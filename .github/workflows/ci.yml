@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # Reusable so release.yml gates publish on the exact same matrix —
+  # release-time and PR-time CI can never drift.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Cross-platform matrix is deliberate: cortexkit-paths carries cfg(windows)
+  # canonicalization (verbatim \\?\ + UNC strip, drive-letter uppercasing) that
+  # only compiles/runs on Windows. Running the matrix on every push validates
+  # those Windows vectors continuously, instead of relying on a manual
+  # native-Windows check before each release.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-targets
