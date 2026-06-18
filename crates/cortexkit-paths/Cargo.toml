@@ -1,0 +1,12 @@
+[package]
+name = "cortexkit-paths"
+version = "0.1.0"
+description = "Shared CortexKit-neutral path canonicalization primitives for project root identities."
+keywords = ["path", "canonicalization", "realpath", "cortexkit"]
+categories = ["filesystem"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]

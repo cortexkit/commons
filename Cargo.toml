@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/cortexkit-paths"]
+
+# cortexkit/commons — neutral home for cross-product CortexKit primitives.
+# Shared by subc, AFT, and Magic Context. Each crate is published independently
+# to crates.io; product repos depend on the published version (or a sibling
+# path-dep for local development).
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/cortexkit/commons"
+authors = ["Ufuk Altinok"]
