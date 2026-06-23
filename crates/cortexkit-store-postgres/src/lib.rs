@@ -160,14 +160,16 @@ pub fn open_postgres(descriptor: &StorageDescriptor) -> Result<PostgresStore, St
         }));
     }
 
-    // We hold the lock: ensure the lease/epoch table and bump the epoch fence.
-    let epoch = match bump_epoch(&mut client, lease_id) {
-        Ok(epoch) => epoch,
-        Err(e) => {
-            let _ = client.execute("SELECT pg_advisory_unlock($1)", &[&lease_id]);
-            return Err(e);
-        }
-    };
+    // We hold the lock: ensure the shared infra tables exist (race-safely), then
+    // bump the epoch fence.
+    let epoch =
+        match ensure_infra_tables(&mut client).and_then(|()| bump_epoch(&mut client, lease_id)) {
+            Ok(epoch) => epoch,
+            Err(e) => {
+                let _ = client.execute("SELECT pg_advisory_unlock($1)", &[&lease_id]);
+                return Err(e);
+            }
+        };
 
     Ok(PostgresStore {
         client: std::sync::Mutex::new(client),
@@ -176,17 +178,48 @@ pub fn open_postgres(descriptor: &StorageDescriptor) -> Result<PostgresStore, St
     })
 }
 
-/// Persist + increment the monotonic epoch fence in the module's own database,
-/// under the held advisory lock.
-fn bump_epoch(client: &mut Client, lease_id: i64) -> Result<i64, StoreError> {
-    client
-        .batch_execute(
-            "CREATE TABLE IF NOT EXISTS cortexkit_lease (\
-                 lease_key BIGINT PRIMARY KEY, \
-                 epoch BIGINT NOT NULL\
-             )",
-        )
+/// A fixed advisory-lock key serializing creation of the SHARED infra tables (the
+/// lease + schema-version tables), which every open touches regardless of module
+/// or namespace. Postgres `CREATE TABLE IF NOT EXISTS` is NOT concurrency-safe:
+/// two concurrent opens on a fresh database both pass the existence check and one
+/// errors on the `pg_class` unique index. So the shared bootstrap DDL runs under
+/// this one fixed transaction-scoped lock. It is distinct from the
+/// per-(module, namespace) single-writer lock, which does not cover the shared
+/// tables.
+const INFRA_BOOTSTRAP_LOCK: i64 = 0x636b_5f69_6e66_7261;
+
+/// Create the shared infra tables (lease + schema-version) race-safely. All
+/// concurrent opens serialize on the fixed bootstrap lock so the
+/// not-concurrency-safe `CREATE TABLE IF NOT EXISTS` runs one at a time; the lock
+/// releases when this transaction commits.
+fn ensure_infra_tables(client: &mut Client) -> Result<(), StoreError> {
+    let mut tx = client
+        .transaction()
         .map_err(|e| StoreError::Migration(e.to_string()))?;
+    tx.execute("SELECT pg_advisory_xact_lock($1)", &[&INFRA_BOOTSTRAP_LOCK])
+        .map_err(|e| StoreError::Migration(e.to_string()))?;
+    tx.batch_execute(
+        "CREATE TABLE IF NOT EXISTS cortexkit_lease (\
+             lease_key BIGINT PRIMARY KEY, \
+             epoch BIGINT NOT NULL\
+         );\
+         CREATE TABLE IF NOT EXISTS cortexkit_schema_version (\
+             namespace TEXT NOT NULL, \
+             version INTEGER NOT NULL, \
+             applied_at_unix BIGINT NOT NULL, \
+             PRIMARY KEY (namespace, version)\
+         );",
+    )
+    .map_err(|e| StoreError::Migration(e.to_string()))?;
+    tx.commit()
+        .map_err(|e| StoreError::Migration(e.to_string()))?;
+    Ok(())
+}
+
+/// Persist + increment the monotonic epoch fence in the module's own database,
+/// under the held advisory lock. The lease table is created by
+/// [`ensure_infra_tables`] before this runs.
+fn bump_epoch(client: &mut Client, lease_id: i64) -> Result<i64, StoreError> {
     let row = client
         .query_one(
             "INSERT INTO cortexkit_lease (lease_key, epoch) VALUES ($1, 1) \
@@ -206,17 +239,8 @@ fn run_migrations(
     namespace: &str,
     migrations: &[Migration],
 ) -> Result<(), StoreError> {
-    client
-        .batch_execute(
-            "CREATE TABLE IF NOT EXISTS cortexkit_schema_version (\
-                 namespace TEXT NOT NULL, \
-                 version INTEGER NOT NULL, \
-                 applied_at_unix BIGINT NOT NULL, \
-                 PRIMARY KEY (namespace, version)\
-             )",
-        )
-        .map_err(|e| StoreError::Migration(e.to_string()))?;
-
+    // The schema-version table is bootstrapped race-safely in ensure_infra_tables
+    // at open, so migrate() does not (re-)create it here.
     let current: i32 = client
         .query_one(
             "SELECT COALESCE(MAX(version), 0) FROM cortexkit_schema_version WHERE namespace = $1",
