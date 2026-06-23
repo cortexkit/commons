@@ -140,26 +140,33 @@ mod sqlite_backend {
     ///
     /// The lease is acquired BEFORE the file is opened, so a second live writer is
     /// rejected (`StoreError::Lease`) rather than corrupting a shared file.
-    /// `lease_dir` is where lease files live (a directory the module/daemon owns;
-    /// keys inside it are namespaced per module + backend).
-    pub fn open_sqlite(
-        descriptor: &StorageDescriptor,
-        lease_dir: impl Into<PathBuf>,
-    ) -> Result<SqliteStore, StoreError> {
+    ///
+    /// The lease lives next to the database file (its parent directory), DERIVED
+    /// from the descriptor's path rather than passed in. This makes the
+    /// one-lease-per-database invariant structural: two distinct database paths get
+    /// distinct leases (correct isolation), and the same database path gets one
+    /// lease (the single-writer guarantee). A caller cannot accidentally point a
+    /// shared lease directory at several distinct databases (which would falsely
+    /// make them contend) or split one database across lease directories (which
+    /// would break single-writer).
+    pub fn open_sqlite(descriptor: &StorageDescriptor) -> Result<SqliteStore, StoreError> {
         let path = match &descriptor.backend {
             StorageBackend::Sqlite { path } => path.clone(),
             other => return Err(StoreError::UnsupportedBackend(other.label().to_string())),
         };
 
-        // Acquire the single-writer lease first.
-        let lease = FileLeaseStore::new(lease_dir.into())
+        let parent = Path::new(&path)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        std::fs::create_dir_all(&parent).map_err(StoreError::Io)?;
+
+        // Acquire the single-writer lease first, co-located with the database file
+        // so the lease identity follows the database path by construction.
+        let lease = FileLeaseStore::new(&parent)
             .acquire(&lease_key(descriptor))
             .map_err(StoreError::Lease)?;
         let epoch = lease.epoch();
-
-        if let Some(parent) = Path::new(&path).parent() {
-            std::fs::create_dir_all(parent).map_err(StoreError::Io)?;
-        }
 
         let conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
         // Durability + concurrency pragmas: WAL for concurrent readers, a busy
@@ -251,12 +258,13 @@ pub use sqlite_backend::{open_sqlite, SqliteStore};
 mod tests {
     use super::*;
 
-    fn tmp() -> (PathBufs, StorageDescriptor) {
+    /// A unique temp root + a descriptor whose sqlite file lives under it. The
+    /// lease is derived from the db path (its parent), so no separate lease dir.
+    fn tmp() -> (std::path::PathBuf, StorageDescriptor) {
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQ: AtomicU64 = AtomicU64::new(0);
         // Per-call atomic counter (not a clock) guarantees a unique dir even when
-        // tests run in parallel and the clock resolution is coarse, so two tests
-        // never share a lease file.
+        // tests run in parallel and the clock resolution is coarse.
         let root = std::env::temp_dir().join(format!(
             "cortexkit-store-{}-{}-{}",
             std::process::id(),
@@ -272,18 +280,7 @@ mod tests {
                 path: db.to_string_lossy().into_owned(),
             },
         };
-        (
-            PathBufs {
-                root: root.clone(),
-                lease_dir: root.join("leases"),
-            },
-            descriptor,
-        )
-    }
-
-    struct PathBufs {
-        root: std::path::PathBuf,
-        lease_dir: std::path::PathBuf,
+        (root, descriptor)
     }
 
     fn now_nanos() -> u128 {
@@ -301,9 +298,9 @@ mod tests {
 
     #[test]
     fn open_runs_migrations_and_seeds_once() {
-        let (p, d) = tmp();
+        let (root, d) = tmp();
         {
-            let store = open_sqlite(&d, &p.lease_dir).expect("open");
+            let store = open_sqlite(&d).expect("open");
             store.migrate("facts", M1).expect("migrate");
             let n: i64 = store
                 .with_conn(|c| c.query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0)))
@@ -313,7 +310,7 @@ mod tests {
         }
         // Reopen: migration must NOT re-run (no duplicate seed rows), epoch bumps.
         {
-            let store = open_sqlite(&d, &p.lease_dir).expect("reopen");
+            let store = open_sqlite(&d).expect("reopen");
             store.migrate("facts", M1).expect("migrate again");
             let n: i64 = store
                 .with_conn(|c| c.query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0)))
@@ -321,26 +318,41 @@ mod tests {
             assert_eq!(n, 2, "seed not re-inserted on reopen (run-once)");
             assert_eq!(store.epoch(), 2, "lease epoch is monotonic across opens");
         }
-        let _ = std::fs::remove_dir_all(&p.root);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn second_live_writer_is_rejected() {
-        let (p, d) = tmp();
-        let _held = open_sqlite(&d, &p.lease_dir).expect("first open");
-        match open_sqlite(&d, &p.lease_dir) {
+        let (root, d) = tmp();
+        let _held = open_sqlite(&d).expect("first open");
+        match open_sqlite(&d) {
             Err(StoreError::Lease(_)) => {}
             Err(e) => panic!("expected Lease(Held), got {e}"),
             Ok(_) => panic!("expected Lease(Held), got a second open"),
         }
-        let _ = std::fs::remove_dir_all(&p.root);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn distinct_databases_do_not_falsely_contend() {
+        // The footgun the first consumer hit: two DISTINCT databases must not
+        // contend on one lease. Because the lease is derived from the db path, two
+        // descriptors with different paths get different leases and both open while
+        // live, even with the same module_id/namespace.
+        let (root_a, a) = tmp();
+        let (root_b, b) = tmp();
+        let held_a = open_sqlite(&a).expect("open a");
+        let held_b = open_sqlite(&b).expect("open b - distinct db, must not contend with a");
+        drop((held_a, held_b));
+        let _ = std::fs::remove_dir_all(&root_a);
+        let _ = std::fs::remove_dir_all(&root_b);
     }
 
     #[test]
     fn later_migration_applies_on_top_of_earlier() {
-        let (p, d) = tmp();
+        let (root, d) = tmp();
         {
-            let s = open_sqlite(&d, &p.lease_dir).expect("v1");
+            let s = open_sqlite(&d).expect("v1");
             s.migrate("facts", M1).expect("v1 migrate");
         }
         const M2: &[Migration] = &[
@@ -353,7 +365,7 @@ mod tests {
                 statements: "ALTER TABLE facts ADD COLUMN weight REAL NOT NULL DEFAULT 0;",
             },
         ];
-        let store = open_sqlite(&d, &p.lease_dir).expect("v2");
+        let store = open_sqlite(&d).expect("v2");
         store.migrate("facts", M2).expect("v2 migrate");
         // The v2 column exists and v1 did not re-run (table already present).
         let ok: i64 = store
@@ -364,7 +376,7 @@ mod tests {
             })
             .expect("weight column queryable");
         assert_eq!(ok, 2);
-        let _ = std::fs::remove_dir_all(&p.root);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -372,7 +384,7 @@ mod tests {
         // A multi-domain module (one database, several domains) registers an
         // independent migration chain per domain. Each chain's history is separate:
         // adding the second domain later does not re-run or entangle the first.
-        let (p, d) = tmp();
+        let (root, d) = tmp();
         const WORK_GRAPH: &[Migration] = &[Migration {
             version: 1,
             statements: "CREATE TABLE wg_nodes (id INTEGER PRIMARY KEY);",
@@ -381,7 +393,7 @@ mod tests {
             version: 1,
             statements: "CREATE TABLE hires (id INTEGER PRIMARY KEY);",
         }];
-        let store = open_sqlite(&d, &p.lease_dir).expect("open");
+        let store = open_sqlite(&d).expect("open");
         // Both domains use version 1, but distinct namespaces -> both run.
         store.migrate("work_graph", WORK_GRAPH).expect("work_graph");
         store.migrate("hires", HIRES).expect("hires");
@@ -403,7 +415,7 @@ mod tests {
             tables, 2,
             "both domains' tables exist; version 1 did not collide across namespaces"
         );
-        let _ = std::fs::remove_dir_all(&p.root);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -417,7 +429,7 @@ mod tests {
                 database: "y".into(),
             },
         };
-        match open_sqlite(&d, std::env::temp_dir()) {
+        match open_sqlite(&d) {
             Err(StoreError::UnsupportedBackend(b)) => assert_eq!(b, "postgres"),
             Err(e) => panic!("expected UnsupportedBackend, got {e}"),
             Ok(_) => panic!("expected UnsupportedBackend, got an open store"),
