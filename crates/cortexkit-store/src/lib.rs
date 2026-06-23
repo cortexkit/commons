@@ -118,10 +118,25 @@ mod sqlite_backend {
             let guard = self.conn.lock().unwrap_or_else(|p| p.into_inner());
             f(&guard).map_err(|e| StoreError::Backend(e.to_string()))
         }
+
+        /// Apply a `namespace`'s migration chain to this store's database, once.
+        ///
+        /// Applied migrations are tracked per `(namespace, version)`, so a module
+        /// that owns several domains in one database registers an INDEPENDENT chain
+        /// per domain (`migrate("work_graph", ..)`, `migrate("hires", ..)`): each
+        /// domain's history is separate, and adding a domain later never re-runs or
+        /// entangles another's migrations. A single-domain module just calls this
+        /// once. Idempotent: only un-applied versions in this namespace run.
+        pub fn migrate(&self, namespace: &str, migrations: &[Migration]) -> Result<(), StoreError> {
+            let mut guard = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            run_migrations(&mut guard, namespace, migrations)
+        }
     }
 
     /// Open a module's sqlite store from its descriptor: acquire the single-writer
-    /// lease, open the file with durable pragmas, and apply `migrations` once.
+    /// lease and open the file with durable pragmas. Migrations are applied
+    /// separately via [`SqliteStore::migrate`], so a multi-domain module can apply
+    /// several independent per-domain chains into its one database.
     ///
     /// The lease is acquired BEFORE the file is opened, so a second live writer is
     /// rejected (`StoreError::Lease`) rather than corrupting a shared file.
@@ -130,7 +145,6 @@ mod sqlite_backend {
     pub fn open_sqlite(
         descriptor: &StorageDescriptor,
         lease_dir: impl Into<PathBuf>,
-        migrations: &[Migration],
     ) -> Result<SqliteStore, StoreError> {
         let path = match &descriptor.backend {
             StorageBackend::Sqlite { path } => path.clone(),
@@ -147,7 +161,7 @@ mod sqlite_backend {
             std::fs::create_dir_all(parent).map_err(StoreError::Io)?;
         }
 
-        let mut conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
+        let conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
         // Durability + concurrency pragmas: WAL for concurrent readers, a busy
         // timeout so a transient lock waits rather than erroring, foreign keys on.
         conn.pragma_update(None, "journal_mode", "WAL")
@@ -157,8 +171,6 @@ mod sqlite_backend {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
-        run_migrations(&mut conn, migrations)?;
-
         Ok(SqliteStore {
             conn: Mutex::new(conn),
             epoch,
@@ -166,23 +178,32 @@ mod sqlite_backend {
         })
     }
 
-    /// Apply un-applied migrations in ascending version order, each in its own
-    /// transaction together with its version record, so a migration and the record
-    /// that it ran commit atomically (a crash mid-migration leaves it un-recorded
-    /// and it re-runs cleanly next open).
-    fn run_migrations(conn: &mut Connection, migrations: &[Migration]) -> Result<(), StoreError> {
+    /// Apply un-applied migrations for one `namespace` in ascending version order,
+    /// each in its own transaction together with its version record, so a migration
+    /// and the record that it ran commit atomically (a crash mid-migration leaves
+    /// it un-recorded and it re-runs cleanly next open).
+    ///
+    /// Applied migrations are keyed by `(namespace, version)`, so independent
+    /// domain chains in one database never collide or re-run each other.
+    fn run_migrations(
+        conn: &mut Connection,
+        namespace: &str,
+        migrations: &[Migration],
+    ) -> Result<(), StoreError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cortexkit_schema_version (\
-                 version INTEGER PRIMARY KEY, \
-                 applied_at_unix INTEGER NOT NULL\
+                 namespace TEXT NOT NULL, \
+                 version INTEGER NOT NULL, \
+                 applied_at_unix INTEGER NOT NULL, \
+                 PRIMARY KEY (namespace, version)\
              )",
         )
         .map_err(|e| StoreError::Migration(e.to_string()))?;
 
         let current: u32 = conn
             .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM cortexkit_schema_version",
-                [],
+                "SELECT COALESCE(MAX(version), 0) FROM cortexkit_schema_version WHERE namespace = ?1",
+                rusqlite::params![namespace],
                 |r| r.get(0),
             )
             .map_err(|e| StoreError::Migration(e.to_string()))?;
@@ -197,11 +218,16 @@ mod sqlite_backend {
             let tx = conn
                 .transaction()
                 .map_err(|e| StoreError::Migration(e.to_string()))?;
-            tx.execute_batch(m.statements)
-                .map_err(|e| StoreError::Migration(format!("migration {}: {e}", m.version)))?;
+            tx.execute_batch(m.statements).map_err(|e| {
+                StoreError::Migration(format!(
+                    "namespace '{namespace}' migration {}: {e}",
+                    m.version
+                ))
+            })?;
             tx.execute(
-                "INSERT INTO cortexkit_schema_version (version, applied_at_unix) VALUES (?1, ?2)",
-                rusqlite::params![m.version, now_unix()],
+                "INSERT INTO cortexkit_schema_version (namespace, version, applied_at_unix) \
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![namespace, m.version, now_unix()],
             )
             .map_err(|e| StoreError::Migration(e.to_string()))?;
             tx.commit()
@@ -277,7 +303,8 @@ mod tests {
     fn open_runs_migrations_and_seeds_once() {
         let (p, d) = tmp();
         {
-            let store = open_sqlite(&d, &p.lease_dir, M1).expect("open");
+            let store = open_sqlite(&d, &p.lease_dir).expect("open");
+            store.migrate("facts", M1).expect("migrate");
             let n: i64 = store
                 .with_conn(|c| c.query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0)))
                 .expect("count");
@@ -286,7 +313,8 @@ mod tests {
         }
         // Reopen: migration must NOT re-run (no duplicate seed rows), epoch bumps.
         {
-            let store = open_sqlite(&d, &p.lease_dir, M1).expect("reopen");
+            let store = open_sqlite(&d, &p.lease_dir).expect("reopen");
+            store.migrate("facts", M1).expect("migrate again");
             let n: i64 = store
                 .with_conn(|c| c.query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0)))
                 .expect("count");
@@ -299,8 +327,8 @@ mod tests {
     #[test]
     fn second_live_writer_is_rejected() {
         let (p, d) = tmp();
-        let _held = open_sqlite(&d, &p.lease_dir, M1).expect("first open");
-        match open_sqlite(&d, &p.lease_dir, M1) {
+        let _held = open_sqlite(&d, &p.lease_dir).expect("first open");
+        match open_sqlite(&d, &p.lease_dir) {
             Err(StoreError::Lease(_)) => {}
             Err(e) => panic!("expected Lease(Held), got {e}"),
             Ok(_) => panic!("expected Lease(Held), got a second open"),
@@ -312,7 +340,8 @@ mod tests {
     fn later_migration_applies_on_top_of_earlier() {
         let (p, d) = tmp();
         {
-            let _s = open_sqlite(&d, &p.lease_dir, M1).expect("v1");
+            let s = open_sqlite(&d, &p.lease_dir).expect("v1");
+            s.migrate("facts", M1).expect("v1 migrate");
         }
         const M2: &[Migration] = &[
             Migration {
@@ -324,7 +353,8 @@ mod tests {
                 statements: "ALTER TABLE facts ADD COLUMN weight REAL NOT NULL DEFAULT 0;",
             },
         ];
-        let store = open_sqlite(&d, &p.lease_dir, M2).expect("v2");
+        let store = open_sqlite(&d, &p.lease_dir).expect("v2");
+        store.migrate("facts", M2).expect("v2 migrate");
         // The v2 column exists and v1 did not re-run (table already present).
         let ok: i64 = store
             .with_conn(|c| {
@@ -334,6 +364,45 @@ mod tests {
             })
             .expect("weight column queryable");
         assert_eq!(ok, 2);
+        let _ = std::fs::remove_dir_all(&p.root);
+    }
+
+    #[test]
+    fn independent_namespace_chains_in_one_database() {
+        // A multi-domain module (one database, several domains) registers an
+        // independent migration chain per domain. Each chain's history is separate:
+        // adding the second domain later does not re-run or entangle the first.
+        let (p, d) = tmp();
+        const WORK_GRAPH: &[Migration] = &[Migration {
+            version: 1,
+            statements: "CREATE TABLE wg_nodes (id INTEGER PRIMARY KEY);",
+        }];
+        const HIRES: &[Migration] = &[Migration {
+            version: 1,
+            statements: "CREATE TABLE hires (id INTEGER PRIMARY KEY);",
+        }];
+        let store = open_sqlite(&d, &p.lease_dir).expect("open");
+        // Both domains use version 1, but distinct namespaces -> both run.
+        store.migrate("work_graph", WORK_GRAPH).expect("work_graph");
+        store.migrate("hires", HIRES).expect("hires");
+        // Re-applying is a no-op per namespace; same version across namespaces did
+        // not collide (both tables exist).
+        store
+            .migrate("work_graph", WORK_GRAPH)
+            .expect("work_graph again");
+        let tables: i64 = store
+            .with_conn(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('wg_nodes','hires')",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("count tables");
+        assert_eq!(
+            tables, 2,
+            "both domains' tables exist; version 1 did not collide across namespaces"
+        );
         let _ = std::fs::remove_dir_all(&p.root);
     }
 
@@ -348,7 +417,7 @@ mod tests {
                 database: "y".into(),
             },
         };
-        match open_sqlite(&d, std::env::temp_dir(), M1) {
+        match open_sqlite(&d, std::env::temp_dir()) {
             Err(StoreError::UnsupportedBackend(b)) => assert_eq!(b, "postgres"),
             Err(e) => panic!("expected UnsupportedBackend, got {e}"),
             Ok(_) => panic!("expected UnsupportedBackend, got an open store"),
