@@ -1,0 +1,15 @@
+[package]
+name = "cortexkit-store-postgres"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Postgres backend mechanics (open, native single-writer lease, versioned migrations) for CortexKit module storage."
+
+[dependencies]
+cortexkit-store-types = { version = "0.1.0", path = "../cortexkit-store-types" }
+cortexkit-lease = { version = "0.1.0", path = "../cortexkit-lease" }
+# Synchronous blocking driver: the store API is synchronous, so the blocking
+# client avoids an async-runtime bridge and confines postgres types to this crate.
+postgres = "0.19"

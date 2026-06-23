@@ -43,3 +43,36 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-targets
+
+  # cortexkit-store-postgres's live tests need a real postgres. GitHub service
+  # containers are Linux-only, so they run here (the cross-OS matrix above skips
+  # them: no DSN -> skip-pass, which is correct on macOS/Windows). CORTEXKIT_REQUIRE_PG
+  # makes a missing DSN FAIL here instead of silently skip-passing, so a broken
+  # service wiring can never show a false green.
+  postgres:
+    name: Postgres backend (live)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ck
+          POSTGRES_PASSWORD: ckpw
+          POSTGRES_DB: ckstore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ck -d ckstore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test cortexkit-store-postgres (live)
+        env:
+          CORTEXKIT_TEST_PG_DSN: postgresql://ck:ckpw@127.0.0.1:5432/ckstore
+          CORTEXKIT_REQUIRE_PG: "1"
+        run: cargo test -p cortexkit-store-postgres -- --nocapture
