@@ -50,6 +50,12 @@ pub enum StoreError {
     Backend(String),
     /// An io failure preparing the store location.
     Io(std::io::Error),
+    /// A fenced (epoch-checked) write was rejected because the database has already
+    /// been claimed by a newer writer. `db_epoch` (the epoch stamped in the
+    /// database) is greater than `holder_epoch` (this store's lease epoch), so this
+    /// writer has been superseded — for example a draining old instance attempting a
+    /// late write after a replacement took the lease. The write was not applied.
+    Fenced { holder_epoch: u64, db_epoch: u64 },
 }
 
 impl std::fmt::Display for StoreError {
@@ -63,6 +69,14 @@ impl std::fmt::Display for StoreError {
             StoreError::Migration(m) => write!(f, "migration: {m}"),
             StoreError::Backend(m) => write!(f, "storage backend: {m}"),
             StoreError::Io(e) => write!(f, "storage io: {e}"),
+            StoreError::Fenced {
+                holder_epoch,
+                db_epoch,
+            } => write!(
+                f,
+                "fenced write rejected: this writer holds epoch {holder_epoch} but the \
+                 database was claimed by a newer writer at epoch {db_epoch}"
+            ),
         }
     }
 }
@@ -109,6 +123,33 @@ mod sqlite_backend {
             self.epoch
         }
 
+        /// Construct a store over an already-open connection at a chosen epoch,
+        /// WITHOUT acquiring the lease. Test-only: it exists to reconstruct the
+        /// two-handles-one-database state of a lease handover (an old draining writer
+        /// and its replacement at different epochs), which the live lease's OS lock
+        /// would otherwise make impossible to set up. Not for production — real opens
+        /// go through `open_sqlite`, which holds the single-writer lease.
+        #[cfg(test)]
+        pub(crate) fn for_test(conn: Connection, epoch: u64) -> Self {
+            #[derive(Debug)]
+            struct NoLease(cortexkit_lease::LeaseKey);
+            impl LeaseHandle for NoLease {
+                fn epoch(&self) -> u64 {
+                    0
+                }
+                fn key(&self) -> &cortexkit_lease::LeaseKey {
+                    &self.0
+                }
+            }
+            SqliteStore {
+                conn: Mutex::new(conn),
+                epoch,
+                _lease: Box::new(NoLease(cortexkit_lease::LeaseKey::new(
+                    "test", "sqlite", "test",
+                ))),
+            }
+        }
+
         /// Run a closure against the connection under the store mutex. The module's
         /// domain trait implementation calls this for every query/transaction.
         pub fn with_conn<T>(
@@ -117,6 +158,78 @@ mod sqlite_backend {
         ) -> Result<T, StoreError> {
             let guard = self.conn.lock().unwrap_or_else(|p| p.into_inner());
             f(&guard).map_err(|e| StoreError::Backend(e.to_string()))
+        }
+
+        /// Run a closure inside an epoch-FENCED write transaction: the write is
+        /// rejected ([`StoreError::Fenced`]) if a newer writer has taken over the
+        /// database, otherwise it commits atomically.
+        ///
+        /// Use this instead of [`with_conn`] for a durable write that must NOT be
+        /// applied by a superseded writer — for example a credential vault's
+        /// token-rotation commit, where a draining old instance must never clobber a
+        /// fresh token its replacement already wrote. The OS advisory lock already
+        /// prevents two *live* lease holders, but during a lease handover an old
+        /// instance can briefly still hold an open connection after releasing the
+        /// lock; the persisted epoch fence rejects its late writes at the database
+        /// layer (the lock alone cannot).
+        ///
+        /// Mechanism: an IMMEDIATE transaction reads the database's stored fence
+        /// epoch and, if it is greater than this store's lease epoch, rejects without
+        /// applying `f` (a newer writer owns the database). Otherwise it claims the
+        /// database for this epoch and runs `f`, committing atomically. Returning an
+        /// error from `f` rolls the transaction back.
+        ///
+        /// Additive and opt-in: the fence table is created lazily on the first fenced
+        /// write, so existing [`with_conn`]-only stores have a byte-identical
+        /// database and are unaffected. A store mixes both paths freely.
+        pub fn with_conn_fenced<T>(
+            &self,
+            f: impl FnOnce(&rusqlite::Transaction) -> rusqlite::Result<T>,
+        ) -> Result<T, StoreError> {
+            let mut guard = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+            let tx = guard
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS cortexkit_fence (\
+                     id INTEGER PRIMARY KEY CHECK (id = 0), \
+                     epoch INTEGER NOT NULL)",
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+            // COALESCE over the (at most one) fence row yields 0 when unclaimed, so
+            // no OptionalExtension import is needed.
+            let db_epoch: u64 = tx
+                .query_row(
+                    "SELECT COALESCE((SELECT epoch FROM cortexkit_fence WHERE id = 0), 0)",
+                    [],
+                    |r| r.get::<_, i64>(0).map(|v| v as u64),
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+            if db_epoch > self.epoch {
+                // A newer writer owns the database; reject without applying `f`. The
+                // transaction rolls back on drop.
+                return Err(StoreError::Fenced {
+                    holder_epoch: self.epoch,
+                    db_epoch,
+                });
+            }
+            if self.epoch > db_epoch {
+                // Claim the database for this writer's epoch, fencing older writers.
+                tx.execute(
+                    "INSERT INTO cortexkit_fence (id, epoch) VALUES (0, ?1) \
+                     ON CONFLICT(id) DO UPDATE SET epoch = excluded.epoch",
+                    rusqlite::params![self.epoch as i64],
+                )
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+
+            let out = f(&tx).map_err(|e| StoreError::Backend(e.to_string()))?;
+            tx.commit()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            Ok(out)
         }
 
         /// Apply a `namespace`'s migration chain to this store's database, once.
@@ -433,6 +546,129 @@ mod tests {
             Err(StoreError::UnsupportedBackend(b)) => assert_eq!(b, "postgres"),
             Err(e) => panic!("expected UnsupportedBackend, got {e}"),
             Ok(_) => panic!("expected UnsupportedBackend, got an open store"),
+        }
+    }
+
+    const FENCE_SCHEMA: &[Migration] = &[Migration {
+        version: 1,
+        statements: "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+    }];
+
+    #[test]
+    fn fenced_write_commits_and_persists() {
+        let (root, d) = tmp();
+        let store = open_sqlite(&d).expect("open");
+        store.migrate("kv", FENCE_SCHEMA).expect("migrate");
+        store
+            .with_conn_fenced(|tx| {
+                tx.execute("INSERT INTO kv (k, v) VALUES ('a', '1')", [])?;
+                Ok(())
+            })
+            .expect("fenced write");
+        let v: String = store
+            .with_conn(|c| c.query_row("SELECT v FROM kv WHERE k = 'a'", [], |r| r.get(0)))
+            .expect("read back");
+        assert_eq!(v, "1");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fenced_write_rolls_back_on_error() {
+        let (root, d) = tmp();
+        let store = open_sqlite(&d).expect("open");
+        store.migrate("kv", FENCE_SCHEMA).expect("migrate");
+        let r: Result<(), StoreError> = store.with_conn_fenced(|tx| {
+            tx.execute("INSERT INTO kv (k, v) VALUES ('a', '1')", [])?;
+            // Force the closure to fail AFTER a write: the transaction must roll back.
+            tx.query_row("SELECT * FROM does_not_exist", [], |_| Ok(()))?;
+            Ok(())
+        });
+        assert!(
+            matches!(r, Err(StoreError::Backend(_))),
+            "closure error surfaces"
+        );
+        let n: i64 = store
+            .with_conn(|c| c.query_row("SELECT COUNT(*) FROM kv", [], |r| r.get(0)))
+            .expect("count");
+        assert_eq!(n, 0, "the failed fenced write rolled back");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn superseded_writer_is_fenced_out_after_handover() {
+        // The lease-handover race the credential vault must survive: an OLD store
+        // instance (lower lease epoch) that still holds an open connection after a
+        // NEW instance took over must NOT clobber the database. The live OS lock
+        // prevents two simultaneous LEASE holders, so this models the in-memory state
+        // of the race directly: two handles on one db file at epochs 2 (replacement)
+        // and 1 (draining old) — exactly what the persisted epoch fence must catch
+        // and the lock alone cannot.
+        let (root, d) = tmp();
+        let path = sqlite_path(&d);
+
+        // First, a real open migrates the schema (epoch 1, released on drop).
+        open_sqlite(&d)
+            .expect("seed schema")
+            .migrate("kv", FENCE_SCHEMA)
+            .expect("migrate");
+
+        let new = SqliteStore::for_test(rusqlite::Connection::open(&path).unwrap(), 2);
+        new.with_conn_fenced(|tx| {
+            tx.execute("INSERT INTO kv (k, v) VALUES ('owner', 'new')", [])
+                .map(|_| ())
+        })
+        .expect("replacement claims the db at epoch 2");
+
+        let stale = SqliteStore::for_test(rusqlite::Connection::open(&path).unwrap(), 1);
+        match stale.with_conn_fenced(|tx| {
+            tx.execute("UPDATE kv SET v = 'clobbered' WHERE k = 'owner'", [])
+                .map(|_| ())
+        }) {
+            Err(StoreError::Fenced {
+                holder_epoch,
+                db_epoch,
+            }) => {
+                assert_eq!(holder_epoch, 1);
+                assert_eq!(db_epoch, 2);
+            }
+            other => panic!("expected Fenced, got {other:?}"),
+        }
+
+        let v: String = new
+            .with_conn(|c| c.query_row("SELECT v FROM kv WHERE k = 'owner'", [], |r| r.get(0)))
+            .expect("read");
+        assert_eq!(v, "new", "stale writer was fenced out, no clobber");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn equal_epoch_writer_is_not_fenced() {
+        // A writer at the SAME epoch the db is already claimed at (its own prior
+        // fenced write) is allowed — the fence rejects only a STRICTLY newer claim.
+        let (root, d) = tmp();
+        let path = sqlite_path(&d);
+        open_sqlite(&d)
+            .expect("seed")
+            .migrate("kv", FENCE_SCHEMA)
+            .expect("migrate");
+        let s = SqliteStore::for_test(rusqlite::Connection::open(&path).unwrap(), 5);
+        s.with_conn_fenced(|tx| {
+            tx.execute("INSERT INTO kv (k, v) VALUES ('a', '1')", [])
+                .map(|_| ())
+        })
+        .expect("claims at 5");
+        s.with_conn_fenced(|tx| {
+            tx.execute("INSERT INTO kv (k, v) VALUES ('b', '2')", [])
+                .map(|_| ())
+        })
+        .expect("same epoch 5 still writes");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn sqlite_path(d: &StorageDescriptor) -> String {
+        match &d.backend {
+            StorageBackend::Sqlite { path } => path.clone(),
+            _ => unreachable!(),
         }
     }
 }
