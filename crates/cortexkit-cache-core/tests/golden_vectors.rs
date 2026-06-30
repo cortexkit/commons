@@ -1,5 +1,5 @@
 //! The cross-language parity gate. This drives the cache-core state machine through the
-//! frozen golden vectors (`cache-stability-golden-vectors.json`, schema_version 2) — the
+//! frozen golden vectors (`cache-stability-golden-vectors.json`, schema_version 3) — the
 //! SAME fixture Magic Context's TS core pins. A green run here means the Rust core branches
 //! byte-identically to the reference for every mechanics + durability vector.
 //!
@@ -125,13 +125,13 @@ fn pass_to_input(pass: &Pass, pending_keys: &[String]) -> PassInput {
 }
 
 #[test]
-fn golden_fixture_is_schema_v2_with_nine_vectors() {
+fn golden_fixture_is_schema_v3_with_ten_vectors() {
     let file: GoldenFile = serde_json::from_str(GOLDEN).expect("golden fixture parses");
-    assert_eq!(file.schema_version, 2, "pinned to schema_version 2");
+    assert_eq!(file.schema_version, 3, "pinned to schema_version 3");
     assert_eq!(
         file.vectors.len(),
-        9,
-        "9 vectors (8 mechanics + V9 durability)"
+        10,
+        "10 vectors (8 mechanics + V9 durability + V10 coverage-extending SOFT)"
     );
 }
 
@@ -179,19 +179,20 @@ fn run_vector(vector: &Vector) {
             vector.name
         );
 
-        // 2. reconcile_pending matches when the fixture pins it (boundary-presence anchor).
-        if pass.reconcile_pending {
-            assert!(
-                result.reconcile_pending,
-                "{}: pass {i} expected reconcile_pending (boundary absent on defer)",
-                vector.name
-            );
-        }
-
         let after_bytes = state.cached_prefix_bytes();
 
         match pass.expect_action {
             Action::SoftPlus => {
+                // 2. A defer recomputes reconcile_pending from boundary-presence,
+                //    BIDIRECTIONALLY: boundary present => not pending; absent => pending. This
+                //    is what makes V10 non-vacuous — its SOFT+ passes at the NEW anchor b1 must
+                //    read NOT-pending, which only holds if the prior SOFT actually advanced the
+                //    anchor b0->b1 (else b1 would be absent => spurious reconcile).
+                assert_eq!(
+                    result.reconcile_pending, pass.reconcile_pending,
+                    "{}: pass {i} SOFT+ reconcile_pending must equal boundary-absence",
+                    vector.name
+                );
                 // 3. A defer pass NEVER changes cached_prefix_bytes (the byte-stability
                 //    invariant), even when the boundary is absent (revert) — it keeps
                 //    replaying the frozen bytes.
@@ -233,16 +234,19 @@ fn run_vector(vector: &Vector) {
                     );
                     frozen_seen.insert(delta.key.clone(), delta.frozen_payload.clone());
                 }
-                // 6. A HARD mints the new boundary id.
+                // 6. A bust carrying new_boundary_id advances the coverage anchor — HARD
+                //    always; SOFT only as a (guarded) coverage-extending bust (V10). Asserting
+                //    this for the SOFT case is the load-bearing V10 check: the anchor moved on a
+                //    SOFT while m0 bytes stayed frozen (the delta assert above proves m0 frozen).
+                if let Some(b) = &pass.new_boundary_id {
+                    assert_eq!(
+                        &state.boundary_id, b,
+                        "{}: pass {i} bust must advance the boundary to the fixture id",
+                        vector.name
+                    );
+                }
+                // 7. A HARD drains all deferred work (pending_changes empty after).
                 if pass.expect_action == Action::Hard {
-                    if let Some(b) = &pass.new_boundary_id {
-                        assert_eq!(
-                            &state.boundary_id, b,
-                            "{}: pass {i} HARD must mint new boundary id",
-                            vector.name
-                        );
-                    }
-                    // 7. A HARD drains all deferred work (pending_changes empty after).
                     assert!(
                         state.pending_changes.is_empty(),
                         "{}: pass {i} HARD must drain deferred work",

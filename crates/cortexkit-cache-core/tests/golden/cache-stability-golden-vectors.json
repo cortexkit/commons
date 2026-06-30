@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "description": "Harness-neutral cache-stability golden vectors. The shared parity target for any harness that pins a render-config across turns without thrashing the provider prefix cache. See cache-stability-golden-vectors.schema.md. All boundary/render_config values are OPAQUE CONSISTENT TOKENS, never real hashes: the core only does string-equality + branch. The SOFT+ cache anchor is BOUNDARY-PRESENCE (is the boundary_id still in the live array?) + frozen-byte replacement of the covered prefix, NOT a content fingerprint over the covered prefix.",
+  "schema_version": 3,
+  "description": "Harness-neutral cache-stability golden vectors. The shared parity target for any harness that pins a render-config across turns without thrashing the provider prefix cache. See cache-stability-golden-vectors.schema.md. All boundary/render_config values are OPAQUE CONSISTENT TOKENS, never real hashes: the core only does string-equality + branch. The SOFT+ cache anchor is BOUNDARY-PRESENCE (is the boundary_id still in the live array?) + frozen-byte replacement of the covered prefix, NOT a content fingerprint over the covered prefix. schema_version 3 adds V10: a coverage-extending SOFT advances the boundary anchor (new_boundary_id on a SOFT, not just a HARD) while m0 bytes stay frozen - the two-watermark coverage model where a new compartment riding m1 extends what m0+m1 cover.",
   "reference_impl": {
     "cache_anchor": "magic-context: inject-compartments.ts:258-292 - on a defer pass, replay the cached frozen m0/m1 bytes AND splice the covered prefix out by BOUNDARY-ID MATCH (findIndex(info.id === compartmentEndMessageId)). The covered prefix is REPLACED by the frozen <session-history> bytes; the only validity check is boundary-id presence. There is NO fingerprint over the covered prefix, so no collision surface.",
     "historian_snapshot_NOT_the_anchor": "magic-context: computeRawRangeFingerprint (read-session-true-raw-tokens.ts:650-672) is a DIFFERENT mechanism - the historian in-flight snapshot validator (checks the runner's raw chunk matches the trigger's fire-decision view). It is deliberately length/id/ordinal-based; its same-length-edit residual is a historian content-quality edge, NEVER a stale cache. Do not cite it as the cache anchor.",
@@ -208,6 +208,28 @@
         { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
         { "signal": { "kind": "run-started", "frozen_config_source": "durable-wal" }, "boundary_present": "b0", "expect_action": "SOFT+", "lineage_reproduced_byte_identical": true, "expect_frozen_set_delta": [] },
         { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+      ]
+    },
+    {
+      "name": "V10-coverage-extending-soft-advances-boundary",
+      "layer": "mechanics",
+      "provenance": "The two-watermark coverage model (magic-context slice 4d-m0). A newly-published compartment that EXTENDS the m0+m1 coverage rides m1 at P1 AND advances the coverage anchor on the SOFT (boundary b0->b1). Production reference: softRefreshCachedM1 writes cached_m1_bytes AND cached_m0_last_baseline_end_message_id (the last raw message covered by m0+m1) together on the soft refresh (inject-compartments.ts:2127-2137, compartment-storage.ts:257-263). This is the capability the core's step_soft gained: apply input.new_boundary_id when Some (None = boundary unchanged = today's behavior).",
+      "notes": "DISTINCT from V5: V5 is a delta SOFT that does NOT extend coverage (the new_boundary_id=None path, boundary stationary at b0); V10 is the coverage-EXTENDING SOFT (new_boundary_id=Some(b1), boundary advances). p0 is the coverage-extending SOFT: m1 re-renders carrying the new compartment, the boundary ADVANCES b0->b1, and m0 frozen bytes are UNCHANGED. p1..p2 are SOFT+ at the new anchor b1, replaying both regions byte-identical. p3 is a revert BELOW b1 (boundary_present '-'): the core keeps replaying frozen bytes (SOFT+, reconcile_pending) and reconciles on the next bust. THE LOAD-BEARING ASSERT: the boundary moved on a SOFT yet m0's frozen_payload never appears in a delta (m0 bytes frozen) -- the real invariant (m0 BYTES never change on a SOFT) holds while only the coverage anchor + m1 delta move. The old 'a SOFT never touches the baseline' comment conflated 'anchor stationary' with 'bytes frozen'; only the latter is load-bearing, and it holds here.",
+      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "initial_state": {
+        "version": 0,
+        "boundary_id": "b0",
+        "frozen_units": [
+          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
+          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "(no new content since last materialization)", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+        ],
+        "pending_changes": []
+      },
+      "passes": [
+        { "signal": { "kind": "compartment-published", "extends_coverage": true }, "boundary_present": "b0", "expect_action": "SOFT", "new_boundary_id": "b1", "expect_frozen_set_delta": [ { "key": "m1", "kind": "synthesized-region", "frozen_payload": "<session-history-since>NEWCOMPARTMENT</session-history-since>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
+        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
+        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
+        { "signal": { "kind": "revert-below-new-boundary" }, "boundary_present": "-", "expect_action": "SOFT+", "reconcile_pending": true, "expect_frozen_set_delta": [] }
       ]
     }
   ]
