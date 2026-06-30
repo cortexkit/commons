@@ -159,7 +159,7 @@ impl CoreState {
 
         match proposed {
             Action::SoftPlus => self.step_defer(input, boundary_match),
-            Action::Soft => self.step_soft(input),
+            Action::Soft => self.step_soft(input, boundary_match),
             Action::Hard => self.step_hard(input),
         }
     }
@@ -192,11 +192,33 @@ impl CoreState {
         }
     }
 
-    /// Soft bust: the volatile delta re-renders, the stable baseline stays frozen. Freeze the
-    /// rendered delta units (replace same-key, append new); the boundary id is UNCHANGED (a
-    /// SOFT busts at the delta breakpoint, not the baseline).
-    fn step_soft(&mut self, input: PassInput) -> StepResult {
+    /// Soft bust: the volatile delta re-renders, the stable baseline (m0 frozen bytes) stays
+    /// frozen. Freeze the rendered delta units (replace same-key, append new).
+    ///
+    /// `boundary_id` is the COVERAGE anchor (the last raw item any summary covers, m0 OR the
+    /// delta). A SOFT MAY advance it when `new_boundary_id` is `Some` — used when the volatile
+    /// delta now summarizes content past the prior anchor (e.g. a new compartment rides the
+    /// delta and extends coverage over raw tail items). The m0 frozen bytes are NEVER mutated
+    /// on a SOFT; only the coverage anchor moves, so the byte-stability invariant holds. `None`
+    /// leaves the boundary unchanged (the common case: a delta that rides within existing
+    /// coverage, e.g. a memory delta). `reconcile_pending` is untouched — a pending reconcile
+    /// (m0 itself stale) is cleared only by a HARD rematerialize, never a SOFT.
+    ///
+    /// The anchor advance is GUARDED: it applies only when the prior anchor is present
+    /// (`boundary_match`) AND no reconcile is pending. A coverage-extending SOFT is only
+    /// coherent when the current anchor is live and m0 is not already stale — advancing the
+    /// anchor while a reconcile is pending would strand the stale m0 under a fresh anchor (the
+    /// next defer would clear `reconcile_pending` against the new anchor and the needed HARD
+    /// rematerialize would never fire). Under a correct harness classifier this never arises
+    /// (`reconcile_pending` routes Defer or HARD, never a coverage-extending SOFT), but this is
+    /// a shared cache-stability primitive, so the guard is enforced in the core, not assumed.
+    fn step_soft(&mut self, input: PassInput, boundary_match: bool) -> StepResult {
         self.apply_units(input.rendered_units);
+        if boundary_match && !self.reconcile_pending {
+            if let Some(new_boundary) = input.new_boundary_id {
+                self.boundary_id = new_boundary;
+            }
+        }
         self.version += 1;
         StepResult {
             action: Action::Soft,
@@ -371,7 +393,120 @@ mod tests {
             state.frozen_units[1].frozen_payload, "<delta>X</delta>",
             "m1 replaced"
         );
-        assert_eq!(state.boundary_id, "b0", "SOFT does not move the boundary");
+        assert_eq!(
+            state.boundary_id, "b0",
+            "SOFT with new_boundary_id=None leaves the anchor unchanged (the common case + the \
+             llm-runner consumer path)"
+        );
+    }
+
+    #[test]
+    fn coverage_extending_soft_advances_anchor_keeps_m0_frozen() {
+        // m0 covers up to b0; m1 is the volatile delta slot.
+        let mut state = state_with(
+            vec![
+                unit("m0", "<h>BASE</h>", DurabilityClass::Lineage),
+                unit("m1", "(empty)", DurabilityClass::Lineage),
+            ],
+            "b0",
+        );
+        let m0_before = state.frozen_units[0].frozen_payload.clone();
+
+        // A SOFT whose delta now summarizes a new compartment that extends coverage past b0 to
+        // b1 (the m1-takes-a-compartment case): re-render m1 AND advance the coverage anchor.
+        let mut soft = PassInput::new(Action::Soft, "b0");
+        soft.rendered_units = vec![unit(
+            "m1",
+            "<compartment>C1</compartment>",
+            DurabilityClass::Lineage,
+        )];
+        soft.new_boundary_id = Some("b1".into());
+        let r = state.step(soft);
+
+        assert_eq!(r.action, Action::Soft);
+        assert_eq!(
+            state.boundary_id, "b1",
+            "a coverage-extending SOFT advances the anchor to the new coverage end"
+        );
+        assert_eq!(
+            state.frozen_units[0].frozen_payload, m0_before,
+            "m0 frozen bytes must NOT change on the coverage-extending SOFT (only the anchor moves)"
+        );
+
+        // A defer at the NEW anchor replays byte-identical, no reconcile.
+        let before = state.cached_prefix_bytes();
+        let r = state.step(PassInput::new(Action::SoftPlus, "b1"));
+        assert_eq!(r.action, Action::SoftPlus);
+        assert!(
+            !r.reconcile_pending,
+            "defer at the new anchor must not reconcile"
+        );
+        assert_eq!(
+            state.cached_prefix_bytes(),
+            before,
+            "defer replays m0+m1 byte-identical after the coverage-extending SOFT"
+        );
+
+        // A revert that removes the new boundary from the live array -> reconcile (the anchor
+        // moved to b1, so a revert below b1 makes b1 absent).
+        let r = state.step(PassInput::new(Action::SoftPlus, "-"));
+        assert!(
+            r.reconcile_pending,
+            "a revert below the new anchor must flag reconcile"
+        );
+
+        // The reconcile-forced HARD rematerializes m0 against the live array and re-mints the
+        // anchor: m0 bytes replaced, new boundary, reconcile cleared.
+        let mut hard = PassInput::new(Action::Hard, "-");
+        hard.rendered_units = vec![unit("m0", "<h>REMAT</h>", DurabilityClass::Lineage)];
+        hard.new_boundary_id = Some("b2".into());
+        let r = state.step(hard);
+        assert_eq!(r.action, Action::Hard);
+        assert!(!r.reconcile_pending, "HARD clears the pending reconcile");
+        assert_eq!(state.boundary_id, "b2", "HARD re-mints the anchor");
+        assert_eq!(
+            state.frozen_units[0].frozen_payload, "<h>REMAT</h>",
+            "HARD rematerializes m0"
+        );
+    }
+
+    #[test]
+    fn soft_does_not_advance_anchor_while_reconcile_pending() {
+        // The adversarial case: a misclassified (or future-consumer) coverage-extending SOFT
+        // arriving while m0 is already stale (reconcile_pending) must NOT move the anchor — else
+        // the stale m0 gets stranded under a fresh anchor and the needed HARD never fires.
+        let mut state = state_with(
+            vec![
+                unit("m0", "<h>OLD_BASE</h>", DurabilityClass::Lineage),
+                unit("m1", "(empty)", DurabilityClass::Lineage),
+            ],
+            "b0",
+        );
+
+        // A revert removes b0 -> defer reuses this pass and sets reconcile_pending.
+        let r = state.step(PassInput::new(Action::SoftPlus, "-"));
+        assert!(r.reconcile_pending, "revert must flag reconcile");
+
+        // An erroneous coverage-extending SOFT while reconcile is pending: the anchor must hold.
+        let mut soft = PassInput::new(Action::Soft, "-");
+        soft.rendered_units = vec![unit(
+            "m1",
+            "<compartment>C1</compartment>",
+            DurabilityClass::Lineage,
+        )];
+        soft.new_boundary_id = Some("b1".into());
+        state.step(soft);
+        assert_eq!(
+            state.boundary_id, "b0",
+            "anchor must NOT advance on a SOFT while reconcile is pending (no stranded stale m0)"
+        );
+
+        // The next absent pass still forces reconcile against the original anchor (not stranded).
+        let r = state.step(PassInput::new(Action::SoftPlus, "-"));
+        assert!(
+            r.reconcile_pending,
+            "the needed reconcile must still fire — it was not stranded under a moved anchor"
+        );
     }
 
     #[test]
