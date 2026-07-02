@@ -184,7 +184,17 @@ impl CoreState {
 
         // boundary_match => the covered prefix splices/replaces and frozen bytes replay.
         // boundary absent => reuse this pass, reconcile on the next bust.
-        self.reconcile_pending = !boundary_match;
+        //
+        // VACUOUS CASE: an EMPTY boundary_id means no boundary was ever minted (fresh
+        // store, nothing covered) — absence then is "never existed", not "reverted
+        // away", and there is genuinely nothing to reconcile. Without this, an
+        // unseeded session oscillates HARD → defer → HARD forever (each HARD clears
+        // the flag, each defer re-sets it against the "" boundary) — cache-neutral
+        // (the empty baseline re-materializes byte-identical) but dishonest state.
+        // "" is RESERVED as the no-boundary sentinel: a HARD that mints Some("") is
+        // legitimately declaring "still no boundary" (fresh store), and the first
+        // real compartment mints a non-empty id, exiting the vacuous state.
+        self.reconcile_pending = !boundary_match && !self.boundary_id.is_empty();
 
         StepResult {
             action: Action::SoftPlus,
@@ -307,6 +317,44 @@ mod tests {
         assert_eq!(
             state.version, 0,
             "defer must not bump version (no CAS write needed)"
+        );
+    }
+
+    #[test]
+    fn defer_on_never_minted_boundary_is_stable_not_reconcile_pending() {
+        // Fresh/unseeded store: no boundary was ever minted (boundary_id == ""), so a
+        // defer whose boundary token is the absent sentinel has NOTHING to reconcile.
+        // Without the vacuous-case guard this oscillates forever: defer sets
+        // reconcile_pending against "" → classify routes HARD → step_hard clears it →
+        // next defer re-sets it. Cache-neutral (empty baseline re-materializes
+        // byte-identical) but dishonest state; the guard makes the empty-store defer a
+        // clean stable SoftPlus.
+        let mut state = state_with(
+            vec![unit("m0", "<h>EMPTY</h>", DurabilityClass::Lineage)],
+            "",
+        );
+        let before = state.cached_prefix_bytes();
+        for _ in 0..3 {
+            let r = state.step(PassInput::new(Action::SoftPlus, "-"));
+            assert_eq!(r.action, Action::SoftPlus);
+            assert!(
+                !r.reconcile_pending,
+                "never-minted boundary must not read as reconcile-pending"
+            );
+        }
+        assert_eq!(state.cached_prefix_bytes(), before);
+        // The first real boundary mint exits the vacuous state: a revert AFTER a real
+        // boundary exists still reconciles (the non-vacuous arm below is unaffected).
+        state.step(PassInput {
+            proposed: Some(Action::Hard),
+            boundary_present: "-".into(),
+            new_boundary_id: Some("b1".into()),
+            ..Default::default()
+        });
+        let r = state.step(PassInput::new(Action::SoftPlus, "-"));
+        assert!(
+            r.reconcile_pending,
+            "absence of a REAL minted boundary must still reconcile"
         );
     }
 
