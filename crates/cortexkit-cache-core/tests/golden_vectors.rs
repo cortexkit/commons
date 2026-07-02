@@ -125,13 +125,13 @@ fn pass_to_input(pass: &Pass, pending_keys: &[String]) -> PassInput {
 }
 
 #[test]
-fn golden_fixture_is_schema_v3_with_ten_vectors() {
+fn golden_fixture_is_schema_v3_with_eleven_vectors() {
     let file: GoldenFile = serde_json::from_str(GOLDEN).expect("golden fixture parses");
     assert_eq!(file.schema_version, 3, "pinned to schema_version 3");
     assert_eq!(
         file.vectors.len(),
-        10,
-        "10 vectors (8 mechanics + V9 durability + V10 coverage-extending SOFT)"
+        11,
+        "11 vectors (8 mechanics + V9 durability + V10 coverage-extending SOFT + V11 never-minted boundary)"
     );
 }
 

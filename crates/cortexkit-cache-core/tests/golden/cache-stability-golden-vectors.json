@@ -19,22 +19,74 @@
       "layer": "mechanics",
       "provenance": "cache-invariants.test.ts A1 - low-pressure conversation, several pure-defer turns grow the tail.",
       "notes": "Tail growth happens after the breakpoint; the boundary_id stays present, so the covered prefix splices/replaces identically every pass. Steady state: every pass SOFT+, zero busts.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "(no new content since last materialization)", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "m1",
+            "kind": "synthesized-region",
+            "frozen_payload": "(no new content since last materialization)",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -42,21 +94,75 @@
       "layer": "mechanics",
       "provenance": "cache-invariants.test.ts A2 - a conversation that crossed an execute pass, then defer passes continue to grow.",
       "notes": "An execute pass may legitimately bust once (drops/markers materialize). The invariant is that the DEFER passes after it are byte-stable. p1 is the execute (SOFT, allowed to change bytes); p2..p4 are SOFT+ and must be byte-identical.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "(no new content since last materialization)", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "m1",
+            "kind": "synthesized-region",
+            "frozen_payload": "(no new content since last materialization)",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "execute", "usage": "high" }, "boundary_present": "b0", "expect_action": "SOFT", "expect_frozen_set_delta": [ { "key": "drop1", "kind": "drop", "frozen_payload": "[dropped 1]", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "execute",
+            "usage": "high"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT",
+          "expect_frozen_set_delta": [
+            {
+              "key": "drop1",
+              "kind": "drop",
+              "frozen_payload": "[dropped 1]",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -64,20 +170,68 @@
       "layer": "mechanics",
       "provenance": "cache-invariants.test.ts A3 - the regression: an aged strip/drop unit must be FROZEN on a bust pass and replayed verbatim, never first-applied on a defer pass (which would change tail bytes mid-prefix and bust the whole prefix after it).",
       "notes": "p1 (a bust pass) freezes the strip decision into drop_reduce. p2..p4 are defer passes that age the unit past the protected window; they REPLAY the frozen [dropped 99999] verbatim. A correct core never introduces a strip on a SOFT+ pass (expect_frozen_set_delta is empty on every defer pass). This is the single most-broken MC invariant; the per-unit frozen_payload assert catches a renderer that re-derives. The drop is 'lineage' in MC (persisted in tags, reproduced byte-identical across restart - which is WHY V3 holds across a restart too).",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "execute", "usage": "high" }, "boundary_present": "b0", "expect_action": "SOFT", "expect_frozen_set_delta": [ { "key": "drop_reduce", "kind": "strip", "frozen_payload": "[dropped 99999]", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "execute",
+            "usage": "high"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT",
+          "expect_frozen_set_delta": [
+            {
+              "key": "drop_reduce",
+              "kind": "strip",
+              "frozen_payload": "[dropped 99999]",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -85,19 +239,59 @@
       "layer": "mechanics",
       "provenance": "Leak-A direct test (smart-drops / edit_marker). A superseded edit compresses to a filePath + region-hint prefix; the frozen_payload must be the EXACT EMITTED BYTES (captured at freeze), NOT re-derived from current content each pass.",
       "notes": "p1 freezes edit1 to a skeleton with a fixed region-hint payload. p2..p3 grow the tail (a newer edit lands; the 'recent window' moves). edit1 must replay its frozen_payload verbatim - a core that re-derives the 40-char diff prefix from current content would flip bytes on p2 (the [dropped]->[truncated] class). The per-unit assert (rendered_bytes == frozen_payload) is the catch.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "edit-superseded" }, "boundary_present": "b0", "expect_action": "SOFT", "expect_frozen_set_delta": [ { "key": "edit1", "kind": "skeleton", "frozen_payload": "edit packages/app/x.ts | @@ -10,6 +10,8 @@ [dropped 1]", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "edit-superseded"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT",
+          "expect_frozen_set_delta": [
+            {
+              "key": "edit1",
+              "kind": "skeleton",
+              "frozen_payload": "edit packages/app/x.ts | @@ -10,6 +10,8 @@ [dropped 1]",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -105,20 +299,66 @@
       "layer": "mechanics",
       "provenance": "cache-invariants.test.ts B9/B10/B11 - a compartment published (or memory added/updated) after m[0] materialized surfaces as an m[1] delta on a SOFT pass; m[0] stays byte-identical; defer passes after it replay m[0] AND m[1] byte-identical.",
       "notes": "p1 surfaces the delta: m1 re-renders (SOFT, busts at the m1 breakpoint), m0 unchanged. p2..p3 are SOFT+ and replay both regions byte-identical. m0's frozen_payload never appears in a delta after init = m0 stays frozen (the SOFT changed only m1). Pre-fix regressions: max_compartment_seq was a HARD trigger (folded the compartment INTO m0); supersede-delta keeps m0 stale-but-frozen with a <memory-updates> correction in m1. boundary_id present throughout (the delta is a render_config-independent content add, not a boundary move).",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history></session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "(no new content since last materialization)", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history></session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "m1",
+            "kind": "synthesized-region",
+            "frozen_payload": "(no new content since last materialization)",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "compartment-published" }, "boundary_present": "b0", "expect_action": "SOFT", "expect_frozen_set_delta": [ { "key": "m1", "kind": "synthesized-region", "frozen_payload": "<new-compartments>cache-invariant chunk</new-compartments>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "compartment-published"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT",
+          "expect_frozen_set_delta": [
+            {
+              "key": "m1",
+              "kind": "synthesized-region",
+              "frozen_payload": "<new-compartments>cache-invariant chunk</new-compartments>",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -126,25 +366,90 @@
       "layer": "mechanics",
       "provenance": "cache-invariants.test.ts B12 (HARD fold = project epoch bump) + the deferred-work coordinator. A memory rode m[1]; a deferred drop was queued; then a HARD trigger fires.",
       "notes": "p1 queues a deferred drop WITHOUT busting (SOFT+, observer half - drops accumulate while m1 replays frozen). p2 is the HARD trigger: m[0] re-materializes folding the m1 delta into the baseline, m1 resets to the empty placeholder, AND the queued drop drains into THIS bust (a HARD bust from any cause drains all deferred work). p3..p4 re-stabilize (SOFT+, byte-identical on the new baseline b1). The HARD fold mints a NEW boundary_id b1 (the m0 re-materialization advances the boundary).",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history></session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "<new-memories>B12 delta rule</new-memories>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history></session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "m1",
+            "kind": "synthesized-region",
+            "frozen_payload": "<new-memories>B12 delta rule</new-memories>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "drop-queued" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "hard-fold-trigger", "cause": "epoch-bump" }, "boundary_present": "b0", "expect_action": "HARD", "new_boundary_id": "b1", "expect_frozen_set_delta": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>B12 delta rule</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "(no new content since last materialization)", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "drop1", "kind": "drop", "frozen_payload": "[dropped 1]", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
-        ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "drop-queued"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "hard-fold-trigger",
+            "cause": "epoch-bump"
+          },
+          "boundary_present": "b0",
+          "expect_action": "HARD",
+          "new_boundary_id": "b1",
+          "expect_frozen_set_delta": [
+            {
+              "key": "m0",
+              "kind": "synthesized-region",
+              "frozen_payload": "<session-history>B12 delta rule</session-history>",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            },
+            {
+              "key": "m1",
+              "kind": "synthesized-region",
+              "frozen_payload": "(no new content since last materialization)",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            },
+            {
+              "key": "drop1",
+              "kind": "drop",
+              "frozen_payload": "[dropped 1]",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b1",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b1",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -152,19 +457,51 @@
       "layer": "mechanics",
       "provenance": "cache-stability oracle normalization - Anthropic billing nonce (cch) and cache_control breakpoint movement are normalized OUT of the bust decision; they are not content changes.",
       "notes": "p2's only change is a provider nonce / a forward-walked cache_control breakpoint. The boundary_id is unchanged and the covered content is unchanged, so it must classify SOFT+ and the cached_prefix_bytes must be unchanged after normalization. A core that treats the nonce as content would false-bust.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "provider-nonce-only" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "provider-nonce-only"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -172,21 +509,78 @@
       "layer": "mechanics",
       "provenance": "Leak-C (revert-safety), REFRAMED to the boundary-presence anchor. There is NO content fingerprint over the covered prefix, so an in-coverage same-length edit cannot stale-cache. The only revert that matters to the anchor is one that REMOVES/crosses the boundary_id (a revert below the boundary, in the tail, is just V1 tail-trim and stays SOFT+).",
       "notes": "p1..p2 replay (SOFT+, boundary_present b0). p3 is a revert that removes the boundary message (boundary_present '-'): the core CANNOT splice the same coverage, so it KEEPS replaying the frozen m0/m1 bytes (SOFT+, NO bust - bytes are stable) and marks reconcile-needed. p4 is the next cache-busting pass (execute): m0 RE-MATERIALIZES against the live (reverted) array, minting a new boundary b1 (this is where the revert reconciles). p5 re-stabilizes on b1. KEY CORRECTION vs the old vector: the revert pass itself does NOT bust (boundary-presence model makes reverts cheap); reconciliation is deferred to the next natural bust. The old 'in-coverage content diverge -> immediate HARD' case does not exist under boundary-presence.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "revert-removes-boundary" }, "boundary_present": "-", "expect_action": "SOFT+", "reconcile_pending": true, "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "execute", "usage": "high" }, "boundary_present": "-", "expect_action": "HARD", "new_boundary_id": "b1", "expect_frozen_set_delta": [ { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE-REVERTED</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "revert-removes-boundary"
+          },
+          "boundary_present": "-",
+          "expect_action": "SOFT+",
+          "reconcile_pending": true,
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "execute",
+            "usage": "high"
+          },
+          "boundary_present": "-",
+          "expect_action": "HARD",
+          "new_boundary_id": "b1",
+          "expect_frozen_set_delta": [
+            {
+              "key": "m0",
+              "kind": "synthesized-region",
+              "frozen_payload": "<session-history>BASELINE-REVERTED</session-history>",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b1",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -194,20 +588,61 @@
       "layer": "durability",
       "provenance": "The cross-episode twin of the within-run defer vectors (pairs with codec spec #2 B.4(d)). LINEAGE frozen units (the m0/m1 boundary + the reasoning-clear watermark) MUST reproduce byte-identical after a RunStarted / crash-resume, with FrozenRenderConfig reproduced from durable WAL state - a restart does NOT bust the cached prefix. This is the class that bit the identity-lead (passed every within-run test, busted at the episode boundary).",
       "notes": "p1 replays within-run (SOFT+, boundary_present b0). p2 is a RunStarted/crash-resume boundary: the FrozenRenderConfig is reproduced from durable state, the boundary_id b0 survives in durable state (boundary_present b0), and the lineage units (m0 + reasoning_clear watermark) reproduce byte-identical -> expect_action SOFT+ (NO bust across the episode boundary). p3 continues SOFT+. The assert: post-RunStarted cached_prefix_bytes == pre-RunStarted (lineage reproduction is byte-exact). An 'episode'-class unit (if the daemon had one) would reset here; MC has none - its entire frozen set is lineage-durable, which is exactly why a restart does not bust.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "reasoning_clear", "kind": "strip", "frozen_payload": "", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset", "watermark": "clearedReasoningThroughTag=420" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "reasoning_clear",
+            "kind": "strip",
+            "frozen_payload": "",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset",
+            "watermark": "clearedReasoningThroughTag=420"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "run-started", "frozen_config_source": "durable-wal" }, "boundary_present": "b0", "expect_action": "SOFT+", "lineage_reproduced_byte_identical": true, "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b0", "expect_action": "SOFT+", "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "run-started",
+            "frozen_config_source": "durable-wal"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "lineage_reproduced_byte_identical": true,
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        }
       ]
     },
     {
@@ -215,21 +650,172 @@
       "layer": "mechanics",
       "provenance": "The two-watermark coverage model (magic-context slice 4d-m0). A newly-published compartment that EXTENDS the m0+m1 coverage rides m1 at P1 AND advances the coverage anchor on the SOFT (boundary b0->b1). Production reference: softRefreshCachedM1 writes cached_m1_bytes AND cached_m0_last_baseline_end_message_id (the last raw message covered by m0+m1) together on the soft refresh (inject-compartments.ts:2127-2137, compartment-storage.ts:257-263). This is the capability the core's step_soft gained: apply input.new_boundary_id when Some (None = boundary unchanged = today's behavior).",
       "notes": "DISTINCT from V5: V5 is a delta SOFT that does NOT extend coverage (the new_boundary_id=None path, boundary stationary at b0); V10 is the coverage-EXTENDING SOFT (new_boundary_id=Some(b1), boundary advances). p0 is the coverage-extending SOFT: m1 re-renders carrying the new compartment, the boundary ADVANCES b0->b1, and m0 frozen bytes are UNCHANGED. p1..p2 are SOFT+ at the new anchor b1, replaying both regions byte-identical. p3 is a revert BELOW b1 (boundary_present '-'): the core keeps replaying frozen bytes (SOFT+, reconcile_pending) and reconciles on the next bust. THE LOAD-BEARING ASSERT: the boundary moved on a SOFT yet m0's frozen_payload never appears in a delta (m0 bytes frozen) -- the real invariant (m0 BYTES never change on a SOFT) holds while only the coverage anchor + m1 delta move. The old 'a SOFT never touches the baseline' comment conflated 'anchor stationary' with 'bytes frozen'; only the latter is load-bearing, and it holds here.",
-      "render_config": { "system_hash": "sys0", "tool_set_id": "tools0", "model_key": "m0", "serializer_profile_id": "prof0" },
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
       "initial_state": {
         "version": 0,
         "boundary_id": "b0",
         "frozen_units": [
-          { "key": "m0", "kind": "synthesized-region", "frozen_payload": "<session-history>BASELINE</session-history>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" },
-          { "key": "m1", "kind": "synthesized-region", "frozen_payload": "(no new content since last materialization)", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" }
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history>BASELINE</session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "m1",
+            "kind": "synthesized-region",
+            "frozen_payload": "(no new content since last materialization)",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
         ],
         "pending_changes": []
       },
       "passes": [
-        { "signal": { "kind": "compartment-published", "extends_coverage": true }, "boundary_present": "b0", "expect_action": "SOFT", "new_boundary_id": "b1", "expect_frozen_set_delta": [ { "key": "m1", "kind": "synthesized-region", "frozen_payload": "<session-history-since>NEWCOMPARTMENT</session-history-since>", "durability_class": "lineage", "reset_rule": "survive + advance-only-merge, never reset" } ] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "growing-tail" }, "boundary_present": "b1", "expect_action": "SOFT+", "expect_frozen_set_delta": [] },
-        { "signal": { "kind": "revert-below-new-boundary" }, "boundary_present": "-", "expect_action": "SOFT+", "reconcile_pending": true, "expect_frozen_set_delta": [] }
+        {
+          "signal": {
+            "kind": "compartment-published",
+            "extends_coverage": true
+          },
+          "boundary_present": "b0",
+          "expect_action": "SOFT",
+          "new_boundary_id": "b1",
+          "expect_frozen_set_delta": [
+            {
+              "key": "m1",
+              "kind": "synthesized-region",
+              "frozen_payload": "<session-history-since>NEWCOMPARTMENT</session-history-since>",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b1",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "b1",
+          "expect_action": "SOFT+",
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "revert-below-new-boundary"
+          },
+          "boundary_present": "-",
+          "expect_action": "SOFT+",
+          "reconcile_pending": true,
+          "expect_frozen_set_delta": []
+        }
+      ]
+    },
+    {
+      "name": "V11-never-minted-boundary-is-not-reconcile-pending",
+      "layer": "mechanics",
+      "provenance": "The empty-store oscillation fix (commons 5615850). A session with no compartment keeps boundary_id=\"\" for its whole pre-first-compartment life; the module passes the absent sentinel every pass. Before the fix, step_defer set reconcile_pending on that vacuous boundary, so classify rule 5 (reconcile_pending && !boundary_present) forced a HARD on the very next pass -> HARD<->SOFT+ oscillation (bytes identical, so cache-neutral, but dishonest telemetry + per-pass writes). Reference: magic-context empty_store_bootstrap_then_defers_stably_without_hard_oscillation (crates/mc-module/src/transform.rs).",
+      "notes": "THE LOAD-BEARING ASSERT: an empty boundary_id is the NEVER-MINTED sentinel, not a reverted-away boundary, so a defer pass over it reads reconcile_pending=FALSE (p0..p2). This is the exact bit the fix flips: the pre-fix core read TRUE here (spurious reconcile). REVERT SEMANTICS PRESERVED (the half that must NOT regress): p3 is a HARD that mints the first real boundary b1; p4 is then a defer with the boundary ABSENT ('-') while boundary_id is now the non-empty 'b1', and it STILL reconciles (reconcile_pending=TRUE) - proving the fix only exempted the vacuous empty-string case, leaving genuine revert detection (V8) intact. m0/m1 bytes are byte-identical across every defer either way (cache-neutral).",
+      "render_config": {
+        "system_hash": "sys0",
+        "tool_set_id": "tools0",
+        "model_key": "m0",
+        "serializer_profile_id": "prof0"
+      },
+      "initial_state": {
+        "version": 0,
+        "boundary_id": "",
+        "frozen_units": [
+          {
+            "key": "m0",
+            "kind": "synthesized-region",
+            "frozen_payload": "<session-history></session-history>",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          },
+          {
+            "key": "m1",
+            "kind": "synthesized-region",
+            "frozen_payload": "(no new content since last materialization)",
+            "durability_class": "lineage",
+            "reset_rule": "survive + advance-only-merge, never reset"
+          }
+        ],
+        "pending_changes": []
+      },
+      "passes": [
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "-",
+          "expect_action": "SOFT+",
+          "reconcile_pending": false,
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "-",
+          "expect_action": "SOFT+",
+          "reconcile_pending": false,
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "growing-tail"
+          },
+          "boundary_present": "-",
+          "expect_action": "SOFT+",
+          "reconcile_pending": false,
+          "expect_frozen_set_delta": []
+        },
+        {
+          "signal": {
+            "kind": "first-compartment-fold-hard"
+          },
+          "boundary_present": "-",
+          "expect_action": "HARD",
+          "new_boundary_id": "b1",
+          "expect_frozen_set_delta": [
+            {
+              "key": "m0",
+              "kind": "synthesized-region",
+              "frozen_payload": "<session-history>C1</session-history>",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            },
+            {
+              "key": "m1",
+              "kind": "synthesized-region",
+              "frozen_payload": "(no new content since last materialization)",
+              "durability_class": "lineage",
+              "reset_rule": "survive + advance-only-merge, never reset"
+            }
+          ]
+        },
+        {
+          "signal": {
+            "kind": "revert-below-new-boundary"
+          },
+          "boundary_present": "-",
+          "expect_action": "SOFT+",
+          "reconcile_pending": true,
+          "expect_frozen_set_delta": []
+        }
       ]
     }
   ]
