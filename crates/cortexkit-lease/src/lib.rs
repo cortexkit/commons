@@ -118,6 +118,22 @@ pub trait LeaseStore: Send + Sync {
     /// Acquire the lease, or `Err(Held)` if a live writer holds it. The returned
     /// handle must outlive the writer; dropping it releases the lease.
     fn acquire(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError>;
+
+    /// Acquire the lease in SHARED mode: any number of shared holders may
+    /// coexist, but a shared holder blocks [`LeaseStore::acquire`] (exclusive)
+    /// and an exclusive holder blocks shared acquisition.
+    ///
+    /// Use for reader-side protection of shared resources: e.g. a model-cache
+    /// consumer takes a shared lease on a blob's digest while validating or
+    /// mmap-ing it, so a GC (exclusive holder) can never delete the file out
+    /// from under a live reader, while concurrent readers never serialize each
+    /// other.
+    ///
+    /// Shared handles do NOT bump the fence epoch (they are not writers; the
+    /// epoch fences durable writes). [`LeaseHandle::epoch`] on a shared handle
+    /// returns the last persisted writer epoch at acquisition time, for
+    /// observability only — never use it as a write fence.
+    fn acquire_shared(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError>;
 }
 
 /// File-based lease store: one lock file per key under `base_dir`. The OS advisory
@@ -143,7 +159,8 @@ impl FileLeaseStore {
     }
 }
 
-/// A file-backed held lease: holds the OS advisory lock for its lifetime.
+/// A file-backed held lease: holds the OS advisory lock (exclusive or shared)
+/// for its lifetime.
 #[derive(Debug)]
 struct FileLeaseHandle {
     epoch: u64,
@@ -202,6 +219,45 @@ impl LeaseStore for FileLeaseStore {
             key: key.clone(),
         }))
     }
+
+    fn acquire_shared(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError> {
+        std::fs::create_dir_all(&self.base_dir).map_err(LeaseError::Io)?;
+        let path = self.lease_path(key);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(LeaseError::Io)?;
+
+        // Shared liveness gate: only an exclusive holder contends; other shared
+        // holders coexist. On unix this is flock(LOCK_SH|LOCK_NB); on Windows,
+        // LockFileEx without LOCKFILE_EXCLUSIVE_LOCK (both via fs2).
+        // Fully-qualified call: std >= 1.89 has an inherent File::try_lock_shared
+        // (returning TryLockError) that would otherwise shadow the fs2 trait
+        // method this crate's error handling is built around.
+        match FileExt::try_lock_shared(&file) {
+            Ok(()) => {}
+            Err(e) if is_lock_contended(&e) => {
+                return Err(LeaseError::Held { key: key.clone() });
+            }
+            Err(e) => return Err(LeaseError::Io(e)),
+        }
+
+        // Read-only peek at the persisted writer epoch: shared holders are not
+        // writers, so the epoch is NOT bumped (it fences durable writes only).
+        let epoch = read_epoch(&mut file).map_err(|e| {
+            let _ = file.unlock();
+            LeaseError::Io(e)
+        })?;
+
+        Ok(Box::new(FileLeaseHandle {
+            epoch,
+            file,
+            key: key.clone(),
+        }))
+    }
 }
 
 /// Whether a `try_lock_exclusive` error means "another live holder owns the lock"
@@ -213,6 +269,16 @@ impl LeaseStore for FileLeaseStore {
 /// misread as `Io`.
 fn is_lock_contended(e: &std::io::Error) -> bool {
     e.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+}
+
+/// Read the persisted epoch without modifying it (0 if new/empty). Called while
+/// holding a shared OS lock; must not write (concurrent shared holders read the
+/// same file).
+fn read_epoch(file: &mut File) -> std::io::Result<u64> {
+    let mut buf = String::new();
+    file.seek(SeekFrom::Start(0))?;
+    file.read_to_string(&mut buf)?;
+    Ok(buf.trim().parse().unwrap_or(0))
 }
 
 /// Read the persisted epoch (0 if new/empty), increment, write it back, return the
@@ -311,6 +377,153 @@ mod tests {
             .acquire(&LeaseKey::new("m", "postgres", "s"))
             .expect("postgres - different backend, same scope");
         drop((a, b));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn shared_holders_coexist_but_block_exclusive() {
+        let (store, dir) = tmp_store();
+        let k = key("shared");
+
+        let s1 = store.acquire_shared(&k).expect("first shared");
+        let s2 = store
+            .acquire_shared(&k)
+            .expect("second shared holder coexists");
+
+        // A shared holder blocks the exclusive writer — this is the property
+        // the model-cache GC relies on (never delete under a live reader).
+        match store.acquire(&k) {
+            Err(LeaseError::Held { key }) => assert_eq!(key.scope_key, "shared"),
+            other => panic!("exclusive must be Held while shared holders live, got {other:?}"),
+        }
+
+        drop(s1);
+        // Still one shared holder alive: exclusive must STILL be blocked.
+        match store.acquire(&k) {
+            Err(LeaseError::Held { .. }) => {}
+            other => panic!("exclusive must stay Held until the last shared holder drops, got {other:?}"),
+        }
+
+        drop(s2);
+        let g = store
+            .acquire(&k)
+            .expect("exclusive after all shared holders released");
+        drop(g);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn exclusive_holder_blocks_shared() {
+        let (store, dir) = tmp_store();
+        let k = key("excl-blocks-shared");
+
+        let g = store.acquire(&k).expect("exclusive");
+        match store.acquire_shared(&k) {
+            Err(LeaseError::Held { key }) => assert_eq!(key.scope_key, "excl-blocks-shared"),
+            other => panic!("shared must be Held while exclusive holder lives, got {other:?}"),
+        }
+        drop(g);
+        let s = store
+            .acquire_shared(&k)
+            .expect("shared after exclusive released");
+        drop(s);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn shared_acquisition_does_not_bump_the_write_epoch() {
+        let (store, dir) = tmp_store();
+        let k = key("epoch-neutral");
+
+        let g = store.acquire(&k).expect("writer");
+        assert_eq!(g.epoch(), 1);
+        drop(g);
+
+        // Shared holders observe the persisted epoch but never advance it.
+        let s1 = store.acquire_shared(&k).expect("shared");
+        assert_eq!(s1.epoch(), 1, "shared handle reports last writer epoch");
+        drop(s1);
+        let s2 = store.acquire_shared(&k).expect("shared again");
+        assert_eq!(s2.epoch(), 1);
+        drop(s2);
+
+        let g2 = store.acquire(&k).expect("writer again");
+        assert_eq!(
+            g2.epoch(),
+            2,
+            "writer epoch continues from 1: shared holders did not consume epochs"
+        );
+        drop(g2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // Unix-only: the child uses fcntl.flock. On Windows the same-process tests
+    // above still exercise the real LockFileEx shared/exclusive semantics via
+    // fs2, because LockFileEx locks are per-handle (two handles in one process
+    // behave like two processes for contention purposes).
+    #[cfg(unix)]
+    #[test]
+    fn shared_lease_across_processes_blocks_exclusive() {
+        // Cross-PROCESS proof (not just same-process flock semantics): a child
+        // process holds a shared lease while the parent tries exclusive.
+        // flock/LockFileEx semantics are per-open-file-description, so the
+        // same-process tests above could in principle pass with per-fd
+        // semantics that differ across processes; this pins the real contract.
+        let (store, dir) = tmp_store();
+        let k = key("xproc");
+
+        // Learn the exact lock file path by acquiring+releasing once (also
+        // seeds the epoch file).
+        let g = store.acquire(&k).expect("seed");
+        drop(g);
+        let lock_path = {
+            let mut entries = std::fs::read_dir(&dir).expect("lease dir");
+            let entry = entries
+                .next()
+                .expect("one lease file")
+                .expect("dir entry");
+            entry.path()
+        };
+
+        // Child: hold a SHARED flock on the lease file for 2 seconds.
+        // `flock(1)` from util-linux is absent on macOS, so use a tiny python
+        // child — python is available on every dev/CI platform we run.
+        let mut child = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import fcntl,time\nf=open({lock_path:?},'r+')\nfcntl.flock(f,fcntl.LOCK_SH)\nprint('held',flush=True)\ntime.sleep(2)",
+            ))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn shared-holder child");
+
+        // Wait until the child confirms it holds the shared lock.
+        {
+            use std::io::BufRead;
+            let stdout = child.stdout.take().expect("child stdout");
+            let mut line = String::new();
+            std::io::BufReader::new(stdout)
+                .read_line(&mut line)
+                .expect("child readiness line");
+            assert_eq!(line.trim(), "held");
+        }
+
+        // Parent: exclusive must be Held while the child's shared lock lives.
+        match store.acquire(&k) {
+            Err(LeaseError::Held { .. }) => {}
+            other => panic!("exclusive must be Held under cross-process shared lock, got {other:?}"),
+        }
+        // Shared, however, coexists with the child's shared lock.
+        let s = store
+            .acquire_shared(&k)
+            .expect("shared coexists with cross-process shared holder");
+        drop(s);
+
+        child.wait().expect("child exit");
+        let g = store
+            .acquire(&k)
+            .expect("exclusive after child released");
+        drop(g);
         let _ = std::fs::remove_dir_all(dir);
     }
 
