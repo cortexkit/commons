@@ -401,7 +401,9 @@ mod tests {
         // Still one shared holder alive: exclusive must STILL be blocked.
         match store.acquire(&k) {
             Err(LeaseError::Held { .. }) => {}
-            other => panic!("exclusive must stay Held until the last shared holder drops, got {other:?}"),
+            other => {
+                panic!("exclusive must stay Held until the last shared holder drops, got {other:?}")
+            }
         }
 
         drop(s2);
@@ -478,10 +480,7 @@ mod tests {
         drop(g);
         let lock_path = {
             let mut entries = std::fs::read_dir(&dir).expect("lease dir");
-            let entry = entries
-                .next()
-                .expect("one lease file")
-                .expect("dir entry");
+            let entry = entries.next().expect("one lease file").expect("dir entry");
             entry.path()
         };
 
@@ -511,7 +510,9 @@ mod tests {
         // Parent: exclusive must be Held while the child's shared lock lives.
         match store.acquire(&k) {
             Err(LeaseError::Held { .. }) => {}
-            other => panic!("exclusive must be Held under cross-process shared lock, got {other:?}"),
+            other => {
+                panic!("exclusive must be Held under cross-process shared lock, got {other:?}")
+            }
         }
         // Shared, however, coexists with the child's shared lock.
         let s = store
@@ -520,9 +521,7 @@ mod tests {
         drop(s);
 
         child.wait().expect("child exit");
-        let g = store
-            .acquire(&k)
-            .expect("exclusive after child released");
+        let g = store.acquire(&k).expect("exclusive after child released");
         drop(g);
         let _ = std::fs::remove_dir_all(dir);
     }
