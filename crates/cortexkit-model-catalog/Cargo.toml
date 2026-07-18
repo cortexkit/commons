@@ -1,0 +1,16 @@
+# cortexkit-model-catalog — the shared REPRESENTATION of the models.dev model
+# catalog: types + parsing only, NO bundled data. Consumers (broca for
+# capabilities, astrocyte for pricing) parse the same shape by construction;
+# each brings its own snapshot and owns its own derived stores.
+[package]
+name = "cortexkit-model-catalog"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Shared parsing + types for the models.dev model catalog (no data): providers, models, capabilities, and exact integer-nanodollar cost rates."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
