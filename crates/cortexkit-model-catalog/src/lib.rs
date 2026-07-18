@@ -35,6 +35,14 @@ pub enum CatalogParseError {
         field: &'static str,
         value: String,
     },
+    /// A NEGATIVE rate. No catalog publishes one; a corrupted snapshot must
+    /// fail loud here rather than flow into consumers' signed money paths.
+    NegativeRate {
+        provider: String,
+        model: String,
+        field: &'static str,
+        value: String,
+    },
 }
 
 impl std::fmt::Display for CatalogParseError {
@@ -45,6 +53,9 @@ impl std::fmt::Display for CatalogParseError {
                 f,
                 "catalog rate {provider}/{model}.{field} = {value} cannot scale exactly to nanodollars"
             ),
+            CatalogParseError::NegativeRate { provider, model, field, value } => {
+                write!(f, "catalog rate {provider}/{model}.{field} = {value} is negative")
+            }
         }
     }
 }
@@ -229,19 +240,27 @@ fn parse_cost(
     model: &str,
     cost: &Value,
 ) -> Result<CostSchedule, CatalogParseError> {
+    let convert = |field: &'static str, v: &Value| -> Result<RateNanosPerMtok, CatalogParseError> {
+        let nanos = dollars_to_nanos(v).map_err(|value| CatalogParseError::InexactRate {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            field,
+            value,
+        })?;
+        if nanos < 0 {
+            return Err(CatalogParseError::NegativeRate {
+                provider: provider.to_string(),
+                model: model.to_string(),
+                field,
+                value: v.to_string(),
+            });
+        }
+        Ok(nanos)
+    };
     let rate = |field: &'static str| -> Result<Option<RateNanosPerMtok>, CatalogParseError> {
         match cost.get(field) {
             None | Some(Value::Null) => Ok(None),
-            Some(v) => {
-                dollars_to_nanos(v)
-                    .map(Some)
-                    .map_err(|value| CatalogParseError::InexactRate {
-                        provider: provider.to_string(),
-                        model: model.to_string(),
-                        field,
-                        value,
-                    })
-            }
+            Some(v) => convert(field, v).map(Some),
         }
     };
     let mut tiers = Vec::new();
@@ -251,14 +270,7 @@ fn parse_cost(
                 |field: &'static str| -> Result<Option<RateNanosPerMtok>, CatalogParseError> {
                     match tier.get(field) {
                         None | Some(Value::Null) => Ok(None),
-                        Some(v) => dollars_to_nanos(v).map(Some).map_err(|value| {
-                            CatalogParseError::InexactRate {
-                                provider: provider.to_string(),
-                                model: model.to_string(),
-                                field,
-                                value,
-                            }
-                        }),
+                        Some(v) => convert(field, v).map(Some),
                     }
                 };
             tiers.push(CostTier {
@@ -433,6 +445,35 @@ mod tests {
             CatalogDoc::parse(r#"{ "p": { "future_field": {"x": 1}, "models": {} } }"#).unwrap();
         let provider = doc.providers.get("p").unwrap();
         assert_eq!(provider.raw.get("future_field").unwrap()["x"], 1);
+    }
+
+    #[test]
+    fn negative_rate_is_a_loud_error() {
+        // A corrupted snapshot's negative price must fail parse, not flow
+        // silently into consumers' signed money paths.
+        let err =
+            CatalogDoc::parse(r#"{ "p": { "models": { "m": { "cost": { "output": -15 } } } } }"#)
+                .unwrap_err();
+        match err {
+            CatalogParseError::NegativeRate {
+                provider,
+                model,
+                field,
+                ..
+            } => {
+                assert_eq!(
+                    (provider.as_str(), model.as_str(), field),
+                    ("p", "m", "output")
+                );
+            }
+            other => panic!("expected NegativeRate, got {other:?}"),
+        }
+        // Tier rates are guarded by the same gate.
+        let err = CatalogDoc::parse(
+            r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "context_over": 1, "input": -1 } ] } } } } }"#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CatalogParseError::NegativeRate { .. }));
     }
 
     #[test]
