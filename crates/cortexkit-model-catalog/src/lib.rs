@@ -303,8 +303,13 @@ fn parse_cost(
 /// via DECIMAL STRING scaling — floats never do money arithmetic.
 ///
 /// The JSON number's shortest-roundtrip decimal form is scaled by 10^9
-/// exactly; more than 9 fractional digits, exponents beyond range, or a
-/// non-finite value is an error (returns the offending textual value).
+/// exactly. Precision beyond nanodollars ROUNDS HALF-EVEN at this boundary:
+/// real catalogs carry upstream float artifacts (models.dev publishes rates
+/// like `0.8299999999999998` for an intended `0.83`), and the rounding error
+/// is below the money resolution (< 0.5 nanodollar per million tokens).
+/// The one dangerous case stays a loud error: a NONZERO rate that would
+/// round to ZERO (e.g. `1e-10`) is rejected — rounding it would fabricate a
+/// free model, the exact silent-$0 the fleet's money rules ban.
 fn dollars_to_nanos(v: &Value) -> Result<RateNanosPerMtok, String> {
     let n = v.as_number().ok_or_else(|| v.to_string())?;
     decimal_str_to_nanos(&n.to_string()).ok_or_else(|| n.to_string())
@@ -344,10 +349,32 @@ fn decimal_str_to_nanos(s: &str) -> Option<RateNanosPerMtok> {
     };
     // value × 10^(exp - frac_len) dollars → nanos = value × 10^(9 + exp - frac_len)
     let shift = 9 + exp - frac_part.len() as i32;
-    if shift < 0 {
-        return None; // sub-nanodollar precision: cannot represent exactly
-    }
-    let scaled = value.checked_mul(10i128.checked_pow(shift as u32)?)?;
+    let scaled = if shift >= 0 {
+        value.checked_mul(10i128.checked_pow(shift as u32)?)?
+    } else {
+        // Sub-nanodollar digits: round half-even at the money resolution.
+        // Upstream float artifacts ("0.8299999999999998") land here; the
+        // error is < 0.5 nano per Mtok. A NONZERO value rounding to ZERO is
+        // refused — that would fabricate a free model from a real price.
+        let divisor = 10i128.checked_pow((-shift) as u32)?;
+        let quot = value / divisor;
+        let rem = value % divisor;
+        let rounded = match (rem * 2).cmp(&divisor) {
+            std::cmp::Ordering::Greater => quot + 1,
+            std::cmp::Ordering::Less => quot,
+            std::cmp::Ordering::Equal => {
+                if quot % 2 == 0 {
+                    quot
+                } else {
+                    quot + 1
+                }
+            }
+        };
+        if rounded == 0 && value != 0 {
+            return None; // nonzero price must never become $0
+        }
+        rounded
+    };
     let scaled = if negative { -scaled } else { scaled };
     RateNanosPerMtok::try_from(scaled).ok()
 }
@@ -368,9 +395,33 @@ mod tests {
         // Exponent forms (serde prints tiny rates this way).
         assert_eq!(decimal_str_to_nanos("1e-7"), Some(100));
         assert_eq!(decimal_str_to_nanos("2.5e-3"), Some(2_500_000));
-        // Sub-nanodollar precision is an ERROR, not a rounded guess.
+        // A nonzero rate that would round to ZERO stays an ERROR — rounding
+        // it would fabricate a free model from a real price.
         assert_eq!(decimal_str_to_nanos("1e-10"), None);
         assert_eq!(decimal_str_to_nanos("0.0000000001"), None);
+    }
+
+    #[test]
+    fn upstream_float_artifacts_round_half_even() {
+        // Real models.dev data: IEEE-754 shortest-roundtrip artifacts from
+        // the upstream pipeline. The intended decimal is recovered exactly.
+        assert_eq!(
+            decimal_str_to_nanos("0.8299999999999998"),
+            Some(830_000_000)
+        );
+        assert_eq!(
+            decimal_str_to_nanos("1.7999999999999998"),
+            Some(1_800_000_000)
+        );
+        assert_eq!(
+            decimal_str_to_nanos("0.49299999999999994"),
+            Some(493_000_000)
+        );
+        // Half-even at the boundary digit: 10 fractional digits ...5 exact.
+        assert_eq!(decimal_str_to_nanos("0.0000000015"), Some(2)); // 1.5 → 2 (even)
+        assert_eq!(decimal_str_to_nanos("0.0000000025"), Some(2)); // 2.5 → 2 (even)
+                                                                   // True zero stays zero (zero is not "rounded to zero").
+        assert_eq!(decimal_str_to_nanos("0.0000000000"), Some(0));
     }
 
     fn snapshot() -> &'static str {
