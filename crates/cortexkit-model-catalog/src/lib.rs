@@ -359,7 +359,11 @@ fn decimal_str_to_nanos(s: &str) -> Option<RateNanosPerMtok> {
         let divisor = 10i128.checked_pow((-shift) as u32)?;
         let quot = value / divisor;
         let rem = value % divisor;
-        let rounded = match (rem * 2).cmp(&divisor) {
+        // Checked doubling: for an absurd ~38-digit fractional significand,
+        // divisor approaches i128::MAX and rem*2 could wrap — money math
+        // never wraps, so overflow makes the rate a loud parse error.
+        let doubled = rem.checked_mul(2)?;
+        let rounded = match doubled.cmp(&divisor) {
             std::cmp::Ordering::Greater => quot + 1,
             std::cmp::Ordering::Less => quot,
             std::cmp::Ordering::Equal => {
@@ -422,6 +426,22 @@ mod tests {
         assert_eq!(decimal_str_to_nanos("0.0000000025"), Some(2)); // 2.5 → 2 (even)
                                                                    // True zero stays zero (zero is not "rounded to zero").
         assert_eq!(decimal_str_to_nanos("0.0000000000"), Some(0));
+    }
+
+    #[test]
+    fn pathological_significand_is_error_never_wrap() {
+        // 47 fractional digits: significand 8.6e37 still parses as i128 and
+        // reaches the rounding branch with divisor 10^38 and rem = 8.6e37 >
+        // i128::MAX/2 — rem*2 would wrap without the checked multiply (debug:
+        // panic; release: a wrapped compare). Must be a loud None instead.
+        let s = "0.00000000086000000000000000000000000000000000000";
+        assert_eq!(decimal_str_to_nanos(s), None);
+        // Sane long-fraction values still round normally (no overreach): 29
+        // sub-nano digits with a small significand stay in checked range.
+        assert_eq!(
+            decimal_str_to_nanos("0.99999999999999999999999999999999999999"),
+            Some(1_000_000_000)
+        );
     }
 
     fn snapshot() -> &'static str {
