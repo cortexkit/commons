@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cortexkit-paths", "crates/cortexkit-lease", "crates/cortexkit-store-types", "crates/cortexkit-store", "crates/cortexkit-store-postgres", "crates/cortexkit-cache-core", "crates/cortexkit-model-catalog"]
+members = ["crates/cortexkit-paths", "crates/cortexkit-lease", "crates/cortexkit-store-types", "crates/cortexkit-store", "crates/cortexkit-store-postgres", "crates/cortexkit-cache-core", "crates/cortexkit-model-catalog", "crates/cortexkit-provider-usage"]
 
 # cortexkit/commons — neutral home for cross-product CortexKit primitives.
 # Shared by subc, AFT, and Magic Context. Each crate is published independently
