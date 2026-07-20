@@ -131,6 +131,15 @@ fn account_info_is_empty(value: &Option<AccountInfo>) -> bool {
 pub struct ProviderUsage {
     /// CodexBar provider name (e.g. "codex"), which consumers map to their own id.
     pub provider: String,
+    /// Canonical API provider identifier — the models.dev slug for the same
+    /// provider (e.g. "openai" when `provider == "codex"`, "anthropic" for
+    /// "claude", "google" for "gemini", "xai" for "grok"). Present when the
+    /// producer knows the canonical name; absent for providers with no models.dev
+    /// counterpart, where consumers fall back to `provider`. Lets every consumer
+    /// key on one canonical name instead of each maintaining its own
+    /// CodexBar-name → canonical map.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub api_provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
     /// Which retrieval path produced this (e.g. "oauth") — observability only.
@@ -155,6 +164,7 @@ impl ProviderUsage {
     pub fn healthy(provider: &str, account: Option<String>, source: &str, usage: Usage) -> Self {
         Self {
             provider: provider.to_string(),
+            api_provider: None,
             account,
             source: Some(source.to_string()),
             account_info: None,
@@ -170,6 +180,7 @@ impl ProviderUsage {
     pub fn degraded(provider: &str, error: impl std::fmt::Display) -> Self {
         Self {
             provider: provider.to_string(),
+            api_provider: None,
             account: None,
             source: None,
             account_info: None,
@@ -275,5 +286,21 @@ mod tests {
         let json = serde_json::to_string(&degraded).unwrap();
         assert!(json.contains("\"error\":\"no session\""));
         assert!(!json.contains("usage"));
+    }
+
+    #[test]
+    fn api_provider_is_camel_case_present_when_set_and_omitted_when_absent() {
+        let mut entry = ProviderUsage::healthy("codex", None, "oauth", Usage::default());
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("apiProvider"),
+            "absent api_provider must be omitted"
+        );
+
+        entry.api_provider = Some("openai".to_string());
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"apiProvider\":\"openai\""));
+        let back: ProviderUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, entry);
     }
 }
