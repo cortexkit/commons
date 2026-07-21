@@ -22,7 +22,8 @@
 //!
 //! # Serialization contract consumers depend on
 //! - camelCase keys (`usedPercent`, `resetsAt`, `windowMinutes`,
-//!   `extraRateWindows`, `rawUsedPercent`, `accountInfo`, `savedResets`).
+//!   `extraRateWindows`, `rawUsedPercent`, `accountInfo`, `savedResets`,
+//!   `usedCount`, `totalCount`).
 //! - A healthy entry MUST NOT carry `error` (consumers skip truthy-`error`
 //!   entries), so it is omitted when absent.
 //! - A window is emitted when it has a `usedPercent`; `resetsAt` is OPTIONAL and
@@ -53,6 +54,15 @@ pub struct RateWindow {
     /// the consumer then paces on utilization alone rather than a burn rate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_minutes: Option<i64>,
+    /// Absolute consumed count in the window (e.g. tokens, requests). Present
+    /// only when the provider reports or derives it; human-facing UIs can show
+    /// "10,336 / 40,000" alongside the percentage for richer context.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub used_count: Option<f64>,
+    /// Absolute total cap for the window. Present alongside `used_count` when
+    /// the provider knows the ceiling; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub total_count: Option<f64>,
 }
 
 /// A per-model window bundled under one account (e.g. Antigravity's Geminis).
@@ -208,6 +218,8 @@ mod tests {
                     raw_used_percent: None,
                     resets_at: None,
                     window_minutes: Some(300),
+                    used_count: None,
+                    total_count: None,
                 }),
                 ..Default::default()
             },
@@ -257,6 +269,8 @@ mod tests {
             raw_used_percent: None,
             resets_at: Some("2026-07-20T00:00:00Z".to_string()),
             window_minutes: Some(10080),
+            used_count: None,
+            total_count: None,
         };
         let json = serde_json::to_string(&unrelaxed).unwrap();
         assert!(
@@ -269,6 +283,8 @@ mod tests {
             raw_used_percent: Some(70.0),
             resets_at: Some("2026-07-20T00:00:00Z".to_string()),
             window_minutes: Some(10080),
+            used_count: None,
+            total_count: None,
         };
         let json = serde_json::to_string(&relaxed).unwrap();
         assert!(json.contains("\"rawUsedPercent\":70.0"));
@@ -302,5 +318,37 @@ mod tests {
         assert!(json.contains("\"apiProvider\":\"openai\""));
         let back: ProviderUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, entry);
+    }
+
+    #[test]
+    fn used_count_and_total_count_are_camel_case_and_omitted_when_absent() {
+        let window = RateWindow {
+            used_percent: 25.8,
+            raw_used_percent: None,
+            resets_at: Some("2026-07-26T14:09:00Z".to_string()),
+            window_minutes: Some(10080),
+            used_count: None,
+            total_count: None,
+        };
+        let json = serde_json::to_string(&window).unwrap();
+        assert!(
+            !json.contains("usedCount"),
+            "absent used_count must be omitted"
+        );
+        assert!(
+            !json.contains("totalCount"),
+            "absent total_count must be omitted"
+        );
+
+        let enriched = RateWindow {
+            used_count: Some(10336.0),
+            total_count: Some(40000.0),
+            ..window
+        };
+        let json = serde_json::to_string(&enriched).unwrap();
+        assert!(json.contains("\"usedCount\":10336.0"));
+        assert!(json.contains("\"totalCount\":40000.0"));
+        let back: RateWindow = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, enriched);
     }
 }
