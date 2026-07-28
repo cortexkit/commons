@@ -167,6 +167,38 @@ pub struct ProviderUsage {
     /// truthy `error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A stable, machine-readable name for *why* a degraded entry failed,
+    /// published beside the human-readable `error`.
+    ///
+    /// `error` is prose with no stability promise, so consumers are told not to
+    /// branch on it — which leaves them no way to separate failures that mean
+    /// something from failures that are a permanent, correct state. A host that
+    /// never configured a provider and a host whose credential broke this
+    /// morning both produce a degraded entry, and only the second is worth
+    /// anyone's attention.
+    ///
+    /// Classes currently produced:
+    ///
+    /// | Value | Meaning |
+    /// |---|---|
+    /// | `credential_absent` | No credential was found. Permanent and correct on a host that never configured this provider; nothing to fix. |
+    /// | `credential_unusable` | A credential was found but cannot be used as it stands (empty, incomplete, or refused by the credential store). Someone configured this and it needs fixing. |
+    /// | `credential_rejected` | The upstream rejected the credential (401/403). Usually means logging in again. |
+    /// | `no_quota_reported` | The credential works and the account genuinely has no quota to report. Not a failure. |
+    /// | `upstream_failed` | The upstream could not be reached or returned an error status. Usually transient. |
+    /// | `decode_failed` | The response arrived but was not the expected shape. |
+    ///
+    /// **This list will grow.** A consumer must render an unrecognised class as
+    /// a degraded entry with an unknown reason — never drop the entry, and
+    /// never fold it into an existing bucket. It is a `String` rather than an
+    /// enum for exactly that reason: on an observability surface, meeting an
+    /// unknown value must not turn into a parse failure that makes a provider
+    /// disappear at the moment its state changed.
+    ///
+    /// Absent on healthy entries, and absent from any producer that predates
+    /// this field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_class: Option<String>,
 }
 
 impl ProviderUsage {
@@ -182,6 +214,7 @@ impl ProviderUsage {
             saved_resets: None,
             usage: Some(usage),
             error: None,
+            error_class: None,
         }
     }
 
@@ -198,6 +231,25 @@ impl ProviderUsage {
             saved_resets: None,
             usage: None,
             error: Some(error.to_string()),
+            error_class: None,
+        }
+    }
+
+    /// A degraded entry that also names *why* it failed.
+    ///
+    /// Prefer this over [`Self::degraded`] wherever the producer knows the
+    /// class: without it a consumer can only tell an unconfigured provider from
+    /// a broken one by reading prose it has been told not to parse. See
+    /// [`ProviderUsage::error_class`] for the classes and for the rule that an
+    /// unrecognised one must still render.
+    pub fn degraded_with_class(
+        provider: &str,
+        error: impl std::fmt::Display,
+        error_class: impl Into<String>,
+    ) -> Self {
+        Self {
+            error_class: Some(error_class.into()),
+            ..Self::degraded(provider, error)
         }
     }
 }
@@ -350,5 +402,70 @@ mod tests {
         assert!(json.contains("\"totalCount\":40000.0"));
         let back: RateWindow = serde_json::from_str(&json).unwrap();
         assert_eq!(back, enriched);
+    }
+
+    /// The field is additive: a producer that does not set it must serialize
+    /// exactly as before, or adding it changes every existing entry on the wire.
+    #[test]
+    fn an_entry_without_a_class_serializes_as_it_did_before_the_field_existed() {
+        let entry = ProviderUsage::degraded("codex", "no session: nothing configured");
+        let json = serde_json::to_string(&entry).unwrap();
+
+        assert!(!json.contains("errorClass"), "absent class must be omitted");
+        // Not vacuous: the entry really is a degraded one carrying its message,
+        // so this cannot pass by serializing something empty.
+        assert!(json.contains("\"error\":\"no session: nothing configured\""));
+
+        let back: ProviderUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, entry);
+        assert_eq!(back.error_class, None);
+    }
+
+    #[test]
+    fn a_class_round_trips_under_its_camel_case_wire_name() {
+        let entry = ProviderUsage::degraded_with_class(
+            "gemini",
+            "credential unusable: gemini creds have no refresh_token",
+            "credential_unusable",
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+
+        assert!(json.contains("\"errorClass\":\"credential_unusable\""));
+        let back: ProviderUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, entry);
+    }
+
+    /// The classes are open by design, so a consumer built today must survive a
+    /// producer that ships a class it has never heard of. Modelling the field as
+    /// a `String` is what buys that: an enum would make this a parse failure,
+    /// and on an observability surface a parse failure means the entry vanishes
+    /// at the moment its state changed.
+    #[test]
+    fn an_unknown_class_decodes_rather_than_failing() {
+        let json = r#"{"provider":"someprovider","error":"something new","errorClass":"a_class_from_the_future"}"#;
+
+        let entry: ProviderUsage =
+            serde_json::from_str(json).expect("an unrecognised class must not fail to decode");
+
+        assert_eq!(
+            entry.error_class.as_deref(),
+            Some("a_class_from_the_future")
+        );
+        // The rest of the entry survives intact, so a consumer can still render
+        // it as degraded-with-unknown-reason rather than dropping it.
+        assert_eq!(entry.provider, "someprovider");
+        assert_eq!(entry.error.as_deref(), Some("something new"));
+    }
+
+    /// A healthy entry must never carry a class: the field's presence is itself
+    /// a signal, and a class on a working provider would be a contradiction a
+    /// consumer has to resolve.
+    #[test]
+    fn a_healthy_entry_carries_no_class() {
+        let entry = ProviderUsage::healthy("codex", None, "oauth", Usage::default());
+        assert_eq!(entry.error_class, None);
+        assert!(!serde_json::to_string(&entry)
+            .unwrap()
+            .contains("errorClass"));
     }
 }
