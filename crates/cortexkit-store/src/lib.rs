@@ -102,7 +102,7 @@ mod sqlite_backend {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
-    use cortexkit_lease::{FileLeaseStore, LeaseHandle};
+    use cortexkit_lease::{protect_file, FileLeaseStore, LeaseHandle};
     use rusqlite::Connection;
 
     /// A lease-guarded, migrated sqlite store. Holds the single-writer lease for
@@ -291,6 +291,34 @@ mod sqlite_backend {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
+        // Owner-only, decided here rather than left to the caller's umask.
+        //
+        // SQLite sets no mode of its own, so without this the shipped default is
+        // world-readable `0644` — measured across every module store on a real
+        // deployment. A crate that already decides WAL mode, busy timeout and
+        // foreign keys has taken responsibility for how this file behaves on
+        // disk; leaving permissions to callers means the decision is made by the
+        // ambient umask, which is to say not made at all.
+        //
+        // The WAL and SHM siblings are the half that gets missed. Recently
+        // committed rows live in the WAL until a checkpoint, so protecting only
+        // the database file leaves the NEWEST data permissive while the database
+        // itself reads as correct — and on real hosts the WAL is routinely
+        // larger than the database.
+        //
+        // Ordering: after the pragma that ENABLES WAL, so the sibling files
+        // exist to be protected on a first open rather than being created
+        // unprotected immediately afterwards.
+        //
+        // A group-readable store is not a configuration this crate supports: it
+        // hands out an exclusive single-writer lease, so an out-of-band reader
+        // is already outside the contract. That need is a read replica or an
+        // export operation, not a looser file mode.
+        for suffix in ["", "-wal", "-shm"] {
+            protect_file(Path::new(&format!("{path}{suffix}")))
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+
         Ok(SqliteStore {
             conn: Mutex::new(conn),
             epoch,
@@ -370,6 +398,93 @@ pub use sqlite_backend::{open_sqlite, SqliteStore};
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use super::*;
+
+    /// The database file AND its WAL sibling are owner-only on disk after
+    /// `open_sqlite`, including a database that already exists permissively.
+    ///
+    /// Two properties, asserted separately because they fail independently.
+    /// SQLite sets no mode, so without this the shipped default is `0644`.
+    /// And the WAL is the half that gets missed: recently committed rows live
+    /// there until a checkpoint, so protecting only the database leaves the
+    /// NEWEST data readable while the database file itself looks correct.
+    ///
+    /// Asserts the mode ON DISK rather than that `open_sqlite` returned Ok — a
+    /// hardening step that silently did nothing would still return Ok.
+    ///
+    /// The scenario is REOPENING an already-deployed store, which is the only
+    /// shape in which the WAL assertion means anything. A first open cannot
+    /// exercise it: SQLite creates a fresh WAL inheriting the database's mode,
+    /// so by then the database is already `0600` and the WAL follows for free.
+    /// A permissive WAL only exists because a PREVIOUS process wrote one under
+    /// the old umask — exactly the state every deployed machine is in.
+    ///
+    /// Mutation-proved, both suffixes independently: dropping `""` fails the
+    /// database assertion, dropping `"-wal"` fails the WAL assertion, and
+    /// neither is carried by the other. An earlier version of this test used a
+    /// first open and the `"-wal"` mutation SURVIVED it — the assertion was
+    /// there, it just could not fail.
+    #[cfg(unix)]
+    #[test]
+    fn reopening_a_permissive_store_protects_the_database_and_its_wal() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (root, descriptor) = tmp();
+        let StorageBackend::Sqlite { path } = &descriptor.backend else {
+            panic!("sqlite descriptor");
+        };
+        let path = std::path::PathBuf::from(path);
+        let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
+
+        // First open: create a real database, then close it.
+        {
+            let store = open_sqlite(&descriptor).expect("first open");
+            store
+                .migrate(
+                    "perm",
+                    &[Migration {
+                        version: 1,
+                        statements: "CREATE TABLE t (k TEXT);",
+                    }],
+                )
+                .expect("migrate");
+        }
+
+        // A clean close checkpoints and REMOVES the WAL, so one has to be put
+        // back deliberately. That is not artificial: a WAL surviving on disk is
+        // precisely what an unclean shutdown leaves behind, and it is the only
+        // state in which a permissive WAL can be waiting at open time.
+        std::fs::write(&wal, b"").expect("leave a WAL behind");
+
+        // Reproduce the deployed state: both files permissive, as every store
+        // created before this hardening actually is on disk.
+        for file in [&path, &wal] {
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644))
+                .expect("set permissive mode");
+        }
+
+        let store = open_sqlite(&descriptor).expect("reopen");
+
+        let mode = |p: &std::path::Path| {
+            std::fs::metadata(p)
+                .unwrap_or_else(|error| panic!("stat {}: {error}", p.display()))
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(
+            mode(&path),
+            0o600,
+            "the database stayed group/world readable on reopen"
+        );
+        assert_eq!(
+            mode(&wal),
+            0o600,
+            "the WAL stayed group/world readable while the database looked correct"
+        );
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A unique temp root + a descriptor whose sqlite file lives under it. The
     /// lease is derived from the db path (its parent), so no separate lease dir.
