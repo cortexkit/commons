@@ -35,6 +35,55 @@ use std::{
 
 use fs2::FileExt;
 
+/// Force owner-only permissions on a file this process owns the lifecycle of.
+///
+/// Files created through `File::create` or `OpenOptions::create` get their mode
+/// from the process umask, which on a default system means `0644` — readable by
+/// every other account and, more to the point, by every other process running
+/// as this user. That is the exposure that actually exists on a
+/// single-account machine: every module, every worker, every tool, plus
+/// anything that copies the tree (a backup, a restore, an `install` into a
+/// shared location, a container bind-mount).
+///
+/// Applied on OPEN rather than only at creation, because a file that already
+/// exists carries whatever mode it was given — by an older build, a copy, or a
+/// restore. A creation-time-only fix protects exactly the installations with no
+/// history and leaves the ones that matter permissive forever.
+///
+/// A path that is not a regular file is REFUSED rather than adjusted. Following
+/// a symlink here would chmod a file the caller never named, which is a
+/// privilege-escalation primitive wearing a hardening step's clothes.
+///
+/// A missing file is not an error: callers pass optional sidecars (a WAL that
+/// exists only while the journal is active) and the absence of a file is
+/// nothing to protect.
+pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{} is not a regular file; refusing to change its permissions",
+                    path.display()
+                ),
+            ));
+        }
+        if metadata.permissions().mode() & 0o777 != 0o600 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
 /// Identifies the thing being single-writer-guarded, namespaced so distinct
 /// modules cannot collide on a shared lease root.
 ///
@@ -196,6 +245,11 @@ impl LeaseStore for FileLeaseStore {
             .truncate(false)
             .open(&path)
             .map_err(LeaseError::Io)?;
+        // The lease is the single-writer fence, so a world-WRITABLE lease file is
+        // an integrity question rather than a privacy one: anything able to write
+        // the persisted epoch can forge the fence token that readers use to
+        // detect a stale writer.
+        protect_file(&path).map_err(LeaseError::Io)?;
 
         // Liveness gate: a live holder still owns the lock, so the try-lock fails
         // with the OS "contended" error.
@@ -230,6 +284,7 @@ impl LeaseStore for FileLeaseStore {
             .truncate(false)
             .open(&path)
             .map_err(LeaseError::Io)?;
+        protect_file(&path).map_err(LeaseError::Io)?;
 
         // Shared liveness gate: only an exclusive holder contends; other shared
         // holders coexist. On unix this is flock(LOCK_SH|LOCK_NB); on Windows,
@@ -321,6 +376,105 @@ mod tests {
             fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
         ));
         (FileLeaseStore::new(&dir), dir)
+    }
+
+    /// An acquired lease file is owner-only on disk, including one that already
+    /// exists with a permissive mode.
+    ///
+    /// The pre-existing half is the case that bites: every lease already on a
+    /// deployed machine was created at the umask default, so correcting only at
+    /// creation time would protect exactly the installations with no history.
+    ///
+    /// The lease is the single-writer FENCE, so the exposure here is integrity
+    /// rather than privacy — anything able to write the persisted epoch can
+    /// forge the token readers use to detect a stale writer.
+    ///
+    /// Mutation-proved: removing the `protect_file` call from `acquire` fails
+    /// this on the pre-existing case.
+    #[cfg(unix)]
+    #[test]
+    fn an_acquired_lease_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (store, dir) = tmp_store();
+        let k = key("perm");
+
+        // Reproduce a lease left behind by an older build at the umask default.
+        std::fs::create_dir_all(&dir).expect("create lease dir");
+        let path = store.lease_path(&k);
+        std::fs::write(&path, b"").expect("pre-create lease file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("set permissive mode");
+
+        let guard = store.acquire(&k).expect("acquire");
+        let mode = std::fs::metadata(&path)
+            .expect("stat lease")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "the lease file stayed group/world writable at {mode:o}"
+        );
+
+        drop(guard);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `protect_file` refuses a symlink rather than following it.
+    ///
+    /// Following one would change the mode of a file the caller never named,
+    /// which is a privilege-escalation primitive wearing a hardening step's
+    /// clothes. The assertion is that the TARGET's mode is unchanged, not
+    /// merely that an error came back — an implementation could chmod the
+    /// target and still return Err.
+    #[cfg(unix)]
+    #[test]
+    fn protect_file_refuses_a_symlink_and_leaves_its_target_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "cortexkit-lease-symlink-{}-{}",
+            std::process::id(),
+            fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
+        ));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let target = dir.join("target");
+        std::fs::write(&target, b"not mine").expect("write target");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644))
+            .expect("set target mode");
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        assert!(
+            protect_file(&link).is_err(),
+            "a symlink must be refused rather than followed"
+        );
+        let mode = std::fs::metadata(&target)
+            .expect("stat target")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o644,
+            "the symlink target was chmod-ed through the link"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A path that does not exist is not an error: callers pass optional
+    /// sidecars (a WAL that exists only while the journal is active), and the
+    /// absence of a file is nothing to protect. Without this, a first open of a
+    /// fresh database would fail on its missing WAL.
+    #[test]
+    fn protect_file_ignores_a_missing_path() {
+        let missing = std::env::temp_dir().join(format!(
+            "cortexkit-lease-absent-{}-{}",
+            std::process::id(),
+            fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
+        ));
+        assert!(protect_file(&missing).is_ok());
     }
 
     #[test]
