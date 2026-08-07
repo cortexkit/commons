@@ -41,8 +41,20 @@ pub struct RateWindow {
     pub used_percent: f64,
     /// The provider-reported percent when `used_percent` has been relaxed to
     /// an effective value (banked resets guarantee the window resets before
-    /// the wall). Present only on relaxed windows; human-facing UIs should
-    /// display this truth alongside the effective number.
+    /// the wall).
+    ///
+    /// **Pace on `used_percent`, not on this.** The effective number is the real
+    /// headroom: a reset that is going to happen has already been accounted for.
+    /// Treating this as the truer figure routes work away from an account whose
+    /// credit is about to be spent — and the credit expires whether or not it is
+    /// used, so the cautious-looking reading is the lossy one. Display it beside
+    /// the effective number in a human-facing view, where a zero next to real
+    /// consumption would otherwise look like a fault.
+    ///
+    /// Emitted **only where the two diverge**, so its absence means they agree
+    /// and falling back to `used_percent` is exact rather than approximate.
+    /// Rendering a placeholder for absence would be wrong on every unrelaxed
+    /// window, which is nearly all of them.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub raw_used_percent: Option<f64>,
     /// ISO 8601 / RFC 3339 timestamp when the window resets. Omitted when the
@@ -196,6 +208,13 @@ pub struct ProviderUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
     /// Which retrieval path produced this (e.g. "oauth") — observability only.
+    ///
+    /// **Per lane, not per account, and it moves.** One account can be reached
+    /// through more than one credential path, and which one answers is decided
+    /// per fetch by whichever is healthy. So the same account can report one
+    /// value on a poll and another on the next with nothing having changed about
+    /// the account, the credential, or anything the consumer did. Do not key on
+    /// it, branch on it, or treat a change in it as an event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// Display labels for the account. Absent when the upstream supplies none of
