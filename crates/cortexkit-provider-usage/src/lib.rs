@@ -41,8 +41,20 @@ pub struct RateWindow {
     pub used_percent: f64,
     /// The provider-reported percent when `used_percent` has been relaxed to
     /// an effective value (banked resets guarantee the window resets before
-    /// the wall). Present only on relaxed windows; human-facing UIs should
-    /// display this truth alongside the effective number.
+    /// the wall).
+    ///
+    /// **Pace on `used_percent`, not on this.** The effective number is the real
+    /// headroom: a reset that is going to happen has already been accounted for.
+    /// Treating this as the truer figure routes work away from an account whose
+    /// credit is about to be spent — and the credit expires whether or not it is
+    /// used, so the cautious-looking reading is the lossy one. Display it beside
+    /// the effective number in a human-facing view, where a zero next to real
+    /// consumption would otherwise look like a fault.
+    ///
+    /// Emitted **only where the two diverge**, so its absence means they agree
+    /// and falling back to `used_percent` is exact rather than approximate.
+    /// Rendering a placeholder for absence would be wrong on every unrelaxed
+    /// window, which is nearly all of them.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub raw_used_percent: Option<f64>,
     /// ISO 8601 / RFC 3339 timestamp when the window resets. Omitted when the
@@ -69,10 +81,19 @@ pub struct RateWindow {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtraWindow {
+    /// Human-facing label. Absent when the producer has no display text for this
+    /// window; render `id` instead rather than dropping the entry.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Stable identifier to match on. Absent when the producer cannot name the
+    /// window stably. **Not unique across providers** — one provider's ids are
+    /// model names, another's its own scope labels — so key on
+    /// `(provider, id)`, never on `id` alone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The figures for this window. Absent means the provider **named a limit it
+    /// could not read a figure for**, which is not the same as no limit: the
+    /// entry is still evidence the limit exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<RateWindow>,
 }
@@ -82,12 +103,30 @@ pub struct ExtraWindow {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
+    /// The provider's **shortest** window, not its most constrained one. Absent
+    /// when the provider reported no window of that cadence.
+    ///
+    /// The three slots are positions, not a ranking, and **they can have holes**:
+    /// each is filled from its own optional upstream field, so `secondary` may be
+    /// absent while `tertiary` is present. Walk all three plus
+    /// `extra_rate_windows` rather than stopping at the first gap, and take the
+    /// maximum when asking how much headroom an account has.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<RateWindow>,
+    /// The next cadence up, typically weekly. Absent means not reported — never
+    /// that the window exists at zero. See [`Usage::primary`] on slot holes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary: Option<RateWindow>,
+    /// A third account-wide window where a provider has one. Absent means not
+    /// reported. See [`Usage::primary`] on slot holes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tertiary: Option<RateWindow>,
+    /// Windows whose meaning has no slot — per-model pools, scoped weeklies.
+    /// Absent means the provider published none.
+    ///
+    /// These are **real limits**, not extras in the dispensable sense: a consumer
+    /// ignoring this list silently ignores whichever limits did not fit three
+    /// slots.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_rate_windows: Option<Vec<ExtraWindow>>,
 }
@@ -96,10 +135,17 @@ pub struct Usage {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInfo {
+    /// Account email. Absent when the upstream does not identify the account that
+    /// way — not a signal about the account itself.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub email: Option<String>,
+    /// Organisation label. Absent when the upstream reports none; absent does not
+    /// mean a personal account.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub org_name: Option<String>,
+    /// The upstream's **own** plan label, not a normalised vocabulary, so it is
+    /// not comparable across providers. Display and grouping only. Absent when
+    /// the upstream states no plan.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub plan_type: Option<String>,
 }
@@ -123,6 +169,8 @@ pub struct CreditExpiry {
 pub struct SavedResets {
     #[serde(default)]
     pub available_count: u32,
+    /// When the next credit lapses. Absent means **no credit states an expiry**,
+    /// which is not the same as none expiring soon.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub soonest_expires_at: Option<String>,
     #[serde(default)]
@@ -150,17 +198,48 @@ pub struct ProviderUsage {
     /// CodexBar-name → canonical map.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub api_provider: Option<String>,
+    /// The account this entry describes, as the credential store identifies it.
+    ///
+    /// Absent means the producer **could not resolve an identity for this
+    /// credential**, not that the provider has one account. Some credentials
+    /// carry no account identity at all (a bare API key), and an entry is also
+    /// emitted unlabelled while an identity is still being confirmed — so an
+    /// unlabelled entry is not evidence that a labelled one does not exist.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
     /// Which retrieval path produced this (e.g. "oauth") — observability only.
+    ///
+    /// **Per lane, not per account, and it moves.** One account can be reached
+    /// through more than one credential path, and which one answers is decided
+    /// per fetch by whichever is healthy. So the same account can report one
+    /// value on a poll and another on the next with nothing having changed about
+    /// the account, the credential, or anything the consumer did. Do not key on
+    /// it, branch on it, or treat a change in it as an event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Display labels for the account. Absent when the upstream supplies none of
+    /// them; carries no operational meaning.
     #[serde(skip_serializing_if = "account_info_is_empty", default)]
     pub account_info: Option<AccountInfo>,
+    /// When this entry's figures were last **successfully** fetched — producer
+    /// time, per entry, never a common instant across the array.
+    ///
+    /// Absent means this credential has never had a successful fetch. It keeps
+    /// its old value while a failure is being retried, so it ages honestly rather
+    /// than pausing; never restamp it with your own poll time.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub fetched_at: Option<String>,
+    /// Banked quota-reset credits held by this account.
+    ///
+    /// Absent means there is no credit inventory to report — which includes the
+    /// inventory lookup having **failed** on this fetch, since it is separate
+    /// from the usage fetch and may fail without degrading the entry. Absent is
+    /// therefore not "zero credits held".
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub saved_resets: Option<SavedResets>,
+    /// The windows. Absent on a degraded entry, and on an entry whose credential
+    /// works but whose account reports no quota at all — read `error` and
+    /// `error_class` to tell those apart, rather than inferring from this field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
     /// Present only on a degraded entry. The consumer skips any entry with a
