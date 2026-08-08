@@ -35,6 +35,12 @@ impl ProjectRootId {
     /// instead of being logically normalized. That policy avoids silently
     /// aliasing roots whose future meaning could change when missing path
     /// components or symlinks are later created.
+    ///
+    /// That rejection is load-bearing for callers who use it to DETECT a root
+    /// that has gone away, so this constructor keeps it. Callers that must still
+    /// address a vanished root -- ending or inspecting work that was admitted
+    /// while the root existed -- use [`Self::from_path_allowing_missing`], which
+    /// preserves the aliasing guarantee by a narrower means.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, IdentityError> {
         let requested_path = path.as_ref().to_path_buf();
         match fs::canonicalize(path.as_ref()) {
@@ -49,6 +55,34 @@ impl ProjectRootId {
                 source,
             }),
         }
+    }
+
+    /// Resolve a path into a project-root id even when the path no longer exists.
+    ///
+    /// Resolves the longest prefix that still exists and re-appends the rest,
+    /// following any symlink encountered on the missing tail. This is the
+    /// behaviour of POSIX `realpath` on a non-existent path; [`fs::canonicalize`]
+    /// is the outlier in refusing partial resolution, so this matches a
+    /// documented reference rather than inventing a rule.
+    ///
+    /// WHY NOT LEXICAL NORMALIZATION: consumers key durable state on the
+    /// resolved string. On macOS every temporary directory is reached through a
+    /// symlink, so a lexically-normalized path is a DIFFERENT string from the id
+    /// minted while the root existed -- the caller would address an empty
+    /// lineage and receive a confident "no such thing" rather than an error.
+    /// That is one caller, one spelling, and two ids across time.
+    ///
+    /// WHAT THIS DOES NOT PROMISE: if a missing component later reappears as a
+    /// symlink pointing elsewhere, the id moves. [`Self::from_path`] does not
+    /// prevent that either -- it declines to answer while the component is
+    /// missing and then resolves through the new link exactly as this does, so
+    /// the hazard is shared rather than introduced here. The aliasing guarantee
+    /// the strict constructor exists for is preserved by refusing to create NEW
+    /// durable state under an id resolved this way; callers admit only
+    /// operations that read or end something already recorded.
+    pub fn from_path_allowing_missing(path: impl AsRef<Path>) -> Result<Self, IdentityError> {
+        let resolved = resolve_allowing_missing(path.as_ref(), 0)?;
+        Ok(Self(platform_project_root_path(resolved)))
     }
 
     /// Borrow the canonical path backing this identity.
@@ -153,6 +187,78 @@ fn platform_project_root_path(canonical_path: PathBuf) -> PathBuf {
     canonical_path
 }
 
+/// The kernel's own ceiling on symlink hops is typically 40 (`ELOOP`); matching
+/// it means a chain this code refuses is one the OS would refuse too.
+const MAX_SYMLINK_HOPS: u32 = 40;
+
+/// Resolve the longest existing prefix of `path` and re-append the missing tail.
+///
+/// Recurses on the parent rather than looping so that following a symlink on the
+/// missing tail re-enters the same resolution from the link's target.
+fn resolve_allowing_missing(path: &Path, hops: u32) -> Result<PathBuf, IdentityError> {
+    match fs::canonicalize(path) {
+        Ok(canonical_path) => return Ok(canonical_path),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(IdentityError::CanonicalizePath {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
+
+    // `..` and `.` tails have no file name to re-append, so there is no honest
+    // way to reconstruct them once the path has stopped existing. Refuse rather
+    // than return a path that differs from what the caller named.
+    let (Some(parent), Some(tail)) = (path.parent(), path.file_name()) else {
+        return Err(IdentityError::NonExistentPath {
+            path: path.to_path_buf(),
+        });
+    };
+    // `Path::parent` yields an empty path for a bare relative name; that is the
+    // current directory, not the absence of a parent.
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+
+    let resolved_parent = resolve_allowing_missing(parent, hops)?;
+    let candidate = resolved_parent.join(tail);
+
+    // A DANGLING symlink reads as absent to `canonicalize` and to `Path::exists`,
+    // because both follow links. `symlink_metadata` is the only predicate that
+    // sees the link itself, and following it is what `realpath` does -- keeping
+    // the link's own name instead would move the id the moment someone repairs
+    // the link, so ordinary maintenance would silently strand whatever was
+    // admitted under it.
+    match fs::symlink_metadata(&candidate) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if hops >= MAX_SYMLINK_HOPS {
+                return Err(IdentityError::CanonicalizePath {
+                    path: path.to_path_buf(),
+                    source: io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("symbolic link chain exceeded {MAX_SYMLINK_HOPS} hops"),
+                    ),
+                });
+            }
+            let target =
+                fs::read_link(&candidate).map_err(|source| IdentityError::CanonicalizePath {
+                    path: candidate.clone(),
+                    source,
+                })?;
+            let target = if target.is_absolute() {
+                target
+            } else {
+                resolved_parent.join(target)
+            };
+            resolve_allowing_missing(&target, hops.saturating_add(1))
+        }
+        _ => Ok(candidate),
+    }
+}
+
 #[cfg(windows)]
 fn platform_project_root_path(canonical_path: PathBuf) -> PathBuf {
     windows_non_verbatim_path(canonical_path)
@@ -218,6 +324,16 @@ mod tests {
 
     static NEXT_TEST_DIR: AtomicUsize = AtomicUsize::new(0);
 
+    #[cfg(unix)]
+    fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::windows::fs::symlink_dir(target, link)
+    }
+
     struct TestDir {
         path: PathBuf,
     }
@@ -247,6 +363,113 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    /// The property the whole constructor exists for: an id minted while the root
+    /// existed must still be reachable after it is gone.
+    ///
+    /// Written as an EQUALITY against the strict constructor's output rather than
+    /// against a hand-written expected string, because a literal would encode
+    /// whatever this author believed canonicalization does. The equality fails if
+    /// the fallback and the strict path ever disagree, which is the only thing
+    /// consumers keying durable state on the result actually require.
+    #[test]
+    fn id_survives_the_root_being_deleted() {
+        let temp = TestDir::new("vanished");
+        let root = temp.child("project");
+        fs::create_dir(&root).expect("create project root");
+
+        let while_present = ProjectRootId::from_path(&root).expect("canonicalize live root");
+        fs::remove_dir(&root).expect("remove project root");
+
+        assert!(
+            ProjectRootId::from_path(&root).is_err(),
+            "the strict constructor must still refuse a vanished root, or callers that \
+             use the refusal to DETECT a dead root would silently keep it"
+        );
+        assert_eq!(
+            ProjectRootId::from_path_allowing_missing(&root).expect("resolve vanished root"),
+            while_present,
+            "a root deleted after admission must resolve to the id it was admitted \
+             under, or the caller addresses an empty lineage and is told no such thing \
+             exists rather than being given an error"
+        );
+    }
+
+    /// macOS reaches every temp directory through a symlink, so this is the case
+    /// that distinguishes resolving from lexical normalization on this host --
+    /// and the one a lexical implementation silently gets wrong.
+    #[test]
+    fn missing_tail_resolves_through_a_symlinked_ancestor() {
+        let temp = TestDir::new("symlinked-ancestor");
+        let real = temp.child("real");
+        let link = temp.child("link");
+        fs::create_dir(&real).expect("create real directory");
+        symlink_dir(&real, &link).expect("create ancestor symlink");
+
+        let through_link = ProjectRootId::from_path_allowing_missing(link.join("gone"))
+            .expect("resolve through symlinked ancestor");
+        let through_real = ProjectRootId::from_path_allowing_missing(real.join("gone"))
+            .expect("resolve through real ancestor");
+
+        assert_eq!(
+            through_link, through_real,
+            "a missing tail must resolve through a live symlinked ancestor, or two \
+             spellings of one location mint two different ids"
+        );
+        assert_ne!(
+            through_link.as_path(),
+            link.join("gone"),
+            "non-vacuity: if this equals the input the implementation is normalizing \
+             lexically and the test above would pass for the wrong reason"
+        );
+    }
+
+    /// A dangling link reads as absent to both `canonicalize` and `Path::exists`,
+    /// so the naive walk-up stops one component too high and keeps the link's own
+    /// name. Following it is what `realpath` does, and it is the choice that
+    /// SURVIVES REPAIR: if someone later creates the target, the strict
+    /// constructor produces this same id, so ordinary maintenance cannot strand
+    /// work admitted while the link dangled.
+    #[test]
+    fn dangling_link_resolves_to_its_target_and_survives_the_link_being_repaired() {
+        let temp = TestDir::new("dangling");
+        let target = temp.child("target");
+        let link = temp.child("link");
+        symlink_dir(&target, &link).expect("create dangling symlink");
+
+        let while_dangling = ProjectRootId::from_path_allowing_missing(link.join("session"))
+            .expect("resolve through dangling link");
+
+        fs::create_dir(&target).expect("create link target");
+        fs::create_dir(target.join("session")).expect("create session directory");
+        let after_repair =
+            ProjectRootId::from_path(link.join("session")).expect("canonicalize repaired path");
+
+        assert_eq!(
+            while_dangling, after_repair,
+            "repairing a dangling link must not move the id, or an act of maintenance \
+             silently strands whatever was admitted while it dangled"
+        );
+    }
+
+    /// A link chain long enough to be an error must fail rather than recurse until
+    /// the stack gives out. Asserting the ERROR VARIANT, not merely that it failed:
+    /// a stack overflow is not a refusal.
+    #[test]
+    fn symlink_chain_beyond_the_hop_ceiling_is_refused() {
+        let temp = TestDir::new("loop");
+        let first = temp.child("a");
+        let second = temp.child("b");
+        symlink_dir(&second, &first).expect("create first link");
+        symlink_dir(&first, &second).expect("create second link");
+
+        let error = ProjectRootId::from_path_allowing_missing(first.join("gone"))
+            .expect_err("a symlink cycle must be refused");
+        assert!(
+            matches!(error, IdentityError::CanonicalizePath { .. }),
+            "a cycle is an unresolvable path, not a missing one: {error:?}"
+        );
     }
 
     #[test]
