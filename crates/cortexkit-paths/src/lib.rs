@@ -25,6 +25,24 @@ use std::{
 /// main checkout. Because a linked worktree has its own checkout directory, the
 /// canonical worktree path is a distinct id from the canonical main-checkout
 /// path while alternate spellings of either path still converge.
+/// A canonical project-root identity.
+///
+/// THE CANONICAL FORM THIS PRODUCES IS A CRYPTOGRAPHIC IDENTITY INPUT IN AT
+/// LEAST ONE CONSUMER, WHICH IS NOT VISIBLE FROM THIS CRATE. The vault hashes
+/// the canonical directory to derive the keychain service name holding its
+/// master key, and to derive the vault id that fences an admin-operation MAC to
+/// one vault. A change to canonicalization is therefore a BREAKING CHANGE to
+/// those identities.
+///
+/// It does not present as one. The vault looks up a keychain item that does not
+/// exist and reports a locked vault over an intact store, or two binaries derive
+/// different vault ids and every admin MAC fails verification. Nothing says
+/// "these two builds disagree about what this path is" -- so the usual
+/// reassurance for a path helper, that a mistake surfaces as a loud path
+/// mismatch, does not hold here.
+///
+/// The name is the trap: this reads as a path helper and is a canonicalizer for
+/// security identities. Route changes to the canonical form past the vault.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProjectRootId(PathBuf);
 
