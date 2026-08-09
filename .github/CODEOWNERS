@@ -1,0 +1,13 @@
+# Ownership of record. Git attributes every commit here to the human account, so
+# the repository could not answer "who owns this" from its own history -- which
+# is how it went unowned while several repos built against it.
+#
+# Owned by the subc seat: direction, review, releases.
+*                               @ualtinok
+
+# NOT ENCODED HERE, DELIBERATELY: the vault seat holds a standing review
+# obligation on cortexkit-store, cortexkit-lease, and cortexkit-paths
+# canonicalization. Agent seats are not GitHub accounts, so CODEOWNERS cannot
+# express it -- per-path lines naming the same account would look like a routing
+# rule while routing nothing. The obligation is stated in README.md, where it is
+# honest about being a convention rather than a mechanism.
