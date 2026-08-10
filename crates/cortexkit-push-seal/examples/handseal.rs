@@ -4,8 +4,10 @@
 //
 // The key argument accepts either bare hex or a labelled block pasted whole:
 //
-//     push_seal_pubkey_hex: 63e0...
-//     apns_device_token_hex: 9f21...
+//     push_seal_pubkey_hex=63e0...
+//     apns_device_token_hex=9f21...
+//
+// Either `=` or `:` separates a label from its value.
 //
 // Labelled input is preferred and the label is what makes it safe. The sealing
 // key and the device token are both 32 bytes rendered as 64 hex characters, so
@@ -66,10 +68,14 @@ fn select_key(raw: &str) -> Result<String, String> {
     const LABEL: &str = "push_seal_pubkey_hex";
 
     if raw.contains(LABEL) {
+        // Accept either separator. The producing side emits `=`, this example was
+        // written against `:`, and a paste that reaches the wrong parser fails with
+        // a message about hex rather than about the separator -- which points at
+        // the value when the mismatch is in the format.
         let value = raw
             .lines()
             .find(|line| line.contains(LABEL))
-            .and_then(|line| line.split(':').nth(1))
+            .and_then(|line| line.split([':', '=']).nth(1))
             .map(str::trim)
             .ok_or_else(|| format!("found `{LABEL}` but no value after it"))?;
         return validate(value);
