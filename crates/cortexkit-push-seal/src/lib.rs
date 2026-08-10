@@ -22,6 +22,24 @@
 //! Not on comments or tests — a version that moves for prose trains its readers
 //! to bump reflexively and then stops meaning anything.
 //!
+//! # This crate has no production caller yet, and that is staged rather than dead
+//!
+//! `seal` is reached only from this crate's tests and its `handseal` example.
+//! The consumer is the notification submit endpoint, which is unbuilt: the
+//! surface that will call this holds the recipient key and does not exist yet.
+//!
+//! Recorded here because an uncalled function is indistinguishable from an
+//! abandoned one, and the next reader running a dead-code pass arrives at this
+//! file with no way to tell them apart. Deleting it would take the ciphersuite
+//! pinning and the envelope layout with it — the two facts that a separate
+//! implementation in another repository is already built against, and which
+//! nothing in this workspace would fail to notice the loss of.
+//!
+//! The examples are not decoration either: `handseal` and `handopen` are how a
+//! sealed payload is produced by hand before the endpoint exists, and the
+//! round trip between them is the only end-to-end exercise of this crate
+//! outside its own tests.
+//!
 //! # The parameters, and why they are spelled out
 //!
 //! An HPKE ciphersuite is a triple. Naming two of its three parts leaves the
