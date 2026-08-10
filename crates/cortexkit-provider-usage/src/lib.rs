@@ -131,6 +131,104 @@ pub struct Usage {
     pub extra_rate_windows: Option<Vec<ExtraWindow>>,
 }
 
+/// An amount of money or credit, in integer minor units.
+///
+/// Not a float, and the reason is not stylistic. A balance is compared against
+/// zero on every routing decision that reads it, and binary floating point
+/// cannot hold ordinary decimal amounts exactly — the nearest `f64` to `0.1` is
+/// not `0.1`, so sums drift and a comparison near zero can fall either way. The
+/// providers agree: DeepSeek and MiniMax both send decimal strings, and
+/// Anthropic sends integer minor units with an exponent.
+///
+/// Parse a provider's own representation once, where its precision is still
+/// known, rather than passing a float along and re-rendering it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Amount {
+    /// The amount in minor units: `1050` with `exponent: 2` is 10.50.
+    pub minor: i64,
+    /// Decimal places in `minor`. `2` for currencies with cents; `0` for whole
+    /// credits or points.
+    pub exponent: u8,
+    /// What the amount is denominated in: a currency code like `"USD"`, or a
+    /// provider's own label for its credits.
+    ///
+    /// A free string rather than a currency enum, because not every pool is
+    /// money — some are points that convert to no currency, and an enum would
+    /// force those into a currency slot or drop them.
+    pub unit: String,
+}
+
+/// Where a pool's balance came from, which decides what a consumer may promise.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolFunding {
+    /// Given by the provider: a promotion, a trial grant, a voucher. Spendable
+    /// without a bill.
+    Granted,
+    /// Bought. Spending it costs money.
+    Purchased,
+    /// Included in a subscription the account already pays for.
+    Subscription,
+    /// The provider separates this pool but does not say what funds it.
+    ///
+    /// A correct answer rather than a failure one: some providers name their
+    /// pools without defining them, and guessing the funding is how a consumer
+    /// ends up spending money it meant to protect.
+    Unknown,
+}
+
+/// How a pool's `remaining` was obtained.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolBasis {
+    /// The provider states this pool's remaining balance directly.
+    Reported,
+    /// Computed from a total and a consumption figure that covers several pools
+    /// at once, so the split between them is not known.
+    ///
+    /// The distinction is load-bearing for any "spend only granted credits"
+    /// policy: against a `Reported` pool it is exact, and against a `Derived`
+    /// one it can only be a ceiling.
+    Derived,
+}
+
+/// A prepaid balance or credit pool on an account.
+///
+/// Plural by necessity: one figure cannot express "9.50 granted and 40
+/// purchased", which is exactly the distinction a consumer needs to spend the
+/// first without spending the second.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Pool {
+    /// The provider's own name for this pool, never one invented here.
+    ///
+    /// Providers separate pools without always defining them — a wallet may list
+    /// voucher, cash and credit balances and document none of them. Passing the
+    /// provider's name through lets a consumer decide; renaming one `granted`
+    /// would be inventing the label a spend policy keys on.
+    pub id: String,
+    /// Human-readable name for display.
+    pub label: String,
+    /// What funds this pool.
+    pub funding: PoolFunding,
+    /// What is left, when it can be established.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub remaining: Option<Amount>,
+    /// The pool's size, when the provider reports one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub total: Option<Amount>,
+    /// How `remaining` was obtained. Read it before acting on `remaining`.
+    pub basis: PoolBasis,
+    /// Whether the provider says this pool may currently be drawn on.
+    ///
+    /// Read from the provider, never inferred from `remaining > 0`: a pool can
+    /// be non-empty and closed, which several providers publish directly through
+    /// their own enable flags. Absent means the provider does not say.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub spendable: Option<bool>,
+}
+
 /// Account labels and subscription information supplied by a provider or vault.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -242,6 +340,22 @@ pub struct ProviderUsage {
     /// `error_class` to tell those apart, rather than inferring from this field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+    /// Prepaid balances and credit pools on this account, when the provider
+    /// reports any.
+    ///
+    /// Deliberately apart from [`Self::usage`], because a pool and a rate window
+    /// are different facts that fail in opposite directions: over-consuming a
+    /// window gets you throttled and recovers by waiting, while over-consuming a
+    /// balance gets you billed and recovers by paying. Nothing in a routing loop
+    /// can undo the second, so a balance is never expressed as a window, never
+    /// carries a reset, and never appears as a percentage — a consumer that
+    /// found one where it expects headroom would pace into a bill.
+    ///
+    /// Absent means the producer has nothing to say, which is not the same as an
+    /// account having no credit. Empty means it looked and the provider reports
+    /// no pools.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub spend: Option<Vec<Pool>>,
     /// Present only on a degraded entry. The consumer skips any entry with a
     /// truthy `error`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -292,6 +406,7 @@ impl ProviderUsage {
             fetched_at: None,
             saved_resets: None,
             usage: Some(usage),
+            spend: None,
             error: None,
             error_class: None,
         }
@@ -309,6 +424,7 @@ impl ProviderUsage {
             fetched_at: None,
             saved_resets: None,
             usage: None,
+            spend: None,
             error: Some(error.to_string()),
             error_class: None,
         }
@@ -534,6 +650,59 @@ mod tests {
         // it as degraded-with-unknown-reason rather than dropping it.
         assert_eq!(entry.provider, "someprovider");
         assert_eq!(entry.error.as_deref(), Some("something new"));
+    }
+
+    /// An entry with no pools serializes exactly as it did before pools existed.
+    ///
+    /// Consumers pin these payloads, so an additive field that appears as `null`
+    /// on every existing entry is not additive in practice. The check is on the
+    /// rendered text rather than on the field, because that is what a consumer
+    /// parses.
+    #[test]
+    fn an_entry_without_pools_does_not_mention_them() {
+        let entry = ProviderUsage::healthy("codex", None, "oauth", Usage::default());
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(!json.contains("spend"), "unexpected spend key: {json}");
+    }
+
+    /// Pools survive a round trip, including the two fields a consumer must read
+    /// before acting on an amount.
+    ///
+    /// `basis` and `funding` are what separate "you have 10 granted credits
+    /// left" from "you were granted 10 credits and we cannot tell how many
+    /// remain". A consumer that loses either one is left with a number it cannot
+    /// safely spend against.
+    #[test]
+    fn pools_round_trip_with_their_basis_and_funding() {
+        let pool = Pool {
+            id: "granted_balance".to_string(),
+            label: "Granted".to_string(),
+            funding: PoolFunding::Granted,
+            remaining: Some(Amount {
+                minor: 1050,
+                exponent: 2,
+                unit: "CNY".to_string(),
+            }),
+            total: None,
+            basis: PoolBasis::Reported,
+            spendable: Some(true),
+        };
+        let mut entry = ProviderUsage::healthy("deepseek", None, "api", Usage::default());
+        entry.spend = Some(vec![pool.clone()]);
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: ProviderUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.spend, Some(vec![pool]));
+
+        // Rendered as the wire spells them, since consumers key on these.
+        assert!(json.contains(r#""funding":"granted""#), "{json}");
+        assert!(json.contains(r#""basis":"reported""#), "{json}");
+        // 10.50 CNY is carried as minor units, never as a float.
+        assert!(json.contains(r#""minor":1050"#), "{json}");
+        assert!(
+            !json.contains("10.5"),
+            "an amount was rendered as a decimal: {json}"
+        );
     }
 
     /// A healthy entry must never carry a class: the field's presence is itself
