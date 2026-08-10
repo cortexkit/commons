@@ -170,11 +170,20 @@ pub enum PoolFunding {
     Purchased,
     /// Included in a subscription the account already pays for.
     Subscription,
-    /// The provider separates this pool but does not say what funds it.
+    /// The provider separates this pool but does not say what funds it, **or**
+    /// the producer named a funding kind this consumer does not recognise.
     ///
     /// A correct answer rather than a failure one: some providers name their
     /// pools without defining them, and guessing the funding is how a consumer
     /// ends up spending money it meant to protect.
+    ///
+    /// It is also the deserialization fallback, and the two meanings genuinely
+    /// agree — a funding kind added after this consumer was built is, to this
+    /// consumer, of unknown funding. Without the fallback an unrecognised value
+    /// fails the whole `ProviderUsage` entry rather than this one field, so a
+    /// new pool kind would take an account's *usage* down with it and read as
+    /// the provider being unavailable.
+    #[serde(other)]
     Unknown,
 }
 
@@ -191,6 +200,21 @@ pub enum PoolBasis {
     /// policy: against a `Reported` pool it is exact, and against a `Derived`
     /// one it can only be a ceiling.
     Derived,
+    /// No basis was stated, or one was stated that this consumer does not
+    /// recognise. **Treat `remaining` as a ceiling, never as exact.**
+    ///
+    /// This is deliberately its own variant rather than folding an unrecognised
+    /// value into [`Self::Derived`]. Both are read conservatively, so the
+    /// spending behaviour is the same either way — but `Derived` is a statement
+    /// about how a number was obtained, and answering "I do not know" with it
+    /// would have the producer assert a fact it does not hold. That is the
+    /// failure this type exists to prevent, one level up.
+    ///
+    /// Reading it conservatively is safe in the direction that matters: an
+    /// exact remainder treated as a ceiling under-spends, while a ceiling
+    /// treated as exact spends money that may not be there.
+    #[serde(other)]
+    Unstated,
 }
 
 /// A prepaid balance or credit pool on an account.
@@ -702,6 +726,64 @@ mod tests {
         assert!(
             !json.contains("10.5"),
             "an amount was rendered as a decimal: {json}"
+        );
+    }
+
+    /// An unrecognised funding kind must not take the entry down with it.
+    ///
+    /// This payload crosses a repository boundary: one project produces it,
+    /// others consume it, and their versions move independently. A closed enum
+    /// makes the first new funding kind fail deserialization of the WHOLE
+    /// `ProviderUsage` entry rather than one field, so an account's rate windows
+    /// would vanish because of a credit pool the consumer had never heard of --
+    /// and a vanished entry reads as the provider being unavailable.
+    ///
+    /// Asserted on a mixed entry rather than on the enum alone, because the
+    /// blast radius is the point: the usage figure below is what a router acts
+    /// on, and it is downstream of the pool that failed.
+    #[test]
+    fn an_unknown_funding_kind_does_not_discard_the_entry() {
+        let json = r#"{
+            "provider": "minimax",
+            "usage": { "primary": { "usedPercent": 42.0 } },
+            "spend": [
+              { "id": "a", "label": "A", "funding": "granted",     "basis": "reported" },
+              { "id": "b", "label": "B", "funding": "crypto_grant", "basis": "reported" }
+            ]
+        }"#;
+
+        let entry: ProviderUsage = serde_json::from_str(json).expect("entry must survive");
+        let pools = entry.spend.expect("pools present");
+        assert_eq!(pools.len(), 2, "no pool may be dropped");
+        assert_eq!(pools[0].funding, PoolFunding::Granted);
+        // The unrecognised kind lands on Unknown, which is the correct reading:
+        // a funding this consumer cannot name is one it must not spend from.
+        assert_eq!(pools[1].funding, PoolFunding::Unknown);
+        // And the part a router acts on survived.
+        assert_eq!(
+            entry.usage.and_then(|u| u.primary).map(|w| w.used_percent),
+            Some(42.0)
+        );
+    }
+
+    /// An unrecognised basis reads as unstated, never as exact.
+    ///
+    /// The two poles are not symmetrical. Treating an exact remainder as a
+    /// ceiling under-spends and costs nothing; treating a ceiling as exact
+    /// spends money that may not be there. So the fallback folds to the
+    /// conservative side, and does so under its own name rather than claiming
+    /// the number was derived -- which would assert a fact about a computation
+    /// the consumer knows nothing about.
+    #[test]
+    fn an_unknown_basis_is_unstated_rather_than_exact() {
+        let json = r#"{ "id": "a", "label": "A", "funding": "granted",
+                        "basis": "sampled_hourly" }"#;
+        let pool: Pool = serde_json::from_str(json).expect("pool must survive");
+        assert_eq!(pool.basis, PoolBasis::Unstated);
+        assert_ne!(
+            pool.basis,
+            PoolBasis::Reported,
+            "an unknown basis must never read as an exact remainder"
         );
     }
 
