@@ -43,6 +43,10 @@ pub enum CatalogParseError {
         field: &'static str,
         value: String,
     },
+    /// A pricing tier without a `tier.size` context threshold. A tier whose
+    /// floor cannot be read must not default to 0: that would apply the
+    /// over-threshold rate to every request, which is a silent repricing.
+    MissingTierThreshold,
 }
 
 impl std::fmt::Display for CatalogParseError {
@@ -55,6 +59,9 @@ impl std::fmt::Display for CatalogParseError {
             ),
             CatalogParseError::NegativeRate { provider, model, field, value } => {
                 write!(f, "catalog rate {provider}/{model}.{field} = {value} is negative")
+            }
+            CatalogParseError::MissingTierThreshold => {
+                write!(f, "catalog pricing tier lacks a tier.size context threshold")
             }
         }
     }
@@ -273,12 +280,20 @@ fn parse_cost(
                         Some(v) => convert(field, v).map(Some),
                     }
                 };
+            // The threshold lives at tier.tier.size (with tier.tier.type ==
+            // "context") in the models.dev shape — measured at 335/335 tier
+            // rows on the live payload. Earlier revisions read invented keys
+            // (context_over / min_context) that the upstream never emitted, so
+            // every threshold silently parsed to 0; a missing threshold is now
+            // a loud error, because a tier whose floor defaults to 0 applies
+            // its over-threshold rate to every request.
+            let min_context = tier
+                .get("tier")
+                .and_then(|t| t.get("size"))
+                .and_then(Value::as_u64)
+                .ok_or(CatalogParseError::MissingTierThreshold)?;
             tiers.push(CostTier {
-                min_context: tier
-                    .get("context_over")
-                    .or_else(|| tier.get("min_context"))
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
+                min_context,
                 input: trate("input")?,
                 output: trate("output")?,
                 cache_read: trate("cache_read")?,
@@ -469,7 +484,7 @@ mod tests {
                         "cost": {
                             "input": 1.25, "output": 10,
                             "tiers": [
-                                { "context_over": 200000, "input": 2.5, "output": 15 }
+                                { "tier": { "type": "context", "size": 200000 }, "input": 2.5, "output": 15 }
                             ]
                         }
                     }
@@ -510,6 +525,37 @@ mod tests {
         assert_eq!(model.cost.tiers[0].input, Some(2_500_000_000));
     }
 
+    /// The threshold must come from `tier.tier.size` — the shape models.dev
+    /// actually emits (335/335 tier rows on the 2026-08-11 live payload).
+    /// Earlier revisions read invented keys (`context_over`/`min_context`)
+    /// that no upstream snapshot ever carried, so every threshold silently
+    /// parsed to 0 and the fixture, authored from the same misunderstanding,
+    /// certified it. These two tests pin both failure directions.
+    #[test]
+    fn tier_threshold_missing_is_a_loud_error_never_zero() {
+        // A tier with rates but NO tier.size: must refuse, not default to 0.
+        let err = CatalogDoc::parse(
+            r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "input": 2.5 } ] } } } } }"#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CatalogParseError::MissingTierThreshold));
+    }
+
+    #[test]
+    fn tier_threshold_ignores_the_invented_legacy_keys() {
+        // The keys earlier revisions read. If someone "restores compatibility"
+        // with them, the threshold would come from a field no upstream emits —
+        // this must stay a loud refusal on the missing REAL key.
+        let err = CatalogDoc::parse(
+            r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "context_over": 200000, "input": 2.5 } ] } } } } }"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, CatalogParseError::MissingTierThreshold),
+            "context_over must not satisfy the threshold: models.dev never emitted it"
+        );
+    }
+
     #[test]
     fn raw_passthrough_preserves_unmodeled_fields() {
         let doc =
@@ -541,7 +587,7 @@ mod tests {
         }
         // Tier rates are guarded by the same gate.
         let err = CatalogDoc::parse(
-            r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "context_over": 1, "input": -1 } ] } } } } }"#,
+            r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "tier": { "type": "context", "size": 1 }, "input": -1 } ] } } } } }"#,
         )
         .unwrap_err();
         assert!(matches!(err, CatalogParseError::NegativeRate { .. }));
