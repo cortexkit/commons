@@ -43,10 +43,16 @@ pub enum CatalogParseError {
         field: &'static str,
         value: String,
     },
-    /// A pricing tier without a `tier.size` context threshold. A tier whose
-    /// floor cannot be read must not default to 0: that would apply the
+    /// A pricing tier whose dimension cannot be verified as context-based, or
+    /// a context tier without a `tier.size` threshold. A tier whose floor
+    /// cannot be read must not default to 0: that would apply the
     /// over-threshold rate to every request, which is a silent repricing.
-    MissingTierThreshold,
+    /// Carries the row so an operator diagnoses a rejected snapshot without
+    /// bisecting the payload.
+    MissingTierThreshold {
+        provider: String,
+        model: String,
+    },
 }
 
 impl std::fmt::Display for CatalogParseError {
@@ -60,8 +66,11 @@ impl std::fmt::Display for CatalogParseError {
             CatalogParseError::NegativeRate { provider, model, field, value } => {
                 write!(f, "catalog rate {provider}/{model}.{field} = {value} is negative")
             }
-            CatalogParseError::MissingTierThreshold => {
-                write!(f, "catalog pricing tier lacks a tier.size context threshold")
+            CatalogParseError::MissingTierThreshold { provider, model } => {
+                write!(
+                    f,
+                    "catalog pricing tier on {provider}/{model} lacks a verifiable context threshold (tier.type/tier.size)"
+                )
             }
         }
     }
@@ -280,18 +289,31 @@ fn parse_cost(
                         Some(v) => convert(field, v).map(Some),
                     }
                 };
-            // The threshold lives at tier.tier.size (with tier.tier.type ==
-            // "context") in the models.dev shape — measured at 335/335 tier
+            // The threshold lives at tier.tier.size with tier.tier.type ==
+            // "context" in the models.dev shape — measured at 335/335 tier
             // rows on the live payload. Earlier revisions read invented keys
             // (context_over / min_context) that the upstream never emitted, so
             // every threshold silently parsed to 0; a missing threshold is now
             // a loud error, because a tier whose floor defaults to 0 applies
-            // its over-threshold rate to every request.
-            let min_context = tier
-                .get("tier")
-                .and_then(|t| t.get("size"))
+            // its over-threshold rate to every request. The `type` gate is
+            // load-bearing too: `min_context` is a claim that the dimension IS
+            // context, so a non-context tier (per-image, per-second) must not
+            // have its size read as a token threshold — the upstream already
+            // lists image/audio/video models, so a second tier type is a
+            // plausible upstream addition, not a hypothetical.
+            let tier_err = || CatalogParseError::MissingTierThreshold {
+                provider: provider.to_string(),
+                model: model.to_string(),
+            };
+            let dim = tier.get("tier").ok_or_else(tier_err)?;
+            if dim.get("type").and_then(Value::as_str) != Some("context") {
+                return Err(tier_err());
+            }
+
+            let min_context = dim
+                .get("size")
                 .and_then(Value::as_u64)
-                .ok_or(CatalogParseError::MissingTierThreshold)?;
+                .ok_or_else(tier_err)?;
             tiers.push(CostTier {
                 min_context,
                 input: trate("input")?,
@@ -538,7 +560,10 @@ mod tests {
             r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "input": 2.5 } ] } } } } }"#,
         )
         .unwrap_err();
-        assert!(matches!(err, CatalogParseError::MissingTierThreshold));
+        assert!(matches!(
+            err,
+            CatalogParseError::MissingTierThreshold { .. }
+        ));
     }
 
     #[test]
@@ -551,8 +576,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, CatalogParseError::MissingTierThreshold),
+            matches!(err, CatalogParseError::MissingTierThreshold { .. }),
             "context_over must not satisfy the threshold: models.dev never emitted it"
+        );
+    }
+
+    #[test]
+    fn tier_of_a_non_context_dimension_is_refused_not_reinterpreted() {
+        // A per-image tier must not have its size read as a token threshold:
+        // min_context is a CLAIM that the dimension is context, so the type
+        // gate is part of the threshold's meaning, not decoration.
+        let err = CatalogDoc::parse(
+            r#"{ "p": { "models": { "m": { "cost": { "tiers": [ { "tier": { "type": "images", "size": 1000 }, "input": 2.5 } ] } } } } }"#,
+        )
+        .unwrap_err();
+        match err {
+            CatalogParseError::MissingTierThreshold { provider, model } => {
+                assert_eq!((provider.as_str(), model.as_str()), ("p", "m"));
+            }
+            other => panic!("expected MissingTierThreshold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tier_error_names_the_offending_row() {
+        // The parse failure is fatal to the whole snapshot, so the error must
+        // point at the row: a refusal over 6,253 models without an identifier
+        // turns a five-second fix into a bisect.
+        let err = CatalogDoc::parse(
+            r#"{ "prov": { "models": { "mod": { "cost": { "tiers": [ { "input": 2.5 } ] } } } } }"#,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "catalog pricing tier on prov/mod lacks a verifiable context threshold (tier.type/tier.size)"
         );
     }
 
