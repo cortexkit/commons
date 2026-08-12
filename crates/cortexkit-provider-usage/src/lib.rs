@@ -66,13 +66,18 @@ pub struct RateWindow {
     /// the consumer then paces on utilization alone rather than a burn rate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_minutes: Option<i64>,
-    /// Absolute consumed count in the window (e.g. tokens, requests). Present
-    /// only when the provider reports or derives it; human-facing UIs can show
-    /// "10,336 / 40,000" alongside the percentage for richer context.
+    /// Absolute consumed count in the window (e.g. tokens, requests). A count
+    /// of things, so integral by contract, and only ever the upstream's own
+    /// figure — never recovered from a percentage and a cap (a derived figure
+    /// can carry a disagreement between two provider endpoints while wearing
+    /// a type that claims exactness). Omitted when the upstream reports only
+    /// a percentage. Human-facing UIs can show "10,336 / 40,000" alongside
+    /// the percentage for richer context.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub used_count: Option<f64>,
-    /// Absolute total cap for the window. Present alongside `used_count` when
-    /// the provider knows the ceiling; omitted otherwise.
+    /// Absolute total cap for the window, when the upstream states one. May
+    /// appear without `used_count`: the cap can be known while the consumed
+    /// figure is only a percentage.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub total_count: Option<f64>,
 }
