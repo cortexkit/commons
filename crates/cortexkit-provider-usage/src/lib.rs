@@ -421,6 +421,44 @@ pub struct ProviderUsage {
     /// this field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub error_class: Option<String>,
+    /// Present when this entry is a last-known-good reading served through an
+    /// ongoing failure, absent when it is a fresh success.
+    ///
+    /// Without it a preserved reading is byte-identical to a fresh one apart
+    /// from `fetched_at`, so a consumer cannot separate "this figure is old
+    /// because the producer has been unable to reach the provider" from "this
+    /// figure is old because nothing polled recently". Those have opposite
+    /// remedies — the first is a reason to stop acting on the number, the
+    /// second is not — and a consumer with only a timestamp has to guess with a
+    /// wall-clock threshold, which denies fresh-enough data to catch stale data.
+    ///
+    /// A producer serving preserved readings is behaving correctly: a brief
+    /// upstream failure should not blank a window. This field discloses that it
+    /// is happening rather than reporting a fault.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stale: Option<Stale>,
+}
+
+/// Why an entry is being served through a failure, and since when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stale {
+    /// When the producer first failed to refresh this entry, RFC3339.
+    ///
+    /// Distinct from `fetched_at`, which is when the served reading was
+    /// obtained. The gap between them is how long the producer has been unable
+    /// to look, which is the quantity a staleness policy actually wants: a
+    /// reading can be minutes old with the producer perfectly healthy, or
+    /// seconds old with the producer failing since just after it was taken.
+    pub since: String,
+    /// The failure class, using the same vocabulary as `error_class` on a
+    /// degraded entry.
+    ///
+    /// Carried so a consumer can tell a flapping upstream from a credential
+    /// that has started refusing, without branching on prose. Optional because
+    /// a producer may preserve a reading for a reason it cannot classify.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub class: Option<String>,
 }
 
 impl ProviderUsage {
@@ -438,6 +476,7 @@ impl ProviderUsage {
             spend: None,
             error: None,
             error_class: None,
+            stale: None,
         }
     }
 
@@ -456,6 +495,7 @@ impl ProviderUsage {
             spend: None,
             error: Some(error.to_string()),
             error_class: None,
+            stale: None,
         }
     }
 
@@ -480,6 +520,80 @@ impl ProviderUsage {
 
 #[cfg(test)]
 mod tests {
+
+    /// An entry without the field serializes exactly as before.
+    ///
+    /// Every consumer decoding today's shape must keep working, so absence has
+    /// to be byte-identical rather than merely tolerated.
+    #[test]
+    fn a_fresh_entry_carries_no_stale_key() {
+        let entry = ProviderUsage::healthy("codex", None, "oauth", Usage::default());
+        let json = serde_json::to_string(&entry).expect("entry serializes");
+
+        assert!(
+            !json.contains("stale"),
+            "a fresh entry must not emit the key at all: {json}"
+        );
+    }
+
+    /// A preserved reading states when the producer stopped being able to look.
+    ///
+    /// `since` is deliberately not `fetchedAt`: the reading was taken when it
+    /// was taken, and the failure began afterwards. The gap between the two is
+    /// how long the producer has been blind, which is the quantity a staleness
+    /// policy wants -- an entry can be minutes old with the producer healthy,
+    /// or seconds old with it failing since just after the read.
+    #[test]
+    fn a_preserved_reading_states_when_the_failure_began() {
+        let mut entry = ProviderUsage::healthy("codex", None, "oauth", Usage::default());
+        entry.fetched_at = Some("2026-08-13T10:00:00Z".to_string());
+        entry.stale = Some(Stale {
+            since: "2026-08-13T10:02:00Z".to_string(),
+            class: Some("upstream_failed".to_string()),
+        });
+
+        let json = serde_json::to_string(&entry).expect("entry serializes");
+        let back: ProviderUsage = serde_json::from_str(&json).expect("entry round-trips");
+        let stale = back.stale.expect("the disclosure survives the round trip");
+
+        assert_eq!(stale.since, "2026-08-13T10:02:00Z");
+        assert_eq!(stale.class.as_deref(), Some("upstream_failed"));
+        assert_ne!(
+            Some(stale.since.as_str()),
+            back.fetched_at.as_deref(),
+            "the two timestamps answer different questions and must not be conflated"
+        );
+        assert!(
+            json.contains("\"stale\""),
+            "the key is camelCase on the wire: {json}"
+        );
+    }
+
+    /// A producer that cannot classify the failure still discloses the state.
+    ///
+    /// Optional rather than required so a preserved reading is never suppressed
+    /// for want of a label -- disclosing "this is stale, cause unstated" beats
+    /// looking fresh.
+    #[test]
+    fn a_disclosure_without_a_class_still_decodes() {
+        let json = r#"{"provider":"codex","stale":{"since":"2026-08-13T10:02:00Z"}}"#;
+        let entry: ProviderUsage = serde_json::from_str(json).expect("decodes");
+        let stale = entry.stale.expect("present");
+
+        assert_eq!(stale.class, None);
+        assert_eq!(stale.since, "2026-08-13T10:02:00Z");
+    }
+
+    /// An entry from a producer that predates the field decodes unchanged.
+    #[test]
+    fn an_entry_without_the_field_decodes() {
+        let json = r#"{"provider":"codex","source":"oauth"}"#;
+        let entry: ProviderUsage = serde_json::from_str(json).expect("decodes");
+
+        assert_eq!(entry.stale, None);
+        assert_eq!(entry.provider, "codex");
+    }
+
     use super::*;
 
     #[test]
