@@ -770,6 +770,62 @@ mod tests {
         assert_eq!(err.wire_code(), "key_id_mismatch");
     }
 
+    /// The COMMITTED corpus stays executable against this crate: every case in
+    /// test-vectors/push-sealed-payload.json re-runs through the real open
+    /// paths with its recorded expectation. Envelopes are one-run artifacts
+    /// (fresh HPKE ephemerals per seal), so this opens the committed BYTES
+    /// rather than comparing regenerated ones — which is also the consumer's
+    /// exact contract: the opener opens the generator's bytes.
+    #[test]
+    fn the_committed_corpus_executes_against_this_crate() {
+        let raw = match std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/push-sealed-payload.json"
+        )) {
+            Ok(raw) => raw,
+            Err(err) => panic!("corpus missing — regenerate with the gen-vectors example: {err}"),
+        };
+        let corpus: serde_json::Value = serde_json::from_slice(&raw).expect("corpus json");
+        let unhex = |s: &str| -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        let phone_sk = unhex(
+            corpus["keys"]["phone_recipient"]["sk_hex"]
+                .as_str()
+                .unwrap(),
+        );
+        let plaintext = corpus["plaintext_utf8"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        let cases = corpus["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 9, "corpus shrank: {} cases", cases.len());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let envelope = unhex(case["envelope_hex"].as_str().unwrap());
+            let expect = case["expect"].as_str().unwrap();
+            let outcome: Result<Vec<u8>, OpenError> = match case["open_as"].as_str().unwrap() {
+                "auth" => {
+                    let sender = unhex(case["expected_sender_pubkey_hex"].as_str().unwrap());
+                    open_auth(&phone_sk, &sender, &envelope)
+                }
+                "base" => open(&phone_sk, &envelope),
+                other => panic!("{name}: unknown open_as {other}"),
+            };
+            match expect {
+                "opens" => assert_eq!(outcome.as_deref(), Ok(plaintext.as_slice()), "{name}"),
+                code => {
+                    let err = outcome.expect_err(name);
+                    assert_eq!(err.wire_code(), code, "{name}: {err:?}");
+                }
+            }
+        }
+    }
+
     /// v2's version byte and key-id are AUTHENTICATED, not merely present: a
     /// tampered key-id fails even when the opener is tricked into expecting the
     /// tampered value's key.

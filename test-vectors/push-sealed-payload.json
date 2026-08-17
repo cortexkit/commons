@@ -1,0 +1,111 @@
+{
+  "cases": [
+    {
+      "envelope_hex": "02d19bf3f082782c877dd6ab87d239edeec30ce761b0ab892065060ec17d1c06297648fd63c5b05672cef0fb941f328a26b290b5919dd858029f44e3fe4d6c788fea351acdd3942d496999ca0d0ccdaebf17105c4934a41df532c9f4918fd20ee921f6778f6fae12af62226c877fd501016aff29",
+      "expect": "opens",
+      "expected_sender_pubkey_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "name": "ep-valid-auth-mode",
+      "note": "verifies against the pinned sender key and yields the plaintext; rich rendering is licensed by THIS outcome only",
+      "open_as": "auth"
+    },
+    {
+      "envelope_hex": "01e535bdf75c09fa13df8ceac9a6cbe75702c16de4b53f6b107e0a14e36d90e85447d265e137e3a19e4eb94cfdb93813ea11a84d2f9a0c57b28fb6ee2eed51be07fc5f623b51f9b1843f7ee04e06202ab8763f7a14eb92cce51d82381c9de55c7d126f8ba9bf3c0dbd79b862",
+      "expect": "opens",
+      "expected_sender_pubkey_hex": null,
+      "name": "ep-valid-base-mode-downgrade",
+      "note": "opens as v1; rendering contract: GENERIC banner (unauthenticated input), never rich, never a refused notification",
+      "open_as": "base"
+    },
+    {
+      "envelope_hex": "02d19bf3f082782c87e535bdf75c09fa13df8ceac9a6cbe75702c16de4b53f6b107e0a14e36d90e85447d265e137e3a19e4eb94cfdb93813ea11a84d2f9a0c57b28fb6ee2eed51be07fc5f623b51f9b1843f7ee04e06202ab8763f7a14eb92cce51d82381c9de55c7d126f8ba9bf3c0dbd79b862",
+      "expect": "malformed",
+      "expected_sender_pubkey_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "name": "ep-reject-cross-role-mac",
+      "note": "a blob sealed TO a key must not verify as authored BY it (RFC 9180 mode separation, OUR binding pinned)",
+      "open_as": "auth"
+    },
+    {
+      "envelope_hex": "0265cf5c9b1de5d41fe535bdf75c09fa13df8ceac9a6cbe75702c16de4b53f6b107e0a14e36d90e85447d265e137e3a19e4eb94cfdb93813ea11a84d2f9a0c57b28fb6ee2eed51be07fc5f623b51f9b1843f7ee04e06202ab8763f7a14eb92cce51d82381c9de55c7d126f8ba9bf3c0dbd79b862",
+      "expect": "malformed",
+      "expected_sender_pubkey_hex": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+      "name": "ep-reject-cross-role-phone-self",
+      "note": "a blob sealed TO a key must not verify as authored BY it (RFC 9180 mode separation, OUR binding pinned)",
+      "open_as": "auth"
+    },
+    {
+      "envelope_hex": "02d19bf3f082782c87774431043e482959e6703d17aa7fe0b13292a0014305f4728c07090949a05a6ce441a35268528d0e9215c9a295e4fd8b5ef34202b4900d311041b3231ed53afbf7e8a3297f53b891dfd0806afbffc7e5ca9cb9d4f0a56e0dad7ca35cb090b76a714f138ff51a69a6c13b8e",
+      "expect": "malformed",
+      "expected_sender_pubkey_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "name": "ep-reject-wrong-sender-static",
+      "note": "an imposter forging the key-id still fails the tag: the id is routing, the tag is the boundary",
+      "open_as": "auth"
+    },
+    {
+      "envelope_hex": "02d19bf3f082782c877dd6ab87d239edeec30ce761b0ab892065060ec17d1c06297648fd63c5b05672cef0fb941f328a26b290b5919dd858029f44e3fe4d6c788fea351acdd3942d496999ca0d0ccdaebf17105c4934a41df532c9f4918fd20ee921f6778f6fae12af62226c877fd501016aff29",
+      "expect": "key_id_mismatch",
+      "expected_sender_pubkey_hex": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "name": "ep-reject-key-id-mismatch",
+      "note": "routing refusal: try the OTHER pinned key; never retried against forgery (Aead on a MATCHING id)",
+      "open_as": "auth"
+    },
+    {
+      "envelope_hex": "01e535bdf75c09fa13df8ceac9a6cbe75702c16de4b53f6b107e0a14e36d90e85447d265e137e3a19e4eb94cfdb93813ea11a84d2f9a0c57b28fb6ee2eed51be07fc5f623b51f9b1843f7ee04e06202ab8763f7a14eb92cce51d82381c9de55c7d126f8ba9bf3c0dbd79b862",
+      "expect": "mode_mismatch",
+      "expected_sender_pubkey_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "name": "ep-reject-mode-confusion-v1-as-auth",
+      "note": "the downgrade signal: distinct from corruption so the render layer maps it to the GENERIC banner",
+      "open_as": "auth"
+    },
+    {
+      "envelope_hex": "02d19bf3f082782c877dd6ab87d239edeec30ce761b0ab892065060ec17d1c06297648fd63c5b05672cef0fb941f328a26b290b5919dd858029f44e3fe4d6c788fea351acdd3942d496999ca0d0ccdaebf17105c4934a41df532c9f4918fd20ee921f6778f6fae12af62226c877fd501016aff29",
+      "expect": "mode_mismatch",
+      "expected_sender_pubkey_hex": null,
+      "name": "ep-reject-mode-confusion-auth-as-v1",
+      "note": "an authenticated envelope must not be silently opened unauthenticated: the downgrade decision belongs to the render layer",
+      "open_as": "base"
+    },
+    {
+      "envelope_hex": "02d19bf3f082782c877dd6ab87d239edeec30ce761b0ab892065060ec17d1c06297648fd63c5b05672cef0fb941f328a26b290b5919dd858029f44e3fe4d6c788fea351acdd3942d496999ca0d0ccdaebf17105c4934a41df532c9f4918fd20ee921f6778f6fae12af62226c877fd501016aff28",
+      "expect": "malformed",
+      "expected_sender_pubkey_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "name": "ep-reject-tampered-ciphertext",
+      "note": "altered bytes fail the tag",
+      "open_as": "auth"
+    }
+  ],
+  "corpus_meta": {
+    "auth_info_utf8": "cortexkit-push-seal/v2/auth",
+    "key_id_derivation": "first 8 bytes of SHA-256 over the sender public key bytes",
+    "key_id_len": 8,
+    "producer": "cortexkit-push-seal examples/gen-vectors.rs",
+    "sender_key_provenance": "lab",
+    "spec": "subconscious/docs/specs/push-sealed-payload.md",
+    "suite": {
+      "aead_id": 3,
+      "kdf_id": 1,
+      "kem_id": 32
+    },
+    "vector_set_version": 2,
+    "versions": {
+      "auth": 2,
+      "base": 1
+    }
+  },
+  "keys": {
+    "imposter": {
+      "key_id_hex": "19bd195f8fa9ecb9",
+      "pk_hex": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "sk_hex": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "mac_sender": {
+      "key_id_hex": "d19bf3f082782c87",
+      "pk_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "sk_hex": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "phone_recipient": {
+      "pk_hex": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+      "sk_hex": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  },
+  "plaintext_utf8": "{\"kind\":\"ask\",\"asker\":\"ALF\",\"title\":\"A decision needs you\"}"
+}

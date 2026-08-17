@@ -1,0 +1,3 @@
+# Byte-executed conformance corpus: content, not text. EOL conversion on
+# checkout would alter the bytes consumers execute (the Windows CRLF class).
+*.json -text
