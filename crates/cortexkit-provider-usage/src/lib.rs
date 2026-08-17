@@ -80,6 +80,76 @@ pub struct RateWindow {
     /// figure is only a percentage.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub total_count: Option<f64>,
+    /// How the window's quota comes back, when the upstream STATES a mechanic.
+    ///
+    /// **Absence licenses nothing.** It means the upstream said nothing about
+    /// replenishment — never "this is a fixed window". Most providers state
+    /// nothing, so absence is the common case and carries no information.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub regeneration: Option<Regeneration>,
+}
+
+/// A stated replenishment mechanic for a window.
+///
+/// Present only where an upstream describes how the quota returns. It exists
+/// because the alternative — projecting a replenishment onto `resets_at` — makes
+/// a continuously refilling pool indistinguishable from a hard cutoff, and the
+/// projection is unrecoverable once published.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Regeneration {
+    /// Which mechanic the upstream describes: `cliff`, `drip`, or `unstated`.
+    ///
+    /// **PACING DEPENDS ON THIS AND THE THREE ANSWERS DIFFER SHARPLY.** A rate
+    /// alone cannot separate them: "1,000,000 units per 720h" describes both a
+    /// lump arriving on one instant and a steady accrual every hour, and the two
+    /// give opposite answers about headroom on day 14.
+    ///
+    /// - `cliff` — the whole amount lands at `resets_at`, and **accrual before
+    ///   that instant is exactly zero**. A consumer treating this as gradual
+    ///   believes it has partial headroom when it has none.
+    /// - `drip` — the quota accrues continuously at `rate`, so headroom grows
+    ///   between reads and an exhausted pool becomes usable again without any
+    ///   reset event.
+    /// - `unstated` — the upstream states that quota replenishes but nothing
+    ///   establishes which mechanic. **No pacing claim exists: display the rate,
+    ///   never derive headroom from it.** Same contract as `PoolFunding::Unknown`
+    ///   and `PoolBasis::Unstated`, for the same reason — an honest arm keeps a
+    ///   producer from guessing to satisfy the type.
+    ///
+    /// A plain `String` rather than an enum, and REQUIRED rather than optional.
+    /// String because this is an observability wire: a variant added later must
+    /// not make an old consumer drop the record that reports a state it has never
+    /// seen. Required because an optional discriminator invites exactly the
+    /// inference this field exists to prevent — with no value present, a consumer
+    /// picks one, and the picker has less evidence than the producer.
+    ///
+    /// Treat an unrecognised value as `unstated`: render it, pace on nothing.
+    pub mechanic: String,
+    /// The stated replenishment rate, when the upstream gives one.
+    ///
+    /// Absent means the mechanic is described without a quantity — a real and
+    /// common shape ("credits refresh monthly" with no amount). Absence here says
+    /// nothing about `mechanic`, which stays authoritative.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub rate: Option<RegenerationRate>,
+}
+
+/// How much quota returns, and over what period.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegenerationRate {
+    /// Amount replenished per period, in the SAME units as `used_count` and
+    /// `total_count` on the window. Not integral by contract: unlike a count, a
+    /// rate is legitimately fractional (a monthly grant read per hour).
+    pub amount: f64,
+    /// Length of the replenishment period in minutes.
+    ///
+    /// Distinct from the window's own `window_minutes`, which they need not
+    /// match: an observed payload states a 720h refill period on a balance whose
+    /// percentage is measured against a larger total that includes a purchased
+    /// pool that never refills.
+    pub per_minutes: i64,
 }
 
 /// A per-model window bundled under one account (e.g. Antigravity's Geminis).
@@ -521,6 +591,103 @@ impl ProviderUsage {
 #[cfg(test)]
 mod tests {
 
+    /// A window with no stated mechanic serializes exactly as before.
+    ///
+    /// The additive guarantee: every existing producer omits the field, and a
+    /// consumer on the previous version must see byte-identical output.
+    #[test]
+    fn a_window_without_regeneration_is_unchanged_on_the_wire() {
+        let window = RateWindow {
+            used_percent: 42.0,
+            raw_used_percent: None,
+            resets_at: Some("2026-08-17T00:00:00Z".to_string()),
+            window_minutes: Some(300),
+            used_count: None,
+            total_count: None,
+            regeneration: None,
+        };
+        let json = serde_json::to_string(&window).expect("serializes");
+        assert!(
+            !json.contains("regeneration"),
+            "an absent mechanic must not appear on the wire: {json}"
+        );
+    }
+
+    /// A payload from before this field decodes into the new shape.
+    #[test]
+    fn a_pre_regeneration_payload_still_decodes() {
+        let json = r#"{"usedPercent":42.0,"resetsAt":"2026-08-17T00:00:00Z","windowMinutes":300}"#;
+        let window: RateWindow = serde_json::from_str(json).expect("older payloads must decode");
+        assert_eq!(window.regeneration, None);
+    }
+
+    /// The observed cliff shape round-trips, rate and all.
+    ///
+    /// SHAPE FROM A LIVE CAPTURE (insula#1, 2026-08-17): a credentialed JetBrains
+    /// account stating `tariff: { amount: "1000000", duration: "PT720H" }` beside
+    /// a known next-refill instant. First observed rate-bearing payload; the
+    /// numbers here are its scrubbed values.
+    #[test]
+    fn a_stated_cliff_refill_round_trips() {
+        let window = RateWindow {
+            used_percent: 0.67,
+            raw_used_percent: None,
+            resets_at: Some("2026-08-15T06:00:00.000Z".to_string()),
+            window_minutes: None,
+            used_count: Some(8100.0),
+            total_count: Some(1_207_000.0),
+            regeneration: Some(Regeneration {
+                mechanic: "cliff".to_string(),
+                rate: Some(RegenerationRate {
+                    amount: 1_000_000.0,
+                    per_minutes: 43_200,
+                }),
+            }),
+        };
+        let json = serde_json::to_string(&window).expect("serializes");
+        let back: RateWindow = serde_json::from_str(&json).expect("round-trips");
+        assert_eq!(back, window);
+        assert!(
+            json.contains("\"perMinutes\":43200"),
+            "camelCase on the wire: {json}"
+        );
+    }
+
+    /// A mechanic with no rate is a valid statement.
+    ///
+    /// "Credits refresh monthly" with no amount is a real upstream shape, and it
+    /// is precisely the case a rate-only field could not have expressed — which
+    /// is why this is an object rather than a bare rate.
+    #[test]
+    fn a_mechanic_without_a_rate_is_valid() {
+        let json = r#"{"usedPercent":10.0,"regeneration":{"mechanic":"drip"}}"#;
+        let window: RateWindow = serde_json::from_str(json).expect("decodes");
+        let regeneration = window.regeneration.expect("the mechanic is stated");
+        assert_eq!(regeneration.mechanic, "drip");
+        assert_eq!(
+            regeneration.rate, None,
+            "the mechanic stands without a rate"
+        );
+    }
+
+    /// A mechanic this version has never seen decodes intact.
+    ///
+    /// THE REASON `mechanic` IS A STRING. On an observability wire a new variant
+    /// must not delete the record that reports it: an enum here would fail the
+    /// whole entry, so the state a consumer most needs to see is the one that
+    /// would vanish. Consumers treat an unrecognised value as `unstated` --
+    /// render it, pace on nothing.
+    #[test]
+    fn an_unrecognised_mechanic_decodes_rather_than_dropping_the_window() {
+        let json = r#"{"usedPercent":10.0,"regeneration":{"mechanic":"stepped_thaw"}}"#;
+        let window: RateWindow = serde_json::from_str(json).expect("a future variant must decode");
+        assert_eq!(
+            window.regeneration.expect("present").mechanic,
+            "stepped_thaw"
+        );
+        assert_eq!(window.used_percent, 10.0, "the rest of the window survives");
+    }
+
     /// An entry without the field serializes exactly as before.
     ///
     /// Every consumer decoding today's shape must keep working, so absence has
@@ -610,6 +777,7 @@ mod tests {
                     window_minutes: Some(300),
                     used_count: None,
                     total_count: None,
+                    regeneration: None,
                 }),
                 ..Default::default()
             },
@@ -661,6 +829,7 @@ mod tests {
             window_minutes: Some(10080),
             used_count: None,
             total_count: None,
+            regeneration: None,
         };
         let json = serde_json::to_string(&unrelaxed).unwrap();
         assert!(
@@ -675,6 +844,7 @@ mod tests {
             window_minutes: Some(10080),
             used_count: None,
             total_count: None,
+            regeneration: None,
         };
         let json = serde_json::to_string(&relaxed).unwrap();
         assert!(json.contains("\"rawUsedPercent\":70.0"));
@@ -719,6 +889,7 @@ mod tests {
             window_minutes: Some(10080),
             used_count: None,
             total_count: None,
+            regeneration: None,
         };
         let json = serde_json::to_string(&window).unwrap();
         assert!(
