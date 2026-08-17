@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-push-seal"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -16,6 +16,7 @@ description = "Seals push-notification payloads with HPKE so only the recipient 
 publish = false
 
 [dependencies]
+sha2 = "0.10"
 hpke = { version = "0.14", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
 rand_core = "0.9"
 
