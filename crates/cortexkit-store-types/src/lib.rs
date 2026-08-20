@@ -120,7 +120,9 @@ pub fn postgres_database_name(module_id: &str) -> String {
 /// it in the module's env block). Private per-module `*_DATA_DIR` conventions
 /// are unsupported: they create a second boundary that this crate cannot see.
 pub fn resolve_data_home() -> String {
-    let xdg = std::env::var("XDG_DATA_HOME").ok().filter(|v| v.starts_with('/'));
+    let xdg = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|v| v.starts_with('/'));
     match xdg {
         Some(v) => v.trim_end_matches('/').to_string(),
         None => {
@@ -287,7 +289,10 @@ mod resolver_tests {
         std::env::remove_var("XDG_DATA_HOME");
         std::env::set_var("HOME", "/tmp/home-test");
         let got = module_store_path("astrocyte");
-        assert_eq!(got, "/tmp/home-test/.local/share/cortexkit/astrocyte/store.db");
+        assert_eq!(
+            got,
+            "/tmp/home-test/.local/share/cortexkit/astrocyte/store.db"
+        );
     }
 
     #[test]
@@ -309,6 +314,9 @@ mod resolver_tests {
         // low-level contract changed and every caller comment referencing the
         // doubling hazard is stale.
         let doubled = sqlite_store_path("/x/.local/share/cortexkit/astrocyte", "astrocyte");
-        assert_eq!(doubled, "/x/.local/share/cortexkit/astrocyte/cortexkit/astrocyte/store.db");
+        assert_eq!(
+            doubled,
+            "/x/.local/share/cortexkit/astrocyte/cortexkit/astrocyte/store.db"
+        );
     }
 }
