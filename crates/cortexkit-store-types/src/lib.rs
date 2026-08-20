@@ -109,9 +109,52 @@ pub fn postgres_database_name(module_id: &str) -> String {
     format!("cortexkit_{slug}_{}", fnv1a_hex(module_id))
 }
 
+/// The platform data home: `$XDG_DATA_HOME` if set and absolute, else
+/// `$HOME/.local/share`. This is THE definition -- modules must not re-derive
+/// it by hand. Hand-rolled `env-or-XDG-or-HOME` assembly is how a module
+/// directory got fed back in as a data home and produced a doubled
+/// `<module>/cortexkit/<module>` store path in production (astrocyte,
+/// 2026-08); the resolver exists so that assembly has exactly one spelling.
+///
+/// The ONLY supported relocation mechanism is `XDG_DATA_HOME` itself (rigs set
+/// it in the module's env block). Private per-module `*_DATA_DIR` conventions
+/// are unsupported: they create a second boundary that this crate cannot see.
+pub fn resolve_data_home() -> String {
+    let xdg = std::env::var("XDG_DATA_HOME").ok().filter(|v| v.starts_with('/'));
+    match xdg {
+        Some(v) => v.trim_end_matches('/').to_string(),
+        None => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| String::from("~"));
+            format!("{}/.local/share", home.trim_end_matches('/'))
+        }
+    }
+}
+
+/// The conventional module data directory (`<data_home>/cortexkit/<module_id>`),
+/// with the data home resolved by [`resolve_data_home`]. Modules that keep
+/// non-sqlite state (journals, caches, rings) root it here.
+pub fn module_data_dir(module_id: &str) -> String {
+    format!("{}/cortexkit/{}", resolve_data_home(), module_id)
+}
+
+/// THE entry point for a module resolving its own sqlite store path:
+/// `<resolved data home>/cortexkit/<module_id>/store.db`. Wraps
+/// [`resolve_data_home`] + [`sqlite_store_path`] so no module hand-assembles
+/// either half. Prefer this over calling [`sqlite_store_path`] directly;
+/// the two-argument form exists for callers that genuinely hold a foreign
+/// data home (the daemon resolving descriptors, tests, rig tooling).
+pub fn module_store_path(module_id: &str) -> String {
+    sqlite_store_path(&resolve_data_home(), module_id)
+}
+
 /// The conventional sqlite store path for a module under a data-home root
 /// (`<data_home>/cortexkit/<module_id>/store.db`). subc uses this to resolve a
 /// sqlite descriptor; the resolved absolute path then travels in the descriptor.
+///
+/// The first argument is an XDG-STYLE DATA HOME (`~/.local/share`), never an
+/// already-qualified module directory -- passing `<data_home>/cortexkit/<id>`
+/// here doubles the nesting. Modules resolving their OWN path should call
+/// [`module_store_path`] and never assemble the data home by hand.
 pub fn sqlite_store_path(data_home: &str, module_id: &str) -> String {
     format!(
         "{}/cortexkit/{}/store.db",
@@ -218,5 +261,54 @@ mod tests {
             .label(),
             "postgres"
         );
+    }
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::*;
+
+    // Env-mutating tests share one lock: cargo runs tests concurrently and
+    // XDG_DATA_HOME is process-global.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn module_store_path_honours_xdg_data_home() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        std::env::set_var("XDG_DATA_HOME", "/tmp/xdg-test");
+        let got = module_store_path("astrocyte");
+        std::env::remove_var("XDG_DATA_HOME");
+        assert_eq!(got, "/tmp/xdg-test/cortexkit/astrocyte/store.db");
+    }
+
+    #[test]
+    fn module_store_path_defaults_to_home_local_share() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        std::env::remove_var("XDG_DATA_HOME");
+        std::env::set_var("HOME", "/tmp/home-test");
+        let got = module_store_path("astrocyte");
+        assert_eq!(got, "/tmp/home-test/.local/share/cortexkit/astrocyte/store.db");
+    }
+
+    #[test]
+    fn relative_xdg_data_home_is_ignored_per_spec() {
+        // The XDG basedir spec: relative paths are invalid and must be ignored.
+        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        std::env::set_var("XDG_DATA_HOME", "relative/path");
+        std::env::set_var("HOME", "/tmp/home-test");
+        let got = module_store_path("m");
+        std::env::remove_var("XDG_DATA_HOME");
+        assert_eq!(got, "/tmp/home-test/.local/share/cortexkit/m/store.db");
+    }
+
+    #[test]
+    fn feeding_a_module_dir_as_data_home_doubles_the_nesting() {
+        // The astrocyte defect, pinned as a NEGATIVE example: this is what the
+        // two-argument form does when handed an already-qualified module dir,
+        // and why module_store_path exists. If this test ever fails, the
+        // low-level contract changed and every caller comment referencing the
+        // doubling hazard is stale.
+        let doubled = sqlite_store_path("/x/.local/share/cortexkit/astrocyte", "astrocyte");
+        assert_eq!(doubled, "/x/.local/share/cortexkit/astrocyte/cortexkit/astrocyte/store.db");
     }
 }
