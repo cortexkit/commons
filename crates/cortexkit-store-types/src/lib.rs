@@ -109,26 +109,66 @@ pub fn postgres_database_name(module_id: &str) -> String {
     format!("cortexkit_{slug}_{}", fnv1a_hex(module_id))
 }
 
-/// The platform data home: `$XDG_DATA_HOME` if set and absolute, else
-/// `$HOME/.local/share`. This is THE definition -- modules must not re-derive
-/// it by hand. Hand-rolled `env-or-XDG-or-HOME` assembly is how a module
-/// directory got fed back in as a data home and produced a doubled
-/// `<module>/cortexkit/<module>` store path in production (astrocyte,
-/// 2026-08); the resolver exists so that assembly has exactly one spelling.
+/// The platform data home, resolved by THE SUPERVISOR'S RULES -- this function
+/// is a byte-for-byte mirror of `default_data_home` in subconscious
+/// `crates/subc-core/src/daemon_config.rs`, which is the authority: the daemon
+/// resolves each module's storage descriptor with that function, so a module
+/// resolving its own path with different rules silently splits from the
+/// directory its supervisor serves. Any change lands THERE first and is
+/// mirrored here against the shared golden fixture
+/// (`tests/golden/data_home_resolution.json`, vendored from subconscious).
 ///
-/// The ONLY supported relocation mechanism is `XDG_DATA_HOME` itself (rigs set
-/// it in the module's env block). Private per-module `*_DATA_DIR` conventions
-/// are unsupported: they create a second boundary that this crate cannot see.
+/// The rules, in order: non-empty `XDG_DATA_HOME` is honored AS-IS (relative
+/// values included -- the daemon does not require absoluteness, so neither may
+/// we); on Windows, non-empty `APPDATA`, else `USERPROFILE\AppData\Roaming`;
+/// then `$HOME/.local/share`; finally the relative `.local/share`. Empty env
+/// values count as unset. No trimming here -- compose sites trim.
+///
+/// Modules must not re-derive this by hand. Hand-rolled `env-or-XDG-or-HOME`
+/// assembly is how a module directory got fed back in as a data home and
+/// produced a doubled `<module>/cortexkit/<module>` store path in production
+/// (astrocyte, 2026-08); the resolver exists so that assembly has exactly one
+/// spelling. The ONLY supported relocation mechanism is `XDG_DATA_HOME` itself
+/// (rigs set it in the module's env block). Private per-module `*_DATA_DIR`
+/// conventions are unsupported: they create a second boundary that this crate
+/// cannot see.
 pub fn resolve_data_home() -> String {
-    let xdg = std::env::var("XDG_DATA_HOME")
-        .ok()
-        .filter(|v| v.starts_with('/'));
-    match xdg {
-        Some(v) => v.trim_end_matches('/').to_string(),
-        None => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| String::from("~"));
-            format!("{}/.local/share", home.trim_end_matches('/'))
+    resolve_data_home_path().to_string_lossy().into_owned()
+}
+
+/// `PathBuf` form of [`resolve_data_home`]; the join operations reproduce the
+/// daemon's separator behavior exactly (backslash joins on Windows).
+fn resolve_data_home_path() -> std::path::PathBuf {
+    use std::path::PathBuf;
+
+    if let Some(v) = non_empty_env("XDG_DATA_HOME") {
+        return PathBuf::from(v);
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(app_data) = non_empty_env("APPDATA") {
+            return PathBuf::from(app_data);
         }
+        if let Some(user_profile) = non_empty_env("USERPROFILE") {
+            return PathBuf::from(user_profile).join("AppData").join("Roaming");
+        }
+    }
+
+    if let Some(home) = non_empty_env("HOME") {
+        return PathBuf::from(home).join(".local").join("share");
+    }
+
+    PathBuf::from(".local").join("share")
+}
+
+/// Empty env values count as unset, mirroring the daemon's `non_empty_os_var`.
+fn non_empty_env(key: &str) -> Option<std::ffi::OsString> {
+    let value = std::env::var_os(key)?;
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
@@ -136,7 +176,11 @@ pub fn resolve_data_home() -> String {
 /// with the data home resolved by [`resolve_data_home`]. Modules that keep
 /// non-sqlite state (journals, caches, rings) root it here.
 pub fn module_data_dir(module_id: &str) -> String {
-    format!("{}/cortexkit/{}", resolve_data_home(), module_id)
+    format!(
+        "{}/cortexkit/{}",
+        resolve_data_home().trim_end_matches('/'),
+        module_id
+    )
 }
 
 /// THE entry point for a module resolving its own sqlite store path:
@@ -296,10 +340,27 @@ mod resolver_tests {
     }
 
     #[test]
-    fn relative_xdg_data_home_is_ignored_per_spec() {
-        // The XDG basedir spec: relative paths are invalid and must be ignored.
+    fn relative_xdg_data_home_is_honored_matching_the_daemon() {
+        // The XDG basedir spec calls relative paths invalid, but the AUTHORITY
+        // here is the supervisor, not the spec: subc's default_data_home
+        // honors a non-empty XDG_DATA_HOME as-is, so this crate must too --
+        // rejecting it would resolve a different directory than the descriptor
+        // the daemon serves, which is the exact divergence class this crate
+        // exists to eliminate (CKCRED's Windows finding, 2026-08).
         let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         std::env::set_var("XDG_DATA_HOME", "relative/path");
+        std::env::set_var("HOME", "/tmp/home-test");
+        let got = module_store_path("m");
+        std::env::remove_var("XDG_DATA_HOME");
+        assert_eq!(got, "relative/path/cortexkit/m/store.db");
+    }
+
+    #[test]
+    fn empty_env_values_count_as_unset() {
+        // Mirrors the daemon's non_empty_os_var: an empty XDG_DATA_HOME falls
+        // through to the next rule rather than resolving an empty data home.
+        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        std::env::set_var("XDG_DATA_HOME", "");
         std::env::set_var("HOME", "/tmp/home-test");
         let got = module_store_path("m");
         std::env::remove_var("XDG_DATA_HOME");
