@@ -353,10 +353,20 @@ mod resolver_tests {
                 None => std::env::remove_var("USERPROFILE"),
             }
         }
+        #[cfg(not(windows))]
         assert_eq!(
             got,
             "/tmp/home-test/.local/share/cortexkit/astrocyte/store.db"
         );
+        #[cfg(windows)]
+        {
+            // PathBuf joins the data-home tier while module paths retain the
+            // daemon's forward slashes, so this mixed form is byte-identical.
+            assert_eq!(
+                got,
+                "/tmp/home-test\\.local\\share/cortexkit/astrocyte/store.db"
+            );
+        }
     }
 
     #[test]
@@ -404,7 +414,14 @@ mod resolver_tests {
                 None => std::env::remove_var("USERPROFILE"),
             }
         }
+        #[cfg(not(windows))]
         assert_eq!(got, "/tmp/home-test/.local/share/cortexkit/m/store.db");
+        #[cfg(windows)]
+        {
+            // PathBuf joins the data-home tier while module paths retain the
+            // daemon's forward slashes, so this mixed form is byte-identical.
+            assert_eq!(got, "/tmp/home-test\\.local\\share/cortexkit/m/store.db");
+        }
     }
 
     #[cfg(windows)]
