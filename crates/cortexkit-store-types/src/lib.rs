@@ -330,13 +330,43 @@ mod resolver_tests {
     #[test]
     fn module_store_path_defaults_to_home_local_share() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        #[cfg(windows)]
+        let appdata = std::env::var_os("APPDATA");
+        #[cfg(windows)]
+        let userprofile = std::env::var_os("USERPROFILE");
         std::env::remove_var("XDG_DATA_HOME");
+        #[cfg(windows)]
+        {
+            std::env::remove_var("APPDATA");
+            std::env::remove_var("USERPROFILE");
+        }
         std::env::set_var("HOME", "/tmp/home-test");
         let got = module_store_path("astrocyte");
+        #[cfg(windows)]
+        {
+            match appdata {
+                Some(value) => std::env::set_var("APPDATA", value),
+                None => std::env::remove_var("APPDATA"),
+            }
+            match userprofile {
+                Some(value) => std::env::set_var("USERPROFILE", value),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+        #[cfg(not(windows))]
         assert_eq!(
             got,
             "/tmp/home-test/.local/share/cortexkit/astrocyte/store.db"
         );
+        #[cfg(windows)]
+        {
+            // PathBuf joins the data-home tier while module paths retain the
+            // daemon's forward slashes, so this mixed form is byte-identical.
+            assert_eq!(
+                got,
+                "/tmp/home-test\\.local\\share/cortexkit/astrocyte/store.db"
+            );
+        }
     }
 
     #[test]
@@ -360,11 +390,66 @@ mod resolver_tests {
         // Mirrors the daemon's non_empty_os_var: an empty XDG_DATA_HOME falls
         // through to the next rule rather than resolving an empty data home.
         let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        #[cfg(windows)]
+        let appdata = std::env::var_os("APPDATA");
+        #[cfg(windows)]
+        let userprofile = std::env::var_os("USERPROFILE");
         std::env::set_var("XDG_DATA_HOME", "");
+        #[cfg(windows)]
+        {
+            std::env::remove_var("APPDATA");
+            std::env::remove_var("USERPROFILE");
+        }
         std::env::set_var("HOME", "/tmp/home-test");
         let got = module_store_path("m");
         std::env::remove_var("XDG_DATA_HOME");
+        #[cfg(windows)]
+        {
+            match appdata {
+                Some(value) => std::env::set_var("APPDATA", value),
+                None => std::env::remove_var("APPDATA"),
+            }
+            match userprofile {
+                Some(value) => std::env::set_var("USERPROFILE", value),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+        #[cfg(not(windows))]
         assert_eq!(got, "/tmp/home-test/.local/share/cortexkit/m/store.db");
+        #[cfg(windows)]
+        {
+            // PathBuf joins the data-home tier while module paths retain the
+            // daemon's forward slashes, so this mixed form is byte-identical.
+            assert_eq!(got, "/tmp/home-test\\.local\\share/cortexkit/m/store.db");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn module_store_path_prefers_appdata_over_home() {
+        // APPDATA is a resolver tier only on Windows, so its coverage must be
+        // platform-gated too.
+        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let xdg_data_home = std::env::var_os("XDG_DATA_HOME");
+        let appdata = std::env::var_os("APPDATA");
+        let home = std::env::var_os("HOME");
+        std::env::remove_var("XDG_DATA_HOME");
+        std::env::set_var("APPDATA", "C:\\tmp\\appdata-test");
+        std::env::set_var("HOME", "/tmp/home-test");
+        let got = module_store_path("astrocyte");
+        match xdg_data_home {
+            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+            None => std::env::remove_var("XDG_DATA_HOME"),
+        }
+        match appdata {
+            Some(value) => std::env::set_var("APPDATA", value),
+            None => std::env::remove_var("APPDATA"),
+        }
+        match home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        assert_eq!(got, "C:\\tmp\\appdata-test/cortexkit/astrocyte/store.db");
     }
 
     #[test]
