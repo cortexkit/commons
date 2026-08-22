@@ -142,6 +142,15 @@
         "variant": "InvalidIdPrefix",
         "id": "p"
       }
+    },
+    {
+      "name": "malformed-entry-effective-from",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":\"2026-8-13\"}}}",
+      "expect_error": {
+        "variant": "InvalidEffectiveFrom",
+        "id": "p/m",
+        "value": "2026-8-13"
+      }
     }
   ]
 }

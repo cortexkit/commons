@@ -4,7 +4,7 @@
 //! refuse. Change it only with a format-contract change and fresh mutation evidence:
 //! a passing suite alone does not prove a parser guard remains load-bearing.
 
-use cortexkit_model_catalog::{PaygRemapDoc, PaygRemapParseError};
+use cortexkit_model_catalog::{PaygModelId, PaygRemapDoc, PaygRemapEntry, PaygRemapParseError};
 use serde::Deserialize;
 
 const VECTORS: &str = include_str!("golden/payg-parse-vectors.json");
@@ -69,6 +69,10 @@ enum ExpectedError {
     InvalidIdPrefix {
         id: String,
     },
+    InvalidEffectiveFrom {
+        id: String,
+        value: String,
+    },
 }
 
 #[test]
@@ -76,7 +80,7 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
     let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
     assert_eq!(
         file.vectors.len(),
-        24,
+        25,
         "one vector for each non-structural parse guard"
     );
 
@@ -87,6 +91,100 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
         };
         assert_expected_error(&vector.name, error, vector.expect_error);
     }
+}
+
+#[test]
+fn malformed_effective_from_is_refused() {
+    let error = PaygRemapDoc::parse(
+        r#"{
+            "schema": 1,
+            "counterfactual": "same_platform_list",
+            "providers": {},
+            "entries": {
+                "p/m": {
+                    "kind": "not_sold_per_token",
+                    "reason": "plan_only",
+                    "source": "https://vendor.example/pricing",
+                    "observed": "2026-08-13",
+                    "effective_from": "2026-8-13"
+                }
+            }
+        }"#,
+    )
+    .expect_err("an effective date outside YYYY-MM-DD must be refused");
+
+    assert_eq!(
+        error.to_string(),
+        "PAYG remap declaration p/m has invalid effective_from \"2026-8-13\""
+    );
+}
+
+#[test]
+fn entry_effective_from_round_trips() {
+    let doc = PaygRemapDoc::parse(
+        r#"{
+            "schema": 1,
+            "counterfactual": "same_platform_list",
+            "providers": {
+                "p": {
+                    "kind": "zeros_are_not_prices",
+                    "source": "https://vendor.example/pricing",
+                    "observed": "2026-08-13",
+                    "effective_from": "2026-09-01"
+                }
+            },
+            "entries": {
+                "p/with-effective-date": {
+                    "kind": "not_sold_per_token",
+                    "reason": "plan_only",
+                    "source": "https://vendor.example/pricing",
+                    "observed": "2026-08-13",
+                    "effective_from": "2026-09-01"
+                }
+            }
+        }"#,
+    )
+    .expect("a shaped effective date must parse");
+
+    assert_eq!(
+        doc.providers["p"].effective_from.as_deref(),
+        Some("2026-09-01")
+    );
+    let id = PaygModelId::parse("p/with-effective-date").expect("valid test id");
+    let PaygRemapEntry::NotSoldPerToken(entry) = &doc.entries[&id] else {
+        panic!("expected not_sold_per_token entry");
+    };
+    assert_eq!(entry.effective_from.as_deref(), Some("2026-09-01"));
+}
+
+#[test]
+fn entry_without_effective_from_stays_absent() {
+    let doc = PaygRemapDoc::parse(
+        r#"{
+            "schema": 1,
+            "counterfactual": "same_platform_list",
+            "providers": {},
+            "entries": {
+                "p/without-effective-date": {
+                    "kind": "not_sold_per_token",
+                    "reason": "plan_only",
+                    "source": "https://vendor.example/pricing",
+                    "observed": "2026-08-13"
+                }
+            }
+        }"#,
+    )
+    .expect("an entry without effective_from must remain valid");
+
+    let id = PaygModelId::parse("p/without-effective-date").expect("valid test id");
+    let PaygRemapEntry::NotSoldPerToken(entry) = &doc.entries[&id] else {
+        panic!("expected not_sold_per_token entry");
+    };
+    assert_eq!(entry.effective_from, None);
+    assert_ne!(
+        entry.effective_from.as_deref(),
+        Some(entry.observed.as_str())
+    );
 }
 
 #[test]
@@ -219,6 +317,16 @@ fn assert_expected_error(name: &str, error: PaygRemapParseError, expected: Expec
             PaygRemapParseError::InvalidIdPrefix { id: actual },
             ExpectedError::InvalidIdPrefix { id: expected },
         ) => assert_eq!(actual, expected, "{name}: InvalidIdPrefix.id"),
+        (
+            PaygRemapParseError::InvalidEffectiveFrom {
+                id: actual_id,
+                value: actual_value,
+            },
+            ExpectedError::InvalidEffectiveFrom { id, value },
+        ) => {
+            assert_eq!(actual_id, id, "{name}: InvalidEffectiveFrom.id");
+            assert_eq!(actual_value, value, "{name}: InvalidEffectiveFrom.value");
+        }
         (actual, expected) => panic!("{name}: expected {expected:?}, got {actual:?}"),
     }
 }

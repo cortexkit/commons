@@ -128,6 +128,7 @@ pub struct PaygProviderRule {
     pub id_prefix: Option<String>,
     pub source: String,
     pub observed: String,
+    pub effective_from: Option<String>,
 }
 
 /// A specific PAYG remap declaration.
@@ -145,6 +146,7 @@ pub struct ResolvesToEntry {
     pub because: String,
     pub source: String,
     pub observed: String,
+    pub effective_from: Option<String>,
 }
 
 /// A declaration that supplies a sourced schedule absent from the catalog.
@@ -153,6 +155,7 @@ pub struct OverridesUnpricedEntry {
     pub cost: CostSchedule,
     pub source: String,
     pub observed: String,
+    pub effective_from: Option<String>,
 }
 
 /// A declaration that the platform has no per-token rate for this identifier.
@@ -161,6 +164,7 @@ pub struct NotSoldPerTokenEntry {
     pub reason: String,
     pub source: String,
     pub observed: String,
+    pub effective_from: Option<String>,
 }
 
 /// A PAYG remap-document parse failure.
@@ -211,6 +215,10 @@ pub enum PaygRemapParseError {
     InvalidIdPrefix {
         id: String,
     },
+    InvalidEffectiveFrom {
+        id: String,
+        value: String,
+    },
 }
 
 impl std::fmt::Display for PaygRemapParseError {
@@ -257,6 +265,9 @@ impl std::fmt::Display for PaygRemapParseError {
             Self::InvalidIdPrefix { id } => {
                 write!(f, "PAYG provider rule {id} has a non-string id_prefix")
             }
+            Self::InvalidEffectiveFrom { id, value } => {
+                write!(f, "PAYG remap declaration {id} has invalid effective_from {value:?}")
+            }
         }
     }
 }
@@ -296,6 +307,7 @@ fn parse_provider_rules(
                 id_prefix,
                 source: required_provenance(rule, id, "source")?,
                 observed: required_provenance(rule, id, "observed")?,
+                effective_from: optional_effective_from(rule, id)?,
             },
         );
     }
@@ -316,6 +328,7 @@ fn parse_entries(
         })?;
         let source = required_provenance(entry, raw_id, "source")?;
         let observed = required_provenance(entry, raw_id, "observed")?;
+        let effective_from = optional_effective_from(entry, raw_id)?;
         let kind = required_string(entry, raw_id, "kind")?;
         let entry = match kind.as_str() {
             "resolves_to" => PaygRemapEntry::ResolvesTo(ResolvesToEntry {
@@ -323,6 +336,7 @@ fn parse_entries(
                 because: required_string(entry, raw_id, "because")?,
                 source,
                 observed,
+                effective_from,
             }),
             "overrides_unpriced" => PaygRemapEntry::OverridesUnpriced(OverridesUnpricedEntry {
                 cost: parse_override_cost(
@@ -333,11 +347,13 @@ fn parse_entries(
                 )?,
                 source,
                 observed,
+                effective_from,
             }),
             "not_sold_per_token" => PaygRemapEntry::NotSoldPerToken(NotSoldPerTokenEntry {
                 reason: required_string(entry, raw_id, "reason")?,
                 source,
                 observed,
+                effective_from,
             }),
             _ => {
                 return Err(PaygRemapParseError::UnknownKind {
@@ -365,6 +381,42 @@ fn required_provenance(
             id: id.into(),
             field,
         })
+}
+
+/// `observed` is audit provenance, while `effective_from` selects a pricing era for downstream
+/// arithmetic. Keep this stricter check separate: malformed effective dates can choose a wrong
+/// rate, whereas malformed observations merely confuse a human auditor. This validates only the
+/// `YYYY-MM-DD` shape, not calendar validity.
+fn optional_effective_from(
+    entry: &serde_json::Map<String, Value>,
+    id: &str,
+) -> Result<Option<String>, PaygRemapParseError> {
+    let Some(value) = entry.get("effective_from") else {
+        return Ok(None);
+    };
+    let Some(date) = value.as_str() else {
+        return Err(PaygRemapParseError::InvalidEffectiveFrom {
+            id: id.into(),
+            value: value.to_string(),
+        });
+    };
+    if !is_yyyy_mm_dd(date) {
+        return Err(PaygRemapParseError::InvalidEffectiveFrom {
+            id: id.into(),
+            value: date.into(),
+        });
+    }
+    Ok(Some(date.into()))
+}
+
+fn is_yyyy_mm_dd(value: &str) -> bool {
+    value.len() == 10
+        && value.as_bytes()[4] == b'-'
+        && value.as_bytes()[7] == b'-'
+        && value
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
 }
 
 fn required_string(
