@@ -12,6 +12,8 @@ const VECTORS: &str = include_str!("golden/payg-parse-vectors.json");
 #[derive(Debug, Deserialize)]
 struct VectorFile {
     vectors: Vec<Vector>,
+    #[serde(default)]
+    positive_vectors: Vec<PositiveVector>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -19,6 +21,14 @@ struct Vector {
     name: String,
     input_json: String,
     expect_error: ExpectedError,
+}
+
+#[derive(Debug, Deserialize)]
+struct PositiveVector {
+    name: String,
+    input_json: String,
+    id: String,
+    effective_from: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,7 +90,7 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
     let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
     assert_eq!(
         file.vectors.len(),
-        25,
+        26,
         "one vector for each non-structural parse guard"
     );
 
@@ -90,6 +100,30 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
             Err(error) => error,
         };
         assert_expected_error(&vector.name, error, vector.expect_error);
+    }
+}
+
+#[test]
+fn parse_gate_accepts_every_positive_golden_vector() {
+    let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
+
+    assert_eq!(
+        file.positive_vectors.len(),
+        1,
+        "one vector for an explicitly unset optional field"
+    );
+    for vector in file.positive_vectors {
+        let doc = PaygRemapDoc::parse(&vector.input_json)
+            .unwrap_or_else(|error| panic!("{} unexpectedly refused: {error}", vector.name));
+        let id = PaygModelId::parse(&vector.id).expect("golden vector must use a valid id");
+        let PaygRemapEntry::NotSoldPerToken(entry) = &doc.entries[&id] else {
+            panic!("{} must parse a not_sold_per_token entry", vector.name);
+        };
+        assert_eq!(
+            entry.effective_from, vector.effective_from,
+            "{}: effective_from",
+            vector.name
+        );
     }
 }
 
@@ -180,11 +214,8 @@ fn entry_without_effective_from_stays_absent() {
     let PaygRemapEntry::NotSoldPerToken(entry) = &doc.entries[&id] else {
         panic!("expected not_sold_per_token entry");
     };
+    assert_eq!(entry.observed, "2026-08-13");
     assert_eq!(entry.effective_from, None);
-    assert_ne!(
-        entry.effective_from.as_deref(),
-        Some(entry.observed.as_str())
-    );
 }
 
 #[test]

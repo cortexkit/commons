@@ -391,8 +391,9 @@ fn optional_effective_from(
     entry: &serde_json::Map<String, Value>,
     id: &str,
 ) -> Result<Option<String>, PaygRemapParseError> {
-    let Some(value) = entry.get("effective_from") else {
-        return Ok(None);
+    let value = match entry.get("effective_from") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(value) => value,
     };
     let Some(date) = value.as_str() else {
         return Err(PaygRemapParseError::InvalidEffectiveFrom {
