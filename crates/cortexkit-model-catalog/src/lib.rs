@@ -21,6 +21,15 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod payg_conformance;
+mod payg_remap;
+
+pub use payg_conformance::{run_vectors, PaygOutcome, PaygVector, PaygVectorSuite, VectorFailure};
+pub use payg_remap::{
+    is_all_zero, NotSoldPerTokenEntry, OverridesUnpricedEntry, PaygModelId, PaygProviderRule,
+    PaygProviderRuleKind, PaygRemapDoc, PaygRemapEntry, PaygRemapParseError, ResolvesToEntry,
+};
+
 /// Integer nanodollars per million tokens. $3/M tokens = 3_000_000_000.
 pub type RateNanosPerMtok = i64;
 

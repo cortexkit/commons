@@ -1,0 +1,173 @@
+{
+  "vectors": [
+    {
+      "name": "version-skew",
+      "input_json": "{\"schema\":2,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{}}",
+      "expect_error": { "variant": "UnknownSchema", "schema": 2 }
+    },
+    {
+      "name": "schema-zero",
+      "input_json": "{\"schema\":0,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{}}",
+      "expect_error": { "variant": "UnknownSchema", "schema": 0 }
+    },
+    {
+      "name": "counterfactual-mismatch",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"different\",\"providers\":{},\"entries\":{}}",
+      "expect_error": { "variant": "CounterfactualMismatch", "expected": "same_platform_list", "found": "different" }
+    },
+    {
+      "name": "unknown-kind-refuses-whole-document",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"unknown\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "UnknownKind", "id": "p/m", "kind": "unknown" }
+    },
+    {
+      "name": "id-without-provider",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"/model\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "MalformedId", "id": "/model" }
+    },
+    {
+      "name": "id-without-model",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"provider/\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "MalformedId", "id": "provider/" }
+    },
+    {
+      "name": "entry-without-source",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p/m", "field": "source" }
+    },
+    {
+      "name": "provider-rule-without-source",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p\":{\"kind\":\"zeros_are_not_prices\",\"observed\":\"2026-08-13\"}},\"entries\":{}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p", "field": "source" }
+    },
+    {
+      "name": "entry-without-observed",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\"}}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p/m", "field": "observed" }
+    },
+    {
+      "name": "provider-rule-without-observed",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p\":{\"kind\":\"zeros_are_not_prices\",\"source\":\"https://vendor.example/pricing\"}},\"entries\":{}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p", "field": "observed" }
+    },
+    {
+      "name": "entry-with-empty-source",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p/m", "field": "source" }
+    },
+    {
+      "name": "provider-rule-with-empty-source",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p\":{\"kind\":\"zeros_are_not_prices\",\"source\":\"\",\"observed\":\"2026-08-13\"}},\"entries\":{}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p", "field": "source" }
+    },
+    {
+      "name": "entry-with-empty-observed",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"\"}}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p/m", "field": "observed" }
+    },
+    {
+      "name": "provider-rule-with-empty-observed",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p\":{\"kind\":\"zeros_are_not_prices\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"\"}},\"entries\":{}}",
+      "expect_error": { "variant": "MissingProvenance", "id": "p", "field": "observed" }
+    },
+    {
+      "name": "self-target",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"resolves_to\",\"target\":\"p/m\",\"because\":\"same schedule\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "SelfReferentialTarget", "id": "p/m" }
+    },
+    {
+      "name": "chained-target",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/a\":{\"kind\":\"resolves_to\",\"target\":\"p/b\",\"because\":\"origin schedule\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"},\"p/b\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "ChainedTarget", "id": "p/a", "target": "p/b" }
+    },
+    {
+      "name": "zero-valued-overrides-unpriced",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"input\":0,\"output\":0,\"cache_read\":0,\"cache_write\":0,\"reasoning\":0,\"input_audio\":0,\"output_audio\":0,\"tiers\":[{\"tier\":{\"type\":\"context\",\"size\":128000},\"input\":0,\"output\":0,\"cache_read\":0,\"cache_write\":0}]},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "ZeroOverride", "id": "p/m" }
+    },
+    {
+      "name": "rate-that-rounds-to-zero",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"input\":1e-10},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": { "variant": "InexactRate", "id": "p/m", "field": "input", "value": "1e-10" }
+    },
+    {
+      "name": "negative-rate",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"output\":-1},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": {
+        "variant": "NegativeRate",
+        "id": "p/m",
+        "field": "output",
+        "value": "-1"
+      }
+    },
+    {
+      "name": "context-band-requires-tier",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"context_over_200k\":{\"input\":2,\"output\":6}},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": {
+        "variant": "ContextBandNotRepresentable",
+        "id": "p/m",
+        "message": "PAYG remap override p/m uses context_over_200k; express that band through a tiers entry"
+      }
+    }
+    ,
+    {
+      "name": "zero-only-reasoning-override",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"reasoning\":0},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": {
+        "variant": "ZeroOverride",
+        "id": "p/m"
+      }
+    },
+    {
+      "name": "all-none-override",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": {
+        "variant": "ZeroOverride",
+        "id": "p/m"
+      }
+    },
+    {
+      "name": "all-zero-tier-only-override",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"tiers\":[{\"tier\":{\"type\":\"context\",\"size\":128000},\"input\":0,\"output\":0}]},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\"}}}",
+      "expect_error": {
+        "variant": "ZeroOverride",
+        "id": "p/m"
+      }
+    }
+    ,
+    {
+      "name": "non-string-provider-id-prefix",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p\":{\"kind\":\"zeros_are_not_prices\",\"id_prefix\":123,\"source\":\"https://vendor.example/rules\",\"observed\":\"2026-08-13\"}},\"entries\":{}}",
+      "expect_error": {
+        "variant": "InvalidIdPrefix",
+        "id": "p"
+      }
+    },
+    {
+      "name": "malformed-entry-effective-from",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":\"2026-8-13\"}}}",
+      "expect_error": {
+        "variant": "InvalidEffectiveFrom",
+        "id": "p/m",
+        "value": "2026-8-13"
+      }
+    },
+    {
+      "name": "non-string-entry-effective-from",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":123}}}",
+      "expect_error": {
+        "variant": "InvalidEffectiveFrom",
+        "id": "p/m",
+        "value": "123"
+      }
+    }
+  ],
+  "positive_vectors": [
+    {
+      "name": "null-entry-effective-from-stays-absent",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":null}}}",
+      "id": "p/m",
+      "effective_from": null
+    }
+  ]
+}

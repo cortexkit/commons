@@ -1,0 +1,882 @@
+{
+  "vectors": [
+    {
+      "name": "resolves-to-priced-source",
+      "cell": "resolves_to/priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        },
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "declaration_superseded"
+    },
+    {
+      "name": "resolves-to-zero-source-priced-target",
+      "cell": "resolves_to/all-zero/target-priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        },
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "priced"
+    },
+    {
+      "name": "resolves-to-zero-source-none-target",
+      "cell": "resolves_to/all-zero/target-all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        },
+        "target": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_priceable"
+    },
+    {
+      "name": "resolves-to-zero-source-zero-target",
+      "cell": "resolves_to/all-zero/target-all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        },
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_priceable"
+    },
+    {
+      "name": "resolves-to-zero-source-absent-target",
+      "cell": "resolves_to/all-zero/target-absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_in_catalog"
+    },
+    {
+      "name": "resolves-to-none-source-priced-target",
+      "cell": "resolves_to/all-none/target-priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        },
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "priced"
+    },
+    {
+      "name": "resolves-to-none-source-none-target",
+      "cell": "resolves_to/all-none/target-all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        },
+        "target": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_priceable"
+    },
+    {
+      "name": "resolves-to-none-source-zero-target",
+      "cell": "resolves_to/all-none/target-all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        },
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_priceable"
+    },
+    {
+      "name": "resolves-to-none-source-absent-target",
+      "cell": "resolves_to/all-none/target-absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_in_catalog"
+    },
+    {
+      "name": "resolves-to-absent-source-priced-target",
+      "cell": "resolves_to/absent/target-priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "priced"
+    },
+    {
+      "name": "resolves-to-absent-source-none-target",
+      "cell": "resolves_to/absent/target-all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "target": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_priceable"
+    },
+    {
+      "name": "resolves-to-absent-source-zero-target",
+      "cell": "resolves_to/absent/target-all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "target": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "target_not_priceable"
+    },
+    {
+      "name": "resolves-to-absent-source-absent-target",
+      "cell": "resolves_to/absent/target-absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "resolves_to",
+            "target": "target/model",
+            "because": "same-platform schedule",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {},
+      "model": "source/model",
+      "expected": "target_not_in_catalog"
+    },
+    {
+      "name": "override-reasoning-priced-source",
+      "cell": "overrides_unpriced/priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "overrides_unpriced",
+            "cost": {
+              "input": 0.5,
+              "output": 3
+            },
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 5
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "declaration_superseded"
+    },
+    {
+      "name": "override-qwen-reseller-zero",
+      "cell": "overrides_unpriced/all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "alibaba-token-plan/qwen3.7-plus": {
+            "kind": "overrides_unpriced",
+            "cost": {
+              "input": 0.5,
+              "output": 3,
+              "cache_read": 0.05,
+              "cache_write": 0.625,
+              "tiers": [
+                {
+                  "input": 2,
+                  "output": 6,
+                  "cache_read": 0.2,
+                  "cache_write": 2.5,
+                  "tier": {
+                    "type": "context",
+                    "size": 256000
+                  }
+                }
+              ]
+            },
+            "source": "https://www.alibabacloud.com/help/en/model-studio/models",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "alibaba-token-plan": {
+          "models": {
+            "qwen3.7-plus": {
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cache_read": 0,
+                "cache_write": 0
+              }
+            }
+          }
+        },
+        "opencode-go": {
+          "models": {
+            "qwen3.7-plus": {
+              "cost": {
+                "input": 0.4,
+                "output": 1.6,
+                "cache_read": 0.04,
+                "cache_write": 0.5
+              }
+            }
+          }
+        },
+        "alibaba": {
+          "models": {
+            "qwen3.7-plus": {
+              "cost": {
+                "input": 0.5,
+                "output": 3,
+                "cache_read": 0.05,
+                "cache_write": 0.625
+              }
+            }
+          }
+        }
+      },
+      "model": "alibaba-token-plan/qwen3.7-plus",
+      "expected": "priced"
+    },
+    {
+      "name": "override-none-source",
+      "cell": "overrides_unpriced/all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "overrides_unpriced",
+            "cost": {
+              "input": 0.5,
+              "output": 3
+            },
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "priced"
+    },
+    {
+      "name": "override-absent-source",
+      "cell": "overrides_unpriced/absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "overrides_unpriced",
+            "cost": {
+              "input": 0.5,
+              "output": 3
+            },
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {},
+      "model": "source/model",
+      "expected": "priced"
+    },
+    {
+      "name": "not-sold-priced-source",
+      "cell": "not_sold_per_token/priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "not_sold_per_token",
+            "reason": "plan-only",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "declaration_superseded"
+    },
+    {
+      "name": "not-sold-zero-source",
+      "cell": "not_sold_per_token/all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "not_sold_per_token",
+            "reason": "plan-only",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "not_sold_per_token"
+    },
+    {
+      "name": "not-sold-none-source",
+      "cell": "not_sold_per_token/all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "not_sold_per_token",
+            "reason": "plan-only",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "not_sold_per_token"
+    },
+    {
+      "name": "not-sold-absent-source",
+      "cell": "not_sold_per_token/absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "source/model": {
+            "kind": "not_sold_per_token",
+            "reason": "plan-only",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        }
+      },
+      "catalog": {},
+      "model": "source/model",
+      "expected": "not_sold_per_token"
+    },
+    {
+      "name": "google-priced-provider-rule",
+      "cell": "zeros_are_not_prices/priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {
+          "google": {
+            "kind": "zeros_are_not_prices",
+            "source": "https://example.test/google",
+            "observed": "2026-08-15"
+          }
+        },
+        "entries": {}
+      },
+      "catalog": {
+        "google": {
+          "models": {
+            "gemini-3.5-flash": {
+              "cost": {
+                "input": 1.5,
+                "output": 9,
+                "cache_read": 0.15,
+                "input_audio": 1.5
+              }
+            }
+          }
+        }
+      },
+      "model": "google/gemini-3.5-flash",
+      "expected": "no_entry"
+    },
+    {
+      "name": "provider-rule-zero-source",
+      "cell": "zeros_are_not_prices/all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {
+          "source": {
+            "kind": "zeros_are_not_prices",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        },
+        "entries": {}
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "not_sold_per_token"
+    },
+    {
+      "name": "provider-rule-none-source",
+      "cell": "zeros_are_not_prices/all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {
+          "source": {
+            "kind": "zeros_are_not_prices",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        },
+        "entries": {}
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "not_sold_per_token"
+    },
+    {
+      "name": "provider-rule-absent-source",
+      "cell": "zeros_are_not_prices/absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {
+          "source": {
+            "kind": "zeros_are_not_prices",
+            "source": "https://example.test/source",
+            "observed": "2026-08-15"
+          }
+        },
+        "entries": {}
+      },
+      "catalog": {},
+      "model": "source/model",
+      "expected": "not_sold_per_token"
+    },
+    {
+      "name": "no-declaration-priced-source",
+      "cell": "no_declaration/priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {}
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 1
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "no_entry"
+    },
+    {
+      "name": "no-declaration-zero-source",
+      "cell": "no_declaration/all-zero",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {}
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {
+              "cost": {
+                "input": 0
+              }
+            }
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "no_entry"
+    },
+    {
+      "name": "no-declaration-none-source",
+      "cell": "no_declaration/all-none",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {}
+      },
+      "catalog": {
+        "source": {
+          "models": {
+            "model": {}
+          }
+        }
+      },
+      "model": "source/model",
+      "expected": "no_entry"
+    },
+    {
+      "name": "no-declaration-absent-source",
+      "cell": "no_declaration/absent",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {}
+      },
+      "catalog": {},
+      "model": "source/model",
+      "expected": "no_entry"
+    }
+  ]
+}
