@@ -12,6 +12,10 @@ const VECTORS: &str = include_str!("golden/payg-parse-vectors.json");
 #[derive(Debug, Deserialize)]
 struct VectorFile {
     vectors: Vec<Vector>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PositiveVectorFile {
     #[serde(default)]
     positive_vectors: Vec<PositiveVector>,
 }
@@ -28,12 +32,24 @@ struct PositiveVector {
     name: String,
     input_json: String,
     id: String,
-    entry_kind: Option<String>,
+    entry_kind: String,
     provider: Option<String>,
     provider_kind: Option<String>,
     source: Option<String>,
     observed: Option<String>,
     effective_from: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPositiveVectorFile {
+    #[serde(default)]
+    positive_vectors: Vec<RawPositiveVector>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPositiveVector {
+    name: String,
+    entry_kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,7 +130,7 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
 
 #[test]
 fn parse_gate_accepts_every_positive_golden_vector() {
-    let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
+    let file: PositiveVectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
 
     assert_eq!(
         file.positive_vectors.len(),
@@ -125,61 +141,78 @@ fn parse_gate_accepts_every_positive_golden_vector() {
         let doc = PaygRemapDoc::parse(&vector.input_json)
             .unwrap_or_else(|error| panic!("{} unexpectedly refused: {error}", vector.name));
         let id = PaygModelId::parse(&vector.id).expect("golden vector must use a valid id");
-        if let Some(expected_kind) = vector.entry_kind.as_deref() {
-            match (expected_kind, &doc.entries[&id]) {
-                ("not_sold_per_token", PaygRemapEntry::NotSoldPerToken(entry)) => {
-                    if let Some(source) = vector.source.as_deref() {
-                        assert_eq!(entry.source, source, "{}: source", vector.name);
-                    }
-                    if let Some(observed) = vector.observed.as_deref() {
-                        assert_eq!(entry.observed, observed, "{}: observed", vector.name);
-                    }
-                    assert_eq!(
-                        entry.effective_from, vector.effective_from,
-                        "{}: effective_from",
-                        vector.name
-                    );
+        match (vector.entry_kind.as_str(), &doc.entries[&id]) {
+            ("not_sold_per_token", PaygRemapEntry::NotSoldPerToken(entry)) => {
+                if let Some(source) = vector.source.as_deref() {
+                    assert_eq!(entry.source, source, "{}: source", vector.name);
                 }
-                ("rate_time_banded", PaygRemapEntry::RateTimeBanded(entry)) => {
-                    if let Some(source) = vector.source.as_deref() {
-                        assert_eq!(entry.source, source, "{}: source", vector.name);
-                    }
-                    if let Some(observed) = vector.observed.as_deref() {
-                        assert_eq!(entry.observed, observed, "{}: observed", vector.name);
-                    }
-                    assert_eq!(
-                        entry.effective_from, vector.effective_from,
-                        "{}: effective_from",
-                        vector.name
-                    );
+                if let Some(observed) = vector.observed.as_deref() {
+                    assert_eq!(entry.observed, observed, "{}: observed", vector.name);
                 }
-                (kind, entry) => panic!("{} must parse a {kind} entry, got {entry:?}", vector.name),
+                assert_eq!(
+                    entry.effective_from, vector.effective_from,
+                    "{}: effective_from",
+                    vector.name
+                );
             }
+            ("rate_time_banded", PaygRemapEntry::RateTimeBanded(entry)) => {
+                if let Some(source) = vector.source.as_deref() {
+                    assert_eq!(entry.source, source, "{}: source", vector.name);
+                }
+                if let Some(observed) = vector.observed.as_deref() {
+                    assert_eq!(entry.observed, observed, "{}: observed", vector.name);
+                }
+                assert_eq!(
+                    entry.effective_from, vector.effective_from,
+                    "{}: effective_from",
+                    vector.name
+                );
+            }
+            (kind, entry) => panic!("{} must parse a {kind} entry, got {entry:?}", vector.name),
         }
 
-        if let (Some(provider), Some(expected_kind)) =
-            (vector.provider.as_deref(), vector.provider_kind.as_deref())
-        {
-            let rule = &doc.providers[provider];
-            match expected_kind {
-                "rate_time_banded" => assert!(matches!(
-                    rule.kind,
-                    cortexkit_model_catalog::PaygProviderRuleKind::RateTimeBanded
-                )),
-                kind => panic!("{} has unknown provider kind {kind}", vector.name),
+        match (vector.provider.as_deref(), vector.provider_kind.as_deref()) {
+            (Some(provider), Some(expected_kind)) => {
+                let rule = &doc.providers[provider];
+                match expected_kind {
+                    "rate_time_banded" => assert!(matches!(
+                        rule.kind,
+                        cortexkit_model_catalog::PaygProviderRuleKind::RateTimeBanded
+                    )),
+                    kind => panic!("{} has unknown provider kind {kind}", vector.name),
+                }
+                if let Some(source) = vector.source.as_deref() {
+                    assert_eq!(rule.source, source, "{}: source", vector.name);
+                }
+                if let Some(observed) = vector.observed.as_deref() {
+                    assert_eq!(rule.observed, observed, "{}: observed", vector.name);
+                }
+                assert_eq!(
+                    rule.effective_from, vector.effective_from,
+                    "{}: effective_from",
+                    vector.name
+                );
             }
-            if let Some(source) = vector.source.as_deref() {
-                assert_eq!(rule.source, source, "{}: source", vector.name);
-            }
-            if let Some(observed) = vector.observed.as_deref() {
-                assert_eq!(rule.observed, observed, "{}: observed", vector.name);
-            }
-            assert_eq!(
-                rule.effective_from, vector.effective_from,
-                "{}: effective_from",
+            (None, None) => {}
+            _ => panic!(
+                "{} must declare both provider and provider_kind",
                 vector.name
-            );
+            ),
         }
+    }
+}
+
+#[test]
+fn positive_vectors_must_declare_entry_kind() {
+    let file: RawPositiveVectorFile =
+        serde_json::from_str(VECTORS).expect("parse raw PAYG parse vectors");
+
+    for vector in file.positive_vectors {
+        assert!(
+            vector.entry_kind.is_some(),
+            "{} must declare entry_kind",
+            vector.name
+        );
     }
 }
 

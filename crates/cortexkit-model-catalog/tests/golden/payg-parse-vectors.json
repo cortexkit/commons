@@ -185,6 +185,7 @@
       "name": "null-entry-effective-from-stays-absent",
       "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":null}}}",
       "id": "p/m",
+      "entry_kind": "not_sold_per_token",
       "effective_from": null
     },
     {
@@ -198,8 +199,9 @@
     },
     {
       "name": "time-banded-provider-rule-provenance-round-trips",
-      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"deepseek\":{\"kind\":\"rate_time_banded\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\",\"effective_from\":\"2026-08-16\"}},\"entries\":{}}",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"deepseek\":{\"kind\":\"rate_time_banded\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\",\"effective_from\":\"2026-08-16\"}},\"entries\":{\"deepseek/placeholder\":{\"kind\":\"rate_time_banded\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\",\"effective_from\":\"2026-08-16\"}}}",
       "id": "deepseek/placeholder",
+      "entry_kind": "rate_time_banded",
       "provider": "deepseek",
       "provider_kind": "rate_time_banded",
       "source": "https://vendor.example/pricing",
