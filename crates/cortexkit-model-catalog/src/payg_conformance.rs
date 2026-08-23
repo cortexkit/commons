@@ -9,6 +9,9 @@ use crate::{CatalogDoc, PaygModelId, PaygRemapDoc};
 pub enum PaygOutcome {
     Priced,
     NotSoldPerToken,
+    /// Refuses a catalog scalar like other refusal outcomes because it cannot be correct for every
+    /// time band.
+    RateTimeBanded,
     TargetNotInCatalog,
     TargetNotPriceable,
     DeclarationSuperseded,
@@ -146,5 +149,57 @@ mod tests {
 
         assert_eq!(suite.vectors[0].model.as_str(), "provider/model");
         assert_eq!(suite.vectors[0].expected, PaygOutcome::Priced);
+    }
+
+    #[test]
+    fn reports_the_named_time_banded_vector_when_collapsed_to_not_sold() {
+        let vectors: PaygVectorSuite =
+            serde_json::from_str(include_str!("../tests/golden/payg-class-vectors.json"))
+                .expect("time-banded classification vector parses");
+
+        let time_banded = vectors
+            .vectors
+            .into_iter()
+            .find(|vector| vector.name == "time-banded-priced-source")
+            .expect("time-banded vector is present");
+        let failures = run_vectors(
+            &PaygVectorSuite {
+                vectors: vec![time_banded],
+            },
+            |_, _, _| PaygOutcome::NotSoldPerToken,
+        );
+
+        assert_eq!(
+            failures,
+            vec![super::VectorFailure {
+                vector: "time-banded-priced-source".into(),
+                expected: PaygOutcome::RateTimeBanded,
+                actual: PaygOutcome::NotSoldPerToken,
+            }]
+        );
+    }
+
+    #[test]
+    fn time_banded_vector_requires_its_distinct_outcome() {
+        let vectors: PaygVectorSuite =
+            serde_json::from_str(include_str!("../tests/golden/payg-class-vectors.json"))
+                .expect("time-banded classification vector parses");
+        let time_banded = vectors
+            .vectors
+            .into_iter()
+            .find(|vector| vector.name == "time-banded-priced-source")
+            .expect("time-banded vector is present");
+
+        let failures = run_vectors(
+            &PaygVectorSuite {
+                vectors: vec![time_banded],
+            },
+            |remap, _, model| match remap.entries.get(model) {
+                Some(crate::PaygRemapEntry::RateTimeBanded(_)) => PaygOutcome::RateTimeBanded,
+                _ => PaygOutcome::NoEntry,
+            },
+        );
+
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

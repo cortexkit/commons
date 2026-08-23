@@ -28,6 +28,11 @@ struct PositiveVector {
     name: String,
     input_json: String,
     id: String,
+    entry_kind: Option<String>,
+    provider: Option<String>,
+    provider_kind: Option<String>,
+    source: Option<String>,
+    observed: Option<String>,
     effective_from: Option<String>,
 }
 
@@ -83,6 +88,10 @@ enum ExpectedError {
         id: String,
         value: String,
     },
+    UnexpectedField {
+        id: String,
+        field: String,
+    },
 }
 
 #[test]
@@ -90,7 +99,7 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
     let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
     assert_eq!(
         file.vectors.len(),
-        26,
+        28,
         "one vector for each non-structural parse guard"
     );
 
@@ -109,21 +118,68 @@ fn parse_gate_accepts_every_positive_golden_vector() {
 
     assert_eq!(
         file.positive_vectors.len(),
-        1,
-        "one vector for an explicitly unset optional field"
+        3,
+        "one unset optional field plus entry and provider time-banded declarations"
     );
     for vector in file.positive_vectors {
         let doc = PaygRemapDoc::parse(&vector.input_json)
             .unwrap_or_else(|error| panic!("{} unexpectedly refused: {error}", vector.name));
         let id = PaygModelId::parse(&vector.id).expect("golden vector must use a valid id");
-        let PaygRemapEntry::NotSoldPerToken(entry) = &doc.entries[&id] else {
-            panic!("{} must parse a not_sold_per_token entry", vector.name);
-        };
-        assert_eq!(
-            entry.effective_from, vector.effective_from,
-            "{}: effective_from",
-            vector.name
-        );
+        if let Some(expected_kind) = vector.entry_kind.as_deref() {
+            match (expected_kind, &doc.entries[&id]) {
+                ("not_sold_per_token", PaygRemapEntry::NotSoldPerToken(entry)) => {
+                    if let Some(source) = vector.source.as_deref() {
+                        assert_eq!(entry.source, source, "{}: source", vector.name);
+                    }
+                    if let Some(observed) = vector.observed.as_deref() {
+                        assert_eq!(entry.observed, observed, "{}: observed", vector.name);
+                    }
+                    assert_eq!(
+                        entry.effective_from, vector.effective_from,
+                        "{}: effective_from",
+                        vector.name
+                    );
+                }
+                ("rate_time_banded", PaygRemapEntry::RateTimeBanded(entry)) => {
+                    if let Some(source) = vector.source.as_deref() {
+                        assert_eq!(entry.source, source, "{}: source", vector.name);
+                    }
+                    if let Some(observed) = vector.observed.as_deref() {
+                        assert_eq!(entry.observed, observed, "{}: observed", vector.name);
+                    }
+                    assert_eq!(
+                        entry.effective_from, vector.effective_from,
+                        "{}: effective_from",
+                        vector.name
+                    );
+                }
+                (kind, entry) => panic!("{} must parse a {kind} entry, got {entry:?}", vector.name),
+            }
+        }
+
+        if let (Some(provider), Some(expected_kind)) =
+            (vector.provider.as_deref(), vector.provider_kind.as_deref())
+        {
+            let rule = &doc.providers[provider];
+            match expected_kind {
+                "rate_time_banded" => assert!(matches!(
+                    rule.kind,
+                    cortexkit_model_catalog::PaygProviderRuleKind::RateTimeBanded
+                )),
+                kind => panic!("{} has unknown provider kind {kind}", vector.name),
+            }
+            if let Some(source) = vector.source.as_deref() {
+                assert_eq!(rule.source, source, "{}: source", vector.name);
+            }
+            if let Some(observed) = vector.observed.as_deref() {
+                assert_eq!(rule.observed, observed, "{}: observed", vector.name);
+            }
+            assert_eq!(
+                rule.effective_from, vector.effective_from,
+                "{}: effective_from",
+                vector.name
+            );
+        }
     }
 }
 
@@ -357,6 +413,16 @@ fn assert_expected_error(name: &str, error: PaygRemapParseError, expected: Expec
         ) => {
             assert_eq!(actual_id, id, "{name}: InvalidEffectiveFrom.id");
             assert_eq!(actual_value, value, "{name}: InvalidEffectiveFrom.value");
+        }
+        (
+            PaygRemapParseError::UnexpectedField {
+                id: actual_id,
+                field: actual_field,
+            },
+            ExpectedError::UnexpectedField { id, field },
+        ) => {
+            assert_eq!(actual_id, id, "{name}: UnexpectedField.id");
+            assert_eq!(actual_field, field, "{name}: UnexpectedField.field");
         }
         (actual, expected) => panic!("{name}: expected {expected:?}, got {actual:?}"),
     }

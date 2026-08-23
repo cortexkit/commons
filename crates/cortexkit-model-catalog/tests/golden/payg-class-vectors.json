@@ -877,6 +877,37 @@
       "catalog": {},
       "model": "source/model",
       "expected": "no_entry"
+    },
+    {
+      "name": "time-banded-priced-source",
+      "cell": "rate_time_banded/priced",
+      "remap": {
+        "schema": 1,
+        "counterfactual": "same_platform_list",
+        "providers": {},
+        "entries": {
+          "deepseek/deepseek-v4-pro": {
+            "kind": "rate_time_banded",
+            "source": "https://vendor.example/pricing",
+            "observed": "2026-08-16"
+          }
+        }
+      },
+      "catalog": {
+        "deepseek": {
+          "models": {
+            "deepseek-v4-pro": {
+              "cost": {
+                "input": 0.66,
+                "output": 1.98,
+                "cache_read": 0.022
+              }
+            }
+          }
+        }
+      },
+      "model": "deepseek/deepseek-v4-pro",
+      "expected": "rate_time_banded"
     }
   ]
 }

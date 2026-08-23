@@ -115,10 +115,11 @@ impl PaygRemapDoc {
     }
 }
 
-/// The only provider-wide PAYG refusal rule.
+/// Provider-wide PAYG refusal rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaygProviderRuleKind {
     ZerosAreNotPrices,
+    RateTimeBanded,
 }
 
 /// A provider-scoped PAYG refusal rule.
@@ -137,6 +138,7 @@ pub enum PaygRemapEntry {
     ResolvesTo(ResolvesToEntry),
     OverridesUnpriced(OverridesUnpricedEntry),
     NotSoldPerToken(NotSoldPerTokenEntry),
+    RateTimeBanded(RateTimeBandedEntry),
 }
 
 /// A declaration that points at one terminal catalog schedule.
@@ -162,6 +164,14 @@ pub struct OverridesUnpricedEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotSoldPerTokenEntry {
     pub reason: String,
+    pub source: String,
+    pub observed: String,
+    pub effective_from: Option<String>,
+}
+
+/// A declaration that per-token list pricing varies by time and cannot be represented safely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateTimeBandedEntry {
     pub source: String,
     pub observed: String,
     pub effective_from: Option<String>,
@@ -219,6 +229,10 @@ pub enum PaygRemapParseError {
         id: String,
         value: String,
     },
+    UnexpectedField {
+        id: String,
+        field: String,
+    },
 }
 
 impl std::fmt::Display for PaygRemapParseError {
@@ -268,6 +282,9 @@ impl std::fmt::Display for PaygRemapParseError {
             Self::InvalidEffectiveFrom { id, value } => {
                 write!(f, "PAYG remap declaration {id} has invalid effective_from {value:?}")
             }
+            Self::UnexpectedField { id, field } => {
+                write!(f, "PAYG remap declaration {id} has unexpected field {field}")
+            }
         }
     }
 }
@@ -288,6 +305,7 @@ fn parse_provider_rules(
         let kind = required_string(rule, id, "kind")?;
         let kind = match kind.as_str() {
             "zeros_are_not_prices" => PaygProviderRuleKind::ZerosAreNotPrices,
+            "rate_time_banded" => PaygProviderRuleKind::RateTimeBanded,
             _ => {
                 return Err(PaygRemapParseError::UnknownKind {
                     id: id.clone(),
@@ -355,6 +373,14 @@ fn parse_entries(
                 observed,
                 effective_from,
             }),
+            "rate_time_banded" => {
+                reject_unexpected_time_banded_fields(entry, raw_id)?;
+                PaygRemapEntry::RateTimeBanded(RateTimeBandedEntry {
+                    source,
+                    observed,
+                    effective_from,
+                })
+            }
             _ => {
                 return Err(PaygRemapParseError::UnknownKind {
                     id: raw_id.clone(),
@@ -365,6 +391,24 @@ fn parse_entries(
         parsed.insert(id, entry);
     }
     Ok(parsed)
+}
+
+fn reject_unexpected_time_banded_fields(
+    entry: &serde_json::Map<String, Value>,
+    id: &str,
+) -> Result<(), PaygRemapParseError> {
+    for field in entry.keys() {
+        if !matches!(
+            field.as_str(),
+            "kind" | "source" | "observed" | "effective_from"
+        ) {
+            return Err(PaygRemapParseError::UnexpectedField {
+                id: id.into(),
+                field: field.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn required_provenance(

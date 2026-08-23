@@ -160,6 +160,24 @@
         "id": "p/m",
         "value": "123"
       }
+    },
+    {
+      "name": "time-banded-entry-rejects-rates",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"rate_time_banded\",\"rates\":{\"input\":0.66},\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "UnexpectedField",
+        "id": "p/m",
+        "field": "rates"
+      }
+    },
+    {
+      "name": "time-banded-entry-rejects-target",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"rate_time_banded\",\"target\":\"p/other\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "UnexpectedField",
+        "id": "p/m",
+        "field": "target"
+      }
     }
   ],
   "positive_vectors": [
@@ -168,6 +186,25 @@
       "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":null}}}",
       "id": "p/m",
       "effective_from": null
+    },
+    {
+      "name": "time-banded-entry-provenance-round-trips",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"deepseek/deepseek-v4-pro\":{\"kind\":\"rate_time_banded\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\",\"effective_from\":\"2026-08-16\"}}}",
+      "id": "deepseek/deepseek-v4-pro",
+      "entry_kind": "rate_time_banded",
+      "source": "https://vendor.example/pricing",
+      "observed": "2026-08-16",
+      "effective_from": "2026-08-16"
+    },
+    {
+      "name": "time-banded-provider-rule-provenance-round-trips",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"deepseek\":{\"kind\":\"rate_time_banded\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\",\"effective_from\":\"2026-08-16\"}},\"entries\":{}}",
+      "id": "deepseek/placeholder",
+      "provider": "deepseek",
+      "provider_kind": "rate_time_banded",
+      "source": "https://vendor.example/pricing",
+      "observed": "2026-08-16",
+      "effective_from": "2026-08-16"
     }
   ]
 }

@@ -35,6 +35,7 @@ const MATRIX_CELLS: &[&str] = &[
     "not_sold_per_token/all-zero",
     "not_sold_per_token/all-none",
     "not_sold_per_token/absent",
+    "rate_time_banded/priced",
     "zeros_are_not_prices/priced",
     "zeros_are_not_prices/all-zero",
     "zeros_are_not_prices/all-none",
@@ -48,6 +49,7 @@ const MATRIX_CELLS: &[&str] = &[
 const LEGAL_OUTCOMES: &[&str] = &[
     "priced",
     "not_sold_per_token",
+    "rate_time_banded",
     "target_not_in_catalog",
     "target_not_priceable",
     "declaration_superseded",
@@ -94,6 +96,7 @@ const CELL_CONTRACT: &[(&str, &str)] = &[
     ("not_sold_per_token/all-zero", "not_sold_per_token"),
     ("not_sold_per_token/all-none", "not_sold_per_token"),
     ("not_sold_per_token/absent", "not_sold_per_token"),
+    ("rate_time_banded/priced", "rate_time_banded"),
     ("zeros_are_not_prices/priced", "no_entry"),
     ("zeros_are_not_prices/all-zero", "not_sold_per_token"),
     ("zeros_are_not_prices/all-none", "not_sold_per_token"),
@@ -190,7 +193,7 @@ fn validation_diagnostics_collect_independent_failures() {
     assert_eq!(failures.len(), 5, "{failures:#?}");
     assert!(failures
         .iter()
-        .any(|failure| failure.contains("expected 29 vectors")));
+        .any(|failure| failure.contains("expected 30 vectors")));
     assert!(failures
         .iter()
         .any(|failure| failure.contains("unknown matrix cell")));
