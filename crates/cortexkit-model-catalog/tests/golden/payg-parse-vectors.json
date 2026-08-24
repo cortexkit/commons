@@ -230,6 +230,22 @@
         "id": "p",
         "field": "sources"
       }
+    },
+    {
+      "name": "duplicate-top-level-entries-key",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan-only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "DuplicateKey",
+        "key": "entries"
+      }
+    },
+    {
+      "name": "duplicate-nested-entry-source-key",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan-only\",\"source\":\"https://first.example/pricing\",\"source\":\"https://second.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "DuplicateKey",
+        "key": "source"
+      }
     }
   ],
   "positive_vectors": [

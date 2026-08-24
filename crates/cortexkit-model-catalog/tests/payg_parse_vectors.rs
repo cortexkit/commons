@@ -116,6 +116,9 @@ enum ExpectedError {
     DuplicateIdPrefix {
         id_prefix: String,
     },
+    DuplicateKey {
+        key: String,
+    },
 }
 
 #[test]
@@ -123,7 +126,7 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
     let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
     assert_eq!(
         file.vectors.len(),
-        34,
+        36,
         "one vector for each non-structural parse guard"
     );
 
@@ -134,6 +137,31 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
         };
         assert_expected_error(&vector.name, error, vector.expect_error);
     }
+}
+
+#[test]
+fn duplicate_key_vectors_refuse_at_each_object_depth() {
+    let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
+
+    let accepted = [
+        "duplicate-top-level-entries-key",
+        "duplicate-nested-entry-source-key",
+    ]
+    .into_iter()
+    .filter(|name| {
+        let vector = file
+            .vectors
+            .iter()
+            .find(|vector| vector.name == *name)
+            .unwrap_or_else(|| panic!("missing {name} vector"));
+        PaygRemapDoc::parse(&vector.input_json).is_ok()
+    })
+    .collect::<Vec<_>>();
+
+    assert!(
+        accepted.is_empty(),
+        "duplicate vectors parsed: {accepted:?}"
+    );
 }
 
 #[test]
@@ -200,6 +228,8 @@ fn parse_gate_accepts_every_positive_golden_vector() {
 
 #[test]
 fn positive_vectors_must_declare_expected_fields() {
+    // Serde's required-field error reports only a generated-fixture line number; this companion
+    // guard identifies the malformed vector by name when the positive corpus grows.
     let file: RawPositiveVectorFile =
         serde_json::from_str(VECTORS).expect("parse raw PAYG parse vectors");
 
@@ -473,6 +503,10 @@ fn assert_expected_error(name: &str, error: PaygRemapParseError, expected: Expec
                 id_prefix: expected,
             },
         ) => assert_eq!(actual, expected, "{name}: DuplicateIdPrefix.id_prefix"),
+        (
+            PaygRemapParseError::DuplicateKey { key: actual },
+            ExpectedError::DuplicateKey { key: expected },
+        ) => assert_eq!(actual, expected, "{name}: DuplicateKey.key"),
         (actual, expected) => panic!("{name}: expected {expected:?}, got {actual:?}"),
     }
 }

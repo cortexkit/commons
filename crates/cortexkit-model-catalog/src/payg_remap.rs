@@ -85,7 +85,7 @@ impl PaygRemapDoc {
             });
         }
 
-        reject_duplicate_entry_ids(json)?;
+        reject_duplicate_keys(json)?;
 
         let providers = parse_provider_rules(
             root.get("providers")
@@ -244,6 +244,9 @@ pub enum PaygRemapParseError {
     DuplicateIdPrefix {
         id_prefix: String,
     },
+    DuplicateKey {
+        key: String,
+    },
 }
 
 impl std::fmt::Display for PaygRemapParseError {
@@ -300,6 +303,7 @@ impl std::fmt::Display for PaygRemapParseError {
             Self::DuplicateIdPrefix { id_prefix } => {
                 write!(f, "PAYG remap has duplicate provider id_prefix {id_prefix}")
             }
+            Self::DuplicateKey { key } => write!(f, "PAYG remap has duplicate key {key}"),
         }
     }
 }
@@ -475,7 +479,7 @@ enum DuplicatePreservingValue {
     Bool,
     Number,
     String,
-    Array,
+    Array(Vec<Self>),
     Object(Vec<(String, Self)>),
 }
 
@@ -525,11 +529,11 @@ impl<'de> Deserialize<'de> for DuplicatePreservingValue {
             where
                 A: SeqAccess<'de>,
             {
-                while sequence
-                    .next_element::<DuplicatePreservingValue>()?
-                    .is_some()
-                {}
-                Ok(DuplicatePreservingValue::Array)
+                let mut values = Vec::new();
+                while let Some(value) = sequence.next_element()? {
+                    values.push(value);
+                }
+                Ok(DuplicatePreservingValue::Array(values))
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -548,25 +552,44 @@ impl<'de> Deserialize<'de> for DuplicatePreservingValue {
     }
 }
 
-fn reject_duplicate_entry_ids(json: &str) -> Result<(), PaygRemapParseError> {
+fn reject_duplicate_keys(json: &str) -> Result<(), PaygRemapParseError> {
     let root: DuplicatePreservingValue =
         serde_json::from_str(json).map_err(|error| PaygRemapParseError::Json(error.to_string()))?;
-    let DuplicatePreservingValue::Object(root) = root else {
-        return Ok(());
-    };
-    let Some((_, DuplicatePreservingValue::Object(entries))) =
-        root.into_iter().find(|(field, _)| field == "entries")
-    else {
-        return Ok(());
-    };
 
-    let mut ids = BTreeSet::new();
-    for (id, _) in entries {
-        if !ids.insert(id.clone()) {
-            return Err(PaygRemapParseError::DuplicateEntry { id });
+    fn visit(value: DuplicatePreservingValue, path: &str) -> Result<(), PaygRemapParseError> {
+        match value {
+            DuplicatePreservingValue::Array(values) => {
+                for (index, value) in values.into_iter().enumerate() {
+                    visit(value, &format!("{path}[{index}]"))?;
+                }
+            }
+            DuplicatePreservingValue::Object(fields) => {
+                let mut keys = BTreeSet::new();
+                for (key, value) in fields {
+                    if !keys.insert(key.clone()) {
+                        return Err(if path == "entries" {
+                            PaygRemapParseError::DuplicateEntry { id: key }
+                        } else {
+                            PaygRemapParseError::DuplicateKey { key }
+                        });
+                    }
+                    let child_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    visit(value, &child_path)?;
+                }
+            }
+            DuplicatePreservingValue::Null
+            | DuplicatePreservingValue::Bool
+            | DuplicatePreservingValue::Number
+            | DuplicatePreservingValue::String => {}
         }
+        Ok(())
     }
-    Ok(())
+
+    visit(root, "")
 }
 
 fn required_provenance(
