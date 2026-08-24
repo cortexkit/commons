@@ -1,5 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::{dollars_to_nanos, CostSchedule, CostTier, RateNanosPerMtok};
@@ -81,6 +84,8 @@ impl PaygRemapDoc {
                 found,
             });
         }
+
+        reject_duplicate_entry_ids(json)?;
 
         let providers = parse_provider_rules(
             root.get("providers")
@@ -233,6 +238,12 @@ pub enum PaygRemapParseError {
         id: String,
         field: String,
     },
+    DuplicateEntry {
+        id: String,
+    },
+    DuplicateIdPrefix {
+        id_prefix: String,
+    },
 }
 
 impl std::fmt::Display for PaygRemapParseError {
@@ -285,6 +296,10 @@ impl std::fmt::Display for PaygRemapParseError {
             Self::UnexpectedField { id, field } => {
                 write!(f, "PAYG remap declaration {id} has unexpected field {field}")
             }
+            Self::DuplicateEntry { id } => write!(f, "PAYG remap has duplicate entry {id}"),
+            Self::DuplicateIdPrefix { id_prefix } => {
+                write!(f, "PAYG remap has duplicate provider id_prefix {id_prefix}")
+            }
         }
     }
 }
@@ -298,10 +313,16 @@ fn parse_provider_rules(
         .as_object()
         .ok_or_else(|| PaygRemapParseError::Json("providers is not an object".into()))?;
     let mut parsed = BTreeMap::new();
+    let mut id_prefixes = BTreeSet::new();
     for (id, value) in rules {
         let rule = value.as_object().ok_or_else(|| {
             PaygRemapParseError::Json(format!("provider rule {id} is not an object"))
         })?;
+        reject_unexpected_fields(
+            rule,
+            id,
+            &["kind", "id_prefix", "source", "observed", "effective_from"],
+        )?;
         let kind = required_string(rule, id, "kind")?;
         let kind = match kind.as_str() {
             "zeros_are_not_prices" => PaygProviderRuleKind::ZerosAreNotPrices,
@@ -318,6 +339,13 @@ fn parse_provider_rules(
             Some(Value::String(prefix)) => Some(prefix.clone()),
             Some(_) => return Err(PaygRemapParseError::InvalidIdPrefix { id: id.clone() }),
         };
+        if let Some(prefix) = &id_prefix {
+            if !id_prefixes.insert(prefix.clone()) {
+                return Err(PaygRemapParseError::DuplicateIdPrefix {
+                    id_prefix: prefix.clone(),
+                });
+            }
+        }
         parsed.insert(
             id.clone(),
             PaygProviderRule {
@@ -349,32 +377,64 @@ fn parse_entries(
         let effective_from = optional_effective_from(entry, raw_id)?;
         let kind = required_string(entry, raw_id, "kind")?;
         let entry = match kind.as_str() {
-            "resolves_to" => PaygRemapEntry::ResolvesTo(ResolvesToEntry {
-                target: PaygModelId::parse(&required_string(entry, raw_id, "target")?)?,
-                because: required_string(entry, raw_id, "because")?,
-                source,
-                observed,
-                effective_from,
-            }),
-            "overrides_unpriced" => PaygRemapEntry::OverridesUnpriced(OverridesUnpricedEntry {
-                cost: parse_override_cost(
+            "resolves_to" => {
+                reject_unexpected_fields(
+                    entry,
                     raw_id,
-                    entry
-                        .get("cost")
-                        .ok_or_else(|| missing_required_field(raw_id, "cost"))?,
-                )?,
-                source,
-                observed,
-                effective_from,
-            }),
-            "not_sold_per_token" => PaygRemapEntry::NotSoldPerToken(NotSoldPerTokenEntry {
-                reason: required_string(entry, raw_id, "reason")?,
-                source,
-                observed,
-                effective_from,
-            }),
+                    &[
+                        "kind",
+                        "target",
+                        "because",
+                        "source",
+                        "observed",
+                        "effective_from",
+                    ],
+                )?;
+                PaygRemapEntry::ResolvesTo(ResolvesToEntry {
+                    target: PaygModelId::parse(&required_string(entry, raw_id, "target")?)?,
+                    because: required_string(entry, raw_id, "because")?,
+                    source,
+                    observed,
+                    effective_from,
+                })
+            }
+            "overrides_unpriced" => {
+                reject_unexpected_fields(
+                    entry,
+                    raw_id,
+                    &["kind", "cost", "source", "observed", "effective_from"],
+                )?;
+                PaygRemapEntry::OverridesUnpriced(OverridesUnpricedEntry {
+                    cost: parse_override_cost(
+                        raw_id,
+                        entry
+                            .get("cost")
+                            .ok_or_else(|| missing_required_field(raw_id, "cost"))?,
+                    )?,
+                    source,
+                    observed,
+                    effective_from,
+                })
+            }
+            "not_sold_per_token" => {
+                reject_unexpected_fields(
+                    entry,
+                    raw_id,
+                    &["kind", "reason", "source", "observed", "effective_from"],
+                )?;
+                PaygRemapEntry::NotSoldPerToken(NotSoldPerTokenEntry {
+                    reason: required_string(entry, raw_id, "reason")?,
+                    source,
+                    observed,
+                    effective_from,
+                })
+            }
             "rate_time_banded" => {
-                reject_unexpected_time_banded_fields(entry, raw_id)?;
+                reject_unexpected_fields(
+                    entry,
+                    raw_id,
+                    &["kind", "source", "observed", "effective_from"],
+                )?;
                 PaygRemapEntry::RateTimeBanded(RateTimeBandedEntry {
                     source,
                     observed,
@@ -393,19 +453,117 @@ fn parse_entries(
     Ok(parsed)
 }
 
-fn reject_unexpected_time_banded_fields(
+fn reject_unexpected_fields(
     entry: &serde_json::Map<String, Value>,
     id: &str,
+    allowed: &[&str],
 ) -> Result<(), PaygRemapParseError> {
     for field in entry.keys() {
-        if !matches!(
-            field.as_str(),
-            "kind" | "source" | "observed" | "effective_from"
-        ) {
+        if !allowed.contains(&field.as_str()) {
             return Err(PaygRemapParseError::UnexpectedField {
                 id: id.into(),
                 field: field.clone(),
             });
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+enum DuplicatePreservingValue {
+    Null,
+    Bool,
+    Number,
+    String,
+    Array,
+    Object(Vec<(String, Self)>),
+}
+
+impl<'de> Deserialize<'de> for DuplicatePreservingValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct DuplicatePreservingVisitor;
+
+        impl<'de> Visitor<'de> for DuplicatePreservingVisitor {
+            type Value = DuplicatePreservingValue;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::Null)
+            }
+
+            fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::Bool)
+            }
+
+            fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::Number)
+            }
+
+            fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::Number)
+            }
+
+            fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::Number)
+            }
+
+            fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::String)
+            }
+
+            fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
+                Ok(DuplicatePreservingValue::String)
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                while sequence
+                    .next_element::<DuplicatePreservingValue>()?
+                    .is_some()
+                {}
+                Ok(DuplicatePreservingValue::Array)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut fields = Vec::new();
+                while let Some(key) = map.next_key()? {
+                    fields.push((key, map.next_value()?));
+                }
+                Ok(DuplicatePreservingValue::Object(fields))
+            }
+        }
+
+        deserializer.deserialize_any(DuplicatePreservingVisitor)
+    }
+}
+
+fn reject_duplicate_entry_ids(json: &str) -> Result<(), PaygRemapParseError> {
+    let root: DuplicatePreservingValue =
+        serde_json::from_str(json).map_err(|error| PaygRemapParseError::Json(error.to_string()))?;
+    let DuplicatePreservingValue::Object(root) = root else {
+        return Ok(());
+    };
+    let Some((_, DuplicatePreservingValue::Object(entries))) =
+        root.into_iter().find(|(field, _)| field == "entries")
+    else {
+        return Ok(());
+    };
+
+    let mut ids = BTreeSet::new();
+    for (id, _) in entries {
+        if !ids.insert(id.clone()) {
+            return Err(PaygRemapParseError::DuplicateEntry { id });
         }
     }
     Ok(())

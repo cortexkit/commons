@@ -178,6 +178,58 @@
         "id": "p/m",
         "field": "target"
       }
+    },
+    {
+      "name": "duplicate-entry-id",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"first\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"},\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"second\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "DuplicateEntry",
+        "id": "p/m"
+      }
+    },
+    {
+      "name": "duplicate-provider-id-prefix",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p1\":{\"kind\":\"zeros_are_not_prices\",\"id_prefix\":\"shared-\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"},\"p2\":{\"kind\":\"zeros_are_not_prices\",\"id_prefix\":\"shared-\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}},\"entries\":{}}",
+      "expect_error": {
+        "variant": "DuplicateIdPrefix",
+        "id_prefix": "shared-"
+      }
+    },
+    {
+      "name": "resolves-to-unknown-field",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"resolves_to\",\"target\":\"q/m\",\"because\":\"same schedule\",\"sources\":\"typo\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "UnexpectedField",
+        "id": "p/m",
+        "field": "sources"
+      }
+    },
+    {
+      "name": "overrides-unpriced-unknown-field",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"overrides_unpriced\",\"cost\":{\"input\":1},\"effective_form\":\"typo\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "UnexpectedField",
+        "id": "p/m",
+        "field": "effective_form"
+      }
+    },
+    {
+      "name": "not-sold-per-token-unknown-field",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan-only\",\"effective_form\":\"typo\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}}}",
+      "expect_error": {
+        "variant": "UnexpectedField",
+        "id": "p/m",
+        "field": "effective_form"
+      }
+    },
+    {
+      "name": "provider-rule-unknown-field",
+      "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{\"p\":{\"kind\":\"zeros_are_not_prices\",\"sources\":\"typo\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-16\"}},\"entries\":{}}",
+      "expect_error": {
+        "variant": "UnexpectedField",
+        "id": "p",
+        "field": "sources"
+      }
     }
   ],
   "positive_vectors": [
@@ -186,6 +238,8 @@
       "input_json": "{\"schema\":1,\"counterfactual\":\"same_platform_list\",\"providers\":{},\"entries\":{\"p/m\":{\"kind\":\"not_sold_per_token\",\"reason\":\"plan_only\",\"source\":\"https://vendor.example/pricing\",\"observed\":\"2026-08-13\",\"effective_from\":null}}}",
       "id": "p/m",
       "entry_kind": "not_sold_per_token",
+      "source": "https://vendor.example/pricing",
+      "observed": "2026-08-13",
       "effective_from": null
     },
     {

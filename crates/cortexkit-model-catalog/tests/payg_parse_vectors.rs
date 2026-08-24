@@ -35,8 +35,8 @@ struct PositiveVector {
     entry_kind: String,
     provider: Option<String>,
     provider_kind: Option<String>,
-    source: Option<String>,
-    observed: Option<String>,
+    source: String,
+    observed: String,
     effective_from: Option<String>,
 }
 
@@ -50,6 +50,8 @@ struct RawPositiveVectorFile {
 struct RawPositiveVector {
     name: String,
     entry_kind: Option<String>,
+    source: Option<String>,
+    observed: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +110,12 @@ enum ExpectedError {
         id: String,
         field: String,
     },
+    DuplicateEntry {
+        id: String,
+    },
+    DuplicateIdPrefix {
+        id_prefix: String,
+    },
 }
 
 #[test]
@@ -115,7 +123,7 @@ fn parse_gate_rejects_every_golden_vector_with_its_exact_error() {
     let file: VectorFile = serde_json::from_str(VECTORS).expect("parse PAYG parse vectors");
     assert_eq!(
         file.vectors.len(),
-        28,
+        34,
         "one vector for each non-structural parse guard"
     );
 
@@ -143,12 +151,8 @@ fn parse_gate_accepts_every_positive_golden_vector() {
         let id = PaygModelId::parse(&vector.id).expect("golden vector must use a valid id");
         match (vector.entry_kind.as_str(), &doc.entries[&id]) {
             ("not_sold_per_token", PaygRemapEntry::NotSoldPerToken(entry)) => {
-                if let Some(source) = vector.source.as_deref() {
-                    assert_eq!(entry.source, source, "{}: source", vector.name);
-                }
-                if let Some(observed) = vector.observed.as_deref() {
-                    assert_eq!(entry.observed, observed, "{}: observed", vector.name);
-                }
+                assert_eq!(entry.source, vector.source, "{}: source", vector.name);
+                assert_eq!(entry.observed, vector.observed, "{}: observed", vector.name);
                 assert_eq!(
                     entry.effective_from, vector.effective_from,
                     "{}: effective_from",
@@ -156,12 +160,8 @@ fn parse_gate_accepts_every_positive_golden_vector() {
                 );
             }
             ("rate_time_banded", PaygRemapEntry::RateTimeBanded(entry)) => {
-                if let Some(source) = vector.source.as_deref() {
-                    assert_eq!(entry.source, source, "{}: source", vector.name);
-                }
-                if let Some(observed) = vector.observed.as_deref() {
-                    assert_eq!(entry.observed, observed, "{}: observed", vector.name);
-                }
+                assert_eq!(entry.source, vector.source, "{}: source", vector.name);
+                assert_eq!(entry.observed, vector.observed, "{}: observed", vector.name);
                 assert_eq!(
                     entry.effective_from, vector.effective_from,
                     "{}: effective_from",
@@ -181,12 +181,8 @@ fn parse_gate_accepts_every_positive_golden_vector() {
                     )),
                     kind => panic!("{} has unknown provider kind {kind}", vector.name),
                 }
-                if let Some(source) = vector.source.as_deref() {
-                    assert_eq!(rule.source, source, "{}: source", vector.name);
-                }
-                if let Some(observed) = vector.observed.as_deref() {
-                    assert_eq!(rule.observed, observed, "{}: observed", vector.name);
-                }
+                assert_eq!(rule.source, vector.source, "{}: source", vector.name);
+                assert_eq!(rule.observed, vector.observed, "{}: observed", vector.name);
                 assert_eq!(
                     rule.effective_from, vector.effective_from,
                     "{}: effective_from",
@@ -203,7 +199,7 @@ fn parse_gate_accepts_every_positive_golden_vector() {
 }
 
 #[test]
-fn positive_vectors_must_declare_entry_kind() {
+fn positive_vectors_must_declare_expected_fields() {
     let file: RawPositiveVectorFile =
         serde_json::from_str(VECTORS).expect("parse raw PAYG parse vectors");
 
@@ -211,6 +207,16 @@ fn positive_vectors_must_declare_entry_kind() {
         assert!(
             vector.entry_kind.is_some(),
             "{} must declare entry_kind",
+            vector.name
+        );
+        assert!(
+            vector.source.is_some(),
+            "{} must declare source",
+            vector.name
+        );
+        assert!(
+            vector.observed.is_some(),
+            "{} must declare observed",
             vector.name
         );
     }
@@ -457,6 +463,16 @@ fn assert_expected_error(name: &str, error: PaygRemapParseError, expected: Expec
             assert_eq!(actual_id, id, "{name}: UnexpectedField.id");
             assert_eq!(actual_field, field, "{name}: UnexpectedField.field");
         }
+        (
+            PaygRemapParseError::DuplicateEntry { id: actual },
+            ExpectedError::DuplicateEntry { id: expected },
+        ) => assert_eq!(actual, expected, "{name}: DuplicateEntry.id"),
+        (
+            PaygRemapParseError::DuplicateIdPrefix { id_prefix: actual },
+            ExpectedError::DuplicateIdPrefix {
+                id_prefix: expected,
+            },
+        ) => assert_eq!(actual, expected, "{name}: DuplicateIdPrefix.id_prefix"),
         (actual, expected) => panic!("{name}: expected {expected:?}, got {actual:?}"),
     }
 }

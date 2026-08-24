@@ -6,6 +6,8 @@
 //! fleet rule is that they must parse the SAME shape so a catalog schema
 //! drift cannot make them disagree silently. This crate is that shape.
 //! Consumers bring their own snapshot bytes and own their derived stores.
+//! This crate ships no reference classifier: each consumer owns the join from a PAYG remap to
+//! its catalog snapshot, while the conformance runner supplies their shared executable contract.
 //!
 //! Money discipline: models.dev publishes dollar-per-million-token rates as
 //! JSON decimal numbers. This crate converts them ONCE, at the parse
