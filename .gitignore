@@ -6,3 +6,4 @@ Cargo.lock
 # Agent working state (context packages, prompts, drafts) -- never source.
 # A committed gather artifact answers searches with another repo's details.
 .cortexkit/
+docs/private/
