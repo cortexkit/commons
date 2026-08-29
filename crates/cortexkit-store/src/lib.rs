@@ -338,12 +338,15 @@ mod sqlite_backend {
     /// silently — migrations at or below the recorded version are skipped and
     /// this returns `Ok`, with no staleness refusal anywhere in the open path.
     /// Refusing here would turn every binary rollback into a bricked store,
-    /// and rollbacks are a supported recovery path. The cost is that nothing
-    /// in the store layer detects a stale binary running against a migrated
-    /// store: the only mechanism that can notice is comparing a module's
-    /// manifest-declared `store_schema_version` against the store's actual
-    /// recorded version. Modules that declare it derived from their migration
-    /// list (rather than typed) keep that comparison honest.
+    /// and rollbacks are a supported recovery path. The cost is that a stale
+    /// binary on a migrated store goes UNDETECTED: there is no store-level
+    /// refusal, and the one place it could be noticed — a supervisor
+    /// comparing a module's manifest-declared `store_schema_version` against
+    /// the store's actual recorded version — is declared by some modules but
+    /// consumed by nothing today. Whoever builds that comparison: this note
+    /// names your job; do not read it as saying the job is done. Modules
+    /// declaring the version derived from their migration list (rather than
+    /// typed) keep the future comparison honest.
     fn run_migrations(
         conn: &mut Connection,
         namespace: &str,
