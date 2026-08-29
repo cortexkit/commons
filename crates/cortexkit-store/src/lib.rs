@@ -333,6 +333,17 @@ mod sqlite_backend {
     ///
     /// Applied migrations are keyed by `(namespace, version)`, so independent
     /// domain chains in one database never collide or re-run each other.
+    ///
+    /// Deliberate policy: a binary OLDER than the store it opens proceeds
+    /// silently — migrations at or below the recorded version are skipped and
+    /// this returns `Ok`, with no staleness refusal anywhere in the open path.
+    /// Refusing here would turn every binary rollback into a bricked store,
+    /// and rollbacks are a supported recovery path. The cost is that nothing
+    /// in the store layer detects a stale binary running against a migrated
+    /// store: the only mechanism that can notice is comparing a module's
+    /// manifest-declared `store_schema_version` against the store's actual
+    /// recorded version. Modules that declare it derived from their migration
+    /// list (rather than typed) keep that comparison honest.
     fn run_migrations(
         conn: &mut Connection,
         namespace: &str,
