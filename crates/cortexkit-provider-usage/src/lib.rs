@@ -588,8 +588,169 @@ impl ProviderUsage {
     }
 }
 
+/// Shared account-identity type (commons#13, operator-ratified 2026-08-29).
+///
+/// `provider` was two namespaces wearing one name across the fleet: usage
+/// sources, credential configs, sweep-unit names, and catalog slugs all emit
+/// plausible provider strings, so a wrong join never fails loudly. This type
+/// makes the namespace explicit so no consumer ever writes the alias map that
+/// a silent join failure invites.
+///
+/// Absence is ordinary here, not exceptional: at ratification time 34 of 40
+/// live wire entries carried no verified identity. Consumers must treat a
+/// missing `account_ref` as the expected shape, never as an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountIdentity {
+    /// Source-scoped provider name, spelled in the emitting module's own
+    /// namespace (a usage source's "claude", a registry's invented plan
+    /// name). MANDATORY. The same string under two sources need not mean the
+    /// same thing; this field never claims cross-source meaning.
+    pub provider: String,
+
+    /// The models.dev slug for this provider, when a join to the model
+    /// catalog EXISTS. Named for its source deliberately: a second catalog
+    /// source would get its own field rather than silently changing this
+    /// one's meaning.
+    ///
+    /// `None` means NO JOIN EXISTS — never fall back to [`Self::provider`].
+    /// models.dev publishes no alias metadata of any kind (measured:
+    /// no `alias`, `renamed_from`, `supersedes`, or `deprecated_by`), so
+    /// there is nothing for a fallback to fall back to; "use the other name"
+    /// fabricates a join, and a fabricated join produces plausible rows
+    /// forever instead of erroring.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models_dev_provider_slug: Option<String>,
+
+    /// Verified account identity, when the provider disclosed one.
+    ///
+    /// PROPAGATION RULE: provenance travels with the value and is NEVER
+    /// re-derived downstream. The moment a consumer writes
+    /// `if provider == "anthropic" { assume frozen }` they have re-implemented
+    /// the producer's discriminant from the outside, keyed on a provider
+    /// string — the exact namespace hazard this type exists to prevent,
+    /// recreated one level down. The producer that holds the value at its
+    /// source knows which branch produced it; nobody else does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_ref: Option<AccountRef>,
+}
+
+/// An account identity value bundled with how it was obtained.
+///
+/// Bundled rather than parallel fields, so the bug-causing states — a value
+/// with no provenance, or a provenance with no value — are unrepresentable.
+/// Absent identity carries no provenance because there is nothing to qualify.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountRef {
+    /// The identity value as the provider disclosed it (an email, an account
+    /// id, an org slug — whatever the source speaks).
+    pub value: String,
+    /// Which staleness story produced [`Self::value`]. See
+    /// [`AccountRefProvenance`] for why the two must never be conflated.
+    pub provenance: AccountRefProvenance,
+}
+
+/// The two ways an account identity reaches the wire, with opposite staleness
+/// properties.
+///
+/// The discriminant says a value *could* be wrong, not that it *is*: the
+/// frozen branch goes stale only if a record is re-pointed without a
+/// re-login. A consumer holding a [`Self::StoredLogin`] value knows it needs
+/// watching; a [`Self::LiveClaim`] value re-corrects on every read.
+///
+/// This enum is CLOSED on purpose — identity-bearing, not diagnostic. An
+/// unknown provenance must refuse to decode rather than default: a wrong
+/// guess here poisons joins silently, which is worse than a loud decode
+/// error on a version skew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountRefProvenance {
+    /// Parsed from the served token at read time — re-derived on every get,
+    /// self-correcting.
+    LiveClaim,
+    /// Stored at login time and returned unchanged — frozen, can go stale
+    /// silently if the account is re-pointed without a re-login.
+    StoredLogin,
+}
+
 #[cfg(test)]
 mod tests {
+    /// Full AccountIdentity round-trips with every field present, and the
+    /// wire spelling of both provenance branches is pinned.
+    #[test]
+    fn account_identity_full_round_trip_pins_provenance_spellings() {
+        let full = AccountIdentity {
+            provider: "claude".into(),
+            models_dev_provider_slug: Some("anthropic".into()),
+            account_ref: Some(AccountRef {
+                value: "ufuk@example.com".into(),
+                provenance: AccountRefProvenance::StoredLogin,
+            }),
+        };
+        let wire = serde_json::to_string(&full).unwrap();
+        assert!(
+            wire.contains("\"stored_login\""),
+            "frozen branch spelling: {wire}"
+        );
+        let back: AccountIdentity = serde_json::from_str(&wire).unwrap();
+        assert_eq!(back, full);
+
+        let live = serde_json::to_string(&AccountRefProvenance::LiveClaim).unwrap();
+        assert_eq!(live, "\"live_claim\"");
+    }
+
+    /// A minimal identity (provider only) keeps absent fields ABSENT on the
+    /// wire — not null — so pre-identity consumers see byte-identical output.
+    #[test]
+    fn a_minimal_identity_serializes_provider_only() {
+        let min = AccountIdentity {
+            provider: "kimi-for-coding".into(),
+            models_dev_provider_slug: None,
+            account_ref: None,
+        };
+        let wire = serde_json::to_string(&min).unwrap();
+        assert_eq!(wire, r#"{"provider":"kimi-for-coding"}"#);
+        let back: AccountIdentity = serde_json::from_str(&wire).unwrap();
+        assert_eq!(back, min);
+    }
+
+    /// A null slug stays None through a round trip and never inherits the
+    /// provider's value: the fallback is fabrication, and this asserts the
+    /// bytes, not the intent.
+    #[test]
+    fn a_none_slug_never_becomes_the_provider_value() {
+        let id = AccountIdentity {
+            provider: "qwen-cloud".into(),
+            models_dev_provider_slug: None,
+            account_ref: None,
+        };
+        let wire = serde_json::to_string(&id).unwrap();
+        assert!(
+            !wire.contains("models_dev_provider_slug"),
+            "absent, not null: {wire}"
+        );
+        let back: AccountIdentity = serde_json::from_str(&wire).unwrap();
+        assert_eq!(back.models_dev_provider_slug, None);
+        assert_ne!(
+            back.models_dev_provider_slug.as_deref(),
+            Some(back.provider.as_str()),
+            "a decode path that mirrors provider into the slug has fabricated a join"
+        );
+    }
+
+    /// Unknown provenance REFUSES to decode. Identity-bearing enum: a
+    /// wrong-guess default poisons joins silently, so version skew must fail
+    /// loud here, unlike the diagnostic value enums.
+    #[test]
+    fn an_unknown_provenance_refuses_to_decode() {
+        let err = serde_json::from_str::<AccountRef>(r#"{"value":"x","provenance":"vibes"}"#);
+        assert!(err.is_err(), "unknown provenance must refuse, got {err:?}");
+        // And a bare value with no provenance is unrepresentable:
+        let err2 = serde_json::from_str::<AccountRef>(r#"{"value":"x"}"#);
+        assert!(
+            err2.is_err(),
+            "value without provenance must refuse, got {err2:?}"
+        );
+    }
 
     /// A window with no stated mechanic serializes exactly as before.
     ///
