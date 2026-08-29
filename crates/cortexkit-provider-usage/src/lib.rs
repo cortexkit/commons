@@ -661,6 +661,21 @@ pub struct AccountRef {
 /// unknown provenance must refuse to decode rather than default: a wrong
 /// guess here poisons joins silently, which is worse than a loud decode
 /// error on a version skew.
+///
+/// WHAT CLOSURE COSTS — read before adding a variant: because decoders
+/// refuse unknown spellings, adding a variant is a WIRE-BREAKING change for
+/// every consumer on an older crate version. The next addition is a
+/// coordinated version boundary across all adopters, not an additive edit.
+/// That cost is deliberate and paid once, by whoever creates the need.
+///
+/// Both existing variants are CUSTODIAN-derived and differ only in
+/// staleness. The first likely addition — a consumer-derived identity, e.g.
+/// parsed from a logged-in page — differs on a bigger axis: WHO VOUCHES.
+/// Such a variant must be named so it cannot wear a custodian-sourced
+/// label; otherwise a consumer joins on something the custodian appears to
+/// have vouched for and did not. It is not minted in advance because a
+/// variant with no producer is defined from a guess about properties nobody
+/// can yet observe — decodable, joinable, and vouched for by nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountRefProvenance {
