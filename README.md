@@ -15,6 +15,7 @@ be boring, stable, and safe to depend on.
 | `cortexkit-store-postgres` | Postgres flavor of the store contract |
 | `cortexkit-provider-usage` | provider quota/usage wire types shared by producers and renderers |
 | `cortexkit-push-seal` | HPKE sealing for push-notification payloads |
+| `cortexkit-log` | fleet logging: canonical line format, `CK_LOG` levels and tags, module-owned files with rotation and retention, redaction |
 | `cortexkit-cache-core` | cache-policy primitives |
 | `cortexkit-model-catalog` | model catalog wire types (transitioning to the fusiform-served schema) |
 
