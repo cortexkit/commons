@@ -35,6 +35,28 @@ pub struct Migration {
     pub statements: &'static str,
 }
 
+/// What one migration run found and did. A run with nothing left to apply and
+/// a run that skipped everything because the store is AHEAD of the binary's
+/// chain (a rollback, or a reset numbering) must not return the same value;
+/// the migrator reports both versions and the caller decides whether it can
+/// serve a newer store. See the sqlite flavor for the full rationale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrationOutcome {
+    /// Migrations applied by this run.
+    pub applied: u32,
+    /// The namespace's recorded version after the run.
+    pub recorded: u32,
+    /// The highest version in the chain the binary carries (0 for an empty chain).
+    pub chain_max: u32,
+}
+
+impl MigrationOutcome {
+    /// The store was written by a binary carrying a longer chain than this one.
+    pub fn store_ahead(&self) -> bool {
+        self.recorded > self.chain_max
+    }
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     Lease(LeaseError),
@@ -114,7 +136,11 @@ impl PostgresStore {
     /// Apply a `namespace`'s migration chain to this database, once. Applied
     /// migrations are tracked per `(namespace, version)`, so a multi-domain module
     /// registers an independent chain per domain.
-    pub fn migrate(&self, namespace: &str, migrations: &[Migration]) -> Result<(), StoreError> {
+    pub fn migrate(
+        &self,
+        namespace: &str,
+        migrations: &[Migration],
+    ) -> Result<MigrationOutcome, StoreError> {
         let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
         run_migrations(&mut guard, namespace, migrations)
     }
@@ -238,7 +264,7 @@ fn run_migrations(
     client: &mut Client,
     namespace: &str,
     migrations: &[Migration],
-) -> Result<(), StoreError> {
+) -> Result<MigrationOutcome, StoreError> {
     // The schema-version table is bootstrapped race-safely in ensure_infra_tables
     // at open, so migrate() does not (re-)create it here.
     let current: i32 = client
@@ -252,6 +278,8 @@ fn run_migrations(
 
     let mut ordered: Vec<&Migration> = migrations.iter().collect();
     ordered.sort_by_key(|m| m.version);
+    let chain_max = ordered.last().map_or(0, |m| m.version);
+    let mut applied = 0u32;
 
     for m in ordered {
         if m.version <= current {
@@ -274,8 +302,13 @@ fn run_migrations(
         .map_err(|e| StoreError::Migration(e.to_string()))?;
         tx.commit()
             .map_err(|e| StoreError::Migration(e.to_string()))?;
+        applied += 1;
     }
-    Ok(())
+    Ok(MigrationOutcome {
+        applied,
+        recorded: current.max(chain_max),
+        chain_max,
+    })
 }
 
 fn now_unix() -> i64 {

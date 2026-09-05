@@ -38,6 +38,38 @@ pub struct Migration {
     pub statements: &'static str,
 }
 
+/// What one migration run found and did.
+///
+/// Returned instead of `Ok(())` because two different runs used to look
+/// identical from the caller's side: a run with nothing left to apply and a
+/// run that skipped everything because the store's recorded version is AHEAD
+/// of the binary's chain (a binary rollback, or a module that reset its
+/// migration numbering). The second one is a store the binary may not be able
+/// to serve, and a module that cannot serve a newer store must refuse to start
+/// on it; a module whose migrations are additive may proceed. The migrator
+/// does not choose between those — refusing here would turn every binary
+/// rollback into a bricked store — it reports, and the caller decides.
+///
+/// The fleet integration gate cannot catch the store-ahead case at all: every
+/// rig opens a fresh data tree, so no module there ever meets a store newer
+/// than its binary. This value is the only place the condition is visible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrationOutcome {
+    /// Migrations applied by this run.
+    pub applied: u32,
+    /// The namespace's recorded version after the run.
+    pub recorded: u32,
+    /// The highest version in the chain the binary carries (0 for an empty chain).
+    pub chain_max: u32,
+}
+
+impl MigrationOutcome {
+    /// The store was written by a binary carrying a longer chain than this one.
+    pub fn store_ahead(&self) -> bool {
+        self.recorded > self.chain_max
+    }
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     /// A live writer already holds this module's store.
@@ -240,7 +272,15 @@ mod sqlite_backend {
         /// domain's history is separate, and adding a domain later never re-runs or
         /// entangles another's migrations. A single-domain module just calls this
         /// once. Idempotent: only un-applied versions in this namespace run.
-        pub fn migrate(&self, namespace: &str, migrations: &[Migration]) -> Result<(), StoreError> {
+        ///
+        /// Read [`MigrationOutcome::store_ahead`] on the result: a module that
+        /// cannot serve a store newer than its chain refuses startup on it,
+        /// naming both versions.
+        pub fn migrate(
+            &self,
+            namespace: &str,
+            migrations: &[Migration],
+        ) -> Result<MigrationOutcome, StoreError> {
             let mut guard = self.conn.lock().unwrap_or_else(|p| p.into_inner());
             run_migrations(&mut guard, namespace, migrations)
         }
@@ -334,24 +374,22 @@ mod sqlite_backend {
     /// Applied migrations are keyed by `(namespace, version)`, so independent
     /// domain chains in one database never collide or re-run each other.
     ///
-    /// Deliberate policy: a binary OLDER than the store it opens proceeds
-    /// silently — migrations at or below the recorded version are skipped and
-    /// this returns `Ok`, with no staleness refusal anywhere in the open path.
-    /// Refusing here would turn every binary rollback into a bricked store,
-    /// and rollbacks are a supported recovery path. The cost is that a stale
-    /// binary on a migrated store goes UNDETECTED: there is no store-level
-    /// refusal, and the one place it could be noticed — a supervisor
-    /// comparing a module's manifest-declared `store_schema_version` against
-    /// the store's actual recorded version — is declared by some modules but
-    /// consumed by nothing today. Whoever builds that comparison: this note
-    /// names your job; do not read it as saying the job is done. Modules
-    /// declaring the version derived from their migration list (rather than
-    /// typed) keep the future comparison honest.
+    /// Deliberate policy: a binary OLDER than the store it opens is not
+    /// refused here — migrations at or below the recorded version are skipped
+    /// and the run returns `Ok`. Refusing would turn every binary rollback
+    /// into a bricked store, and rollbacks are a supported recovery path. What
+    /// the run does NOT do is hide that it skipped: the returned
+    /// [`MigrationOutcome`] reports the recorded version against the chain's
+    /// highest, and the caller — who knows whether its migrations are
+    /// additive — decides whether to serve. The supervisor-side comparison
+    /// of a module's manifest-declared `store_schema_version` against the
+    /// store is still consumed by nothing; this value is the module-side
+    /// half of that job.
     fn run_migrations(
         conn: &mut Connection,
         namespace: &str,
         migrations: &[Migration],
-    ) -> Result<(), StoreError> {
+    ) -> Result<MigrationOutcome, StoreError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cortexkit_schema_version (\
                  namespace TEXT NOT NULL, \
@@ -372,6 +410,8 @@ mod sqlite_backend {
 
         let mut ordered: Vec<&Migration> = migrations.iter().collect();
         ordered.sort_by_key(|m| m.version);
+        let chain_max = ordered.last().map_or(0, |m| m.version);
+        let mut applied = 0u32;
 
         for m in ordered {
             if m.version <= current {
@@ -394,8 +434,13 @@ mod sqlite_backend {
             .map_err(|e| StoreError::Migration(e.to_string()))?;
             tx.commit()
                 .map_err(|e| StoreError::Migration(e.to_string()))?;
+            applied += 1;
         }
-        Ok(())
+        Ok(MigrationOutcome {
+            applied,
+            recorded: current.max(chain_max),
+            chain_max,
+        })
     }
 
     fn now_unix() -> i64 {
@@ -618,6 +663,60 @@ mod tests {
             })
             .expect("weight column queryable");
         assert_eq!(ok, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A binary whose chain is SHORTER than the store's recorded version (a
+    /// rollback, or a module that reset its numbering) must not read as a
+    /// no-op: the outcome says the store is ahead and by how much, and the
+    /// caller decides whether it can serve. Before this value existed the two
+    /// runs returned the same `Ok(())`, and a v1 store under a reset chain
+    /// started a daemon that could answer nothing.
+    #[test]
+    fn store_ahead_of_chain_is_reported_not_hidden() {
+        let (root, d) = tmp();
+        {
+            let s = open_sqlite(&d).expect("newer binary");
+            const NEWER: &[Migration] = &[
+                Migration {
+                    version: 1,
+                    statements: "CREATE TABLE facts (id INTEGER PRIMARY KEY, name TEXT NOT NULL);",
+                },
+                Migration {
+                    version: 9,
+                    statements: "CREATE TABLE later (id INTEGER PRIMARY KEY);",
+                },
+            ];
+            let outcome = s.migrate("facts", NEWER).expect("newer migrate");
+            assert_eq!(outcome.applied, 2);
+            assert_eq!(outcome.recorded, 9);
+            assert!(!outcome.store_ahead(), "a store at its chain is not ahead");
+        }
+        // The older (or reset) binary: chain max 1 against a store at 9.
+        let store = open_sqlite(&d).expect("older binary");
+        let outcome = store
+            .migrate("facts", M1)
+            .expect("older migrate is Ok by policy");
+        assert_eq!(
+            outcome,
+            MigrationOutcome {
+                applied: 0,
+                recorded: 9,
+                chain_max: 1
+            }
+        );
+        assert!(
+            outcome.store_ahead(),
+            "the skip must be visible to the caller"
+        );
+        // And nothing was applied or re-applied: M1's seed rows are still exactly two.
+        let n: i64 = store
+            .with_conn(|c| c.query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0)))
+            .expect("count");
+        assert_eq!(
+            n, 0,
+            "the newer chain's table was created empty; the older chain seeded nothing"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
