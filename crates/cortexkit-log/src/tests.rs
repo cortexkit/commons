@@ -776,3 +776,89 @@ fn for_module_places_the_file_under_the_module_data_dir() {
     assert_eq!(config.logs_dir, expected);
     assert_eq!(config.module_id, "magic-context");
 }
+
+/// A supervisor's per-child sink must rotate under the same policy the layer
+/// uses, and must frame a line exactly once: two pipes (a child's stdout and
+/// stderr) feed one file, so a second write for the newline would let the other
+/// pipe land inside a line.
+#[test]
+fn line_sink_rotates_and_frames_each_line_once() {
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("child.stderr.log");
+    // 64-byte cap: small enough that the third line forces a rotation.
+    let retention = Retention::from_bytes_for_testing(64, 2, 14);
+    let mut sink = LineSink::open(&path, retention).expect("sink opens");
+
+    sink.write_line(b"first line without newline")
+        .expect("write 1");
+    sink.write_line(b"second line with newline\n")
+        .expect("write 2");
+
+    let active = fs::read_to_string(&path).expect("active file");
+    assert_eq!(
+        active, "first line without newline\nsecond line with newline\n",
+        "each line is terminated exactly once, whether or not the caller framed it"
+    );
+
+    // The interleave property, proven rather than asserted: two sinks on one
+    // file stand in for a child's stdout and stderr pipes. With one write per
+    // line every line arrives whole; with a separate write for the newline the
+    // other pipe can land between them and split a line.
+    let shared = dir.path().join("two-pipes.log");
+    let threads: Vec<_> = ["out", "err"]
+        .into_iter()
+        .map(|lane| {
+            let shared = shared.clone();
+            thread::spawn(move || {
+                let mut sink = LineSink::open(&shared, Retention::default()).expect("sink opens");
+                for i in 0..200 {
+                    sink.write_line(format!("{lane}-{i:03}-{}", "x".repeat(48)).as_bytes())
+                        .expect("concurrent write");
+                }
+            })
+        })
+        .collect();
+    for thread in threads {
+        thread.join().expect("writer thread");
+    }
+    let woven = fs::read_to_string(&shared).expect("shared file");
+    assert_eq!(woven.lines().count(), 400, "every line must be present");
+    for line in woven.lines() {
+        assert!(
+            line.len() == 56 && (line.starts_with("out-") || line.starts_with("err-")),
+            "a torn line proves the newline was a second write: {line:?}"
+        );
+    }
+
+    for i in 0..4 {
+        sink.write_line(
+            format!("padding line {i} carrying enough bytes to pass the cap").as_bytes(),
+        )
+        .expect("padding write");
+    }
+
+    let rotated = sink::rotated_path(&path, 1);
+    assert!(
+        rotated.exists(),
+        "exceeding the cap must rotate, as the layer's own sink does: {}",
+        rotated.display()
+    );
+    // Read every retained generation plus the active file: with keep=2 the
+    // earliest lines may already have aged out, so the property under test is
+    // that whatever is retained is intact, not that generation 1 holds it.
+    let mut combined = String::new();
+    for generation in (1..=u32::from(retention.keep)).rev() {
+        if let Ok(text) = fs::read_to_string(sink::rotated_path(&path, generation)) {
+            combined.push_str(&text);
+        }
+    }
+    combined.push_str(&fs::read_to_string(&path).expect("active file"));
+    assert!(
+        combined.contains("padding line 3 carrying enough bytes to pass the cap\n"),
+        "rotation must preserve lines it retained, not truncate them: {combined:?}"
+    );
+    assert!(
+        !combined.contains("\n\n"),
+        "no line may be double-terminated: {combined:?}"
+    );
+}

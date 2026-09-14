@@ -6,6 +6,59 @@ use std::time::{Duration, SystemTime};
 
 use crate::Retention;
 
+/// A rotating file sink for bytes the caller has already framed as complete
+/// lines — captured child output, forwarded worker rings, anything that is
+/// already a log line and must not be re-formatted.
+///
+/// The tracing layer is process-global by construction: one `init` per process,
+/// one destination. A supervisor needs one rotating file PER CHILD, and those
+/// bytes must reach the child's own file unchanged rather than becoming events
+/// in the supervisor's log. Without this type the only options are duplicating
+/// the rotation code (which then drifts from the crate that owns the policy) or
+/// shipping unrotated files (which is how a log reaches 936 MB unnoticed).
+///
+/// The caller owns framing: `write_line` appends a single trailing newline if
+/// the bytes do not already end with one, and writes exactly once so two pipes
+/// feeding one sink cannot interleave a partial line. Rotation and pruning are
+/// the same policy the layer uses, because it is the same code.
+pub struct LineSink {
+    destination: Destination,
+}
+
+impl LineSink {
+    /// Opens (or creates) `path` with `retention`, pruning aged generations the
+    /// way the layer's own sink does on open.
+    pub fn open(path: &Path, retention: Retention) -> io::Result<Self> {
+        Self::open_at(path, retention, SystemTime::now())
+    }
+
+    /// `open` with an explicit clock, so a caller can test rotation and age
+    /// pruning without sleeping.
+    pub fn open_at(path: &Path, retention: Retention, now: SystemTime) -> io::Result<Self> {
+        Ok(Self {
+            destination: Destination::open(path, retention, now, false)?,
+        })
+    }
+
+    /// Writes one complete line, rotating first if it would exceed the cap.
+    pub fn write_line(&mut self, line: &[u8]) -> io::Result<()> {
+        self.write_line_at(line, SystemTime::now())
+    }
+
+    /// `write_line` with an explicit clock.
+    pub fn write_line_at(&mut self, line: &[u8], now: SystemTime) -> io::Result<()> {
+        if line.ends_with(b"\n") {
+            return self.destination.write(line, now);
+        }
+        // One write, not two: a second write for the newline would let a
+        // concurrent writer on another pipe land between them.
+        let mut framed = Vec::with_capacity(line.len() + 1);
+        framed.extend_from_slice(line);
+        framed.push(b'\n');
+        self.destination.write(&framed, now)
+    }
+}
+
 pub(crate) enum Destination {
     File(FileDestination),
     Fallback,

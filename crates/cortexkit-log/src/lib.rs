@@ -3,6 +3,7 @@
 mod format;
 mod redaction;
 mod sink;
+pub use sink::LineSink;
 
 use std::backtrace::Backtrace;
 use std::borrow::Cow;
