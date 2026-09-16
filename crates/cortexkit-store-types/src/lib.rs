@@ -136,6 +136,45 @@ pub fn resolve_data_home() -> String {
     resolve_data_home_path().to_string_lossy().into_owned()
 }
 
+/// The XDG-style CONFIG HOME (`~/.config`, `%APPDATA%`), with no `cortexkit/`
+/// tail: a module joins `cortexkit/<its file>` under it. Mirrors the
+/// supervisor's `default_config_home` exactly and is pinned to the same golden
+/// rows (`tests/golden/config_home_resolution.json`, vendored from
+/// subconscious). Modules previously carried a dated hand copy of this ladder
+/// because the only callable was the daemon's, which bakes in its own
+/// `cortexkit/subc.jsonc` tail; a copy is current the day it is taken and every
+/// local check passes forever after, so the ladder lives here once.
+///
+/// `XDG_CONFIG_HOME` → `APPDATA` (Windows) → `USERPROFILE\AppData\Roaming`
+/// (Windows) → `HOME/.config` → `.config` relative. Empty values count as unset.
+pub fn resolve_config_home() -> String {
+    resolve_config_home_path().to_string_lossy().into_owned()
+}
+
+fn resolve_config_home_path() -> std::path::PathBuf {
+    use std::path::PathBuf;
+
+    if let Some(v) = non_empty_env("XDG_CONFIG_HOME") {
+        return PathBuf::from(v);
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(app_data) = non_empty_env("APPDATA") {
+            return PathBuf::from(app_data);
+        }
+        if let Some(user_profile) = non_empty_env("USERPROFILE") {
+            return PathBuf::from(user_profile).join("AppData").join("Roaming");
+        }
+    }
+
+    if let Some(home) = non_empty_env("HOME") {
+        return PathBuf::from(home).join(".config");
+    }
+
+    PathBuf::from(".config")
+}
+
 /// `PathBuf` form of [`resolve_data_home`]; the join operations reproduce the
 /// daemon's separator behavior exactly (backslash joins on Windows).
 fn resolve_data_home_path() -> std::path::PathBuf {

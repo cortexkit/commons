@@ -1,0 +1,94 @@
+{
+  "authority": "crates/subc-core/src/daemon_config.rs default_config_home -- the daemon resolves its own config file under this home; mirrors (cortexkit-store-types resolve_config_home, and any module resolving its own config file) assert against these rows and may not diverge",
+  "notes": "env maps list ONLY the variables set for the case; the harness must clear XDG_CONFIG_HOME, APPDATA, USERPROFILE, and HOME before applying each case. Empty string values are deliberately present to pin empty-counts-as-unset. Platform 'any' rows must pass on every OS; 'unix'/'windows' rows only where cfg matches. Resolver output is asserted RAW (no trimming, no cortexkit/ tail): callers join their own file under it. Row shape is deliberately identical to data_home_resolution.json so a harness written for one runs the other with two string substitutions.",
+  "cases": [
+    {
+      "name": "xdg_absolute_as_is",
+      "platform": "any",
+      "env": {
+        "XDG_CONFIG_HOME": "/tmp/xdg-config-golden"
+      },
+      "expect": "/tmp/xdg-config-golden"
+    },
+    {
+      "name": "xdg_relative_honored_as_is",
+      "platform": "any",
+      "env": {
+        "XDG_CONFIG_HOME": "relative/config"
+      },
+      "expect": "relative/config"
+    },
+    {
+      "name": "xdg_trailing_slash_kept_by_resolver",
+      "platform": "any",
+      "env": {
+        "XDG_CONFIG_HOME": "/tmp/xdg-config-golden/"
+      },
+      "expect": "/tmp/xdg-config-golden/"
+    },
+    {
+      "name": "xdg_empty_is_unset",
+      "platform": "unix",
+      "env": {
+        "XDG_CONFIG_HOME": "",
+        "HOME": "/home/golden"
+      },
+      "expect": "/home/golden/.config"
+    },
+    {
+      "name": "home_fallback",
+      "platform": "unix",
+      "env": {
+        "HOME": "/home/golden"
+      },
+      "expect": "/home/golden/.config"
+    },
+    {
+      "name": "all_unset_falls_to_relative",
+      "platform": "unix",
+      "env": {},
+      "expect": ".config"
+    },
+    {
+      "name": "appdata_wins_on_windows",
+      "platform": "windows",
+      "env": {
+        "APPDATA": "C:\\Users\\golden\\AppData\\Roaming"
+      },
+      "expect": "C:\\Users\\golden\\AppData\\Roaming"
+    },
+    {
+      "name": "userprofile_appends_appdata_roaming",
+      "platform": "windows",
+      "env": {
+        "USERPROFILE": "C:\\Users\\golden"
+      },
+      "expect": "C:\\Users\\golden\\AppData\\Roaming"
+    },
+    {
+      "name": "xdg_beats_appdata_on_windows",
+      "platform": "windows",
+      "env": {
+        "XDG_CONFIG_HOME": "C:/xdg-config-golden",
+        "APPDATA": "C:\\Users\\golden\\AppData\\Roaming"
+      },
+      "expect": "C:/xdg-config-golden"
+    },
+    {
+      "name": "windows_empty_appdata_userprofile_falls_to_home",
+      "platform": "windows",
+      "env": {
+        "APPDATA": "",
+        "USERPROFILE": "",
+        "HOME": "C:/golden-home"
+      },
+      "expect": "C:/golden-home\\.config"
+    },
+    {
+      "name": "windows_all_unset_falls_to_relative",
+      "platform": "windows",
+      "env": {},
+      "expect": ".config"
+    }
+  ]
+}
