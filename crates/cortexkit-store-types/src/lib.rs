@@ -132,6 +132,18 @@ pub fn postgres_database_name(module_id: &str) -> String {
 /// (rigs set it in the module's env block). Private per-module `*_DATA_DIR`
 /// conventions are unsupported: they create a second boundary that this crate
 /// cannot see.
+///
+/// # THE RESULT CAN BE RELATIVE — see `resolve_config_home` for the full note
+///
+/// Same two undistinguished cases (no rung set, or a relative `XDG_*_HOME`
+/// passed through), same consequence: the path resolves against the caller's
+/// current directory, so one module can derive a different store per process
+/// while every read reports success. Check `Path::is_absolute()` at your seam.
+///
+/// This one has a measured instance rather than a hypothetical: on 2026-09-18 a
+/// daemon change spawned modules with a cleared environment, and a workspace
+/// test run with `HOME` unset wrote a store tree INSIDE a source checkout
+/// (`crates/subc-client-rs/.local/share/…`), which then poisoned a build stamp.
 pub fn resolve_data_home() -> String {
     resolve_data_home_path().to_string_lossy().into_owned()
 }
@@ -147,6 +159,32 @@ pub fn resolve_data_home() -> String {
 ///
 /// `XDG_CONFIG_HOME` → `APPDATA` (Windows) → `USERPROFILE\AppData\Roaming`
 /// (Windows) → `HOME/.config` → `.config` relative. Empty values count as unset.
+///
+/// # THE RESULT CAN BE RELATIVE, AND YOU ALMOST CERTAINLY WANT TO REFUSE IT
+///
+/// Two cases return a relative path, and this function does not distinguish
+/// them: no rung is set (falls through to a bare `.config`), or an `XDG_*_HOME`
+/// is itself set relative and is passed through as the golden pins it.
+///
+/// A relative config home resolves against the CALLER'S CURRENT DIRECTORY, so
+/// two processes of the same module — or one module before and after a service
+/// manager changes its working directory — read different files while both
+/// report success. Nothing downstream can detect that.
+///
+/// Four independent consumers reached the same conclusion and each wrote the
+/// same guard (2026-09-18): cerebellum, synapse, astrocyte, and the subc daemon,
+/// which refuses a relative `storage.data_home` at config parse. When four
+/// callers add identical arms on top of one callable, the callable's return type
+/// is the thing that is wrong. Until that changes — it is a cross-language
+/// contract with a shared golden, so it is a fleet decision rather than a patch
+/// — check `Path::is_absolute()` at your seam and refuse with a message naming
+/// the environment variable the operator should set.
+///
+/// There is an unresolved contradiction underneath this, stated so the next
+/// reader does not have to rediscover it: a DECLARED relative data home is
+/// refused by the daemon at parse, while the DERIVED relative fallback is pinned
+/// as CORRECT by the shared golden. Same value, opposite verdicts, decided by
+/// whether an operator typed it or a resolver produced it.
 pub fn resolve_config_home() -> String {
     resolve_config_home_path().to_string_lossy().into_owned()
 }
