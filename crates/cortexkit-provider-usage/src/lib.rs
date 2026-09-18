@@ -692,6 +692,62 @@ pub enum AccountRefProvenance {
 
 #[cfg(test)]
 mod tests {
+    /// `AccountInfo` IS AN IDENTITY STRUCT, SO AN ADDITIVE FIELD HERE IS A
+    /// DECISION RATHER THAN A DETAIL. This pins its serialised key set closed
+    /// in both directions so adding one reddens here, at the moment it is
+    /// written, rather than at whatever a consumer notices later.
+    ///
+    /// Why an identity struct earns a pin that an ordinary payload does not:
+    /// downstream, `ck quota --redact` renders these fields for screenshots and
+    /// removes the identifying ones BY NAME -- so a new identifying field
+    /// defaults to visible, the redaction filter keeps passing, its tests keep
+    /// going green, and a published screenshot carries a name nobody can
+    /// unpublish. Measured live 2026-09-18: Anthropic's `/api/oauth/profile`
+    /// carries `account.full_name`, `account.display_name` and
+    /// `organization.name` beside the subscription tier a consumer wanted, so
+    /// the pressure to widen this struct is real and already arrived once.
+    ///
+    /// THE THREE-LINK CHAIN, so nobody mistakes one link for the whole:
+    /// 1 the capturing consumer decodes only the fields it means to keep,
+    /// 2 THIS PIN (the shared struct's key set, closed at the producer),
+    /// 3 the rendering consumer's redaction filter, downstream.
+    ///
+    /// Link 2 alone does not stop a field being added; it stops one being added
+    /// WITHOUT SOMEONE SAYING SO. If you are here because this test is red and
+    /// the field is genuinely wanted, add it, update this test, and tell the
+    /// `ck quota --redact` owner -- that last step is the whole reason the test
+    /// exists.
+    #[test]
+    fn the_account_info_key_set_is_closed_in_both_directions() {
+        let populated = AccountInfo {
+            email: Some("operator@example.com".to_string()),
+            org_name: Some("Example Org".to_string()),
+            plan_type: Some("max".to_string()),
+        };
+        let value = serde_json::to_value(&populated).expect("serialise");
+        let object = value.as_object().expect("object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["email", "orgName", "planType"],
+            "AccountInfo's serialised key set changed. If a field was ADDED: is it \
+             personally identifying? If so it reaches `ck quota --redact`, whose filter \
+             removes fields by name and will pass it straight through into a screenshot. \
+             Update this test and notify that owner."
+        );
+
+        // The other direction: every empty account must serialise to nothing at
+        // all, so a consumer cannot read an absent identity as an empty one.
+        let empty = serde_json::to_value(AccountInfo::default()).expect("serialise");
+        assert_eq!(
+            empty.as_object().expect("object").len(),
+            0,
+            "an empty AccountInfo must emit no keys; a present-but-null field reads to a \
+             consumer as a resolved-and-blank identity rather than an unresolved one"
+        );
+    }
+
     /// Full AccountIdentity round-trips with every field present, and the
     /// wire spelling of both provenance branches is pinned.
     #[test]
