@@ -4,25 +4,34 @@ use std::time::SystemTime;
 use chrono::{DateTime, SecondsFormat, Utc};
 use tracing::Level;
 
+/// Renders one r2 fleet log line: `<ts> <LEVEL> <logger>: [<bound>] <message> <fields>`.
+///
+/// `logger` is the full dotted name (`engram`, `engram.gc.walk`), already
+/// validated by [`logger_name`]. `bound` renders inside the bracket in the order
+/// given; an empty slice renders NO bracket, because "nothing bound" and "an
+/// empty context" are different facts and only the first is ever true.
 pub(crate) fn render_line(
     at: SystemTime,
     level: &Level,
-    module_id: &str,
-    session: Option<&str>,
-    tag: Option<&str>,
+    logger: &str,
+    bound: &[(String, String)],
     message: &str,
     fields: &[(String, String)],
 ) -> String {
     let timestamp = DateTime::<Utc>::from(at).to_rfc3339_opts(SecondsFormat::Millis, true);
-    let mut line = format!("{timestamp} {:<5} {module_id}", level.as_str());
+    let mut line = format!("{timestamp} {:<5} {logger}:", level.as_str());
 
-    if let Some(session) = session {
-        line.push_str(" session=");
-        line.push_str(session);
-    }
-    if let Some(tag) = tag {
-        line.push_str(" tag=");
-        line.push_str(tag);
+    if !bound.is_empty() {
+        line.push_str(" [");
+        for (index, (key, value)) in bound.iter().enumerate() {
+            if index > 0 {
+                line.push(' ');
+            }
+            line.push_str(key);
+            line.push('=');
+            line.push_str(&format_value(value));
+        }
+        line.push(']');
     }
     if !message.is_empty() {
         line.push(' ');
@@ -38,6 +47,27 @@ pub(crate) fn render_line(
     line
 }
 
+/// Joins a module id and an optional component into the logger name, refusing
+/// a component that is not in the segment grammar. A `tracing` target that is
+/// a Rust module path (`synapse::engine::decode`) is NOT a component: it would
+/// make logger names an accident of code layout, so it maps to the bare module
+/// id. A target equal to the module id is the same case spelled differently.
+pub(crate) fn logger_name(module_id: &str, target: &str) -> String {
+    if target.is_empty() || target == module_id || target.contains("::") {
+        return module_id.to_owned();
+    }
+    if !target.split('.').all(is_segment) {
+        return module_id.to_owned();
+    }
+    format!("{module_id}.{target}")
+}
+
+pub(crate) fn is_segment(segment: &str) -> bool {
+    let mut chars = segment.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && chars.all(|character| matches!(character, 'a'..='z' | '0'..='9' | '-'))
+}
+
 // Backslash is escaped first so a literal `\n` in the input survives as
 // `\\n` and cannot be read back as a newline. Same order as @cortexkit/log.
 fn escape_message(message: &str) -> String {
@@ -51,7 +81,7 @@ fn format_value(value: &str) -> String {
     if value.is_empty()
         || value
             .chars()
-            .any(|character| matches!(character, ' ' | '"' | '\n' | '\r'))
+            .any(|character| matches!(character, ' ' | '"' | '\n' | '\r' | ']'))
     {
         let escaped = value
             .replace('\\', "\\\\")
@@ -174,14 +204,29 @@ pub struct ParsedLine<'a> {
     pub timestamp: SystemTime,
     /// Event severity.
     pub level: ParsedLevel,
-    /// Module that owns the log file.
+    /// The full dotted logger name, rooted at the module id.
+    pub logger: &'a str,
+    /// The module id: the logger's first segment.
     pub module_id: &'a str,
-    /// Session lineage, including its issuer, when one was present.
-    pub session: Option<&'a str>,
-    /// Declared target tag, when one was present.
-    pub tag: Option<&'a str>,
-    /// The message and ordered fields after the fixed columns.
+    /// The raw text inside the bound bracket, absent when there was none.
+    pub bound: Option<&'a str>,
+    /// The message and ordered event fields after the bracket.
     pub body: &'a str,
+}
+
+impl ParsedLine<'_> {
+    /// The `session=` bound value when one is present, whole, issuer included.
+    pub fn session(&self) -> Option<&str> {
+        self.bound.and_then(|bound| bound_value(bound, "session"))
+    }
+}
+
+fn bound_value<'a>(bound: &'a str, key: &str) -> Option<&'a str> {
+    bound
+        .split(' ')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(candidate, _)| *candidate == key)
+        .map(|(_, value)| value)
 }
 
 /// A stable parse failure returned by [`parse_line`](crate::parse_line).
@@ -230,54 +275,87 @@ pub(crate) fn parse(line: &str) -> Result<ParsedLine<'_>, ParseError> {
         .map_err(|_| ParseError::new("timestamp_invalid"))?;
 
     let (level, after_level) = parse_level(after_timestamp)?;
-    let (module_id, mut body) = after_level
-        .split_once(' ')
-        .ok_or_else(|| ParseError::new("message_missing"))?;
-    if module_id.is_empty() {
-        return Err(ParseError::new("module_missing"));
+
+    // The logger runs to the first space and MUST end in a colon. An r1 line
+    // (`fusiform poll changed`) has no colon and fails here by design: it is
+    // the colon that makes the logger unambiguous against a one-word message.
+    let (logger_token, mut body) = match after_level.split_once(' ') {
+        Some(split) => split,
+        None => (after_level, ""),
+    };
+    let logger = logger_token
+        .strip_suffix(':')
+        .ok_or_else(|| ParseError::new("logger_not_terminated"))?;
+    if logger.is_empty() {
+        return Err(ParseError::new("logger_missing"));
+    }
+    if !logger.split('.').all(is_segment) {
+        return Err(ParseError::new("logger_segment_grammar"));
+    }
+    let module_id = logger.split('.').next().unwrap_or(logger);
+
+    let mut bound = None;
+    if let Some(rest) = body.strip_prefix('[') {
+        let close =
+            find_bracket_close(rest).ok_or_else(|| ParseError::new("bound_unterminated"))?;
+        let inside = &rest[..close];
+        if inside.is_empty() {
+            return Err(ParseError::new("empty_bound_bracket"));
+        }
+        if let Some(session) = bound_value(inside, "session") {
+            let valid = session
+                .rsplit_once(':')
+                .is_some_and(|(issuer, id)| !issuer.is_empty() && !id.is_empty());
+            // `session=global` and other issuer-less placeholders fail here on
+            // their missing `issuer:` half; the renderer never has to know any
+            // particular sentinel.
+            if !valid {
+                return Err(ParseError::new("session_missing_issuer"));
+            }
+        }
+        bound = Some(inside);
+        body = rest[close + 1..]
+            .strip_prefix(' ')
+            .unwrap_or(&rest[close + 1..]);
     }
 
-    let mut session = None;
-    if let Some(rest) = body.strip_prefix("session=") {
-        let (value, remainder) = rest
-            .split_once(' ')
-            .ok_or_else(|| ParseError::new("message_missing"))?;
-        let valid = value
-            .rsplit_once(':')
-            .is_some_and(|(issuer, id)| !issuer.is_empty() && !id.is_empty());
-        // `session=global` and other issuer-less placeholders fail here on
-        // their missing `issuer:` half; the renderer never has to know any
-        // particular sentinel.
-        if !valid {
-            return Err(ParseError::new("session_missing_issuer"));
-        }
-        session = Some(value);
-        body = remainder;
-    }
-
-    let mut tag = None;
-    if let Some(rest) = body.strip_prefix("tag=") {
-        let (value, remainder) = rest
-            .split_once(' ')
-            .ok_or_else(|| ParseError::new("message_missing"))?;
-        if value.is_empty() {
-            return Err(ParseError::new("tag_missing"));
-        }
-        tag = Some(value);
-        body = remainder;
-    }
-    if body.is_empty() {
-        return Err(ParseError::new("message_missing"));
+    // A bracket AFTER the message is not context: context precedes the message
+    // so its column is stable. Reject rather than silently reading it as a
+    // field, because a reader that accepted both would train writers to put
+    // it wherever, and the alignment property would be gone in a month.
+    if bound.is_none() && body.contains(" [") && body.ends_with(']') {
+        return Err(ParseError::new("bound_after_message"));
     }
 
     Ok(ParsedLine {
         timestamp: SystemTime::from(timestamp),
         level,
+        logger,
         module_id,
-        session,
-        tag,
+        bound,
         body,
     })
+}
+
+// The bracket closes at the first `]` that is not inside a quoted value. A
+// bound value containing `]` was quoted by the renderer for exactly this
+// reason, so a naive `find(']')` would split a path like `[root="a]b"]`.
+fn find_bracket_close(input: &str) -> Option<usize> {
+    let mut in_quotes = false;
+    let mut escaped = false;
+    for (index, character) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' if in_quotes => escaped = true,
+            '"' => in_quotes = !in_quotes,
+            ']' if !in_quotes => return Some(index),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_level(input: &str) -> Result<(ParsedLevel, &str), ParseError> {

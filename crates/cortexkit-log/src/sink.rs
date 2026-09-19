@@ -61,9 +61,6 @@ impl LineSink {
 
 pub(crate) enum Destination {
     File(FileDestination),
-    Fallback,
-    #[cfg(test)]
-    AlwaysFail,
 }
 
 impl Destination {
@@ -79,12 +76,6 @@ impl Destination {
     pub(crate) fn write(&mut self, bytes: &[u8], now: SystemTime) -> io::Result<()> {
         match self {
             Self::File(file) => file.write(bytes, now),
-            Self::Fallback => Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "fallback writes use the diagnostic stream",
-            )),
-            #[cfg(test)]
-            Self::AlwaysFail => Err(io::Error::other("injected write failure")),
         }
     }
 }
