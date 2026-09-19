@@ -115,14 +115,15 @@ pub struct Config {
 }
 
 impl Config {
-    /// The fleet configuration for a supervised module's own process: segments
-    /// under `<module data dir>/logs/`, `CK_LOG` from the environment (the
-    /// daemon injects it at spawn), fleet default retention, nothing bound.
-    pub fn for_module(module_id: &str) -> Self {
-        let data_dir = PathBuf::from(cortexkit_store_types::module_data_dir(module_id));
+    /// A configuration whose segment directory the caller already resolved:
+    /// `CK_LOG` from the environment, fleet default retention, nothing bound.
+    /// This is the path for a consumer that owns its module data directory
+    /// through its own pinned store crate and must not pull a second copy of
+    /// it through this one (see the `store-paths` feature).
+    pub fn in_dir(module_id: &str, logs_dir: impl Into<PathBuf>) -> Self {
         Self {
             module_id: module_id.to_owned(),
-            logs_dir: data_dir.join("logs"),
+            logs_dir: logs_dir.into(),
             bound: Vec::new(),
             spec: None,
             retention: SegmentRetention::default(),
@@ -131,8 +132,18 @@ impl Config {
         }
     }
 
+    /// The fleet configuration for a supervised module's own process: segments
+    /// under `<module data dir>/logs/`, `CK_LOG` from the environment (the
+    /// daemon injects it at spawn), fleet default retention, nothing bound.
+    #[cfg(feature = "store-paths")]
+    pub fn for_module(module_id: &str) -> Self {
+        let data_dir = PathBuf::from(cortexkit_store_types::module_data_dir(module_id));
+        Self::in_dir(module_id, data_dir.join("logs"))
+    }
+
     /// [`Config::for_module`] with `harness=<harness>` bound on every line, for
     /// a plugin running inside a harness process.
+    #[cfg(feature = "store-paths")]
     pub fn for_plugin(module_id: &str, harness: &str) -> Self {
         let mut config = Self::for_module(module_id);
         config
@@ -147,6 +158,7 @@ impl Config {
     /// knobs as `CK_LOG_MAX_AGE_DAYS` / `CK_LOG_ALARM_SEGMENT_MB`. This is the
     /// zero-argument path the r2 spec requires so that reaching for the crate
     /// costs no more than reaching for `eprintln!`.
+    #[cfg(feature = "store-paths")]
     pub fn from_env() -> Result<Self, InitError> {
         let module_id = env::var("SUBC_MODULE_ID")
             .ok()
@@ -163,6 +175,7 @@ impl Config {
     }
 }
 
+#[cfg(feature = "store-paths")]
 fn env_u32(name: &str) -> Option<u32> {
     env::var(name).ok()?.trim().parse().ok()
 }
@@ -232,6 +245,7 @@ pub fn init(config: Config) -> Result<Handle, InitError> {
 }
 
 /// [`init`] with [`Config::from_env`]: the whole setup for a supervised module.
+#[cfg(feature = "store-paths")]
 pub fn init_from_env() -> Result<Handle, InitError> {
     init(Config::from_env()?)
 }

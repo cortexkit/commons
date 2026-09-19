@@ -800,6 +800,7 @@ fn paths_and_unix_permissions_follow_the_contract() {
 }
 
 #[test]
+#[cfg(feature = "store-paths")]
 fn for_module_places_segments_under_the_module_data_dir() {
     let config = Config::for_module("insula");
     let expected = PathBuf::from(cortexkit_store_types::module_data_dir("insula")).join("logs");
@@ -810,6 +811,7 @@ fn for_module_places_segments_under_the_module_data_dir() {
 }
 
 #[test]
+#[cfg(feature = "store-paths")]
 fn from_env_reads_the_daemon_injected_knobs_and_refuses_without_a_module_id() {
     // Serialised through a lock because these are process-global.
     static ENV: Mutex<()> = Mutex::new(());
@@ -932,4 +934,16 @@ fn two_line_sinks_on_one_file_never_tear_a_line() {
             "torn line: {line:?}"
         );
     }
+}
+
+#[test]
+fn in_dir_takes_the_callers_directory_verbatim_and_binds_nothing() {
+    // The constructor a consumer uses when it resolves its own data directory
+    // through a store crate pinned elsewhere, so this crate must not resolve
+    // one for it. Available with or without the `store-paths` feature.
+    let config = Config::in_dir("thalamus", "/some/where/thalamus/logs");
+    assert_eq!(config.logs_dir, PathBuf::from("/some/where/thalamus/logs"));
+    assert_eq!(config.module_id, "thalamus");
+    assert!(config.bound.is_empty());
+    assert!(config.spec.is_none());
 }
