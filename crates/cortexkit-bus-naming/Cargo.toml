@@ -1,0 +1,9 @@
+[package]
+name = "cortexkit-bus-naming"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Subject, stream, bucket, consumer and grant naming rules for the CortexKit message plane"
+

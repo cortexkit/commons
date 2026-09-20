@@ -1,0 +1,19 @@
+[package]
+name = "cortexkit-bus-nats"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "async-nats backend for the CortexKit message-plane traits"
+
+[dependencies]
+async-nats = { version = "0.50", default-features = false, features = ["jetstream", "kv", "nkeys", "nuid", "ring", "server_2_10"] }
+async-trait = "0.1"
+bytes = "1"
+futures-util = "0.3"
+cortexkit-bus-trait = { version = "0.1.0", path = "../cortexkit-bus-trait" }
+tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3"

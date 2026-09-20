@@ -1,0 +1,16 @@
+[package]
+name = "cortexkit-bus-inmemory"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Deterministic in-memory backend for the CortexKit NATS-shaped bus traits"
+
+[dependencies]
+async-trait = "0.1"
+cortexkit-bus-trait = { version = "0.1.0", path = "../cortexkit-bus-trait" }
+tokio = { version = "1", features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
