@@ -51,6 +51,7 @@ struct GoldenFixture {
     cases: Vec<GoldenCase>,
     parse_rejects: Vec<ParseReject>,
     level_filter: LevelFilterCases,
+    redaction: RedactionCases,
     segment_name: SegmentNameCases,
     retention_prune: RetentionPruneCases,
 }
@@ -77,6 +78,18 @@ struct ParseReject {
     name: String,
     line: String,
     reason: String,
+}
+
+#[derive(Deserialize)]
+struct RedactionCases {
+    cases: Vec<RedactionCase>,
+}
+
+#[derive(Deserialize)]
+struct RedactionCase {
+    name: String,
+    input: String,
+    output: String,
 }
 
 #[derive(Deserialize)]
@@ -146,7 +159,7 @@ fn config(logs_dir: PathBuf, module_id: &str) -> Config {
 }
 
 fn build_test_layer(config: Config, capture: &CaptureWriter) -> (LogLayer, Handle) {
-    build_layer(config, Box::new(capture.clone())).expect("build test layer")
+    build_layer(config, Box::new(capture.clone()), false).expect("build test layer")
 }
 
 fn dispatch(layer: LogLayer) -> tracing::Dispatch {
@@ -218,6 +231,117 @@ fn every_golden_line_parses_and_round_trips_its_columns() {
             case.name
         );
     }
+}
+
+// Every redaction case through the real fleet redactor. `control-*` cases come
+// out unchanged, which is what keeps the patterns from widening into text that
+// only resembles a credential.
+#[test]
+fn golden_redaction_cases_match() {
+    for case in fixture().redaction.cases {
+        assert_eq!(
+            fleet_redact(&case.input),
+            case.output,
+            "redaction case {}",
+            case.name
+        );
+    }
+}
+
+// The whole-line stripping bug from before 0.3.3, reproduced through the real
+// emit and write path: a value carrying `ESC ]` opened an OSC that consumed the
+// closing quote and every later field. The later field must reach the file.
+#[test]
+fn a_stray_osc_introducer_in_one_value_keeps_the_later_fields() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let capture = CaptureWriter::default();
+    let (layer, handle) = build_test_layer(config(root.path().to_path_buf(), "aft"), &capture);
+    tracing::dispatcher::with_default(&dispatch(layer), || {
+        tracing::warn!(target: "lsp", text = "x\u{1b}]title", code = 2_u64, "server said");
+    });
+    let line = read_segment(&handle);
+    assert!(line.contains("text=\"x\\u001b]title\""), "{line}");
+    assert!(line.contains(" code=2"), "later field lost: {line}");
+    assert!(!line.contains('\u{1b}'), "raw ESC reached the file: {line}");
+}
+
+// A module redactor can put raw control bytes back into a finished line. The
+// guard must escape them, never strip: a strip would eat text the redactor
+// never meant to touch.
+#[test]
+fn the_post_redactor_guard_escapes_raw_controls() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let capture = CaptureWriter::default();
+    let mut config = config(root.path().to_path_buf(), "aft");
+    config.redactor = Some(Arc::new(|line: &str| {
+        Cow::Owned(line.replace("MARK", "\u{1b}]MARK"))
+    }));
+    let (layer, handle) = build_test_layer(config, &capture);
+    tracing::dispatcher::with_default(&dispatch(layer), || {
+        tracing::info!(after = "tail", "before MARK");
+    });
+    let line = read_segment(&handle);
+    assert!(line.contains("before \\u001b]MARK"), "{line}");
+    assert!(
+        line.contains(" after=tail"),
+        "guard consumed later text: {line}"
+    );
+}
+
+// The stderr copy writes the same bytes as the segment, and only when asked.
+#[test]
+fn stderr_copy_repeats_each_segment_line_and_is_off_by_default() {
+    for copy in [false, true] {
+        let root = tempfile::tempdir().expect("tempdir");
+        let capture = CaptureWriter::default();
+        let (layer, handle) = build_layer(
+            config(root.path().to_path_buf(), "aft"),
+            Box::new(capture.clone()),
+            copy,
+        )
+        .expect("layer");
+        tracing::dispatcher::with_default(&dispatch(layer), || {
+            tracing::info!(kind = "bridge", "started");
+        });
+        let segment = read_segment(&handle);
+        assert!(segment.contains("aft: started kind=bridge"), "{segment}");
+        if copy {
+            assert_eq!(
+                capture.text(),
+                segment,
+                "stderr copy must equal the segment"
+            );
+        } else {
+            assert!(
+                !capture.text().contains("started"),
+                "copy is off by default: {}",
+                capture.text()
+            );
+        }
+    }
+}
+
+// An off-thread writer carries the context the caller's span would have given.
+#[test]
+fn emit_at_with_bound_renders_bound_fields_after_process_fields() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let capture = CaptureWriter::default();
+    let mut config = config(root.path().to_path_buf(), "aft");
+    config.bound = vec![("harness".to_owned(), "opencode".to_owned())];
+    let (_layer, handle) = build_test_layer(config, &capture);
+    handle.emit_at_with_bound(
+        fixed_time(FIXED_NOW_MS),
+        Level::INFO,
+        "aft.index",
+        &[("session".to_owned(), "opencode:ses_1".to_owned())],
+        "queued line",
+        &[("n".to_owned(), "3".to_owned())],
+    );
+    let line = read_segment(&handle);
+    assert_eq!(
+        line,
+        "2026-09-05T10:41:03.123Z INFO  aft.index: [harness=opencode session=opencode:ses_1] queued line n=3\n"
+    );
 }
 
 #[test]
@@ -508,15 +632,14 @@ fn module_redactor_runs_after_fleet_redaction() {
     assert!(!contents.contains("sk-private"));
 }
 
+// Complete color sequences inside the message, in both 7-bit and C1 form, are
+// removed per field. (A module redactor's own control bytes are escaped by the
+// guard instead; see the_post_redactor_guard_escapes_raw_controls.)
 #[test]
-fn ansi_is_stripped_from_rendered_lines() {
+fn complete_ansi_sequences_in_a_message_are_stripped() {
     let temp = TempDir::new().expect("temp dir");
     let capture = CaptureWriter::default();
-    let redactor: Arc<Redactor> =
-        Arc::new(|line: &str| Cow::Owned(format!("\u{1b}[31m{line}\u{1b}[0m")));
-    let mut test_config = config(temp.path().to_owned(), "ansi");
-    test_config.redactor = Some(redactor);
-    let (layer, handle) = build_test_layer(test_config, &capture);
+    let (layer, handle) = build_test_layer(config(temp.path().to_owned(), "ansi"), &capture);
     let dispatcher = dispatch(layer);
 
     tracing::dispatcher::with_default(&dispatcher, || {

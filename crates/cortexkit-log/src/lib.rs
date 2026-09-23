@@ -227,6 +227,36 @@ impl Handle {
     ) {
         self.inner.emit_at(at, &level, logger, &[], message, fields);
     }
+
+    /// [`Handle::emit_at`] with bound fields too, for a writer that renders on a
+    /// thread other than the one that produced the event (for example a queue
+    /// drained by a dedicated log thread). Such a writer cannot rely on the
+    /// caller's `tracing` span, so it carries the context itself: `bound` is
+    /// rendered in the bracket after the process-level fields, replacing a
+    /// process-level field of the same key. Not level-filtered (`CK_LOG` does
+    /// not apply); the producer decides what to enqueue.
+    pub fn emit_at_with_bound(
+        &self,
+        at: SystemTime,
+        level: tracing::Level,
+        logger: &str,
+        bound: &[(String, String)],
+        message: &str,
+        fields: &[(String, String)],
+    ) {
+        self.inner
+            .emit_at(at, &level, logger, bound, message, fields);
+    }
+
+    /// Installs the panic hook [`init`] installs: the panic text and a forced
+    /// backtrace go into the segment, one line each on logger
+    /// `<module>.panic`, and the previous hook still runs (the default one
+    /// prints to stderr). For a caller that composed the layer itself with
+    /// [`layer`] or [`layer_with_stderr_copy`]. Call it once; each call chains
+    /// another hook.
+    pub fn install_panic_hook(&self) {
+        install_panic_hook(Arc::clone(&self.inner));
+    }
 }
 
 // The handle of the logger `init` installed, so code that did not install it
@@ -267,7 +297,7 @@ impl std::error::Error for InitError {}
 
 /// Installs the fleet logger as the process-global `tracing` subscriber.
 pub fn init(config: Config) -> Result<Handle, InitError> {
-    let (layer, handle) = build_layer(config, Box::new(io::stderr()))?;
+    let (layer, handle) = build_layer(config, Box::new(io::stderr()), false)?;
     let panic_inner = Arc::clone(&handle.inner);
     let subscriber = Registry::default().with(layer);
     tracing::subscriber::set_global_default(subscriber)
@@ -275,6 +305,24 @@ pub fn init(config: Config) -> Result<Handle, InitError> {
     install_panic_hook(panic_inner);
     let _ = INSTALLED.set(handle.clone());
     Ok(handle)
+}
+
+/// The fleet layer without installing anything global, for a caller that
+/// composes its own `tracing` subscriber stack. Unlike [`init`], it installs no
+/// global subscriber and no panic hook ([`Handle::install_panic_hook`] does
+/// that), and [`installed`] does not return its handle.
+pub fn layer(config: Config) -> Result<(LogLayer, Handle), InitError> {
+    build_layer(config, Box::new(io::stderr()), false)
+}
+
+/// [`layer`] that also writes every rendered line to stderr after it reaches
+/// the segment. For a process whose stderr is watched by a person or a parent
+/// (a standalone bridge, a CLI), where the segment alone would hide its output.
+/// A supervised module should not use it: the daemon captures a module's stderr
+/// separately, so every line would be stored twice. When the segment directory
+/// cannot be opened, lines already go to stderr and are not doubled.
+pub fn layer_with_stderr_copy(config: Config) -> Result<(LogLayer, Handle), InitError> {
+    build_layer(config, Box::new(io::stderr()), true)
 }
 
 /// [`init`] with [`Config::from_env`]: the whole setup for a supervised module.
@@ -310,6 +358,7 @@ struct LoggerInner {
     stderr: Mutex<Box<dyn Write + Send>>,
     swallowed_writes: AtomicU64,
     fallback_active: bool,
+    stderr_copy: bool,
     redactor: Option<Arc<Redactor>>,
     clock: Arc<dyn Fn() -> SystemTime + Send + Sync>,
 }
@@ -357,11 +406,10 @@ impl LoggerInner {
             |redactor| redactor(&fleet_redacted),
         );
         // Redactors are extensibility points, so the final guard preserves the
-        // one-line, no-ANSI contract even if a module redactor introduces such
-        // bytes.
-        let guarded = format::strip_ansi(&module_redacted)
-            .replace('\r', "\\r")
-            .replace('\n', "\\n");
+        // one-line, no-raw-control contract even if a module redactor introduces
+        // such bytes. It escapes rather than strips, because a strip can consume
+        // text the redactor never meant to touch.
+        let guarded = format::escape_raw_controls(&module_redacted);
         self.write_line(&guarded, at);
     }
 
@@ -386,7 +434,17 @@ impl LoggerInner {
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     stderr.write_all(&bytes).map(|()| None)
                 }
-                Some(segment) => segment.write(&bytes, at),
+                Some(segment) => {
+                    let written = segment.write(&bytes, at);
+                    if self.stderr_copy && written.is_ok() {
+                        let mut stderr = self
+                            .stderr
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let _ = stderr.write_all(&bytes);
+                    }
+                    written
+                }
             }
         };
 
@@ -443,7 +501,9 @@ impl LoggerInner {
     }
 }
 
-struct LogLayer {
+/// The fleet `tracing` layer, built by [`layer`] or [`layer_with_stderr_copy`]
+/// for a caller that installs its own subscriber.
+pub struct LogLayer {
     inner: Arc<LoggerInner>,
     filter: LevelFilter,
 }
@@ -613,6 +673,7 @@ impl Visit for EventVisitor {
 fn build_layer(
     config: Config,
     stderr: Box<dyn Write + Send>,
+    stderr_copy: bool,
 ) -> Result<(LogLayer, Handle), InitError> {
     let clock = config.clock.unwrap_or_else(|| Arc::new(SystemTime::now));
     let now = clock();
@@ -635,6 +696,7 @@ fn build_layer(
         stderr: Mutex::new(stderr),
         swallowed_writes: AtomicU64::new(0),
         fallback_active,
+        stderr_copy,
         redactor: config.redactor,
         clock,
     });

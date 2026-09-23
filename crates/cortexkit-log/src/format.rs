@@ -68,118 +68,160 @@ pub(crate) fn is_segment(segment: &str) -> bool {
         && chars.all(|character| matches!(character, 'a'..='z' | '0'..='9' | '-'))
 }
 
-// Backslash is escaped first so a literal `\n` in the input survives as
-// `\\n` and cannot be read back as a newline. Same order as @cortexkit/log.
+// Control characters are handled per field, never across the rendered line.
+// A complete terminal escape sequence inside one message or value is removed;
+// every control character left is written as `\uXXXX`. Stripping escape
+// sequences over the whole rendered line, as this crate did before 0.3.3, let
+// a stray `ESC ]` in one value open an OSC that consumed the value's closing
+// quote and every field after it. The TypeScript twin (`@cortexkit/log`)
+// follows the same rule, and the golden fixture shared by both pins it.
+
+/// Whether `character` is written as a `\uXXXX` escape: C0 controls other than
+/// `\n` and `\r` (which keep their own escapes), DEL, and the C1 range.
+fn is_escaped_control(character: char) -> bool {
+    matches!(character as u32, 0x00..=0x1f | 0x7f..=0x9f) && !matches!(character, '\n' | '\r')
+}
+
+fn push_control_escape(output: &mut String, character: char) {
+    output.push_str(&format!("\\u{:04x}", character as u32));
+}
+
+/// Removes CSI and OSC sequences that start and end inside `field`, in their
+/// 7-bit (`ESC [`, `ESC ]`) and C1 (`U+009B`, `U+009D`) forms. A sequence that
+/// does not end inside the field is not a sequence and is left for escaping.
+fn strip_complete_sequences(field: &str) -> std::borrow::Cow<'_, str> {
+    if !field
+        .chars()
+        .any(|character| matches!(character, '\u{1b}' | '\u{9b}' | '\u{9d}'))
+    {
+        return std::borrow::Cow::Borrowed(field);
+    }
+    let characters: Vec<char> = field.chars().collect();
+    let mut output = String::with_capacity(field.len());
+    let mut index = 0;
+    while index < characters.len() {
+        let character = characters[index];
+        let next = characters.get(index + 1).copied();
+        let csi_body = match (character, next) {
+            ('\u{1b}', Some('[')) => Some(index + 2),
+            ('\u{9b}', _) => Some(index + 1),
+            _ => None,
+        };
+        let osc_body = match (character, next) {
+            ('\u{1b}', Some(']')) => Some(index + 2),
+            ('\u{9d}', _) => Some(index + 1),
+            _ => None,
+        };
+        let end = if let Some(body) = csi_body {
+            csi_end(&characters, body)
+        } else if let Some(body) = osc_body {
+            osc_end(&characters, body)
+        } else {
+            None
+        };
+        match end {
+            Some(end) => index = end,
+            None => {
+                output.push(character);
+                index += 1;
+            }
+        }
+    }
+    std::borrow::Cow::Owned(output)
+}
+
+/// A CSI body is parameter and intermediate bytes (`0x20`-`0x3f`) ended by a
+/// final byte (`0x40`-`0x7e`). Anything else before the final byte means it
+/// was never a sequence.
+fn csi_end(characters: &[char], body: usize) -> Option<usize> {
+    for (offset, character) in characters[body..].iter().enumerate() {
+        match *character as u32 {
+            0x40..=0x7e => return Some(body + offset + 1),
+            0x20..=0x3f => {}
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// An OSC ends at `BEL`, `ESC \` or C1 `ST` (`U+009C`).
+fn osc_end(characters: &[char], body: usize) -> Option<usize> {
+    let mut index = body;
+    while index < characters.len() {
+        match characters[index] {
+            '\u{7}' | '\u{9c}' => return Some(index + 1),
+            '\u{1b}' if characters.get(index + 1) == Some(&'\\') => return Some(index + 2),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+// Backslash is escaped first so a literal `\n` or `\u0041` in the input
+// survives as `\\n` or `\\u0041` and cannot be read back as an escape.
 fn escape_message(message: &str) -> String {
-    message
-        .replace('\\', "\\\\")
-        .replace('\r', "\\r")
-        .replace('\n', "\\n")
+    let cleaned = strip_complete_sequences(message);
+    let mut output = String::with_capacity(cleaned.len());
+    for character in cleaned.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '\r' => output.push_str("\\r"),
+            '\n' => output.push_str("\\n"),
+            control if is_escaped_control(control) => push_control_escape(&mut output, control),
+            other => output.push(other),
+        }
+    }
+    output
 }
 
 fn format_value(value: &str) -> String {
-    if value.is_empty()
-        || value
-            .chars()
-            .any(|character| matches!(character, ' ' | '"' | '\n' | '\r' | ']'))
-    {
-        let escaped = value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\r', "\\r")
-            .replace('\n', "\\n");
-        format!("\"{escaped}\"")
-    } else {
+    // Stripped before the quoting decision, so a colored plain word stays unquoted.
+    let cleaned = strip_complete_sequences(value);
+    let needs_quotes = cleaned.is_empty()
+        || cleaned.chars().any(|character| {
+            matches!(character, ' ' | '"' | '\n' | '\r' | ']') || is_escaped_control(character)
+        });
+    if !needs_quotes {
         // An unquoted value is verbatim, backslashes included: only the quoted
         // form has an escape grammar, and a reader decodes only quoted values.
-        value.to_owned()
+        return cleaned.into_owned();
     }
-}
-
-pub(crate) fn strip_ansi(input: &str) -> String {
-    let without_c1 = strip_c1_sequences(input);
-    let input = without_c1.as_str();
-    let bytes = input.as_bytes();
-    let mut output = String::with_capacity(input.len());
-    let mut index = 0;
-    let mut plain_start = 0;
-
-    while index < bytes.len() {
-        if bytes[index] != 0x1b {
-            index += 1;
-            continue;
-        }
-
-        output.push_str(&input[plain_start..index]);
-        index += 1;
-        if index >= bytes.len() {
-            plain_start = index;
-            break;
-        }
-
-        match bytes[index] {
-            b'[' => {
-                index += 1;
-                while index < bytes.len() {
-                    let byte = bytes[index];
-                    index += 1;
-                    if (0x40..=0x7e).contains(&byte) {
-                        break;
-                    }
-                }
-            }
-            b']' => {
-                index += 1;
-                while index < bytes.len() {
-                    if bytes[index] == 0x07 {
-                        index += 1;
-                        break;
-                    }
-                    if bytes[index] == 0x1b
-                        && bytes.get(index + 1).is_some_and(|next| *next == b'\\')
-                    {
-                        index += 2;
-                        break;
-                    }
-                    index += 1;
-                }
-            }
-            _ => index += 1,
-        }
-        plain_start = index;
-    }
-
-    if plain_start == 0 {
-        return without_c1;
-    }
-    output.push_str(&input[plain_start..]);
-    output
-}
-
-fn strip_c1_sequences(input: &str) -> String {
-    let mut characters = input.chars();
-    let mut output = String::with_capacity(input.len());
-    while let Some(character) = characters.next() {
+    let mut output = String::with_capacity(cleaned.len() + 2);
+    output.push('"');
+    for character in cleaned.chars() {
         match character {
-            '\u{009b}' => {
-                for parameter in characters.by_ref() {
-                    if ('@'..='~').contains(&parameter) {
-                        break;
-                    }
-                }
-            }
-            '\u{009d}' => {
-                for payload in characters.by_ref() {
-                    if matches!(payload, '\u{0007}' | '\u{009c}') {
-                        break;
-                    }
-                }
-            }
-            '\u{0080}'..='\u{009f}' => {}
-            _ => output.push(character),
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\r' => output.push_str("\\r"),
+            '\n' => output.push_str("\\n"),
+            control if is_escaped_control(control) => push_control_escape(&mut output, control),
+            other => output.push(other),
         }
     }
+    output.push('"');
     output
+}
+
+/// The guard after a module redactor: writes any raw control character the
+/// redactor put into an already-rendered line as an escape, and never strips.
+/// Backslashes are left alone, since the line's own escapes are already there.
+pub(crate) fn escape_raw_controls(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r') || is_escaped_control(character))
+    {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    let mut output = String::with_capacity(line.len());
+    for character in line.chars() {
+        match character {
+            '\r' => output.push_str("\\r"),
+            '\n' => output.push_str("\\n"),
+            control if is_escaped_control(control) => push_control_escape(&mut output, control),
+            other => output.push(other),
+        }
+    }
+    std::borrow::Cow::Owned(output)
 }
 
 /// A level parsed from a fleet log line.

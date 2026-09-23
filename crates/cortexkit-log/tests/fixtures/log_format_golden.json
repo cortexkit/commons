@@ -95,8 +95,71 @@
                  "message": "module reported non-ok health", "fields": [["module_id", "engram"], ["status", "Degraded"]] },
       "line": "2026-09-05T10:41:13.000Z WARN  subc.supervise: module reported non-ok health module_id=engram status=Degraded",
       "note": "when the daemon logs ABOUT a module, module_id is an event field: the module is the subject, not the emitter"
+    },
+    {
+      "name": "value-with-bare-esc-is-escaped-and-quoted",
+      "event": { "at_ms": 1788604874000, "level": "info", "logger": "broca.capture", "bound": [],
+                 "message": "child wrote", "fields": [["tail", "a\u001bb"]] },
+      "line": "2026-09-05T10:41:14.000Z INFO  broca.capture: child wrote tail=\"a\\u001bb\"",
+      "note": "a lone ESC is not a complete sequence, so it is escaped rather than removed, and the escape forces quoting"
+    },
+    {
+      "name": "unterminated-osc-does-not-cross-fields",
+      "event": { "at_ms": 1788604875000, "level": "warn", "logger": "aft.lsp", "bound": [],
+                 "message": "server said", "fields": [["text", "x\u001b]title"], ["code", "2"]] },
+      "line": "2026-09-05T10:41:15.000Z WARN  aft.lsp: server said text=\"x\\u001b]title\" code=2",
+      "note": "the defect before cortexkit-log 0.3.3 / @cortexkit/log 0.2.1: a whole-line strip read ESC ] as an OSC and consumed the closing quote and code=2. Per-field handling keeps every later field"
+    },
+    {
+      "name": "complete-csi-in-message-is-stripped",
+      "event": { "at_ms": 1788604876000, "level": "info", "logger": "synapse", "bound": [],
+                 "message": "\u001b[31mred\u001b[0m done", "fields": [] },
+      "line": "2026-09-05T10:41:16.000Z INFO  synapse: red done"
+    },
+    {
+      "name": "complete-csi-in-value-is-stripped-before-quoting",
+      "event": { "at_ms": 1788604877000, "level": "info", "logger": "synapse", "bound": [],
+                 "message": "build", "fields": [["status", "\u001b[1mok\u001b[0m"]] },
+      "line": "2026-09-05T10:41:17.000Z INFO  synapse: build status=ok",
+      "note": "stripping happens before the quoting decision, so a colored plain word stays unquoted"
+    },
+    {
+      "name": "c0-controls-and-del-are-escaped",
+      "event": { "at_ms": 1788604878000, "level": "debug", "logger": "plexus.vendor", "bound": [],
+                 "message": "a\u0000b\tc\u0007d\u007f", "fields": [] },
+      "line": "2026-09-05T10:41:18.000Z DEBUG plexus.vendor: a\\u0000b\\u0009c\\u0007d\\u007f"
+    },
+    {
+      "name": "c1-control-escaped-and-c1-csi-stripped",
+      "event": { "at_ms": 1788604879000, "level": "info", "logger": "fusiform", "bound": [],
+                 "message": "row", "fields": [["a", "x\u0085y"], ["b", "\u009b31mred"]] },
+      "line": "2026-09-05T10:41:19.000Z INFO  fusiform: row a=\"x\\u0085y\" b=red"
+    },
+    {
+      "name": "literal-backslash-u-is-not-an-escape",
+      "event": { "at_ms": 1788604880000, "level": "info", "logger": "fusiform", "bound": [],
+                 "message": "path C:\\u0041", "fields": [] },
+      "line": "2026-09-05T10:41:20.000Z INFO  fusiform: path C:\\\\u0041",
+      "note": "backslash is escaped first, so text that merely looks like an escape stays distinguishable from one"
     }
   ],
+  "redaction": {
+    "description": "The fleet default redactor applied to a complete rendered line: input -> exact output. Cases named control-* must come out unchanged; they pin the shapes the patterns must not touch.",
+    "cases": [
+      { "name": "github-fine-grained-pat", "input": "push token=github_pat_11ABCDE0Y_abcDEF123", "output": "push token=[REDACTED]" },
+      { "name": "github-server-user-refresh", "input": "ghs_AbC123 ghu_Def456 ghr_Ghi789", "output": "[REDACTED] [REDACTED] [REDACTED]" },
+      { "name": "github-classic", "input": "ghp_AbC123 gho_Def456", "output": "[REDACTED] [REDACTED]" },
+      { "name": "url-userinfo-password", "input": "clone https://user:hunter2@example.com/org/repo", "output": "clone https://[REDACTED]@example.com/org/repo" },
+      { "name": "url-userinfo-token-only", "input": "clone https://x-access-token@github.com/o/r", "output": "clone https://[REDACTED]@github.com/o/r" },
+      { "name": "url-query-access-token", "input": "GET https://api.example.com/v1?access_token=abc123&page=2", "output": "GET https://api.example.com/v1?access_token=[REDACTED]&page=2", "note": "a generic key=value rule misses this because https: matches as the key" },
+      { "name": "quoted-url-query-api-key", "input": "url=\"https://h.example/p?x=1&api_key=Z9y8\"", "output": "url=\"https://h.example/p?x=1&api_key=[REDACTED]\"" },
+      { "name": "query-value-with-escaped-quote-stays-balanced", "input": "url=\"https://h.example/p?token=ab\\\"cd&x=1\"", "output": "url=\"https://h.example/p?token=[REDACTED]&x=1\"", "note": "inside a quoted field a quote in the value is written \\\"; the value consumes backslash pairs, so the field's closing quote is never left unbalanced" },
+      { "name": "authorization-bearer", "input": "Authorization: Bearer abc.def", "output": "Authorization: [REDACTED]" },
+      { "name": "control-plain-url-untouched", "input": "GET https://example.com/x?page=2&sort=asc", "output": "GET https://example.com/x?page=2&sort=asc" },
+      { "name": "control-email-untouched", "input": "notify user@example.com", "output": "notify user@example.com" },
+      { "name": "control-word-ghp-untouched", "input": "ghp token rotation", "output": "ghp token rotation" }
+    ]
+  },
   "parse_rejects": [
     { "name": "ansi-in-line", "line": "2026-09-05T10:41:03.123Z \u001b[32mINFO\u001b[0m  fusiform: x", "reason": "ansi_forbidden" },
     { "name": "placeholder-session", "line": "2026-09-05T10:41:03.123Z INFO  magic-context: [session=global] x", "reason": "session_missing_issuer" },

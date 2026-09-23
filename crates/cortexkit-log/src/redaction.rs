@@ -15,8 +15,30 @@ static CORTEXKIT_HANDLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bckh_[A-Za-z0-9_-]+\b").expect("valid CortexKit handle regex"));
 static OPENAI_KEY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bsk-[A-Za-z0-9_-]+\b").expect("valid OpenAI key regex"));
-static GITHUB_TOKEN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bgh[po]_[A-Za-z0-9_-]+\b").expect("valid GitHub token regex"));
+// Classic (`ghp_`), OAuth (`gho_`), server (`ghs_`), user-to-server (`ghu_`)
+// and refresh (`ghr_`) tokens, plus fine-grained `github_pat_` tokens.
+static GITHUB_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bgh[pousr]_[A-Za-z0-9_-]+\b|\bgithub_pat_[A-Za-z0-9_]+\b")
+        .expect("valid GitHub token regex")
+});
+// `scheme://user:pass@host` and `scheme://token@host`: everything between the
+// `//` and the `@`, never crossing whitespace, a path, a query, a fragment or a
+// quote, so a bare `user@example.com` and an `@` later in a path are untouched.
+static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/?#@"]+@"#).expect("valid URL userinfo regex")
+});
+// A credential query parameter, value only. Its own pattern rather than a
+// generic `key=value` rule: in a full URL a generic rule takes `https:` as the
+// key and never reaches `?access_token=`. The value
+// consumes backslash pairs, so a quote written `\"` inside a quoted field value
+// is redacted with the rest instead of ending the match and leaving the
+// field's closing quote unbalanced.
+static CREDENTIAL_QUERY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)([?&](?:access_token|token|api_key|apikey|password|secret|client_secret)=)(?:\\.|[^&#\s"\\])+"#,
+    )
+    .expect("valid credential query regex")
+});
 
 pub(crate) fn fleet_redact(line: &str) -> Cow<'_, str> {
     let authorization_redacted = redact_authorization(line);
@@ -27,11 +49,19 @@ pub(crate) fn fleet_redact(line: &str) -> Cow<'_, str> {
     let handle_redacted = CORTEXKIT_HANDLE.replace_all(&jwt_redacted, REDACTED);
     let openai_redacted = OPENAI_KEY.replace_all(&handle_redacted, REDACTED);
     let github_redacted = GITHUB_TOKEN.replace_all(&openai_redacted, REDACTED);
+    let userinfo_redacted = URL_USERINFO
+        .replace_all(&github_redacted, |captures: &Captures<'_>| {
+            format!("{}{REDACTED}@", &captures[1])
+        });
+    let query_redacted = CREDENTIAL_QUERY
+        .replace_all(&userinfo_redacted, |captures: &Captures<'_>| {
+            format!("{}{REDACTED}", &captures[1])
+        });
 
-    if github_redacted == line {
+    if query_redacted == line {
         Cow::Borrowed(line)
     } else {
-        Cow::Owned(github_redacted.into_owned())
+        Cow::Owned(query_redacted.into_owned())
     }
 }
 
