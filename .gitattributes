@@ -1,0 +1,13 @@
+# Check every text file out with LF, on every platform.
+#
+# Git for Windows defaults to core.autocrlf=true, so without this a Windows
+# checkout rewrites each checked-in text file to CRLF. Any test that compares
+# generated output against a checked-in file byte for byte then fails on
+# Windows only, although the generator and the file agree. The
+# cortexkit-bus-naming permission golden did exactly that: 116 lines, every
+# one differing only in its line ending.
+#
+# Pinning LF here, rather than normalising line endings inside each such test,
+# keeps the comparison exact: a generator that started emitting CRLF would
+# still fail.
+* text=auto eol=lf
