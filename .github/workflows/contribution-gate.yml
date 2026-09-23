@@ -1,0 +1,19 @@
+name: Design gate
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  issues:
+    types: [labeled]
+
+jobs:
+  design-gate:
+    permissions:
+      contents: read # fetch the gate action
+      issues: read # read the linked issue's labels
+      pull-requests: write # gate comment, draft conversion, ready for review
+      checks: write # publish the design-gate check run
+    uses: cortexkit/subconscious/.github/workflows/design-gate.yml@master
+    secrets:
+      CK_CI_APP_ID: ${{ secrets.CK_CI_APP_ID }}
+      CK_CI_APP_PRIVATE_KEY: ${{ secrets.CK_CI_APP_PRIVATE_KEY }}
