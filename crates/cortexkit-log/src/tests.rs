@@ -947,3 +947,47 @@ fn in_dir_takes_the_callers_directory_verbatim_and_binds_nothing() {
     assert!(config.bound.is_empty());
     assert!(config.spec.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// emit_at: a record placed by an explicit instant, for a wall-clock step.
+
+/// A clock that stepped across UTC midnight put the lines before the step in
+/// one day's segment and everything after in another. A marker describing the
+/// pre-step lines must land in THEIR segment, stamped like its neighbours, or a
+/// reader who opens that file finds the lines and not the warning.
+#[test]
+fn emit_at_writes_into_the_segment_its_instant_names() {
+    let temp = TempDir::new().expect("temp dir");
+    let capture = CaptureWriter::default();
+    // The logger's own clock reads the next UTC day: the corrected time after
+    // a step backward across midnight.
+    let now_ms = FIXED_NOW_MS + 86_400_000;
+    let mut config = config(temp.path().to_path_buf(), "stepper");
+    config.clock = Some(Arc::new(move || fixed_time(now_ms)));
+    let (_layer, handle) = build_test_layer(config, &capture);
+
+    let pre_step = fixed_time(FIXED_NOW_MS);
+    handle.emit_at(
+        pre_step,
+        Level::WARN,
+        "stepper",
+        "wall clock stepped",
+        &[("step_ms".to_owned(), "7200000".to_owned())],
+    );
+
+    let pre_step_segment = temp.path().join(segment::segment_name("stepper", pre_step));
+    let written = fs::read_to_string(&pre_step_segment).expect("pre-step segment written");
+    assert_eq!(written.lines().count(), 1, "{written}");
+    assert!(
+        written.starts_with("2026-09-05T10:41:03.123Z WARN  stepper: wall clock stepped"),
+        "stamped with the instant it was placed by: {written}"
+    );
+    // The logger creates its current segment on open, so the file may exist;
+    // what must hold is that it did not receive this line.
+    let current = fs::read_to_string(handle.path()).unwrap_or_default();
+    assert!(
+        !current.contains("wall clock stepped"),
+        "the current segment ({}) received a line emitted for another instant: {current}",
+        handle.path().display()
+    );
+}

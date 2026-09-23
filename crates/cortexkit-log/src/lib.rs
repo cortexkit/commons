@@ -21,7 +21,7 @@ use std::io::{self, Write};
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use filter::LevelFilter;
@@ -206,6 +206,38 @@ impl Handle {
     pub fn fallback_active(&self) -> bool {
         self.inner.fallback_active
     }
+
+    /// Writes one line stamped with `at` into the segment `at` names, instead
+    /// of the one the logger's clock names now.
+    ///
+    /// For a record that must sit beside lines written under a different clock
+    /// reading. The case it exists for is a wall-clock step: the lines before
+    /// the step went to the segment the old clock named, so a marker describing
+    /// them belongs there too, stamped the way its neighbours are, or a reader
+    /// opening that file finds the lines and not the warning. Not level-filtered
+    /// (CK_LOG does not apply) and not for routine logging, which goes through
+    /// `tracing` so filtering and span context hold.
+    pub fn emit_at(
+        &self,
+        at: SystemTime,
+        level: tracing::Level,
+        logger: &str,
+        message: &str,
+        fields: &[(String, String)],
+    ) {
+        self.inner.emit_at(at, &level, logger, &[], message, fields);
+    }
+}
+
+// The handle of the logger `init` installed, so code that did not install it
+// (a library running inside a module's process) can still reach
+// `Handle::emit_at`. `init` can succeed only once per process, since the
+// tracing global can only be set once, so there is at most one to hold.
+static INSTALLED: OnceLock<Handle> = OnceLock::new();
+
+/// The logger this process installed with [`init`], if it installed one.
+pub fn installed() -> Option<Handle> {
+    INSTALLED.get().cloned()
 }
 
 /// An error that prevents installation of the global logger.
@@ -241,6 +273,7 @@ pub fn init(config: Config) -> Result<Handle, InitError> {
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|_| InitError::GlobalSubscriberAlreadySet)?;
     install_panic_hook(panic_inner);
+    let _ = INSTALLED.set(handle.clone());
     Ok(handle)
 }
 
