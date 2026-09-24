@@ -29,6 +29,10 @@ pub enum ClaimOutcome {
     MaxDeliveriesExceeded(MaxDeliveriesExceeded),
 }
 
+/// A claimant on a bounded work queue.
+///
+/// `ack`, `nak` and `term` return `Ok` only once the server has recorded the
+/// decision, so a claimant may exit straight after one without losing it.
 #[async_trait]
 pub trait WorkQueue: Send + Sync {
     async fn claim(&self) -> BusResult<ClaimOutcome>;

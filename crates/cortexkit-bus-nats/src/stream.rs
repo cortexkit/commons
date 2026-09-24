@@ -140,8 +140,10 @@ impl NatsStreamCursor {
             .as_ref()
             .ok_or_else(|| BusError::absent("in-flight stream delivery"))?;
         let mut events = self.connection.event_receiver();
+        // Wait for the server's reply, not just the client's send queue, so the
+        // acknowledgement survives the caller exiting right after it.
         message
-            .ack_with(kind)
+            .double_ack_with(kind)
             .await
             .map_err(|error| map_operation_error("delivery acknowledgement", error, &mut events))?;
         self.in_flight = None;

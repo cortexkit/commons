@@ -508,9 +508,12 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
 
     let worker = connect(&server.url, "UWORKERONE").await;
     let queue = worker
-        .work_queue("CK_BOX_EFFECT", "c_agent", 4)
+        .work_queue("CK_BOX_EFFECT", "c_agent")
         .await
         .expect("bind work queue");
+    // The consumer allows 5 deliveries; the claimant's cap is derived one below,
+    // leaving the 5th as the spare that finishes a crashed dead-letter.
+    assert_eq!(queue.max_deliveries(), 4);
     for expected in 1..4 {
         let ClaimOutcome::Item(item) = next_claim(&queue).await else {
             panic!("delivery {expected} should be a work item");
@@ -543,7 +546,7 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
 
     let restarted = connect(&server.url, "UWORKERTWO").await;
     let queue = restarted
-        .work_queue("CK_BOX_EFFECT", "c_agent", 4)
+        .work_queue("CK_BOX_EFFECT", "c_agent")
         .await
         .expect("rebind queue after crash");
     let ClaimOutcome::MaxDeliveriesExceeded(redelivered) = next_claim(&queue).await else {
@@ -581,4 +584,97 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
     .await
     .expect("confirmed dead-letter publish precedes term");
     dead.ack().await.expect("ack dead-letter record");
+}
+
+#[tokio::test]
+async fn a_work_queue_without_a_spare_redelivery_is_refused() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    for (stream, durable, max_deliver) in [
+        ("CK_BOX_UNBOUNDED", "c_unbounded", -1),
+        ("CK_BOX_ONESHOT", "c_oneshot", 1),
+    ] {
+        let subject = format!("ck.box.{}.intent", durable);
+        create_stream_and_consumer(
+            &admin,
+            stream,
+            &subject,
+            &subject,
+            durable,
+            max_deliver,
+            Duration::from_secs(30),
+        )
+        .await;
+        let refused = admin
+            .work_queue(stream, durable)
+            .await
+            .err()
+            .expect("a consumer with no spare redelivery must be refused");
+        assert!(
+            matches!(&refused, BusError::Denied { reason, .. } if reason.contains("at least 2")),
+            "{refused:?}"
+        );
+    }
+}
+
+/// A claimant that terminates an item and exits at once must not lose the
+/// term: `Ok` from `term()` means the server has it.
+#[tokio::test]
+async fn a_term_survives_the_claimant_exiting_straight_after_it() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    create_stream_and_consumer(
+        &admin,
+        "CK_BOX_EFFECT",
+        "ck.box.effect.agent.*.intent",
+        "ck.box.effect.agent.*.intent",
+        "c_agent",
+        5,
+        Duration::from_millis(150),
+    )
+    .await;
+    let effect_stream = admin.stream("CK_BOX_EFFECT");
+    for index in 0..20 {
+        let id = format!("effect-{index}");
+        effect_stream
+            .publish(
+                "ck.box.effect.agent.s.intent",
+                &id,
+                digest(&id),
+                Headers::new(),
+            )
+            .await
+            .expect("publish work item");
+    }
+
+    // Each claimant takes one item, terminates it and exits without any flush.
+    for index in 0..20 {
+        let worker = connect(&server.url, &format!("UTERMWORKER{index}")).await;
+        let queue = worker
+            .work_queue("CK_BOX_EFFECT", "c_agent")
+            .await
+            .expect("bind work queue");
+        let ClaimOutcome::Item(item) = next_claim(&queue).await else {
+            panic!("item {index} should be claimable");
+        };
+        queue.term(item.token).await.expect("term");
+        drop(queue);
+        drop(worker);
+    }
+
+    // Past the ack wait, nothing may come back.
+    sleep(Duration::from_millis(400)).await;
+    let observer = connect(&server.url, "UTERMOBSERVER").await;
+    let queue = observer
+        .work_queue("CK_BOX_EFFECT", "c_agent")
+        .await
+        .expect("bind observer");
+    match queue.claim().await.expect("claim") {
+        ClaimOutcome::Empty => {}
+        other => panic!("a terminated item came back: {other:?}"),
+    }
 }

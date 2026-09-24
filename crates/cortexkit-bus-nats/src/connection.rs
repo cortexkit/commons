@@ -109,13 +109,11 @@ impl NatsConnection {
         &self,
         stream: impl Into<String>,
         durable: impl Into<String>,
-        max_deliveries: u32,
     ) -> BusResult<NatsWorkQueue> {
         NatsWorkQueue::bind(
             self.clone(),
             stream.into(),
             durable.into(),
-            max_deliveries,
             self.request_timeout,
         )
         .await
