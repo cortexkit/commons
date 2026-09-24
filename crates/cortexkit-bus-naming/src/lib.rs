@@ -6,9 +6,10 @@ mod names;
 mod token;
 
 pub use grants::{
-    bus_permissions, generate_permission_golden, participant_permissions, system_permissions,
-    validate_permission_file, AllowEntry, GoldenFixture, GrantError, Operation, PermissionDocument,
-    Principal, RefusedEntry, PINNED_GOLDEN_FIXTURE,
+    bus_permissions, delivery_authority_permissions, generate_permission_golden,
+    participant_permissions, system_permissions, validate_permission_file, AllowEntry,
+    GoldenFixture, GrantError, Operation, PermissionDocument, Principal, RefusedEntry,
+    PINNED_GOLDEN_FIXTURE,
 };
 pub use limits::{
     shipped_streams, validate_consumer, validate_store_retention, validate_streams, ConsumerSpec,

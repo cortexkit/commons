@@ -24,6 +24,17 @@ impl StreamNames {
             &self.effect_dead,
         ]
     }
+
+    /// The streams that hold per-agent durables (`c_{agent_id}`): WAKE, PEER, EFFECT.
+    ///
+    /// Grants that let a credential read any agent's durable use a whole-token `*`
+    /// in the consumer position on exactly these streams (NATS wildcards cannot
+    /// match a `c_` prefix), which admits every consumer on them. So no non-agent
+    /// durable may ever be created on these streams; ck-bus asserts that against
+    /// this list. ROOM and EFFECT_DEAD are not agent streams.
+    pub fn agent_streams(&self) -> [&str; 3] {
+        [&self.wake, &self.peer, &self.effect]
+    }
 }
 
 /// The census KV bucket and its JetStream backing stream.

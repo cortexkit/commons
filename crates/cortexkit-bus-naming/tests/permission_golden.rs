@@ -90,8 +90,169 @@ fn golden_names_bound_and_refused_fixture_identities() {
     ] {
         assert!(CHECKED_IN_GOLDEN.contains(literal), "missing {literal}");
     }
-    assert!(CHECKED_IN_GOLDEN.contains("foreign-identity"));
+    assert!(CHECKED_IN_GOLDEN.contains("workload-publish"));
     assert!(CHECKED_IN_GOLDEN.contains("unbound-room"));
+}
+
+/// NATS subject matching: `*` matches one token, a final `>` one or more.
+fn subject_matches(pattern: &str, subject: &str) -> bool {
+    let pattern = pattern.split('.').collect::<Vec<_>>();
+    let subject = subject.split('.').collect::<Vec<_>>();
+    for (index, token) in pattern.iter().enumerate() {
+        match *token {
+            ">" => return subject.len() > index,
+            "*" if index < subject.len() => {}
+            literal if subject.get(index) == Some(&literal) => {}
+            _ => return false,
+        }
+    }
+    pattern.len() == subject.len()
+}
+
+fn allowed(
+    allows: &[cortexkit_bus_naming::AllowEntry],
+    principal: Principal,
+    operation: cortexkit_bus_naming::Operation,
+    subject: &str,
+) -> bool {
+    allows.iter().any(|entry| {
+        entry.principal == principal
+            && entry.operation == operation
+            && subject_matches(&entry.subject, subject)
+    })
+}
+
+#[test]
+fn every_expected_refusal_is_actually_refused_by_the_allows() {
+    let document = generate_permission_golden(PINNED_GOLDEN_FIXTURE).unwrap();
+    for refusal in document.refused() {
+        assert!(
+            !allowed(
+                document.allows(),
+                refusal.principal,
+                refusal.operation,
+                &refusal.subject
+            ),
+            "{} may {} {} ({}), which the golden says is refused",
+            refusal.principal.as_str(),
+            refusal.operation.as_str(),
+            refusal.subject,
+            refusal.reason
+        );
+    }
+}
+
+#[test]
+fn participants_read_any_agent_durable_but_publish_no_workload() {
+    use cortexkit_bus_naming::{participant_permissions, Operation};
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let allows = participant_permissions(&account, "ckhost", &["room_gold_bound"]).unwrap();
+
+    for agent in ["agent_gold_a", "agent_gold_b", "agent_never_seen"] {
+        let consumer = AccountNames::consumer_name(agent).unwrap();
+        for stream in account.streams().agent_streams() {
+            for subject in [
+                format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{consumer}"),
+                format!("$JS.API.CONSUMER.INFO.{stream}.{consumer}"),
+                format!("$JS.ACK.{stream}.{consumer}.1.2.3.4.5"),
+            ] {
+                assert!(
+                    allowed(
+                        &allows,
+                        Principal::Participant,
+                        Operation::Publish,
+                        &subject
+                    ),
+                    "participant cannot {subject}"
+                );
+            }
+        }
+    }
+
+    // The only account subjects a participant may publish are the dead-letter
+    // record and its bound room's posts.
+    let account_prefix = format!("ck.{}.", account.account());
+    let published = allows
+        .iter()
+        .filter(|entry| entry.operation == Operation::Publish)
+        .filter(|entry| entry.subject.starts_with(&account_prefix))
+        .map(|entry| entry.subject.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        published,
+        vec![
+            account.effect_dead(),
+            account.room_post("room_gold_bound").unwrap()
+        ]
+    );
+}
+
+#[test]
+fn the_delivery_authority_adds_exactly_the_three_agent_stream_bindings() {
+    use cortexkit_bus_naming::{delivery_authority_permissions, participant_permissions};
+    use std::collections::BTreeSet;
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let participant = participant_permissions(&account, "ckcore", &["room_gold_bound"])
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.operation, entry.subject))
+        .collect::<BTreeSet<_>>();
+    let authority =
+        delivery_authority_permissions(&account, "ckcore", &["room_gold_bound"]).unwrap();
+    assert!(authority
+        .iter()
+        .all(|entry| entry.principal == Principal::DeliveryAuthority));
+    let authority = authority
+        .into_iter()
+        .map(|entry| (entry.operation, entry.subject))
+        .collect::<BTreeSet<_>>();
+
+    assert!(participant.is_subset(&authority));
+    let extra = authority
+        .difference(&participant)
+        .map(|(operation, subject)| (operation.as_str(), subject.as_str()))
+        .collect::<Vec<_>>();
+    let (wake, peer, effect) = (
+        account.wake_binding(),
+        account.peer_binding(),
+        account.effect_binding(),
+    );
+    assert_eq!(
+        extra,
+        vec![
+            ("publish", effect.as_str()),
+            ("publish", peer.as_str()),
+            ("publish", wake.as_str()),
+        ]
+    );
+}
+
+#[test]
+fn agent_streams_are_wake_peer_and_effect_only() {
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let streams = account.streams();
+    assert_eq!(
+        streams.agent_streams(),
+        [
+            streams.wake.as_str(),
+            streams.peer.as_str(),
+            streams.effect.as_str()
+        ]
+    );
+
+    // The bus lists and purges agent durables on exactly those streams.
+    let bus = cortexkit_bus_naming::bus_permissions(&account, "ckbus").unwrap();
+    for stream in streams.all() {
+        for verb in ["CONSUMER.NAMES", "STREAM.PURGE"] {
+            let subject = format!("$JS.API.{verb}.{stream}");
+            let granted = bus.iter().any(|entry| entry.subject == subject);
+            assert_eq!(
+                granted,
+                streams.agent_streams().contains(&stream),
+                "{subject}"
+            );
+        }
+    }
 }
 
 #[test]

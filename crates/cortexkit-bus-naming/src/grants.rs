@@ -8,6 +8,7 @@ use crate::token::{validate_token, NamingError, TokenKind};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Principal {
     Participant,
+    DeliveryAuthority,
     Bus,
     System,
 }
@@ -16,6 +17,7 @@ impl Principal {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Participant => "participant",
+            Self::DeliveryAuthority => "delivery-authority",
             Self::Bus => "bus",
             Self::System => "system",
         }
@@ -74,6 +76,9 @@ pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
     unbound_room: "room_gold_unbound",
     system_credential: "cksys",
 };
+
+/// The session token in the golden's refused peer and effect subjects.
+const GOLDEN_SESSION: &str = "session_gold";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionDocument {
@@ -164,90 +169,123 @@ impl From<NamingError> for GrantError {
     }
 }
 
+/// The grant for every host and module except the delivery authority.
+///
+/// Credentials are account-scoped and name no agents: a participant may pull,
+/// inspect and acknowledge any agent's durable on the agent streams, and which
+/// durable it actually reads is decided by prefrontal-core, which owns agent
+/// residence. It holds no workload publish at all: hosts and modules consume
+/// wakes, peer deliveries and effect intents but never produce them.
 pub fn participant_permissions(
     account: &AccountNames,
     credential_public: &str,
-    bound_agents: &[&str],
     bound_rooms: &[&str],
 ) -> Result<Vec<AllowEntry>, GrantError> {
-    validate_token(TokenKind::CredentialPublic, credential_public)?;
     let mut entries = BTreeSet::new();
-
-    add(
+    add_consumer_permissions(
         &mut entries,
         Principal::Participant,
+        account,
+        credential_public,
+        bound_rooms,
+    )?;
+    Ok(entries.into_iter().collect())
+}
+
+/// The grant for the delivery authority, prefrontal-core alone.
+///
+/// Everything a participant holds, plus publish on each agent stream's own
+/// binding: prefrontal-core is the only producer of wakes, peer deliveries and
+/// effect intents, and it also copies a merged agent's queued wakes and peer
+/// deliveries into the survivor. Keeping workload publish here, and out of every
+/// host credential and out of ck-bus's own, means the module that decides a
+/// delivery is the only one that can make one.
+pub fn delivery_authority_permissions(
+    account: &AccountNames,
+    credential_public: &str,
+    bound_rooms: &[&str],
+) -> Result<Vec<AllowEntry>, GrantError> {
+    let mut entries = BTreeSet::new();
+    add_consumer_permissions(
+        &mut entries,
+        Principal::DeliveryAuthority,
+        account,
+        credential_public,
+        bound_rooms,
+    )?;
+    for subject in [
+        account.wake_binding(),
+        account.peer_binding(),
+        account.effect_binding(),
+    ] {
+        add(
+            &mut entries,
+            Principal::DeliveryAuthority,
+            Operation::Publish,
+            subject,
+        );
+    }
+    Ok(entries.into_iter().collect())
+}
+
+/// The permissions participants and the delivery authority share: their own
+/// inbox, the dead-letter record, census reads, bound rooms, and reading any
+/// agent's durable on the agent streams.
+fn add_consumer_permissions(
+    entries: &mut BTreeSet<AllowEntry>,
+    principal: Principal,
+    account: &AccountNames,
+    credential_public: &str,
+    bound_rooms: &[&str],
+) -> Result<(), GrantError> {
+    validate_token(TokenKind::CredentialPublic, credential_public)?;
+
+    add(
+        entries,
+        principal,
         Operation::Subscribe,
         format!("_INBOX.{credential_public}.>"),
     );
     add(
-        &mut entries,
-        Principal::Participant,
+        entries,
+        principal,
         Operation::Publish,
         account.effect_dead(),
     );
 
-    for agent_id in bound_agents {
-        validate_token(TokenKind::AgentId, agent_id)?;
-        let consumer = AccountNames::consumer_name(agent_id)?;
+    // A whole-token `*` in the consumer position: NATS wildcards cannot match the
+    // `c_` prefix, so this admits every consumer on the stream. That is safe only
+    // because no non-agent durable exists on the agent streams (see
+    // `StreamNames::agent_streams`).
+    for stream in account.streams().agent_streams() {
         for subject in [
-            account.wake_fire(agent_id)?,
-            account.peer_subscription(agent_id)?,
-            account.effect_publish_grant(agent_id)?,
+            format!("$JS.ACK.{stream}.*.>"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.*"),
+            format!("$JS.API.CONSUMER.INFO.{stream}.*"),
+            format!("$JS.API.STREAM.INFO.{stream}"),
         ] {
-            add(
-                &mut entries,
-                Principal::Participant,
-                Operation::Publish,
-                subject,
-            );
-        }
-        add(
-            &mut entries,
-            Principal::Participant,
-            Operation::Subscribe,
-            account.peer_subscription(agent_id)?,
-        );
-
-        for stream in [
-            &account.streams().room,
-            &account.streams().wake,
-            &account.streams().peer,
-            &account.streams().effect,
-        ] {
-            for subject in [
-                format!("$JS.ACK.{stream}.{consumer}.>"),
-                format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{consumer}"),
-                format!("$JS.API.CONSUMER.INFO.{stream}.{consumer}"),
-                format!("$JS.API.STREAM.INFO.{stream}"),
-            ] {
-                add(
-                    &mut entries,
-                    Principal::Participant,
-                    Operation::Publish,
-                    subject,
-                );
-            }
+            add(entries, principal, Operation::Publish, subject);
         }
     }
 
     for room_id in bound_rooms {
         validate_token(TokenKind::RoomId, room_id)?;
         add(
-            &mut entries,
-            Principal::Participant,
+            entries,
+            principal,
             Operation::Publish,
             account.room_post(room_id)?,
         );
         add(
-            &mut entries,
-            Principal::Participant,
+            entries,
+            principal,
             Operation::Subscribe,
             account.room_subscription(room_id)?,
         );
     }
 
-    add_census_read_permissions(&mut entries, Principal::Participant, account);
-    Ok(entries.into_iter().collect())
+    add_census_read_permissions(entries, principal, account);
+    Ok(())
 }
 
 pub fn bus_permissions(
@@ -305,6 +343,20 @@ pub fn bus_permissions(
     ] {
         add(&mut entries, Principal::Bus, Operation::Publish, subject);
     }
+
+    // Agent durable lifecycle: listing the durables, and purging an agent's
+    // subject when its durable is deleted (a consumer delete alone leaves its
+    // messages in the stream for a later bind to redeliver). The purge filter
+    // travels in the request body, which permissions cannot see, so ck-bus's
+    // code restricts each purge to one agent's filter.
+    for stream in account.streams().agent_streams() {
+        for subject in [
+            format!("$JS.API.CONSUMER.NAMES.{stream}"),
+            format!("$JS.API.STREAM.PURGE.{stream}"),
+        ] {
+            add(&mut entries, Principal::Bus, Operation::Publish, subject);
+        }
+    }
     Ok(entries.into_iter().collect())
 }
 
@@ -358,33 +410,34 @@ pub fn generate_permission_golden(
     allows.extend(participant_permissions(
         &account,
         fixture.module_id,
-        &[fixture.bound_agent],
+        &[fixture.bound_room],
+    )?);
+    allows.extend(delivery_authority_permissions(
+        &account,
+        fixture.module_id,
         &[fixture.bound_room],
     )?);
     allows.extend(bus_permissions(&account, fixture.module_id)?);
     allows.extend(system_permissions(fixture.system_credential)?);
 
-    let foreign_consumer = AccountNames::consumer_name(fixture.foreign_agent)?;
     let mut refused = BTreeSet::new();
+    // Credentials name no agents, so no participant may produce a workload
+    // message for any agent, its own or another's.
+    for agent_id in [fixture.bound_agent, fixture.foreign_agent] {
+        for subject in [
+            account.wake_fire(agent_id)?,
+            account.peer_delivery(agent_id, GOLDEN_SESSION)?,
+            account.effect_intent(agent_id, GOLDEN_SESSION)?,
+        ] {
+            refused.insert(RefusedEntry {
+                principal: Principal::Participant,
+                operation: Operation::Publish,
+                subject,
+                reason: "workload-publish",
+            });
+        }
+    }
     for (operation, subject, reason) in [
-        (
-            Operation::Publish,
-            account.wake_fire(fixture.foreign_agent)?,
-            "foreign-identity",
-        ),
-        (
-            Operation::Publish,
-            format!("$JS.ACK.{}.{foreign_consumer}.>", account.streams().peer),
-            "foreign-consumer",
-        ),
-        (
-            Operation::Publish,
-            format!(
-                "$JS.API.CONSUMER.MSG.NEXT.{}.{foreign_consumer}",
-                account.streams().peer
-            ),
-            "foreign-consumer",
-        ),
         (
             Operation::Publish,
             format!("$KV.{}.forbidden", account.buckets().census),
@@ -413,31 +466,51 @@ pub fn generate_permission_golden(
             reason,
         });
     }
-    for stream in [
-        &account.streams().room,
-        &account.streams().wake,
-        &account.streams().peer,
-        &account.streams().effect,
+    for principal in [Principal::Participant, Principal::DeliveryAuthority] {
+        for stream in [
+            &account.streams().room,
+            &account.streams().wake,
+            &account.streams().peer,
+            &account.streams().effect,
+        ] {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Publish,
+                subject: format!("$JS.API.CONSUMER.CREATE.{stream}.c_{}", fixture.bound_agent),
+                reason: "consumer-create",
+            });
+        }
+    }
+    for (subject, reason) in [
+        (
+            format!("$KV.{}.forbidden", account.buckets().census),
+            "census-write",
+        ),
+        ("$SYS.REQ.CLAIMS.UPDATE".to_owned(), "system-subject"),
+        (account.room_post(fixture.unbound_room)?, "unbound-room"),
     ] {
         refused.insert(RefusedEntry {
-            principal: Principal::Participant,
+            principal: Principal::DeliveryAuthority,
             operation: Operation::Publish,
-            subject: format!("$JS.API.CONSUMER.CREATE.{stream}.c_{}", fixture.bound_agent),
-            reason: "consumer-create",
+            subject,
+            reason,
         });
     }
-    refused.insert(RefusedEntry {
-        principal: Principal::Bus,
-        operation: Operation::Publish,
-        subject: account.room_post(fixture.bound_room)?,
-        reason: "workload-publish",
-    });
-    refused.insert(RefusedEntry {
-        principal: Principal::System,
-        operation: Operation::Publish,
-        subject: account.room_post(fixture.bound_room)?,
-        reason: "workload-publish",
-    });
+    for principal in [Principal::Bus, Principal::System] {
+        for subject in [
+            account.room_post(fixture.bound_room)?,
+            account.wake_fire(fixture.bound_agent)?,
+            account.peer_delivery(fixture.bound_agent, GOLDEN_SESSION)?,
+            account.effect_intent(fixture.bound_agent, GOLDEN_SESSION)?,
+        ] {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Publish,
+                subject,
+                reason: "workload-publish",
+            });
+        }
+    }
 
     let document = PermissionDocument {
         fixture,
@@ -553,7 +626,10 @@ fn add_census_read_permissions(
 }
 
 fn validate_principal(line: usize, principal: &str) -> Result<(), GrantError> {
-    if matches!(principal, "participant" | "bus" | "system") {
+    if matches!(
+        principal,
+        "participant" | "delivery-authority" | "bus" | "system"
+    ) {
         Ok(())
     } else {
         Err(file_error(line, "unknown principal"))
