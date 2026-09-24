@@ -308,15 +308,19 @@ pub fn bus_permissions(
     Ok(entries.into_iter().collect())
 }
 
-/// The system user's grant. It publishes claims updates and per-account claims
+/// The system user's grant. It publishes claims updates, per-account claims
 /// lookups (`$SYS.REQ.ACCOUNT.<account>.CLAIMS.LOOKUP`, which the revocation
-/// check reads back), kicks, and watches connects; replies to its requests
-/// arrive on its own credential-scoped inbox.
+/// check reads back) and the claims list (`$SYS.REQ.CLAIMS.LIST`, which finds
+/// an existing account by name when its id was not recorded, so a lost state
+/// file adopts the account instead of creating a second one), kicks, and
+/// watches connects; replies to its requests arrive on its own
+/// credential-scoped inbox.
 pub fn system_permissions(credential_public: &str) -> Result<Vec<AllowEntry>, GrantError> {
     validate_token(TokenKind::CredentialPublic, credential_public)?;
     let mut entries = BTreeSet::new();
     for subject in [
         "$SYS.REQ.CLAIMS.UPDATE",
+        "$SYS.REQ.CLAIMS.LIST",
         "$SYS.REQ.ACCOUNT.*.CLAIMS.LOOKUP",
         "$SYS.REQ.SERVER.*.KICK",
     ] {

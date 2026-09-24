@@ -104,6 +104,7 @@ fn system_user_can_look_up_account_claims_and_read_only_its_own_replies() {
             .any(|entry| entry.operation == operation && entry.subject == subject)
     };
     assert!(has(Operation::Publish, "$SYS.REQ.ACCOUNT.*.CLAIMS.LOOKUP"));
+    assert!(has(Operation::Publish, "$SYS.REQ.CLAIMS.LIST"));
     assert!(has(Operation::Subscribe, "_INBOX.cksys.>"));
     // Replies are scoped to the system user's own inbox, never every inbox.
     assert!(!has(Operation::Subscribe, "_INBOX.>"));
