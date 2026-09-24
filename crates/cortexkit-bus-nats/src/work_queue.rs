@@ -100,20 +100,6 @@ fn claimant_cap(max_deliver: i64) -> Option<u32> {
     u32::try_from(max_deliver - 1).ok()
 }
 
-#[cfg(test)]
-mod cap_tests {
-    use super::claimant_cap;
-
-    #[test]
-    fn the_cap_leaves_one_spare_redelivery() {
-        assert_eq!(claimant_cap(5), Some(4));
-        assert_eq!(claimant_cap(2), Some(1));
-        assert_eq!(claimant_cap(1), None);
-        assert_eq!(claimant_cap(0), None);
-        assert_eq!(claimant_cap(-1), None);
-    }
-}
-
 #[async_trait]
 impl WorkQueue for NatsWorkQueue {
     async fn claim(&self) -> BusResult<ClaimOutcome> {
@@ -163,5 +149,19 @@ impl WorkQueue for NatsWorkQueue {
 
     async fn term(&self, token: DeliveryToken) -> BusResult<()> {
         self.settle(token, AckKind::Term).await
+    }
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::claimant_cap;
+
+    #[test]
+    fn the_cap_leaves_one_spare_redelivery() {
+        assert_eq!(claimant_cap(5), Some(4));
+        assert_eq!(claimant_cap(2), Some(1));
+        assert_eq!(claimant_cap(1), None);
+        assert_eq!(claimant_cap(0), None);
+        assert_eq!(claimant_cap(-1), None);
     }
 }
