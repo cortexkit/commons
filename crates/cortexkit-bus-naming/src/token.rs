@@ -11,6 +11,7 @@ pub enum TokenKind {
     ModuleId,
     RosterHostId,
     CredentialPublic,
+    RootProvider,
 }
 
 impl TokenKind {
@@ -23,6 +24,7 @@ impl TokenKind {
             Self::ModuleId => "module_id",
             Self::RosterHostId => "roster_host_id",
             Self::CredentialPublic => "credential_public",
+            Self::RootProvider => "root_provider",
         }
     }
 }

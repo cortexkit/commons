@@ -93,3 +93,19 @@ fn golden_names_bound_and_refused_fixture_identities() {
     assert!(CHECKED_IN_GOLDEN.contains("foreign-identity"));
     assert!(CHECKED_IN_GOLDEN.contains("unbound-room"));
 }
+
+#[test]
+fn system_user_can_look_up_account_claims_and_read_only_its_own_replies() {
+    use cortexkit_bus_naming::{system_permissions, Operation};
+    let allows = system_permissions("cksys").unwrap();
+    let has = |operation: Operation, subject: &str| {
+        allows
+            .iter()
+            .any(|entry| entry.operation == operation && entry.subject == subject)
+    };
+    assert!(has(Operation::Publish, "$SYS.REQ.ACCOUNT.*.CLAIMS.LOOKUP"));
+    assert!(has(Operation::Subscribe, "_INBOX.cksys.>"));
+    // Replies are scoped to the system user's own inbox, never every inbox.
+    assert!(!has(Operation::Subscribe, "_INBOX.>"));
+    assert!(system_permissions("cksys.>").is_err());
+}

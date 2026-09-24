@@ -86,3 +86,44 @@ fn every_governed_name_obeys_its_rule_and_exemptions_are_closed() {
         validate_tenancy_name(&names, name, NamingRule::Exempt(exemption)).unwrap();
     }
 }
+
+#[test]
+fn root_credential_ids_follow_the_ceremony_grammar() {
+    use cortexkit_bus_naming::{root_credential_id, RootCredentialKind};
+    use std::num::NonZeroU32;
+    let one = NonZeroU32::new(1);
+    // The ids the operator ceremony mints (ck-bus spec, credentials table).
+    assert_eq!(
+        root_credential_id(RootCredentialKind::Signing, "ck-bus-account", one).unwrap(),
+        "signing:ck-bus-account:1"
+    );
+    assert_eq!(
+        root_credential_id(RootCredentialKind::Signing, "ck-bus-operator-signer", one).unwrap(),
+        "signing:ck-bus-operator-signer:1"
+    );
+    assert_eq!(
+        root_credential_id(RootCredentialKind::Signing, "ck-bus-operator-root", one).unwrap(),
+        "signing:ck-bus-operator-root:1"
+    );
+    assert_eq!(
+        root_credential_id(RootCredentialKind::Signing, "msgsig", None).unwrap(),
+        "signing:msgsig"
+    );
+    assert_eq!(
+        root_credential_id(RootCredentialKind::Kem, "fed-seal", NonZeroU32::new(2)).unwrap(),
+        "kem:fed-seal:2"
+    );
+    // A provider can never add a segment, widen with a wildcard, or change case.
+    for provider in [
+        "ck-bus-account:2",
+        "ck-bus.account",
+        "*",
+        "Ck-bus",
+        "",
+        " msgsig",
+    ] {
+        let error = root_credential_id(RootCredentialKind::Signing, provider, one)
+            .expect_err("provider outside the lexicon must refuse");
+        assert_eq!(error.kind(), cortexkit_bus_naming::TokenKind::RootProvider);
+    }
+}

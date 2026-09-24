@@ -61,6 +61,8 @@ pub struct GoldenFixture {
     pub foreign_agent: &'static str,
     pub bound_room: &'static str,
     pub unbound_room: &'static str,
+    /// Inbox component of the system user in the golden.
+    pub system_credential: &'static str,
 }
 
 pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
@@ -70,6 +72,7 @@ pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
     foreign_agent: "agent_gold_b",
     bound_room: "room_gold_bound",
     unbound_room: "room_gold_unbound",
+    system_credential: "cksys",
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,9 +308,18 @@ pub fn bus_permissions(
     Ok(entries.into_iter().collect())
 }
 
-pub fn system_permissions() -> Vec<AllowEntry> {
+/// The system user's grant. It publishes claims updates and per-account claims
+/// lookups (`$SYS.REQ.ACCOUNT.<account>.CLAIMS.LOOKUP`, which the revocation
+/// check reads back), kicks, and watches connects; replies to its requests
+/// arrive on its own credential-scoped inbox.
+pub fn system_permissions(credential_public: &str) -> Result<Vec<AllowEntry>, GrantError> {
+    validate_token(TokenKind::CredentialPublic, credential_public)?;
     let mut entries = BTreeSet::new();
-    for subject in ["$SYS.REQ.CLAIMS.UPDATE", "$SYS.REQ.SERVER.*.KICK"] {
+    for subject in [
+        "$SYS.REQ.CLAIMS.UPDATE",
+        "$SYS.REQ.ACCOUNT.*.CLAIMS.LOOKUP",
+        "$SYS.REQ.SERVER.*.KICK",
+    ] {
         add(
             &mut entries,
             Principal::System,
@@ -315,15 +327,19 @@ pub fn system_permissions() -> Vec<AllowEntry> {
             subject.to_owned(),
         );
     }
-    for subject in ["$SYS.ACCOUNT.*.CONNECT", "$SYS.ACCOUNT.*.DISCONNECT"] {
+    for subject in [
+        "$SYS.ACCOUNT.*.CONNECT".to_owned(),
+        "$SYS.ACCOUNT.*.DISCONNECT".to_owned(),
+        format!("_INBOX.{credential_public}.>"),
+    ] {
         add(
             &mut entries,
             Principal::System,
             Operation::Subscribe,
-            subject.to_owned(),
+            subject,
         );
     }
-    entries.into_iter().collect()
+    Ok(entries.into_iter().collect())
 }
 
 pub fn generate_permission_golden(
@@ -342,7 +358,7 @@ pub fn generate_permission_golden(
         &[fixture.bound_room],
     )?);
     allows.extend(bus_permissions(&account, fixture.module_id)?);
-    allows.extend(system_permissions());
+    allows.extend(system_permissions(fixture.system_credential)?);
 
     let foreign_consumer = AccountNames::consumer_name(fixture.foreign_agent)?;
     let mut refused = BTreeSet::new();

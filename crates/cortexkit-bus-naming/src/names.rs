@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::num::NonZeroU32;
 
 use crate::token::{validate_account_token, validate_token, NamingError, TokenKind};
 
@@ -171,6 +172,9 @@ impl AccountNames {
         Ok(format!("c_{agent_id}"))
     }
 
+    #[deprecated(
+        note = "the foundation amendment keeps no process records in the vault; per-spawn credentials are held by ck-bus in memory"
+    )]
     pub fn process_record_name(
         module_id: &str,
         generation: u64,
@@ -180,22 +184,70 @@ impl AccountNames {
         Ok(format!("nats.{module_id}.g{generation}.e{epoch}"))
     }
 
+    #[deprecated(
+        note = "vault roots are credential ids from the operator ceremony; use root_credential_id"
+    )]
     pub fn leaf_record_name(roster_host_id: &str) -> Result<String, NamingError> {
         validate_token(TokenKind::RosterHostId, roster_host_id)?;
         Ok(format!("nats.leaf.{roster_host_id}"))
     }
 
+    #[deprecated(
+        note = "vault roots are credential ids from the operator ceremony; use root_credential_id"
+    )]
     pub fn operator_record_name(&self) -> String {
         format!("nats.operator.{}", self.account)
     }
 
+    #[deprecated(
+        note = "vault roots are credential ids from the operator ceremony; use root_credential_id"
+    )]
     pub fn account_record_name(&self) -> String {
         format!("nats.account.{}", self.account)
     }
 
+    #[deprecated(
+        note = "vault roots are credential ids from the operator ceremony; use root_credential_id"
+    )]
     pub fn system_account_record_name(&self) -> String {
         format!("nats.sysaccount.{}", self.account)
     }
+}
+
+/// Families of root keys the operator creates once in the vault by ceremony
+/// (`ck auth mint-signing-key --id signing:<provider>[:<generation>]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootCredentialKind {
+    /// Ed25519 signing keys: account, operator and message-signing roots.
+    Signing,
+    /// Key-encapsulation keys, for sealing federation envelopes.
+    Kem,
+}
+
+impl RootCredentialKind {
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Signing => "signing",
+            Self::Kem => "kem",
+        }
+    }
+}
+
+/// The vault credential id of a root key: `<kind>:<provider>[:<generation>]`,
+/// for example `signing:ck-bus-account:1` or `signing:msgsig`.
+///
+/// `provider` uses the shared identity lexicon, so it can never carry a colon
+/// and add a segment; a generation, when present, is at least 1 by type.
+pub fn root_credential_id(
+    kind: RootCredentialKind,
+    provider: &str,
+    generation: Option<NonZeroU32>,
+) -> Result<String, NamingError> {
+    validate_token(TokenKind::RootProvider, provider)?;
+    Ok(match generation {
+        Some(generation) => format!("{}:{provider}:{generation}", kind.prefix()),
+        None => format!("{}:{provider}", kind.prefix()),
+    })
 }
 
 /// Namespaces that are deliberately outside the account-token rule.
