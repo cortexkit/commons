@@ -172,6 +172,23 @@ impl AccountNames {
         Ok(format!("c_{agent_id}"))
     }
 
+    /// The census key for one live module inside `buckets().census`.
+    ///
+    /// Issuance writes one record per module under this key (history 1, no TTL)
+    /// so revocation can find the credential a module currently holds. The key
+    /// is the module id itself, refused unless it is a single plain token: a dot
+    /// or wildcard would address a different key or several at once.
+    pub fn census_key(module_id: &str) -> Result<String, NamingError> {
+        validate_token(TokenKind::ModuleId, module_id)?;
+        Ok(module_id.to_owned())
+    }
+
+    /// The KV subject a census write for `module_id` is published on.
+    pub fn census_subject(&self, module_id: &str) -> Result<String, NamingError> {
+        let key = Self::census_key(module_id)?;
+        Ok(format!("$KV.{}.{key}", self.buckets().census))
+    }
+
     #[deprecated(
         note = "the foundation amendment keeps no process records in the vault; per-spawn credentials are held by ck-bus in memory"
     )]

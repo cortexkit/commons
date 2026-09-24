@@ -127,3 +127,29 @@ fn root_credential_ids_follow_the_ceremony_grammar() {
         assert_eq!(error.kind(), cortexkit_bus_naming::TokenKind::RootProvider);
     }
 }
+
+#[test]
+fn census_key_is_the_module_id_and_refuses_anything_but_one_token() {
+    let names = AccountNames::derive("box_census").unwrap();
+    assert_eq!(
+        AccountNames::census_key("prefrontal-core").unwrap(),
+        "prefrontal-core"
+    );
+    assert_eq!(
+        names.census_subject("prefrontal-core").unwrap(),
+        "$KV.CK_BOX_CENSUS_CENSUS.prefrontal-core"
+    );
+    for bad in ["", "a.b", "*", ">", "Prefrontal", "mod ule", "-lead"] {
+        let error = AccountNames::census_key(bad).expect_err("census key must refuse a non-token");
+        assert_eq!(error.kind(), TokenKind::ModuleId, "{bad:?}");
+        names
+            .census_subject(bad)
+            .expect_err("census subject must refuse the same tokens");
+    }
+    validate_tenancy_name(
+        &names,
+        &names.census_subject("prefrontal-core").unwrap(),
+        NamingRule::Exempt(NamingExemption::KeyValuePrefix),
+    )
+    .unwrap();
+}
