@@ -326,6 +326,21 @@ pub struct Pool {
     /// their own enable flags. Absent means the provider does not say.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub spendable: Option<bool>,
+    /// When the pool's period renews, as RFC 3339, if the provider states one.
+    ///
+    /// **Absent means not stated, never "does not renew".** Some providers state
+    /// a period for a money pool (a monthly workspace credit limit with its own
+    /// reset time); others state none for a pool that may well be monthly (paid
+    /// overage named `monthly_limit` with no date anywhere in the payload). A
+    /// consumer that reads absence as "this balance is all there will ever be"
+    /// under-spends at best, and at worst treats a pool that refills on the 1st
+    /// as permanently exhausted.
+    ///
+    /// A producer sets it only from a value the provider sent. A period guessed
+    /// from a field name is the fabricated-precision failure this crate refuses
+    /// everywhere else.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub resets_at: Option<String>,
 }
 
 /// Account labels and subscription information supplied by a provider or vault.
@@ -1235,6 +1250,7 @@ mod tests {
             total: None,
             basis: PoolBasis::Reported,
             spendable: Some(true),
+            resets_at: None,
         };
         let mut entry = ProviderUsage::healthy("deepseek", None, "api", Usage::default());
         entry.spend = Some(vec![pool.clone()]);
@@ -1252,6 +1268,50 @@ mod tests {
             !json.contains("10.5"),
             "an amount was rendered as a decimal: {json}"
         );
+    }
+
+    /// A stated reset survives a round trip under its wire name, and an absent
+    /// one is not rendered at all.
+    #[test]
+    fn a_pool_reset_round_trips_and_is_omitted_when_absent() {
+        let pool = Pool {
+            id: "individual_limit".to_string(),
+            label: "Credit limit".to_string(),
+            funding: PoolFunding::Unknown,
+            remaining: None,
+            total: None,
+            basis: PoolBasis::Unstated,
+            spendable: None,
+            resets_at: Some("2026-10-01T00:00:00Z".to_string()),
+        };
+        let json = serde_json::to_string(&pool).unwrap();
+        assert!(
+            json.contains(r#""resetsAt":"2026-10-01T00:00:00Z""#),
+            "{json}"
+        );
+        assert_eq!(serde_json::from_str::<Pool>(&json).unwrap(), pool);
+
+        let unstated = Pool {
+            resets_at: None,
+            ..pool
+        };
+        let json = serde_json::to_string(&unstated).unwrap();
+        assert!(!json.contains("resetsAt"), "{json}");
+    }
+
+    /// A pool written before `resetsAt` existed still decodes, to `None`.
+    ///
+    /// The direction that bites: a producer on an older crate, or a stored
+    /// payload, has no such key. A required field would fail every such pool,
+    /// and the whole entry with it, rate windows included. serde already decodes
+    /// a missing `Option` as `None` (dropping `default` alone leaves this green,
+    /// measured), so what this pins is that the field stays optional.
+    #[test]
+    fn a_pool_without_a_reset_key_decodes_to_none() {
+        let json = r#"{ "id": "credits", "label": "Credits", "funding": "unknown", "basis": "reported",
+                       "remaining": { "minor": 2402, "exponent": 2, "unit": "credit" } }"#;
+        let pool: Pool = serde_json::from_str(json).unwrap();
+        assert_eq!(pool.resets_at, None);
     }
 
     /// An unrecognised funding kind must not take the entry down with it.
