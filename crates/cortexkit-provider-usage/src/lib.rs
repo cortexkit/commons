@@ -87,6 +87,55 @@ pub struct RateWindow {
     /// nothing, so absence is the common case and carries no information.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub regeneration: Option<Regeneration>,
+    /// How the window's consumption divides among the upstream's own
+    /// categories, when the upstream states that split.
+    ///
+    /// **Absence means not fetched or not published, never "all zero".** Most
+    /// providers state no split, so absence is the common case.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub breakdown: Option<UsageBreakdown>,
+}
+
+/// A window's consumption split by category, as the upstream reports it.
+///
+/// First observed on Anthropic's weekly window, which splits consumption across
+/// `claude_code`, `chat`, `cowork` and `other`. A consumer that sees only some
+/// of an account's traffic uses the split to tell which share of a movement in
+/// `used_percent` it can account for.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageBreakdown {
+    /// When the upstream computed the split, RFC 3339. Omitted when unstated.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub as_of: Option<String>,
+    /// When the window this split describes began, RFC 3339, as the upstream
+    /// states it. Lets a consumer tell which window a split belongs to across a
+    /// reset. Omitted when unstated.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub window_started_at: Option<String>,
+    /// One row per category, in the upstream's order.
+    pub rows: Vec<BreakdownRow>,
+}
+
+/// One category's part of a window's consumption.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BreakdownRow {
+    /// The upstream's own category key, verbatim: never mapped or renamed.
+    ///
+    /// A `String` rather than an enum, because this is an observability wire: a
+    /// category added upstream must arrive as itself, not fail the record.
+    pub key: String,
+    /// This category's share of what the window has CONSUMED, 0..=100.
+    ///
+    /// **A share, not a used-percent.** Across rows it sums to about 100 whatever
+    /// the window's `used_percent`: a window 85% used whose consumption was all
+    /// one category reads 100 on that row, not 85. The part of `used_percent` a
+    /// category accounts for is `used_percent * share_percent / 100`.
+    ///
+    /// Omitted, never zero, when the upstream's row carries no figure.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub share_percent: Option<f64>,
 }
 
 /// A stated replenishment mechanic for a window.
@@ -855,6 +904,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            breakdown: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
         assert!(
@@ -893,6 +943,7 @@ mod tests {
                     per_minutes: 43_200,
                 }),
             }),
+            breakdown: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
         let back: RateWindow = serde_json::from_str(&json).expect("round-trips");
@@ -1028,6 +1079,7 @@ mod tests {
                     used_count: None,
                     total_count: None,
                     regeneration: None,
+                    breakdown: None,
                 }),
                 ..Default::default()
             },
@@ -1080,6 +1132,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            breakdown: None,
         };
         let json = serde_json::to_string(&unrelaxed).unwrap();
         assert!(
@@ -1095,6 +1148,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            breakdown: None,
         };
         let json = serde_json::to_string(&relaxed).unwrap();
         assert!(json.contains("\"rawUsedPercent\":70.0"));
@@ -1140,6 +1194,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            breakdown: None,
         };
         let json = serde_json::to_string(&window).unwrap();
         assert!(
@@ -1382,5 +1437,69 @@ mod tests {
         assert!(!serde_json::to_string(&entry)
             .unwrap()
             .contains("errorClass"));
+    }
+
+    fn weekly(breakdown: Option<UsageBreakdown>) -> RateWindow {
+        RateWindow {
+            used_percent: 85.0,
+            raw_used_percent: None,
+            resets_at: Some("2026-09-30T14:00:00Z".to_string()),
+            window_minutes: Some(10_080),
+            used_count: None,
+            total_count: None,
+            regeneration: None,
+            breakdown,
+        }
+    }
+
+    /// The field is additive: a window without a split serializes exactly as
+    /// before, with no `breakdown` key, so every existing entry is unchanged.
+    #[test]
+    fn a_window_without_a_breakdown_omits_the_key() {
+        let json = serde_json::to_string(&weekly(None)).unwrap();
+        assert!(!json.contains("breakdown"), "{json}");
+    }
+
+    /// A window written before `breakdown` existed still decodes, to `None`.
+    #[test]
+    fn a_window_from_before_the_field_decodes_without_one() {
+        let json =
+            r#"{"usedPercent":85.0,"resetsAt":"2026-09-30T14:00:00Z","windowMinutes":10080}"#;
+        let window: RateWindow = serde_json::from_str(json).unwrap();
+        assert_eq!(window.breakdown, None);
+    }
+
+    /// The split round-trips with the upstream's keys verbatim, including one no
+    /// consumer has seen, and a row with no figure stays without one rather than
+    /// becoming zero.
+    #[test]
+    fn a_breakdown_round_trips_keys_verbatim_and_keeps_a_missing_share_absent() {
+        let breakdown = UsageBreakdown {
+            as_of: Some("2026-09-27T08:37:37Z".to_string()),
+            window_started_at: Some("2026-09-23T14:00:00Z".to_string()),
+            rows: vec![
+                BreakdownRow {
+                    key: "claude_code".to_string(),
+                    share_percent: Some(100.0),
+                },
+                BreakdownRow {
+                    key: "chat".to_string(),
+                    share_percent: Some(0.0),
+                },
+                BreakdownRow {
+                    key: "a_surface_from_the_future".to_string(),
+                    share_percent: None,
+                },
+            ],
+        };
+        let window = weekly(Some(breakdown));
+        let json = serde_json::to_string(&window).unwrap();
+        assert!(
+            json.contains(r#""breakdown":{"asOf":"2026-09-27T08:37:37Z","windowStartedAt":"2026-09-23T14:00:00Z","rows":[{"key":"claude_code","sharePercent":100.0},{"key":"chat","sharePercent":0.0},{"key":"a_surface_from_the_future"}]}"#),
+            "{json}"
+        );
+        let back: RateWindow = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, window);
+        assert_eq!(back.breakdown.unwrap().rows[2].share_percent, None);
     }
 }
