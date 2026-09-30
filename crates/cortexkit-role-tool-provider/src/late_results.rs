@@ -252,5 +252,7 @@ mod tests {
         assert_eq!(check_since("i2", 5, Some(&cursor("i2", 0))), Ok(()));
         let past = check_since("i2", 5, Some(&cursor("i2", 6))).unwrap_err();
         assert_eq!(past.code, CURSOR_INCARNATION_CHANGED);
+        let foreign = check_since("i2", 5, Some(&cursor("i1", 3))).unwrap_err();
+        assert_eq!(foreign.code, CURSOR_INCARNATION_CHANGED);
     }
 }
