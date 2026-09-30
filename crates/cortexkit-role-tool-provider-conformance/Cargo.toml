@@ -1,0 +1,29 @@
+# cortexkit-role-tool-provider-conformance — the `tool-provider/v1`
+# conformance runner. It drives a LIVE provider over a real route, reached
+# through the provider's `cortexkit-role-harness` implementation, and checks
+# its answers against the role's test vectors. A provider adds this crate as a
+# dev-dependency and runs the suite in its own CI; it is a separate crate
+# rather than a feature so a provider's production build never compiles the
+# suite, and so `cargo test --workspace` here tests the runner without feature
+# flags.
+[package]
+name = "cortexkit-role-tool-provider-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Conformance runner for the CortexKit tool-provider/v1 role: drives a live provider through its crash-cut harness and checks it against the role's vectors."
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
+cortexkit-role-tool-provider = { version = "0.1.0", path = "../cortexkit-role-tool-provider" }
+futures-util = { version = "0.3", default-features = false }
+serde_json = "1"
+subc-protocol = "0.25.2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

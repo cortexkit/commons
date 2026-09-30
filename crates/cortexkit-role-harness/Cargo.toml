@@ -1,0 +1,20 @@
+# cortexkit-role-harness — the crash-cut harness every role implementation
+# supplies so a role's conformance suite can spawn it on a state root, kill it
+# at a named point, and restart it on the same root. The suite only ever kills
+# through this trait, never through the module's own code, so the same suite
+# drives every implementation of a role the same way.
+[package]
+name = "cortexkit-role-harness"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Crash-cut harness trait shared by CortexKit role conformance suites: spawn on a state root, kill at a named durable point, restart on the same root, and a ledger that fails a run with no real process kill."
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

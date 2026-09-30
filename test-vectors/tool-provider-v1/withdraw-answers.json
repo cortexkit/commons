@@ -1,0 +1,29 @@
+{
+  "_about": "tool.withdraw reply bodies. `known` decode to the named kind and re-encode byte-identical; `unclassified` carry an answer the role does not define and must decode as final but unclassified, recorded verbatim; `malformed` are not answers at all.",
+  "known": [
+    { "name": "withdrawn", "body": { "answer": "withdrawn" }, "decodes_as": "withdrawn" },
+    { "name": "unknown call", "body": { "answer": "unknown_call" }, "decodes_as": "unknown_call" },
+    { "name": "started, outcome observed", "body": { "answer": "already_started", "outcome": "ok" }, "decodes_as": "already_started" },
+    { "name": "started, outcome unknown", "body": { "answer": "already_started", "outcome": "unknown" }, "decodes_as": "already_started_unknown" },
+    { "name": "completed, result retained", "body": { "answer": "completed", "result": { "content": [{ "type": "text", "text": "done" }] }, "result_retained": true }, "decodes_as": "completed_retained" },
+    { "name": "completed, outcome only", "body": { "answer": "completed", "outcome": "ok", "result_retained": false }, "decodes_as": "completed_outcome_only" },
+    { "name": "refused, denied", "body": { "answer": "refused", "reason": "denied" }, "decodes_as": "refused" },
+    { "name": "refused, expired", "body": { "answer": "refused", "reason": "expired" }, "decodes_as": "refused" },
+    { "name": "refused, scope ended", "body": { "answer": "refused", "reason": "scope_ended" }, "decodes_as": "refused" },
+    { "name": "refused, open reason", "body": { "answer": "refused", "reason": "vendor_hold" }, "decodes_as": "refused_other" }
+  ],
+  "unclassified": [
+    { "name": "a future answer", "body": { "answer": "superseded" } },
+    { "name": "a future answer with members", "body": { "answer": "handed_off", "to": "reserved:other", "at": 12 } }
+  ],
+  "malformed": [
+    { "name": "not an object", "body": "withdrawn" },
+    { "name": "no answer", "body": { "outcome": "ok" } },
+    { "name": "answer not a string", "body": { "answer": 1 } },
+    { "name": "started without outcome", "body": { "answer": "already_started" } },
+    { "name": "completed without result_retained", "body": { "answer": "completed", "result": {} } },
+    { "name": "retained without result", "body": { "answer": "completed", "result_retained": true } },
+    { "name": "not retained without outcome", "body": { "answer": "completed", "result_retained": false } },
+    { "name": "refused without reason", "body": { "answer": "refused" } }
+  ]
+}

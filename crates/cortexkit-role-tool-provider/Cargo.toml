@@ -1,0 +1,23 @@
+# cortexkit-role-tool-provider — the wire contract of the `tool-provider/v1`
+# role: request and answer types, error codes, the kill-point vocabulary its
+# crash suite uses, and CONTRACT.md, which says what is pinned and what is
+# still open. Pure serde plus small checks; no transport, no runtime.
+#
+# Every tool provider (and every consumer of one) compiles against this one
+# definition. The conformance runner that drives a live provider lives in the
+# sibling `cortexkit-role-tool-provider-conformance` crate, so a provider's
+# production build never pulls in the suite.
+[package]
+name = "cortexkit-role-tool-provider"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit tool-provider/v1 role: role.describe, tool.catalog, call_key, tool.withdraw and late-result names."
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subc-protocol = "0.25.2"
