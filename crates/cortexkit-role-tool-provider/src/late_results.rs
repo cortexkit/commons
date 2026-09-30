@@ -12,7 +12,8 @@
 /// The session capability a provider declares when it may settle calls later.
 pub const CAPABILITY: &str = "late_results";
 
-/// A cursor from another provider incarnation, or one past a gap, is refused
+/// A cursor from another provider incarnation, or one whose next entries the
+/// provider no longer has (a gap), is refused
 /// with this code; the reader re-reads from the start and deduplicates on its
 /// own intake key.
 pub const CURSOR_INCARNATION_CHANGED: &str = "cursor_incarnation_changed";

@@ -642,7 +642,8 @@ where
 }
 
 /// Kill the provider at `point` while it holds a call, restart it on the same
-/// root, and check it neither runs the call nor answers as if it might.
+/// root, and check that it never runs the call and that its withdraw answer
+/// guarantees the call will never run.
 async fn crash_case<S>(
     subject: &S,
     driver: &mut CrashDriver<'_, S>,

@@ -99,7 +99,8 @@ pub struct KeyedToolCallRequest {
 }
 
 impl KeyedToolCallRequest {
-    /// A call with no consumer id, no progress token and no call key.
+    /// A call with only a name and arguments: no `tool_call_id`, no
+    /// `progress_token` and no `call_key`.
     pub fn new(name: impl Into<String>, arguments: Value) -> Self {
         Self {
             request: ToolCallRequest::new(name, arguments),

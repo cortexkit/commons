@@ -117,10 +117,10 @@ pub trait ToolProviderSubject: Harness {
     /// action never ran.
     fn held_call(&self, marker: &Path) -> Option<CallSpec>;
 
-    /// Resolve once the provider holds the call sent with `call_key`, which is
-    /// once its question has been filed. Implementations typically wait for
-    /// the question to reach the stand-in for the elicitation provider their
-    /// harness runs.
+    /// Resolve once the provider holds the call sent with `call_key`, that is,
+    /// once the provider has filed the call's approval question.
+    /// Implementations typically wait for that question to reach whatever
+    /// stands in for the elicitation provider in their harness.
     async fn await_held(&self, call_key: &str) -> Result<(), HarnessError>;
 
     /// Answer "approve" to the question filed for `call_key`, through the same

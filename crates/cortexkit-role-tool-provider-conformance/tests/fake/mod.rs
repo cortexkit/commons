@@ -55,7 +55,8 @@ pub const SLOW: &str = "sleep";
 pub const HELD: &str = "effect";
 pub const DISABLED: &str = "danger";
 
-/// One contract break each.
+/// Deliberate contract breaks: each field makes the fake violate one rule a
+/// runner case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     /// A cancelled call gets a second terminal frame after its error.

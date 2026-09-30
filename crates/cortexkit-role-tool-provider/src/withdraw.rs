@@ -40,7 +40,8 @@ pub mod answers {
     pub const UNKNOWN_CALL: &str = "unknown_call";
 }
 
-/// Refusal reasons the role names. The reason is an open string.
+/// Refusal reasons the role names. Any other string may appear on the wire;
+/// it decodes as [`RefusalReason::Other`].
 pub mod reasons {
     pub const DENIED: &str = "denied";
     pub const EXPIRED: &str = "expired";
@@ -123,8 +124,9 @@ pub enum CallerProblem {
 /// stamped principal and scope and the request's arguments.
 ///
 /// On success the provider reads the record `(carrier, arguments.call_key)`.
-/// If that record exists under a scope other than `stamp_scope`, the caller
-/// check fails too, and the provider answers `withdraw_not_permitted`.
+/// If that record exists under a scope other than the route's stamped scope
+/// (`stamp_scope`), the caller is not permitted either, and the provider
+/// answers `withdraw_not_permitted`.
 pub fn resolve_carrier(
     caller: &str,
     stamp_scope: &ScopeIdentity,
@@ -202,7 +204,8 @@ impl RefusalReason {
 ///
 /// Every answer is final: a caller that gets one records it and stops
 /// retrying. That holds for [`WithdrawAnswer::Unclassified`] too, an
-/// `answer` this crate does not know, which the caller records verbatim.
+/// `answer` this crate does not know: the caller records the whole reply
+/// body verbatim.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WithdrawAnswer {
     /// The call is guaranteed never to run.

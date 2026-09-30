@@ -99,7 +99,8 @@ pub struct CatalogTool {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// The argument schema, which must be flat (see [`check_flat_schema`]).
-    /// The member name is provisional; see `CONTRACT.md`.
+    /// The role has not settled this member name yet; `CONTRACT.md` lists it
+    /// as an open item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<Value>,
 }
