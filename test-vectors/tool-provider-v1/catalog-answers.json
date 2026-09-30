@@ -1,0 +1,92 @@
+{
+  "_about": "tool.catalog answers. `full` is a complete answer; `digest_only` the answer to the same inputs with digest_only: true; `refused_tools` are tool entries a decoder must refuse.",
+  "full": {
+    "generation": "g-2026-09-30.4",
+    "composition_digest": "sha256:c0",
+    "capabilities": {
+      "late_results": true
+    },
+    "tools": [
+      {
+        "name": "read",
+        "schema_digest": "sha256:r1",
+        "semantics": 1,
+        "result_ops": [
+          "prepend",
+          "append"
+        ],
+        "capabilities": [
+          "code.read/v1",
+          "acme:code.read-lines/v1"
+        ],
+        "description": "Read a file.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      },
+      {
+        "name": "grep",
+        "schema_digest": "sha256:g1",
+        "semantics": 3,
+        "capabilities": [],
+        "input_schema": {
+          "type": "object"
+        },
+        "future_member": 1
+      }
+    ]
+  },
+  "digest_only": {
+    "generation": "g-2026-09-30.4",
+    "catalog_digest": "sha256:cat4"
+  },
+  "refused_tools": [
+    {
+      "name": "no semantics",
+      "tool": {
+        "name": "t",
+        "schema_digest": "s",
+        "input_schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "semantics not an integer",
+      "tool": {
+        "name": "t",
+        "schema_digest": "s",
+        "semantics": "1",
+        "input_schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "no input_schema",
+      "tool": {
+        "name": "t",
+        "schema_digest": "s",
+        "semantics": 1
+      }
+    },
+    {
+      "name": "no schema_digest",
+      "tool": {
+        "name": "t",
+        "semantics": 1,
+        "input_schema": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

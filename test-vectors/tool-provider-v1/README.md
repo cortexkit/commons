@@ -5,10 +5,13 @@ The role document is `crates/cortexkit-role-tool-provider/CONTRACT.md`.
 
 | File | What it pins | Checked by |
 |---|---|---|
-| `call-key.json` | `call_key` bounds: valid keys, and invalid keys with the validator's error | the wire crate's validator test; the conformance runner sends every key to a live provider |
-| `withdraw-answers.json` | `tool.withdraw` reply bodies: known answers, unknown answers (final but unclassified) and malformed replies | the wire crate's decoder tests |
+| `call-key.json` | the `call_key` bound (1 to 256 bytes, each 0x21–0x7E, no space): valid keys, and invalid keys with the validator's error | the wire crate's validator test; the conformance runner sends every key to a live provider, as a call key and as a withdraw target |
+| `schema-pin.json` | the `tp1` schema-pin encoding: canonical pins with their parts, and refused strings | the wire crate's pin test; the runner sends every refused pin to a live provider |
+| `withdraw-answers.json` | `tool.withdraw` reply bodies (known, unclassified, malformed) and the caller policy for replies and route errors | the wire crate's decoder and policy tests |
 | `role-describe.json` | `role.describe` answers a consumer accepts or refuses, with the problem | the wire crate's `check_describe` test |
 | `catalog-schemas.json` | flat and non-flat argument schemas | the wire crate's `check_flat_schema` test |
+| `catalog-answers.json` | a full and a `digest_only` catalog answer, and tool entries a decoder refuses | the wire crate's catalog test |
+| `late-results.json` | the `late_results` request, reply, ack, entry kinds (including an unknown one) and malformed entries | the wire crate's late-result tests |
 
 Changing a vector changes the contract: bump the role crate's version and say
 why in the commit.

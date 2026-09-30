@@ -13,12 +13,16 @@ use serde_json::Value;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Capability {
     /// The harness can open routes under a scope stamp, as distinct
-    /// principals (a carrier, a second carrier, a stranger and the scope's
-    /// owner). See [`ToolProviderSubject::scoped_principals`].
+    /// principals (a carrier, a second carrier and the scope's owner), and
+    /// under a second scope of the same owner. See
+    /// [`ToolProviderSubject::scoped_principals`].
     ScopeStamp,
     /// The provider decodes the top-level `call_key` and refuses a malformed
     /// one.
     CallKey,
+    /// The provider decodes the top-level `schema_pin` and checks it against
+    /// its catalog.
+    SchemaPin,
     /// The provider holds calls past its reply and serves `tool.withdraw`.
     /// See [`ToolProviderSubject::held_call`].
     HeldCalls,
@@ -32,6 +36,9 @@ pub enum Capability {
     /// states, and its harness can kill at both. See
     /// [`ToolProviderSubject::approve`].
     ApprovalExecution,
+    /// The provider declares the `late_results` session capability and
+    /// serves `late_results` and `late_results.ack`.
+    LateResults,
 }
 
 impl Capability {
@@ -40,16 +47,20 @@ impl Capability {
         match self {
             Self::ScopeStamp => "scope_stamp",
             Self::CallKey => "call_key",
+            Self::SchemaPin => "schema_pin",
             Self::HeldCalls => "held_calls",
             Self::DisableTool => "disable_tool",
             Self::Cancellation => "cancellation",
             Self::ApprovalExecution => "approval_execution",
+            Self::LateResults => "late_results",
         }
     }
 }
 
-/// The identities the withdraw and crash cases open routes as. Every scoped
-/// route is under `scope`; the scope's owner is `scope.owner`.
+/// The identities the withdraw, late-result and crash cases open routes as.
+/// Scoped routes are under `scope` unless a case says otherwise; the scope's
+/// owner is `scope.owner`, which is also the custodian of the late results of
+/// calls raised under it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopedPrincipals {
     pub scope: ScopeIdentity,
@@ -57,21 +68,31 @@ pub struct ScopedPrincipals {
     pub carrier: String,
     /// Another principal that may carry calls under the scope.
     pub other_carrier: String,
-    /// A principal that may open a route under the scope but is neither a
-    /// held call's carrier nor the scope's owner.
-    pub stranger: String,
+    /// A second scope of the same owner, which the harness can also stamp
+    /// routes with. A call held under `scope` is not withdrawable from it.
+    pub other_scope: ScopeIdentity,
 }
 
 impl ScopedPrincipals {
+    /// A route stamp for `principal` under `scope`.
     pub fn stamp(&self, principal: &str) -> RouteStamp {
-        RouteStamp {
-            principal: principal.to_owned(),
-            scope: Some(cortexkit_role_harness::ScopeStamp {
-                owner: self.scope.owner.clone(),
-                scope_ref: self.scope.scope_ref.clone(),
-                scope_epoch: self.scope.scope_epoch,
-            }),
-        }
+        stamp_under(principal, &self.scope)
+    }
+
+    /// A route stamp for `principal` under `other_scope`.
+    pub fn stamp_in_other_scope(&self, principal: &str) -> RouteStamp {
+        stamp_under(principal, &self.other_scope)
+    }
+}
+
+fn stamp_under(principal: &str, scope: &ScopeIdentity) -> RouteStamp {
+    RouteStamp {
+        principal: principal.to_owned(),
+        scope: Some(cortexkit_role_harness::ScopeStamp {
+            owner: scope.owner.clone(),
+            scope_ref: scope.scope_ref.clone(),
+            scope_epoch: scope.scope_epoch,
+        }),
     }
 }
 

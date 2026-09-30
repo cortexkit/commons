@@ -12,8 +12,9 @@
 //! here are the pinned wire shapes; where a shape is still open the type says
 //! so and decodes leniently.
 //!
-//! Role ops travel as ordinary tool-call requests on the provider's tool
-//! route, named by the op, the same way `tool.withdraw` does.
+//! Role ops travel as ordinary named requests on the provider's tool route,
+//! `{name: <op>, arguments: {...}}`, like a tool call. They are never model
+//! tools: a provider never lists them in its catalog.
 
 #![forbid(unsafe_code)]
 
@@ -47,6 +48,8 @@ pub mod ops {
     /// Pull late results. Served by a provider that declares the
     /// `late_results` session capability.
     pub const LATE_RESULTS: &str = "late_results";
+    /// Acknowledge late results through a cursor. Served with `late_results`.
+    pub const LATE_RESULTS_ACK: &str = "late_results.ack";
 }
 
 /// Ops every `tool-provider/v1` module must list in `role.describe`. A

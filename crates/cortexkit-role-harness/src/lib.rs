@@ -34,12 +34,27 @@
 //! database, say) may reach its points only with a fault hook followed by a
 //! real kill, and declares so in [`Harness::declared_points`].
 //!
-//! Suites drive a harness through [`CrashDriver`], which checks every kill
-//! against the implementation's declaration and records it in the ledger.
+//! # One kill per point, one root per kill
+//!
+//! A suite calls `kill_at` once per point in a run, each time on a module it
+//! spawned on a fresh state root, and never kills one trigger at several
+//! points. That keeps each kill's durable state attributable to exactly one
+//! point: a root killed twice would mix the leftovers of two cuts, and
+//! nothing could say which one a restarted module was recovering from.
+//!
+//! Suites drive a harness through [`CrashDriver`], which enforces all of this,
+//! checks every kill against the implementation's declaration and records it
+//! in the ledger.
 
 #![forbid(unsafe_code)]
 
-use std::{fmt, future::Future, path::Path, pin::Pin};
+use std::{
+    collections::BTreeSet,
+    fmt,
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+};
 
 use async_trait::async_trait;
 
@@ -284,6 +299,16 @@ pub enum DriverError {
         asked: KillPoint,
         reported: KillPoint,
     },
+    /// The suite spawned on a root this run already used. Every spawn needs a
+    /// fresh root.
+    RootAlreadyUsed(PathBuf),
+    /// The handle's state root was already killed once in this run (the
+    /// handle came from a restart). Each root is killed at most once.
+    RootAlreadyKilled(PathBuf),
+    /// This run already killed at this point. Each point is cut once.
+    PointAlreadyKilled(KillPoint),
+    /// The suite restarted on a root this run never killed.
+    RootNotKilled(PathBuf),
 }
 
 impl From<HarnessError> for DriverError {
@@ -312,18 +337,58 @@ impl fmt::Display for DriverError {
                     "asked to kill at {asked}, the implementation reports {reported}"
                 )
             }
+            Self::RootAlreadyUsed(root) => {
+                write!(
+                    f,
+                    "state root {} was already used in this run",
+                    root.display()
+                )
+            }
+            Self::RootAlreadyKilled(root) => {
+                write!(
+                    f,
+                    "state root {} was already killed in this run",
+                    root.display()
+                )
+            }
+            Self::PointAlreadyKilled(point) => write!(f, "this run already killed at {point}"),
+            Self::RootNotKilled(root) => write!(
+                f,
+                "state root {} was never killed, so there is nothing to restart",
+                root.display()
+            ),
         }
     }
 }
 
 impl std::error::Error for DriverError {}
 
+/// A module the driver started, with the state root it runs on.
+pub struct DriverHandle<H: Harness> {
+    inner: H::Handle,
+    root: PathBuf,
+}
+
+impl<H: Harness> DriverHandle<H> {
+    pub fn inner(&self) -> &H::Handle {
+        &self.inner
+    }
+
+    pub fn state_root(&self) -> &Path {
+        &self.root
+    }
+}
+
 /// The only way a suite kills a module: every kill is checked against the
-/// implementation's declaration and recorded in a [`KillLedger`].
+/// implementation's declaration and the one-kill rules, and recorded in a
+/// [`KillLedger`].
 pub struct CrashDriver<'h, H: Harness> {
     harness: &'h H,
     declared: Vec<PointDeclaration>,
     ledger: KillLedger,
+    used_roots: BTreeSet<PathBuf>,
+    killed_roots: BTreeSet<PathBuf>,
+    killed_points: BTreeSet<KillPoint>,
 }
 
 impl<'h, H: Harness> CrashDriver<'h, H> {
@@ -332,6 +397,9 @@ impl<'h, H: Harness> CrashDriver<'h, H> {
             declared: harness.declared_points(),
             harness,
             ledger: KillLedger::default(),
+            used_roots: BTreeSet::new(),
+            killed_roots: BTreeSet::new(),
+            killed_points: BTreeSet::new(),
         }
     }
 
@@ -347,32 +415,48 @@ impl<'h, H: Harness> CrashDriver<'h, H> {
         &self.ledger
     }
 
-    pub async fn spawn(&self, state_root: &Path) -> Result<H::Handle, DriverError> {
-        Ok(self.harness.spawn(state_root).await?)
+    /// Start a module on a root this run has not used before.
+    pub async fn spawn(&mut self, state_root: &Path) -> Result<DriverHandle<H>, DriverError> {
+        if !self.used_roots.insert(state_root.to_owned()) {
+            return Err(DriverError::RootAlreadyUsed(state_root.to_owned()));
+        }
+        Ok(DriverHandle {
+            inner: self.harness.spawn(state_root).await?,
+            root: state_root.to_owned(),
+        })
     }
 
     pub async fn route(
         &self,
-        handle: &H::Handle,
+        handle: &DriverHandle<H>,
         stamp: &RouteStamp,
     ) -> Result<H::Route, DriverError> {
-        Ok(self.harness.route(handle, stamp).await?)
+        Ok(self.harness.route(&handle.inner, stamp).await?)
     }
 
     /// Kill at `point` through the implementation, after checking the point is
-    /// declared. The kill is recorded even when its report breaks the
-    /// declaration, because it happened either way.
+    /// declared, that this run has not cut it before, and that the handle's
+    /// root has not been killed before. The kill is recorded even when its
+    /// report breaks the declaration, because it happened either way.
     pub async fn kill_at(
         &mut self,
-        handle: H::Handle,
+        handle: DriverHandle<H>,
         point: &KillPoint,
         trigger: Trigger<'_>,
     ) -> Result<KillReport, DriverError> {
         let Some(declaration) = self.declared.iter().find(|d| &d.point == point) else {
             return Err(DriverError::UndeclaredPoint(point.clone()));
         };
+        if self.killed_roots.contains(&handle.root) {
+            return Err(DriverError::RootAlreadyKilled(handle.root));
+        }
+        if self.killed_points.contains(point) {
+            return Err(DriverError::PointAlreadyKilled(point.clone()));
+        }
         let allowed = declaration.mechanisms.clone();
-        let report = self.harness.kill_at(handle, point, trigger).await?;
+        self.killed_roots.insert(handle.root.clone());
+        self.killed_points.insert(point.clone());
+        let report = self.harness.kill_at(handle.inner, point, trigger).await?;
         self.ledger.record(report.clone());
         if &report.point != point {
             return Err(DriverError::ReportedWrongPoint {
@@ -389,8 +473,15 @@ impl<'h, H: Harness> CrashDriver<'h, H> {
         Ok(report)
     }
 
-    pub async fn restart(&self, state_root: &Path) -> Result<H::Handle, DriverError> {
-        Ok(self.harness.restart(state_root).await?)
+    /// Start a module again on a root this run killed.
+    pub async fn restart(&self, state_root: &Path) -> Result<DriverHandle<H>, DriverError> {
+        if !self.killed_roots.contains(state_root) {
+            return Err(DriverError::RootNotKilled(state_root.to_owned()));
+        }
+        Ok(DriverHandle {
+            inner: self.harness.restart(state_root).await?,
+            root: state_root.to_owned(),
+        })
     }
 }
 
@@ -489,8 +580,9 @@ mod tests {
     async fn the_driver_refuses_an_undeclared_point_before_killing() {
         let harness = Scripted::new(&[("A", &[KillMechanism::ProcessSignal])], vec![]);
         let mut driver = CrashDriver::new(&harness);
+        let handle = driver.spawn(Path::new("/r")).await.unwrap();
         let error = driver
-            .kill_at((), &KillPoint::new("B"), noop())
+            .kill_at(handle, &KillPoint::new("B"), noop())
             .await
             .unwrap_err();
         assert_eq!(error, DriverError::UndeclaredPoint(KillPoint::new("B")));
@@ -504,8 +596,9 @@ mod tests {
             vec![report("A", KillMechanism::LogTruncation)],
         );
         let mut driver = CrashDriver::new(&harness);
+        let handle = driver.spawn(Path::new("/r")).await.unwrap();
         let error = driver
-            .kill_at((), &KillPoint::new("A"), noop())
+            .kill_at(handle, &KillPoint::new("A"), noop())
             .await
             .unwrap_err();
         assert_eq!(
@@ -525,8 +618,9 @@ mod tests {
             vec![report("B", KillMechanism::ProcessSignal)],
         );
         let mut driver = CrashDriver::new(&harness);
+        let handle = driver.spawn(Path::new("/r")).await.unwrap();
         let error = driver
-            .kill_at((), &KillPoint::new("A"), noop())
+            .kill_at(handle, &KillPoint::new("A"), noop())
             .await
             .unwrap_err();
         assert!(matches!(error, DriverError::ReportedWrongPoint { .. }));
@@ -540,9 +634,10 @@ mod tests {
         );
         let mut driver = CrashDriver::new(&harness);
         let ran = std::sync::atomic::AtomicBool::new(false);
+        let handle = driver.spawn(Path::new("/r")).await.unwrap();
         let kill = driver
             .kill_at(
-                (),
+                handle,
                 &KillPoint::new("A"),
                 Box::pin(async { ran.store(true, std::sync::atomic::Ordering::SeqCst) }),
             )
@@ -551,5 +646,61 @@ mod tests {
         assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!(kill, report("A", KillMechanism::ProcessSignal));
         assert_eq!(driver.ledger().verdict(), RealKillVerdict::RealKillPresent);
+    }
+
+    #[tokio::test]
+    async fn the_driver_kills_each_root_and_each_point_once() {
+        let harness = Scripted::new(
+            &[
+                ("A", &[KillMechanism::ProcessSignal]),
+                ("B", &[KillMechanism::ProcessSignal]),
+            ],
+            vec![
+                report("A", KillMechanism::ProcessSignal),
+                report("B", KillMechanism::ProcessSignal),
+            ],
+        );
+        let mut driver = CrashDriver::new(&harness);
+        let root = Path::new("/r1");
+        assert_eq!(
+            driver.restart(root).await.err(),
+            Some(DriverError::RootNotKilled(root.to_owned()))
+        );
+        let handle = driver.spawn(root).await.unwrap();
+        assert_eq!(
+            driver.spawn(root).await.err(),
+            Some(DriverError::RootAlreadyUsed(root.to_owned()))
+        );
+        driver
+            .kill_at(handle, &KillPoint::new("A"), noop())
+            .await
+            .unwrap();
+
+        // A restarted handle's root was already killed: a second cut there
+        // would mix the leftovers of two points.
+        let restarted = driver.restart(root).await.unwrap();
+        assert_eq!(
+            driver
+                .kill_at(restarted, &KillPoint::new("B"), noop())
+                .await
+                .err(),
+            Some(DriverError::RootAlreadyKilled(root.to_owned()))
+        );
+
+        // A fresh root may not cut a point this run already cut.
+        let fresh = driver.spawn(Path::new("/r2")).await.unwrap();
+        assert_eq!(
+            driver
+                .kill_at(fresh, &KillPoint::new("A"), noop())
+                .await
+                .err(),
+            Some(DriverError::PointAlreadyKilled(KillPoint::new("A")))
+        );
+        let fresh = driver.spawn(Path::new("/r3")).await.unwrap();
+        driver
+            .kill_at(fresh, &KillPoint::new("B"), noop())
+            .await
+            .unwrap();
+        assert_eq!(driver.ledger().kills().len(), 2);
     }
 }

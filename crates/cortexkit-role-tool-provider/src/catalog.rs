@@ -40,14 +40,15 @@ pub struct CatalogRequest {
     /// the provider does not know is refused, never guessed.
     #[serde(default)]
     pub params: Map<String, Value>,
-    /// The session's composition. Absent on a preflight call. Its shape is an
-    /// open item, so it is carried verbatim.
+    /// The session's composition, carried verbatim as an opaque JSON object.
+    /// Providers never interpret it beyond resolving their own text against
+    /// it. Absent on a preflight call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composition: Option<Value>,
+    pub composition: Option<Map<String, Value>>,
     /// The provider's system-prompt item, when the plan has one for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_text: Option<SystemTextItem>,
-    /// Ask for the digests without the bytes, for a cheap change check.
+    /// Ask for `{generation, catalog_digest}` only, for a cheap change check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest_only: Option<bool>,
 }
@@ -60,23 +61,38 @@ pub struct SystemTextItem {
     pub params: Map<String, Value>,
 }
 
-/// The `tool.catalog` answer.
+/// The `tool.catalog` answer. A `digest_only` answer carries only
+/// `generation` and `catalog_digest`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct CatalogAnswer {
-    /// A cue to refetch the catalog, nothing more. Its type is an open item,
-    /// so it is carried verbatim and compared only for equality.
+    /// Opaque; changes whenever the catalog's content changes. A call's
+    /// schema pin names the generation the runner froze.
+    pub generation: String,
+    /// The digest of the catalog's content under these inputs. Present in a
+    /// `digest_only` answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<Value>,
+    pub catalog_digest: Option<String>,
     /// The composition the answer was resolved against; absent on preflight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_digest: Option<String>,
     /// Every tool the provider serves under these inputs. A provider with only
-    /// system text answers an empty list.
+    /// system text, and every `digest_only` answer, has none.
     #[serde(default)]
     pub tools: Vec<CatalogTool>,
     /// The system-prompt item's answer, when the request named one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_text: Option<SystemTextAnswer>,
+    /// Session-level capabilities, keyed by name ([`session_capabilities`]),
+    /// each declared with the value `true`.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub capabilities: Map<String, Value>,
+}
+
+impl CatalogAnswer {
+    /// Whether the answer declares the session capability `name`.
+    pub fn declares(&self, name: &str) -> bool {
+        self.capabilities.get(name) == Some(&Value::Bool(true))
+    }
 }
 
 /// One tool in a catalog answer.
@@ -84,9 +100,11 @@ pub struct CatalogAnswer {
 pub struct CatalogTool {
     /// The provider's exact tool name, which is also how the user disables it.
     pub name: String,
-    /// The digest of the argument schema. A call pins it, and the provider
-    /// refuses a pin it can no longer honour. Opaque: compared for equality.
+    /// The digest of the argument schema. Opaque: compared for equality.
     pub schema_digest: String,
+    /// The tool's behaviour version, bumped when its behaviour changes without
+    /// a schema change. A call's schema pin names it.
+    pub semantics: u64,
     /// The result operations the tool accepts from hooks; `None` means all
     /// of [`RESULT_OPS_ALL`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,10 +117,7 @@ pub struct CatalogTool {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// The argument schema, which must be flat (see [`check_flat_schema`]).
-    /// The role has not settled this member name yet; `CONTRACT.md` lists it
-    /// as an open item.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_schema: Option<Value>,
+    pub input_schema: Value,
 }
 
 impl CatalogTool {
@@ -118,7 +133,6 @@ impl CatalogTool {
 /// as the catalog in the same reply.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct SystemTextAnswer {
-    /// Absent when the request asked for digests only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     pub item_digest: String,
@@ -134,10 +148,13 @@ pub enum FlatnessProblem {
     NotAnObject,
     /// The schema's root carries a union keyword.
     RootUnion { keyword: &'static str },
+    /// The schema's root `type` is an array, which is a union of types.
+    RootTypeArray,
 }
 
 /// Check an argument schema is flat: an object with no root-level `anyOf`,
-/// `oneOf` or `allOf`. Unions below the root are allowed.
+/// `oneOf` or `allOf`, and no root-level `type` array. Unions below the root
+/// are allowed.
 pub fn check_flat_schema(schema: &Value) -> Result<(), FlatnessProblem> {
     let Some(object) = schema.as_object() else {
         return Err(FlatnessProblem::NotAnObject);
@@ -146,6 +163,9 @@ pub fn check_flat_schema(schema: &Value) -> Result<(), FlatnessProblem> {
         if object.contains_key(*keyword) {
             return Err(FlatnessProblem::RootUnion { keyword });
         }
+    }
+    if object.get("type").is_some_and(Value::is_array) {
+        return Err(FlatnessProblem::RootTypeArray);
     }
     Ok(())
 }
@@ -178,23 +198,40 @@ mod tests {
     }
 
     #[test]
-    fn a_catalog_answer_decodes_leniently_and_result_ops_default_to_all() {
-        let answer: CatalogAnswer = serde_json::from_value(json!({
-            "generation": 7,
-            "composition_digest": "c",
-            "tools": [
-                {"name": "read", "schema_digest": "s1", "result_ops": ["prepend", "append"],
-                 "capabilities": ["code.read/v1"], "input_schema": {"type": "object"}},
-                {"name": "grep", "schema_digest": "s2", "future": 1}
-            ],
-            "system_text": {"item_digest": "i", "preflight_digest": "p"}
+    fn catalog_vectors_decode_as_recorded() {
+        let vectors = vectors::load("catalog-answers.json");
+        let full: CatalogAnswer = serde_json::from_value(vectors["full"].clone()).unwrap();
+        assert_eq!(full.tools[0].effective_result_ops(), ["prepend", "append"]);
+        assert_eq!(full.tools[1].effective_result_ops(), RESULT_OPS_ALL);
+        assert_eq!(full.tools[1].semantics, 3);
+        assert!(full.declares(session_capabilities::LATE_RESULTS));
+        assert!(!full.declares(session_capabilities::HOST_PARAMS));
+
+        let digest: CatalogAnswer = serde_json::from_value(vectors["digest_only"].clone()).unwrap();
+        assert!(digest.tools.is_empty());
+        assert_eq!(digest.generation, full.generation);
+        assert!(digest.catalog_digest.is_some());
+
+        for case in vectors["refused_tools"].as_array().unwrap() {
+            assert!(
+                serde_json::from_value::<CatalogTool>(case["tool"].clone()).is_err(),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_carries_the_composition_verbatim() {
+        let request: CatalogRequest = serde_json::from_value(json!({
+            "params": {"preset": "main"},
+            "composition": {"anything": [1, {"nested": true}]},
+            "digest_only": true
         }))
         .unwrap();
         assert_eq!(
-            answer.tools[0].effective_result_ops(),
-            ["prepend", "append"]
+            serde_json::to_value(&request).unwrap()["composition"],
+            json!({"anything": [1, {"nested": true}]})
         );
-        assert_eq!(answer.tools[1].effective_result_ops(), RESULT_OPS_ALL);
-        assert_eq!(answer.system_text.unwrap().text, None);
     }
 }

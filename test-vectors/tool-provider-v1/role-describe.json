@@ -3,23 +3,23 @@
   "accepted": [
     {
       "name": "minimal",
-      "answer": { "role": "tool-provider", "version": "v1", "stability": "alpha", "implementation_version": "0.1.0", "ops": ["role.describe", "tool.catalog"], "capabilities": [] }
+      "answer": { "role": "tool-provider", "versions": ["v1"], "stability": "alpha", "implementation_version": "0.1.0", "ops": ["role.describe", "tool.catalog"], "capabilities": [] }
     },
     {
       "name": "holds calls, extra op, unknown field",
-      "answer": { "role": "tool-provider", "version": "v1", "stability": "beta", "implementation_version": "2.4.1+abc", "ops": ["role.describe", "tool.catalog", "tool.withdraw", "vendor.extra"], "capabilities": [], "later_field": true }
+      "answer": { "role": "tool-provider", "versions": ["v1", "v2"], "stability": "beta", "implementation_version": "2.4.1+abc", "ops": ["role.describe", "tool.catalog", "tool.withdraw", "vendor.extra"], "capabilities": [], "later_field": true }
     },
     {
       "name": "capabilities omitted",
-      "answer": { "role": "tool-provider", "version": "v1", "stability": "stable", "implementation_version": "1", "ops": ["tool.catalog", "role.describe"] }
+      "answer": { "role": "tool-provider", "versions": ["v1"], "stability": "stable", "implementation_version": "1", "ops": ["tool.catalog", "role.describe"] }
     }
   ],
   "refused": [
     { "name": "not an object", "answer": [], "problem": "not_an_object" },
-    { "name": "no ops", "answer": { "role": "tool-provider", "version": "v1", "stability": "alpha", "implementation_version": "1" }, "problem": "undecodable" },
-    { "name": "another role", "answer": { "role": "llm-runner", "version": "v1", "stability": "alpha", "implementation_version": "1", "ops": ["role.describe", "tool.catalog"] }, "problem": "wrong_role" },
-    { "name": "another major", "answer": { "role": "tool-provider", "version": "v2", "stability": "alpha", "implementation_version": "1", "ops": ["role.describe", "tool.catalog"] }, "problem": "wrong_version" },
-    { "name": "catalog op missing", "answer": { "role": "tool-provider", "version": "v1", "stability": "alpha", "implementation_version": "1", "ops": ["role.describe"] }, "problem": "missing_op" },
-    { "name": "carries the tool list", "answer": { "role": "tool-provider", "version": "v1", "stability": "alpha", "implementation_version": "1", "ops": ["role.describe", "tool.catalog"], "tools": [{ "name": "read" }] }, "problem": "carries_tool_list" }
+    { "name": "no ops", "answer": { "role": "tool-provider", "versions": ["v1"], "stability": "alpha", "implementation_version": "1" }, "problem": "undecodable" },
+    { "name": "another role", "answer": { "role": "llm-runner", "versions": ["v1"], "stability": "alpha", "implementation_version": "1", "ops": ["role.describe", "tool.catalog"] }, "problem": "wrong_role" },
+    { "name": "v1 not served", "answer": { "role": "tool-provider", "versions": ["v2"], "stability": "alpha", "implementation_version": "1", "ops": ["role.describe", "tool.catalog"] }, "problem": "missing_version" },
+    { "name": "catalog op missing", "answer": { "role": "tool-provider", "versions": ["v1"], "stability": "alpha", "implementation_version": "1", "ops": ["role.describe"] }, "problem": "missing_op" },
+    { "name": "carries the tool list", "answer": { "role": "tool-provider", "versions": ["v1"], "stability": "alpha", "implementation_version": "1", "ops": ["role.describe", "tool.catalog"], "tools": [{ "name": "read" }] }, "problem": "carries_tool_list" }
   ]
 }

@@ -110,6 +110,8 @@ async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
     for case in [
         "catalog_disabled_tool_absent",
         "call_disabled_tool_refused_by_name",
+        "late_results_cursor_round_trip",
+        "late_results_ack",
         "crash_after_prepared_not_started",
         "crash_after_authorized_not_started",
     ] {
@@ -120,10 +122,26 @@ async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
         );
     }
     assert!(report.kills.is_empty());
-    match &report.verdict {
-        SuiteVerdict::Incomplete { skipped } => assert_eq!(skipped.len(), 4),
-        other => panic!("expected an incomplete run, got {other:?}"),
-    }
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::ConformingForDeclaredCapabilities {
+            skipped: vec![Capability::DisableTool, Capability::ApprovalExecution],
+        },
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn forgetting_acks_fails_the_ack_case() {
+    let report = run(&FakeSubject::new(Defects {
+        forget_acks: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "late_results_ack");
+    assert!(reason.contains("still served"), "{reason}");
+    assert_passed(&report, "late_results_cursor_round_trip");
 }
 
 #[tokio::test]

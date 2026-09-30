@@ -35,9 +35,46 @@ pub const TOOL_UNAVAILABLE: &str = "tool_unavailable";
 /// Refuses that call only; never re-dispatched.
 pub const CAPABILITY_NOT_ADMITTED: &str = "capability_not_admitted";
 
-/// A `tool.withdraw` caller is neither the call's carrier nor the scope's
-/// owner. A route error, never a withdraw answer.
+/// A call to a tool the provider does not serve at all.
+pub const UNKNOWN_TOOL: &str = "unknown_tool";
+
+/// A `tool.withdraw` caller may not withdraw the call it addressed: the call
+/// is under a different scope than the route's stamp. A route error, never a
+/// withdraw answer; terminal for the caller.
 pub const WITHDRAW_NOT_PERMITTED: &str = "withdraw_not_permitted";
+
+/// The scope's owner withdrew without `arguments.carrier`, and it holds no
+/// call of its own under that key. A route error; terminal.
+pub const WITHDRAW_CARRIER_REQUIRED: &str = "withdraw_carrier_required";
+
+/// A caller other than the scope's owner named a carrier other than itself.
+/// A route error; terminal.
+pub const WITHDRAW_CARRIER_MISMATCH: &str = "withdraw_carrier_mismatch";
+
+/// `arguments.scope` differs from the route's stamped scope. A route error;
+/// terminal.
+pub const WITHDRAW_SCOPE_MISMATCH: &str = "withdraw_scope_mismatch";
+
+/// subc's route refusal while the target module reloads. Transient.
+pub const MODULE_RELOADING: &str = subc_protocol::error_codes::MODULE_RELOADING;
+
+/// subc's route refusal while the scope's owner has not yet synced the scope
+/// after a daemon restart. Transient.
+pub const SCOPE_NOT_SYNCED: &str = "scope_not_synced";
+
+/// Whether a route error on a role request is transient, so the caller
+/// retries the same request: `scope_not_synced`, or any code subc itself
+/// retries (`module_reloading`, `module_warming`, `target_unavailable`,
+/// `module_timeout`). Every other code is terminal for that request.
+pub fn is_transient(code: &str) -> bool {
+    code == SCOPE_NOT_SYNCED || subc_protocol::error_codes::is_retryable_route_open(code)
+}
+
+/// An `unknown_tool` refusal for `tool`.
+pub fn unknown_tool(tool: &str) -> ErrorBody {
+    ErrorBody::new(UNKNOWN_TOOL, format!("no tool named {tool}"))
+        .with_detail(json!({ "tool": tool }))
+}
 
 /// An `invalid_request` error naming `field`.
 pub fn invalid_request(field: &str, message: impl Into<String>) -> ErrorBody {
@@ -67,11 +104,6 @@ pub fn disabled_tool(error: &ErrorBody) -> Option<&str> {
         return None;
     }
     detail_str(error, "tool")
-}
-
-/// A `withdraw_not_permitted` route error.
-pub fn withdraw_not_permitted(message: impl Into<String>) -> ErrorBody {
-    ErrorBody::new(WITHDRAW_NOT_PERMITTED, message)
 }
 
 fn detail_str<'a>(error: &'a ErrorBody, key: &str) -> Option<&'a str> {

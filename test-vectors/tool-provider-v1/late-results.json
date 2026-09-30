@@ -1,0 +1,136 @@
+{
+  "_about": "late_results wire: request {since: cursor|null, limit?}, reply {entries, cursor: {provider_incarnation, seq}, more}, ack late_results.ack {through: cursor}. settled_at is milliseconds since the Unix epoch. `unknown_kinds` must decode, be recorded verbatim and be acked; `malformed_entries` lack a required member.",
+  "first_request": {
+    "since": null,
+    "limit": 100
+  },
+  "reply": {
+    "entries": [
+      {
+        "kind": "result",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "01J9ZQ:41",
+        "event_id": "task-17:ok",
+        "settled_at": 1790000000000,
+        "reduced": false,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "done"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "result",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "01J9ZQ:42",
+        "invocation_id": "relay-9",
+        "event_id": "task-18:failed",
+        "settled_at": 1790000001000,
+        "reduced": true,
+        "outcome": "failed"
+      },
+      {
+        "kind": "not_started",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "01J9ZQ:43",
+        "event_id": "task-19:not_started",
+        "settled_at": 1790000002000,
+        "reduced": false,
+        "reason": "restart_before_dispatch"
+      },
+      {
+        "kind": "expired",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "01J9ZQ:40",
+        "event_id": "task-16:ok",
+        "settled_at": 1789900000000,
+        "reduced": false
+      }
+    ],
+    "cursor": {
+      "provider_incarnation": "inc-2026-09-30-a",
+      "seq": 4
+    },
+    "more": false
+  },
+  "ack": {
+    "through": {
+      "provider_incarnation": "inc-2026-09-30-a",
+      "seq": 4
+    }
+  },
+  "unknown_kinds": [
+    {
+      "name": "future kind",
+      "entry": {
+        "kind": "handed_off",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "k:1",
+        "event_id": "ev-1",
+        "settled_at": 1,
+        "reduced": false,
+        "to": "reserved:other"
+      }
+    }
+  ],
+  "malformed_entries": [
+    {
+      "name": "no event_id",
+      "entry": {
+        "kind": "result",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "k",
+        "settled_at": 1,
+        "reduced": false
+      }
+    },
+    {
+      "name": "no custodian",
+      "entry": {
+        "kind": "result",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "call_key": "k",
+        "event_id": "x",
+        "settled_at": 1,
+        "reduced": false
+      }
+    },
+    {
+      "name": "settled_at not an integer",
+      "entry": {
+        "kind": "result",
+        "owner": "reserved:prefrontal-core",
+        "ref": "scope-7",
+        "scope_epoch": 3,
+        "custodian": "reserved:prefrontal-core",
+        "call_key": "k",
+        "event_id": "x",
+        "settled_at": "2026-09-30",
+        "reduced": false
+      }
+    }
+  ]
+}

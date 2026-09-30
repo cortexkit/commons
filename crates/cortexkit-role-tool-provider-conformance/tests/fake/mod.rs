@@ -7,16 +7,14 @@
 //!
 //! > A single tool provider that serves `role.describe`, `tool.catalog` and
 //! > four tools, holds approval-gated calls in a durable log keyed
-//! > `(carrier, call_key)`, answers `tool.withdraw` from that log, and after a
-//! > kill knows only what its log holds.
+//! > `(carrier, call_key)`, answers `tool.withdraw` from that log, keeps a
+//! > late-result log per custodian, and after a kill knows only what its log
+//! > holds.
 //!
 //! Everything it knows reaches the runner only as frames on a route; it has
 //! no side channel into the runner. Its kills are fault hooks inside one
 //! process, so it reports [`KillMechanism::FaultHook`], never a real process
 //! kill, and a run against it can never pass the real-kill rule.
-//!
-//! [`Defects`] switch on one contract break each, so a test can show the case
-//! that should catch it does.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -36,24 +34,30 @@ use cortexkit_role_tool_provider_conformance::{
         Trigger,
     },
     wire::{
-        call::{check_call_key, KeyedToolCallRequest, CALL_KEY_FIELD},
-        errors, ops, points,
+        call::{check_call, PinnedToolCallRequest, CALL_KEY_FIELD},
+        errors,
+        late_results::{
+            check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
+            LateResultsRequest,
+        },
+        ops, points,
         scope::ScopeIdentity,
         withdraw::{
-            parse_withdraw_request, resolve_carrier, CallerProblem, CompletedResult, RefusalReason,
-            StartedOutcome, WithdrawAnswer,
+            check_record_scope, parse_withdraw_request, resolve_carrier, CallerProblem,
+            CarrierResolution, CompletedResult, StartedOutcome, WithdrawAnswer,
         },
     },
     CallSpec, Capability, Exchange, ObservedFrame, RouteFailure, ScopedPrincipals,
     ToolProviderSubject, ToolRoute,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 pub const QUICK: &str = "echo";
 pub const SLOW: &str = "sleep";
 pub const HELD: &str = "effect";
 pub const DISABLED: &str = "danger";
+const GENERATION: &str = "fake-gen-1";
 
 /// Deliberate contract breaks: each field makes the fake violate one rule a
 /// runner case must catch.
@@ -67,6 +71,8 @@ pub struct Defects {
     pub run_held_calls_on_restart: bool,
     /// The held tool's argument schema is a root-level union.
     pub root_union_schema: bool,
+    /// Acks are accepted but forgotten, so acked entries are served again.
+    pub forget_acks: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +82,7 @@ enum State {
     Started,
     Settled,
     Withdrawn,
+    NotStarted,
 }
 
 #[derive(Clone, Debug)]
@@ -87,91 +94,120 @@ struct Record {
 
 struct Killed;
 
+type Key = (String, String);
+
 /// One running instance: its log on disk and what it rebuilt from it.
 pub struct Module {
     log: PathBuf,
     defects: Defects,
+    incarnation: String,
     alive: AtomicBool,
     kill_hook: Mutex<Option<String>>,
     hook_fired: AtomicBool,
-    records: Mutex<BTreeMap<(String, String), Record>>,
+    records: Mutex<BTreeMap<Key, Record>>,
+    /// The late-result log of this incarnation: `(seq, entry)`, seq from 1.
+    late: Mutex<Vec<(u64, LateEntry)>>,
+    acked: Mutex<BTreeSet<String>>,
 }
 
 impl Module {
     fn open(root: &Path, defects: Defects) -> Result<Arc<Self>, HarnessError> {
         std::fs::create_dir_all(root).map_err(|e| HarnessError::new(e.to_string()))?;
-        let log = root.join("records.jsonl");
-        let mut records = BTreeMap::new();
-        if let Ok(text) = std::fs::read_to_string(&log) {
-            for line in text.lines() {
-                let entry: Value = serde_json::from_str(line)
-                    .map_err(|e| HarnessError::new(format!("corrupt log: {e}")))?;
-                let key = (
-                    entry["carrier"].as_str().unwrap().to_owned(),
-                    entry["call_key"].as_str().unwrap().to_owned(),
-                );
-                let state = match entry["point"].as_str().unwrap() {
-                    points::PREPARED => {
-                        records.insert(
-                            key,
-                            Record {
-                                scope: serde_json::from_value(entry["scope"].clone()).unwrap(),
-                                marker: PathBuf::from(entry["marker"].as_str().unwrap()),
-                                state: State::Prepared,
-                            },
-                        );
-                        continue;
-                    }
-                    points::AUTHORIZED => State::Authorized,
-                    points::DISPATCH_STARTED => State::Started,
-                    "Settled" => State::Settled,
-                    "Withdrawn" => State::Withdrawn,
-                    other => return Err(HarnessError::new(format!("unknown record {other}"))),
-                };
-                if let Some(record) = records.get_mut(&key) {
-                    record.state = state;
-                }
-            }
-        }
+        let starts = root.join("starts");
+        let start = std::fs::read_to_string(&starts)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+            + 1;
+        std::fs::write(&starts, start.to_string()).map_err(|e| HarnessError::new(e.to_string()))?;
         let module = Arc::new(Self {
-            log,
+            log: root.join("records.jsonl"),
             defects,
+            incarnation: format!("fake-inc-{start}"),
             alive: AtomicBool::new(true),
             kill_hook: Mutex::new(None),
             hook_fired: AtomicBool::new(false),
-            records: Mutex::new(records),
+            records: Mutex::new(BTreeMap::new()),
+            late: Mutex::new(Vec::new()),
+            acked: Mutex::new(BTreeSet::new()),
         });
-        if defects.run_held_calls_on_restart {
-            let pending: Vec<(String, String)> = module
-                .records
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|(_, r)| matches!(r.state, State::Prepared | State::Authorized))
-                .map(|(key, _)| key.clone())
-                .collect();
-            for key in pending {
+        module.replay()?;
+        let pending: Vec<Key> = module
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, r)| matches!(r.state, State::Prepared | State::Authorized))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in pending {
+            if defects.run_held_calls_on_restart {
                 let _ = module.run(&key);
+            } else if module
+                .append(json!({ "point": "NotStarted", "carrier": key.0, "call_key": key.1 }))
+                .is_ok()
+            {
+                module.set_state(&key, State::NotStarted);
+                module.publish(&key, kinds::NOT_STARTED);
             }
         }
         Ok(module)
     }
 
-    /// Append one durable record. A kill armed for this point takes effect
-    /// right after the record is on disk: nothing later is written or done.
-    fn append(
-        &self,
-        point: &str,
-        carrier: &str,
-        call_key: &str,
-        extra: Value,
-    ) -> Result<(), Killed> {
+    fn replay(&self) -> Result<(), HarnessError> {
+        let Ok(text) = std::fs::read_to_string(&self.log) else {
+            return Ok(());
+        };
+        for line in text.lines() {
+            let entry: Value = serde_json::from_str(line)
+                .map_err(|e| HarnessError::new(format!("corrupt log: {e}")))?;
+            let point = entry["point"].as_str().unwrap_or_default();
+            if point == "Acked" {
+                self.acked
+                    .lock()
+                    .unwrap()
+                    .insert(entry["event_id"].as_str().unwrap().to_owned());
+                continue;
+            }
+            let key = (
+                entry["carrier"].as_str().unwrap().to_owned(),
+                entry["call_key"].as_str().unwrap().to_owned(),
+            );
+            let state = match point {
+                points::PREPARED => {
+                    self.records.lock().unwrap().insert(
+                        key,
+                        Record {
+                            scope: serde_json::from_value(entry["scope"].clone()).unwrap(),
+                            marker: PathBuf::from(entry["marker"].as_str().unwrap()),
+                            state: State::Prepared,
+                        },
+                    );
+                    continue;
+                }
+                points::AUTHORIZED => State::Authorized,
+                points::DISPATCH_STARTED => State::Started,
+                "Settled" => State::Settled,
+                "Withdrawn" => State::Withdrawn,
+                "NotStarted" => State::NotStarted,
+                other => return Err(HarnessError::new(format!("unknown record {other}"))),
+            };
+            self.set_state(&key, state);
+            match state {
+                State::Settled => self.publish(&key, kinds::RESULT),
+                State::NotStarted => self.publish(&key, kinds::NOT_STARTED),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Append one durable record. A kill armed for this record's point takes
+    /// effect right after the record is on disk: nothing later is written or
+    /// done.
+    fn append(&self, entry: Value) -> Result<(), Killed> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
-        }
-        let mut entry = json!({ "point": point, "carrier": carrier, "call_key": call_key });
-        if let Value::Object(extra) = extra {
-            entry.as_object_mut().unwrap().extend(extra);
         }
         let mut file = OpenOptions::new()
             .create(true)
@@ -180,7 +216,7 @@ impl Module {
             .expect("fake log opens");
         writeln!(file, "{entry}").expect("fake log writes");
         file.sync_all().expect("fake log syncs");
-        if self.kill_hook.lock().unwrap().as_deref() == Some(point) {
+        if self.kill_hook.lock().unwrap().as_deref() == entry["point"].as_str() {
             self.alive.store(false, Ordering::SeqCst);
             self.hook_fired.store(true, Ordering::SeqCst);
             return Err(Killed);
@@ -188,36 +224,65 @@ impl Module {
         Ok(())
     }
 
-    fn set_state(&self, key: &(String, String), state: State) {
+    fn mark(&self, point: &str, key: &Key) -> Result<(), Killed> {
+        self.append(json!({ "point": point, "carrier": key.0, "call_key": key.1 }))
+    }
+
+    fn set_state(&self, key: &Key, state: State) {
         if let Some(record) = self.records.lock().unwrap().get_mut(key) {
             record.state = state;
         }
     }
 
+    /// Add a late-result entry for `key`, unless it was acked before.
+    fn publish(&self, key: &Key, kind: &str) {
+        let event_id = format!("{}|{}|{kind}", key.0, key.1);
+        if self.acked.lock().unwrap().contains(&event_id) {
+            return;
+        }
+        let scope = self.records.lock().unwrap()[key].scope.clone();
+        let mut entry = json!({
+            "kind": kind, "owner": scope.owner, "ref": scope.scope_ref,
+            "scope_epoch": scope.scope_epoch, "custodian": scope.owner,
+            "call_key": key.1, "event_id": event_id, "settled_at": 1_790_000_000_000u64,
+            "reduced": false,
+        });
+        if kind == kinds::NOT_STARTED {
+            entry["reason"] = json!(reasons::RESTART_BEFORE_DISPATCH);
+        } else {
+            entry["result"] = json!({ "content": "ran" });
+        }
+        let mut late = self.late.lock().unwrap();
+        let seq = late.len() as u64 + 1;
+        late.push((seq, serde_json::from_value(entry).unwrap()));
+    }
+
     /// Dispatch a held call: DispatchStarted, the action, Settled.
-    fn run(&self, key: &(String, String)) -> Result<(), Killed> {
+    fn run(&self, key: &Key) -> Result<(), Killed> {
         let marker = self.records.lock().unwrap()[key].marker.clone();
-        self.append(points::DISPATCH_STARTED, &key.0, &key.1, json!({}))?;
+        self.mark(points::DISPATCH_STARTED, key)?;
         self.set_state(key, State::Started);
         std::fs::write(&marker, b"ran").expect("marker writes");
-        self.append("Settled", &key.0, &key.1, json!({}))?;
+        self.mark("Settled", key)?;
         self.set_state(key, State::Settled);
+        self.publish(key, kinds::RESULT);
         Ok(())
     }
 
-    fn approve(&self, call_key: &str) -> Result<(), HarnessError> {
-        let key = self
-            .records
+    fn find(&self, call_key: &str) -> Option<Key> {
+        self.records
             .lock()
             .unwrap()
             .keys()
             .find(|(_, k)| k == call_key)
             .cloned()
+    }
+
+    fn approve(&self, call_key: &str) -> Result<(), HarnessError> {
+        let key = self
+            .find(call_key)
             .ok_or_else(|| HarnessError::new(format!("no question filed for {call_key}")))?;
-        if self
-            .append(points::AUTHORIZED, &key.0, &key.1, json!({}))
-            .is_err()
-        {
+        if self.mark(points::AUTHORIZED, &key).is_err() {
             return Ok(());
         }
         self.set_state(&key, State::Authorized);
@@ -225,24 +290,20 @@ impl Module {
         Ok(())
     }
 
-    fn holds(&self, call_key: &str) -> bool {
-        self.records
-            .lock()
-            .unwrap()
-            .keys()
-            .any(|(_, k)| k == call_key)
-    }
-
     fn describe() -> Value {
         json!({
-            "role": "tool-provider", "version": "v1", "stability": "alpha",
+            "role": "tool-provider", "versions": ["v1"], "stability": "alpha",
             "implementation_version": "fake-0",
-            "ops": [ops::ROLE_DESCRIBE, ops::TOOL_CATALOG, ops::TOOL_WITHDRAW],
+            "ops": [ops::ROLE_DESCRIBE, ops::TOOL_CATALOG, ops::TOOL_WITHDRAW,
+                    ops::LATE_RESULTS, ops::LATE_RESULTS_ACK],
             "capabilities": []
         })
     }
 
-    fn catalog(&self) -> Value {
+    fn catalog(&self, arguments: &Value) -> Value {
+        if arguments["digest_only"] == json!(true) {
+            return json!({ "generation": GENERATION, "catalog_digest": "fake-catalog-1" });
+        }
         let object = json!({ "type": "object", "properties": { "text": { "type": "string" } } });
         let held_schema = if self.defects.root_union_schema {
             json!({ "anyOf": [
@@ -253,48 +314,84 @@ impl Module {
             json!({ "type": "object", "properties": { "marker": { "type": "string" } }, "required": ["marker"] })
         };
         json!({
-            "generation": 1,
+            "generation": GENERATION,
+            "capabilities": { "late_results": true },
             "tools": [
-                { "name": QUICK, "schema_digest": "fake:echo:1", "capabilities": [], "input_schema": object },
-                { "name": SLOW, "schema_digest": "fake:sleep:1", "capabilities": [], "input_schema": { "type": "object" } },
-                { "name": HELD, "schema_digest": "fake:effect:1", "result_ops": ["prepend", "append"],
+                { "name": QUICK, "schema_digest": "fake:echo:1", "semantics": 1, "input_schema": object },
+                { "name": SLOW, "schema_digest": "fake:sleep:1", "semantics": 1, "input_schema": { "type": "object" } },
+                { "name": HELD, "schema_digest": "fake:effect:1", "semantics": 2, "result_ops": ["prepend", "append"],
                   "capabilities": ["fake:effect/v1"], "input_schema": held_schema }
             ]
         })
+    }
+
+    fn semantics(tool: &str) -> Option<u64> {
+        match tool {
+            QUICK | SLOW => Some(1),
+            HELD => Some(2),
+            _ => None,
+        }
     }
 
     fn handle(&self, stamp: &RouteStamp, body: Value) -> Result<Vec<ObservedFrame>, RouteFailure> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(RouteFailure::new("module is gone"));
         }
-        let request: KeyedToolCallRequest = match serde_json::from_value(body) {
+        let request: PinnedToolCallRequest = match serde_json::from_value(body) {
             Ok(request) => request,
             Err(e) => return Ok(error(errors::invalid_request("body", e.to_string()))),
         };
         let name = request.request.name.as_str();
-        if name == ops::TOOL_WITHDRAW {
-            return Ok(match self.withdraw(stamp, &request) {
-                Ok(answer) => vec![ObservedFrame::Response(answer.encode())],
-                Err(refusal) => error(refusal),
-            });
+        let reply = |result: Result<Value, ErrorBody>| match result {
+            Ok(body) => vec![ObservedFrame::Response(body)],
+            Err(refusal) => error(refusal),
+        };
+        match name {
+            ops::TOOL_WITHDRAW => {
+                return Ok(reply(
+                    self.withdraw(stamp, &request).map(|answer| answer.encode()),
+                ))
+            }
+            ops::LATE_RESULTS => {
+                return Ok(reply(self.late_results(stamp, &request.request.arguments)))
+            }
+            ops::LATE_RESULTS_ACK => return Ok(reply(self.ack(stamp, &request.request.arguments))),
+            _ => {}
         }
-        if let Err(refusal) = check_call_key(&request) {
-            return Ok(error(refusal));
+        let pin = match check_call(&request) {
+            Ok(pin) => pin,
+            Err(refusal) => return Ok(error(refusal)),
+        };
+        if let (Some(pin), Some(current)) = (&pin, Self::semantics(name)) {
+            if pin.semantics != current {
+                return Ok(error(ErrorBody::new(
+                    errors::TOOL_SEMANTICS_CHANGED,
+                    "semantics moved",
+                )));
+            }
+            if pin.generation != GENERATION {
+                return Ok(error(ErrorBody::new(
+                    errors::TOOL_SCHEMA_CHANGED,
+                    "unknown generation",
+                )));
+            }
         }
         Ok(match name {
             ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(Self::describe())],
-            ops::TOOL_CATALOG => vec![ObservedFrame::Response(self.catalog())],
+            ops::TOOL_CATALOG => vec![ObservedFrame::Response(
+                self.catalog(&request.request.arguments),
+            )],
             QUICK | SLOW => vec![ObservedFrame::Response(
                 json!({ "content": request.request.arguments }),
             )],
             DISABLED => error(errors::tool_disabled(DISABLED)),
             HELD => self.hold(stamp, &request),
-            other => error(ErrorBody::new("unknown_tool", format!("no tool {other}"))),
+            other => error(errors::unknown_tool(other)),
         })
     }
 
-    fn hold(&self, stamp: &RouteStamp, request: &KeyedToolCallRequest) -> Vec<ObservedFrame> {
-        let (Some(call_key), Some(scope)) = (&request.call_key, &stamp.scope) else {
+    fn hold(&self, stamp: &RouteStamp, request: &PinnedToolCallRequest) -> Vec<ObservedFrame> {
+        let (Some(call_key), Some(scope)) = (&request.request.call_key, scope_of(stamp)) else {
             return error(errors::invalid_request(
                 CALL_KEY_FIELD,
                 "held calls need a call_key and a scope",
@@ -302,28 +399,21 @@ impl Module {
         };
         let key = (stamp.principal.clone(), call_key.clone());
         if !self.records.lock().unwrap().contains_key(&key) {
-            let scope = ScopeIdentity {
-                owner: scope.owner.clone(),
-                scope_ref: scope.scope_ref.clone(),
-                scope_epoch: scope.scope_epoch,
-            };
             let marker = request.request.arguments["marker"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned();
-            let extra = json!({ "scope": scope, "marker": marker });
             self.records.lock().unwrap().insert(
                 key.clone(),
                 Record {
-                    scope,
-                    marker: PathBuf::from(marker),
+                    scope: scope.clone(),
+                    marker: PathBuf::from(&marker),
                     state: State::Prepared,
                 },
             );
-            if self
-                .append(points::PREPARED, &key.0, &key.1, extra)
-                .is_err()
-            {
+            let entry = json!({ "point": points::PREPARED, "carrier": key.0, "call_key": key.1,
+                                "scope": scope, "marker": marker });
+            if self.append(entry).is_err() {
                 return Vec::new();
             }
         }
@@ -333,55 +423,36 @@ impl Module {
     fn withdraw(
         &self,
         stamp: &RouteStamp,
-        request: &KeyedToolCallRequest,
+        request: &PinnedToolCallRequest,
     ) -> Result<WithdrawAnswer, ErrorBody> {
-        let arguments = parse_withdraw_request(request)?;
-        let scope = stamp
-            .scope
-            .as_ref()
-            .map(|s| ScopeIdentity {
-                owner: s.owner.clone(),
-                scope_ref: s.scope_ref.clone(),
-                scope_epoch: s.scope_epoch,
-            })
-            .ok_or_else(|| errors::withdraw_not_permitted("tool.withdraw needs a scoped route"))?;
-        let carrier =
-            resolve_carrier(&stamp.principal, &scope, &arguments).map_err(
-                |problem| match problem {
-                    CallerProblem::ScopeMismatch => {
-                        errors::invalid_request("scope", "differs from the route's scope")
-                    }
-                    CallerProblem::OwnerMustNameCarrier => {
-                        errors::invalid_request("carrier", "the owner must name the carrier")
-                    }
-                    CallerProblem::CarrierMismatch { named } => errors::withdraw_not_permitted(
-                        format!("{} may not withdraw {named}'s calls", stamp.principal),
-                    ),
-                },
-            )?;
+        let arguments = parse_withdraw_request(&request.request)?;
+        let scope = scope_of(stamp);
+        let resolution =
+            resolve_carrier(&stamp.principal, scope.as_ref(), &arguments).map_err(|p| p.error())?;
+        let (carrier, owner_as_carrier) = match resolution {
+            CarrierResolution::Carrier(carrier) => (carrier, false),
+            CarrierResolution::OwnerAsCarrier(owner) => (owner, true),
+        };
         let key = (carrier, arguments.call_key);
         let Some(record) = self.records.lock().unwrap().get(&key).cloned() else {
+            if owner_as_carrier {
+                return Err(CallerProblem::CarrierRequired.error());
+            }
             return Ok(if self.defects.refuse_unknown_call {
-                WithdrawAnswer::Refused {
-                    reason: RefusalReason::Denied,
-                }
+                WithdrawAnswer::Refused { reason: cortexkit_role_tool_provider_conformance::wire::withdraw::RefusalReason::Denied }
             } else {
                 WithdrawAnswer::UnknownCall
             });
         };
-        if record.scope != scope {
-            return Err(errors::withdraw_not_permitted(
-                "the call is under another scope",
-            ));
-        }
+        check_record_scope(Some(&record.scope), scope.as_ref()).map_err(|p| p.error())?;
         Ok(match record.state {
             State::Prepared | State::Authorized => {
-                if self.append("Withdrawn", &key.0, &key.1, json!({})).is_ok() {
+                if self.mark("Withdrawn", &key).is_ok() {
                     self.set_state(&key, State::Withdrawn);
                 }
                 WithdrawAnswer::Withdrawn
             }
-            State::Withdrawn => WithdrawAnswer::Withdrawn,
+            State::Withdrawn | State::NotStarted => WithdrawAnswer::Withdrawn,
             State::Started => WithdrawAnswer::AlreadyStarted {
                 outcome: StartedOutcome::Unknown,
             },
@@ -390,6 +461,74 @@ impl Module {
             },
         })
     }
+
+    fn head(&self) -> u64 {
+        self.late.lock().unwrap().len() as u64
+    }
+
+    fn late_results(&self, stamp: &RouteStamp, arguments: &Value) -> Result<Value, ErrorBody> {
+        let request: LateResultsRequest = serde_json::from_value(arguments.clone())
+            .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
+        check_since(&self.incarnation, self.head(), request.since.as_ref())?;
+        let after = request.since.as_ref().map_or(0, |c| c.seq);
+        let limit = request.limit.map_or(usize::MAX, |l| l as usize);
+        let acked = self.acked.lock().unwrap().clone();
+        let mine: Vec<(u64, LateEntry)> = self
+            .late
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(seq, e)| {
+                *seq > after && e.custodian == stamp.principal && !acked.contains(&e.event_id)
+            })
+            .cloned()
+            .collect();
+        let taken: Vec<(u64, LateEntry)> = mine.iter().take(limit).cloned().collect();
+        let cursor = Cursor {
+            provider_incarnation: self.incarnation.clone(),
+            seq: taken.last().map_or(after, |(seq, _)| *seq),
+        };
+        let reply = LateResultsReply {
+            entries: taken.into_iter().map(|(_, e)| e).collect(),
+            cursor,
+            more: mine.len() > limit,
+        };
+        Ok(serde_json::to_value(reply).unwrap())
+    }
+
+    fn ack(&self, stamp: &RouteStamp, arguments: &Value) -> Result<Value, ErrorBody> {
+        let request: AckRequest = serde_json::from_value(arguments.clone())
+            .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
+        check_since(&self.incarnation, self.head(), Some(&request.through))?;
+        if self.defects.forget_acks {
+            return Ok(json!({}));
+        }
+        let events: Vec<String> = self
+            .late
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(seq, e)| *seq <= request.through.seq && e.custodian == stamp.principal)
+            .map(|(_, e)| e.event_id.clone())
+            .collect();
+        for event in events {
+            if self
+                .append(json!({ "point": "Acked", "event_id": event }))
+                .is_ok()
+            {
+                self.acked.lock().unwrap().insert(event);
+            }
+        }
+        Ok(json!({}))
+    }
+}
+
+fn scope_of(stamp: &RouteStamp) -> Option<ScopeIdentity> {
+    stamp.scope.as_ref().map(|s| ScopeIdentity {
+        owner: s.owner.clone(),
+        scope_ref: s.scope_ref.clone(),
+        scope_epoch: s.scope_epoch,
+    })
 }
 
 fn error(body: ErrorBody) -> Vec<ObservedFrame> {
@@ -447,10 +586,12 @@ impl FakeSubject {
             capabilities: [
                 Capability::ScopeStamp,
                 Capability::CallKey,
+                Capability::SchemaPin,
                 Capability::HeldCalls,
                 Capability::DisableTool,
                 Capability::Cancellation,
                 Capability::ApprovalExecution,
+                Capability::LateResults,
             ]
             .into(),
             live: Mutex::new(None),
@@ -544,20 +685,24 @@ impl ToolProviderSubject for FakeSubject {
     }
 
     fn scoped_principals(&self) -> Option<ScopedPrincipals> {
+        let scope = ScopeIdentity {
+            owner: "reserved:owner".into(),
+            scope_ref: "scope-1".into(),
+            scope_epoch: 1,
+        };
         Some(ScopedPrincipals {
-            scope: ScopeIdentity {
-                owner: "reserved:owner".into(),
-                scope_ref: "scope-1".into(),
-                scope_epoch: 1,
+            other_scope: ScopeIdentity {
+                scope_ref: "scope-2".into(),
+                ..scope.clone()
             },
+            scope,
             carrier: "reserved:broca".into(),
             other_carrier: "reserved:thalamus".into(),
-            stranger: "reserved:stranger".into(),
         })
     }
 
     fn catalog_arguments(&self) -> Value {
-        json!({ "params": {} })
+        json!({ "params": Map::new() })
     }
 
     fn quick_call(&self) -> CallSpec {
@@ -578,7 +723,7 @@ impl ToolProviderSubject for FakeSubject {
 
     async fn await_held(&self, call_key: &str) -> Result<(), HarnessError> {
         for _ in 0..100 {
-            if self.live()?.holds(call_key) {
+            if self.live()?.find(call_key).is_some() {
                 return Ok(());
             }
             tokio::task::yield_now().await;

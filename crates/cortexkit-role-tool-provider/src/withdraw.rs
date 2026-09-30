@@ -7,14 +7,22 @@
 //! the provider's record for it is keyed `(carrier, call_key)`, where the
 //! carrier is the principal that raised the call.
 //!
-//! Who may withdraw: the carrier itself, or the owner of the call's scope.
-//! - The carrier's request needs no `arguments.carrier`: the carrier is the
-//!   route's stamped principal. Naming a different carrier is refused.
-//! - The owner's request must name `arguments.carrier`, because the owner is
-//!   not the carrier and the record cannot be found without it.
-//! - `arguments.scope`, when present, must equal the route's stamped scope.
-//! - A caller that is neither the carrier nor the owner of the record's scope
-//!   gets the route error `withdraw_not_permitted`, never an answer.
+//! Who may withdraw, and the route error each failed check gets (all four
+//! are terminal for the caller, and none is an answer):
+//! - `arguments.scope`, when present, must equal the route's stamped scope:
+//!   otherwise `withdraw_scope_mismatch`.
+//! - A caller other than the scope's owner is the carrier: the record is keyed
+//!   on the route's stamped principal, and an `arguments.carrier` naming
+//!   anyone else is `withdraw_carrier_mismatch`.
+//! - The scope's owner may withdraw any carrier's call by naming
+//!   `arguments.carrier`. An owner that names no carrier is treated as the
+//!   carrier itself; if it holds no call under that key, the request is
+//!   `withdraw_carrier_required`.
+//! - On an unscoped route only the carrier may withdraw, keyed on the route's
+//!   principal.
+//! - A record found under a different scope than the route's stamp (or a
+//!   scoped record reached from an unscoped route, or the reverse) is
+//!   `withdraw_not_permitted`.
 //!
 //! The answer is read from the provider's record, so it is identical for
 //! every permitted caller and every repeat. `unknown_call` means the provider
@@ -26,10 +34,13 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 use crate::{
-    call::{KeyedToolCallRequest, CALL_KEY_FIELD},
+    call::{validate_call_key, ToolCallRequest, CALL_KEY_FIELD},
     errors, ops,
     scope::ScopeIdentity,
 };
+
+/// The `field` an `invalid_request` names when the target key is malformed.
+pub const TARGET_CALL_KEY_FIELD: &str = "arguments.call_key";
 
 /// Answer names.
 pub mod answers {
@@ -84,8 +95,8 @@ impl WithdrawArguments {
     /// The request that carries these arguments. It has no top-level
     /// `call_key`: that would name the withdraw request itself, which is not
     /// a call anyone can hold.
-    pub fn into_request(self) -> KeyedToolCallRequest {
-        KeyedToolCallRequest::new(
+    pub fn into_request(self) -> ToolCallRequest {
+        ToolCallRequest::new(
             ops::TOOL_WITHDRAW,
             serde_json::to_value(self).expect("withdraw arguments serialize"),
         )
@@ -93,63 +104,113 @@ impl WithdrawArguments {
 }
 
 /// The provider's first check of a `tool.withdraw` request: a top-level
-/// `call_key` is refused as `invalid_request {field: "call_key"}`, and
-/// arguments that do not decode as `invalid_request {field: "arguments"}`.
-pub fn parse_withdraw_request(
-    request: &KeyedToolCallRequest,
-) -> Result<WithdrawArguments, ErrorBody> {
+/// `call_key` is refused as `invalid_request {field: "call_key"}`, arguments
+/// that do not decode as `invalid_request {field: "arguments"}`, and a
+/// malformed target key as `invalid_request {field: "arguments.call_key"}`.
+pub fn parse_withdraw_request(request: &ToolCallRequest) -> Result<WithdrawArguments, ErrorBody> {
     if request.call_key.is_some() {
         return Err(errors::invalid_request(
             CALL_KEY_FIELD,
             "tool.withdraw names its target in arguments.call_key and carries no call_key of its own",
         ));
     }
-    serde_json::from_value(request.request.arguments.clone())
-        .map_err(|error| errors::invalid_request("arguments", error.to_string()))
+    let arguments: WithdrawArguments = serde_json::from_value(request.arguments.clone())
+        .map_err(|error| errors::invalid_request("arguments", error.to_string()))?;
+    validate_call_key(&arguments.call_key)
+        .map_err(|error| errors::invalid_request(TARGET_CALL_KEY_FIELD, error.to_string()))?;
+    Ok(arguments)
 }
 
-/// Why a withdraw caller's request is refused before any record is read.
+/// Why a withdraw caller's request is refused. Each maps to one route error
+/// ([`CallerProblem::error`]); none is an answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallerProblem {
-    /// `arguments.scope` differs from the route's stamped scope.
+    /// `arguments.scope` differs from the route's stamped scope (or names a
+    /// scope on an unscoped route).
     ScopeMismatch,
-    /// The scope's owner did not name `arguments.carrier`.
-    OwnerMustNameCarrier,
-    /// A caller that is not the scope's owner named a carrier other than
-    /// itself. That is a failed caller check: `withdraw_not_permitted`.
+    /// The scope's owner named no carrier and holds no call of its own under
+    /// the key.
+    CarrierRequired,
+    /// A caller other than the scope's owner named a carrier other than
+    /// itself.
     CarrierMismatch { named: String },
+    /// The record found is under a different scope than the route's stamp.
+    NotPermitted,
+}
+
+impl CallerProblem {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ScopeMismatch => errors::WITHDRAW_SCOPE_MISMATCH,
+            Self::CarrierRequired => errors::WITHDRAW_CARRIER_REQUIRED,
+            Self::CarrierMismatch { .. } => errors::WITHDRAW_CARRIER_MISMATCH,
+            Self::NotPermitted => errors::WITHDRAW_NOT_PERMITTED,
+        }
+    }
+
+    /// The route error a provider answers with.
+    pub fn error(&self) -> ErrorBody {
+        let message = match self {
+            Self::ScopeMismatch => "arguments.scope differs from the route's scope".to_owned(),
+            Self::CarrierRequired => {
+                "the scope's owner must name arguments.carrier for a call it did not raise"
+                    .to_owned()
+            }
+            Self::CarrierMismatch { named } => {
+                format!("only the scope's owner may name another carrier ({named})")
+            }
+            Self::NotPermitted => "the call is under another scope".to_owned(),
+        };
+        ErrorBody::new(self.code(), message)
+    }
+}
+
+/// Whose record a withdraw request addresses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CarrierResolution {
+    /// Read the record `(carrier, arguments.call_key)`.
+    Carrier(String),
+    /// The scope's owner named no carrier: read `(owner, arguments.call_key)`,
+    /// treating the owner as the carrier. If no such record exists, refuse
+    /// with [`CallerProblem::CarrierRequired`] rather than answering
+    /// `unknown_call`, because the owner may simply have omitted the carrier.
+    OwnerAsCarrier(String),
 }
 
 /// Decide whose record a withdraw request addresses, from the route's
-/// stamped principal and scope and the request's arguments.
-///
-/// On success the provider reads the record `(carrier, arguments.call_key)`.
-/// If that record exists under a scope other than the route's stamped scope
-/// (`stamp_scope`), the caller is not permitted either, and the provider
-/// answers `withdraw_not_permitted`.
+/// stamped principal (`caller`) and scope (`stamp_scope`, `None` on an
+/// unscoped route) and the request's arguments.
 pub fn resolve_carrier(
     caller: &str,
-    stamp_scope: &ScopeIdentity,
+    stamp_scope: Option<&ScopeIdentity>,
     arguments: &WithdrawArguments,
-) -> Result<String, CallerProblem> {
-    if arguments
-        .scope
-        .as_ref()
-        .is_some_and(|named| named != stamp_scope)
-    {
-        return Err(CallerProblem::ScopeMismatch);
+) -> Result<CarrierResolution, CallerProblem> {
+    if let Some(named) = &arguments.scope {
+        if stamp_scope != Some(named) {
+            return Err(CallerProblem::ScopeMismatch);
+        }
     }
-    if caller == stamp_scope.owner {
-        return arguments
-            .carrier
-            .clone()
-            .ok_or(CallerProblem::OwnerMustNameCarrier);
-    }
-    match &arguments.carrier {
-        Some(named) if named != caller => Err(CallerProblem::CarrierMismatch {
+    let is_owner = stamp_scope.is_some_and(|scope| scope.owner == caller);
+    match (&arguments.carrier, is_owner) {
+        (Some(named), true) => Ok(CarrierResolution::Carrier(named.clone())),
+        (None, true) => Ok(CarrierResolution::OwnerAsCarrier(caller.to_owned())),
+        (Some(named), false) if named != caller => Err(CallerProblem::CarrierMismatch {
             named: named.clone(),
         }),
-        _ => Ok(caller.to_owned()),
+        (_, false) => Ok(CarrierResolution::Carrier(caller.to_owned())),
+    }
+}
+
+/// The last caller check, once a record was found: the record's scope must
+/// be the route's stamped scope (both `None` on unscoped routes).
+pub fn check_record_scope(
+    record_scope: Option<&ScopeIdentity>,
+    stamp_scope: Option<&ScopeIdentity>,
+) -> Result<(), CallerProblem> {
+    if record_scope == stamp_scope {
+        Ok(())
+    } else {
+        Err(CallerProblem::NotPermitted)
     }
 }
 
@@ -363,6 +424,62 @@ fn member_str<'a>(
         .ok_or(WithdrawDecodeError::BadMember { answer, member })
 }
 
+/// What a withdrawing caller concludes from one reply, and whether it
+/// retries.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WithdrawVerdict {
+    /// `withdrawn` or `refused`: the call never ran and never will.
+    NeverRan,
+    /// `completed`: the call ran.
+    Ran,
+    /// `already_started` with an observed outcome code.
+    StartedWithOutcome(String),
+    /// `already_started` with outcome `unknown`: record `outcome_unknown`.
+    OutcomeUnknown,
+    /// `unknown_call`: the provider held nothing under that key.
+    NothingHeld,
+    /// A reply body this crate cannot classify (an unknown `answer`, or not an
+    /// answer at all): record it verbatim; final.
+    Unclassified(Value),
+    /// A terminal route error: the four withdraw caller errors, or any other
+    /// code that is not transient. Record it; do not retry.
+    Terminal(ErrorBody),
+    /// A transient route refusal ([`errors::is_transient`]): retry the same
+    /// request.
+    Retry(ErrorBody),
+}
+
+impl WithdrawVerdict {
+    /// Only [`WithdrawVerdict::Retry`] sends the request again.
+    pub fn retries(&self) -> bool {
+        matches!(self, Self::Retry(_))
+    }
+}
+
+/// The caller policy for one `tool.withdraw` reply: `Ok` is a `RESPONSE`
+/// body, `Err` a route error.
+pub fn caller_verdict(reply: Result<&Value, &ErrorBody>) -> WithdrawVerdict {
+    match reply {
+        Err(error) if errors::is_transient(&error.code) => WithdrawVerdict::Retry(error.clone()),
+        Err(error) => WithdrawVerdict::Terminal(error.clone()),
+        Ok(body) => match WithdrawAnswer::decode(body) {
+            Ok(WithdrawAnswer::Withdrawn | WithdrawAnswer::Refused { .. }) => {
+                WithdrawVerdict::NeverRan
+            }
+            Ok(WithdrawAnswer::Completed { .. }) => WithdrawVerdict::Ran,
+            Ok(WithdrawAnswer::AlreadyStarted {
+                outcome: StartedOutcome::Known(code),
+            }) => WithdrawVerdict::StartedWithOutcome(code),
+            Ok(WithdrawAnswer::AlreadyStarted {
+                outcome: StartedOutcome::Unknown,
+            }) => WithdrawVerdict::OutcomeUnknown,
+            Ok(WithdrawAnswer::UnknownCall) => WithdrawVerdict::NothingHeld,
+            Ok(WithdrawAnswer::Unclassified { body, .. }) => WithdrawVerdict::Unclassified(body),
+            Err(_) => WithdrawVerdict::Unclassified(body.clone()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,67 +550,138 @@ mod tests {
     }
 
     #[test]
-    fn a_withdraw_request_with_its_own_call_key_is_refused() {
-        let request = WithdrawArguments::new("k1")
-            .into_request()
-            .with_call_key("k2");
-        let error = parse_withdraw_request(&request).unwrap_err();
-        assert_eq!(errors::invalid_request_field(&error), Some(CALL_KEY_FIELD));
-
-        let request = WithdrawArguments::new("k1").into_request();
+    fn a_withdraw_request_with_its_own_or_a_malformed_key_is_refused() {
+        let mut request = WithdrawArguments::new("k1").into_request();
         assert_eq!(request.call_key, None);
         assert_eq!(
             parse_withdraw_request(&request),
             Ok(WithdrawArguments::new("k1"))
         );
+        request.call_key = Some("k2".into());
+        let error = parse_withdraw_request(&request).unwrap_err();
+        assert_eq!(errors::invalid_request_field(&error), Some(CALL_KEY_FIELD));
+
+        let request = WithdrawArguments::new("has space").into_request();
+        let error = parse_withdraw_request(&request).unwrap_err();
+        assert_eq!(
+            errors::invalid_request_field(&error),
+            Some(TARGET_CALL_KEY_FIELD)
+        );
     }
 
     #[test]
-    fn the_carrier_comes_from_the_stamp_and_the_owner_must_name_it() {
+    fn caller_rules_resolve_the_carrier_or_name_the_route_error() {
         let scope = scope();
+        let scoped = Some(&scope);
         let bare = WithdrawArguments::new("k");
+        let named = |c: &str| bare.clone().with_carrier(c);
+        let carrier = |c: &str| Ok(CarrierResolution::Carrier(c.into()));
+
         assert_eq!(
-            resolve_carrier("reserved:broca", &scope, &bare),
-            Ok("reserved:broca".into())
+            resolve_carrier("reserved:broca", scoped, &bare),
+            carrier("reserved:broca")
         );
         assert_eq!(
-            resolve_carrier(
-                "reserved:broca",
-                &scope,
-                &bare.clone().with_carrier("reserved:broca")
-            ),
-            Ok("reserved:broca".into())
+            resolve_carrier("reserved:broca", scoped, &named("reserved:broca")),
+            carrier("reserved:broca")
         );
         assert_eq!(
-            resolve_carrier(
-                "reserved:broca",
-                &scope,
-                &bare.clone().with_carrier("reserved:other")
-            ),
+            resolve_carrier("reserved:broca", scoped, &named("reserved:other")),
             Err(CallerProblem::CarrierMismatch {
                 named: "reserved:other".into()
             })
         );
         assert_eq!(
-            resolve_carrier("reserved:owner", &scope, &bare),
-            Err(CallerProblem::OwnerMustNameCarrier)
+            resolve_carrier("reserved:owner", scoped, &bare),
+            Ok(CarrierResolution::OwnerAsCarrier("reserved:owner".into()))
         );
         assert_eq!(
-            resolve_carrier(
-                "reserved:owner",
-                &scope,
-                &bare.clone().with_carrier("reserved:broca")
-            ),
-            Ok("reserved:broca".into())
+            resolve_carrier("reserved:owner", scoped, &named("reserved:broca")),
+            carrier("reserved:broca")
         );
-        let mut other_scope = bare;
+        let mut other_scope = bare.clone();
         other_scope.scope = Some(ScopeIdentity {
             scope_epoch: 4,
             ..scope.clone()
         });
         assert_eq!(
-            resolve_carrier("reserved:broca", &scope, &other_scope),
+            resolve_carrier("reserved:broca", scoped, &other_scope),
             Err(CallerProblem::ScopeMismatch)
         );
+        // Unscoped: only the carrier, keyed on the route principal; the
+        // principal that owns some scope is no owner here.
+        assert_eq!(
+            resolve_carrier("reserved:owner", None, &bare),
+            carrier("reserved:owner")
+        );
+        assert_eq!(
+            resolve_carrier("direct", None, &named("reserved:broca")),
+            Err(CallerProblem::CarrierMismatch {
+                named: "reserved:broca".into()
+            })
+        );
+        assert_eq!(
+            resolve_carrier("direct", None, &other_scope),
+            Err(CallerProblem::ScopeMismatch)
+        );
+
+        assert_eq!(check_record_scope(scoped, scoped), Ok(()));
+        assert_eq!(check_record_scope(None, None), Ok(()));
+        assert_eq!(
+            check_record_scope(scoped, None),
+            Err(CallerProblem::NotPermitted)
+        );
+        assert_eq!(
+            check_record_scope(None, scoped),
+            Err(CallerProblem::NotPermitted)
+        );
+    }
+
+    #[test]
+    fn every_caller_problem_has_its_own_route_error() {
+        let codes = [
+            CallerProblem::ScopeMismatch.error().code,
+            CallerProblem::CarrierRequired.error().code,
+            CallerProblem::CarrierMismatch { named: "x".into() }
+                .error()
+                .code,
+            CallerProblem::NotPermitted.error().code,
+        ];
+        assert_eq!(
+            codes,
+            [
+                errors::WITHDRAW_SCOPE_MISMATCH,
+                errors::WITHDRAW_CARRIER_REQUIRED,
+                errors::WITHDRAW_CARRIER_MISMATCH,
+                errors::WITHDRAW_NOT_PERMITTED,
+            ]
+        );
+    }
+
+    #[test]
+    fn caller_policy_vectors_decide_as_recorded() {
+        let vectors = vectors::load("withdraw-answers.json");
+        for case in vectors["policy"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let verdict = match (&case["body"], &case["route_error"]) {
+                (body, Value::Null) => caller_verdict(Ok(body)),
+                (_, error) => {
+                    let error: ErrorBody = serde_json::from_value(error.clone()).unwrap();
+                    caller_verdict(Err(&error))
+                }
+            };
+            let kind = match &verdict {
+                WithdrawVerdict::NeverRan => "never_ran",
+                WithdrawVerdict::Ran => "ran",
+                WithdrawVerdict::StartedWithOutcome(_) => "started_with_outcome",
+                WithdrawVerdict::OutcomeUnknown => "outcome_unknown",
+                WithdrawVerdict::NothingHeld => "nothing_held",
+                WithdrawVerdict::Unclassified(_) => "unclassified",
+                WithdrawVerdict::Terminal(_) => "terminal",
+                WithdrawVerdict::Retry(_) => "retry",
+            };
+            assert_eq!(kind, case["verdict"].as_str().unwrap(), "{name}");
+            assert_eq!(verdict.retries(), kind == "retry", "{name}");
+        }
     }
 }

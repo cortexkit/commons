@@ -13,14 +13,25 @@ pub struct CaseSpec {
     pub checks: &'static str,
 }
 
-use Capability::{ApprovalExecution, Cancellation, DisableTool, HeldCalls, ScopeStamp};
+use Capability::{
+    ApprovalExecution, CallKey, Cancellation, DisableTool, HeldCalls, LateResults, SchemaPin,
+    ScopeStamp,
+};
 
-const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, Capability::CallKey];
+const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
+const LATE: &[Capability] = &[
+    LateResults,
+    ScopeStamp,
+    HeldCalls,
+    CallKey,
+    ApprovalExecution,
+];
 const CRASH: &[Capability] = &[
     ApprovalExecution,
     HeldCalls,
     ScopeStamp,
-    Capability::CallKey,
+    CallKey,
+    LateResults,
 ];
 
 /// Every case, in the order the runner runs them.
@@ -28,7 +39,7 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "role_describe_shape",
         requires: &[],
-        checks: "role.describe answers tool-provider/v1 with every required op, carries no tool list, and lists tool.withdraw when the subject declares held_calls",
+        checks: "role.describe lists v1 among its versions and every required op, carries no tool list, and lists tool.withdraw or the late_results ops when the subject declares held_calls or late_results",
     },
     CaseSpec {
         name: "role_describe_cacheable",
@@ -38,12 +49,17 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "catalog_schemas_flat",
         requires: &[],
-        checks: "every catalog tool has a schema_digest and a flat input_schema, and the quick call's tool is listed",
+        checks: "every catalog tool has a schema_digest and a flat input_schema, no role op is listed as a tool, and the quick call's tool is listed",
     },
     CaseSpec {
         name: "catalog_schema_digest_stable",
         requires: &[],
-        checks: "two tool.catalog answers list the same tools with the same schema_digest",
+        checks: "two tool.catalog answers carry the same generation and the same tools with the same schema_digest and semantics",
+    },
+    CaseSpec {
+        name: "catalog_digest_only",
+        requires: &[],
+        checks: "a digest_only answer carries the full answer's generation and a catalog_digest, and no tools",
     },
     CaseSpec {
         name: "catalog_disabled_tool_absent",
@@ -63,7 +79,7 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "terminal_frame_on_refusal",
         requires: &[],
-        checks: "a call to a tool the provider does not serve gets exactly one terminal frame, an error",
+        checks: "a call to a tool the provider does not serve gets exactly one terminal frame, an unknown_tool error",
     },
     CaseSpec {
         name: "terminal_frame_on_cancel",
@@ -72,13 +88,23 @@ pub const CASES: &[CaseSpec] = &[
     },
     CaseSpec {
         name: "call_key_malformed_refused",
-        requires: &[Capability::CallKey],
+        requires: &[CallKey],
         checks: "every invalid call_key vector is refused as invalid_request {field: \"call_key\"}",
     },
     CaseSpec {
         name: "call_key_well_formed_accepted",
-        requires: &[Capability::CallKey],
-        checks: "every valid call_key vector is accepted (not refused naming call_key)",
+        requires: &[CallKey],
+        checks: "every valid call_key vector is accepted",
+    },
+    CaseSpec {
+        name: "schema_pin_current_accepted",
+        requires: &[SchemaPin],
+        checks: "a call pinned to its tool's current generation and semantics is accepted",
+    },
+    CaseSpec {
+        name: "schema_pin_malformed_refused",
+        requires: &[SchemaPin],
+        checks: "every refused schema-pin vector, and a pin naming another tool, is refused as invalid_request {field: \"schema_pin\"}",
     },
     CaseSpec {
         name: "withdraw_unknown_call",
@@ -91,19 +117,24 @@ pub const CASES: &[CaseSpec] = &[
         checks: "a held call's carrier gets withdrawn, the same bytes on repeat and for the owner naming the carrier, and the action never runs",
     },
     CaseSpec {
+        name: "withdraw_owner_as_carrier_needs_no_carrier",
+        requires: WITHDRAW,
+        checks: "the scope's owner withdrawing a call it raised itself, without arguments.carrier, is treated as the carrier and gets withdrawn",
+    },
+    CaseSpec {
         name: "withdraw_owner_without_carrier_refused",
         requires: WITHDRAW,
-        checks: "the scope's owner withdrawing without arguments.carrier is refused with an error frame, not answered",
+        checks: "the scope's owner withdrawing another carrier's call without arguments.carrier gets the route error withdraw_carrier_required",
     },
     CaseSpec {
         name: "withdraw_carrier_naming_other_carrier_refused",
         requires: WITHDRAW,
-        checks: "a carrier naming a different carrier is refused with an error frame, not answered",
+        checks: "a carrier naming a different carrier gets the route error withdraw_carrier_mismatch",
     },
     CaseSpec {
         name: "withdraw_scope_mismatch_refused",
         requires: WITHDRAW,
-        checks: "arguments.scope differing from the route's stamp is refused with an error frame",
+        checks: "arguments.scope differing from the route's stamp gets the route error withdraw_scope_mismatch",
     },
     CaseSpec {
         name: "withdraw_top_level_call_key_refused",
@@ -111,19 +142,39 @@ pub const CASES: &[CaseSpec] = &[
         checks: "a tool.withdraw request with its own top-level call_key is refused as invalid_request {field: \"call_key\"}",
     },
     CaseSpec {
+        name: "withdraw_malformed_target_key_refused",
+        requires: WITHDRAW,
+        checks: "a malformed arguments.call_key is refused as invalid_request {field: \"arguments.call_key\"}",
+    },
+    CaseSpec {
         name: "withdraw_not_permitted_is_route_error",
         requires: WITHDRAW,
-        checks: "a caller that is neither the carrier nor the owner gets the route error withdraw_not_permitted",
+        checks: "the carrier withdrawing its call from a route under another scope gets the route error withdraw_not_permitted",
+    },
+    CaseSpec {
+        name: "late_results_cursor_round_trip",
+        requires: LATE,
+        checks: "the custodian reads a settled call's result entry from null, and reading on from the returned cursor yields nothing already read, identically twice",
+    },
+    CaseSpec {
+        name: "late_results_ack",
+        requires: LATE,
+        checks: "after late_results.ack through a cursor, a read from null no longer returns the acked entry",
+    },
+    CaseSpec {
+        name: "late_results_incarnation_change_refused",
+        requires: &[LateResults, ScopeStamp],
+        checks: "the catalog declares late_results, and a cursor from another incarnation or past the log is refused as cursor_incarnation_changed",
     },
     CaseSpec {
         name: "crash_after_prepared_not_started",
         requires: CRASH,
-        checks: "killed at Prepared and restarted, the provider never runs the call and its withdraw answer guarantees it never will",
+        checks: "killed at Prepared and restarted, the provider never runs the call, reports a not_started late result for it, and its withdraw answer guarantees it never runs",
     },
     CaseSpec {
         name: "crash_after_authorized_not_started",
         requires: CRASH,
-        checks: "killed at Authorized, before DispatchStarted, and restarted, the provider never runs the call and its withdraw answer guarantees it never will",
+        checks: "killed at Authorized, before DispatchStarted, and restarted, the provider never runs the call, reports a not_started late result for it, and its withdraw answer guarantees it never runs",
     },
 ];
 
@@ -152,9 +203,11 @@ pub struct CaseReport {
 pub enum SuiteVerdict {
     /// Every case ran and passed, and at least one kill ended a real process.
     Passed,
-    /// Nothing failed, but some cases were skipped. Not a pass.
-    Incomplete {
-        skipped: Vec<&'static str>,
+    /// Nothing failed, but the subject does not declare every capability, so
+    /// the cases requiring `skipped` were not run. The provider conforms for
+    /// the capabilities it declares, and for no others. Never a plain pass.
+    ConformingForDeclaredCapabilities {
+        skipped: Vec<Capability>,
     },
     Failed {
         reasons: Vec<String>,

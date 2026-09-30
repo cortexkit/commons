@@ -15,12 +15,14 @@ use crate::{ops, REQUIRED_OPS, ROLE, VERSION};
 /// The `role.describe` answer.
 ///
 /// Decoded leniently: unknown fields, ops and capabilities are ignored. Only
-/// the role, the version and the presence of the required ops are checked
+/// the role, the listed versions and the presence of the required ops are checked
 /// strictly, by [`check_describe`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RoleDescribe {
     pub role: String,
-    pub version: String,
+    /// Every major of the role the module serves, for example `["v1"]`. The
+    /// caller picks the highest it understands for a new session.
+    pub versions: Vec<String>,
     /// `alpha`, `beta` or `stable`; see [`RoleDescribe::stability`].
     pub stability: String,
     /// The module's own build identity, for display. Never a cache key.
@@ -74,8 +76,9 @@ pub enum DescribeProblem {
     WrongRole {
         found: String,
     },
-    WrongVersion {
-        found: String,
+    /// `versions` does not list `v1`.
+    MissingVersion {
+        found: Vec<String>,
     },
     MissingOp(&'static str),
     /// The answer carries a `tools` list. The catalog comes only from
@@ -83,7 +86,7 @@ pub enum DescribeProblem {
     CarriesToolList,
 }
 
-/// Decode `raw` and check it describes `tool-provider/v1` with every
+/// Decode `raw` and check it describes a module serving `tool-provider/v1`, with every
 /// required op. Every problem is returned, not only the first.
 pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>> {
     let Some(object) = raw.as_object() else {
@@ -105,9 +108,9 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             found: describe.role.clone(),
         });
     }
-    if describe.version != VERSION {
-        problems.push(DescribeProblem::WrongVersion {
-            found: describe.version.clone(),
+    if !describe.versions.iter().any(|version| version == VERSION) {
+        problems.push(DescribeProblem::MissingVersion {
+            found: describe.versions.clone(),
         });
     }
     for op in REQUIRED_OPS {
@@ -149,7 +152,7 @@ mod tests {
                     DescribeProblem::NotAnObject => "not_an_object",
                     DescribeProblem::Undecodable(_) => "undecodable",
                     DescribeProblem::WrongRole { .. } => "wrong_role",
-                    DescribeProblem::WrongVersion { .. } => "wrong_version",
+                    DescribeProblem::MissingVersion { .. } => "missing_version",
                     DescribeProblem::MissingOp(_) => "missing_op",
                     DescribeProblem::CarriesToolList => "carries_tool_list",
                 })
@@ -161,7 +164,7 @@ mod tests {
     #[test]
     fn unknown_stability_and_extra_ops_are_tolerated() {
         let answer = serde_json::json!({
-            "role": "tool-provider", "version": "v1", "stability": "experimental",
+            "role": "tool-provider", "versions": ["v1", "v2"], "stability": "experimental",
             "implementation_version": "1.2.3",
             "ops": ["role.describe", "tool.catalog", "vendor.extra"],
             "future_field": {}

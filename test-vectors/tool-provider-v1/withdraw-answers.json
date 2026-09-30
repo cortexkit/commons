@@ -1,29 +1,305 @@
 {
-  "_about": "tool.withdraw reply bodies. `known` decode to the named kind and re-encode byte-identical; `unclassified` carry an answer the role does not define and must decode as final but unclassified, recorded verbatim; `malformed` are not answers at all.",
+  "_about": "tool.withdraw reply bodies. `known` decode to the named kind and re-encode byte-identical; `unclassified` carry an answer the role does not define and must decode as final but unclassified, recorded verbatim; `malformed` are not answers at all. `policy` entries give a reply (a RESPONSE body, or a route_error ERROR body) and the caller's verdict: never_ran, ran, started_with_outcome, outcome_unknown, nothing_held, unclassified (final, recorded verbatim), terminal (no retry) or retry.",
   "known": [
-    { "name": "withdrawn", "body": { "answer": "withdrawn" }, "decodes_as": "withdrawn" },
-    { "name": "unknown call", "body": { "answer": "unknown_call" }, "decodes_as": "unknown_call" },
-    { "name": "started, outcome observed", "body": { "answer": "already_started", "outcome": "ok" }, "decodes_as": "already_started" },
-    { "name": "started, outcome unknown", "body": { "answer": "already_started", "outcome": "unknown" }, "decodes_as": "already_started_unknown" },
-    { "name": "completed, result retained", "body": { "answer": "completed", "result": { "content": [{ "type": "text", "text": "done" }] }, "result_retained": true }, "decodes_as": "completed_retained" },
-    { "name": "completed, outcome only", "body": { "answer": "completed", "outcome": "ok", "result_retained": false }, "decodes_as": "completed_outcome_only" },
-    { "name": "refused, denied", "body": { "answer": "refused", "reason": "denied" }, "decodes_as": "refused" },
-    { "name": "refused, expired", "body": { "answer": "refused", "reason": "expired" }, "decodes_as": "refused" },
-    { "name": "refused, scope ended", "body": { "answer": "refused", "reason": "scope_ended" }, "decodes_as": "refused" },
-    { "name": "refused, open reason", "body": { "answer": "refused", "reason": "vendor_hold" }, "decodes_as": "refused_other" }
+    {
+      "name": "withdrawn",
+      "body": {
+        "answer": "withdrawn"
+      },
+      "decodes_as": "withdrawn"
+    },
+    {
+      "name": "unknown call",
+      "body": {
+        "answer": "unknown_call"
+      },
+      "decodes_as": "unknown_call"
+    },
+    {
+      "name": "started, outcome observed",
+      "body": {
+        "answer": "already_started",
+        "outcome": "ok"
+      },
+      "decodes_as": "already_started"
+    },
+    {
+      "name": "started, outcome unknown",
+      "body": {
+        "answer": "already_started",
+        "outcome": "unknown"
+      },
+      "decodes_as": "already_started_unknown"
+    },
+    {
+      "name": "completed, result retained",
+      "body": {
+        "answer": "completed",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "done"
+            }
+          ]
+        },
+        "result_retained": true
+      },
+      "decodes_as": "completed_retained"
+    },
+    {
+      "name": "completed, outcome only",
+      "body": {
+        "answer": "completed",
+        "outcome": "ok",
+        "result_retained": false
+      },
+      "decodes_as": "completed_outcome_only"
+    },
+    {
+      "name": "refused, denied",
+      "body": {
+        "answer": "refused",
+        "reason": "denied"
+      },
+      "decodes_as": "refused"
+    },
+    {
+      "name": "refused, expired",
+      "body": {
+        "answer": "refused",
+        "reason": "expired"
+      },
+      "decodes_as": "refused"
+    },
+    {
+      "name": "refused, scope ended",
+      "body": {
+        "answer": "refused",
+        "reason": "scope_ended"
+      },
+      "decodes_as": "refused"
+    },
+    {
+      "name": "refused, open reason",
+      "body": {
+        "answer": "refused",
+        "reason": "vendor_hold"
+      },
+      "decodes_as": "refused_other"
+    }
   ],
   "unclassified": [
-    { "name": "a future answer", "body": { "answer": "superseded" } },
-    { "name": "a future answer with members", "body": { "answer": "handed_off", "to": "reserved:other", "at": 12 } }
+    {
+      "name": "a future answer",
+      "body": {
+        "answer": "superseded"
+      }
+    },
+    {
+      "name": "a future answer with members",
+      "body": {
+        "answer": "handed_off",
+        "to": "reserved:other",
+        "at": 12
+      }
+    }
   ],
   "malformed": [
-    { "name": "not an object", "body": "withdrawn" },
-    { "name": "no answer", "body": { "outcome": "ok" } },
-    { "name": "answer not a string", "body": { "answer": 1 } },
-    { "name": "started without outcome", "body": { "answer": "already_started" } },
-    { "name": "completed without result_retained", "body": { "answer": "completed", "result": {} } },
-    { "name": "retained without result", "body": { "answer": "completed", "result_retained": true } },
-    { "name": "not retained without outcome", "body": { "answer": "completed", "result_retained": false } },
-    { "name": "refused without reason", "body": { "answer": "refused" } }
+    {
+      "name": "not an object",
+      "body": "withdrawn"
+    },
+    {
+      "name": "no answer",
+      "body": {
+        "outcome": "ok"
+      }
+    },
+    {
+      "name": "answer not a string",
+      "body": {
+        "answer": 1
+      }
+    },
+    {
+      "name": "started without outcome",
+      "body": {
+        "answer": "already_started"
+      }
+    },
+    {
+      "name": "completed without result_retained",
+      "body": {
+        "answer": "completed",
+        "result": {}
+      }
+    },
+    {
+      "name": "retained without result",
+      "body": {
+        "answer": "completed",
+        "result_retained": true
+      }
+    },
+    {
+      "name": "not retained without outcome",
+      "body": {
+        "answer": "completed",
+        "result_retained": false
+      }
+    },
+    {
+      "name": "refused without reason",
+      "body": {
+        "answer": "refused"
+      }
+    }
+  ],
+  "policy": [
+    {
+      "name": "withdrawn",
+      "body": {
+        "answer": "withdrawn"
+      },
+      "route_error": null,
+      "verdict": "never_ran"
+    },
+    {
+      "name": "refused",
+      "body": {
+        "answer": "refused",
+        "reason": "expired"
+      },
+      "route_error": null,
+      "verdict": "never_ran"
+    },
+    {
+      "name": "refused, open reason",
+      "body": {
+        "answer": "refused",
+        "reason": "vendor_hold"
+      },
+      "route_error": null,
+      "verdict": "never_ran"
+    },
+    {
+      "name": "completed",
+      "body": {
+        "answer": "completed",
+        "outcome": "ok",
+        "result_retained": false
+      },
+      "route_error": null,
+      "verdict": "ran"
+    },
+    {
+      "name": "started with outcome",
+      "body": {
+        "answer": "already_started",
+        "outcome": "failed"
+      },
+      "route_error": null,
+      "verdict": "started_with_outcome"
+    },
+    {
+      "name": "started, unknown",
+      "body": {
+        "answer": "already_started",
+        "outcome": "unknown"
+      },
+      "route_error": null,
+      "verdict": "outcome_unknown"
+    },
+    {
+      "name": "unknown call",
+      "body": {
+        "answer": "unknown_call"
+      },
+      "route_error": null,
+      "verdict": "nothing_held"
+    },
+    {
+      "name": "unknown answer",
+      "body": {
+        "answer": "superseded"
+      },
+      "route_error": null,
+      "verdict": "unclassified"
+    },
+    {
+      "name": "not an answer",
+      "body": {
+        "outcome": "ok"
+      },
+      "route_error": null,
+      "verdict": "unclassified"
+    },
+    {
+      "name": "not permitted",
+      "body": null,
+      "route_error": {
+        "code": "withdraw_not_permitted",
+        "message": "m"
+      },
+      "verdict": "terminal"
+    },
+    {
+      "name": "carrier required",
+      "body": null,
+      "route_error": {
+        "code": "withdraw_carrier_required",
+        "message": "m"
+      },
+      "verdict": "terminal"
+    },
+    {
+      "name": "carrier mismatch",
+      "body": null,
+      "route_error": {
+        "code": "withdraw_carrier_mismatch",
+        "message": "m"
+      },
+      "verdict": "terminal"
+    },
+    {
+      "name": "scope mismatch",
+      "body": null,
+      "route_error": {
+        "code": "withdraw_scope_mismatch",
+        "message": "m"
+      },
+      "verdict": "terminal"
+    },
+    {
+      "name": "invalid request",
+      "body": null,
+      "route_error": {
+        "code": "invalid_request",
+        "message": "m",
+        "detail": {
+          "field": "arguments.call_key"
+        }
+      },
+      "verdict": "terminal"
+    },
+    {
+      "name": "module reloading",
+      "body": null,
+      "route_error": {
+        "code": "module_reloading",
+        "message": "m"
+      },
+      "verdict": "retry"
+    },
+    {
+      "name": "scope not synced",
+      "body": null,
+      "route_error": {
+        "code": "scope_not_synced",
+        "message": "m"
+      },
+      "verdict": "retry"
+    }
   ]
 }

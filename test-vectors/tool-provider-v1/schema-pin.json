@@ -1,0 +1,99 @@
+{
+  "_about": "tool-provider/v1 schema pins, encoding tp1: `tp1:<pct(tool)>:<pct(generation)>:<semantics>`. pct keeps RFC 3986 unreserved bytes and writes every other UTF-8 byte as %XX with uppercase hex; semantics is a decimal u64 without leading zeros. `canonical` entries encode to `pin` and parse back; `refused` entries are not canonical pins.",
+  "canonical": [
+    {
+      "name": "plain",
+      "tool": "echo",
+      "generation": "g7",
+      "semantics": 2,
+      "pin": "tp1:echo:g7:2"
+    },
+    {
+      "name": "timestamped generation",
+      "tool": "read",
+      "generation": "2026-09-30T10:00:00Z#4",
+      "semantics": 1,
+      "pin": "tp1:read:2026-09-30T10%3A00%3A00Z%234:1"
+    },
+    {
+      "name": "namespaced tool, space in generation",
+      "tool": "ns:tool",
+      "generation": "a b",
+      "semantics": 0,
+      "pin": "tp1:ns%3Atool:a%20b:0"
+    },
+    {
+      "name": "non-ASCII generation",
+      "tool": "bash",
+      "generation": "g\u00e9n",
+      "semantics": 18446744073709551615,
+      "pin": "tp1:bash:g%C3%A9n:18446744073709551615"
+    }
+  ],
+  "refused": [
+    {
+      "name": "two components",
+      "pin": "tp1:echo:g7"
+    },
+    {
+      "name": "four components",
+      "pin": "tp1:ec:ho:g:1"
+    },
+    {
+      "name": "other scheme",
+      "pin": "tp2:echo:g:1"
+    },
+    {
+      "name": "no scheme",
+      "pin": "echo:g:1"
+    },
+    {
+      "name": "leading zero",
+      "pin": "tp1:echo:g:01"
+    },
+    {
+      "name": "negative",
+      "pin": "tp1:echo:g:-1"
+    },
+    {
+      "name": "overflow",
+      "pin": "tp1:echo:g:18446744073709551616"
+    },
+    {
+      "name": "lowercase hex",
+      "pin": "tp1:echo:g%3a:1"
+    },
+    {
+      "name": "escaped unreserved byte",
+      "pin": "tp1:%65cho:g:1"
+    },
+    {
+      "name": "truncated escape",
+      "pin": "tp1:echo:g%2:1"
+    },
+    {
+      "name": "invalid UTF-8",
+      "pin": "tp1:echo:g%C3:1"
+    },
+    {
+      "name": "unescaped reserved byte",
+      "pin": "tp1:echo:g#1:1"
+    },
+    {
+      "name": "empty tool",
+      "pin": "tp1::g:1"
+    },
+    {
+      "name": "empty generation",
+      "pin": "tp1:echo::1"
+    },
+    {
+      "name": "space",
+      "pin": "tp1:echo:g:1 "
+    },
+    {
+      "name": "too long",
+      "pin": "tp1:echo:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg:1"
+    }
+  ]
+}
