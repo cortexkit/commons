@@ -4,9 +4,7 @@ Stability: **alpha**. This document is the role definition; the Rust types in
 this crate are its wire shapes, `test-vectors/tool-provider-v1/` at the
 repository root holds its vectors, and `cortexkit-role-tool-provider-conformance`
 is its suite. Every item below is **pinned**: a provider must do it, and a
-consumer may rely on it. The section "Choices to confirm" at the end lists
-the few details this revision had to fix itself because no decision covered
-them; each is pinned as written until the role owner confirms or changes it.
+consumer may rely on it. Nothing in this revision is open.
 
 A tool provider is any module that serves tool definitions and executes calls
 to them. Nothing here names a particular implementation.
@@ -28,15 +26,15 @@ to them. Nothing here names a particular implementation.
 
 ## 2. `role.describe`
 
-- The answer is `{role, versions, stability, implementation_version, ops,
-  capabilities}` (`RoleDescribe`), with `role: "tool-provider"`. `versions`
-  lists every major of the role the module serves (`["v1"]`,
-  `["v1", "v2"]`); the caller picks the highest it understands for a new
-  session.
-- Decoded leniently: unknown fields, ops and capabilities are ignored; only
-  the role, `v1` among the versions, and the required ops are checked
-  strictly. `capabilities` may be omitted. `stability` is `alpha`, `beta` or
-  `stable`; an unknown level decodes.
+- The answer is `{majors: [{version, ops, stability}], implementation_version,
+  capabilities?}` (`RoleDescribe`). `majors` lists every major of the role
+  the module serves, each with its own `ops` and `stability`; `version` is
+  spelled as in the manifest, for example `tool-provider/v1`. The caller picks
+  the highest major it understands for a new session.
+- Decoded leniently: unknown fields, majors, ops and capabilities are
+  ignored; only the presence of the `tool-provider/v1` major and its required
+  ops are checked strictly. `capabilities` may be omitted. `stability` is
+  `alpha`, `beta` or `stable`; an unknown level decodes.
 - The answer describes the implementation, never the tools: it carries no
   tool list. It depends only on the module build, so a consumer may cache it
   for as long as it talks to the same module incarnation; two answers from one
@@ -56,13 +54,18 @@ to them. Nothing here names a particular implementation.
     against it. Absent on a preflight call.
   - `system_text` is `{preset, params}` when the plan has a system-prompt item
     for this provider.
-- Answer (`CatalogAnswer`): `{generation, composition_digest?, tools: [...],
-  system_text?, capabilities?}`.
+- Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
+  tools: [...], system_text?, capabilities?}`.
   - `generation` is an opaque string that changes whenever the catalog's
     content changes.
+  - `catalog_digest` is an opaque digest of the answer's content. A full
+    answer and a `digest_only` answer to the same inputs carry the same value,
+    so a caller holding a full answer can check it later with one cheap
+    `digest_only` fetch.
   - `capabilities` is a top-level object of session-level capabilities, keyed
-    by name, each declared with the value `true`: `host_params`,
-    `late_results`. The runner freezes them with the tools.
+    by name: `host_params`, `late_results`. A capability is declared by the
+    value `true`; any other value is not a declaration. The runner freezes
+    them with the tools.
   - `system_text`, when requested, is `{text, item_digest, preflight_digest,
     composition_digest}`, from the same configuration resolution as the
     catalog in the same reply.
@@ -71,8 +74,9 @@ to them. Nothing here names a particular implementation.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
   capabilities, description?, input_schema}`.
   - `name` is the exact name the user tier disables the tool by.
-  - `schema_digest` is the digest of `input_schema`, compared for equality
-    only. Two answers from the same inputs carry the same digest.
+  - `schema_digest` is the digest of the **structure** of `input_schema`
+    (see "Schema digest" below): 64 lowercase hex characters. Description
+    text never changes it.
   - `semantics` is an integer, bumped whenever the tool's behaviour changes
     without a schema change.
   - `result_ops` lists the hook result operations the tool accepts, from
@@ -87,6 +91,24 @@ to them. Nothing here names a particular implementation.
   on the composition; descriptions and system text may. The same inputs give
   the same bytes.
 - A tool the user or project tier disables is absent from the answer.
+- **Schema digest** (`schema_digest`, `structural_schema`). The digest covers
+  the argument schema's structure (property names, types, `required`, enums,
+  bounds and every other keyword) and never description text:
+  1. Remove the `description` keyword from every schema object: the root and
+     every subschema reached through `properties`, `patternProperties`,
+     `dependentSchemas`, `$defs`, `definitions` (the subschemas under each
+     name), `items`, `additionalItems`, `additionalProperties`,
+     `unevaluatedItems`, `unevaluatedProperties`, `not`, `if`, `then`,
+     `else`, `contains`, `propertyNames`, and each element of `prefixItems`,
+     `anyOf`, `oneOf`, `allOf`. Property names stay, even a property called
+     `description`; data values (`enum`, `const`, `default`, `examples`) and
+     unknown keywords stay verbatim.
+  2. Serialize the result as RFC 8785 (JCS) canonical JSON.
+  3. Take SHA-256 of those bytes, written as 64 lowercase hex characters.
+
+  Two catalogs that differ only in description text give every tool the same
+  digest; any structural change gives a different one
+  (`test-vectors/tool-provider-v1/schema-digest.json`).
 - Argument schemas are flat (`check_flat_schema`): a JSON object with no
   root-level `anyOf`, `oneOf` or `allOf`, and no root-level `type` array (a
   type array is a union). Unions below the root are allowed.
@@ -107,24 +129,29 @@ to them. Nothing here names a particular implementation.
   call_key)`. The model's `tool_call_id` is display-only.
 - `schema_pin` (subc-protocol 0.27.0, top-level, omitted when `None`) has the
   same byte bound as `call_key`. Its content is this role's: the tool name,
-  the catalog `generation` the runner froze, and the tool's `semantics`,
-  encoded canonically as **`tp1`** (`SchemaPin`):
+  the tool's `schema_digest` and its `semantics`, as the runner froze them.
+  A pin never holds the catalog `generation` or any description text, so it
+  survives a description-only deploy. It is encoded canonically as **`tp1`**
+  (`SchemaPin`):
 
   ```text
-  tp1:<pct(tool)>:<pct(generation)>:<semantics>
+  tp1:<pct(tool)>:<schema_digest>:<semantics>
   ```
 
   `pct` keeps the RFC 3986 unreserved bytes (`A-Z a-z 0-9 - . _ ~`) and
   writes every other byte of the UTF-8 string as `%` plus two uppercase hex
-  digits, so `:` inside a component is always `%3A`. `semantics` is decimal,
-  with no sign and no leading zeros. Tool and generation are non-empty.
-  Exactly one string encodes each pin; anything else is refused. A pin that is
+  digits, so `:` inside the tool name is always `%3A`. `schema_digest` is 64
+  lowercase hex characters. `semantics` is decimal, with no sign and no
+  leading zeros. The tool is non-empty. Exactly one string encodes each pin;
+  anything else is refused. A pin that is
   malformed, or names a tool other than the call's `name`, is refused as
   `invalid_request {field: "schema_pin"}`. This crate mirrors the 0.27.0
   field and bound locally until that release publishes (`call.rs`).
-- A call whose pin the provider can no longer honour is refused
-  `tool_schema_changed {tool, expected, current}` or, when only `semantics`
-  moved, `tool_semantics_changed {tool, expected, current}`.
+- A call whose pinned `schema_digest` the provider can no longer honour is
+  refused `tool_schema_changed {tool, expected, current}`; one whose pinned
+  `semantics` it can no longer honour, `tool_semantics_changed {tool,
+  expected, current}`. Providers keep argument changes additive so old
+  schemas stay servable.
 - Every request gets exactly one terminal frame (`RESPONSE`, `STREAM_END` or
   `ERROR`), and it is the last frame: on success, refusal, cancel, drain, and
   when the provider stops tracking the request.
@@ -160,10 +187,15 @@ Served by a provider that can hold a call past its reply.
 
   - A caller other than the scope's owner is the carrier: the record is keyed
     on the route's stamped principal, and `arguments.carrier`, if present,
-    must equal it.
+    must equal it. Naming anyone else is `withdraw_carrier_mismatch`, whether
+    or not the caller carries calls of its own, so `withdraw_not_permitted`
+    is reached only when the record found is under a different scope than the
+    route's stamp.
   - The scope's owner may withdraw any carrier's call by naming
     `arguments.carrier`. An owner that is also the carrier is treated as the
-    carrier: `carrier` is optional and must match if present.
+    carrier: `carrier` is optional and must match if present. An owner
+    naming no carrier that holds no call of its own under the key gets
+    `withdraw_carrier_required`, not `unknown_call`.
   - On an unscoped route, only the carrier may withdraw, keyed on the route's
     principal.
 - The reply is a `RESPONSE` whose body is the answer (`WithdrawAnswer`):
@@ -188,7 +220,7 @@ Served by a provider that can hold a call past its reply.
   | `unknown_call` | nothing was held | no |
   | any other `answer`, or a body that is not an answer | final, unclassified; recorded verbatim | no |
   | `withdraw_not_permitted` and the three errors above | terminal refusal | no |
-  | a transient route refusal (`errors::is_transient`) | nothing yet | yes |
+  | a transient route refusal: `scope_not_synced`, or any code subc itself retries (`module_reloading`, `module_warming`, `target_unavailable`, `module_timeout`; `errors::is_transient`) | nothing yet | yes |
   | any other route error | terminal refusal | no |
 
 ## 6. Approval execution on the provider
@@ -217,6 +249,8 @@ entry only to a caller whose verified principal is its custodian.
   (`LateResultsRequest`). `since: null` reads from the start.
 - Reply: `{entries, cursor: {provider_incarnation, seq}, more: bool}`
   (`LateResultsReply`). `more` says entries beyond `limit` are waiting.
+  `provider_incarnation` is an opaque string that changes on every provider
+  start; `seq` is a `u64`, `0` before any entry; `limit` is a `u32`.
 - Entry (`LateEntry`): `{kind, owner, ref, scope_epoch, custodian, call_key,
   invocation_id?, event_id, settled_at, reduced, result? | outcome?}`, plus
   `reason` on a `not_started` entry.
@@ -230,7 +264,14 @@ entry only to a caller whose verified principal is its custodian.
     for an onward request.
   - `event_id` is deterministic: the same late result always carries the same
     `event_id` across restarts and lost acks.
-- Ack: `late_results.ack {through: cursor}` (`AckRequest`), per custodian.
+  - `settled_at` is milliseconds since the Unix epoch (`u64`). `reduced`
+    defaults to `false`.
+  - Every entry, of any kind including an unknown one, carries `owner`,
+    `ref`, `scope_epoch`, `custodian`, `call_key`, `event_id` and
+    `settled_at`, because the caller's dedupe key needs them. An entry
+    missing one does not decode.
+- Ack: `late_results.ack {through: cursor}` (`AckRequest`), per custodian,
+  answered with an empty `RESPONSE` body `{}`.
   Each custodian has its own cursor and acks only its own entries.
 - A cursor from another provider incarnation, or past the entries the
   provider has, is refused `cursor_incarnation_changed` (`check_since`). The
@@ -293,27 +334,3 @@ Verdict:
 - **Failed**: a case failed, or the run killed anything and no kill ended a
   real process (a run whose kills are all simulated cannot catch a provider
   that keeps something only in memory).
-
-## Choices to confirm
-
-No item from the previous open list remains open. While applying the rulings,
-these details had no ruling and are fixed here as written; each needs the role
-owner's confirmation:
-
-| Id | Choice | Why it needed one |
-|---|---|---|
-| C1 | `provider_incarnation` is an opaque string; `seq` is a `u64`, `0` before any entry; `settled_at` is milliseconds since the Unix epoch (`u64`); `limit` is a `u32`. | The rulings named these members but not their types. |
-| C2 | `late_results.ack` answers an empty `RESPONSE` body `{}`; the suite accepts any `RESPONSE`. | The rulings named the ack request, not its reply. |
-| C3 | Transient withdraw refusals are `scope_not_synced` plus every code subc's own `is_retryable_route_open` retries (`module_reloading`, `module_warming`, `target_unavailable`, `module_timeout`); every other route error is terminal. | The ruling named two examples of transient refusals; withdraw is idempotent, so retrying a timeout is safe. |
-| C4 | A caller other than the scope's owner that names another carrier gets `withdraw_carrier_mismatch`, whether or not it carries calls of its own. `withdraw_not_permitted` is therefore reached only when the record found is under a different scope than the route's stamp. | A provider cannot tell "a carrier naming another carrier" from "a stranger naming a carrier": both are non-owners naming someone else. |
-| C5 | The scope's owner naming no carrier, with no call of its own under the key, gets `withdraw_carrier_required`, not `unknown_call`. | The owner-as-carrier rule and the carrier-required rule overlap on exactly this case. |
-| C6 | The top-level catalog `capabilities` object declares a capability with the value `true`; other values are not declarations. | The ruling named the object, not its values. |
-| C7 | A late-result entry of any kind, including an unknown one, must carry `owner`, `ref`, `scope_epoch`, `custodian`, `call_key`, `event_id` and `settled_at`; `reduced` defaults to `false`. An entry missing one does not decode. | The dedupe key needs these members, even for a kind the caller does not know. |
-
-Gaps this revision found, which need a ruling:
-
-| Id | Gap |
-|---|---|
-| G1 | **Schema pins and `generation`.** A pin names the catalog `generation`, which changes whenever any catalog content changes, descriptions included. The role document meant a description-only deploy to keep serving old pins. Nothing says how a provider decides it can still honour a pin whose generation is not current: whether it must remember each past generation's schema digests, or refuse `tool_schema_changed`. |
-| G2 | **`catalog_digest` outside `digest_only`.** Only a `digest_only` answer carries `catalog_digest`, so a caller cannot compare a digest-only check against the answer it froze without making a second call. Whether a full answer also carries it, and which bytes it covers, is not decided. |
-| G3 | **`role.describe` for several majors.** `versions` lists every major, but `stability` and `ops` are single values, so a module whose majors differ in stability or ops cannot say so. |

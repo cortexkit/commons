@@ -10,28 +10,35 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ops, REQUIRED_OPS, ROLE, VERSION};
+use crate::{ops, PROVIDES, REQUIRED_OPS};
 
-/// The `role.describe` answer.
+/// The `role.describe` answer: every major of the role the module serves,
+/// each with its own ops and stability. The caller picks the highest major it
+/// understands for a new session.
 ///
-/// Decoded leniently: unknown fields, ops and capabilities are ignored. Only
-/// the role, the listed versions and the presence of the required ops are checked
-/// strictly, by [`check_describe`].
+/// Decoded leniently: unknown fields, majors, ops and capabilities are
+/// ignored. Only the presence of the `tool-provider/v1` major and its required
+/// ops are checked strictly, by [`check_describe`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RoleDescribe {
-    pub role: String,
-    /// Every major of the role the module serves, for example `["v1"]`. The
-    /// caller picks the highest it understands for a new session.
-    pub versions: Vec<String>,
-    /// `alpha`, `beta` or `stable`; see [`RoleDescribe::stability`].
-    pub stability: String,
+    pub majors: Vec<Major>,
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
-    pub ops: Vec<String>,
     /// Module-level capabilities. `tool-provider/v1` defines none; session
     /// capabilities travel in the catalog answer instead.
     #[serde(default)]
     pub capabilities: Vec<String>,
+}
+
+/// One served major.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Major {
+    /// The role and major as the manifest spells it, for example
+    /// `tool-provider/v1`.
+    pub version: String,
+    pub ops: Vec<String>,
+    /// `alpha`, `beta` or `stable`; see [`Major::stability`].
+    pub stability: String,
 }
 
 /// A stability level. Unknown levels decode as [`Stability::Other`] rather
@@ -45,6 +52,13 @@ pub enum Stability {
 }
 
 impl RoleDescribe {
+    /// The entry for `version` (for example `tool-provider/v1`), if served.
+    pub fn major(&self, version: &str) -> Option<&Major> {
+        self.majors.iter().find(|major| major.version == version)
+    }
+}
+
+impl Major {
     pub fn stability(&self) -> Stability {
         match self.stability.as_str() {
             "alpha" => Stability::Alpha,
@@ -58,8 +72,8 @@ impl RoleDescribe {
         self.ops.iter().any(|served| served == op)
     }
 
-    /// Whether the module can hold a call past its reply, and so serves
-    /// `tool.withdraw`.
+    /// Whether the module can hold a call past its reply under this major,
+    /// and so serves `tool.withdraw`.
     pub fn holds_calls(&self) -> bool {
         self.serves(ops::TOOL_WITHDRAW)
     }
@@ -73,21 +87,19 @@ pub enum DescribeProblem {
     NotAnObject,
     /// A required field is missing or has the wrong type.
     Undecodable(String),
-    WrongRole {
-        found: String,
-    },
-    /// `versions` does not list `v1`.
-    MissingVersion {
-        found: Vec<String>,
-    },
+    /// No entry in `majors` is `tool-provider/v1`.
+    MissingMajor { found: Vec<String> },
+    /// The `tool-provider/v1` entry lacks a required op.
     MissingOp(&'static str),
     /// The answer carries a `tools` list. The catalog comes only from
     /// `tool.catalog`, so a describe answer stays cacheable.
     CarriesToolList,
 }
 
-/// Decode `raw` and check it describes a module serving `tool-provider/v1`, with every
-/// required op. Every problem is returned, not only the first.
+/// Decode `raw` and check it lists a `tool-provider/v1` major with every
+/// required op. Every problem is returned, not only the first. On success
+/// the answer's `tool-provider/v1` entry is [`RoleDescribe::major`] of
+/// [`PROVIDES`].
 pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>> {
     let Some(object) = raw.as_object() else {
         return Err(vec![DescribeProblem::NotAnObject]);
@@ -103,19 +115,16 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             return Err(problems);
         }
     };
-    if describe.role != ROLE {
-        problems.push(DescribeProblem::WrongRole {
-            found: describe.role.clone(),
-        });
-    }
-    if !describe.versions.iter().any(|version| version == VERSION) {
-        problems.push(DescribeProblem::MissingVersion {
-            found: describe.versions.clone(),
-        });
-    }
-    for op in REQUIRED_OPS {
-        if !describe.serves(op) {
-            problems.push(DescribeProblem::MissingOp(op));
+    match describe.major(PROVIDES) {
+        None => problems.push(DescribeProblem::MissingMajor {
+            found: describe.majors.iter().map(|m| m.version.clone()).collect(),
+        }),
+        Some(major) => {
+            for op in REQUIRED_OPS {
+                if !major.serves(op) {
+                    problems.push(DescribeProblem::MissingOp(op));
+                }
+            }
         }
     }
     if problems.is_empty() {
@@ -151,8 +160,7 @@ mod tests {
                 .map(|problem| match problem {
                     DescribeProblem::NotAnObject => "not_an_object",
                     DescribeProblem::Undecodable(_) => "undecodable",
-                    DescribeProblem::WrongRole { .. } => "wrong_role",
-                    DescribeProblem::MissingVersion { .. } => "missing_version",
+                    DescribeProblem::MissingMajor { .. } => "missing_major",
                     DescribeProblem::MissingOp(_) => "missing_op",
                     DescribeProblem::CarriesToolList => "carries_tool_list",
                 })
@@ -162,18 +170,23 @@ mod tests {
     }
 
     #[test]
-    fn unknown_stability_and_extra_ops_are_tolerated() {
+    fn unknown_stability_extra_majors_and_extra_ops_are_tolerated() {
         let answer = serde_json::json!({
-            "role": "tool-provider", "versions": ["v1", "v2"], "stability": "experimental",
+            "majors": [
+                {"version": "tool-provider/v1", "stability": "experimental",
+                 "ops": ["role.describe", "tool.catalog", "vendor.extra"]},
+                {"version": "tool-provider/v2", "stability": "alpha", "ops": ["role.describe"]}
+            ],
             "implementation_version": "1.2.3",
-            "ops": ["role.describe", "tool.catalog", "vendor.extra"],
             "future_field": {}
         });
         let describe = check_describe(&answer).unwrap();
+        let v1 = describe.major(PROVIDES).unwrap();
+        assert_eq!(v1.stability(), Stability::Other("experimental".into()));
+        assert!(!v1.holds_calls());
         assert_eq!(
-            describe.stability(),
-            Stability::Other("experimental".into())
+            describe.major("tool-provider/v2").unwrap().stability(),
+            Stability::Alpha
         );
-        assert!(!describe.holds_calls());
     }
 }

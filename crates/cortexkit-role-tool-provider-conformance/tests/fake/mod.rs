@@ -35,6 +35,7 @@ use cortexkit_role_tool_provider_conformance::{
     },
     wire::{
         call::{check_call, PinnedToolCallRequest, CALL_KEY_FIELD},
+        catalog::schema_digest,
         errors,
         late_results::{
             check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
@@ -292,19 +293,20 @@ impl Module {
 
     fn describe() -> Value {
         json!({
-            "role": "tool-provider", "versions": ["v1"], "stability": "alpha",
+            "majors": [{
+                "version": "tool-provider/v1", "stability": "alpha",
+                "ops": [ops::ROLE_DESCRIBE, ops::TOOL_CATALOG, ops::TOOL_WITHDRAW,
+                        ops::LATE_RESULTS, ops::LATE_RESULTS_ACK],
+            }],
             "implementation_version": "fake-0",
-            "ops": [ops::ROLE_DESCRIBE, ops::TOOL_CATALOG, ops::TOOL_WITHDRAW,
-                    ops::LATE_RESULTS, ops::LATE_RESULTS_ACK],
             "capabilities": []
         })
     }
 
-    fn catalog(&self, arguments: &Value) -> Value {
-        if arguments["digest_only"] == json!(true) {
-            return json!({ "generation": GENERATION, "catalog_digest": "fake-catalog-1" });
-        }
-        let object = json!({ "type": "object", "properties": { "text": { "type": "string" } } });
+    /// The served tools, each with its schema digest computed from its schema.
+    fn tools(&self) -> Vec<Value> {
+        let object = json!({ "type": "object", "description": "Echo text back.",
+                             "properties": { "text": { "type": "string", "description": "The text." } } });
         let held_schema = if self.defects.root_union_schema {
             json!({ "anyOf": [
                 { "type": "object", "properties": { "marker": { "type": "string" } } },
@@ -313,24 +315,28 @@ impl Module {
         } else {
             json!({ "type": "object", "properties": { "marker": { "type": "string" } }, "required": ["marker"] })
         };
-        json!({
-            "generation": GENERATION,
-            "capabilities": { "late_results": true },
-            "tools": [
-                { "name": QUICK, "schema_digest": "fake:echo:1", "semantics": 1, "input_schema": object },
-                { "name": SLOW, "schema_digest": "fake:sleep:1", "semantics": 1, "input_schema": { "type": "object" } },
-                { "name": HELD, "schema_digest": "fake:effect:1", "semantics": 2, "result_ops": ["prepend", "append"],
-                  "capabilities": ["fake:effect/v1"], "input_schema": held_schema }
-            ]
-        })
+        let mut tools = vec![
+            json!({ "name": QUICK, "semantics": 1, "input_schema": object }),
+            json!({ "name": SLOW, "semantics": 1, "input_schema": { "type": "object" } }),
+            json!({ "name": HELD, "semantics": 2, "result_ops": ["prepend", "append"],
+                    "capabilities": ["fake:effect/v1"], "input_schema": held_schema }),
+        ];
+        for tool in &mut tools {
+            tool["schema_digest"] = json!(schema_digest(&tool["input_schema"]).unwrap());
+        }
+        tools
     }
 
-    fn semantics(tool: &str) -> Option<u64> {
-        match tool {
-            QUICK | SLOW => Some(1),
-            HELD => Some(2),
-            _ => None,
+    fn catalog(&self, arguments: &Value) -> Value {
+        if arguments["digest_only"] == json!(true) {
+            return json!({ "generation": GENERATION, "catalog_digest": "fake-catalog-1" });
         }
+        json!({
+            "generation": GENERATION,
+            "catalog_digest": "fake-catalog-1",
+            "capabilities": { "late_results": true },
+            "tools": self.tools(),
+        })
     }
 
     fn handle(&self, stamp: &RouteStamp, body: Value) -> Result<Vec<ObservedFrame>, RouteFailure> {
@@ -362,17 +368,18 @@ impl Module {
             Ok(pin) => pin,
             Err(refusal) => return Ok(error(refusal)),
         };
-        if let (Some(pin), Some(current)) = (&pin, Self::semantics(name)) {
-            if pin.semantics != current {
+        let current = self.tools().into_iter().find(|tool| tool["name"] == name);
+        if let (Some(pin), Some(current)) = (&pin, current) {
+            if pin.schema_digest != current["schema_digest"] {
+                return Ok(error(ErrorBody::new(
+                    errors::TOOL_SCHEMA_CHANGED,
+                    "the schema moved",
+                )));
+            }
+            if json!(pin.semantics) != current["semantics"] {
                 return Ok(error(ErrorBody::new(
                     errors::TOOL_SEMANTICS_CHANGED,
                     "semantics moved",
-                )));
-            }
-            if pin.generation != GENERATION {
-                return Ok(error(ErrorBody::new(
-                    errors::TOOL_SCHEMA_CHANGED,
-                    "unknown generation",
                 )));
             }
         }

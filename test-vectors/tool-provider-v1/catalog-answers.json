@@ -1,5 +1,5 @@
 {
-  "_about": "tool.catalog answers. `full` is a complete answer; `digest_only` the answer to the same inputs with digest_only: true; `refused_tools` are tool entries a decoder must refuse.",
+  "_about": "tool.catalog answers. `full` is a complete answer; `digest_only` the answer to the same inputs with digest_only: true; `refused_tools` are tool entries a decoder must refuse. The full answer and the digest_only answer carry the same catalog_digest; each tool's schema_digest is schema_digest(input_schema).",
   "full": {
     "generation": "g-2026-09-30.4",
     "composition_digest": "sha256:c0",
@@ -9,7 +9,7 @@
     "tools": [
       {
         "name": "read",
-        "schema_digest": "sha256:r1",
+        "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
         "semantics": 1,
         "result_ops": [
           "prepend",
@@ -34,7 +34,7 @@
       },
       {
         "name": "grep",
-        "schema_digest": "sha256:g1",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
         "semantics": 3,
         "capabilities": [],
         "input_schema": {
@@ -42,7 +42,8 @@
         },
         "future_member": 1
       }
-    ]
+    ],
+    "catalog_digest": "sha256:cat4"
   },
   "digest_only": {
     "generation": "g-2026-09-30.4",

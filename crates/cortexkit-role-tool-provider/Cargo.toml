@@ -19,8 +19,7 @@ publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_jcs = "0.2"
 serde_json = "1"
-# 0.26.0 (ToolCallRequest.call_key and its validator) is on subconscious
-# master but not yet in the crates.io index, so it is pinned by git revision.
-# Replace with `subc-protocol = "0.26.0"` once the index carries it.
-subc-protocol = { version = "0.26.0", git = "https://github.com/cortexkit/subconscious", rev = "2a751e4e2542118f5050a7811b26c71d711a8f7e" }
+sha2 = "0.10"
+subc-protocol = "0.26.0"

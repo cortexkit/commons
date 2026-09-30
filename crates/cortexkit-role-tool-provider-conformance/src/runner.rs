@@ -11,12 +11,15 @@ use cortexkit_role_harness::{
 };
 use cortexkit_role_tool_provider::{
     call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
-    catalog::{check_flat_schema, session_capabilities, CatalogAnswer},
+    catalog::{
+        check_flat_schema, is_schema_digest, schema_digest, session_capabilities, CatalogAnswer,
+    },
     describe::check_describe,
     errors,
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
     ops, points,
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
+    PROVIDES,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -308,6 +311,9 @@ where
         let answer = self.describe(&route).await?;
         let describe =
             check_describe(&answer).map_err(|problems| format!("refused: {problems:?}"))?;
+        let describe = describe
+            .major(PROVIDES)
+            .ok_or("check_describe accepted an answer without the v1 major")?;
         if self.capabilities.contains(&Capability::HeldCalls) && !describe.holds_calls() {
             return Err(format!(
                 "the subject declares held_calls but role.describe does not list {}",
@@ -398,6 +404,22 @@ where
                 pins(&second)
             ));
         }
+        if first.catalog_digest.is_empty() || first.catalog_digest != second.catalog_digest {
+            return Err(format!(
+                "catalog_digest {:?} then {:?}",
+                first.catalog_digest, second.catalog_digest
+            ));
+        }
+        for tool in &first.tools {
+            let computed =
+                schema_digest(&tool.input_schema).map_err(|e| format!("{}: {e}", tool.name))?;
+            if !is_schema_digest(&tool.schema_digest) || tool.schema_digest != computed {
+                return Err(format!(
+                    "{} carries schema_digest {:?}; the digest of its schema's structure is {computed}",
+                    tool.name, tool.schema_digest
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -414,10 +436,13 @@ where
                 digest.generation, full.generation
             ));
         }
-        match digest.catalog_digest.as_deref() {
-            Some(d) if !d.is_empty() => Ok(()),
-            _ => Err("a digest_only answer carries no catalog_digest".to_owned()),
+        if digest.catalog_digest.is_empty() || digest.catalog_digest != full.catalog_digest {
+            return Err(format!(
+                "digest_only catalog_digest {:?}, full answer {:?}",
+                digest.catalog_digest, full.catalog_digest
+            ));
         }
+        Ok(())
     }
 
     fn disabled_tool(&self) -> Result<String, String> {
@@ -539,7 +564,7 @@ where
             .iter()
             .find(|tool| tool.name == name)
             .ok_or_else(|| format!("the quick call's tool {name} is not in the catalog"))?;
-        let pin = SchemaPin::new(&name, &catalog.generation, tool.semantics)
+        let pin = SchemaPin::new(&name, &tool.schema_digest, tool.semantics)
             .encode()
             .map_err(|e| format!("the current pin cannot be encoded: {e}"))?;
         let exchange = request(&route, self.pinned_quick_call(&pin)).await?;
@@ -553,7 +578,14 @@ where
         let route = self.plain_route().await?;
         let catalog = self.catalog(&route).await?;
         let mut pins = vector_strings(SCHEMA_PIN_VECTORS, "refused", "pin");
-        let other = SchemaPin::new(UNSERVED_TOOL, &catalog.generation, 0)
+        let (quick, _) = self.subject.quick_call();
+        let digest = catalog
+            .tools
+            .iter()
+            .find(|tool| tool.name == quick)
+            .map(|tool| tool.schema_digest.clone())
+            .ok_or_else(|| format!("the quick call's tool {quick} is not in the catalog"))?;
+        let other = SchemaPin::new(UNSERVED_TOOL, digest, 0)
             .encode()
             .map_err(|e| e.to_string())?;
         pins.push(other);

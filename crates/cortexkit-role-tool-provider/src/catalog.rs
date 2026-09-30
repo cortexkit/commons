@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 /// The result operations a hook may apply to a tool's result. A tool that
 /// does not list `result_ops` accepts all three.
@@ -65,13 +66,13 @@ pub struct SystemTextItem {
 /// `generation` and `catalog_digest`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct CatalogAnswer {
-    /// Opaque; changes whenever the catalog's content changes. A call's
-    /// schema pin names the generation the runner froze.
+    /// Opaque; changes whenever the catalog's content changes.
     pub generation: String,
-    /// The digest of the catalog's content under these inputs. Present in a
-    /// `digest_only` answer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub catalog_digest: Option<String>,
+    /// Opaque digest of the answer's content under these inputs. A full
+    /// answer and a `digest_only` answer to the same inputs carry the same
+    /// value, so a caller holding a full answer can check it later with a
+    /// cheap `digest_only` fetch.
+    pub catalog_digest: String,
     /// The composition the answer was resolved against; absent on preflight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_digest: Option<String>,
@@ -100,7 +101,9 @@ impl CatalogAnswer {
 pub struct CatalogTool {
     /// The provider's exact tool name, which is also how the user disables it.
     pub name: String,
-    /// The digest of the argument schema. Opaque: compared for equality.
+    /// The digest of the argument schema's structure ([`schema_digest`]):
+    /// 64 lowercase hex characters. Description text never changes it. A
+    /// call's schema pin names it.
     pub schema_digest: String,
     /// The tool's behaviour version, bumped when its behaviour changes without
     /// a schema change. A call's schema pin names it.
@@ -170,6 +173,108 @@ pub fn check_flat_schema(schema: &Value) -> Result<(), FlatnessProblem> {
     Ok(())
 }
 
+/// Schema keywords whose value is one subschema.
+const SUBSCHEMA_KEYWORDS: &[&str] = &[
+    "items",
+    "additionalItems",
+    "additionalProperties",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+    "not",
+    "if",
+    "then",
+    "else",
+    "contains",
+    "propertyNames",
+];
+
+/// Schema keywords whose value is an array of subschemas.
+const SUBSCHEMA_ARRAY_KEYWORDS: &[&str] = &["prefixItems", "anyOf", "oneOf", "allOf"];
+
+/// Schema keywords whose value maps names to subschemas. The names are part
+/// of the structure (a property may itself be called `description`), so only
+/// the subschemas under them are stripped.
+const SUBSCHEMA_MAP_KEYWORDS: &[&str] = &[
+    "properties",
+    "patternProperties",
+    "dependentSchemas",
+    "$defs",
+    "definitions",
+];
+
+/// The structural form of an argument schema: the schema with the
+/// `description` keyword removed from every schema object in it.
+///
+/// Only schema objects lose `description`: the root, and every subschema
+/// reached through the keywords above. Property names are kept even when a
+/// property is called `description`, and data values (`enum`, `const`,
+/// `default`, `examples`) and unknown keywords are kept verbatim.
+pub fn structural_schema(schema: &Value) -> Value {
+    let Value::Object(object) = schema else {
+        return schema.clone();
+    };
+    let mut out = Map::new();
+    for (key, value) in object {
+        if key == "description" {
+            continue;
+        }
+        let value = if SUBSCHEMA_KEYWORDS.contains(&key.as_str()) {
+            structural_schema(value)
+        } else if SUBSCHEMA_ARRAY_KEYWORDS.contains(&key.as_str()) {
+            match value {
+                Value::Array(items) => Value::Array(items.iter().map(structural_schema).collect()),
+                other => other.clone(),
+            }
+        } else if SUBSCHEMA_MAP_KEYWORDS.contains(&key.as_str()) {
+            match value {
+                Value::Object(map) => Value::Object(
+                    map.iter()
+                        .map(|(name, sub)| (name.clone(), structural_schema(sub)))
+                        .collect(),
+                ),
+                other => other.clone(),
+            }
+        } else {
+            value.clone()
+        };
+        out.insert(key.clone(), value);
+    }
+    Value::Object(out)
+}
+
+/// Why a schema digest could not be computed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SchemaDigestError(pub String);
+
+impl std::fmt::Display for SchemaDigestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "schema cannot be canonicalized: {}", self.0)
+    }
+}
+
+impl std::error::Error for SchemaDigestError {}
+
+/// A tool's `schema_digest`: SHA-256 of the RFC 8785 (JCS) canonical JSON of
+/// [`structural_schema`], as 64 lowercase hex characters.
+///
+/// It covers the schema's structure (property names, types, `required`,
+/// enums, bounds and every other keyword) and never description text, so a
+/// deploy that only rewrites descriptions keeps every pin valid.
+pub fn schema_digest(schema: &Value) -> Result<String, SchemaDigestError> {
+    let bytes = serde_jcs::to_vec(&structural_schema(schema))
+        .map_err(|e| SchemaDigestError(e.to_string()))?;
+    let digest = Sha256::digest(&bytes);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Whether `digest` has the `schema_digest` form: 64 lowercase hex characters.
+pub fn is_schema_digest(digest: &str) -> bool {
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -210,7 +315,13 @@ mod tests {
         let digest: CatalogAnswer = serde_json::from_value(vectors["digest_only"].clone()).unwrap();
         assert!(digest.tools.is_empty());
         assert_eq!(digest.generation, full.generation);
-        assert!(digest.catalog_digest.is_some());
+        assert_eq!(digest.catalog_digest, full.catalog_digest);
+        for tool in &full.tools {
+            assert_eq!(
+                schema_digest(&tool.input_schema).as_ref(),
+                Ok(&tool.schema_digest)
+            );
+        }
 
         for case in vectors["refused_tools"].as_array().unwrap() {
             assert!(
@@ -233,5 +344,46 @@ mod tests {
             serde_json::to_value(&request).unwrap()["composition"],
             json!({"anything": [1, {"nested": true}]})
         );
+    }
+
+    #[test]
+    fn schema_digest_vectors_hold() {
+        let vectors = vectors::load("schema-digest.json");
+        for case in vectors["digests"].as_array().unwrap() {
+            let digest = schema_digest(&case["schema"]).unwrap();
+            assert!(is_schema_digest(&digest));
+            assert_eq!(
+                digest,
+                case["schema_digest"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn descriptions_never_change_the_schema_digest() {
+        let vectors = vectors::load("schema-digest.json");
+        for case in vectors["same_digest"].as_array().unwrap() {
+            assert_eq!(
+                schema_digest(&case["a"]),
+                schema_digest(&case["b"]),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn structural_changes_always_change_the_schema_digest() {
+        let vectors = vectors::load("schema-digest.json");
+        for case in vectors["different_digest"].as_array().unwrap() {
+            assert_ne!(
+                schema_digest(&case["a"]),
+                schema_digest(&case["b"]),
+                "{}",
+                case["name"]
+            );
+        }
     }
 }

@@ -39,7 +39,7 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "role_describe_shape",
         requires: &[],
-        checks: "role.describe lists v1 among its versions and every required op, carries no tool list, and lists tool.withdraw or the late_results ops when the subject declares held_calls or late_results",
+        checks: "role.describe lists a tool-provider/v1 major with every required op, carries no tool list, and lists tool.withdraw or the late_results ops when the subject declares held_calls or late_results",
     },
     CaseSpec {
         name: "role_describe_cacheable",
@@ -54,12 +54,12 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "catalog_schema_digest_stable",
         requires: &[],
-        checks: "two tool.catalog answers carry the same generation and the same tools with the same schema_digest and semantics",
+        checks: "two tool.catalog answers carry the same generation, catalog_digest and tools with the same semantics, and each schema_digest is the digest of its input_schema's structure",
     },
     CaseSpec {
         name: "catalog_digest_only",
         requires: &[],
-        checks: "a digest_only answer carries the full answer's generation and a catalog_digest, and no tools",
+        checks: "a digest_only answer carries the full answer's generation and catalog_digest, and no tools",
     },
     CaseSpec {
         name: "catalog_disabled_tool_absent",
@@ -99,7 +99,7 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "schema_pin_current_accepted",
         requires: &[SchemaPin],
-        checks: "a call pinned to its tool's current generation and semantics is accepted",
+        checks: "a call pinned to its tool's current schema_digest and semantics is accepted",
     },
     CaseSpec {
         name: "schema_pin_malformed_refused",

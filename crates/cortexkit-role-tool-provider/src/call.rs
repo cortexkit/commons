@@ -22,7 +22,7 @@ pub use subc_protocol::tool_call::{
     validate_call_key, CallKeyError, ToolCallRequest, CALL_KEY_FIELD, CALL_KEY_MAX_LEN,
 };
 
-use crate::errors;
+use crate::{catalog::is_schema_digest, errors};
 
 /// MIRROR of subc-protocol 0.27.0: the wire name of the schema pin, and the
 /// `field` an `invalid_request` names when the pin is malformed.
@@ -100,30 +100,36 @@ impl PinnedToolCallRequest {
 /// The first number of every schema pin this role defines.
 pub const SCHEMA_PIN_PREFIX: &str = "tp1:";
 
-/// What a call's `schema_pin` says: the tool, the catalog `generation` the
-/// runner froze, and the tool's `semantics` version.
+/// What a call's `schema_pin` says: the tool, its `schema_digest` and its
+/// `semantics` version, as the runner froze them from the catalog.
+///
+/// The pin holds the argument schema's structure and the behaviour version,
+/// never the whole catalog or any description text, so a provider deploy that
+/// only rewrites descriptions keeps every pin valid.
 ///
 /// Canonical encoding (`tp1`):
 ///
 /// ```text
-/// tp1:<pct(tool)>:<pct(generation)>:<semantics>
+/// tp1:<pct(tool)>:<schema_digest>:<semantics>
 /// ```
 ///
 /// - `pct` keeps the RFC 3986 unreserved bytes (`A-Z a-z 0-9 - . _ ~`) and
 ///   writes every other byte of the UTF-8 string as `%` plus two UPPERCASE hex
-///   digits. So `:` inside a component is always `%3A` and the three `:`
+///   digits. So `:` inside the tool name is always `%3A` and the three `:`
 ///   separators are unambiguous.
+/// - `schema_digest` is the tool's digest as the catalog gives it: 64
+///   lowercase hex characters.
 /// - `semantics` is the decimal integer, no sign, no leading zeros.
-/// - `tool` and `generation` are non-empty.
+/// - `tool` is non-empty.
 ///
 /// Exactly one string encodes each pin: [`SchemaPin::parse`] refuses anything
-/// [`SchemaPin::encode`] would not produce (lowercase hex, an escaped
-/// unreserved byte, a leading zero). The whole string must also pass
-/// [`validate_schema_pin`], so a pin longer than 256 bytes cannot be encoded.
+/// [`SchemaPin::encode`] would not produce (lowercase percent hex, an escaped
+/// unreserved byte, an uppercase digest, a leading zero). The whole string
+/// must also pass [`validate_schema_pin`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SchemaPin {
     pub tool: String,
-    pub generation: String,
+    pub schema_digest: String,
     pub semantics: u64,
 }
 
@@ -136,9 +142,11 @@ pub enum SchemaPinError {
     /// The pin does not have exactly three components.
     Shape,
     EmptyComponent,
-    /// A component is not percent-encoded canonically, or does not decode to
-    /// UTF-8.
+    /// The tool name is not percent-encoded canonically, or does not decode
+    /// to UTF-8.
     Encoding,
+    /// The schema digest is not 64 lowercase hex characters.
+    Digest,
     /// `semantics` is not a canonical decimal `u64`.
     Semantics,
 }
@@ -152,11 +160,15 @@ impl std::fmt::Display for SchemaPinError {
             }
             Self::Shape => write!(
                 f,
-                "{SCHEMA_PIN_FIELD} must have tool, generation and semantics"
+                "{SCHEMA_PIN_FIELD} must have tool, schema digest and semantics"
             ),
             Self::EmptyComponent => write!(f, "{SCHEMA_PIN_FIELD} has an empty component"),
             Self::Encoding => write!(f, "{SCHEMA_PIN_FIELD} is not canonically percent-encoded"),
             Self::Semantics => write!(f, "{SCHEMA_PIN_FIELD} semantics is not a canonical integer"),
+            Self::Digest => write!(
+                f,
+                "{SCHEMA_PIN_FIELD} schema digest is not 64 lowercase hex characters"
+            ),
         }
     }
 }
@@ -208,23 +220,26 @@ fn pct_decode(text: &str) -> Result<String, SchemaPinError> {
 }
 
 impl SchemaPin {
-    pub fn new(tool: impl Into<String>, generation: impl Into<String>, semantics: u64) -> Self {
+    pub fn new(tool: impl Into<String>, schema_digest: impl Into<String>, semantics: u64) -> Self {
         Self {
             tool: tool.into(),
-            generation: generation.into(),
+            schema_digest: schema_digest.into(),
             semantics,
         }
     }
 
     /// The canonical `tp1` string, or why it cannot be sent.
     pub fn encode(&self) -> Result<String, SchemaPinError> {
-        if self.tool.is_empty() || self.generation.is_empty() {
+        if self.tool.is_empty() {
             return Err(SchemaPinError::EmptyComponent);
+        }
+        if !is_schema_digest(&self.schema_digest) {
+            return Err(SchemaPinError::Digest);
         }
         let pin = format!(
             "{SCHEMA_PIN_PREFIX}{}:{}:{}",
             pct_encode(&self.tool),
-            pct_encode(&self.generation),
+            self.schema_digest,
             self.semantics
         );
         validate_schema_pin(&pin).map_err(SchemaPinError::Bound)?;
@@ -238,11 +253,14 @@ impl SchemaPin {
             .strip_prefix(SCHEMA_PIN_PREFIX)
             .ok_or(SchemaPinError::UnknownScheme)?;
         let parts: Vec<&str> = rest.split(':').collect();
-        let [tool, generation, semantics] = parts.as_slice() else {
+        let [tool, digest, semantics] = parts.as_slice() else {
             return Err(SchemaPinError::Shape);
         };
-        if tool.is_empty() || generation.is_empty() {
+        if tool.is_empty() {
             return Err(SchemaPinError::EmptyComponent);
+        }
+        if !is_schema_digest(digest) {
+            return Err(SchemaPinError::Digest);
         }
         if semantics.is_empty()
             || !semantics.bytes().all(|b| b.is_ascii_digit())
@@ -255,7 +273,7 @@ impl SchemaPin {
             .map_err(|_| SchemaPinError::Semantics)?;
         Ok(Self {
             tool: pct_decode(tool)?,
-            generation: pct_decode(generation)?,
+            schema_digest: (*digest).to_owned(),
             semantics,
         })
     }
@@ -299,6 +317,8 @@ mod tests {
     use super::*;
     use crate::vectors;
 
+    const D: &str = "839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f";
+
     #[test]
     fn call_key_vectors_agree_with_the_published_validator() {
         let vectors = vectors::load("call-key.json");
@@ -328,7 +348,7 @@ mod tests {
         for case in vectors["canonical"].as_array().unwrap() {
             let pin = SchemaPin::new(
                 case["tool"].as_str().unwrap(),
-                case["generation"].as_str().unwrap(),
+                case["schema_digest"].as_str().unwrap(),
                 case["semantics"].as_u64().unwrap(),
             );
             let wire = case["pin"].as_str().unwrap();
@@ -348,10 +368,10 @@ mod tests {
     fn pin_and_key_are_top_level_siblings_omitted_when_absent() {
         let call = PinnedToolCallRequest::new("echo", json!({"x": 1}))
             .with_call_key("k:1")
-            .with_schema_pin(&SchemaPin::new("echo", "g7", 2));
+            .with_schema_pin(&SchemaPin::new("echo", D, 2));
         assert_eq!(
             serde_json::to_value(&call).unwrap(),
-            json!({"name": "echo", "arguments": {"x": 1}, "call_key": "k:1", "schema_pin": "tp1:echo:g7:2"})
+            json!({"name": "echo", "arguments": {"x": 1}, "call_key": "k:1", "schema_pin": format!("tp1:echo:{D}:2")})
         );
         assert_eq!(
             serde_json::to_value(PinnedToolCallRequest::new("echo", json!({}))).unwrap(),
@@ -366,7 +386,7 @@ mod tests {
         assert_eq!(errors::invalid_request_field(&error), Some(CALL_KEY_FIELD));
 
         let mut other_tool = PinnedToolCallRequest::new("echo", json!({}));
-        other_tool.schema_pin = Some("tp1:grep:g:1".into());
+        other_tool.schema_pin = Some(format!("tp1:grep:{D}:1"));
         let error = check_call(&other_tool).unwrap_err();
         assert_eq!(
             errors::invalid_request_field(&error),
@@ -374,7 +394,7 @@ mod tests {
         );
 
         let good = PinnedToolCallRequest::new("echo", json!({}))
-            .with_schema_pin(&SchemaPin::new("echo", "g", 0));
-        assert_eq!(check_call(&good), Ok(Some(SchemaPin::new("echo", "g", 0))));
+            .with_schema_pin(&SchemaPin::new("echo", D, 0));
+        assert_eq!(check_call(&good), Ok(Some(SchemaPin::new("echo", D, 0))));
     }
 }

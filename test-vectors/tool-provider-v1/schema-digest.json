@@ -1,0 +1,551 @@
+{
+  "_about": "schema_digest = lowercase hex SHA-256 of the RFC 8785 (JCS) canonical JSON of the schema with the `description` keyword removed from every schema object (root and subschemas under properties, patternProperties, $defs, definitions, dependentSchemas, items, prefixItems, additionalItems, additionalProperties, unevaluatedItems, unevaluatedProperties, anyOf, oneOf, allOf, not, if, then, else, contains, propertyNames). Property names and data values (enum, const, default, examples) are kept. `digests` give exact digests; `same_digest` pairs differ only in description text or key order; `different_digest` pairs differ in structure.",
+  "digests": [
+    {
+      "name": "read-like",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "schema_digest": "839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f"
+    },
+    {
+      "name": "empty object",
+      "schema": {
+        "type": "object"
+      },
+      "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0"
+    },
+    {
+      "name": "nested union",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "schema_digest": "985dde4d2ba961b7fe13e037459f5c280641628cf132f5edb397322dd68f96dd"
+    }
+  ],
+  "same_digest": [
+    {
+      "name": "descriptions added at root and on properties",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The path."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ],
+            "description": "The path. (mode)"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "description": "Read a file."
+      }
+    },
+    {
+      "name": "descriptions reworded",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The path."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ],
+            "description": "The path. (mode)"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "description": "Read a file."
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute or relative path."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ],
+            "description": "Absolute or relative path. (mode)"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "description": "Read one file from disk."
+      }
+    },
+    {
+      "name": "descriptions inside unions, items and $defs",
+      "a": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "$defs": {
+          "d": {
+            "type": "integer"
+          }
+        }
+      },
+      "b": {
+        "type": "object",
+        "description": "x",
+        "properties": {
+          "target": {
+            "description": "what",
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "one"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "each"
+                }
+              }
+            ]
+          }
+        },
+        "$defs": {
+          "d": {
+            "type": "integer",
+            "description": "def"
+          }
+        }
+      }
+    },
+    {
+      "name": "key order",
+      "a": {
+        "type": "object",
+        "required": [
+          "a"
+        ],
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "b": {
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "a"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "different_digest": [
+    {
+      "name": "a property's type changes",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "required changes",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "an enum grows",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full",
+              "slow"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "a bound changes",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "a property is renamed",
+      "a": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "full"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "name": "a property named description is structure, not text",
+      "a": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "b": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "a const value holding a description key is data",
+      "a": {
+        "type": "object",
+        "properties": {
+          "k": {
+            "const": {
+              "description": "a"
+            }
+          }
+        }
+      },
+      "b": {
+        "type": "object",
+        "properties": {
+          "k": {
+            "const": {
+              "description": "b"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

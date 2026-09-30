@@ -1,99 +1,111 @@
 {
-  "_about": "tool-provider/v1 schema pins, encoding tp1: `tp1:<pct(tool)>:<pct(generation)>:<semantics>`. pct keeps RFC 3986 unreserved bytes and writes every other UTF-8 byte as %XX with uppercase hex; semantics is a decimal u64 without leading zeros. `canonical` entries encode to `pin` and parse back; `refused` entries are not canonical pins.",
+  "_about": "tool-provider/v1 schema pins, encoding tp1: `tp1:<pct(tool)>:<schema_digest>:<semantics>`. pct keeps RFC 3986 unreserved bytes and writes every other UTF-8 byte as %XX with uppercase hex; schema_digest is the tool's 64-lowercase-hex digest; semantics is a decimal u64 without leading zeros. `canonical` entries encode to `pin` and parse back; `refused` entries are not canonical pins.",
   "canonical": [
     {
       "name": "plain",
       "tool": "echo",
-      "generation": "g7",
+      "schema_digest": "839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f",
       "semantics": 2,
-      "pin": "tp1:echo:g7:2"
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:2"
     },
     {
-      "name": "timestamped generation",
-      "tool": "read",
-      "generation": "2026-09-30T10:00:00Z#4",
+      "name": "dotted tool name",
+      "tool": "code.read",
+      "schema_digest": "0000000000000000000000000000000000000000000000000000000000000000",
       "semantics": 1,
-      "pin": "tp1:read:2026-09-30T10%3A00%3A00Z%234:1"
+      "pin": "tp1:code.read:0000000000000000000000000000000000000000000000000000000000000000:1"
     },
     {
-      "name": "namespaced tool, space in generation",
+      "name": "namespaced tool",
       "tool": "ns:tool",
-      "generation": "a b",
+      "schema_digest": "839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f",
       "semantics": 0,
-      "pin": "tp1:ns%3Atool:a%20b:0"
+      "pin": "tp1:ns%3Atool:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:0"
     },
     {
-      "name": "non-ASCII generation",
-      "tool": "bash",
-      "generation": "g\u00e9n",
+      "name": "non-ASCII tool, largest semantics",
+      "tool": "l\u00e9ctor",
+      "schema_digest": "839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f",
       "semantics": 18446744073709551615,
-      "pin": "tp1:bash:g%C3%A9n:18446744073709551615"
+      "pin": "tp1:l%C3%A9ctor:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:18446744073709551615"
     }
   ],
   "refused": [
     {
       "name": "two components",
-      "pin": "tp1:echo:g7"
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f"
     },
     {
       "name": "four components",
-      "pin": "tp1:ec:ho:g:1"
+      "pin": "tp1:ec:ho:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "other scheme",
-      "pin": "tp2:echo:g:1"
+      "pin": "tp2:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "no scheme",
-      "pin": "echo:g:1"
+      "pin": "echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "leading zero",
-      "pin": "tp1:echo:g:01"
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:01"
     },
     {
       "name": "negative",
-      "pin": "tp1:echo:g:-1"
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:-1"
     },
     {
       "name": "overflow",
-      "pin": "tp1:echo:g:18446744073709551616"
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:18446744073709551616"
     },
     {
-      "name": "lowercase hex",
-      "pin": "tp1:echo:g%3a:1"
+      "name": "uppercase digest",
+      "pin": "tp1:echo:839469D5E28DE1286CBD75382E5329EB7002D401575FC6C02C4AA17694939B3F:1"
+    },
+    {
+      "name": "short digest",
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3:1"
+    },
+    {
+      "name": "prefixed digest",
+      "pin": "tp1:echo:sha256%3A839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
+    },
+    {
+      "name": "a generation instead of a digest",
+      "pin": "tp1:echo:g7:1"
+    },
+    {
+      "name": "lowercase percent hex",
+      "pin": "tp1:ns%3atool:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "escaped unreserved byte",
-      "pin": "tp1:%65cho:g:1"
+      "pin": "tp1:%65cho:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "truncated escape",
-      "pin": "tp1:echo:g%2:1"
+      "pin": "tp1:echo%2:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "invalid UTF-8",
-      "pin": "tp1:echo:g%C3:1"
+      "pin": "tp1:echo%C3:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "unescaped reserved byte",
-      "pin": "tp1:echo:g#1:1"
+      "pin": "tp1:ec#ho:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "empty tool",
-      "pin": "tp1::g:1"
-    },
-    {
-      "name": "empty generation",
-      "pin": "tp1:echo::1"
+      "pin": "tp1::839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     },
     {
       "name": "space",
-      "pin": "tp1:echo:g:1 "
+      "pin": "tp1:echo:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1 "
     },
     {
       "name": "too long",
-      "pin": "tp1:echo:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg:1"
+      "pin": "tp1:tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt:839469d5e28de1286cbd75382e5329eb7002d401575fc6c02c4aa17694939b3f:1"
     }
   ]
 }
