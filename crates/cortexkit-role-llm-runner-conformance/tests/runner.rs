@@ -128,6 +128,21 @@ async fn step_recorded_sealed_indeterminate_fails() {
 }
 
 #[tokio::test]
+async fn step_recorded_sealed_dangling_call_fails() {
+    let mut subject = FakeSubject::new(Defects {
+        sealed_call_without_result: true,
+        ..Defects::default()
+    });
+    subject.step_recovery = StepRecovery::SealInterrupted;
+    let report = run(&subject).await;
+    let reason = failed(&report, "crash_at_StepRecorded");
+    assert!(reason.contains("sealed branch:"), "{reason}");
+    assert!(reason.contains("dangling call call_b"), "{reason}");
+    assert!(reason.contains("expected one result before"), "{reason}");
+    assert_passed(&report, "crash_at_DispatchIntent");
+}
+
+#[tokio::test]
 async fn step_recorded_dispatch_twice_fails() {
     let report = run(&FakeSubject::new(Defects {
         dispatch_twice_on_resume: true,

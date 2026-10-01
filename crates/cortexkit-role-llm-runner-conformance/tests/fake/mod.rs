@@ -86,6 +86,8 @@ pub struct Defects {
     /// A never-sent call in a sealed run falsely reports an unknown outcome
     /// through `indeterminate: true`.
     pub sealed_call_indeterminate: bool,
+    /// Sealing leaves the never-sent call dangling in the next model history.
+    pub sealed_call_without_result: bool,
     /// Resumption invokes a never-sent call twice, breaking at-most-once dispatch.
     pub dispatch_twice_on_resume: bool,
     /// role.describe declares `interrupt`, which the runner does not serve
@@ -313,14 +315,23 @@ impl Module {
                 .map(|(key, _)| key.clone())
                 .collect();
             if open.is_empty() {
-                let pending: Vec<Value> = self.sessions.lock().unwrap()[&session]
+                let pending: Vec<(String, Value)> = self.sessions.lock().unwrap()[&session]
                     .calls
-                    .values()
-                    .filter(|call| call.run_id == run_id && !call.intent)
-                    .map(|call| call.arguments.clone())
+                    .iter()
+                    .filter(|(_, call)| call.run_id == run_id && !call.intent)
+                    .map(|(key, call)| (key.clone(), call.arguments.clone()))
                     .collect();
                 if !pending.is_empty() && self.world.step_recovery == StepRecovery::SealInterrupted
                 {
+                    if !self.world.defects.sealed_call_without_result {
+                        for (key, _) in &pending {
+                            self.commit(
+                                &session,
+                                json!({ "kind": "result", "call_key": key,
+                                "content": "not run" }),
+                            )?;
+                        }
+                    }
                     self.commit(
                         &session,
                         json!({ "kind": "terminal", "run_id": run_id,
@@ -328,7 +339,7 @@ impl Module {
                     )?;
                 } else {
                     if self.world.defects.dispatch_twice_on_resume {
-                        for arguments in pending {
+                        for (_, arguments) in pending {
                             self.world.invoke(&arguments);
                         }
                     }

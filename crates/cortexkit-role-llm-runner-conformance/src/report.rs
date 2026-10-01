@@ -229,7 +229,7 @@ pub const CASES: &[CaseSpec] = &[
     case(
         "crash_at_StepRecorded",
         &[Queue, TranscriptReads, DispatchAttribution, KillAt(points::STEP_RECORDED)],
-        "killed at StepRecorded and restarted: observations show either one dispatch and a continued run with a result before the later model turn, or zero dispatches and an interrupted run; the call is not indeterminate and the step is not generated again",
+        "killed at StepRecorded and restarted: observations show either one dispatch and a continued run with a result before the later model turn, or zero dispatches and an interrupted run followed by an owner follow-up with a result before its assistant turn; the call is not indeterminate and the step is not generated again",
     ),
     case(
         "crash_at_DispatchIntent",
@@ -270,7 +270,7 @@ pub const NARROWINGS: &[&str] = &[
     "the crash guarantee that each resume writes one informational record (§14, 8) is not checked: where that record sits is the runner's schema",
     "a call's indeterminate window between a restart and its outcome_unknown close is not observable reliably, so crash_at_DispatchIntent checks the state after the close",
     "a run cut at DispatchIntent is expected to end interrupted, as the role's points list states for that point; StepRecorded accepts either one dispatch with continuation or zero dispatches with interrupted state; ToolResultRecorded checks only that the run has one terminal state that is not cancelled",
-    "the subject interface does not expose model requests, so StepRecorded checks the visible resume transcript: the call's result precedes the later model turn; it cannot inspect the history actually sent to the model",
+    "the subject interface does not expose model requests, so StepRecorded checks transcript ordering on resume or after an owner follow-up to a sealed run: one result precedes the later assistant turn; result bodies are joined by the model call id or attributed call key, without inspecting content, since the runner's message schema is not pinned; it cannot inspect the history actually sent to the model",
     "the crash guarantee that messages read before a kill read the same after it (§14, 1) is checked on a second session written before the kill, because the cut session has nothing readable before its trigger",
     "run_result_interrupted_not_cancelled reads the run cut in the DispatchIntent crash scenario, because a run cuts each point only once",
     "extra_op_still_admitted reads its case as the consumer's lenient decoding (§2) applied to the live answer",

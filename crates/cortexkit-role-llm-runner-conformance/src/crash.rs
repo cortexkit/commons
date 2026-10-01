@@ -60,6 +60,10 @@ pub struct CrashObservation {
     step_text: String,
     call: ScriptedToolCall,
     final_text: String,
+    /// After a run ends interrupted without dispatch, send another owner prompt.
+    /// Store the resulting transcript or the error from sending, waiting or reading;
+    /// absent when recovery did not take this sealing branch.
+    sealed_follow_up: Option<Result<Vec<ReadMessage>, String>>,
 }
 
 /// The kill point a case's scenario cuts at, if it is a crash case.
@@ -214,6 +218,48 @@ where
         (Some(last), true) => Some(run_result(&route_b, &last.run_id).await?),
         _ => None,
     };
+    let sealed_follow_up = if point == points::STEP_RECORDED
+        && invocations_after == 0
+        && head_b
+            .last_run_state
+            .as_ref()
+            .is_some_and(|last| RunState::parse(&last.state) == RunState::Interrupted)
+    {
+        // One assistant step is already durable, so the follow-up consumes
+        // the script's second turn, just as resumption would have done.
+        Some(
+            async {
+                let reply: SendReply = decode(
+                    "the owner follow-up",
+                    expect_ok(
+                        "the owner follow-up",
+                        call(
+                            &route_b,
+                            ops::SESSION_SEND,
+                            send_params(
+                                subject,
+                                &name_b,
+                                false,
+                                &mint.next("follow-up"),
+                                &mint.next("send"),
+                                None,
+                            ),
+                        )
+                        .await?,
+                    )?,
+                )?;
+                wait_run_end(subject, &route_b, declared, None, &reply).await?;
+                let (_, messages) = read_all(&route_b).await?;
+                if subject.tool_invocations(&b_call.arguments).await != 0 {
+                    return Err("the never-sent call was dispatched on the follow-up".into());
+                }
+                Ok(messages)
+            }
+            .await,
+        )
+    } else {
+        None
+    };
     Ok(CrashObservation {
         before_a,
         after_a,
@@ -227,6 +273,7 @@ where
         step_text,
         call: b_call,
         final_text,
+        sealed_follow_up,
     })
 }
 
@@ -304,22 +351,30 @@ pub fn check(
                         ));
                     }
                     expect_holding(b, &observed.final_text, 0, "a later model turn's text")?;
+                    let follow_up = observed
+                        .sealed_follow_up
+                        .as_ref()
+                        .ok_or("no owner follow-up was observed")?
+                        .as_ref()
+                        .map_err(Clone::clone)?;
+                    match entries_for(follow_up, &observed.call.tool_call_id).as_slice() {
+                        [entry] if !entry.indeterminate => {}
+                        _ => {
+                            return Err(
+                                "the call must remain indeterminate: false after the follow-up"
+                                    .into(),
+                            )
+                        }
+                    }
+                    result_before_turn(
+                        follow_up,
+                        &observed.call.tool_call_id,
+                        &observed.final_text,
+                    )?;
                 } else {
                     expect_holding(b, &observed.final_text, 1, "the continued run's final text")?;
                     expect_holding(b, &result_text, 1, "the dispatched call's result")?;
-                    let result = b
-                        .iter()
-                        .find(|m| holding(std::slice::from_ref(m), &result_text) == 1)
-                        .expect("checked result");
-                    let later = b
-                        .iter()
-                        .find(|m| holding(std::slice::from_ref(m), &observed.final_text) == 1)
-                        .expect("checked continued turn");
-                    if result.ordinal >= later.ordinal {
-                        return Err(
-                            "a later model turn carries the call without a preceding result".into(),
-                        );
-                    }
+                    result_before_turn(b, &observed.call.tool_call_id, &observed.final_text)?;
                 }
                 Ok(())
             };
@@ -480,5 +535,42 @@ fn expect_holding(
         Err(format!(
             "{what} is written in {found} messages, not {copies}"
         ))
+    }
+}
+
+/// Result bodies are runner-specific. Join a non-call message to the call
+/// through its model id or attributed call key, without inspecting result content.
+fn result_before_turn(
+    messages: &[ReadMessage],
+    call_id: &str,
+    later_text: &str,
+) -> Result<(), String> {
+    fn contains_id(value: &serde_json::Value, id: &str) -> bool {
+        match value {
+            serde_json::Value::String(text) => text == id,
+            serde_json::Value::Array(values) => values.iter().any(|v| contains_id(v, id)),
+            serde_json::Value::Object(values) => values.values().any(|v| contains_id(v, id)),
+            _ => false,
+        }
+    }
+    expect_holding(messages, later_text, 1, "the later assistant turn")?;
+    let later = messages
+        .iter()
+        .find(|m| holding(std::slice::from_ref(m), later_text) == 1)
+        .expect("checked later turn");
+    let entries = entries_for(messages, call_id);
+    let key = entries.first().and_then(|entry| entry.call_key.as_deref());
+    let results: Vec<_> = messages
+        .iter()
+        .filter(|m| {
+            m.tool_calls.is_empty()
+                && (contains_id(&m.message, call_id)
+                    || key.is_some_and(|key| contains_id(&m.message, key)))
+        })
+        .collect();
+    match results.as_slice() {
+        [result] if result.ordinal < later.ordinal => Ok(()),
+        _ => Err(format!("dangling call {call_id}: expected one result before the later assistant turn at ordinal {}, found result ordinals {:?}",
+            later.ordinal, results.iter().map(|m| m.ordinal).collect::<Vec<_>>())),
     }
 }
