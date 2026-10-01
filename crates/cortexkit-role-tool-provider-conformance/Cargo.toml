@@ -8,21 +8,21 @@
 # flags.
 [package]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Conformance runner for the CortexKit tool-provider/v1 role: drives a live provider through its crash-cut harness and checks it against the role's vectors."
-publish = false
+publish = true
 
 [dependencies]
 async-trait = "0.1"
 cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
-cortexkit-role-tool-provider = { version = "0.1.0", path = "../cortexkit-role-tool-provider" }
+cortexkit-role-tool-provider = { version = "0.2.0", path = "../cortexkit-role-tool-provider" }
 futures-util = { version = "0.3", default-features = false }
 serde_json = "1"
-subc-protocol = "0.26.0"
+subc-protocol = "0.27"
 
 [dev-dependencies]
 tempfile = "3"

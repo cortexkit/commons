@@ -1,0 +1,66 @@
+{
+  "_about": "call_key bounds: 1 to 256 bytes, each 0x21..=0x7E. Validators must agree with every entry. The conformance runner sends each invalid key to a live provider and expects invalid_request {field: \"call_key\"}.",
+  "valid": [
+    {
+      "key": "a",
+      "why": "shortest key"
+    },
+    {
+      "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+      "why": "longest key: 256 bytes"
+    },
+    {
+      "key": "cc:toolu_01ABCdef",
+      "why": "Claude Code form: cc: plus the tool_use id"
+    },
+    {
+      "key": "01J9ZQ0V3X:42",
+      "why": "runner form: lineage id and WAL sequence"
+    },
+    {
+      "key": "pf:relay/991",
+      "why": "relay form"
+    },
+    {
+      "key": "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+      "why": "every printable punctuation character"
+    }
+  ],
+  "invalid": [
+    {
+      "key": "",
+      "error": "empty",
+      "why": "an absent key is omitted, never empty"
+    },
+    {
+      "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+      "error": "too_long",
+      "why": "257 bytes"
+    },
+    {
+      "key": "has space",
+      "error": "invalid_character",
+      "why": "space is refused: invisible at the ends of a logged key"
+    },
+    {
+      "key": " leading",
+      "error": "invalid_character",
+      "why": "leading space"
+    },
+    {
+      "key": "tab\tkey",
+      "error": "invalid_character",
+      "why": "control character"
+    },
+    {
+      "key": "caf\u00e9",
+      "error": "invalid_character",
+      "why": "non-ASCII"
+    },
+    {
+      "key": "del\u007f",
+      "error": "invalid_character",
+      "why": "DEL is not printable"
+    }
+  ]
+}

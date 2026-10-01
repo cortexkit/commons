@@ -34,7 +34,7 @@ use cortexkit_role_tool_provider_conformance::{
         Trigger,
     },
     wire::{
-        call::{check_call, PinnedToolCallRequest, CALL_KEY_FIELD},
+        call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
         catalog::schema_digest,
         errors,
         late_results::{
@@ -343,11 +343,11 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(RouteFailure::new("module is gone"));
         }
-        let request: PinnedToolCallRequest = match serde_json::from_value(body) {
+        let request: ToolCallRequest = match serde_json::from_value(body) {
             Ok(request) => request,
             Err(e) => return Ok(error(errors::invalid_request("body", e.to_string()))),
         };
-        let name = request.request.name.as_str();
+        let name = request.name.as_str();
         let reply = |result: Result<Value, ErrorBody>| match result {
             Ok(body) => vec![ObservedFrame::Response(body)],
             Err(refusal) => error(refusal),
@@ -358,10 +358,8 @@ impl Module {
                     self.withdraw(stamp, &request).map(|answer| answer.encode()),
                 ))
             }
-            ops::LATE_RESULTS => {
-                return Ok(reply(self.late_results(stamp, &request.request.arguments)))
-            }
-            ops::LATE_RESULTS_ACK => return Ok(reply(self.ack(stamp, &request.request.arguments))),
+            ops::LATE_RESULTS => return Ok(reply(self.late_results(stamp, &request.arguments))),
+            ops::LATE_RESULTS_ACK => return Ok(reply(self.ack(stamp, &request.arguments))),
             _ => {}
         }
         let pin = match check_call(&request) {
@@ -385,11 +383,9 @@ impl Module {
         }
         Ok(match name {
             ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(Self::describe())],
-            ops::TOOL_CATALOG => vec![ObservedFrame::Response(
-                self.catalog(&request.request.arguments),
-            )],
+            ops::TOOL_CATALOG => vec![ObservedFrame::Response(self.catalog(&request.arguments))],
             QUICK | SLOW => vec![ObservedFrame::Response(
-                json!({ "content": request.request.arguments }),
+                json!({ "content": request.arguments }),
             )],
             DISABLED => error(errors::tool_disabled(DISABLED)),
             HELD => self.hold(stamp, &request),
@@ -397,8 +393,8 @@ impl Module {
         })
     }
 
-    fn hold(&self, stamp: &RouteStamp, request: &PinnedToolCallRequest) -> Vec<ObservedFrame> {
-        let (Some(call_key), Some(scope)) = (&request.request.call_key, scope_of(stamp)) else {
+    fn hold(&self, stamp: &RouteStamp, request: &ToolCallRequest) -> Vec<ObservedFrame> {
+        let (Some(call_key), Some(scope)) = (&request.call_key, scope_of(stamp)) else {
             return error(errors::invalid_request(
                 CALL_KEY_FIELD,
                 "held calls need a call_key and a scope",
@@ -406,7 +402,7 @@ impl Module {
         };
         let key = (stamp.principal.clone(), call_key.clone());
         if !self.records.lock().unwrap().contains_key(&key) {
-            let marker = request.request.arguments["marker"]
+            let marker = request.arguments["marker"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned();
@@ -430,9 +426,9 @@ impl Module {
     fn withdraw(
         &self,
         stamp: &RouteStamp,
-        request: &PinnedToolCallRequest,
+        request: &ToolCallRequest,
     ) -> Result<WithdrawAnswer, ErrorBody> {
-        let arguments = parse_withdraw_request(&request.request)?;
+        let arguments = parse_withdraw_request(request)?;
         let scope = scope_of(stamp);
         let resolution =
             resolve_carrier(&stamp.principal, scope.as_ref(), &arguments).map_err(|p| p.error())?;

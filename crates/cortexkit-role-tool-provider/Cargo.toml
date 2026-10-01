@@ -9,17 +9,17 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-tool-provider"
-version = "0.1.1"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Wire contract of the CortexKit tool-provider/v1 role: role.describe, tool.catalog, call_key, tool.withdraw and late-result names."
-publish = false
+publish = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2"
 serde_json = "1"
 sha2 = "0.10"
-subc-protocol = "0.26.0"
+subc-protocol = "0.27"

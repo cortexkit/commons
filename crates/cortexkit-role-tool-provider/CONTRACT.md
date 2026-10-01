@@ -155,8 +155,8 @@ to them. Nothing here names a particular implementation.
   leading zeros. The tool is non-empty. Exactly one string encodes each pin;
   anything else is refused. A pin that is
   malformed, or names a tool other than the call's `name`, is refused as
-  `invalid_request {field: "schema_pin"}`. This crate mirrors the 0.27.0
-  field and bound locally until that release publishes (`call.rs`).
+  `invalid_request {field: "schema_pin"}`. The field and its bound are
+  subc-protocol 0.27.0's, re-exported by this crate (`call.rs`).
 - A call whose pinned `schema_digest` the provider can no longer honour is
   refused `tool_schema_changed {tool, expected, current}`; one whose pinned
   `semantics` it can no longer honour, `tool_semantics_changed {tool,

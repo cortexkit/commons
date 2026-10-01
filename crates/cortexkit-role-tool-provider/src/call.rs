@@ -1,97 +1,46 @@
 //! The body of a tool-call request: subc-protocol's `ToolCallRequest`, with
-//! its top-level `call_key`, plus the top-level `schema_pin`.
+//! its top-level `call_key` and `schema_pin`.
 //!
-//! `call_key` and its validator come from subc-protocol 0.26.0 and are
-//! re-exported unchanged.
-//!
-//! TODO(subc-protocol 0.27.0): [`PinnedToolCallRequest`], [`SCHEMA_PIN_FIELD`],
-//! [`SchemaPinBoundError`] and [`validate_schema_pin`] are a LOCAL MIRROR of
-//! what subc-protocol 0.27.0 adds: `ToolCallRequest.schema_pin:
-//! Option<String>`, top-level and omitted when `None`, bounded by the same
-//! rule as `call_key`. When 0.27.0 publishes, bump the dependency, replace
-//! [`PinnedToolCallRequest`] with `subc_protocol::tool_call::ToolCallRequest`
-//! and re-export the validator from there; the wire bytes do not change.
-//! The pin's CONTENT is this role's, not subc-protocol's, and stays here:
-//! see [`SchemaPin`].
+//! The request type, both fields' wire names and bounds, and their shape
+//! validators come from `subc_protocol::tool_call` and are re-exported
+//! unchanged, so a provider and a consumer that both depend on subc-protocol
+//! pass the same type across. What a `schema_pin` HOLDS is this role's, not
+//! subc-protocol's, and is defined here: see [`SchemaPin`].
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use subc_protocol::ErrorBody;
 
 pub use subc_protocol::tool_call::{
-    validate_call_key, CallKeyError, ToolCallRequest, CALL_KEY_FIELD, CALL_KEY_MAX_LEN,
+    validate_call_key, validate_schema_pin, CallKeyError, OpaqueFieldError, ToolCallRequest,
+    CALL_KEY_FIELD, CALL_KEY_MAX_LEN, SCHEMA_PIN_FIELD, SCHEMA_PIN_MAX_LEN,
 };
 
 use crate::{catalog::is_schema_digest, errors};
 
-/// MIRROR of subc-protocol 0.27.0: the wire name of the schema pin, and the
-/// `field` an `invalid_request` names when the pin is malformed.
-pub const SCHEMA_PIN_FIELD: &str = "schema_pin";
+/// Builder helpers for [`ToolCallRequest`], which subc-protocol defines with
+/// only a `new` (a call with only a name and arguments). A trait because the
+/// type is foreign to this crate: `ToolCallRequest::new(..).with_call_key(..)`
+/// works once the trait is in scope.
+pub trait ToolCallRequestExt: Sized {
+    /// Set the top-level `call_key`. The key is not checked here; a provider
+    /// checks it with [`check_call`].
+    fn with_call_key(self, key: impl Into<String>) -> Self;
 
-/// MIRROR of subc-protocol 0.27.0: why a `schema_pin` fails the shared bound
-/// (1 to 256 bytes, each 0x21 to 0x7E), the same bound as `call_key`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SchemaPinBoundError {
-    Empty,
-    TooLong { length: usize },
-    InvalidCharacter { index: usize },
+    /// Set the top-level `schema_pin` to the canonical `tp1` encoding of
+    /// `pin`.
+    ///
+    /// # Panics
+    ///
+    /// If `pin` cannot be encoded (see [`SchemaPin::encode`]).
+    fn with_schema_pin(self, pin: &SchemaPin) -> Self;
 }
 
-impl std::fmt::Display for SchemaPinBoundError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => write!(f, "{SCHEMA_PIN_FIELD} must not be empty"),
-            Self::TooLong { length } => write!(
-                f,
-                "{SCHEMA_PIN_FIELD} is {length} bytes; at most {CALL_KEY_MAX_LEN} are allowed"
-            ),
-            Self::InvalidCharacter { index } => write!(
-                f,
-                "{SCHEMA_PIN_FIELD} has a character at byte {index} outside printable ASCII \
-                 (0x21 to 0x7E; space is not allowed)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for SchemaPinBoundError {}
-
-/// MIRROR of subc-protocol 0.27.0: check a `schema_pin` against the same
-/// bound as `call_key`.
-pub fn validate_schema_pin(pin: &str) -> Result<(), SchemaPinBoundError> {
-    validate_call_key(pin).map_err(|error| match error {
-        CallKeyError::Empty => SchemaPinBoundError::Empty,
-        CallKeyError::TooLong { length } => SchemaPinBoundError::TooLong { length },
-        CallKeyError::InvalidCharacter { index } => SchemaPinBoundError::InvalidCharacter { index },
-    })
-}
-
-/// MIRROR of subc-protocol 0.27.0's `ToolCallRequest`: the 0.26.0 type plus
-/// the top-level `schema_pin`, omitted when absent. Decoding stays tolerant
-/// of members it does not know, as the 0.26.0 type is.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct PinnedToolCallRequest {
-    #[serde(flatten)]
-    pub request: ToolCallRequest,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema_pin: Option<String>,
-}
-
-impl PinnedToolCallRequest {
-    /// A call with only a name and arguments.
-    pub fn new(name: impl Into<String>, arguments: Value) -> Self {
-        Self {
-            request: ToolCallRequest::new(name, arguments),
-            schema_pin: None,
-        }
-    }
-
-    pub fn with_call_key(mut self, key: impl Into<String>) -> Self {
-        self.request.call_key = Some(key.into());
+impl ToolCallRequestExt for ToolCallRequest {
+    fn with_call_key(mut self, key: impl Into<String>) -> Self {
+        self.call_key = Some(key.into());
         self
     }
 
-    pub fn with_schema_pin(mut self, pin: &SchemaPin) -> Self {
+    fn with_schema_pin(mut self, pin: &SchemaPin) -> Self {
         self.schema_pin = Some(pin.encode().expect("pin within bounds"));
         self
     }
@@ -136,7 +85,8 @@ pub struct SchemaPin {
 /// Why a string is not a canonical `tp1` schema pin.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SchemaPinError {
-    Bound(SchemaPinBoundError),
+    /// The pin fails the shared opaque-field bound ([`validate_schema_pin`]).
+    Bound(OpaqueFieldError),
     /// The pin does not start with [`SCHEMA_PIN_PREFIX`].
     UnknownScheme,
     /// The pin does not have exactly three components.
@@ -288,8 +238,8 @@ impl SchemaPin {
 ///
 /// Returns the parsed pin, which the provider then compares with its current
 /// catalog (refusing `tool_schema_changed` or `tool_semantics_changed`).
-pub fn check_call(request: &PinnedToolCallRequest) -> Result<Option<SchemaPin>, ErrorBody> {
-    if let Some(key) = request.request.call_key.as_deref() {
+pub fn check_call(request: &ToolCallRequest) -> Result<Option<SchemaPin>, ErrorBody> {
+    if let Some(key) = request.call_key.as_deref() {
         validate_call_key(key)
             .map_err(|error| errors::invalid_request(CALL_KEY_FIELD, error.to_string()))?;
     }
@@ -298,13 +248,10 @@ pub fn check_call(request: &PinnedToolCallRequest) -> Result<Option<SchemaPin>, 
     };
     let pin = SchemaPin::parse(pin)
         .map_err(|error| errors::invalid_request(SCHEMA_PIN_FIELD, error.to_string()))?;
-    if pin.tool != request.request.name {
+    if pin.tool != request.name {
         return Err(errors::invalid_request(
             SCHEMA_PIN_FIELD,
-            format!(
-                "the pin names {}, the call {}",
-                pin.tool, request.request.name
-            ),
+            format!("the pin names {}, the call {}", pin.tool, request.name),
         ));
     }
     Ok(Some(pin))
@@ -312,7 +259,7 @@ pub fn check_call(request: &PinnedToolCallRequest) -> Result<Option<SchemaPin>, 
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use super::*;
     use crate::vectors;
@@ -332,13 +279,17 @@ mod tests {
         }
         for case in invalid {
             let key = case["key"].as_str().unwrap();
-            let kind = match validate_call_key(key).expect_err(key) {
-                CallKeyError::Empty => "empty",
-                CallKeyError::TooLong { .. } => "too_long",
-                CallKeyError::InvalidCharacter { .. } => "invalid_character",
+            let kind = |error: OpaqueFieldError| match error {
+                OpaqueFieldError::Empty { .. } => "empty",
+                OpaqueFieldError::TooLong { .. } => "too_long",
+                OpaqueFieldError::InvalidCharacter { .. } => "invalid_character",
             };
-            assert_eq!(kind, case["error"].as_str().unwrap(), "{key:?}");
-            assert!(validate_schema_pin(key).is_err(), "same bound for pins");
+            let key_error = validate_call_key(key).expect_err(key);
+            assert_eq!(key_error.field(), CALL_KEY_FIELD, "{key:?}");
+            assert_eq!(kind(key_error), case["error"].as_str().unwrap(), "{key:?}");
+            let pin_error = validate_schema_pin(key).expect_err("same bound for pins");
+            assert_eq!(pin_error.field(), SCHEMA_PIN_FIELD, "{key:?}");
+            assert_eq!(kind(pin_error), case["error"].as_str().unwrap(), "{key:?}");
         }
     }
 
@@ -366,7 +317,7 @@ mod tests {
 
     #[test]
     fn pin_and_key_are_top_level_siblings_omitted_when_absent() {
-        let call = PinnedToolCallRequest::new("echo", json!({"x": 1}))
+        let call = ToolCallRequest::new("echo", json!({"x": 1}))
             .with_call_key("k:1")
             .with_schema_pin(&SchemaPin::new("echo", D, 2));
         assert_eq!(
@@ -374,18 +325,48 @@ mod tests {
             json!({"name": "echo", "arguments": {"x": 1}, "call_key": "k:1", "schema_pin": format!("tp1:echo:{D}:2")})
         );
         assert_eq!(
-            serde_json::to_value(PinnedToolCallRequest::new("echo", json!({}))).unwrap(),
+            serde_json::to_value(ToolCallRequest::new("echo", json!({}))).unwrap(),
             json!({"name": "echo", "arguments": {}})
         );
     }
 
+    /// The pin travels in subc-protocol's own `ToolCallRequest.schema_pin`,
+    /// reached through this crate's re-export: built as a struct literal (so a
+    /// field added upstream stops this compiling), sent as a top-level member,
+    /// decoded back into the same type, and accepted by [`check_call`].
+    #[test]
+    fn schema_pin_round_trips_through_the_subc_protocol_request() {
+        let pin = SchemaPin::new("fs:read", D, 3);
+        let wire_pin = pin.encode().unwrap();
+        assert_eq!(wire_pin, format!("tp1:fs%3Aread:{D}:3"));
+        let call = crate::call::ToolCallRequest {
+            name: "fs:read".into(),
+            arguments: json!({"path": "a"}),
+            tool_call_id: None,
+            progress_token: None,
+            call_key: Some("k:7".into()),
+            schema_pin: Some(wire_pin.clone()),
+        };
+
+        let encoded = serde_json::to_vec(&call).unwrap();
+        let value: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value[SCHEMA_PIN_FIELD], json!(wire_pin));
+        assert!(value["arguments"].get(SCHEMA_PIN_FIELD).is_none());
+
+        let decoded: subc_protocol::tool_call::ToolCallRequest =
+            serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, call);
+        assert_eq!(decoded.schema_pin.as_deref(), Some(wire_pin.as_str()));
+        assert_eq!(check_call(&decoded), Ok(Some(pin)));
+    }
+
     #[test]
     fn check_call_names_the_offending_field() {
-        let bad_key = PinnedToolCallRequest::new("echo", json!({})).with_call_key("has space");
+        let bad_key = ToolCallRequest::new("echo", json!({})).with_call_key("has space");
         let error = check_call(&bad_key).unwrap_err();
         assert_eq!(errors::invalid_request_field(&error), Some(CALL_KEY_FIELD));
 
-        let mut other_tool = PinnedToolCallRequest::new("echo", json!({}));
+        let mut other_tool = ToolCallRequest::new("echo", json!({}));
         other_tool.schema_pin = Some(format!("tp1:grep:{D}:1"));
         let error = check_call(&other_tool).unwrap_err();
         assert_eq!(
@@ -393,8 +374,8 @@ mod tests {
             Some(SCHEMA_PIN_FIELD)
         );
 
-        let good = PinnedToolCallRequest::new("echo", json!({}))
-            .with_schema_pin(&SchemaPin::new("echo", D, 0));
+        let good =
+            ToolCallRequest::new("echo", json!({})).with_schema_pin(&SchemaPin::new("echo", D, 0));
         assert_eq!(check_call(&good), Ok(Some(SchemaPin::new("echo", D, 0))));
     }
 }

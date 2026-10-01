@@ -11,7 +11,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Crash-cut harness trait shared by CortexKit role conformance suites: spawn on a state root, kill at a named durable point, restart on the same root, and a ledger that fails a run with no real process kill."
-publish = false
+publish = true
 
 [dependencies]
 async-trait = "0.1"

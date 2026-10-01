@@ -17,3 +17,8 @@ The role document is `crates/cortexkit-role-tool-provider/CONTRACT.md`.
 
 Changing a vector changes the contract: bump the role crate's version and say
 why in the commit.
+
+The conformance crate compiles in copies of `call-key.json` and
+`schema-pin.json` (`crates/cortexkit-role-tool-provider-conformance/vectors/`),
+because a published crate cannot read files outside its own directory. Its
+`vendored_vectors` test fails until a changed vector is copied there too.

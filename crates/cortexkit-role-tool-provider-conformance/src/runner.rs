@@ -33,14 +33,14 @@ use crate::{
 
 /// The shared vectors, compiled in so every provider's CI checks the same
 /// bytes the wire crate's own tests check.
-const CALL_KEY_VECTORS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../test-vectors/tool-provider-v1/call-key.json"
-));
-const SCHEMA_PIN_VECTORS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../test-vectors/tool-provider-v1/schema-pin.json"
-));
+///
+/// They are read from copies inside this crate, not from the repository's
+/// `test-vectors/` directory, because a published crate contains only its own
+/// directory: a path outside it does not exist when crates.io builds the
+/// package. `tests/vendored_vectors.rs` fails if a copy differs from the
+/// repository's file.
+const CALL_KEY_VECTORS: &str = include_str!("../vectors/call-key.json");
+const SCHEMA_PIN_VECTORS: &str = include_str!("../vectors/schema-pin.json");
 
 /// A tool name no provider serves, for the refusal case.
 const UNSERVED_TOOL: &str = "conformance.not-a-served-tool";
