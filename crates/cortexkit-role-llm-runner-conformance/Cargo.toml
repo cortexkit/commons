@@ -1,0 +1,31 @@
+# cortexkit-role-llm-runner-conformance — the `llm-runner/v1` conformance
+# runner. It drives a LIVE runner over its real management route, reached
+# through the runner's `cortexkit-role-harness` implementation, with a
+# scripted model and a scripted tool provider the runner's own CI wires in,
+# and checks every reply against the role crate's wire types. A runner adds
+# this crate as a dev-dependency; it is a separate crate so a runner's
+# production build never compiles the suite.
+#
+# Not published while the role crate itself is a draft.
+[package]
+name = "cortexkit-role-llm-runner-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Conformance runner for the CortexKit llm-runner/v1 role: drives a live runner through its crash-cut harness with a scripted model and checks its wire replies."
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
+cortexkit-role-llm-runner = { version = "0.1.0", path = "../cortexkit-role-llm-runner" }
+futures-util = { version = "0.3", default-features = false }
+serde = "1"
+serde_json = "1"
+subc-protocol = "0.27"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
