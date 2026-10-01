@@ -24,7 +24,7 @@ cortexkit-role-llm-runner = { version = "0.1.0", path = "../cortexkit-role-llm-r
 futures-util = { version = "0.3", default-features = false }
 serde = "1"
 serde_json = "1"
-subc-protocol = "0.27"
+subc-protocol = "0.28"
 
 [dev-dependencies]
 tempfile = "3"

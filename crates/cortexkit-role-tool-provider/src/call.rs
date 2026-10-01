@@ -346,6 +346,7 @@ mod tests {
             progress_token: None,
             call_key: Some("k:7".into()),
             schema_pin: Some(wire_pin.clone()),
+            origin: None,
         };
 
         let encoded = serde_json::to_vec(&call).unwrap();
