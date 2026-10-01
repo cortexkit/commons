@@ -94,9 +94,17 @@ pub mod runner_codes {
     pub const NOT_SESSION_COMPACTION_PROVIDER: &str = errors::NOT_SESSION_COMPACTION_PROVIDER;
     /// The codes a `compaction.ready` may be refused with.
     pub const READY_CODES: &[&str] = &[INVALID_PARAMS, NOT_SESSION_COMPACTION_PROVIDER];
+    /// A `provider_code` the runner writes itself: Setup failed or timed out
+    /// with no answer, so no initial view was recorded and no model call was
+    /// made. The next send calls Setup again.
+    pub const COMPACTION_UNAVAILABLE: &str = errors::provider_codes::COMPACTION_UNAVAILABLE;
     /// A `provider_code` the runner writes itself: a `wait` reached the
     /// runner's cap and the request could not be shown to fit.
     pub const COMPACTION_WAIT_EXCEEDED: &str = errors::provider_codes::COMPACTION_WAIT_EXCEEDED;
+    /// The `provider_code` values the runner writes itself on account of
+    /// its compaction provider. A provider's own `refuse` code is written
+    /// as given.
+    pub const PROVIDER_CODES: &[&str] = &[COMPACTION_UNAVAILABLE, COMPACTION_WAIT_EXCEEDED];
 }
 
 #[cfg(test)]
@@ -135,6 +143,22 @@ mod tests {
                 refuse_codes::retryable(code),
                 case["retryable"].as_bool(),
                 "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn runner_provider_codes_match_the_vectors_and_the_runner_role() {
+        let file = vectors::load("errors.json");
+        let listed: Vec<&str> = vectors::cases(&file, "runner_provider_codes")
+            .iter()
+            .map(|case| case.as_str().unwrap())
+            .collect();
+        assert_eq!(listed, runner_codes::PROVIDER_CODES);
+        for code in runner_codes::PROVIDER_CODES {
+            assert!(
+                cortexkit_role_llm_runner::errors::provider_codes::CODES.contains(code),
+                "{code} is not an llm-runner/v1 provider code"
             );
         }
     }

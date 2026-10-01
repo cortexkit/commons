@@ -96,18 +96,18 @@ impl CompactionMessage {
 
     /// The `source` the runner's model view (`llm-runner/v1`'s
     /// `EntrySource`) gives each replacement message of this
-    /// CompactionMessage once it is applied: its id, its version and the
-    /// inclusive ordinals of its range. `None` for an empty range, which
-    /// inclusive ordinals cannot express (see the contract's Appendix A).
+    /// CompactionMessage once it is applied: its id, its version and its
+    /// half-open range, `from_ordinal` = `range.from` and `to_ordinal` =
+    /// `range.to`. An empty range is an insertion before `from_ordinal`, so
+    /// Setup's usual head is `[0, 0)`. `None` for a message that fails
+    /// [`CompactionMessage::check`], which the runner never applies.
     pub fn model_view_source(&self) -> Option<EntrySource> {
-        if self.range.is_empty() {
-            return None;
-        }
+        self.check().ok()?;
         Some(EntrySource::Replacement {
             compaction_id: self.compaction_id.clone(),
             version: self.version,
-            first_ordinal: self.range.from,
-            last_ordinal: self.range.to - 1,
+            from_ordinal: self.range.from,
+            to_ordinal: self.range.to,
         })
     }
 }
@@ -236,6 +236,8 @@ mod tests {
                         source,
                         "{name}"
                     );
+                    // An empty range is the runner's insertion, nothing else is.
+                    assert_eq!(source.is_insertion(), message.range.is_empty(), "{name}");
                     // The runner's own page check accepts the entry.
                     let page = ModelPage::new("lin", vec![ModelEntry::new(source, Value::Null)])
                         .with_compaction(message.compaction_id.clone(), message.version);

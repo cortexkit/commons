@@ -10,5 +10,9 @@
     {"code": "misconfigured", "retryable": false},
     {"code": "history_unreadable", "retryable": true},
     {"code": "acme_own_code", "retryable": null}
+  ],
+  "runner_provider_codes": [
+    "compaction_unavailable",
+    "compaction_wait_exceeded"
   ]
 }

@@ -235,7 +235,7 @@
   ],
   "model_view": [
     {
-      "name": "a non-empty range maps to inclusive ordinals",
+      "name": "a non-empty range keeps its half-open ends",
       "compaction": {
         "compaction_id": "mc:snap-118",
         "version": 7,
@@ -249,18 +249,56 @@
         "kind": "replacement",
         "compaction_id": "mc:snap-118",
         "version": 7,
-        "first_ordinal": 3,
-        "last_ordinal": 40
+        "from_ordinal": 3,
+        "to_ordinal": 41
       }
     },
     {
-      "name": "an empty range has no inclusive ordinals",
+      "name": "setup's head: an empty range at 0 is an insertion before every message",
       "compaction": {
         "compaction_id": "mc:head-1",
         "version": 1,
         "range": {
           "from": 0,
           "to": 0
+        },
+        "replacement": []
+      },
+      "source": {
+        "kind": "replacement",
+        "compaction_id": "mc:head-1",
+        "version": 1,
+        "from_ordinal": 0,
+        "to_ordinal": 0
+      }
+    },
+    {
+      "name": "an empty range later in the lineage inserts before its ordinal",
+      "compaction": {
+        "compaction_id": "mc:note-4",
+        "version": 4,
+        "range": {
+          "from": 12,
+          "to": 12
+        },
+        "replacement": []
+      },
+      "source": {
+        "kind": "replacement",
+        "compaction_id": "mc:note-4",
+        "version": 4,
+        "from_ordinal": 12,
+        "to_ordinal": 12
+      }
+    },
+    {
+      "name": "an inverted range is never applied, so it has no source",
+      "compaction": {
+        "compaction_id": "c",
+        "version": 1,
+        "range": {
+          "from": 9,
+          "to": 4
         },
         "replacement": []
       },

@@ -101,9 +101,13 @@ with this document.
   is recorded before the first model call; once recorded, Setup never runs
   again for the session and nothing replaces its initial view except a
   later CompactionMessage.
-- [pinned] If Setup fails or times out, no model call is made and the run
-  ends `error` with a `provider_code`. The next send calls Setup again,
-  because no initial view was recorded. So a provider answers Setup for a
+- [pinned] If Setup fails or times out with no answer, no model call is
+  made and the run ends `error` with `provider_code`
+  `compaction_unavailable`, `llm-runner/v1`'s code, which this crate
+  re-exports (`errors::runner_codes::COMPACTION_UNAVAILABLE`). A Setup
+  answered `refuse` ends it with the provider's own `code` instead (below).
+  Either way the next send calls Setup again, because no initial view was
+  recorded. So a provider answers Setup for a
   session it has seen before, and its answer is well formed whatever it
   answered last time (kill point `SetupRecorded`).
 - [pinned] The request (`SetupRequest`) carries `session`, `request_id`, the
@@ -115,8 +119,9 @@ with this document.
   initial, stability?, call_when?}` or `{answer: "refuse", request_id, code,
   reason, retryable}`.
   - `initial` is a CompactionMessage (§8). Usually its range is empty at the
-    start of the lineage, `{from: 0, to: 0}`: the provider's head goes
-    before every message. A provider with no head returns an empty
+    start of the lineage, `{from: 0, to: 0}`: the provider's head is
+    inserted before every message, and the model view shows it as the
+    insertion `[0, 0)` (§12). A provider with no head returns an empty
     replacement.
   - `stability` ranks the provider's own messages: `index` is a position in
     every CompactionMessage's `replacement`, and a higher `rank` changes
@@ -235,11 +240,12 @@ The status (`StepStatus`) carries:
 - [pinned] It replaces one contiguous range of messages. The replacement
   stands in for the range; messages before the range are not sent; messages
   from its end onward are sent as written.
-- [open: Q3] The range is half-open over ordinals of the request's lineage:
-  `from` included, `to` excluded. `from == to` replaces nothing and inserts
-  the replacement before `to`, so `{from: 0, to: 0}` puts it before every
-  message. `to` may be one past the newest message (no raw tail), never
-  more.
+- [pinned] The range is half-open over ordinals of the request's lineage:
+  `from` included, `to` excluded, the same convention as the model view's
+  `from_ordinal` and `to_ordinal` (§12). `from == to` replaces nothing and
+  inserts the replacement before `to`, so `{from: 0, to: 0}` puts it before
+  every message. `to` may be one past the newest message (no raw tail),
+  never more. Only `from > to` is malformed (`range_inverted`).
 - [pinned] `to` never separates a tool call from its result. The runner
   checks this with the rest of its structural checks (roles, pairing over the
   replacement and the raw tail together, no tool-call id outside the range,
@@ -270,10 +276,14 @@ The status (`StepStatus`) carries:
 
 - [pinned] Before each call the runner durably records the id of the
   request it issues, its newest, and the request carries it.
-- [pinned] The runner acts on an answer only if it names the newest issued
-  request (`fence::dispose`). This holds for every answer: a late `refuse`
-  never ends a run that moved on, a late `wait` never holds a step, a late
-  `noop` never moves the cursor.
+- [pinned] An answer applies only if it names the newest issued request
+  (`fence::dispose`). Any other answer, including a late one, is recorded
+  and never applied: not at the next step boundary, not when the fresh
+  request's answer is slow, and not when its version is higher. This holds
+  for every answer: a late `refuse` never ends a run that moved on, a late
+  `wait` never holds a step, a late `noop` never moves the cursor. The
+  provider's answer to the fresh request carries its content, at a higher
+  version.
 - [pinned] A CompactionMessage that passes the fence applies only if it is
   well formed (§8) and its version is higher than the last applied. A
   delayed answer from before a provider restart, even one with a higher
@@ -293,7 +303,7 @@ The status (`StepStatus`) carries:
 
 | Reason | When |
 |---|---|
-| `superseded_request` | the answer names a request other than the newest issued |
+| `superseded_request` | the answer names a request other than the newest issued, whether an earlier one or one never issued |
 | `range_inverted` | the CompactionMessage's `from` is above its `to` |
 | `stale_version` | its version is not higher than the last applied |
 | `range_beyond_newest` | `to` is past one beyond the request's newest message |
@@ -369,18 +379,23 @@ role's ids show up in it.
   with `view: "model"` as `ModelPage {messages: [ModelEntry {source,
   message}], lineage_id?, next_from_ordinal?, head?, compaction_id?,
   version?}`. Each replacement message has `source: {kind: "replacement",
-  compaction_id, version, first_ordinal, last_ordinal}` (`EntrySource`),
+  compaction_id, version, from_ordinal, to_ordinal}` (`EntrySource`),
   and each raw message `source: {kind: "message", ordinal, mid}`. An
   unknown `source.kind` fails to decode; it is not skipped. Tail and range
   reads only; `after_mid` is refused `invalid_params {field: "view"}`.
+  This crate imports `EntrySource` from the runner's crate and defines no
+  source kind of its own.
 - [pinned] The page's `compaction_id` and `version` are those of the last
   applied CompactionMessage, both absent before any applied.
-- [pinned] For a CompactionMessage with range `[from, to)`, a replacement's
-  `first_ordinal` is `from` and `last_ordinal` is `to − 1`
+- [pinned] For a CompactionMessage with range `{from, to}`, each
+  replacement message's source is `{kind: "replacement", compaction_id,
+  version, from_ordinal: from, to_ordinal: to}`, the same half-open range
   (`CompactionMessage::model_view_source`, which builds the runner crate's
   `EntrySource`).
-- [open: Q10] An empty range has no inclusive ordinals, and Setup's usual
-  initial message has one. See Appendix A.
+- [pinned] An empty range is an insertion: `from_ordinal == to_ordinal`,
+  placed before that ordinal and covering no transcript message. Setup's
+  usual head is `[0, 0)`. There is no separate source kind for inserted
+  messages.
 
 ## 13. Purity and identity
 
@@ -423,6 +438,7 @@ treats it as a terminal refusal of that one request.
 | `invalid_params {field: "plan.compaction_item"}` | admission, on a runner without the `compaction` group |
 | `not_session_compaction_provider` | a `compaction.ready` whose route caller is not `plan.compaction_item.provider`, or for a session without a compaction item |
 | `invalid_params {field}` | a malformed `compaction.ready` |
+| `compaction_unavailable` (a `provider_code`) | Setup failed or timed out with no answer (§4) |
 | `compaction_wait_exceeded` (a `provider_code`) | a wait reached the cap and the request could not be shown to fit |
 
 ## 15. Decoding
@@ -497,8 +513,8 @@ serves `session.read` from a scripted transcript, and receives
 | `crash_at_<point>` for each point in §16 | §16 |
 
 Runner-side rules no live provider can exercise (the fence, an unknown
-answer, an empty range in the model view) are tested against the vectors in
-this crate.
+answer, the model-view source of a range, empty or not) are tested against
+the vectors in this crate.
 
 Verdict, as for `tool-provider/v1`: a case whose requirements the subject
 does not declare is skipped, never passed; a run fails if any case fails or
@@ -518,8 +534,9 @@ if no kill ended a real process.
 
 ## Open questions
 
-Each open question lists the options seen and the draft's choice. A settled
-question keeps its number and records the decision.
+Each open question lists the options seen and the draft's choice. A
+question keeps its number when it is settled and moves to "Settled
+questions" below, with the decision.
 
 - **Q1. The envelope and the ready reply.** (a) **draft:** `{method,
   params}`, as `llm-runner/v1` settled for its own ops, and an empty object
@@ -528,16 +545,9 @@ question keeps its number and records the decision.
 - **Q2. Names.** **draft:** ops `compaction.setup` and `compaction.step`;
   answers `noop`, `compaction_message`, `wait`, `refuse` (snake_case, as the
   hook names are), and `ready` for Setup.
-- **Q3. Range ends.** (a) **draft:** half-open ordinals. Ordinals are never
-  reused within a lineage, they can name an empty range and a range running
-  to the end, and the model view already speaks ordinals. (b) message ids,
-  as the design's §5.4 says; an empty range and "no raw tail" then need
-  special values.
 - **Q4. Who mints `compaction_id`.** Its type is settled: an opaque
   string. (a) **draft:** the provider mints it, as its own content name;
   (b) the runner, at recording.
-- **Q5. `request_id`.** Settled with `llm-runner/v1`: an opaque string,
-  compared only for equality. `version` is settled as `u64`.
 - **Q6. A cap on the status's messages.** (a) **draft:** a byte cap with
   `more`, the cursor advancing only to the last message sent; (b) every
   message since the cursor, uncapped. A lineage change on a long session
@@ -549,24 +559,31 @@ question keeps its number and records the decision.
 - **Q9. Unknown `call_when` kinds and model patterns.** **draft:** a runner
   meeting an unknown kind calls on every step. Pattern matching is unset:
   exact id or a trailing `*`.
-- **Q10. Empty ranges in the model view.** `EntrySource::Replacement`
-  with inclusive `first_ordinal` and `last_ordinal` cannot express Setup's
-  usual empty range, and the runner's page check refuses `last_ordinal`
-  below `first_ordinal`. Options: (a) the runner shows an empty-range
-  replacement with `first_ordinal` = `last_ordinal` = the ordinal it is
-  inserted before, and the page's `compaction_id`/`version` say it is a
-  head, not a stand-in for that message; (b) a third `source` kind for
-  inserted messages; (c) half-open ordinals in the model view. **draft:**
-  (b), `{kind: "inserted", compaction_id, version, before_ordinal}`. The
-  runner role decides; this crate builds no source for an empty range
-  until it does.
-- **Q11. Late answers.** Settled by the room: the fence is strict (§9). An
-  answer to an older request is recorded and never applied; the provider's
-  answer to the fresh request carries the content at a higher version.
-- **Q12. The `provider_code` when Setup times out or fails without an
-  answer.** The runner role names it. Proposed: `compaction_unavailable`.
 - **Q13. The stability shape.** **draft:** an array of `{index, rank}`.
 - **Q14. Role-named `refuse` codes.** **draft:** the four in §11.
+
+## Settled questions
+
+- **Q3. Range ends.** Settled: half-open ordinals, `from` included and `to`
+  excluded (§8). Ordinals are never reused within a lineage, they can name
+  an empty range and a range running to the end, and the model view speaks
+  the same half-open ordinals (§12).
+- **Q5. `request_id`.** Settled with `llm-runner/v1`: an opaque string,
+  compared only for equality. `version` is settled as `u64`.
+- **Q10. Empty ranges in the model view.** Settled in the runner role: the
+  model view's replacement source is half-open, `{kind: "replacement",
+  compaction_id, version, from_ordinal, to_ordinal}`, and an empty range is
+  an insertion before `from_ordinal`; Setup's head is `[0, 0)` (§12). This
+  role defines no source kind of its own: the earlier draft's `inserted`
+  kind is dropped, and `EntrySource` is imported from the runner crate.
+- **Q11. Late answers.** Settled by the room: the fence is strict (§9). An
+  answer applies only if it names the newest issued request; any other
+  answer, including a late one, is recorded and never applied. The
+  provider's answer to the fresh request carries the content at a higher
+  version.
+- **Q12. The `provider_code` when Setup times out or fails without an
+  answer.** Settled in the runner role: `compaction_unavailable`, one of
+  `llm-runner/v1`'s provider codes, re-exported here (§4, §14.2).
 - **Q15. Pairing.** Settled: compaction is a runner capability group, all
   or nothing; a runner without it refuses a compaction item at admission
   with `invalid_params {field: "plan.compaction_item"}` (§3).
@@ -578,46 +595,60 @@ question keeps its number and records the decision.
   {messages: [ModelEntry {source, message}], lineage_id?,
   next_from_ordinal?, head?, compaction_id?, version?}`; messages `{kind:
   "message", ordinal, mid}`, replacements `{kind: "replacement",
-  compaction_id, version, first_ordinal, last_ordinal}`; an unknown kind
+  compaction_id, version, from_ordinal, to_ordinal}`; an unknown kind
   fails to decode; tail and range reads only; `after_mid` refused with
   `invalid_params {field: "view"}` (§12).
 
 ## Appendix A. Cross-check with `llm-runner/v1`
 
-Checked against `llm-runner/v1` at commons commit 90b9c82. Paths are in this
-repository. Every field this contract shares with that role's §8 and §11.1
-agrees: the `compaction` group and its admission refusal
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:432-435`,
+Checked against `llm-runner/v1` at commons commit 5262544. Paths are in this
+repository. Every field this contract shares with that role's §8, §11.1
+and §12.2 agrees: the `compaction` group and its admission refusal
+(`crates/cortexkit-role-llm-runner/CONTRACT.md:452-455`,
 `crates/cortexkit-role-llm-runner/src/lib.rs:114`), `compaction.ready
 {session, request_id}` and its check
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:504-518`,
-`crates/cortexkit-role-llm-runner/src/compaction.rs:33-40`), the Setup,
-cursor and fence rules (`crates/cortexkit-role-llm-runner/CONTRACT.md:486-501`),
-and the model view's `ModelPage` and `EntrySource`
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:281-317`,
-`crates/cortexkit-role-llm-runner/src/read.rs:263-320`). This crate takes
+(`crates/cortexkit-role-llm-runner/CONTRACT.md:524-538`,
+`crates/cortexkit-role-llm-runner/src/compaction.rs:33-41`), the Setup,
+cursor and fence rules (`crates/cortexkit-role-llm-runner/CONTRACT.md:506-521`),
+the model view's `ModelPage` and its half-open `EntrySource`
+(`crates/cortexkit-role-llm-runner/CONTRACT.md:281-330`,
+`crates/cortexkit-role-llm-runner/src/read.rs:261-350`), and the
+`provider_code`s `compaction_unavailable` and `compaction_wait_exceeded`
+(`crates/cortexkit-role-llm-runner/CONTRACT.md:617-628`,
+`crates/cortexkit-role-llm-runner/src/errors.rs:175-191`). This crate takes
 those names and types from the runner crate rather than restating them.
+
+Resolved since the previous draft:
+
+- **Empty ranges in the model view.** The runner's replacement source is
+  now half-open, `[from_ordinal, to_ordinal)`, and an empty range is an
+  insertion (`crates/cortexkit-role-llm-runner/CONTRACT.md:295-300`,
+  `crates/cortexkit-role-llm-runner/src/read.rs:312-321`). Setup's head maps
+  to `[0, 0)` (Q10).
+- **A `provider_code` for a Setup that fails without an answer.** The
+  runner names `compaction_unavailable`
+  (`crates/cortexkit-role-llm-runner/src/errors.rs:176-177`), which this
+  crate re-exports (Q12).
+
 What remains:
 
-1. **An empty range has no model-view source.** The runner's replacement
-   source names an inclusive range `first_ordinal..=last_ordinal`
-   (`crates/cortexkit-role-llm-runner/CONTRACT.md:295-298`), and its page
-   check refuses `last_ordinal` below `first_ordinal`
-   (`crates/cortexkit-role-llm-runner/src/read.rs:358-361,447-448`). Setup's
-   usual initial CompactionMessage replaces an empty range (this document
-   §4, §12; `src/answer.rs` `model_view_source` returns `None` for it). So
-   a runner cannot show a session's head in its model view today. Q10
-   proposes a fix; the runner role decides.
-2. **No `provider_code` for a Setup that fails without an answer.** The
-   runner names only `compaction_wait_exceeded` and `pre_user_unavailable`
-   (`crates/cortexkit-role-llm-runner/CONTRACT.md:597-602`,
-   `crates/cortexkit-role-llm-runner/src/errors.rs:175-182`). The design
-   requires a `provider_code` when Setup fails or times out (r7.3 §5.1);
-   this document §4 and Q12.
-3. **The plan's provider field is provisional on both sides.**
-   `crates/cortexkit-role-llm-runner/CONTRACT.md:436-439` marks
+1. **The scope of `compaction_unavailable`.** The runner's table gives it
+   for "Setup or a compaction call" that failed or timed out with no answer
+   (`crates/cortexkit-role-llm-runner/CONTRACT.md:623`). In this role only
+   Setup ends a run that way: a step call that fails or times out is
+   recorded and the step goes on with the last applied CompactionMessage,
+   which always exists (§7). Wording only, unless the runner role means a
+   step call to end a run as well.
+2. **The plan's provider field is provisional on both sides.**
+   `crates/cortexkit-role-llm-runner/CONTRACT.md:456-459` marks
    `plan.compaction_item.provider` provisional; this document §3 and §10
    follow it and carry the same marker.
+3. **The fence's wording.** The runner role states the fence for a
+   CompactionMessage (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
+   and for `compaction.ready` (`:530-533`). This document states it for
+   every answer: a late `noop`, `wait` or `refuse` is recorded and never
+   acted on either (§9). No disagreement; the runner role is narrower in
+   what it spells out.
 4. **Not a divergence, a concern.** Versions and ordinals are `u64` on both
    sides. JSON readers that use doubles (JavaScript) lose exactness above
    2^53 − 1, so a TypeScript provider must read them as big integers. This
@@ -632,12 +663,12 @@ Against the design itself (paths in the magic-context repository,
    the owner corrections add that a late answer applies when the fresh
    request's answer does not arrive in time
    (`ck-extensibility-r7.3-errata.md:18`). The room's ruling, this document
-   §9 and `llm-runner/v1` (`crates/cortexkit-role-llm-runner/CONTRACT.md:498-501`)
+   §9 and `llm-runner/v1` (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
    apply only an answer to the newest issued request. The design text is
    the one to change.
 6. **Range ends.** r7.3 §5.4 (`ck-extensibility-design-r7.3.md:725`) names
-   both ends by message id. This document uses ordinals (Q3), as the
-   runner's model view does.
+   both ends by message id. This document uses half-open ordinals (Q3), as
+   the runner's model view does.
 ## Appendix B. Gaps in Magic Context today
 
 Where `ck-mc` (`crates/mc-module` in the magic-context repository) differs
