@@ -44,11 +44,18 @@ to them. Nothing here names a particular implementation.
 
 ## 3. `tool.catalog`
 
-- Request: `{params, composition?, system_text?, digest_only?}`
+- Request: `{params, preset?, composition?, system_text?, digest_only?}`
   (`CatalogRequest`).
   - `params` is the plan item's params: the shared vocabulary (`behavior`,
     `scope`, `tool_descs`, `exclude`) plus the provider's own axes. An unknown
     value is refused, never guessed.
+  - `preset` is the plan item's named variant, defined by the provider. It
+    sits beside `params`, not inside it, so it never collides with a
+    provider's own axis, and mirrors `system_text`'s `{preset, params}`.
+    Absent means the provider's default variant; an encoder omits the member
+    rather than sending `null`. A preset the provider does not define is
+    refused as `invalid_request {field: "preset"}`, never guessed, like an
+    unknown `params` value (`test-vectors/tool-provider-v1/catalog-requests.json`).
   - `composition` is the session's composition, carried verbatim as an opaque
     JSON object. Providers never interpret it beyond resolving their own text
     against it. Absent on a preflight call.
@@ -95,8 +102,10 @@ to them. Nothing here names a particular implementation.
     defined only by this document) or namespaced (`acme:code.callgraph/v1`,
     free for anyone). Data in this answer only.
   - `input_schema` is the argument schema; `description` its description.
-- The answer is a pure function of its inputs (the plan item, the
-  composition, user and project configuration, host facts). Scope, owner and
+- The answer is a pure function of its inputs (the plan item's preset and
+  params, the composition, user and project configuration, host facts), so
+  `catalog_digest` covers the preset: a `digest_only` request with the same
+  preset carries the full answer's `catalog_digest`. Scope, owner and
   agent on the route are attribution only. Tool names and schemas never depend
   on the composition; descriptions and system text may. The same inputs give
   the same bytes.
@@ -317,7 +326,7 @@ CI against its real module over a real route; never against a double.
 | Case | Requires |
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
-| `catalog_schemas_flat`, `catalog_schema_digest_stable`, `catalog_digest_only` | — |
+| `catalog_schemas_flat`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
 | `terminal_frame_on_cancel` | `cancellation` |

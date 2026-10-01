@@ -1,0 +1,49 @@
+{
+  "_about": "tool.catalog request bodies and the preset rule. `round_trip` requests decode and re-encode to the same JSON; `absent` names members the encoding must omit, so a request without a preset never carries `preset: null`. `refused` pairs a well-formed request whose preset the provider does not define with the ERROR body the provider answers: invalid_request naming `preset`, never a guess at a variant.",
+  "round_trip": [
+    {
+      "name": "no preset",
+      "request": {
+        "params": {
+          "max_results": 50
+        }
+      },
+      "absent": [
+        "preset",
+        "composition",
+        "system_text",
+        "digest_only"
+      ]
+    },
+    {
+      "name": "default preset with params",
+      "request": {
+        "params": {
+          "max_results": 50
+        },
+        "preset": "default"
+      },
+      "absent": [
+        "composition",
+        "system_text",
+        "digest_only"
+      ]
+    }
+  ],
+  "refused": [
+    {
+      "name": "unknown preset",
+      "request": {
+        "params": {},
+        "preset": "cortexkit-conformance-undefined-preset"
+      },
+      "error": {
+        "code": "invalid_request",
+        "message": "m",
+        "detail": {
+          "field": "preset"
+        }
+      }
+    }
+  ]
+}

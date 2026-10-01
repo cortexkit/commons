@@ -117,7 +117,9 @@ pub trait ToolProviderSubject: Harness {
     fn scoped_principals(&self) -> Option<ScopedPrincipals>;
 
     /// The arguments of the `tool.catalog` request: the plan item's params
-    /// this provider serves (a preset, for instance).
+    /// this provider serves and, optionally, a preset it defines. The
+    /// `catalog_unknown_preset_refused` case sends these arguments with the
+    /// preset replaced by one no provider defines, and expects a refusal.
     fn catalog_arguments(&self) -> Value;
 
     /// A call that completes promptly and successfully. Its tool must be in

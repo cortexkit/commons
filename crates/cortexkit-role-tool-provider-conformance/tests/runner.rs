@@ -102,6 +102,18 @@ async fn a_root_level_union_fails_the_flatness_case() {
 }
 
 #[tokio::test]
+async fn guessing_a_variant_for_an_undefined_preset_fails_the_unknown_preset_case() {
+    let report = run(&FakeSubject::new(Defects {
+        accept_any_preset: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_unknown_preset_refused");
+    assert!(reason.contains("not an error frame"), "{reason}");
+    assert_passed(&report, "catalog_digest_only");
+}
+
+#[tokio::test]
 async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.remove(&Capability::ApprovalExecution);

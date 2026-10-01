@@ -35,7 +35,7 @@ use cortexkit_role_tool_provider_conformance::{
     },
     wire::{
         call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
-        catalog::schema_digest,
+        catalog::{schema_digest, CatalogRequest},
         errors,
         late_results::{
             check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
@@ -59,6 +59,8 @@ pub const SLOW: &str = "sleep";
 pub const HELD: &str = "effect";
 pub const DISABLED: &str = "danger";
 const GENERATION: &str = "fake-gen-1";
+/// The only preset the fake defines: its default variant.
+const DEFAULT_PRESET: &str = "default";
 
 /// Deliberate contract breaks: each field makes the fake violate one rule a
 /// runner case must catch.
@@ -74,6 +76,9 @@ pub struct Defects {
     pub root_union_schema: bool,
     /// Acks are accepted but forgotten, so acked entries are served again.
     pub forget_acks: bool,
+    /// `tool.catalog` answers with its default variant for any preset,
+    /// including one it does not define.
+    pub accept_any_preset: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -327,16 +332,28 @@ impl Module {
         tools
     }
 
-    fn catalog(&self, arguments: &Value) -> Value {
-        if arguments["digest_only"] == json!(true) {
-            return json!({ "generation": GENERATION, "catalog_digest": "fake-catalog-1" });
+    fn catalog(&self, arguments: &Value) -> Result<Value, ErrorBody> {
+        let request: CatalogRequest = serde_json::from_value(arguments.clone())
+            .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
+        // An absent preset means the default variant; any other name is
+        // refused rather than mapped to the closest variant.
+        if let Some(preset) = request.preset.as_deref() {
+            if preset != DEFAULT_PRESET && !self.defects.accept_any_preset {
+                return Err(errors::invalid_request(
+                    "preset",
+                    format!("no preset named {preset}"),
+                ));
+            }
         }
-        json!({
+        if request.digest_only == Some(true) {
+            return Ok(json!({ "generation": GENERATION, "catalog_digest": "fake-catalog-1" }));
+        }
+        Ok(json!({
             "generation": GENERATION,
             "catalog_digest": "fake-catalog-1",
             "capabilities": { "late_results": true },
             "tools": self.tools(),
-        })
+        }))
     }
 
     fn handle(&self, stamp: &RouteStamp, body: Value) -> Result<Vec<ObservedFrame>, RouteFailure> {
@@ -383,7 +400,7 @@ impl Module {
         }
         Ok(match name {
             ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(Self::describe())],
-            ops::TOOL_CATALOG => vec![ObservedFrame::Response(self.catalog(&request.arguments))],
+            ops::TOOL_CATALOG => reply(self.catalog(&request.arguments)),
             QUICK | SLOW => vec![ObservedFrame::Response(
                 json!({ "content": request.arguments }),
             )],
@@ -705,7 +722,7 @@ impl ToolProviderSubject for FakeSubject {
     }
 
     fn catalog_arguments(&self) -> Value {
-        json!({ "params": Map::new() })
+        json!({ "params": Map::new(), "preset": DEFAULT_PRESET })
     }
 
     fn quick_call(&self) -> CallSpec {

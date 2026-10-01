@@ -45,6 +45,12 @@ const SCHEMA_PIN_VECTORS: &str = include_str!("../vectors/schema-pin.json");
 /// A tool name no provider serves, for the refusal case.
 const UNSERVED_TOOL: &str = "conformance.not-a-served-tool";
 
+/// A preset no provider defines, for the unknown-preset case.
+const UNDEFINED_PRESET: &str = "cortexkit-conformance-undefined-preset";
+
+/// The `tool.catalog` request member naming the plan item's preset.
+const PRESET_FIELD: &str = "preset";
+
 /// The run could not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SetupError {
@@ -220,6 +226,7 @@ where
             "catalog_schemas_flat" => self.catalog_schemas_flat().await,
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
+            "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
             "catalog_disabled_tool_absent" => self.catalog_disabled_tool_absent().await,
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
@@ -443,6 +450,17 @@ where
             ));
         }
         Ok(())
+    }
+
+    async fn catalog_unknown_preset_refused(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let mut arguments = self.subject.catalog_arguments();
+        arguments[PRESET_FIELD] = json!(UNDEFINED_PRESET);
+        let error = expect_error(
+            &format!("tool.catalog with preset {UNDEFINED_PRESET:?}"),
+            request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
+        )?;
+        expect_invalid_field(&error, PRESET_FIELD)
     }
 
     fn disabled_tool(&self) -> Result<String, String> {

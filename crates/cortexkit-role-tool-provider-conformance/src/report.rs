@@ -62,6 +62,11 @@ pub const CASES: &[CaseSpec] = &[
         checks: "a digest_only answer carries the full answer's generation and catalog_digest, and no tools",
     },
     CaseSpec {
+        name: "catalog_unknown_preset_refused",
+        requires: &[],
+        checks: "a tool.catalog request naming a preset the provider does not define is refused as invalid_request {field: \"preset\"}, never answered with a guessed variant",
+    },
+    CaseSpec {
         name: "catalog_disabled_tool_absent",
         requires: &[DisableTool],
         checks: "a tool disabled by its exact name is absent from tool.catalog",

@@ -34,13 +34,24 @@ pub const AUDIENCE_HOST: &str = "host";
 pub const ROOT_UNION_KEYWORDS: &[&str] = &["anyOf", "oneOf", "allOf"];
 
 /// The arguments of a `tool.catalog` request.
+///
+/// Non-exhaustive so a later optional member is an additive change: build one
+/// with [`CatalogRequest::new`] and the `with_*` setters, or decode one.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct CatalogRequest {
     /// The plan item's params: the shared vocabulary (`behavior`, `scope`,
     /// `tool_descs`, `exclude`) plus any axes of the provider's own. A value
     /// the provider does not know is refused, never guessed.
     #[serde(default)]
     pub params: Map<String, Value>,
+    /// The plan item's named variant, defined by the provider. Absent means
+    /// the provider's default variant. A preset the provider does not define
+    /// is refused as `invalid_request {field: "preset"}`, never guessed. It
+    /// sits beside `params`, not inside it, so it can never collide with one
+    /// of the provider's own param axes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
     /// The session's composition, carried verbatim as an opaque JSON object.
     /// Providers never interpret it beyond resolving their own text against
     /// it. Absent on a preflight call.
@@ -52,6 +63,42 @@ pub struct CatalogRequest {
     /// Ask for `{generation, catalog_digest}` only, for a cheap change check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest_only: Option<bool>,
+}
+
+impl CatalogRequest {
+    /// A request for the plan item's `params`, with every optional member
+    /// absent.
+    pub fn new(params: Map<String, Value>) -> Self {
+        Self {
+            params,
+            ..Self::default()
+        }
+    }
+
+    /// Name the plan item's preset.
+    pub fn with_preset(mut self, preset: impl Into<String>) -> Self {
+        self.preset = Some(preset.into());
+        self
+    }
+
+    /// Carry the session's composition.
+    pub fn with_composition(mut self, composition: Map<String, Value>) -> Self {
+        self.composition = Some(composition);
+        self
+    }
+
+    /// Fetch the provider's system-prompt item alongside the catalog.
+    pub fn with_system_text(mut self, system_text: SystemTextItem) -> Self {
+        self.system_text = Some(system_text);
+        self
+    }
+
+    /// Ask for `{generation, catalog_digest}` only (`true`), or say
+    /// explicitly that the full answer is wanted (`false`).
+    pub fn with_digest_only(mut self, digest_only: bool) -> Self {
+        self.digest_only = Some(digest_only);
+        self
+    }
 }
 
 /// A system-prompt plan item fetched alongside the catalog.
@@ -350,7 +397,8 @@ mod tests {
     #[test]
     fn a_request_carries_the_composition_verbatim() {
         let request: CatalogRequest = serde_json::from_value(json!({
-            "params": {"preset": "main"},
+            "params": {},
+            "preset": "main",
             "composition": {"anything": [1, {"nested": true}]},
             "digest_only": true
         }))
@@ -359,6 +407,61 @@ mod tests {
             serde_json::to_value(&request).unwrap()["composition"],
             json!({"anything": [1, {"nested": true}]})
         );
+    }
+
+    #[test]
+    fn catalog_request_vectors_round_trip_and_omit_absent_members() {
+        let vectors = vectors::load("catalog-requests.json");
+        let cases = vectors["round_trip"].as_array().unwrap();
+        let params: Map<String, Value> =
+            serde_json::from_value(json!({"max_results": 50})).unwrap();
+        // The `round_trip` requests of `catalog-requests.json`, in its order,
+        // built with the constructor and setters, so the builder's output is
+        // checked against the recorded wire form too.
+        let built = [
+            CatalogRequest::new(params.clone()),
+            CatalogRequest::new(params).with_preset("default"),
+        ];
+        assert_eq!(cases.len(), built.len());
+        for (case, built) in cases.iter().zip(built) {
+            let name = &case["name"];
+            let decoded: CatalogRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            assert_eq!(decoded, built, "{name}");
+            let encoded = serde_json::to_value(&built).unwrap();
+            for member in case["absent"].as_array().unwrap() {
+                let member = member.as_str().unwrap();
+                assert!(
+                    !encoded.as_object().unwrap().contains_key(member),
+                    "{name}: the encoding carries absent member {member}: {encoded}"
+                );
+            }
+            assert_eq!(encoded, case["request"], "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_preset_is_well_formed_and_refused_by_naming_it() {
+        // A preset is the provider's to define, so the wire accepts any
+        // string; the provider refuses one it does not define, naming the
+        // field, with exactly the error body `catalog-requests.json` records.
+        let vectors = vectors::load("catalog-requests.json");
+        for case in vectors["refused"].as_array().unwrap() {
+            let name = &case["name"];
+            let request: CatalogRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            assert!(request.preset.is_some(), "{name}");
+            let error: subc_protocol::ErrorBody =
+                serde_json::from_value(case["error"].clone()).unwrap();
+            assert_eq!(
+                crate::errors::invalid_request_field(&error),
+                Some("preset"),
+                "{name}"
+            );
+            assert_eq!(
+                serde_json::to_value(crate::errors::invalid_request("preset", "m")).unwrap(),
+                case["error"],
+                "{name}"
+            );
+        }
     }
 
     #[test]
