@@ -1,0 +1,40 @@
+{
+  "accepted": [
+    {"name": "tail: no cursor", "mode": "tail", "request": {}},
+    {"name": "tail with a limit", "mode": "tail", "request": {"limit": 50}},
+    {"name": "tail checked against a lineage", "mode": "tail", "request": {"lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"}},
+    {"name": "range from an ordinal", "mode": "range", "request": {"from_ordinal": 200, "limit": 100}},
+    {"name": "range with a byte cap", "mode": "range", "request": {"from_ordinal": 0, "max_bytes": 262144}},
+    {"name": "range checked against a lineage", "mode": "range", "request": {"from_ordinal": 12, "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"}},
+    {"name": "after a message id", "mode": "after", "request": {"after_mid": "m41", "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"}},
+    {"name": "with originals", "mode": "tail", "request": {"include_originals": true}},
+    {"name": "model view", "mode": "tail", "request": {"view": "model"}},
+    {"name": "raw view named", "mode": "range", "request": {"from_ordinal": 3, "view": "raw"}}
+  ],
+  "refused": [
+    {
+      "name": "after_mid without lineage_id",
+      "field": "lineage_id",
+      "request": {"after_mid": "m41"},
+      "refusal": {"code": "invalid_params", "message": "after_mid requires lineage_id", "detail": {"field": "lineage_id"}}
+    },
+    {
+      "name": "after_mid with from_ordinal",
+      "field": "from_ordinal",
+      "request": {"after_mid": "m41", "lineage_id": "L", "from_ordinal": 3},
+      "refusal": {"code": "invalid_params", "message": "from_ordinal excludes after_mid", "detail": {"field": "from_ordinal"}}
+    },
+    {
+      "name": "misspelled cursor is refused, not read as a tail request",
+      "field": "fromOrdinal",
+      "request": {"fromOrdinal": 3},
+      "refusal": {"code": "invalid_params", "message": "unknown field fromOrdinal", "detail": {"field": "fromOrdinal"}}
+    },
+    {
+      "name": "unknown view",
+      "field": "view",
+      "request": {"view": "provider_bytes"},
+      "refusal": {"code": "invalid_params", "message": "view must be raw or model", "detail": {"field": "view"}}
+    }
+  ]
+}

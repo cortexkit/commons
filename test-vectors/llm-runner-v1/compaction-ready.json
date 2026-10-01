@@ -1,0 +1,8 @@
+{
+  "requests": [
+    {"name": "names its session", "request": {"session": "ses_01J9Z"}}
+  ],
+  "tolerated": [
+    {"name": "provider extras are ignored", "request": {"session": "ses_01J9Z", "version": 12}}
+  ]
+}

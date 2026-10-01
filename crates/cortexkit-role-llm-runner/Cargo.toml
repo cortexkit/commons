@@ -1,0 +1,24 @@
+# cortexkit-role-llm-runner — the wire contract of the `llm-runner/v1` role:
+# role.describe and its capability groups, the transcript reads, run results,
+# the subscription handoff, owner sends with a delivery mode, the session
+# baseline, error codes, the kill-point vocabulary its crash suite will use,
+# and CONTRACT.md, which says what is pinned and what is still open. Pure
+# serde plus small checks; no transport, no runtime.
+#
+# A DRAFT for design review: not published until the role's consumers have
+# reviewed CONTRACT.md. The conformance runner will live in a sibling
+# `-conformance` crate, so a runner's production build never pulls in the
+# suite.
+[package]
+name = "cortexkit-role-llm-runner"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit llm-runner/v1 role: role.describe, transcript reads, run results, subscriptions, owner sends and the session baseline."
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,34 @@
+{
+  "requests": [
+    {"name": "no fields", "request": {}}
+  ],
+  "refused_requests": [
+    {"name": "any field is refused", "request": {"limit": 1}}
+  ],
+  "answers": [
+    {
+      "name": "session with a completed last run",
+      "answer": {
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "last_ordinal": 499,
+        "head": {"wal_seq": 1203, "sub_index": 0},
+        "last_run_state": {"run_id": "run-7", "state": "completed"},
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "last run ended in error",
+      "answer": {
+        "lineage_id": "L2",
+        "last_ordinal": 12,
+        "head": {"wal_seq": 40, "sub_index": 1},
+        "last_run_state": {"run_id": "run-2", "state": "error", "reason": "provider_error"},
+        "updated_at": 1790000000500
+      }
+    },
+    {
+      "name": "empty session",
+      "answer": {"lineage_id": "L3", "updated_at": 1790000000000}
+    }
+  ]
+}

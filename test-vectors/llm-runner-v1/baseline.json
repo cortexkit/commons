@@ -1,0 +1,61 @@
+{
+  "requests": [
+    {"name": "no fields", "request": {}}
+  ],
+  "refused_requests": [
+    {"name": "any field is refused", "request": {"session": "s-1"}}
+  ],
+  "answers": [
+    {
+      "name": "not yet: the runner has not seen the session's first request",
+      "answer": {"state": "not_yet"}
+    },
+    {
+      "name": "fresh admission, nothing changed since",
+      "answer": {
+        "state": "ready",
+        "baseline": {
+          "items": [
+            {"provider": "prefrontal-core", "item": "system_text", "item_digest": "1111111111111111111111111111111111111111111111111111111111111111", "preflight_digest": "2222222222222222222222222222222222222222222222222222222222222222"},
+            {"provider": "aft", "item": "tools", "item_digest": "3333333333333333333333333333333333333333333333333333333333333333", "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+            {"provider": "magic-context", "item": "system_text", "item_digest": "5555555555555555555555555555555555555555555555555555555555555555", "preflight_digest": "6666666666666666666666666666666666666666666666666666666666666666"}
+          ],
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "tool_names": ["bash", "browser_use", "ctx_reduce", "edit", "read"],
+          "accepted_generation": 0,
+          "applied_generation": 0,
+          "rungs": {
+            "tools": ["on_prefix_rebuild", "on_system_rebuild", "on_history_rebuild", "immediately"],
+            "system_text": ["on_prefix_rebuild", "on_system_rebuild", "on_history_rebuild", "immediately"]
+          },
+          "session_capabilities": {"mid_session_appends": true, "ordered_hook_phases": true}
+        }
+      }
+    },
+    {
+      "name": "after a fold applied generation 3, with generation 4 pending",
+      "answer": {
+        "state": "ready",
+        "baseline": {
+          "items": [
+            {"provider": "aft", "item": "tools", "item_digest": "8888888888888888888888888888888888888888888888888888888888888888", "preflight_digest": "9999999999999999999999999999999999999999999999999999999999999999"}
+          ],
+          "absent_items": [{"provider": "vendor-guidance", "item": "system_text", "reason": "timeout"}],
+          "composition_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "tool_names": ["bash", "edit", "read"],
+          "effective": {"generation": 3, "applied_by": "fold", "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+          "accepted_generation": 4,
+          "applied_generation": 3,
+          "pending": {"generation": 4, "policy": "on_prefix_rebuild"},
+          "rungs": {"tools": ["on_prefix_rebuild", "immediately"], "system_text": ["on_prefix_rebuild", "on_system_rebuild", "immediately"]}
+        }
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "a caller other than the session's owner",
+      "refusal": {"code": "scope_owner_mismatch", "message": "only the session's owner may read its baseline"}
+    }
+  ]
+}

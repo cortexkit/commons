@@ -1,0 +1,30 @@
+{
+  "requests": [
+    {"name": "absent from attaches live", "attach": "live", "request": {}},
+    {"name": "from start", "attach": "start", "request": {"from": "start"}},
+    {"name": "live named", "attach": "live", "request": {"from": "live"}},
+    {"name": "after a page head, passed back verbatim", "attach": "after", "request": {"from": {"wal_seq": 1203, "sub_index": 0}}}
+  ],
+  "refused_requests": [
+    {"name": "unknown named attach point", "field": "from", "request": {"from": "newest"}},
+    {"name": "a bare number is not a position", "field": "from", "request": {"from": 1203}},
+    {"name": "misspelled from is refused, not read as live", "field": "From", "request": {"From": "start"}}
+  ],
+  "events": [
+    {
+      "name": "durable control event",
+      "durable": true,
+      "event": {"kind": "control", "cursor": {"wal_seq": 1204, "sub_index": 0}, "unit": {"type": "message", "ordinal": 500}}
+    },
+    {
+      "name": "best-effort display event",
+      "durable": false,
+      "event": {"kind": "display", "event": {"type": "text_delta", "text": "Al"}}
+    },
+    {
+      "name": "unknown kind is kept",
+      "durable": false,
+      "event": {"kind": "vendor_lane", "payload": [1, 2]}
+    }
+  ]
+}

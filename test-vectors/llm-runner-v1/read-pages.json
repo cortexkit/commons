@@ -1,0 +1,109 @@
+{
+  "pages": [
+    {
+      "name": "tail page of a longer session, stopped by count",
+      "stopped_early": false,
+      "page": {
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "messages": [
+          {"ordinal": 498, "mid": "m498", "message": {"role": "user", "content": [{"type": "text", "text": "and the tests?"}]}},
+          {"ordinal": 499, "mid": "m499", "message": {"role": "assistant", "content": [{"type": "text", "text": "All pass."}]}}
+        ],
+        "head": {"wal_seq": 1203, "sub_index": 0}
+      }
+    },
+    {
+      "name": "range page stopped by the byte cap",
+      "stopped_early": true,
+      "page": {
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "messages": [
+          {"ordinal": 0, "mid": "m0", "message": {"role": "user", "content": [{"type": "text", "text": "read the big file"}]}}
+        ],
+        "next_from_ordinal": 1,
+        "head": {"wal_seq": 1203, "sub_index": 0}
+      }
+    },
+    {
+      "name": "after page with run attribution and dispatch attribution",
+      "stopped_early": false,
+      "page": {
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "messages": [
+          {
+            "ordinal": 42,
+            "mid": "m42",
+            "message": {"role": "assistant", "content": [{"type": "tool_call", "id": "call_0", "name": "read"}, {"type": "tool_call", "id": "call_1", "name": "bash"}]},
+            "run": {"run_id": "run-7", "episode": "ep-3", "final": false},
+            "tool_calls": [
+              {"tool_call_id": "call_0", "call_key": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0:880", "dispatched_to": "aft", "indeterminate": false},
+              {"tool_call_id": "call_1", "call_key": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0:881", "dispatched_to": "aft", "indeterminate": true}
+            ]
+          },
+          {
+            "ordinal": 43,
+            "mid": "m43",
+            "message": {"role": "tool", "tool_call_id": "call_0", "content": "§1§ fn main() {}"},
+            "run": {"run_id": "run-7", "episode": "ep-3", "final": false},
+            "originals": [{"field": "content", "value": "fn main() {}", "provider": "magic-context"}]
+          }
+        ],
+        "head": {"wal_seq": 990, "sub_index": 2}
+      }
+    },
+    {
+      "name": "a denied call has no dispatch target",
+      "stopped_early": false,
+      "page": {
+        "lineage_id": "L2",
+        "messages": [
+          {
+            "ordinal": 5,
+            "mid": "m5",
+            "message": {"role": "assistant", "content": [{"type": "tool_call", "id": "call_0", "name": "bash"}]},
+            "run": {"run_id": "run-1", "episode": "ep-1", "final": false},
+            "tool_calls": [{"tool_call_id": "call_0", "indeterminate": false}]
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty transcript",
+      "stopped_early": false,
+      "page": {"lineage_id": "L3", "messages": []}
+    }
+  ],
+  "tolerated": [
+    {
+      "name": "runner extras on the page and on a message are ignored",
+      "page": {
+        "lineage_id": "L1",
+        "messages": [{"ordinal": 0, "mid": "m0", "message": {}, "badge": "x"}],
+        "lineage_state": {"state": "completed"},
+        "tools": []
+      }
+    }
+  ],
+  "undecodable": [
+    {"name": "no lineage_id", "page": {"messages": []}},
+    {"name": "message without mid", "page": {"lineage_id": "L1", "messages": [{"ordinal": 0, "message": {}}]}},
+    {"name": "head that is not an object", "page": {"lineage_id": "L1", "messages": [], "head": 7}}
+  ],
+  "refusals": [
+    {
+      "name": "cursor from a lineage the session no longer has",
+      "request": {"after_mid": "m41", "lineage_id": "old-lineage"},
+      "refusal": {"code": "lineage_changed", "message": "the session's lineage is not old-lineage"}
+    },
+    {
+      "name": "range read naming an old lineage",
+      "request": {"from_ordinal": 40, "lineage_id": "old-lineage"},
+      "refusal": {"code": "lineage_changed", "message": "the session's lineage is not old-lineage"}
+    },
+    {
+      "name": "message id the lineage does not have",
+      "request": {"after_mid": "m999999", "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"},
+      "refusal": {"code": "unknown_mid", "message": "no message m999999 in this lineage"}
+    }
+  ]
+}

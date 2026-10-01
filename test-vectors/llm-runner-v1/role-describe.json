@@ -1,0 +1,127 @@
+{
+  "accepted": [
+    {
+      "name": "every group declared, session capabilities from admission",
+      "declares": ["transcript_reads", "run_ops", "dispatch_attribution", "streaming", "model_view", "steer", "queue", "ordered_hook_phases"],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": ["role.describe", "session.baseline", "compaction.ready", "session.read", "session.head", "run.result", "session.subscribe", "session.send"]
+          }
+        ],
+        "implementation_version": "0.9.0",
+        "capabilities": ["transcript_reads", "run_ops", "dispatch_attribution", "streaming", "model_view", "steer", "queue", "ordered_hook_phases"],
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "steer only, session capabilities from the baseline",
+      "declares": ["steer"],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": ["role.describe", "session.baseline", "compaction.ready", "session.send"]
+          }
+        ],
+        "implementation_version": "1.0.0",
+        "capabilities": ["steer"],
+        "session_capabilities_from": "baseline"
+      }
+    },
+    {
+      "name": "no capabilities member, an extra op and an unknown capability",
+      "declares": [],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "beta",
+            "ops": ["role.describe", "session.baseline", "compaction.ready", "vendor.extra"]
+          }
+        ],
+        "implementation_version": "2.0.0",
+        "session_capabilities_from": "admission",
+        "extra_top_level": true
+      }
+    }
+  ],
+  "canonical": [
+    {
+      "name": "minimal answer",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "ops": ["role.describe", "session.baseline", "compaction.ready"],
+            "stability": "alpha"
+          }
+        ],
+        "implementation_version": "0.1.0",
+        "capabilities": [],
+        "session_capabilities_from": "admission"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "not an object",
+      "problem": "not_an_object",
+      "answer": ["llm-runner/v1"]
+    },
+    {
+      "name": "majors missing",
+      "problem": "undecodable",
+      "answer": {"implementation_version": "1", "session_capabilities_from": "admission"}
+    },
+    {
+      "name": "only another role",
+      "problem": "missing_major",
+      "answer": {
+        "majors": [{"version": "tool-provider/v1", "stability": "alpha", "ops": ["role.describe", "tool.catalog"]}],
+        "implementation_version": "1",
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "session.baseline missing",
+      "problem": "missing_op",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "stability": "alpha", "ops": ["role.describe", "compaction.ready"]}],
+        "implementation_version": "1",
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "transcript_reads declared without session.head",
+      "problem": "group_incomplete",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "stability": "alpha", "ops": ["role.describe", "session.baseline", "compaction.ready", "session.read"]}],
+        "implementation_version": "1",
+        "capabilities": ["transcript_reads"],
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "steer declared without session.send",
+      "problem": "group_incomplete",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "stability": "alpha", "ops": ["role.describe", "session.baseline", "compaction.ready"]}],
+        "implementation_version": "1",
+        "capabilities": ["steer"],
+        "session_capabilities_from": "baseline"
+      }
+    },
+    {
+      "name": "no session capability source",
+      "problem": "missing_session_capabilities_source",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "stability": "alpha", "ops": ["role.describe", "session.baseline", "compaction.ready"]}],
+        "implementation_version": "1"
+      }
+    }
+  ]
+}

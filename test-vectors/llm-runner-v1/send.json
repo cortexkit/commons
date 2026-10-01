@@ -1,0 +1,60 @@
+{
+  "requests": [
+    {"name": "absent delivery queues", "delivery": "queue", "request": {"prompt": "next task", "send_id": "owner-delivery-17"}},
+    {"name": "queue named", "delivery": "queue", "request": {"prompt": "next task", "send_id": "owner-delivery-18", "delivery": "queue"}},
+    {
+      "name": "steer with the sender's mark",
+      "delivery": "steer",
+      "request": {"prompt": "<system-reminder>late result for call 3</system-reminder>", "send_id": "late:aft:k-9:e-1", "delivery": "steer", "mark": {"synthetic": true}}
+    },
+    {"name": "interrupt", "delivery": "interrupt", "request": {"prompt": "stop, use the other branch", "send_id": "owner-delivery-19", "delivery": "interrupt"}},
+    {
+      "name": "first send carrying a plan and runner parameters",
+      "delivery": "queue",
+      "request": {
+        "prompt": "start",
+        "send_id": "launch-1",
+        "plan": {"items": [{"provider": "aft", "preset": "default", "params": {}}], "composition": {"providers": [{"module": "aft", "tools": ["read"]}]}},
+        "model": {"id": "provider/model-x"}
+      }
+    }
+  ],
+  "refused_requests": [
+    {"name": "unknown delivery mode", "field": "delivery", "request": {"prompt": "x", "send_id": "s-1", "delivery": "urgent"}},
+    {"name": "no send_id", "field": "send_id", "request": {"prompt": "x"}}
+  ],
+  "replies": [
+    {"name": "steer joined the running turn", "admitted": false, "reply": {"state": "active", "run_id": "run-7"}},
+    {"name": "queued behind the running turn", "admitted": false, "reply": {"state": "pending", "submission_id": "sub-3"}},
+    {"name": "retry after the carrying run ended", "admitted": false, "reply": {"state": "finished", "run_id": "run-7", "reason": "completed"}},
+    {
+      "name": "the send that admitted the session",
+      "admitted": true,
+      "reply": {
+        "state": "active",
+        "run_id": "run-1",
+        "baseline": {
+          "items": [{"provider": "aft", "item": "tools", "item_digest": "3333333333333333333333333333333333333333333333333333333333333333", "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"}],
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "tool_names": ["read"],
+          "accepted_generation": 0,
+          "applied_generation": 0,
+          "session_capabilities": {"mid_session_appends": false}
+        }
+      }
+    }
+  ],
+  "refusals": [
+    {"name": "send_id reused with another mode", "retryable": false, "field": "delivery", "refusal": {"code": "send_id_reuse", "message": "send_id owner-delivery-17 was sent with delivery queue", "detail": {"field": "delivery"}}},
+    {"name": "send_id reused with another prompt", "retryable": false, "field": "prompt", "refusal": {"code": "send_id_reuse", "message": "send_id owner-delivery-17 was sent with another prompt", "detail": {"field": "prompt"}}},
+    {"name": "last run paused", "retryable": false, "refusal": {"code": "run_paused", "message": "run run-6 is paused", "detail": {"run_id": "run-6", "reason": "auth_required"}}},
+    {"name": "not the session's owner", "retryable": false, "refusal": {"code": "scope_owner_mismatch", "message": "only the session's owner may send"}},
+    {"name": "PreUser unavailable under refuse", "retryable": false, "refusal": {"code": "pre_user_unavailable", "message": "magic-context PreUser hook unavailable", "detail": {"provider": "magic-context"}}},
+    {"name": "required plan item missed the deadline", "retryable": true, "refusal": {"code": "fetch_unavailable", "message": "aft did not answer within 10s", "detail": {"provider": "aft"}}},
+    {"name": "fetched names disagree with the composition", "retryable": false, "refusal": {"code": "plan_stale", "message": "aft tool names differ", "detail": {"differences": [{"provider": "aft", "expected": ["read"], "fetched": ["read", "edit"]}]}}},
+    {"name": "two tools share a name", "retryable": false, "refusal": {"code": "tool_name_collision", "message": "two tools named search", "detail": {"tools": [{"provider": "aft", "tool": "search"}, {"provider": "plexus", "tool": "search"}]}}},
+    {"name": "a later send carries a different plan", "retryable": false, "refusal": {"code": "plan_changed", "message": "the session's plan is frozen"}},
+    {"name": "scoped send without daemon scope support", "retryable": false, "refusal": {"code": "scope_unsupported", "message": "the daemon does not offer scopes/v1"}},
+    {"name": "store briefly unavailable", "retryable": true, "refusal": {"code": "transient", "message": "try again"}}
+  ]
+}
