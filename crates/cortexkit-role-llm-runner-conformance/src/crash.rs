@@ -585,13 +585,16 @@ fn check_sealed_history(
             "the later assistant turn",
         )?;
     } else {
-        for messages in [cut, follow_up] {
+        // The result may be written when the run is sealed or only when the
+        // owner's next send renders the history, so the cut-run transcript may
+        // hold it or not; by the follow-up's turn there must be exactly one.
+        for (messages, allowed) in [(cut, 0..=1), (follow_up, 1..=1)] {
             expect_kept_step(messages, observed)?;
             let results = messages
                 .iter()
                 .filter(|m| m.tool_calls.is_empty() && carries_call(m))
                 .count();
-            if results != 1 {
+            if !allowed.contains(&results) {
                 return Err(format!("dangling call {id}: expected one result before the later assistant turn, found {results}"));
             }
             if messages
