@@ -292,16 +292,23 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   runner's own schema. `source` (`EntrySource`) says what the entry is:
   - `{kind: "message", ordinal, mid}`: a transcript message passed through,
     with its hooks applied, keeping its transcript ordinal;
-  - `{kind: "replacement", compaction_id, version, first_ordinal,
-    last_ordinal}`: a compaction replacement, naming the raw range
-    `first_ordinal..=last_ordinal` it stands for and the CompactionMessage
-    it came from.
-- [pinned] Entries are ordered by the first transcript ordinal each covers.
+  - `{kind: "replacement", compaction_id, version, from_ordinal,
+    to_ordinal}`: a compaction replacement, naming the half-open raw range
+    `[from_ordinal, to_ordinal)` it stands for and the CompactionMessage
+    it came from. Only `to_ordinal < from_ordinal` is an invalid range.
+    An empty range inserts before `from_ordinal`; Setup's head message is
+    `[0, 0)`.
+- [pinned] Entries are ordered non-decreasingly by `from_ordinal` (a message's
+  `ordinal` is its anchor). At an equal anchor, insertions come before any
+  message or non-empty replacement. An insertion following either at its
+  anchor is malformed (`ModelPageProblem::InsertionAfterEntry`).
 - [pinned] Tail and range reads apply, keyed on transcript ordinals. A
   replacement is returned whole, exactly once, on the page holding its
-  `first_ordinal`: it is never split, and a later page that intersects its
-  range does not repeat it. `next_from_ordinal` is past every ordinal the
-  page covers.
+  `from_ordinal`: it is never split, and a later page that intersects its
+  range does not repeat it. An empty range at the tail goes on the last
+  page. `next_from_ordinal` is past every ordinal the page covers and every
+  insertion anchor, so an insertion is not returned again. For a non-empty
+  replacement, the next cursor may equal its exclusive `to_ordinal`.
 - [pinned] `after_mid` with `view: "model"` is refused `invalid_params
   {field: "view"}` in v1. `after_mid` is defined against the raw lineage,
   and a message inside a replaced range has no clean "after" in the model
@@ -596,10 +603,16 @@ treats it as a terminal refusal of that one request.
 
 ### 12.2 Run errors (`errors::provider_codes`)
 
-- [pinned] `compaction_wait_exceeded`: a compaction `WAIT` hit its cap and
-  the request could not be shown to fit.
-- [pinned] `pre_user_unavailable`: a user turn's PreUser hook was unavailable
-  under `refuse`.
+[pinned] The provider codes this role names:
+
+| Provider code | When |
+|---|---|
+| `compaction_unavailable` | Setup or a compaction call failed or timed out with no answer |
+| `compaction_wait_exceeded` | a compaction `WAIT` hit its cap and the request could not be shown to fit |
+| `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
+
+These are run errors, not request-refusal codes; `errors::provider_codes::CODES`
+lists them.
 
 ### 12.3 Tool-result reasons (`errors::tool_result_reasons`)
 
@@ -774,10 +787,13 @@ the decision; the items it governs are pinned above.
   role. A neutral schema is not in v1.
 - **Q8. The model view.** Settled, in the compaction provider's role
   owner's shape: each entry carries a `source`, `{kind: "message", ordinal,
-  mid}` or `{kind: "replacement", compaction_id, version, first_ordinal,
-  last_ordinal}`, and entries are ordered by first covered ordinal. Tail and
-  range reads apply, keyed on transcript ordinals; a replacement is returned
-  whole, once, on the page holding its `first_ordinal`. `after_mid` with
+  mid}` or `{kind: "replacement", compaction_id, version, from_ordinal,
+  to_ordinal}`, with half-open ranges and empty ranges inserting before
+  their anchor. Entries are non-decreasing by anchor, insertions first at a
+  tie. Tail and range reads apply, keyed on transcript ordinals; a
+  replacement is returned
+  whole, once, on the page holding its `from_ordinal` (tail insertions on
+  the last page). `after_mid` with
   `view: "model"` is refused `invalid_params {field: "view"}` in v1. The page
   names the compaction state it reflects, `compaction_id` and `version`,
   both absent before any compaction (§8).
@@ -859,7 +875,9 @@ broca beyond what that plan already schedules.
    (`docs/extensibility-build-plan.md:441`): the planned ready names only the
    session, where the role's also carries `request_id`. Page messages carry
    no `source` (`crates/broca-wire/src/lib.rs:525-532`), and a page names no
-   compaction state (`crates/broca-wire/src/lib.rs:568-585`).
+   compaction state (`crates/broca-wire/src/lib.rs:568-585`). Thus it also
+   lacks the half-open replacement ranges, Setup head insertion `[0, 0)`,
+   tail insertion placement and insertion-first ordering required by §8.
 4. **`session.read` takes only `from_ordinal`, `limit` and `include_tools`**
    (`crates/broca-wire/src/lib.rs:464-476`): no `after_mid`, `lineage_id`,
    `max_bytes`, `include_originals` or `view`, so no `lineage_changed` or

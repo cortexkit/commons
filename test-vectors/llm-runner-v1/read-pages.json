@@ -312,6 +312,44 @@
   ],
   "model_pages": [
     {
+      "name": "Setup head insertion before message zero",
+      "from_ordinal": 0,
+      "compacted": true,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 0, "to_ordinal": 0}, "message": {"role": "user", "text": "head"}},
+          {"source": {"kind": "message", "ordinal": 0, "mid": "m0"}, "message": {"role": "user", "text": "hello"}}
+        ],
+        "next_from_ordinal": 1
+      }
+    },
+    {
+      "name": "tail insertion on the last page",
+      "from_ordinal": 1,
+      "compacted": true,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "message", "ordinal": 1, "mid": "m1"}, "message": {"role": "assistant", "text": "hello"}},
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {"role": "user", "text": "tail"}}
+        ]
+      }
+    },
+    {
+      "name": "insertion before replacement at the same anchor",
+      "from_ordinal": 2,
+      "compacted": true,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {"text": "insert"}},
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 5}, "message": {"text": "summary"}}
+        ],
+        "next_from_ordinal": 5
+      }
+    },
+    {
       "name": "before any compaction: messages passed through, no compaction state",
       "from_ordinal": 0,
       "compacted": false,
@@ -364,8 +402,8 @@
               "kind": "replacement",
               "compaction_id": "cmp-ses_01J9Z",
               "version": 4,
-              "first_ordinal": 3,
-              "last_ordinal": 9
+              "from_ordinal": 3,
+              "to_ordinal": 10
             },
             "message": {
               "role": "user",
@@ -429,6 +467,42 @@
   ],
   "model_pages_rejected": [
     {
+      "name": "insertion after message at the same anchor",
+      "problem": "insertion_after_entry",
+      "from_ordinal": 2,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "message", "ordinal": 2, "mid": "m2"}, "message": {}},
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {}}
+        ]
+      }
+    },
+    {
+      "name": "insertion after replacement at the same anchor",
+      "problem": "insertion_after_entry",
+      "from_ordinal": 2,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 5}, "message": {}},
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {}}
+        ]
+      }
+    },
+    {
+      "name": "next cursor repeats an insertion anchor",
+      "problem": "next_inside_entry",
+      "from_ordinal": 2,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {}}
+        ],
+        "next_from_ordinal": 2
+      }
+    },
+    {
       "name": "a replacement on a page that names no compaction state",
       "problem": "replacement_without_compaction_state",
       "page": {
@@ -438,8 +512,8 @@
               "kind": "replacement",
               "compaction_id": "cmp-ses_01J9Z",
               "version": 4,
-              "first_ordinal": 3,
-              "last_ordinal": 9
+              "from_ordinal": 3,
+              "to_ordinal": 10
             },
             "message": {
               "role": "user",
@@ -523,8 +597,8 @@
               "kind": "replacement",
               "compaction_id": "cmp-ses_01J9Z",
               "version": 4,
-              "first_ordinal": 3,
-              "last_ordinal": 9
+              "from_ordinal": 3,
+              "to_ordinal": 10
             },
             "message": {
               "role": "user",
@@ -552,8 +626,8 @@
               "kind": "replacement",
               "compaction_id": "cmp-ses_01J9Z",
               "version": 4,
-              "first_ordinal": 9,
-              "last_ordinal": 3
+              "from_ordinal": 9,
+              "to_ordinal": 4
             },
             "message": {}
           }
@@ -574,8 +648,8 @@
               "kind": "replacement",
               "compaction_id": "cmp-ses_01J9Z",
               "version": 4,
-              "first_ordinal": 3,
-              "last_ordinal": 9
+              "from_ordinal": 3,
+              "to_ordinal": 10
             },
             "message": {
               "role": "user",
@@ -725,8 +799,8 @@
                 "kind": "replacement",
                 "compaction_id": "cmp-ses_01J9Z",
                 "version": 4,
-                "first_ordinal": 3,
-                "last_ordinal": 9
+                "from_ordinal": 3,
+                "to_ordinal": 10
               },
               "message": {
                 "role": "user",
@@ -845,8 +919,8 @@
                 "kind": "replacement",
                 "compaction_id": "cmp-ses_01J9Z",
                 "version": 4,
-                "first_ordinal": 3,
-                "last_ordinal": 9
+                "from_ordinal": 3,
+                "to_ordinal": 10
               },
               "message": {
                 "role": "user",

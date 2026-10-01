@@ -173,12 +173,21 @@ pub mod tool_result_reasons {
 /// `provider_code` values a runner writes on a run that ends `error`
 /// because of a provider the session depends on.
 pub mod provider_codes {
+    /// Setup or a compaction call failed or timed out with no answer.
+    pub const COMPACTION_UNAVAILABLE: &str = "compaction_unavailable";
     /// A compaction WAIT reached its cap and the request could not be shown
     /// to fit.
     pub const COMPACTION_WAIT_EXCEEDED: &str = "compaction_wait_exceeded";
     /// A PreUser hook under `on_unavailable: refuse` was unavailable for a
     /// user turn.
     pub const PRE_USER_UNAVAILABLE: &str = "pre_user_unavailable";
+
+    /// Every provider code this role names; providers may define others.
+    pub const CODES: &[&str] = &[
+        COMPACTION_UNAVAILABLE,
+        COMPACTION_WAIT_EXCEEDED,
+        PRE_USER_UNAVAILABLE,
+    ];
 }
 
 #[cfg(test)]
@@ -204,6 +213,24 @@ mod tests {
                 "{code}"
             );
         }
+    }
+
+    #[test]
+    fn compaction_unavailable_decodes_and_is_listed_as_a_provider_code() {
+        let file = vectors::load("run-result.json");
+        let case = vectors::cases(&file, "answers")
+            .iter()
+            .find(|case| case["name"] == "compaction call unavailable with no answer")
+            .unwrap();
+        let result: crate::run::RunResult =
+            vectors::round_trip("compaction unavailable", &case["answer"]);
+        let error = result.error.unwrap();
+        assert_eq!(
+            error["provider_code"].as_str(),
+            Some(provider_codes::COMPACTION_UNAVAILABLE)
+        );
+        assert!(provider_codes::CODES.contains(&"compaction_unavailable"));
+        assert!(!CODES.contains(&"compaction_unavailable"));
     }
 
     #[test]

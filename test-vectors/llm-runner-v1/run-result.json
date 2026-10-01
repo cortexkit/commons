@@ -8,6 +8,14 @@
   ],
   "answers": [
     {
+      "name": "compaction call unavailable with no answer",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-15", "state": "error",
+        "error": {"class": "permanent", "provider_code": "compaction_unavailable", "provider": "magic-context", "message": "compaction call timed out without an answer"}
+      }
+    },
+    {
       "name": "completed, with its final message",
       "terminal": true,
       "answer": {

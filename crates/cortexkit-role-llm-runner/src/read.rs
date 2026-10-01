@@ -261,15 +261,15 @@ impl ReadPage {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ModelPage {
-    /// The entries, ordered by the first transcript ordinal each covers.
+    /// Entries in non-decreasing anchor order, insertions first at a tie.
     pub messages: Vec<ModelEntry>,
     /// The session's lineage, as on a raw page ([`ReadPage::lineage_id`]):
     /// absent only for a session never written, whose page is empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
     /// The transcript ordinal to read from next, when the page stopped
-    /// early. Always past the last ordinal any entry on the page covers, so
-    /// the next page never repeats a replacement.
+    /// early. Always past covered ordinals and insertion anchors, so the
+    /// next page never repeats a replacement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
     /// The position of the last durable event covered by the same snapshot
@@ -308,32 +308,43 @@ pub enum EntrySource {
     /// A transcript message passed through, with its hooks applied. It keeps
     /// its transcript ordinal and `mid`.
     Message { ordinal: u64, mid: String },
-    /// A compaction replacement standing for the raw transcript range
-    /// `first_ordinal..=last_ordinal`, from the CompactionMessage named by
-    /// `compaction_id` and `version`.
+    /// A compaction replacement standing for the half-open raw transcript
+    /// range `[from_ordinal, to_ordinal)`, from the CompactionMessage named by
+    /// `compaction_id` and `version`. An empty range inserts before
+    /// `from_ordinal`; Setup's head message is `[0, 0)`.
     Replacement {
         compaction_id: String,
         version: u64,
-        first_ordinal: u64,
-        last_ordinal: u64,
+        from_ordinal: u64,
+        to_ordinal: u64,
     },
 }
 
 impl EntrySource {
-    /// The first transcript ordinal the entry covers.
-    pub fn first_ordinal(&self) -> u64 {
+    /// The transcript ordinal that anchors the entry, including an insertion.
+    pub fn from_ordinal(&self) -> u64 {
         match self {
             Self::Message { ordinal, .. } => *ordinal,
-            Self::Replacement { first_ordinal, .. } => *first_ordinal,
+            Self::Replacement { from_ordinal, .. } => *from_ordinal,
         }
     }
 
-    /// The last transcript ordinal the entry covers.
-    pub fn last_ordinal(&self) -> u64 {
+    /// The last covered transcript ordinal, or `None` for an empty or
+    /// inverted replacement range.
+    pub fn last_covered_ordinal(&self) -> Option<u64> {
         match self {
-            Self::Message { ordinal, .. } => *ordinal,
-            Self::Replacement { last_ordinal, .. } => *last_ordinal,
+            Self::Message { ordinal, .. } => Some(*ordinal),
+            Self::Replacement {
+                from_ordinal,
+                to_ordinal,
+                ..
+            } => (to_ordinal > from_ordinal).then(|| to_ordinal - 1),
         }
+    }
+
+    /// Whether this entry inserts without covering a transcript message.
+    pub fn is_insertion(&self) -> bool {
+        matches!(self, Self::Replacement { from_ordinal, to_ordinal, .. } if from_ordinal == to_ordinal)
     }
 }
 
@@ -354,23 +365,22 @@ pub enum ModelPageProblem {
     PartialCompactionState,
     /// The page carries a replacement but names no compaction state.
     ReplacementWithoutCompactionState,
-    /// A replacement's `first_ordinal` is above its `last_ordinal`.
-    InvertedRange {
-        first_ordinal: u64,
-        last_ordinal: u64,
-    },
-    /// An entry does not start after the one before it.
-    OutOfOrder { first_ordinal: u64 },
+    /// A replacement's `to_ordinal` is below its `from_ordinal`.
+    InvertedRange { from_ordinal: u64, to_ordinal: u64 },
+    /// An entry starts below the one before it.
+    OutOfOrder { from_ordinal: u64 },
+    /// An insertion follows a message or non-empty replacement at the same
+    /// anchor. Insertions must precede both at equal ordinals.
+    InsertionAfterEntry { from_ordinal: u64 },
     /// An entry starts below the ordinal the page was read from. A
-    /// replacement belongs only on the page holding its `first_ordinal`; a
-    /// page read from an ordinal inside the replaced range must not repeat
-    /// it.
+    /// replacement belongs only on the page holding its `from_ordinal`; a
+    /// page read from inside the replaced range must not repeat it.
     StartsBeforePage {
-        first_ordinal: u64,
+        entry_from_ordinal: u64,
         from_ordinal: u64,
     },
-    /// `next_from_ordinal` is not past the last ordinal some entry on the page
-    /// covers, so a page read from it would overlap that entry.
+    /// `next_from_ordinal` is not past a covered ordinal or an insertion's
+    /// anchor, so a page read from it would repeat that entry.
     NextInsideEntry {
         next_from_ordinal: u64,
         last_ordinal: u64,
@@ -420,14 +430,13 @@ impl ModelPage {
         self
     }
 
-    /// Check the page against the model view's paging rules, for a page read
-    /// from `from_ordinal` (`None` for a tail read, whose start the runner
-    /// chose). The entries are ordered by the first ordinal each covers; a
-    /// replacement comes whole, only on the page holding its
-    /// `first_ordinal`, so no entry starts below `from_ordinal`, and
-    /// `next_from_ordinal` is past every ordinal the page covers. A page
-    /// carrying a replacement names its compaction state. Returns the first
-    /// problem found.
+    /// Check the model view's paging rules for a range read from
+    /// `from_ordinal` (`None` for a tail read, whose start the runner chose).
+    /// Entries have non-decreasing anchors, with insertions before messages
+    /// or non-empty replacements at a tie. Replacements come whole, once,
+    /// on the page holding their anchor; a tail insertion goes on the last
+    /// page. The next cursor is past covered ordinals and insertion anchors
+    /// to prevent repeats. A replacement requires compaction state.
     pub fn check(&self, from_ordinal: Option<u64>) -> Result<(), ModelPageProblem> {
         let has_compaction_state = self.compaction_id.is_some() || self.version.is_some();
         if self.lineage_id.is_none()
@@ -440,31 +449,48 @@ impl ModelPage {
         if self.compaction_id.is_some() != self.version.is_some() {
             return Err(ModelPageProblem::PartialCompactionState);
         }
-        let mut previous_first: Option<u64> = None;
+        let mut previous: Option<(u64, bool)> = None;
         for entry in &self.messages {
-            let first_ordinal = entry.source.first_ordinal();
-            let last_ordinal = entry.source.last_ordinal();
-            if first_ordinal > last_ordinal {
-                return Err(ModelPageProblem::InvertedRange {
-                    first_ordinal,
-                    last_ordinal,
-                });
-            }
-            if matches!(entry.source, EntrySource::Replacement { .. }) && !has_compaction_state {
-                return Err(ModelPageProblem::ReplacementWithoutCompactionState);
+            let anchor = entry.source.from_ordinal();
+            let insertion = entry.source.is_insertion();
+            if let EntrySource::Replacement {
+                from_ordinal,
+                to_ordinal,
+                ..
+            } = entry.source
+            {
+                if to_ordinal < from_ordinal {
+                    return Err(ModelPageProblem::InvertedRange {
+                        from_ordinal,
+                        to_ordinal,
+                    });
+                }
+                if !has_compaction_state {
+                    return Err(ModelPageProblem::ReplacementWithoutCompactionState);
+                }
             }
             if let Some(from_ordinal) = from_ordinal {
-                if first_ordinal < from_ordinal {
+                if anchor < from_ordinal {
                     return Err(ModelPageProblem::StartsBeforePage {
-                        first_ordinal,
+                        entry_from_ordinal: anchor,
                         from_ordinal,
                     });
                 }
             }
-            if previous_first.is_some_and(|previous| first_ordinal <= previous) {
-                return Err(ModelPageProblem::OutOfOrder { first_ordinal });
+            if let Some((previous_anchor, previous_insertion)) = previous {
+                if anchor < previous_anchor {
+                    return Err(ModelPageProblem::OutOfOrder {
+                        from_ordinal: anchor,
+                    });
+                }
+                if anchor == previous_anchor && insertion && !previous_insertion {
+                    return Err(ModelPageProblem::InsertionAfterEntry {
+                        from_ordinal: anchor,
+                    });
+                }
             }
             if let Some(next_from_ordinal) = self.next_from_ordinal {
+                let last_ordinal = entry.source.last_covered_ordinal().unwrap_or(anchor);
                 if next_from_ordinal <= last_ordinal {
                     return Err(ModelPageProblem::NextInsideEntry {
                         next_from_ordinal,
@@ -472,7 +498,7 @@ impl ModelPage {
                     });
                 }
             }
-            previous_first = Some(first_ordinal);
+            previous = Some((anchor, insertion));
         }
         Ok(())
     }
@@ -820,6 +846,7 @@ mod tests {
             }
             ModelPageProblem::InvertedRange { .. } => "inverted_range",
             ModelPageProblem::OutOfOrder { .. } => "out_of_order",
+            ModelPageProblem::InsertionAfterEntry { .. } => "insertion_after_entry",
             ModelPageProblem::StartsBeforePage { .. } => "starts_before_page",
             ModelPageProblem::NextInsideEntry { .. } => "next_inside_entry",
         }
@@ -849,6 +876,11 @@ mod tests {
             assert!(kinds.contains(&Value::from(kind)), "no {kind} entry");
         }
         for case in vectors::cases(&file, "model_pages_rejected") {
+            if ["inverted_range", "insertion_after_entry"]
+                .contains(&case["problem"].as_str().unwrap())
+            {
+                continue;
+            }
             let name = case["name"].as_str().unwrap();
             let page: ModelPage = serde_json::from_value(case["page"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -868,8 +900,88 @@ mod tests {
         }
     }
 
+    fn rejected_model_vector(name: &str, expected: ModelPageProblem) {
+        let file = vectors::load("read-pages.json");
+        let case = vectors::cases(&file, "model_pages_rejected")
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap();
+        let page: ModelPage = serde_json::from_value(case["page"].clone()).unwrap();
+        assert_eq!(
+            page.check(case["from_ordinal"].as_u64()),
+            Err(expected),
+            "{name}"
+        );
+    }
+
     #[test]
-    fn model_view_replacement_comes_once_on_the_page_holding_its_first_ordinal() {
+    fn model_page_refuses_inverted_half_open_range() {
+        rejected_model_vector(
+            "a replacement whose range is inverted",
+            ModelPageProblem::InvertedRange {
+                from_ordinal: 9,
+                to_ordinal: 4,
+            },
+        );
+    }
+
+    #[test]
+    fn model_page_refuses_insertion_after_its_message() {
+        rejected_model_vector(
+            "insertion after message at the same anchor",
+            ModelPageProblem::InsertionAfterEntry { from_ordinal: 2 },
+        );
+    }
+
+    #[test]
+    fn model_page_accepts_insertion_before_its_replacement() {
+        let file = vectors::load("read-pages.json");
+        let case = vectors::cases(&file, "model_pages")
+            .iter()
+            .find(|case| case["name"] == "insertion before replacement at the same anchor")
+            .unwrap();
+        let page: ModelPage = vectors::round_trip("insertion before replacement", &case["page"]);
+        assert_eq!(page.check(Some(2)), Ok(()));
+        assert!(page.messages[0].source.is_insertion());
+        assert!(!page.messages[1].source.is_insertion());
+        assert_eq!(page.messages[1].source.last_covered_ordinal(), Some(4));
+        assert_eq!(page.next_from_ordinal, Some(5));
+    }
+
+    #[test]
+    fn model_page_refuses_insertion_after_its_replacement() {
+        rejected_model_vector(
+            "insertion after replacement at the same anchor",
+            ModelPageProblem::InsertionAfterEntry { from_ordinal: 2 },
+        );
+    }
+
+    #[test]
+    fn model_view_head_and_tail_insertions_are_on_boundary_pages() {
+        let file = vectors::load("read-pages.json");
+        let pages = vectors::cases(&file, "model_pages");
+        let head = pages
+            .iter()
+            .find(|case| case["name"] == "Setup head insertion before message zero")
+            .unwrap();
+        let tail = pages
+            .iter()
+            .find(|case| case["name"] == "tail insertion on the last page")
+            .unwrap();
+        let head: ModelPage = vectors::round_trip("head", &head["page"]);
+        let tail: ModelPage = vectors::round_trip("tail", &tail["page"]);
+        assert_eq!(head.check(Some(0)), Ok(()));
+        assert_eq!(tail.check(head.next_from_ordinal), Ok(()));
+        assert!(head.messages[0].source.is_insertion());
+        assert_eq!(head.messages[0].source.from_ordinal(), 0);
+        assert_eq!(head.messages[0].source.last_covered_ordinal(), None);
+        assert!(tail.messages.last().unwrap().source.is_insertion());
+        assert_eq!(tail.next_from_ordinal, None);
+        assert_eq!(tail.messages.last().unwrap().source.from_ordinal(), 2);
+    }
+
+    #[test]
+    fn model_view_replacement_comes_once_on_the_page_holding_its_from_ordinal() {
         let file = vectors::load("read-pages.json");
         let once = &file["replacement_once"];
         let replacements = |page: &ModelPage| -> Vec<EntrySource> {
@@ -898,7 +1010,7 @@ mod tests {
             page.check(Some(from_ordinal))
                 .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
             for source in replacements(&page) {
-                assert!(source.first_ordinal() >= from_ordinal, "{name}");
+                assert!(source.from_ordinal() >= from_ordinal, "{name}");
                 assert!(!seen.contains(&source), "{name}: {source:?} repeated");
                 seen.push(source);
             }
@@ -916,8 +1028,8 @@ mod tests {
                 .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
             let replacement = &seen[0];
             assert!(
-                replacement.first_ordinal() < from_ordinal
-                    && from_ordinal <= replacement.last_ordinal(),
+                replacement.from_ordinal() < from_ordinal
+                    && Some(from_ordinal) <= replacement.last_covered_ordinal(),
                 "{name}: the read does not intersect the replacement"
             );
             assert!(replacements(&page).is_empty(), "{name}");
@@ -1020,8 +1132,8 @@ mod tests {
                     EntrySource::Replacement {
                         compaction_id: "cmp-1".into(),
                         version: 2,
-                        first_ordinal: 0,
-                        last_ordinal: 9,
+                        from_ordinal: 0,
+                        to_ordinal: 10,
                     },
                     serde_json::json!({"role": "user"}),
                 ),
