@@ -168,29 +168,48 @@ impl ReadRequest {
 /// A `session.read` page. Decoded leniently: unknown fields are ignored.
 ///
 /// Non-exhaustive so later optional members are additive: use
-/// [`ReadPage::new`] and the `with_*` setters, or decode one.
+/// [`ReadPage::new`], [`ReadPage::no_lineage`] and the `with_*` setters, or
+/// decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ReadPage {
     pub messages: Vec<ReadMessage>,
-    /// The session's lineage, on every page.
-    pub lineage_id: String,
+    /// The session's lineage, on every page of a session that has one.
+    /// Absent means the session has no lineage yet: it was never written,
+    /// and the page is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_id: Option<String>,
     /// Present whenever the page stopped before the end of the transcript,
-    /// by count or by bytes: the ordinal to read from next.
+    /// by count or by bytes: the ordinal to read from next. A single message
+    /// larger than the byte cap comes alone on its page, over the cap, with
+    /// this set if more follow; a message is never truncated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
     /// The position of the last durable event covered by the same snapshot
-    /// as this page: a JSON object, opaque to consumers. A subscription from it continues
-    /// strictly after it. Absent on a session with no events yet.
+    /// as this page: a JSON object, opaque to consumers. A subscription from
+    /// it continues strictly after it. Absent on a session with no events
+    /// yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<Map<String, Value>>,
 }
 
 impl ReadPage {
+    /// A page of a session whose lineage is `lineage_id`.
     pub fn new(lineage_id: impl Into<String>, messages: Vec<ReadMessage>) -> Self {
         Self {
             messages,
-            lineage_id: lineage_id.into(),
+            lineage_id: Some(lineage_id.into()),
+            next_from_ordinal: None,
+            head: None,
+        }
+    }
+
+    /// The page of a session that was never written: empty, with no lineage
+    /// and no `next_from_ordinal`.
+    pub fn no_lineage() -> Self {
+        Self {
+            messages: Vec::new(),
+            lineage_id: None,
             next_from_ordinal: None,
             head: None,
         }
@@ -204,6 +223,13 @@ impl ReadPage {
     pub fn with_head(mut self, head: Map<String, Value>) -> Self {
         self.head = Some(head);
         self
+    }
+
+    /// Whether the page is consistent with its lineage: a page without a
+    /// lineage holds no messages and no `next_from_ordinal`, because a
+    /// session that has messages has a lineage.
+    pub fn lineage_consistent(&self) -> bool {
+        self.lineage_id.is_some() || (self.messages.is_empty() && self.next_from_ordinal.is_none())
     }
 }
 
@@ -462,6 +488,19 @@ mod tests {
             if case["stopped_early"].as_bool().unwrap() {
                 assert!(page.next_from_ordinal.is_some(), "{name}");
             }
+            assert!(page.lineage_consistent(), "{name}");
+            if let Some(cap) = case.get("max_bytes").and_then(Value::as_u64) {
+                // An oversize message comes alone, whole, over the cap.
+                assert_eq!(page.messages.len(), 1, "{name}");
+                let bytes = serde_json::to_vec(&page.messages[0]).unwrap().len() as u64;
+                assert!(bytes > cap, "{name}: {bytes} bytes is not over {cap}");
+            }
+        }
+        for case in vectors::cases(&file, "inconsistent") {
+            let name = case["name"].as_str().unwrap();
+            let page: ReadPage = serde_json::from_value(case["page"].clone())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!page.lineage_consistent(), "{name}");
         }
         for case in vectors::cases(&file, "tolerated") {
             let name = case["name"].as_str().unwrap();
@@ -538,6 +577,7 @@ mod tests {
                 .with_call_key("lin-1:42")
                 .with_dispatched_to("aft")
                 .with_indeterminate(true)]);
+        assert!(ReadPage::no_lineage().lineage_consistent());
         let page = ReadPage::new("lin-1", vec![message])
             .with_next_from_ordinal(4)
             .with_head(serde_json::json!({"seq": 9}).as_object().unwrap().clone());

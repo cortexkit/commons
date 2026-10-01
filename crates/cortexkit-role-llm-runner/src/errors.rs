@@ -33,6 +33,11 @@ pub const UNKNOWN_RUN: &str = "unknown_run";
 /// `delivery`.
 pub const SEND_ID_REUSE: &str = "send_id_reuse";
 
+/// A send whose delivery mode (`queue` when absent) the runner does not
+/// declare as a capability group. `detail.delivery` names the mode. Nothing
+/// was written, and the send is never delivered in another mode instead.
+pub const DELIVERY_UNSUPPORTED: &str = "delivery_unsupported";
+
 /// A send into a session whose last run is paused, other than the paused
 /// run's own retry or an interrupt. Nothing was written.
 pub const RUN_PAUSED: &str = "run_paused";
@@ -85,6 +90,7 @@ pub const CODES: &[&str] = &[
     UNKNOWN_MID,
     UNKNOWN_RUN,
     SEND_ID_REUSE,
+    DELIVERY_UNSUPPORTED,
     RUN_PAUSED,
     SCOPE_OWNER_MISMATCH,
     SCOPE_ADOPTION_REFUSED,

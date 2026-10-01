@@ -1,21 +1,76 @@
 {
   "codes": [
-    {"code": "invalid_params", "retryable": false},
-    {"code": "lineage_changed", "retryable": false},
-    {"code": "unknown_mid", "retryable": false},
-    {"code": "unknown_run", "retryable": false},
-    {"code": "send_id_reuse", "retryable": false},
-    {"code": "run_paused", "retryable": false},
-    {"code": "scope_owner_mismatch", "retryable": false},
-    {"code": "scope_adoption_refused", "retryable": false},
-    {"code": "scope_unsupported", "retryable": false},
-    {"code": "fetch_unavailable", "retryable": true},
-    {"code": "plan_stale", "retryable": false},
-    {"code": "tool_name_collision", "retryable": false},
-    {"code": "plan_changed", "retryable": false},
-    {"code": "pre_user_unavailable", "retryable": false},
-    {"code": "transient", "retryable": true},
-    {"code": "scope_not_synced", "retryable": true},
-    {"code": "a_code_this_role_does_not_define", "retryable": false}
+    {
+      "code": "invalid_params",
+      "retryable": false
+    },
+    {
+      "code": "lineage_changed",
+      "retryable": false
+    },
+    {
+      "code": "unknown_mid",
+      "retryable": false
+    },
+    {
+      "code": "unknown_run",
+      "retryable": false
+    },
+    {
+      "code": "send_id_reuse",
+      "retryable": false
+    },
+    {
+      "code": "delivery_unsupported",
+      "retryable": false
+    },
+    {
+      "code": "run_paused",
+      "retryable": false
+    },
+    {
+      "code": "scope_owner_mismatch",
+      "retryable": false
+    },
+    {
+      "code": "scope_adoption_refused",
+      "retryable": false
+    },
+    {
+      "code": "scope_unsupported",
+      "retryable": false
+    },
+    {
+      "code": "fetch_unavailable",
+      "retryable": true
+    },
+    {
+      "code": "plan_stale",
+      "retryable": false
+    },
+    {
+      "code": "tool_name_collision",
+      "retryable": false
+    },
+    {
+      "code": "plan_changed",
+      "retryable": false
+    },
+    {
+      "code": "pre_user_unavailable",
+      "retryable": false
+    },
+    {
+      "code": "transient",
+      "retryable": true
+    },
+    {
+      "code": "scope_not_synced",
+      "retryable": true
+    },
+    {
+      "code": "a_code_this_role_does_not_define",
+      "retryable": false
+    }
   ]
 }

@@ -41,6 +41,23 @@ pub enum Delivery {
     Interrupt,
 }
 
+impl Delivery {
+    /// The mode's string in a request's `delivery`, which is also the name of
+    /// the capability group a runner declares to accept it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queue => crate::capabilities::QUEUE,
+            Self::Steer => crate::capabilities::STEER,
+            Self::Interrupt => crate::capabilities::INTERRUPT,
+        }
+    }
+}
+
+/// The `detail` of a `delivery_unsupported` refusal for `delivery`.
+pub fn delivery_unsupported_detail(delivery: Delivery) -> Value {
+    serde_json::json!({ DELIVERY_FIELD: delivery.as_str() })
+}
+
 fn deserialize_delivery<'de, D>(deserializer: D) -> Result<Option<Delivery>, D::Error>
 where
     D: Deserializer<'de>,
@@ -124,6 +141,22 @@ impl SendRequest {
     /// The delivery mode, with absence read as [`Delivery::Queue`].
     pub fn delivery(&self) -> Delivery {
         self.delivery.unwrap_or(Delivery::Queue)
+    }
+
+    /// The request's delivery mode if `declared` (a runner's module-level
+    /// capabilities) includes its group, or the mode to refuse as
+    /// `delivery_unsupported` ([`delivery_unsupported_detail`]). An
+    /// undeclared mode is refused, never delivered as another mode.
+    pub fn check_delivery<S: AsRef<str>>(&self, declared: &[S]) -> Result<Delivery, Delivery> {
+        let delivery = self.delivery();
+        if declared
+            .iter()
+            .any(|name| name.as_ref() == delivery.as_str())
+        {
+            Ok(delivery)
+        } else {
+            Err(delivery)
+        }
     }
 }
 
@@ -238,6 +271,34 @@ mod tests {
                     Some(field),
                     "{name}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn undeclared_delivery_modes_are_refused_by_name() {
+        let file = vectors::load("send.json");
+        for case in vectors::cases(&file, "delivery_checks") {
+            let name = case["name"].as_str().unwrap();
+            let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            let declared: Vec<&str> = case["declares"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c.as_str().unwrap())
+                .collect();
+            match (request.check_delivery(&declared), case.get("refusal")) {
+                (Ok(_), None) => {}
+                (Err(mode), Some(refusal)) => {
+                    assert_eq!(refusal["code"], errors::DELIVERY_UNSUPPORTED, "{name}");
+                    assert_eq!(
+                        delivery_unsupported_detail(mode),
+                        refusal["detail"],
+                        "{name}"
+                    );
+                    assert!(!errors::is_retryable(errors::DELIVERY_UNSUPPORTED));
+                }
+                (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }
         }
     }

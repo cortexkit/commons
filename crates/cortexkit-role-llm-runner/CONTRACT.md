@@ -1,7 +1,8 @@
 # `llm-runner/v1` — role contract (draft)
 
-Stability: **alpha, draft**. Not yet reviewed by the role's consumers; nothing
-here ships until they sign it off. This document is the role definition; the
+Stability: **alpha, draft**. Approved by the role's owner with the
+decisions recorded under "Open questions"; the remaining open items go to the
+design room, and nothing here ships until it signs off. This document is the role definition; the
 Rust types in this crate are its wire shapes, `test-vectors/llm-runner-v1/` at
 the repository root holds its vectors, and a separate `-conformance` crate
 will hold its suite (§15).
@@ -17,6 +18,9 @@ Every item is marked:
 - **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
   option down so the types and vectors have something to pin. Question `Qn`
   under "Open questions" lists the options.
+
+A question the role's owner has settled keeps its number and is marked
+"settled" there; the items it governs are marked **[pinned]** here.
 
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation; "Gaps in broca today" at the end compares the one
@@ -37,35 +41,43 @@ shipping runner with this document.
 - [pinned] A consumer refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it. The check lives in the
   consumer, never in the daemon.
-- [open: Q1] Every role op is a request on a route the runner declares, named
-  by the op. The session it acts on is the session the route is bound to; no
-  request names its session, except `compaction.ready`. How the op name and
-  its params are carried in the request body is open.
+- [pinned] Every role op is a request `{method, params}` on the runner's
+  session-bound management route: `method` is the op's name and `params` its
+  request. The session it acts on is the session the route is bound to; no
+  request names its session, except `compaction.ready`.
 
 ## 2. `role.describe`
 
-- [open: Q2] The answer is `{majors: [{version, ops, stability}],
-  implementation_version, capabilities, session_capabilities_from}`
-  (`RoleDescribe`), the shape `tool-provider/v1` uses. `version` is spelled as
-  in the manifest, `llm-runner/v1`.
+- [pinned] The answer is `{majors: [{version, ops, stability}],
+  implementation_version, capabilities, session_capabilities_from,
+  max_bytes?}` (`RoleDescribe`), the shape `tool-provider/v1` uses. `version`
+  is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
   for every session.
 - [pinned] The answer says where session-level capabilities come from (§10):
   the admission reply, on a runner that admits sessions, or
   `session.baseline`, on a runner without an admission reply.
-  [open: Q3] the member is `session_capabilities_from`, valued `admission` or
+  [pinned] The member is `session_capabilities_from`, valued `admission` or
   `baseline`.
+- [pinned] A runner that declares `transcript_reads` states its
+  `session.read` byte cap as `max_bytes: {default, maximum}` (`MaxBytes`),
+  in bytes: the cap a page stops at when the request names none, and the
+  largest cap it honours. `check_describe` refuses a `transcript_reads`
+  answer without it (`missing_max_bytes`).
 - [pinned] Decoded leniently: unknown fields, majors, ops and capabilities
   are ignored, and an unknown `stability` decodes. Only what a consumer
   relies on is checked strictly (`check_describe`): the `llm-runner/v1`
-  major, its required ops, every op of each declared group, and the
-  session-capability source.
+  major, its required ops, every op of each declared group, the
+  session-capability source, and the byte cap when `transcript_reads` is
+  declared.
 - [pinned] The answer describes the runner build, never a session. A consumer
   may cache it for as long as it talks to the same module incarnation.
-- [pinned] `stability` is `alpha`, `beta` or `stable`. A role becomes stable
-  only when a second, independent implementation passes its suite.
-  [open: Q21] the guarantees of each level.
+- [pinned] Stability is data, never part of a capability name. Each major
+  carries `stability`, one of `alpha`, `beta` or `stable`, for the major it
+  describes; a major that omits it is read as `alpha`. This draft is
+  `alpha`. A role becomes stable only when a second, independent
+  implementation passes its suite.
 
 ## 3. Capability groups
 
@@ -83,10 +95,12 @@ shipping runner with this document.
 | `model_view` | `session.read` (`view: "model"`) | §8 |
 | `steer` | `session.send` with `delivery: "steer"` | §9 |
 | `queue` | `session.send` with `delivery: "queue"` | §9 |
+| `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
 
-- [open: Q11] A group that only adds fields to `session.read` requires
+- [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
-- [open: Q12] Whether `interrupt` is a group of its own.
+- [pinned] `interrupt` is a group of its own: a runner may steer and queue
+  without being able to abort a model stream.
 - [pinned] What consumers require is the consumer's business, checked before
   use. A session owner that reads a runner's sessions requires the five
   read-side groups (`transcript_reads`, `run_ops`, `dispatch_attribution`,
@@ -112,9 +126,12 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   returned.
 - [pinned] A read carrying a `lineage_id` that is not the session's current
   lineage is refused `lineage_changed`, whatever its mode.
-- [open: Q6] `after_mid` without `lineage_id` is refused `invalid_params
+- [pinned] `after_mid` without `lineage_id` is refused `invalid_params
   {field: "lineage_id"}`; `after_mid` with `from_ordinal` is refused naming
   `from_ordinal`.
+- [pinned] `max_bytes` asks for a byte cap on the page. Absent means the
+  runner's default; a value above the runner's maximum is capped to it. Both
+  are stated in `role.describe` (§2).
 - [pinned] `include_originals: true` adds `originals` to each message a hook
   changed (§4.2).
 - [pinned] The request is strict: an unknown field is refused
@@ -125,26 +142,31 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 
 `{messages, lineage_id, next_from_ordinal?, head?}` (`ReadPage`).
 
-- [pinned] Every page carries the session's `lineage_id`.
+- [pinned] Every page of a session that has a lineage carries `lineage_id`.
+  A session that was never written has no lineage yet: a read of it returns
+  an empty page with no `lineage_id` and no `next_from_ordinal`, and an
+  absent `lineage_id` means exactly that.
 - [pinned] A page is limited by message count and by bytes, and carries
   `next_from_ordinal` whenever it stops before the end of the transcript.
-  [open: Q6] the byte cap's request member (`max_bytes`), the runner's
-  default, and a single message larger than the cap.
+- [pinned] A single message larger than the byte cap comes alone on its
+  page, over the cap, with `next_from_ordinal` set if more follow. A message
+  is never truncated, and its size is never a reason to refuse the read.
 - [pinned] A page is an ordinal range and nothing more. It is not aligned to
   turns, runs or tool-call boundaries: a tool call and its result may arrive
   on different pages.
 - [pinned] Each message (`ReadMessage`) carries `ordinal`, `mid` and its
   final values: what later steps render and what executed. The raw view and
   the model view then differ only by compaction.
-  [open: Q7] the message body (`message`) is in the runner's schema, decoded
-  as opaque JSON.
+- [pinned] The message body (`message`) is in the runner's own schema,
+  opaque to the role and decoded as JSON. A neutral message schema is not in
+  v1 (see "Not in v1").
 - [pinned] Ordinals and `mid`s are never reused or renumbered within a
   lineage, across any crash.
 - [pinned] With `include_originals`, a hooked message carries `originals:
   [{field, value, provider}]` (`Original`), oldest first.
 - [pinned] `head` is the last durable event covered by the same snapshot as
-  the page (§7). [open: Q18] it is a JSON object, opaque to consumers, and
-  absent on a session with no events.
+  the page (§7). It is a JSON object, opaque to consumers, and absent on a
+  session with no events.
 - [pinned] Decoded leniently: a consumer ignores fields it does not know.
   Runners may add their own (broca's `lineage_state`, say).
 
@@ -152,7 +174,7 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 
 - [pinned] Head metadata without bodies: `{lineage_id, last_ordinal, head,
   last_run_state, updated_at}` (`HeadMeta`).
-- [open: Q5] It is its own op, `session.head`, taking no fields
+- [pinned] It is its own op, `session.head`, taking no fields
   (`HeadRequest`); `last_ordinal` is absent on an empty transcript;
   `last_run_state` is `{run_id, state, reason?}` (`LastRunState`) and
   describes the most recent run, never the transcript; `updated_at` is
@@ -165,7 +187,7 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   is still indeterminate: it has a durable dispatch intent and no result, so
   it may or may not have run.
 - [pinned] Each call's `call_key` (§11.3) is exposed with it.
-- [open: Q11] They ride as `tool_calls: [{tool_call_id, call_key?,
+- [pinned] They ride as `tool_calls: [{tool_call_id, call_key?,
   dispatched_to?, indeterminate}]` (`ToolCallAttribution`) beside the
   message, one entry per tool call the message carries. `dispatched_to` is
   absent for a call never dispatched (denied, say); `call_key` is absent
@@ -178,32 +200,35 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   run's state. For a completed run it also returns the final assistant
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
-  [open: Q9] the answer is `{run_id, state, reason?, error?, final_message?:
-  {ordinal, mid, text}}` (`RunResult`); a run that has not ended answers its
-  current state with no final message; the join separator.
+  [pinned] The answer is `{run_id, state, reason?, error?, final_message?:
+  {ordinal, mid, text}}` (`RunResult`), and a run that has not ended answers
+  its current state with no final message. [open: Q9] the separator the text
+  parts are joined with.
 - [pinned] Each run gets exactly one terminal state, and a crash never gives
   it a second. `interrupted` (the runner stopped or crashed under the run) is
   distinct from `cancelled` (a caller stopped it).
-- [open: Q9] States (`run::states`): `active`, `paused`, `completed`,
-  `max_steps`, `cancelled`, `error`, `interrupted`; decoded open, and an
-  unknown state is not treated as terminal.
+- [pinned] States (`run::states`): `active` and `paused`, which are not
+  terminal, and the terminal states `completed`, `max_steps`, `cancelled`,
+  `error` and `interrupted`. States are decoded open: a runner's own state
+  (broca's `transform_unavailable`, say) decodes as a plain string, and a
+  consumer does not treat an unknown state as terminal.
 - [pinned] A run that ends `error` because of a provider carries the
   provider's code as `provider_code` in `error`, with the provider and its
   reason. `errors::provider_codes` lists the ones this role names.
-- [pinned] An unknown `run_id` is refused. [open: Q16] as `unknown_run`.
+- [pinned] An unknown `run_id` is refused `unknown_run`.
 - [pinned] **Run attribution.** Each message records which run and episode
   produced it, and whether it is that run's final message.
-  [open: Q10] `run: {run_id, episode, final}` (`RunAttribution`), with
-  `episode` an opaque string.
+  [pinned] It rides as `run: {run_id, episode, final}` (`RunAttribution`),
+  with `episode` an opaque string.
 
 ## 7. `streaming`: `session.subscribe`
 
 - [pinned] A page and its `head` come from one snapshot. A subscription from
   that `head` continues strictly after it, with no gap and no duplicate.
-- [open: Q18] The request is `{from?}` (`SubscribeRequest`, strict): `"start"`,
+- [pinned] The request is `{from?}` (`SubscribeRequest`, strict): `"start"`,
   `"live"` (the meaning of an absent `from`) or a `head` object passed back
   verbatim. An unknown attach point is refused naming `from`.
-- [open: Q18] Each event is `{kind, cursor?, ...}` (`SubscribeEvent`): `kind`
+- [pinned] Each event is `{kind, cursor?, ...}` (`SubscribeEvent`): `kind`
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
   never replayed.
@@ -217,7 +242,7 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   value is strict, so an unknown view is refused naming `view`; how
   replacement messages are numbered.
 
-## 9. `steer` and `queue`: `session.send` from the owner
+## 9. `steer`, `queue` and `interrupt`: `session.send` from the owner
 
 - [pinned] Prompts from the session's owner outside a human turn ride
   `session.send` with `delivery: queue | steer | interrupt`
@@ -232,13 +257,17 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
     message starts. The in-flight model stream is aborted and its partial
     step discarded. A running tool call is waited on up to its deadline,
     never killed, so at-most-once holds.
-- [pinned] `steer` and `queue` are each declared on their own (§3).
+- [pinned] `steer`, `queue` and `interrupt` are each declared on their own
+  (§3). A runner refuses a mode it does not declare as
+  `delivery_unsupported`, with `detail.delivery` naming the mode (an absent
+  `delivery` is `queue`), and writes nothing. It never delivers the send in
+  another mode instead (`SendRequest::check_delivery`).
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
   part of the send's identity:
   - the same key with the same payload and mode is answered with the
     existing state, so a retry looks like success;
-  - the same key with a different payload or mode is refused `send_id_reuse`.
-    [open: Q16] `detail.field` names the field that differs.
+  - the same key with a different payload or mode is refused `send_id_reuse`,
+    with `detail.field` naming the field that differs.
 - [pinned] The owner derives `send_id` from what it delivers, never from the
   attempt. The runner keeps it for the session's lifetime, rebuilt from
   replay.
@@ -254,13 +283,16 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   refused `scope_owner_mismatch`.
 - [pinned] The sender's mark says the prompt is model-visible but not a human
   turn. The runner records it and does not act on it.
-  [open: Q13] the member is `mark`, opaque JSON.
+  [pinned] The member is `mark`, opaque JSON.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. The rest of the request is lenient: a
   runner's own send parameters ride beside the role's members
-  (`SendRequest::runner_params`). [open: Q19] which runner parameters an
-  owner's steer must carry.
-- [open: Q19] The reply is `{state, run_id?, submission_id?, reason?,
+  (`SendRequest::runner_params`).
+- [pinned] A `steer` or `interrupt` into an existing session takes every
+  runner parameter it omits (model, generation settings and the like) from
+  the session's frozen values, so an owner that knows only the role's
+  members can send one.
+- [pinned] The reply is `{state, run_id?, submission_id?, reason?,
   baseline?}` (`SendReply`), `state` decoded open (`active`, `finished`,
   `pending`).
 
@@ -271,7 +303,7 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   request takes no fields (`BaselineRequest`, strict).
 - [pinned] Before the session's first request reaches a runner that has no
   admission reply, it answers `not_yet`.
-  [open: Q15] the answer is `{state: "not_yet"}` or `{state: "ready",
+  [pinned] The answer is `{state: "not_yet"}` or `{state: "ready",
   baseline}` (`BaselineReply`).
 - [pinned] The baseline (`Baseline`) holds:
   - the frozen per-item digests and preflight digests (`items`), and any
@@ -294,15 +326,16 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   hint (`SendReply::baseline`), read from the record the runner wrote. A
   retried first send with the same `send_id` gets the same reply. After a
   lost reply, or after a fold, the owner reads `session.baseline` instead of
-  guessing. [open: Q15] the admission reply nests one `baseline` object.
+  guessing. [pinned] The admission reply nests one `baseline` object, the
+  same struct `session.baseline` answers.
 - [pinned] Session-level capabilities are available before the session's
   first step and frozen for the session. `mid_session_appends` is
   re-evaluated only on a model switch, which rebuilds the prefix anyway.
 - [pinned] A policy naming a rung the session does not support for that
   surface is refused when it is set. [open: Q14] the ops that set a policy.
-- [open: Q15] How a baseline item is identified (`provider`, and `item` for
-  a provider with more than one plan item) follows the fetch-plan section of
-  this crate, still to be written.
+- [pinned] A baseline item is identified by `provider`, and by `item` for a
+  provider with more than one plan item. The `item` values follow the
+  fetch-plan section of this crate, still to be written.
 
 ### 10.1 Admission
 
@@ -314,14 +347,14 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   `plan_stale`, naming the differences; a tool-name collision naming both
   tools; `scope_unsupported` when the send is under a scope and the daemon
   lacks scopes. A later send whose plan differs from the frozen one is
-  refused by name. [open: Q16] the collision and plan-drift codes
-  (`tool_name_collision`, `plan_changed`).
+  refused by name. The collision is `tool_name_collision` and the plan drift
+  `plan_changed`.
 - [pinned] Any refusal during admission writes nothing.
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
   versions for life.
-- [open: Q15] The plan travels as `plan` on the session's first send, carried
+- [pinned] The plan travels as `plan` on the session's first send, carried
   verbatim (`SendRequest::plan`); its shape is the fetch-plan section's.
 
 ## 11. Calls the runner makes
@@ -403,6 +436,7 @@ treats it as a terminal refusal of that one request.
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `unknown_run` | `run.result` names no run of the session | — | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode | `field` | no |
+| `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send into a session whose last run is paused | `{run_id, reason}` | no |
 | `scope_owner_mismatch` | a send or `session.baseline` from anyone but the owner | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
@@ -421,9 +455,10 @@ treats it as a terminal refusal of that one request.
 - [pinned] Route refusals the daemon classifies as retryable on open (module
   reloading or warming, target unavailable) are retried by the caller's
   transport under the daemon's own list; this role does not restate them.
-- [open: Q16] The `invalid_params` spelling (`tool-provider/v1` uses
-  `invalid_request`), `detail.field` on `send_id_reuse`, and the names
-  r7.3 leaves unnamed.
+- [pinned] The malformed-request code is `invalid_params`, as runners already
+  answer. `tool-provider/v1` spells the same refusal `invalid_request`; the
+  difference is between roles, and a consumer of both maps each by its own
+  role.
 
 ### 12.2 Run errors (`errors::provider_codes`)
 
@@ -443,7 +478,8 @@ treats it as a terminal refusal of that one request.
   withheld; the error text says so.
 - [pinned] `route_drained`: the call was never sent, because its route closed
   under a drained scope.
-- [open: Q7] Where the reason sits in a message body.
+- [pinned] Where the reason sits in a message body is the runner's message
+  schema.
 
 ## 13. Decoding
 
@@ -506,7 +542,8 @@ state root (`cortexkit-role-harness`):
    which calls it marks indeterminate. It never enters what the model is
    sent.
 
-Kill points (`points.rs`). [open: Q20] the list.
+Kill points (`points.rs`). [pinned] The list below. Approval-gated calls'
+points join it with the runner's approve-gate work.
 
 | Point | Durable state after the kill | Property |
 |---|---|---|
@@ -537,14 +574,16 @@ step-transform providers. It will check:
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
 | `compaction_ready_reasks_after_wait`, `compaction_cursor_never_skips` | a compaction provider in the plan |
-| `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals` | `transcript_reads` |
+| `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals`, `oversize_message_alone_on_its_page`, `never_written_session_empty_page`, `describe_states_max_bytes` | `transcript_reads` |
 | `run_result_completed_final_text`, `run_result_interrupted_not_cancelled`, `run_attribution_per_message` | `run_ops` |
 | `dispatched_to_per_call`, `indeterminate_until_closed`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution` |
 | `subscribe_from_head_no_gap_no_duplicate` | `streaming` |
 | `model_view_differs_only_by_compaction` | `model_view` |
 | `steer_lands_at_step_boundary`, `steer_never_between_call_and_result` | `steer` |
 | `queue_starts_next_turn` | `queue` |
-| `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing` | `steer` or `queue` |
+| `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
+| `undeclared_delivery_refused` | a delivery mode the subject does not declare |
+| `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
 | `crash_at_<point>` for each point in §14, asserting its properties | the points the harness declares |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run
@@ -556,106 +595,98 @@ does not declare is skipped, never passed; a run with skips is "conforming
 for declared capabilities", naming them; a run fails if any case fails or if
 no kill ended a real process.
 
+## Not in v1
+
+- A neutral, role-defined message schema. Message bodies stay in each
+  runner's own schema (§4.2); a consumer reading more than one runner decodes
+  each runner's schema.
+- An observation stream of read-only session events.
+
 ## Open questions
 
-Each lists the options seen; the draft's choice is marked.
+Each open question lists the options seen. A settled question keeps its number and records
+the decision; the items it governs are pinned above.
 
-- **Q1. The request envelope.** (a) `{method, params}`, as broca's routes
-  carry ops today; (b) `{name, arguments}`, as `tool-provider/v1` carries its
-  role ops on the tool route. The session-bound route is common to both.
-- **Q2. The `role.describe` shape.** (a) **draft:** `majors` plus top-level
-  `capabilities`, as `tool-provider/v1`; (b) the flat `{role, version,
-  stability, implementation_version, ops, capabilities}` r7.3 §3.3 writes;
-  (c) `majors` with `capabilities` per major, since groups may differ between
-  majors. The shared SDK role handle decodes this, so all roles should agree.
-- **Q3. The session-capability source.** Member name and values: **draft**
-  `session_capabilities_from: "admission" | "baseline"`.
-- **Q4. `compaction.ready`.** r7.3 makes the compaction interface required of
-  every runner, but a runner that only steers sessions it does not host
-  (Thalamus) may have nothing to compact. (a) **draft:** required op; (b) a
-  `compaction` group, required by any consumer that is a compaction
-  provider. Also how it names its session on a module-level route: **draft**
-  `{session}` as the status named it, which needs the status to name the
-  session.
-- **Q5. Head metadata.** (a) **draft:** its own op `session.head`; (b)
-  `session.read {head_only: true}`, which mixes two reply shapes in one op.
-  Also `updated_at` units (**draft** milliseconds since the epoch) and the
-  `last_run_state` shape.
-- **Q6. The byte cap.** The request member (**draft** `max_bytes`), the
-  runner's default and maximum, and a single message larger than the cap:
-  (a) a page holding only that message, over the cap; (b) refuse by name;
-  never truncate a message. Also the field named by the two `after_mid`
-  misuse refusals.
-- **Q7. The message body.** (a) **draft:** the runner's own schema, opaque to
-  the role, so a consumer that reads two runners decodes two schemas; (b) a
-  neutral role-defined message schema (roles, text, tool calls, results,
-  reasoning, the tool-result reason). (b) is what a context manager reading
-  more than one runner needs; it is a large addition.
-- **Q8. The model view.** How compaction's replacement messages are numbered
-  and identified (they have no transcript ordinal), and whether range and
-  `after_mid` reads apply to it.
-- **Q9. `run.result`.** (a) **draft:** a run that has not ended answers its
-  current state with no final message; (b) refuse it by name. Whether the
-  answer also carries the final message's structured body. The separator the
-  text parts are joined with. Whether `max_steps` (broca) and
-  `transform_unavailable` (broca) belong in the role's state list.
-- **Q10. Episodes.** What an episode is across runners and its type
-  (**draft** an opaque string).
-- **Q11. Dispatch attribution placement.** (a) **draft:** a per-message
-  `tool_calls` list beside the message body; (b) fields inside the runner's
-  message body. And whether groups that extend `session.read` require only
-  that op (**draft**) or all of `transcript_reads`.
-- **Q12. `interrupt`.** (a) **draft:** no group of its own; (b) its own group,
-  since a runner may steer and queue without being able to abort a model
-  stream. Also what a runner that declares only `steer` answers to `queue` or
-  `interrupt`, and what a steer gets on a runner that can only reach a running
-  session when nothing is running.
-- **Q13. The mark.** Member name and shape (**draft** `mark`, opaque JSON).
-- **Q14. Change ops.** `session.refresh {plan, policy, generation}`,
+- **Q1. The request envelope.** Settled: `{method, params}` on the runner's
+  session-bound management route (§1).
+- **Q2. The `role.describe` shape.** Settled: `majors` plus top-level
+  `capabilities`, the shape `tool-provider/v1` uses (§2).
+- **Q3. The session-capability source.** Settled as drafted:
+  `session_capabilities_from: "admission" | "baseline"` (§2).
+- **Q4. `compaction.ready`.** Open; the compaction provider's role owner
+  decides. r7.3 makes the compaction interface required of every runner, but
+  a runner that only steers sessions it does not host (Thalamus) may have
+  nothing to compact. (a) **draft:** a required op; (b) a `compaction` group,
+  required by any consumer that is a compaction provider. Also how it names
+  its session on a module-level route: **draft** `{session}` as the status
+  named it, which needs the status to name the session.
+- **Q5. Head metadata.** Settled as drafted: its own op `session.head`, with
+  `updated_at` in milliseconds since the epoch and `last_run_state` as
+  `{run_id, state, reason?}` (§4.3).
+- **Q6. The byte cap.** Settled: the request member is `max_bytes`; the
+  runner states its default and maximum in `role.describe`; a single message
+  larger than the cap comes alone on its page, over the cap, with
+  `next_from_ordinal` set, and is never truncated or refused (§2, §4).
+- **Q7. The message body.** Settled: the runner's own schema, opaque to the
+  role. A neutral schema is not in v1.
+- **Q8. The model view.** Open. How compaction's replacement messages are
+  numbered and identified (they have no transcript ordinal), and whether
+  range and `after_mid` reads apply to it.
+- **Q9. `run.result`.** Settled: a run that has not ended answers its current
+  state with no final message; `max_steps` is a terminal state of the role;
+  `transform_unavailable` stays a runner state, decoded open (§6). Still
+  open: the separator the text parts are joined with, which the session
+  owner's role owner chooses.
+- **Q10. Episodes.** Settled as drafted: an opaque string (§6).
+- **Q11. Dispatch attribution placement.** Settled as drafted: a per-message
+  `tool_calls` list beside the message body, and a group that extends
+  `session.read` requires only that op (§3, §5).
+- **Q12. `interrupt`.** Settled: its own capability group. A runner refuses a
+  delivery mode it does not declare as `delivery_unsupported` with
+  `detail.delivery`, never falling back to `queue` (§3, §9).
+- **Q13. The mark.** Settled as drafted: `mark`, opaque JSON (§9).
+- **Q14. Change ops.** Open. `session.refresh {plan, policy, generation}`,
   `session.refresh_policy {generation, policy, send_id}` and
   `session.flush_prefix`, with their refusals (`rung_unsupported`,
   `pending_superseded`, `already_applied`): role ops under a group (which
   one?), or runner ops outside the role. r7.3 §10 does not list them.
-- **Q15. The admission reply and baseline.** (a) **draft:** one nested
-  `baseline` object, the same struct `session.baseline` answers; (b) three
-  top-level members `baseline`, `absent_items`, `session_capabilities` on the
-  admission reply. The `not_yet` spelling. Baseline item identity and the
-  plan's shape wait for the fetch-plan section of this crate.
-- **Q16. Unnamed codes.** r7.3 names `lineage_changed`, `unknown_mid`,
-  `fetch_unavailable`, `plan_stale`, `scope_unsupported`,
-  `pre_user_unavailable`, `rung_unsupported`; it leaves unnamed the
-  unknown-run refusal (**draft** `unknown_run`), the tool-name collision
-  (**draft** `tool_name_collision`), the plan drift on a later send
-  (**draft** `plan_changed`) and the non-owner refusal (**draft**
-  `scope_owner_mismatch`). Also `invalid_params` against `tool-provider/v1`'s
-  `invalid_request`, and whether `send_id_reuse` names the differing field.
-- **Q17. A session with no lineage yet.** What a read of a session that was
-  never written answers: (a) a page with a lineage minted then; (b) refuse
-  by name.
-- **Q18. Subscription spellings.** The `start`/`live` names, the `head`
-  object being opaque, and how much of the event shape the role pins beyond
-  `kind` and `cursor`.
-- **Q19. Owner sends on a runner with its own send parameters.** Which
-  runner parameters (model, say) an owner's steer or queue must carry when
-  the role's members are all it knows. The reply's state set.
-- **Q20. Kill points.** Whether approval-gated calls' states (prepared,
-  authorized, dispatch started) are cut here under the `tool-provider/v1`
-  names, and whether `SendRecorded` should split admission sends from owner
-  prompts.
-- **Q21. Stability guarantees.** What `alpha`, `beta` and `stable` each
-  promise; r7.3 says the role document states them but not what they are.
+- **Q15. The admission reply and baseline.** Settled as drafted: one nested
+  `baseline` object, the same struct `session.baseline` answers, with
+  `not_yet` as the answer before the first request (§10).
+- **Q16. Unnamed codes.** Settled: `invalid_params` stays, and
+  `tool-provider/v1`'s `invalid_request` is a difference between roles;
+  `send_id_reuse` names the differing field in `detail.field`; the drafted
+  names `unknown_run`, `tool_name_collision`, `plan_changed` and
+  `scope_owner_mismatch` stay (§12).
+- **Q17. A session with no lineage yet.** Settled, a third option: a read of
+  a session never written returns an empty page with no `lineage_id` and no
+  `next_from_ordinal`, and an absent `lineage_id` means no lineage yet (§4.2).
+- **Q18. Subscription spellings.** Settled as drafted: `start`, `live` or a
+  `head` object passed back verbatim, and events pinned only as far as
+  `kind` and `cursor` (§7).
+- **Q19. Owner sends on a runner with its own send parameters.** Settled: a
+  `steer` or `interrupt` into an existing session takes every runner
+  parameter it omits from the session's frozen values (§9).
+- **Q20. Kill points.** Settled: the list in §14. Approval-gated calls'
+  points join with the runner's approve-gate work; `SendRecorded` is not
+  split.
+- **Q21. Stability.** Settled: stability is data, never part of a capability
+  name. Each major in `role.describe` carries `stability`, `alpha`, `beta` or
+  `stable`, read as `alpha` when absent; this draft is `alpha` (§2).
 
 ## Gaps in broca today
 
 Where broca's shipped surface differs from this document. Paths are in the
-broca repository; none of this is a change request against broca beyond what
-its own build plan already schedules.
+broca repository; `Bn` labels name slices of broca's own build plan
+(`docs/extensibility-build-plan.md`). None of this is a change request against
+broca beyond what that plan already schedules.
 
 1. **No `role.describe`.** The served ops are `cap.install`, `spend.delta`,
    `session.send`, `session.import`, `session.retract`, `run.cancel`,
    `run.status`, `session.read` and the `session.subscribe` stream
    (`crates/broca-module-serve/src/serve.rs:1514-1836`); any other op gets
-   `unknown_method` (`crates/broca-module-serve/src/serve.rs:1837-1848`). Until `role.describe` ships, the manifest claims
+   `unknown_method` (`crates/broca-module-serve/src/serve.rs:1837-1848`).
+   Until `role.describe` ships, the manifest claims
    `session-send-delivery/v1` instead. Planned in B9
    (`docs/extensibility-build-plan.md:358-367`).
 2. **No `session.baseline`, and the admission reply carries no baseline.**
@@ -672,11 +703,14 @@ its own build plan already schedules.
    as §13 requires. `include_tools` is a runner extra the role does not
    define.
 5. **Pages are capped by count only:** default 200, maximum 500
-   (`crates/broca-core/src/context.rs:30-34`), with no byte cap.
-   `next_from_ordinal` is already set whenever a page stops early.
-6. **`lineage_id` is optional on a page,** absent on legacy lineages until
-   their next write (`crates/broca-wire/src/lib.rs:563-566,574-575`). The
-   role requires it on every page.
+   (`crates/broca-core/src/context.rs:30-34`), with no byte cap and no
+   `max_bytes` in a describe answer (the role's values for broca are a 4 MiB
+   default and a 16 MiB maximum). `next_from_ordinal` is already set
+   whenever a page stops early.
+6. **`lineage_id` is absent on legacy lineages** until their next write
+   (`crates/broca-wire/src/lib.rs:563-566,574-575`), so a page of a session
+   that has messages can arrive without it. The role allows an absent
+   `lineage_id` only on the empty page of a session never written.
 7. **Messages carry only `{ordinal, mid, message}`**
    (`crates/broca-wire/src/lib.rs:525-532`): no run attribution, no
    `originals`, no per-call `dispatched_to`, `call_key` or indeterminate
@@ -704,14 +738,16 @@ its own build plan already schedules.
     event shape (`crates/broca-wire/src/lib.rs:756-766`) already fit §7.
 13. **`send_id` is optional and `model` is required on every send**
     (`crates/broca-wire/src/lib.rs:112-115`). The role requires `send_id` on
-    owner sends, and an owner's steer that carries only the role's members
-    would be refused for want of `model` (Q19). There is no `mark` and no
+    owner sends. Broca still requires `model` on every send, where the role
+    has a `steer` or `interrupt` into an existing session take every omitted
+    runner parameter from the session's frozen values (§9). There is no `mark` and no
     `plan` member yet (B8, B12). The `delivery` modes and their strict value
-    already match §9 (`crates/broca-wire/src/lib.rs:177-190`).
+    already match §9 (`crates/broca-wire/src/lib.rs:177-190`), but there is
+    no `delivery_unsupported` refusal: broca accepts every mode.
 14. **`send_id_reuse` and `invalid_params` carry no `detail.field`:** the
     error body is built from the code and message alone
     (`crates/broca-module-serve/src/serve.rs:2078,2102,2123-2141`).
-15. **Separate steer and queue ops in the build plan.** B12 still names new
-    ops `session.steer` and `session.queue`
+15. **Separate steer and queue ops in the build plan,** being corrected in
+    broca. B12 still names new ops `session.steer` and `session.queue`
     (`docs/extensibility-build-plan.md:417`); the role uses `session.send`
     with `delivery` instead.

@@ -20,7 +20,8 @@ use crate::{capabilities, PROVIDES, REQUIRED_OPS};
 /// Decoded leniently: unknown fields, majors, ops and capabilities are
 /// ignored. [`check_describe`] checks strictly only what a consumer relies
 /// on: the `llm-runner/v1` major, its required ops, the ops of every group
-/// the answer declares, and where session capabilities come from.
+/// the answer declares, where session capabilities come from, and the
+/// read byte cap when the answer declares `transcript_reads`.
 ///
 /// Non-exhaustive so a later optional member is additive: build one with
 /// [`RoleDescribe::new`] and the `with_*` setters, or decode one.
@@ -41,6 +42,25 @@ pub struct RoleDescribe {
     /// still decodes and is refused by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_capabilities_from: Option<String>,
+    /// The `session.read` byte cap: the default a page stops at when the
+    /// request names no `max_bytes`, and the largest `max_bytes` the runner
+    /// honours. Required by [`check_describe`] when the answer declares
+    /// `transcript_reads`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<MaxBytes>,
+}
+
+/// A runner's `session.read` byte cap, in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct MaxBytes {
+    /// The cap a page stops at when the request names no `max_bytes`.
+    pub default: u64,
+    /// The largest cap the runner honours; a larger request is capped to it.
+    pub maximum: u64,
+}
+
+fn alpha() -> String {
+    "alpha".to_owned()
 }
 
 /// One served major.
@@ -50,7 +70,10 @@ pub struct Major {
     /// `llm-runner/v1`.
     pub version: String,
     pub ops: Vec<String>,
-    /// `alpha`, `beta` or `stable`; see [`Major::stability`].
+    /// `alpha`, `beta` or `stable`; see [`Major::stability`]. Stability is
+    /// data, never part of a capability name. An answer that omits it is
+    /// read as `alpha`, the level every major starts at.
+    #[serde(default = "alpha")]
     pub stability: String,
 }
 
@@ -78,6 +101,12 @@ impl RoleDescribe {
     /// Set the module-level capabilities.
     pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
         self.capabilities = capabilities;
+        self
+    }
+
+    /// State the `session.read` byte cap.
+    pub fn with_max_bytes(mut self, default: u64, maximum: u64) -> Self {
+        self.max_bytes = Some(MaxBytes { default, maximum });
         self
     }
 
@@ -152,6 +181,8 @@ pub enum DescribeProblem {
     },
     /// The answer does not say where session-level capabilities come from.
     MissingSessionCapabilitiesSource,
+    /// The answer declares `transcript_reads` without stating its byte cap.
+    MissingMaxBytes,
 }
 
 /// Decode `raw` and check it lists an `llm-runner/v1` major with every
@@ -192,6 +223,9 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             }
         }
     }
+    if describe.declares(capabilities::TRANSCRIPT_READS) && describe.max_bytes.is_none() {
+        problems.push(DescribeProblem::MissingMaxBytes);
+    }
     if describe.session_capabilities_from.is_none() {
         problems.push(DescribeProblem::MissingSessionCapabilitiesSource);
     }
@@ -217,6 +251,7 @@ mod tests {
             DescribeProblem::MissingSessionCapabilitiesSource => {
                 "missing_session_capabilities_source"
             }
+            DescribeProblem::MissingMaxBytes => "missing_max_bytes",
         }
     }
 
@@ -230,6 +265,17 @@ mod tests {
             for capability in case["declares"].as_array().unwrap() {
                 assert!(describe.declares(capability.as_str().unwrap()), "{name}");
             }
+        }
+        for case in vectors::cases(&file, "stability_defaults") {
+            let name = case["name"].as_str().unwrap();
+            let describe = check_describe(&case["answer"])
+                .unwrap_or_else(|problems| panic!("{name}: {problems:?}"));
+            let major = describe.major(PROVIDES).unwrap();
+            assert_eq!(
+                major.stability,
+                case["stability"].as_str().unwrap(),
+                "{name}"
+            );
         }
         for case in vectors::cases(&file, "canonical") {
             vectors::round_trip::<RoleDescribe>(case["name"].as_str().unwrap(), &case["answer"]);

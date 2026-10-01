@@ -98,6 +98,11 @@ pub mod capabilities {
     pub const STEER: &str = "steer";
     /// `session.send` with `delivery: "queue"` from the session's owner.
     pub const QUEUE: &str = "queue";
+    /// `session.send` with `delivery: "interrupt"` from the session's owner:
+    /// cancel the running turn and start the message. A separate group from
+    /// `steer` and `queue`, so a runner that cannot abort a model stream can
+    /// still declare those two.
+    pub const INTERRUPT: &str = "interrupt";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -114,6 +119,7 @@ pub mod capabilities {
         (MODEL_VIEW, &[ops::SESSION_READ]),
         (STEER, &[ops::SESSION_SEND]),
         (QUEUE, &[ops::SESSION_SEND]),
+        (INTERRUPT, &[ops::SESSION_SEND]),
     ];
 
     /// The ops a declared group requires, or `None` for a name that is not a
