@@ -1,0 +1,209 @@
+{
+  "requests": [
+    {
+      "name": "pre_user on a human turn",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_user",
+        "text": "fix the failing test"
+      }
+    },
+    {
+      "name": "pre_user on the first message of a fresh session: no lineage",
+      "request": {
+        "session": "ses_01J9Z",
+        "params": {
+          "tags": "on"
+        },
+        "hook": "pre_user",
+        "text": "hello"
+      }
+    },
+    {
+      "name": "pre_user on a steered prompt with its mark",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_user",
+        "text": "<system-reminder>late result</system-reminder>",
+        "mark": {
+          "kind": "late_result",
+          "from": "prefrontal-core"
+        },
+        "delivery": "steer"
+      }
+    },
+    {
+      "name": "post_assistant",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_assistant",
+        "step_id": "st_88",
+        "text": "Done. \n\n"
+      }
+    },
+    {
+      "name": "pre_tool mutate",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_tool",
+        "step_id": "st_88",
+        "phase": "mutate",
+        "tool": "bash",
+        "tool_call_id": "call_0",
+        "input": {
+          "command": "ls"
+        }
+      }
+    },
+    {
+      "name": "pre_tool approve on a deferred call that has a key",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_tool",
+        "step_id": "st_88",
+        "phase": "approve",
+        "tool": "bash",
+        "tool_call_id": "call_0",
+        "call_key": "lin_7:812",
+        "input": {
+          "command": "rm -rf build"
+        }
+      }
+    },
+    {
+      "name": "post_tool",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_tool",
+        "step_id": "st_88",
+        "tool": "read",
+        "tool_call_id": "call_1",
+        "call_key": "lin_7:813",
+        "text": "1: fn main() {}",
+        "is_error": false
+      }
+    }
+  ],
+  "tolerated": [
+    {
+      "name": "runner extras",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_tool",
+        "step_id": "st_88",
+        "tool": "read",
+        "tool_call_id": "call_1",
+        "text": "x",
+        "is_error": false,
+        "runner_trace": "t-1"
+      }
+    },
+    {
+      "name": "an unknown delivery decodes",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_user",
+        "text": "x",
+        "delivery": "broadcast"
+      }
+    }
+  ],
+  "undecodable": [
+    {
+      "name": "unknown hook",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_model",
+        "text": "x"
+      }
+    },
+    {
+      "name": "no hook",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "text": "x"
+      }
+    },
+    {
+      "name": "pre_tool without a phase",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_tool",
+        "step_id": "st_88",
+        "tool": "bash",
+        "tool_call_id": "call_0",
+        "input": {}
+      }
+    },
+    {
+      "name": "pre_tool with an unknown phase",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_tool",
+        "step_id": "st_88",
+        "phase": "audit",
+        "tool": "bash",
+        "tool_call_id": "call_0",
+        "input": {}
+      }
+    },
+    {
+      "name": "post_tool without is_error",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_tool",
+        "step_id": "st_88",
+        "tool": "read",
+        "tool_call_id": "call_1",
+        "text": "x"
+      }
+    },
+    {
+      "name": "no session",
+      "request": {
+        "hook": "pre_user",
+        "text": "x",
+        "params": {}
+      }
+    }
+  ]
+}

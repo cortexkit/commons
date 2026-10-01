@@ -1,0 +1,308 @@
+{
+  "declaration": {
+    "subscriptions": [
+      {
+        "hook": "pre_user",
+        "ops": [
+          "prepend",
+          "append",
+          "replace"
+        ],
+        "on_unavailable": "pass",
+        "budget_ms": 1500
+      },
+      {
+        "hook": "post_tool",
+        "tools": [
+          "read",
+          "bash"
+        ],
+        "ops": [
+          "append"
+        ],
+        "budget_ms": 500
+      },
+      {
+        "hook": "post_tool",
+        "ops": [
+          "prepend"
+        ],
+        "budget_ms": 500
+      },
+      {
+        "hook": "pre_tool",
+        "phase": "validate",
+        "tools": [
+          "bash"
+        ],
+        "ops": [],
+        "budget_ms": 200
+      }
+    ]
+  },
+  "planned": [
+    {
+      "name": "pre_user append, as a fetch plan carries it",
+      "subscription": {
+        "hook": "pre_user",
+        "ops": [
+          "append"
+        ]
+      },
+      "bound_by": 0
+    },
+    {
+      "name": "post_tool append on read",
+      "subscription": {
+        "hook": "post_tool",
+        "tools": [
+          "read"
+        ],
+        "ops": [
+          "append"
+        ]
+      },
+      "bound_by": 1
+    },
+    {
+      "name": "post_tool prepend on every tool",
+      "subscription": {
+        "hook": "post_tool",
+        "ops": [
+          "prepend"
+        ]
+      },
+      "bound_by": 2
+    },
+    {
+      "name": "pre_tool validate on bash",
+      "subscription": {
+        "hook": "pre_tool",
+        "tools": [
+          "bash"
+        ],
+        "ops": [],
+        "phase": "validate"
+      },
+      "bound_by": 3
+    },
+    {
+      "name": "a hook the provider did not declare",
+      "subscription": {
+        "hook": "post_assistant",
+        "ops": [
+          "append"
+        ]
+      },
+      "problem": "not_declared"
+    },
+    {
+      "name": "a phase the provider did not declare",
+      "subscription": {
+        "hook": "pre_tool",
+        "tools": [
+          "bash"
+        ],
+        "ops": [],
+        "phase": "mutate"
+      },
+      "problem": "not_declared"
+    },
+    {
+      "name": "a tool outside the declared list",
+      "subscription": {
+        "hook": "pre_tool",
+        "tools": [
+          "edit"
+        ],
+        "ops": [],
+        "phase": "validate"
+      },
+      "problem": "tools_not_covered"
+    },
+    {
+      "name": "every tool, where the declaration lists some",
+      "subscription": {
+        "hook": "pre_tool",
+        "ops": [],
+        "phase": "validate"
+      },
+      "problem": "tools_not_covered"
+    },
+    {
+      "name": "an op the declaration does not name",
+      "subscription": {
+        "hook": "post_tool",
+        "tools": [
+          "read"
+        ],
+        "ops": [
+          "replace"
+        ]
+      },
+      "problem": "op_not_declared"
+    },
+    {
+      "name": "append on every tool: only the per-tool entry has append",
+      "subscription": {
+        "hook": "post_tool",
+        "ops": [
+          "append"
+        ]
+      },
+      "problem": "op_not_declared"
+    },
+    {
+      "name": "pre_tool with ops, as fetch-plan-v1 writes it",
+      "subscription": {
+        "hook": "pre_tool",
+        "ops": [
+          "append"
+        ],
+        "phase": "validate"
+      },
+      "problem": "ops_on_pre_tool"
+    },
+    {
+      "name": "pre_tool without a phase",
+      "subscription": {
+        "hook": "pre_tool",
+        "ops": []
+      },
+      "problem": "missing_phase"
+    }
+  ],
+  "undecodable": [
+    {
+      "name": "unknown hook",
+      "subscription": {
+        "hook": "on_compaction",
+        "ops": [
+          "append"
+        ]
+      }
+    },
+    {
+      "name": "unknown op",
+      "subscription": {
+        "hook": "pre_user",
+        "ops": [
+          "wrap"
+        ]
+      }
+    },
+    {
+      "name": "no ops member",
+      "subscription": {
+        "hook": "pre_user"
+      }
+    }
+  ],
+  "reduction": [
+    {
+      "name": "the reduction owner may replace on pre_user",
+      "subscription": {
+        "hook": "pre_user",
+        "ops": [
+          "append",
+          "replace"
+        ]
+      },
+      "provider": "magic-context",
+      "reduction_owner": "magic-context",
+      "problem": null
+    },
+    {
+      "name": "another provider may not replace on pre_user",
+      "subscription": {
+        "hook": "pre_user",
+        "ops": [
+          "replace"
+        ]
+      },
+      "provider": "acme-tags",
+      "reduction_owner": "magic-context",
+      "problem": "replace_not_reduction_owner"
+    },
+    {
+      "name": "no reduction owner: nobody replaces on post_assistant",
+      "subscription": {
+        "hook": "post_assistant",
+        "ops": [
+          "replace"
+        ]
+      },
+      "provider": "magic-context",
+      "reduction_owner": null,
+      "problem": "replace_not_reduction_owner"
+    },
+    {
+      "name": "preserving ops need no ownership",
+      "subscription": {
+        "hook": "post_assistant",
+        "ops": [
+          "prepend",
+          "append"
+        ]
+      },
+      "provider": "acme-tags",
+      "reduction_owner": "magic-context",
+      "problem": null
+    },
+    {
+      "name": "replace on post_tool is the user grant's business, not ownership",
+      "subscription": {
+        "hook": "post_tool",
+        "tools": [
+          "read"
+        ],
+        "ops": [
+          "replace"
+        ]
+      },
+      "provider": "acme-cap",
+      "reduction_owner": "magic-context",
+      "problem": null
+    }
+  ],
+  "order": [
+    {
+      "name": "the reduction owner runs first",
+      "providers": [
+        "acme-tags",
+        "magic-context",
+        "acme-recall"
+      ],
+      "reduction_owner": "magic-context",
+      "order": [
+        1,
+        0,
+        2
+      ]
+    },
+    {
+      "name": "no reduction owner: plan order",
+      "providers": [
+        "acme-tags",
+        "acme-recall"
+      ],
+      "reduction_owner": null,
+      "order": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "a reduction owner with no step transforms: plan order",
+      "providers": [
+        "acme-tags",
+        "acme-recall"
+      ],
+      "reduction_owner": "magic-context",
+      "order": [
+        0,
+        1
+      ]
+    }
+  ]
+}

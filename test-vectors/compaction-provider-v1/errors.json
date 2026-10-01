@@ -1,0 +1,14 @@
+{
+  "codes": [
+    {"code": "invalid_params", "retryable": false},
+    {"code": "transient", "retryable": true},
+    {"code": "a_code_this_role_does_not_define", "retryable": false}
+  ],
+  "refuse_codes": [
+    {"code": "window_too_small", "retryable": false},
+    {"code": "provider_busy", "retryable": true},
+    {"code": "misconfigured", "retryable": false},
+    {"code": "history_unreadable", "retryable": true},
+    {"code": "acme_own_code", "retryable": null}
+  ]
+}

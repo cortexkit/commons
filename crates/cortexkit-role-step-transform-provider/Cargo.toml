@@ -1,0 +1,28 @@
+# cortexkit-role-step-transform-provider — the wire contract of the
+# `step-transform-provider/v1` role: role.describe, the declaration that
+# bounds what a plan may subscribe to, the four hooks (pre_user,
+# post_assistant, pre_tool in its mutate, validate and approve phases,
+# post_tool) and their answers, error codes, the kill-point vocabulary its
+# crash suite will use, and CONTRACT.md, which says what is pinned and what is
+# still open. Pure serde plus small checks; no transport, no runtime.
+#
+# A DRAFT for design review: not published until the role's consumers have
+# reviewed CONTRACT.md. The conformance runner will live in a sibling
+# `-conformance` crate, so a provider's production build never pulls in the
+# suite.
+[package]
+name = "cortexkit-role-step-transform-provider"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit step-transform-provider/v1 role: the subscription declaration, the four hooks, their operations and the PreTool phases."
+publish = false
+
+[dependencies]
+# The runner role's crate, for the names and types both sides of the
+# interface share, so they cannot drift apart.
+cortexkit-role-llm-runner = { version = "0.1.0", path = "../cortexkit-role-llm-runner" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
