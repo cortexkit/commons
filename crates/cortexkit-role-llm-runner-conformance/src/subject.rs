@@ -230,6 +230,12 @@ pub trait LlmRunnerSubject: Harness {
 
     /// How many times the scripted tool provider was called with
     /// `arguments`, counted across every kill and restart in the run.
+    ///
+    /// The count must be kept outside the runner's process and outside its
+    /// state root: in the suite's own process, or on disk somewhere a kill
+    /// and restart of the runner cannot touch. A count the runner holds is
+    /// reset by every kill, and the at-most-once crash checks would then pass
+    /// whatever the runner does.
     async fn tool_invocations(&self, arguments: &Value) -> usize;
 
     /// Resolve once the scripted tool provider holds the call with
