@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 
 use crate::token::{validate_account_token, validate_token, NamingError, TokenKind};
 
-/// All five stream names owned by one account.
+/// All six stream names owned by one account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamNames {
     pub room: String,
@@ -12,16 +12,19 @@ pub struct StreamNames {
     pub peer: String,
     pub effect: String,
     pub effect_dead: String,
+    /// Module events (`ck.{acct}.event.>`), read by the flow engine.
+    pub event: String,
 }
 
 impl StreamNames {
-    pub fn all(&self) -> [&str; 5] {
+    pub fn all(&self) -> [&str; 6] {
         [
             &self.room,
             &self.wake,
             &self.peer,
             &self.effect,
             &self.effect_dead,
+            &self.event,
         ]
     }
 
@@ -31,7 +34,8 @@ impl StreamNames {
     /// in the consumer position on exactly these streams (NATS wildcards cannot
     /// match a `c_` prefix), which admits every consumer on them. So no non-agent
     /// durable may ever be created on these streams; ck-bus asserts that against
-    /// this list. ROOM and EFFECT_DEAD are not agent streams.
+    /// this list. ROOM, EFFECT_DEAD and EVENT are not agent streams: EVENT holds
+    /// module durables (`m_{module_id}`), never a `c_` durable.
     pub fn agent_streams(&self) -> [&str; 3] {
         [&self.wake, &self.peer, &self.effect]
     }
@@ -71,6 +75,7 @@ impl AccountNames {
                 peer: format!("CK_{account_upper}_PEER"),
                 effect: format!("CK_{account_upper}_EFFECT"),
                 effect_dead: format!("CK_{account_upper}_EFFECT_DEAD"),
+                event: format!("CK_{account_upper}_EVENT"),
             },
             buckets: BucketNames {
                 census: format!("CK_{account_upper}_CENSUS"),
@@ -174,6 +179,38 @@ impl AccountNames {
         format!("ck.{}.effect.dead", self.account)
     }
 
+    /// The subject one module publishes one event on:
+    /// `ck.{acct}.event.{module_id}.{event}.v{version}`.
+    ///
+    /// The event name must be a single subject token and the version at least
+    /// 1, so every event subject has exactly six tokens and the version is
+    /// always the last one.
+    pub fn event_subject(
+        &self,
+        module_id: &str,
+        event: &str,
+        version: u32,
+    ) -> Result<String, NamingError> {
+        validate_token(TokenKind::ModuleId, module_id)?;
+        validate_token(TokenKind::EventName, event)?;
+        let version_token = format!("v{version}");
+        validate_token(TokenKind::EventVersion, &version_token)?;
+        Ok(format!(
+            "ck.{}.event.{module_id}.{event}.{version_token}",
+            self.account
+        ))
+    }
+
+    /// The publish grant covering every event subject of one module.
+    pub fn event_publish_grant(&self, module_id: &str) -> Result<String, NamingError> {
+        validate_token(TokenKind::ModuleId, module_id)?;
+        Ok(format!("ck.{}.event.{module_id}.>", self.account))
+    }
+
+    pub fn event_binding(&self) -> String {
+        format!("ck.{}.event.>", self.account)
+    }
+
     pub fn sentinel_ping(&self) -> String {
         format!("ck.{}.sentinel.ping", self.account)
     }
@@ -181,6 +218,15 @@ impl AccountNames {
     pub fn consumer_name(agent_id: &str) -> Result<String, NamingError> {
         validate_token(TokenKind::AgentId, agent_id)?;
         Ok(format!("c_{agent_id}"))
+    }
+
+    /// The durable a module reads module events through, `m_{module_id}`.
+    ///
+    /// The `m_` prefix keeps module durables apart from the agent namespace
+    /// `c_`, and they live only on the event stream.
+    pub fn module_consumer_name(module_id: &str) -> Result<String, NamingError> {
+        validate_token(TokenKind::ModuleId, module_id)?;
+        Ok(format!("m_{module_id}"))
     }
 
     /// The census key for one live module inside `buckets().census`.

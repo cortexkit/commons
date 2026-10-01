@@ -12,6 +12,10 @@ pub enum TokenKind {
     RosterHostId,
     CredentialPublic,
     RootProvider,
+    /// The `{event}` token of a module event subject.
+    EventName,
+    /// The `v{version}` token of a module event subject.
+    EventVersion,
 }
 
 impl TokenKind {
@@ -25,6 +29,8 @@ impl TokenKind {
             Self::RosterHostId => "roster_host_id",
             Self::CredentialPublic => "credential_public",
             Self::RootProvider => "root_provider",
+            Self::EventName => "event",
+            Self::EventVersion => "event_version",
         }
     }
 }
@@ -75,7 +81,57 @@ impl Error for NamingError {}
 
 /// Validates the account-only lexicon `[a-z0-9][a-z0-9_]{0,62}`.
 pub fn validate_account_token(token: &str) -> Result<(), NamingError> {
-    validate_len_and_first(TokenKind::Account, token)?;
+    validate_no_hyphen_token(
+        TokenKind::Account,
+        token,
+        "expected [a-z0-9][a-z0-9_]{0,62}; hyphens and normalization are forbidden",
+    )
+}
+
+/// Validates an event name, `[a-z0-9][a-z0-9_]{0,62}`.
+///
+/// NATS splits subjects on dots, so an event name must be exactly one subject
+/// token: a dot would add a level to `ck.{acct}.event.{module_id}.{event}.v{n}`
+/// and shift the version out of place. The hyphen is refused as well, so event
+/// names stay in the narrower lexicon the account token already uses.
+fn validate_event_name(token: &str) -> Result<(), NamingError> {
+    validate_no_hyphen_token(
+        TokenKind::EventName,
+        token,
+        "expected [a-z0-9][a-z0-9_]{0,62}; an event name is one subject token, so dots, hyphens, wildcards and whitespace are forbidden",
+    )
+}
+
+/// Parses the version token of an event subject, `v{n}` with `n >= 1`.
+///
+/// The number is plain decimal without leading zeros, so each version has
+/// exactly one spelling (`v1`, never `v01`) and two subjects for one version
+/// cannot exist.
+pub fn validate_event_version(token: &str) -> Result<u32, NamingError> {
+    let refuse = || {
+        NamingError::new(
+            TokenKind::EventVersion,
+            token,
+            "expected v{n} with n a decimal integer of at least 1 and no leading zero",
+        )
+    };
+    let digits = token.strip_prefix('v').ok_or_else(refuse)?;
+    if digits.is_empty()
+        || digits.starts_with('0')
+        || !digits.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(refuse());
+    }
+    digits.parse::<u32>().map_err(|_| refuse())
+}
+
+/// The one-token lexicon without hyphens shared by accounts and event names.
+fn validate_no_hyphen_token(
+    kind: TokenKind,
+    token: &str,
+    reason: &'static str,
+) -> Result<(), NamingError> {
+    validate_len_and_first(kind, token)?;
     if token
         .bytes()
         .skip(1)
@@ -83,11 +139,7 @@ pub fn validate_account_token(token: &str) -> Result<(), NamingError> {
     {
         Ok(())
     } else {
-        Err(NamingError::new(
-            TokenKind::Account,
-            token,
-            "expected [a-z0-9][a-z0-9_]{0,62}; hyphens and normalization are forbidden",
-        ))
+        Err(NamingError::new(kind, token, reason))
     }
 }
 
@@ -95,12 +147,15 @@ pub fn validate_account_token(token: &str) -> Result<(), NamingError> {
 ///
 /// `CredentialPublic` is an inbox-prefix component rather than a registry token;
 /// it accepts ASCII letters because real NATS public nkeys are uppercase.
+/// `Account` and `EventName` use the narrower lexicon without the hyphen, and
+/// `EventVersion` accepts only `v{n}` (see [`validate_event_version`]).
 pub fn validate_token(kind: TokenKind, token: &str) -> Result<(), NamingError> {
-    if kind == TokenKind::Account {
-        return validate_account_token(token);
-    }
-    if kind == TokenKind::CredentialPublic {
-        return validate_credential_public(token);
+    match kind {
+        TokenKind::Account => return validate_account_token(token),
+        TokenKind::CredentialPublic => return validate_credential_public(token),
+        TokenKind::EventName => return validate_event_name(token),
+        TokenKind::EventVersion => return validate_event_version(token).map(|_| ()),
+        _ => {}
     }
 
     validate_len_and_first(kind, token)?;

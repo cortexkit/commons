@@ -6,10 +6,10 @@ mod names;
 mod token;
 
 pub use grants::{
-    bus_permissions, delivery_authority_permissions, generate_permission_golden,
-    participant_permissions, system_permissions, validate_permission_file, AllowEntry,
-    GoldenFixture, GrantError, Operation, PermissionDocument, Principal, RefusedEntry,
-    PINNED_GOLDEN_FIXTURE,
+    bus_permissions, delivery_authority_permissions, flow_engine_permissions,
+    generate_permission_golden, participant_permissions, system_permissions,
+    validate_permission_file, AllowEntry, GoldenFixture, GrantError, Operation, PermissionDocument,
+    Principal, RefusedEntry, PINNED_GOLDEN_FIXTURE,
 };
 pub use limits::{
     shipped_streams, validate_consumer, validate_store_retention, validate_streams, ConsumerSpec,
@@ -19,4 +19,6 @@ pub use names::{
     root_credential_id, validate_tenancy_name, AccountNames, BucketNames, NamingExemption,
     NamingRule, RootCredentialKind, StreamNames, TenancyNameError, CLOSED_NAMING_EXEMPTIONS,
 };
-pub use token::{validate_account_token, validate_token, NamingError, TokenKind};
+pub use token::{
+    validate_account_token, validate_event_version, validate_token, NamingError, TokenKind,
+};

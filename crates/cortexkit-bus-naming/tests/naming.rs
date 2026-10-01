@@ -63,6 +63,9 @@ fn every_governed_name_obeys_its_rule_and_exemptions_are_closed() {
         names.effect_publish_grant("agent_a").unwrap(),
         names.effect_binding(),
         names.effect_dead(),
+        names.event_subject("module_a", "event_a", 1).unwrap(),
+        names.event_publish_grant("module_a").unwrap(),
+        names.event_binding(),
         names.sentinel_ping(),
     ];
     for subject in subjects {
@@ -84,6 +87,87 @@ fn every_governed_name_obeys_its_rule_and_exemptions_are_closed() {
     ];
     for (name, exemption) in exempt {
         validate_tenancy_name(&names, name, NamingRule::Exempt(exemption)).unwrap();
+    }
+}
+
+#[test]
+fn event_names_are_one_subject_token_without_hyphens() {
+    use cortexkit_bus_naming::validate_token;
+    let names = AccountNames::derive("box_events").unwrap();
+    for bad in ["pull-request", "a.b"] {
+        let error =
+            validate_token(TokenKind::EventName, bad).expect_err("event name must be refused");
+        assert_eq!(error.kind(), TokenKind::EventName);
+        assert_eq!(error.token(), bad);
+        assert!(error.to_string().contains(bad));
+
+        let error = names
+            .event_subject("github", bad, 1)
+            .expect_err("event subject must refuse the same name");
+        assert_eq!(error.kind(), TokenKind::EventName);
+        assert_eq!(error.token(), bad);
+    }
+    for bad in ["", "*", ">", "Pull", "_lead", "a b"] {
+        assert_eq!(
+            validate_token(TokenKind::EventName, bad)
+                .expect_err("event name must be refused")
+                .kind(),
+            TokenKind::EventName,
+            "{bad:?}"
+        );
+    }
+    validate_token(TokenKind::EventName, "pull_request_review").unwrap();
+    assert_eq!(
+        names
+            .event_subject("github", "pull_request_review", 1)
+            .unwrap(),
+        "ck.box_events.event.github.pull_request_review.v1"
+    );
+}
+
+#[test]
+fn event_versions_are_v_then_a_positive_integer() {
+    use cortexkit_bus_naming::validate_event_version;
+    assert_eq!(validate_event_version("v1").unwrap(), 1);
+    assert_eq!(validate_event_version("v42").unwrap(), 42);
+    for bad in ["v0", "v01", "v", "1", "V1", "v1a", "v-1", "v99999999999"] {
+        let error = validate_event_version(bad).expect_err("version must be refused");
+        assert_eq!(error.kind(), TokenKind::EventVersion, "{bad:?}");
+        assert_eq!(error.token(), bad);
+    }
+    let names = AccountNames::derive("box_events").unwrap();
+    let error = names
+        .event_subject("github", "push", 0)
+        .expect_err("version 0 must be refused");
+    assert_eq!(error.kind(), TokenKind::EventVersion);
+}
+
+#[test]
+fn the_event_stream_is_the_sixth_stream_and_holds_module_durables() {
+    let names = AccountNames::derive("box_events").unwrap();
+    let streams = names.streams();
+    assert_eq!(streams.event, "CK_BOX_EVENTS_EVENT");
+    assert_eq!(streams.all().len(), 6);
+    assert_eq!(streams.all()[5], streams.event);
+    assert!(!streams.agent_streams().contains(&streams.event.as_str()));
+
+    assert_eq!(names.event_binding(), "ck.box_events.event.>");
+    assert_eq!(
+        names.event_publish_grant("prefrontal-core").unwrap(),
+        "ck.box_events.event.prefrontal-core.>"
+    );
+    assert_eq!(
+        AccountNames::module_consumer_name("basal").unwrap(),
+        "m_basal"
+    );
+    for bad in ["", "a.b", "*", ">"] {
+        assert_eq!(
+            AccountNames::module_consumer_name(bad)
+                .expect_err("module durable must refuse a non-token")
+                .kind(),
+            TokenKind::ModuleId
+        );
+        assert!(names.event_publish_grant(bad).is_err());
     }
 }
 

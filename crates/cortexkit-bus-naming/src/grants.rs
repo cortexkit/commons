@@ -11,6 +11,8 @@ pub enum Principal {
     DeliveryAuthority,
     Bus,
     System,
+    /// The module that runs flows (basal): it reads the event stream.
+    FlowEngine,
 }
 
 impl Principal {
@@ -20,6 +22,7 @@ impl Principal {
             Self::DeliveryAuthority => "delivery-authority",
             Self::Bus => "bus",
             Self::System => "system",
+            Self::FlowEngine => "flow-engine",
         }
     }
 }
@@ -65,6 +68,11 @@ pub struct GoldenFixture {
     pub unbound_room: &'static str,
     /// Inbox component of the system user in the golden.
     pub system_credential: &'static str,
+    /// Module id, and inbox component, of the flow engine in the golden.
+    pub flow_engine_module: &'static str,
+    /// A module that is neither the participant nor the flow engine; the
+    /// golden refuses its event subjects and its durable to both.
+    pub foreign_module: &'static str,
 }
 
 pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
@@ -75,10 +83,16 @@ pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
     bound_room: "room_gold_bound",
     unbound_room: "room_gold_unbound",
     system_credential: "cksys",
+    flow_engine_module: "basal",
+    foreign_module: "other",
 };
 
 /// The session token in the golden's refused peer and effect subjects.
 const GOLDEN_SESSION: &str = "session_gold";
+
+/// The event name and version in the golden's refused event subjects.
+const GOLDEN_EVENT: &str = "pull_request_review";
+const GOLDEN_EVENT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionDocument {
@@ -107,6 +121,8 @@ impl PermissionDocument {
             ("foreign-agent", self.fixture.foreign_agent),
             ("bound-room", self.fixture.bound_room),
             ("unbound-room", self.fixture.unbound_room),
+            ("flow-engine-module", self.fixture.flow_engine_module),
+            ("foreign-module", self.fixture.foreign_module),
         ] {
             output.push_str(&format!("fixture {name} {value}\n"));
         }
@@ -176,9 +192,13 @@ impl From<NamingError> for GrantError {
 /// durable it actually reads is decided by prefrontal-core, which owns agent
 /// residence. It holds no workload publish at all: hosts and modules consume
 /// wakes, peer deliveries and effect intents but never produce them.
+///
+/// It may publish its own module events, on `ck.{acct}.event.{module_id}.>`
+/// and on no other module's event subjects.
 pub fn participant_permissions(
     account: &AccountNames,
     credential_public: &str,
+    module_id: &str,
     bound_rooms: &[&str],
 ) -> Result<Vec<AllowEntry>, GrantError> {
     let mut entries = BTreeSet::new();
@@ -187,6 +207,7 @@ pub fn participant_permissions(
         Principal::Participant,
         account,
         credential_public,
+        module_id,
         bound_rooms,
     )?;
     Ok(entries.into_iter().collect())
@@ -203,6 +224,7 @@ pub fn participant_permissions(
 pub fn delivery_authority_permissions(
     account: &AccountNames,
     credential_public: &str,
+    module_id: &str,
     bound_rooms: &[&str],
 ) -> Result<Vec<AllowEntry>, GrantError> {
     let mut entries = BTreeSet::new();
@@ -211,6 +233,7 @@ pub fn delivery_authority_permissions(
         Principal::DeliveryAuthority,
         account,
         credential_public,
+        module_id,
         bound_rooms,
     )?;
     for subject in [
@@ -229,13 +252,14 @@ pub fn delivery_authority_permissions(
 }
 
 /// The permissions participants and the delivery authority share: their own
-/// inbox, the dead-letter record, census reads, bound rooms, and reading any
-/// agent's durable on the agent streams.
+/// inbox, the dead-letter record, census reads, bound rooms, publishing their
+/// own module events, and reading any agent's durable on the agent streams.
 fn add_consumer_permissions(
     entries: &mut BTreeSet<AllowEntry>,
     principal: Principal,
     account: &AccountNames,
     credential_public: &str,
+    module_id: &str,
     bound_rooms: &[&str],
 ) -> Result<(), GrantError> {
     validate_token(TokenKind::CredentialPublic, credential_public)?;
@@ -251,6 +275,12 @@ fn add_consumer_permissions(
         principal,
         Operation::Publish,
         account.effect_dead(),
+    );
+    add(
+        entries,
+        principal,
+        Operation::Publish,
+        account.event_publish_grant(module_id)?,
     );
 
     // A whole-token `*` in the consumer position: NATS wildcards cannot match the
@@ -320,6 +350,10 @@ pub fn bus_permissions(
         add(&mut entries, Principal::Bus, Operation::Publish, subject);
     }
 
+    // Stream and consumer management on every stream, the event stream
+    // included: the consumer-create rows are how ck-bus creates the module
+    // durables `m_{module_id}` on the event stream, as it creates the agents'
+    // `c_` durables on the agent streams.
     for stream in account.streams().all() {
         for subject in [
             format!("$JS.API.STREAM.CREATE.{stream}"),
@@ -398,6 +432,64 @@ pub fn system_permissions(credential_public: &str) -> Result<Vec<AllowEntry>, Gr
     Ok(entries.into_iter().collect())
 }
 
+/// The grant for the flow engine (basal), issued by its attested module id.
+///
+/// It reads module events and produces nothing: its own inbox, census reads,
+/// the dead-letter record, pull and ack on its own durable `m_{module_id}` on
+/// the event stream, and ephemeral ordered consumers on that stream for dry-run
+/// replay. It publishes on no workload subject and on no event subject.
+///
+/// The ephemeral consumers rest on three rows. Consumer create is granted only
+/// in its unnamed form, the bare `$JS.API.CONSUMER.CREATE.<stream>` with no
+/// trailing token: a named or durable create carries the consumer name as a
+/// further token and matches nothing here, so the flow engine cannot create a
+/// durable, its own included (ck-bus creates that one). Consumer info on any
+/// consumer of the stream lets it inspect the ephemeral consumers, whose names
+/// the server picks. Publish on the stream's flow-control subjects is needed
+/// because an ordered consumer that cannot answer flow control stalls without
+/// an error. There is deliberately no consumer delete on the event stream, in
+/// any form: the flow engine creates its ephemeral consumers with a short
+/// inactivity threshold, so the server removes an abandoned one itself, and
+/// without delete the flow engine cannot remove another module's durable.
+pub fn flow_engine_permissions(
+    account: &AccountNames,
+    credential_public: &str,
+    module_id: &str,
+) -> Result<Vec<AllowEntry>, GrantError> {
+    validate_token(TokenKind::CredentialPublic, credential_public)?;
+    let durable = AccountNames::module_consumer_name(module_id)?;
+    let stream = &account.streams().event;
+    let mut entries = BTreeSet::new();
+
+    add(
+        &mut entries,
+        Principal::FlowEngine,
+        Operation::Subscribe,
+        format!("_INBOX.{credential_public}.>"),
+    );
+    add_census_read_permissions(&mut entries, Principal::FlowEngine, account);
+    for subject in [
+        account.effect_dead(),
+        // Its own durable.
+        format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{durable}"),
+        format!("$JS.API.CONSUMER.INFO.{stream}.{durable}"),
+        format!("$JS.ACK.{stream}.{durable}.>"),
+        format!("$JS.API.STREAM.INFO.{stream}"),
+        // Ephemeral ordered consumers.
+        format!("$JS.API.CONSUMER.CREATE.{stream}"),
+        format!("$JS.API.CONSUMER.INFO.{stream}.*"),
+        format!("$JS.FC.{stream}.>"),
+    ] {
+        add(
+            &mut entries,
+            Principal::FlowEngine,
+            Operation::Publish,
+            subject,
+        );
+    }
+    Ok(entries.into_iter().collect())
+}
+
 pub fn generate_permission_golden(
     fixture: GoldenFixture,
 ) -> Result<PermissionDocument, GrantError> {
@@ -405,20 +497,28 @@ pub fn generate_permission_golden(
     validate_token(TokenKind::ModuleId, fixture.module_id)?;
     validate_token(TokenKind::AgentId, fixture.foreign_agent)?;
     validate_token(TokenKind::RoomId, fixture.unbound_room)?;
+    validate_token(TokenKind::ModuleId, fixture.foreign_module)?;
 
     let mut allows = BTreeSet::new();
     allows.extend(participant_permissions(
         &account,
+        fixture.module_id,
         fixture.module_id,
         &[fixture.bound_room],
     )?);
     allows.extend(delivery_authority_permissions(
         &account,
         fixture.module_id,
+        fixture.module_id,
         &[fixture.bound_room],
     )?);
     allows.extend(bus_permissions(&account, fixture.module_id)?);
     allows.extend(system_permissions(fixture.system_credential)?);
+    allows.extend(flow_engine_permissions(
+        &account,
+        fixture.flow_engine_module,
+        fixture.flow_engine_module,
+    )?);
 
     let mut refused = BTreeSet::new();
     // Credentials name no agents, so no participant may produce a workload
@@ -457,6 +557,11 @@ pub fn generate_permission_golden(
             Operation::Publish,
             account.sentinel_ping(),
             "sentinel-subject",
+        ),
+        (
+            Operation::Publish,
+            account.event_subject(fixture.foreign_module, GOLDEN_EVENT, GOLDEN_EVENT_VERSION)?,
+            "foreign-module-event",
         ),
     ] {
         refused.insert(RefusedEntry {
@@ -510,6 +615,49 @@ pub fn generate_permission_golden(
                 reason: "workload-publish",
             });
         }
+    }
+
+    // The flow engine can name no durable and delete no consumer on the event
+    // stream; it can read only its own durable and produces no workload.
+    let event_stream = &account.streams().event;
+    let own_durable = AccountNames::module_consumer_name(fixture.flow_engine_module)?;
+    let foreign_durable = AccountNames::module_consumer_name(fixture.foreign_module)?;
+    for (subject, reason) in [
+        (
+            format!("$JS.API.CONSUMER.DURABLE.CREATE.{event_stream}.{foreign_durable}"),
+            "durable-create",
+        ),
+        (
+            format!(
+                "$JS.API.CONSUMER.CREATE.{event_stream}.{own_durable}.{}",
+                account.event_binding()
+            ),
+            "named-consumer-create",
+        ),
+        (
+            format!("$JS.API.CONSUMER.DELETE.{event_stream}.{foreign_durable}"),
+            "consumer-delete",
+        ),
+        (
+            format!("$JS.API.CONSUMER.DELETE.{event_stream}.{own_durable}"),
+            "consumer-delete",
+        ),
+        (
+            format!(
+                "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+                account.streams().wake,
+                AccountNames::consumer_name(fixture.bound_agent)?
+            ),
+            "agent-durable",
+        ),
+        (account.wake_fire(fixture.bound_agent)?, "workload-publish"),
+    ] {
+        refused.insert(RefusedEntry {
+            principal: Principal::FlowEngine,
+            operation: Operation::Publish,
+            subject,
+            reason,
+        });
     }
 
     let document = PermissionDocument {
@@ -628,7 +776,7 @@ fn add_census_read_permissions(
 fn validate_principal(line: usize, principal: &str) -> Result<(), GrantError> {
     if matches!(
         principal,
-        "participant" | "delivery-authority" | "bus" | "system"
+        "participant" | "delivery-authority" | "bus" | "system" | "flow-engine"
     ) {
         Ok(())
     } else {

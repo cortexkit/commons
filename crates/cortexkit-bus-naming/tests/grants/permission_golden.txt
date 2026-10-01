@@ -5,6 +5,8 @@ fixture bound-agent agent_gold_a
 fixture foreign-agent agent_gold_b
 fixture bound-room room_gold_bound
 fixture unbound-room room_gold_unbound
+fixture flow-engine-module basal
+fixture foreign-module other
 
 allow participant publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT.*.>
 allow participant publish $JS.ACK.CK_BOX_GOLDENFIXTURE_PEER.*.>
@@ -26,6 +28,7 @@ allow participant publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_WAKE
 allow participant publish $JS.API.STREAM.INFO.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow participant publish $JS.API.STREAM.MSG.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow participant publish ck.box_goldenfixture.effect.dead
+allow participant publish ck.box_goldenfixture.event.ckbus.>
 allow participant publish ck.box_goldenfixture.room.room_gold_bound.post
 allow participant subscribe $KV.CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow participant subscribe _INBOX.ckbus.>
@@ -51,6 +54,7 @@ allow delivery-authority publish $JS.API.STREAM.INFO.KV_CK_BOX_GOLDENFIXTURE_CEN
 allow delivery-authority publish $JS.API.STREAM.MSG.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow delivery-authority publish ck.box_goldenfixture.effect.*.*.intent
 allow delivery-authority publish ck.box_goldenfixture.effect.dead
+allow delivery-authority publish ck.box_goldenfixture.event.ckbus.>
 allow delivery-authority publish ck.box_goldenfixture.peer.*.*.deliver
 allow delivery-authority publish ck.box_goldenfixture.room.room_gold_bound.post
 allow delivery-authority publish ck.box_goldenfixture.wake.*.fire
@@ -60,6 +64,7 @@ allow delivery-authority subscribe ck.box_goldenfixture.room.room_gold_bound.>
 allow bus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.c_ckbus_dead.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.>
+allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EVENT.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_PEER.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_ROOM.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_WAKE.>
@@ -67,12 +72,14 @@ allow bus publish $JS.API.CONSUMER.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow bus publish $JS.API.CONSUMER.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow bus publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EFFECT.>
 allow bus publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.>
+allow bus publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EVENT.>
 allow bus publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_PEER.>
 allow bus publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_ROOM.>
 allow bus publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_WAKE.>
 allow bus publish $JS.API.CONSUMER.DELETE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.>
 allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.>
+allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_EVENT.>
 allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_PEER.>
 allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_ROOM.>
 allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_WAKE.>
@@ -80,6 +87,7 @@ allow bus publish $JS.API.CONSUMER.DURABLE.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EFFECT.>
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.>
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.c_ckbus_dead
+allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EVENT.>
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_PEER.>
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_ROOM.>
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_WAKE.>
@@ -90,17 +98,20 @@ allow bus publish $JS.API.CONSUMER.NAMES.CK_BOX_GOLDENFIXTURE_WAKE
 allow bus publish $JS.API.DIRECT.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow bus publish $JS.API.STREAM.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT
 allow bus publish $JS.API.STREAM.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD
+allow bus publish $JS.API.STREAM.CREATE.CK_BOX_GOLDENFIXTURE_EVENT
 allow bus publish $JS.API.STREAM.CREATE.CK_BOX_GOLDENFIXTURE_PEER
 allow bus publish $JS.API.STREAM.CREATE.CK_BOX_GOLDENFIXTURE_ROOM
 allow bus publish $JS.API.STREAM.CREATE.CK_BOX_GOLDENFIXTURE_WAKE
 allow bus publish $JS.API.STREAM.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow bus publish $JS.API.STREAM.DELETE.CK_BOX_GOLDENFIXTURE_EFFECT
 allow bus publish $JS.API.STREAM.DELETE.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD
+allow bus publish $JS.API.STREAM.DELETE.CK_BOX_GOLDENFIXTURE_EVENT
 allow bus publish $JS.API.STREAM.DELETE.CK_BOX_GOLDENFIXTURE_PEER
 allow bus publish $JS.API.STREAM.DELETE.CK_BOX_GOLDENFIXTURE_ROOM
 allow bus publish $JS.API.STREAM.DELETE.CK_BOX_GOLDENFIXTURE_WAKE
 allow bus publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_EFFECT
 allow bus publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD
+allow bus publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_EVENT
 allow bus publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_PEER
 allow bus publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_ROOM
 allow bus publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_WAKE
@@ -111,6 +122,7 @@ allow bus publish $JS.API.STREAM.PURGE.CK_BOX_GOLDENFIXTURE_PEER
 allow bus publish $JS.API.STREAM.PURGE.CK_BOX_GOLDENFIXTURE_WAKE
 allow bus publish $JS.API.STREAM.UPDATE.CK_BOX_GOLDENFIXTURE_EFFECT
 allow bus publish $JS.API.STREAM.UPDATE.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD
+allow bus publish $JS.API.STREAM.UPDATE.CK_BOX_GOLDENFIXTURE_EVENT
 allow bus publish $JS.API.STREAM.UPDATE.CK_BOX_GOLDENFIXTURE_PEER
 allow bus publish $JS.API.STREAM.UPDATE.CK_BOX_GOLDENFIXTURE_ROOM
 allow bus publish $JS.API.STREAM.UPDATE.CK_BOX_GOLDENFIXTURE_WAKE
@@ -128,6 +140,23 @@ allow system publish $SYS.REQ.SERVER.*.KICK
 allow system subscribe $SYS.ACCOUNT.*.CONNECT
 allow system subscribe $SYS.ACCOUNT.*.DISCONNECT
 allow system subscribe _INBOX.cksys.>
+allow flow-engine publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EVENT.m_basal.>
+allow flow-engine publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EVENT
+allow flow-engine publish $JS.API.CONSUMER.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS
+allow flow-engine publish $JS.API.CONSUMER.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
+allow flow-engine publish $JS.API.CONSUMER.DELETE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
+allow flow-engine publish $JS.API.CONSUMER.DURABLE.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
+allow flow-engine publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EVENT.*
+allow flow-engine publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EVENT.m_basal
+allow flow-engine publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_EVENT.m_basal
+allow flow-engine publish $JS.API.DIRECT.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
+allow flow-engine publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_EVENT
+allow flow-engine publish $JS.API.STREAM.INFO.KV_CK_BOX_GOLDENFIXTURE_CENSUS
+allow flow-engine publish $JS.API.STREAM.MSG.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS
+allow flow-engine publish $JS.FC.CK_BOX_GOLDENFIXTURE_EVENT.>
+allow flow-engine publish ck.box_goldenfixture.effect.dead
+allow flow-engine subscribe $KV.CK_BOX_GOLDENFIXTURE_CENSUS.>
+allow flow-engine subscribe _INBOX.basal.>
 
 expect-refused participant publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.c_agent_gold_a consumer-create
 expect-refused participant publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_PEER.c_agent_gold_a consumer-create
@@ -137,6 +166,7 @@ expect-refused participant publish $KV.CK_BOX_GOLDENFIXTURE_CENSUS.forbidden cen
 expect-refused participant publish $SYS.REQ.CLAIMS.UPDATE system-subject
 expect-refused participant publish ck.box_goldenfixture.effect.agent_gold_a.session_gold.intent workload-publish
 expect-refused participant publish ck.box_goldenfixture.effect.agent_gold_b.session_gold.intent workload-publish
+expect-refused participant publish ck.box_goldenfixture.event.other.pull_request_review.v1 foreign-module-event
 expect-refused participant publish ck.box_goldenfixture.peer.agent_gold_a.session_gold.deliver workload-publish
 expect-refused participant publish ck.box_goldenfixture.peer.agent_gold_b.session_gold.deliver workload-publish
 expect-refused participant publish ck.box_goldenfixture.room.room_gold_unbound.post unbound-room
@@ -158,3 +188,9 @@ expect-refused system publish ck.box_goldenfixture.effect.agent_gold_a.session_g
 expect-refused system publish ck.box_goldenfixture.peer.agent_gold_a.session_gold.deliver workload-publish
 expect-refused system publish ck.box_goldenfixture.room.room_gold_bound.post workload-publish
 expect-refused system publish ck.box_goldenfixture.wake.agent_gold_a.fire workload-publish
+expect-refused flow-engine publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EVENT.m_basal.ck.box_goldenfixture.event.> named-consumer-create
+expect-refused flow-engine publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EVENT.m_basal consumer-delete
+expect-refused flow-engine publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EVENT.m_other consumer-delete
+expect-refused flow-engine publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_EVENT.m_other durable-create
+expect-refused flow-engine publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_WAKE.c_agent_gold_a agent-durable
+expect-refused flow-engine publish ck.box_goldenfixture.wake.agent_gold_a.fire workload-publish

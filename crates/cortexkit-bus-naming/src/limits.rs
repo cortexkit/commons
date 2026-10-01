@@ -15,6 +15,7 @@ pub enum StreamKind {
     Peer,
     Effect,
     EffectDead,
+    Event,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +33,11 @@ pub struct StreamSpec {
     pub max_bytes: u64,
     pub discard: DiscardPolicy,
     pub work_queue: bool,
+    /// The per-subject message cap (`max_msgs_per_subject`), or `None` to set
+    /// none. Only the event stream has one, so one noisy module or event cannot
+    /// evict every other subject's history; the five older streams leave it
+    /// unset and their emitted configuration is unchanged.
+    pub max_msgs_per_subject: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +132,7 @@ impl fmt::Display for LimitError {
 
 impl Error for LimitError {}
 
-/// Returns the five normative stream configurations for an account.
+/// Returns the six normative stream configurations for an account.
 pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
     let names = account.streams();
     vec![
@@ -138,6 +144,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_msgs_per_subject: None,
         },
         StreamSpec {
             kind: StreamKind::Wake,
@@ -147,6 +154,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_msgs_per_subject: None,
         },
         StreamSpec {
             kind: StreamKind::Peer,
@@ -156,6 +164,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_msgs_per_subject: None,
         },
         StreamSpec {
             kind: StreamKind::Effect,
@@ -165,6 +174,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
             work_queue: true,
+            max_msgs_per_subject: None,
         },
         StreamSpec {
             kind: StreamKind::EffectDead,
@@ -174,6 +184,17 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 64 * MIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_msgs_per_subject: None,
+        },
+        StreamSpec {
+            kind: StreamKind::Event,
+            name: names.event.clone(),
+            subjects: vec![account.event_binding()],
+            max_age: HOUR * 24 * 7,
+            max_bytes: GIB,
+            discard: DiscardPolicy::Old,
+            work_queue: false,
+            max_msgs_per_subject: Some(10_000),
         },
     ]
 }
@@ -254,6 +275,10 @@ pub fn validate_consumer(
 }
 
 /// Enforces that the owning store keeps a body at least as long as its stream.
+///
+/// A module declaring a `resolved` event calls this against the event stream:
+/// the event carries only an id, so the module must keep the record for at
+/// least as long as the stream keeps the event.
 pub fn validate_store_retention(
     stream: &StreamSpec,
     store_retention: Duration,

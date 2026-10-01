@@ -87,6 +87,8 @@ fn golden_names_bound_and_refused_fixture_identities() {
         "agent_gold_b",
         "room_gold_bound",
         "room_gold_unbound",
+        "basal",
+        "other",
     ] {
         assert!(CHECKED_IN_GOLDEN.contains(literal), "missing {literal}");
     }
@@ -146,7 +148,8 @@ fn every_expected_refusal_is_actually_refused_by_the_allows() {
 fn participants_read_any_agent_durable_but_publish_no_workload() {
     use cortexkit_bus_naming::{participant_permissions, Operation};
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
-    let allows = participant_permissions(&account, "ckhost", &["room_gold_bound"]).unwrap();
+    let allows =
+        participant_permissions(&account, "ckhost", "ckhost", &["room_gold_bound"]).unwrap();
 
     for agent in ["agent_gold_a", "agent_gold_b", "agent_never_seen"] {
         let consumer = AccountNames::consumer_name(agent).unwrap();
@@ -170,7 +173,7 @@ fn participants_read_any_agent_durable_but_publish_no_workload() {
     }
 
     // The only account subjects a participant may publish are the dead-letter
-    // record and its bound room's posts.
+    // record, its own module's events and its bound room's posts.
     let account_prefix = format!("ck.{}.", account.account());
     let published = allows
         .iter()
@@ -182,6 +185,7 @@ fn participants_read_any_agent_durable_but_publish_no_workload() {
         published,
         vec![
             account.effect_dead(),
+            account.event_publish_grant("ckhost").unwrap(),
             account.room_post("room_gold_bound").unwrap()
         ]
     );
@@ -192,13 +196,13 @@ fn the_delivery_authority_adds_exactly_the_three_agent_stream_bindings() {
     use cortexkit_bus_naming::{delivery_authority_permissions, participant_permissions};
     use std::collections::BTreeSet;
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
-    let participant = participant_permissions(&account, "ckcore", &["room_gold_bound"])
+    let participant = participant_permissions(&account, "ckcore", "ckcore", &["room_gold_bound"])
         .unwrap()
         .into_iter()
         .map(|entry| (entry.operation, entry.subject))
         .collect::<BTreeSet<_>>();
     let authority =
-        delivery_authority_permissions(&account, "ckcore", &["room_gold_bound"]).unwrap();
+        delivery_authority_permissions(&account, "ckcore", "ckcore", &["room_gold_bound"]).unwrap();
     assert!(authority
         .iter()
         .all(|entry| entry.principal == Principal::DeliveryAuthority));
@@ -252,6 +256,194 @@ fn agent_streams_are_wake_peer_and_effect_only() {
                 "{subject}"
             );
         }
+    }
+}
+
+/// Whether some subject can match both patterns. A refused row may itself carry
+/// a wildcard (a named consumer create ends in its filter, `ck.{acct}.event.>`),
+/// so an allow entry counts as matching it when the two patterns share any
+/// subject, not only when the allow matches the row's literal text.
+fn subjects_overlap(left: &str, right: &str) -> bool {
+    fn overlap(left: &[&str], right: &[&str]) -> bool {
+        match (left.first(), right.first()) {
+            (None, None) => true,
+            (None, Some(_)) | (Some(_), None) => false,
+            (Some(&">"), Some(_)) | (Some(_), Some(&">")) => true,
+            (Some(l), Some(r)) if l == r || *l == "*" || *r == "*" => {
+                overlap(&left[1..], &right[1..])
+            }
+            _ => false,
+        }
+    }
+    overlap(
+        &left.split('.').collect::<Vec<_>>(),
+        &right.split('.').collect::<Vec<_>>(),
+    )
+}
+
+/// The flow engine may create only unnamed (ephemeral) consumers on the event
+/// stream and may delete none. A golden diff alone would not prove that: a
+/// widened grant regenerates into a golden that matches its generator. So this
+/// asserts the property itself, that no flow-engine allow entry overlaps any
+/// flow-engine refused row.
+#[test]
+fn flow_engine_cannot_name_a_durable() {
+    use cortexkit_bus_naming::Operation;
+    let document = generate_permission_golden(PINNED_GOLDEN_FIXTURE).unwrap();
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let stream = &account.streams().event;
+    let refused = document
+        .refused()
+        .iter()
+        .filter(|row| row.principal == Principal::FlowEngine)
+        .collect::<Vec<_>>();
+
+    // The rows this property rests on are present, so the loop below can fail.
+    let event_binding = account.event_binding();
+    for expected in [
+        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_other"),
+        format!("$JS.API.CONSUMER.CREATE.{stream}.m_basal.{event_binding}"),
+        format!("$JS.API.CONSUMER.DELETE.{stream}.m_other"),
+        format!("$JS.API.CONSUMER.DELETE.{stream}.m_basal"),
+    ] {
+        assert!(
+            refused
+                .iter()
+                .any(|row| row.operation == Operation::Publish && row.subject == expected),
+            "the golden lacks the refused flow-engine row {expected}"
+        );
+    }
+
+    for row in &refused {
+        for allow in document.allows().iter().filter(|allow| {
+            allow.principal == Principal::FlowEngine && allow.operation == row.operation
+        }) {
+            assert!(
+                !subjects_overlap(&allow.subject, &row.subject),
+                "flow-engine allow {} {} matches the refused row {} ({})",
+                allow.operation.as_str(),
+                allow.subject,
+                row.subject,
+                row.reason
+            );
+        }
+    }
+}
+
+#[test]
+fn flow_engine_reads_its_own_durable_and_replays_through_ephemeral_consumers_only() {
+    use cortexkit_bus_naming::{flow_engine_permissions, Operation};
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let allows = flow_engine_permissions(&account, "UBASALKEY", "basal").unwrap();
+    assert!(allows
+        .iter()
+        .all(|entry| entry.principal == Principal::FlowEngine));
+    let stream = &account.streams().event;
+    let may = |operation: Operation, subject: &str| {
+        allowed(&allows, Principal::FlowEngine, operation, subject)
+    };
+
+    for subject in [
+        format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_basal"),
+        format!("$JS.API.CONSUMER.INFO.{stream}.m_basal"),
+        format!("$JS.ACK.{stream}.m_basal.1.2.3.4.5"),
+        format!("$JS.API.STREAM.INFO.{stream}"),
+        format!("$JS.API.CONSUMER.CREATE.{stream}"),
+        format!("$JS.API.CONSUMER.INFO.{stream}.server_named_ephemeral"),
+        format!("$JS.FC.{stream}.server_named_ephemeral.1.2"),
+        account.effect_dead(),
+    ] {
+        assert!(
+            may(Operation::Publish, &subject),
+            "flow engine cannot {subject}"
+        );
+    }
+    assert!(may(Operation::Subscribe, "_INBOX.UBASALKEY.reply"));
+
+    for subject in [
+        format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_other"),
+        format!("$JS.ACK.{stream}.m_other.1.2.3.4.5"),
+        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_basal"),
+        format!("$JS.API.CONSUMER.CREATE.{stream}.m_basal"),
+        format!("$JS.API.CONSUMER.DELETE.{stream}"),
+        account
+            .event_subject("basal", "pull_request_review", 1)
+            .unwrap(),
+    ] {
+        assert!(
+            !may(Operation::Publish, &subject),
+            "flow engine may {subject}"
+        );
+    }
+
+    // No consumer delete on the event stream in any form: abandoned ephemeral
+    // consumers expire on their inactivity threshold instead.
+    let delete_prefix = format!("$JS.API.CONSUMER.DELETE.{stream}");
+    assert!(!allows
+        .iter()
+        .any(|entry| entry.subject.starts_with(&delete_prefix)));
+
+    // It publishes no account subject but the dead-letter record.
+    let account_prefix = format!("ck.{}.", account.account());
+    let published = allows
+        .iter()
+        .filter(|entry| entry.operation == Operation::Publish)
+        .filter(|entry| entry.subject.starts_with(&account_prefix))
+        .map(|entry| entry.subject.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(published, vec![account.effect_dead()]);
+
+    assert!(flow_engine_permissions(&account, "UBASALKEY", "basal.>").is_err());
+    assert!(flow_engine_permissions(&account, "UBASAL.>", "basal").is_err());
+}
+
+#[test]
+fn participants_publish_only_their_own_module_events() {
+    use cortexkit_bus_naming::{participant_permissions, Operation};
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let allows = participant_permissions(&account, "ckgithub", "github", &[]).unwrap();
+    let own = account
+        .event_subject("github", "pull_request_review", 2)
+        .unwrap();
+    let foreign = account
+        .event_subject("discord", "pull_request_review", 2)
+        .unwrap();
+    assert!(allowed(
+        &allows,
+        Principal::Participant,
+        Operation::Publish,
+        &own
+    ));
+    assert!(!allowed(
+        &allows,
+        Principal::Participant,
+        Operation::Publish,
+        &foreign
+    ));
+    assert!(participant_permissions(&account, "ckgithub", "git.hub", &[]).is_err());
+}
+
+#[test]
+fn the_bus_creates_module_durables_on_the_event_stream() {
+    use cortexkit_bus_naming::{bus_permissions, Operation};
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let allows = bus_permissions(&account, "ckbus").unwrap();
+    let stream = &account.streams().event;
+    let durable = AccountNames::module_consumer_name("basal").unwrap();
+    for subject in [
+        format!("$JS.API.STREAM.CREATE.{stream}"),
+        format!("$JS.API.STREAM.UPDATE.{stream}"),
+        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.{durable}"),
+        format!(
+            "$JS.API.CONSUMER.CREATE.{stream}.{durable}.{}",
+            account.event_binding()
+        ),
+        format!("$JS.API.CONSUMER.INFO.{stream}.{durable}"),
+    ] {
+        assert!(
+            allowed(&allows, Principal::Bus, Operation::Publish, &subject),
+            "bus cannot {subject}"
+        );
     }
 }
 
