@@ -463,7 +463,7 @@ subscriptions, the declaration and the expected answer copied from
 prefrontal's files, and this crate's `check_item` gives the same refusal
 bytes or admits and freezes the plan's subscriptions unchanged.
 
-Resolved since the previous draft:
+Resolved since the first draft (commons `ff1fe00`):
 
 - **`ops` on `pre_tool`.** Prefrontal's vectors now give every `pre_tool`
   subscription `ops: []` (`subscriptions.json:13-35`) and refuse a plan
@@ -485,7 +485,7 @@ Resolved since the previous draft:
   shapes agree with `StaleDifference`; the previous draft's single
   `not_declared` is gone.
 
-What still differs or is not pinned:
+What still differs, or has no case in the fetch-plan vectors:
 
 1. **Tools or ops beyond the declaration.** Prefrontal has no case for a
    planned subscription whose `tools` or `ops` the declaration does not

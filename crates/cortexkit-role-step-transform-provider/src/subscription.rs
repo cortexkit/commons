@@ -147,8 +147,9 @@ pub struct DeclaredSubscription {
 }
 
 impl DeclaredSubscription {
-    /// What the runner does when this hook is unavailable, and what a plan
-    /// composed from this declaration freezes.
+    /// The `on_unavailable` this subscription means in effect, and the value
+    /// a plan composed from it freezes: `pass` on `post_assistant`,
+    /// otherwise the declared value, `refuse` when none is declared.
     pub fn effective_on_unavailable(&self) -> OnUnavailable {
         if self.hook == Hook::PostAssistant {
             return OnUnavailable::Pass;
@@ -174,8 +175,9 @@ impl DeclaredSubscription {
     }
 }
 
-/// A frozen value a plan subscription may only tighten, named as
-/// `subscription_loosened.field` spells it.
+/// A planned subscription field that may equal or tighten the declared
+/// value but never loosen it. A `subscription_loosened` difference names
+/// the field that broke this rule in its `field` member.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoosenedField {
@@ -315,11 +317,14 @@ impl SubscriptionProblem {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StaleDifference {
-    /// The declaration no longer has the planned hook.
+    /// The provider's current declaration for the plan item's preset and
+    /// params has no subscription with the planned hook and phase.
     SubscriptionMissing { provider: String, hook: Hook },
-    /// The provider no longer declares the item's preset.
+    /// The provider no longer knows the plan item's preset, so it declares
+    /// nothing for it.
     PresetMissing { provider: String, hook: Hook },
-    /// The plan's frozen value is looser than the declaration's.
+    /// A planned subscription's frozen `field` is looser than the current
+    /// declaration's: `pass` for a declared `refuse`, or a larger budget.
     SubscriptionLoosened {
         provider: String,
         hook: Hook,

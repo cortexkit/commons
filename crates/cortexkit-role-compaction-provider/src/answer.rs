@@ -98,8 +98,9 @@ impl CompactionMessage {
     /// `EntrySource`) gives each replacement message of this
     /// CompactionMessage once it is applied: its id, its version and its
     /// half-open range, `from_ordinal` = `range.from` and `to_ordinal` =
-    /// `range.to`. An empty range is an insertion before `from_ordinal`, so
-    /// Setup's usual head is `[0, 0)`. `None` for a message that fails
+    /// `range.to`. An empty range is an insertion: its messages go before
+    /// the transcript message at `from_ordinal`, so Setup's usual head is
+    /// `[0, 0)`. `None` for a message that fails
     /// [`CompactionMessage::check`], which the runner never applies.
     pub fn model_view_source(&self) -> Option<EntrySource> {
         self.check().ok()?;
@@ -236,7 +237,8 @@ mod tests {
                         source,
                         "{name}"
                     );
-                    // An empty range is the runner's insertion, nothing else is.
+                    // The model view treats a source as an insertion exactly
+                    // when the CompactionMessage's range is empty.
                     assert_eq!(source.is_insertion(), message.range.is_empty(), "{name}");
                     // The runner's own page check accepts the entry.
                     let page = ModelPage::new("lin", vec![ModelEntry::new(source, Value::Null)])

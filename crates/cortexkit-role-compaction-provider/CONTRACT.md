@@ -618,7 +618,7 @@ the model view's `ModelPage` and its half-open `EntrySource`
 `crates/cortexkit-role-llm-runner/src/errors.rs:175-191`). This crate takes
 those names and types from the runner crate rather than restating them.
 
-Resolved since the previous draft:
+Resolved since the first draft (commons `ff1fe00`):
 
 - **Empty ranges in the model view.** The runner's replacement source is
   now half-open, `[from_ordinal, to_ordinal)`, and an empty range is an
