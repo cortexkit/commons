@@ -69,8 +69,11 @@ pub struct Baseline {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub absent_items: Vec<AbsentItem>,
     /// The composition digest of the latest prefix rebuild, or of the start
-    /// record before any: with `tool_names`, the frozen-prefix digest.
-    pub composition_digest: String,
+    /// record before any: with `tool_names`, the frozen-prefix digest. Absent
+    /// on a session admitted without a fetch plan, which has no composition;
+    /// present whenever the session was admitted with one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_digest: Option<String>,
     /// The model-facing tool names of the latest prefix rebuild, or of the
     /// start record.
     pub tool_names: Vec<String>,
@@ -98,6 +101,7 @@ pub struct Baseline {
 }
 
 impl Baseline {
+    /// The baseline of a session admitted with a fetch plan.
     pub fn new(
         items: Vec<BaselineItem>,
         composition_digest: impl Into<String>,
@@ -105,10 +109,28 @@ impl Baseline {
     ) -> Self {
         Self {
             items,
-            composition_digest: composition_digest.into(),
+            composition_digest: Some(composition_digest.into()),
             tool_names,
             ..Self::default()
         }
+    }
+
+    /// The baseline of a session admitted without a fetch plan: no items, no
+    /// absent items and no composition digest, only the tool names it runs
+    /// with.
+    pub fn plan_less(tool_names: Vec<String>) -> Self {
+        Self {
+            tool_names,
+            ..Self::default()
+        }
+    }
+
+    /// Whether the plan-shaped members agree with each other. A baseline
+    /// without a composition digest belongs to a session admitted without a
+    /// fetch plan, so it can have neither fetched items nor absent ones; a
+    /// baseline with either must carry the digest its plan produced.
+    pub fn plan_consistent(&self) -> bool {
+        self.composition_digest.is_some() || (self.items.is_empty() && self.absent_items.is_empty())
     }
 
     pub fn with_absent_items(mut self, absent_items: Vec<AbsentItem>) -> Self {
@@ -263,6 +285,7 @@ mod tests {
             let reply: BaselineReply = vectors::round_trip(name, &case["answer"]);
             assert_eq!(reply.is_not_yet(), reply.baseline.is_none(), "{name}");
             if let Some(baseline) = &reply.baseline {
+                assert!(baseline.plan_consistent(), "{name}");
                 assert!(
                     baseline.applied_generation <= baseline.accepted_generation,
                     "{name}"
@@ -275,6 +298,33 @@ mod tests {
         for case in vectors::cases(&file, "refusals") {
             assert_eq!(case["refusal"]["code"], errors::SCOPE_OWNER_MISMATCH);
         }
+    }
+
+    /// A plan-less baseline carries no composition digest and no items, and
+    /// one that lacks the digest while holding items is inconsistent.
+    #[test]
+    fn a_plan_less_baseline_has_no_composition_and_no_items() {
+        let file = vectors::load("baseline.json");
+        let case = vectors::cases(&file, "answers")
+            .iter()
+            .find(|case| case["name"] == "admitted without a fetch plan")
+            .unwrap();
+        let reply: BaselineReply = vectors::round_trip("plan-less", &case["answer"]);
+        let baseline = reply.baseline.unwrap();
+        assert_eq!(baseline, Baseline::plan_less(baseline.tool_names.clone()));
+        assert!(baseline.composition_digest.is_none());
+        assert!(baseline.plan_consistent());
+
+        let mut itemised = Baseline::plan_less(vec!["read".into()]);
+        itemised.items = vec![BaselineItem::new("aft", "d1")];
+        assert!(!itemised.plan_consistent());
+        let mut absent = Baseline::plan_less(vec!["read".into()]);
+        absent.absent_items = vec![AbsentItem {
+            provider: "aft".into(),
+            item: None,
+            reason: "timeout".into(),
+        }];
+        assert!(!absent.plan_consistent());
     }
 
     #[test]
