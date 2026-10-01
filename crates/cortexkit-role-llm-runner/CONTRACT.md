@@ -60,11 +60,12 @@ shipping runner with this document.
   `session.baseline`, on a runner without an admission reply.
   [pinned] The member is `session_capabilities_from`, valued `admission` or
   `baseline`.
-- [pinned] A runner that declares `transcript_reads` states its
+- [pinned] A runner that declares `transcript_reads` must state its
   `session.read` byte cap as `max_bytes: {default, maximum}` (`MaxBytes`),
   in bytes: the cap a page stops at when the request names none, and the
-  largest cap it honours. `check_describe` refuses a `transcript_reads`
-  answer without it (`missing_max_bytes`).
+  largest cap it honours. A consumer refuses a describe answer that
+  declares `transcript_reads` without it (`check_describe`:
+  `missing_max_bytes`).
 - [pinned] Decoded leniently: unknown fields, majors, ops and capabilities
   are ignored, and an unknown `stability` decodes. Only what a consumer
   relies on is checked strictly (`check_describe`): the `llm-runner/v1`
@@ -179,6 +180,13 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   `last_run_state` is `{run_id, state, reason?}` (`LastRunState`) and
   describes the most recent run, never the transcript; `updated_at` is
   milliseconds since the Unix epoch.
+- [pinned] It follows the read rule (§4.2): an absent `lineage_id` means the
+  session has no lineage yet. For a session never written, `lineage_id`,
+  `last_ordinal`, `head`, `last_run_state` and `updated_at` are all absent.
+- [pinned] An answer without `lineage_id` carries none of the other four
+  members, and an answer with `lineage_id` carries `updated_at`
+  (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
+  malformed; it is not a refusal.
 
 ## 5. `dispatch_attribution`
 
@@ -258,10 +266,13 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
     step discarded. A running tool call is waited on up to its deadline,
     never killed, so at-most-once holds.
 - [pinned] `steer`, `queue` and `interrupt` are each declared on their own
-  (§3). A runner refuses a mode it does not declare as
-  `delivery_unsupported`, with `detail.delivery` naming the mode (an absent
-  `delivery` is `queue`), and writes nothing. It never delivers the send in
-  another mode instead (`SendRequest::check_delivery`).
+  (§3). An absent `delivery` means `queue`, and `queue` is a declared group
+  like the others. A runner refuses a mode it does not declare as
+  `delivery_unsupported`, with `detail.delivery` naming the mode, and writes
+  nothing. It never delivers the send in another mode instead
+  (`SendRequest::check_delivery`).
+- [pinned] A runner that admits sessions declares `queue`, because its first
+  send is one.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
   part of the send's identity:
   - the same key with the same payload and mode is answered with the
@@ -574,7 +585,7 @@ step-transform providers. It will check:
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
 | `compaction_ready_reasks_after_wait`, `compaction_cursor_never_skips` | a compaction provider in the plan |
-| `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals`, `oversize_message_alone_on_its_page`, `never_written_session_empty_page`, `describe_states_max_bytes` | `transcript_reads` |
+| `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals`, `oversize_message_alone_on_its_page`, `never_written_session_empty_page`, `never_written_session_empty_head`, `describe_states_max_bytes` | `transcript_reads` |
 | `run_result_completed_final_text`, `run_result_interrupted_not_cancelled`, `run_attribution_per_message` | `run_ops` |
 | `dispatched_to_per_call`, `indeterminate_until_closed`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution` |
 | `subscribe_from_head_no_gap_no_duplicate` | `streaming` |
@@ -643,7 +654,9 @@ the decision; the items it governs are pinned above.
   `session.read` requires only that op (§3, §5).
 - **Q12. `interrupt`.** Settled: its own capability group. A runner refuses a
   delivery mode it does not declare as `delivery_unsupported` with
-  `detail.delivery`, never falling back to `queue` (§3, §9).
+  `detail.delivery`, never falling back to `queue`. An absent `delivery` is
+  `queue`, a declared group like the others, and a runner that admits
+  sessions declares it (§3, §9).
 - **Q13. The mark.** Settled as drafted: `mark`, opaque JSON (§9).
 - **Q14. Change ops.** Open. `session.refresh {plan, policy, generation}`,
   `session.refresh_policy {generation, policy, send_id}` and
@@ -661,6 +674,8 @@ the decision; the items it governs are pinned above.
 - **Q17. A session with no lineage yet.** Settled, a third option: a read of
   a session never written returns an empty page with no `lineage_id` and no
   `next_from_ordinal`, and an absent `lineage_id` means no lineage yet (§4.2).
+  `session.head` follows the same rule: for such a session every member of
+  its answer is absent (§4.3).
 - **Q18. Subscription spellings.** Settled as drafted: `start`, `live` or a
   `head` object passed back verbatim, and events pinned only as far as
   `kind` and `cursor` (§7).

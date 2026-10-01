@@ -385,12 +385,20 @@ pub struct HeadRequest {}
 /// The `session.head` answer: where the transcript stands, without message
 /// bodies. Decoded leniently.
 ///
+/// It follows the read rule for a session that was never written: no
+/// `lineage_id`, and then none of the other members either
+/// ([`HeadMeta::no_lineage`], checked by [`HeadMeta::lineage_consistent`]).
+///
 /// Non-exhaustive so later optional members are additive: use
-/// [`HeadMeta::new`] and the `with_*` setters, or decode one.
+/// [`HeadMeta::new`], [`HeadMeta::no_lineage`] and the `with_*` setters, or
+/// decode one.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadMeta {
-    pub lineage_id: String,
+    /// The session's lineage. Absent means the session has no lineage yet:
+    /// it was never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_id: Option<String>,
     /// The newest message's ordinal. Absent on an empty transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ordinal: Option<u64>,
@@ -401,18 +409,31 @@ pub struct HeadMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run_state: Option<LastRunState>,
     /// When the transcript last changed, in milliseconds since the Unix
-    /// epoch.
-    pub updated_at: u64,
+    /// epoch. Present whenever `lineage_id` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
 }
 
 impl HeadMeta {
+    /// The head of a session whose lineage is `lineage_id`.
     pub fn new(lineage_id: impl Into<String>, updated_at: u64) -> Self {
         Self {
-            lineage_id: lineage_id.into(),
+            lineage_id: Some(lineage_id.into()),
             last_ordinal: None,
             head: None,
             last_run_state: None,
-            updated_at,
+            updated_at: Some(updated_at),
+        }
+    }
+
+    /// The head of a session that was never written: every member absent.
+    pub fn no_lineage() -> Self {
+        Self {
+            lineage_id: None,
+            last_ordinal: None,
+            head: None,
+            last_run_state: None,
+            updated_at: None,
         }
     }
 
@@ -429,6 +450,24 @@ impl HeadMeta {
     pub fn with_last_run_state(mut self, last_run_state: LastRunState) -> Self {
         self.last_run_state = Some(last_run_state);
         self
+    }
+
+    /// Whether the answer is consistent with its lineage. Without a
+    /// `lineage_id`, none of `last_ordinal`, `head`, `last_run_state` or
+    /// `updated_at` may be present, because a session with any of them has a
+    /// lineage. With one, `updated_at` must be present; the other three may
+    /// be absent (an empty transcript, no events, no run yet). A consumer
+    /// treats an inconsistent answer as malformed; it is not a refusal.
+    pub fn lineage_consistent(&self) -> bool {
+        match self.lineage_id {
+            None => {
+                self.last_ordinal.is_none()
+                    && self.head.is_none()
+                    && self.last_run_state.is_none()
+                    && self.updated_at.is_none()
+            }
+            Some(_) => self.updated_at.is_some(),
+        }
     }
 }
 
@@ -542,8 +581,21 @@ mod tests {
         }
         for case in vectors::cases(&file, "answers") {
             let name = case["name"].as_str().unwrap();
-            vectors::round_trip::<HeadMeta>(name, &case["answer"]);
+            let head: HeadMeta = vectors::round_trip(name, &case["answer"]);
             assert!(case["answer"].get("messages").is_none(), "{name}");
+            assert!(head.lineage_consistent(), "{name}");
+        }
+        assert!(HeadMeta::no_lineage().lineage_consistent());
+    }
+
+    #[test]
+    fn head_answers_inconsistent_with_their_lineage_are_rejected() {
+        let file = vectors::load("head.json");
+        for case in vectors::cases(&file, "inconsistent") {
+            let name = case["name"].as_str().unwrap();
+            let head: HeadMeta = serde_json::from_value(case["answer"].clone())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!head.lineage_consistent(), "{name}");
         }
     }
 
