@@ -61,7 +61,17 @@ to them. Nothing here names a particular implementation.
   - `catalog_digest` is an opaque digest of the answer's content. A full
     answer and a `digest_only` answer to the same inputs carry the same value,
     so a caller holding a full answer can check it later with one cheap
-    `digest_only` fetch.
+    `digest_only` fetch. When the request asks for `system_text`, that item is
+    part of the answer's content, so `catalog_digest` covers it too: a change
+    to the text alone changes `catalog_digest`, and a `digest_only` fetch
+    with the same `system_text` request detects it.
+  - `composition_digest` is SHA-256 over the RFC 8785 (JCS) canonical JSON
+    of the request's `composition` object exactly as sent, written as 64
+    lowercase hex characters (`composition_digest`). Nothing is stripped
+    first. The runner computes the same value over the composition it sent
+    and compares (`test-vectors/tool-provider-v1/composition-digest.json`
+    carries each composition, its JCS bytes and the digest). Absent when the
+    request carried no composition.
   - `capabilities` is a top-level object of session-level capabilities, keyed
     by name: `host_params`, `late_results`. A capability is declared by the
     value `true`; any other value is not a declaration. The runner freezes

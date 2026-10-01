@@ -267,6 +267,21 @@ pub fn schema_digest(schema: &Value) -> Result<String, SchemaDigestError> {
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+/// A `composition_digest`: SHA-256 of the RFC 8785 (JCS) canonical JSON of the
+/// composition object exactly as the caller sent it, as 64 lowercase hex
+/// characters.
+///
+/// Unlike [`schema_digest`] nothing is stripped first: the composition is
+/// opaque to providers, so every byte of it is what the runner and the
+/// provider must agree on. Canonicalizing first makes the digest independent
+/// of key order and whitespace, so two sides that build the same object hash
+/// the same bytes.
+pub fn composition_digest(composition: &Value) -> Result<String, SchemaDigestError> {
+    let bytes = serde_jcs::to_vec(composition).map_err(|e| SchemaDigestError(e.to_string()))?;
+    let digest = Sha256::digest(&bytes);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 /// Whether `digest` has the `schema_digest` form: 64 lowercase hex characters.
 pub fn is_schema_digest(digest: &str) -> bool {
     digest.len() == 64
@@ -344,6 +359,32 @@ mod tests {
             serde_json::to_value(&request).unwrap()["composition"],
             json!({"anything": [1, {"nested": true}]})
         );
+    }
+
+    #[test]
+    fn composition_digest_vectors_hold() {
+        // Each vector carries the composition, its canonical (JCS) bytes and
+        // the digest, so a runner and a provider in any language can check
+        // that they hash the same bytes.
+        let vectors = vectors::load("composition-digest.json");
+        for case in vectors["digests"].as_array().unwrap() {
+            let canonical = serde_jcs::to_string(&case["composition"]).unwrap();
+            assert_eq!(canonical, case["jcs"].as_str().unwrap(), "{}", case["name"]);
+            assert_eq!(
+                composition_digest(&case["composition"]).unwrap(),
+                case["composition_digest"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+        }
+        for case in vectors["same_digest"].as_array().unwrap() {
+            assert_eq!(
+                composition_digest(&case["a"]).unwrap(),
+                composition_digest(&case["b"]).unwrap(),
+                "{}",
+                case["name"]
+            );
+        }
     }
 
     #[test]

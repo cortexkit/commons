@@ -1,0 +1,87 @@
+{
+  "_comment": "composition_digest = SHA-256 over the RFC 8785 (JCS) canonical JSON of the composition object as sent, 64 lowercase hex. jcs is the exact byte string hashed.",
+  "digests": [
+    {
+      "name": "two providers with tools and a text-only provider",
+      "composition": {
+        "providers": [
+          {
+            "provider": "aft",
+            "tools": [
+              "read",
+              "edit",
+              "bash"
+            ],
+            "capabilities": [
+              "code.read/v1",
+              "code.edit/v1",
+              "shell.exec/v1"
+            ]
+          },
+          {
+            "provider": "magic-context",
+            "tools": [
+              "ctx_search"
+            ],
+            "capabilities": []
+          },
+          {
+            "provider": "prefrontal-core",
+            "tools": [],
+            "capabilities": []
+          }
+        ],
+        "join_version": 1
+      },
+      "jcs": "{\"join_version\":1,\"providers\":[{\"capabilities\":[\"code.read/v1\",\"code.edit/v1\",\"shell.exec/v1\"],\"provider\":\"aft\",\"tools\":[\"read\",\"edit\",\"bash\"]},{\"capabilities\":[],\"provider\":\"magic-context\",\"tools\":[\"ctx_search\"]},{\"capabilities\":[],\"provider\":\"prefrontal-core\",\"tools\":[]}]}",
+      "composition_digest": "7cd22fcbc13fae9df2fae59b089efe5dfb61550a007106a0d5c522894890c355"
+    },
+    {
+      "name": "empty composition",
+      "composition": {},
+      "jcs": "{}",
+      "composition_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "non-ASCII and nested values",
+      "composition": {
+        "preset": "broca",
+        "params": {
+          "worker": true,
+          "label": "çalışma",
+          "limits": {
+            "max": 3,
+            "ratio": 0.5
+          }
+        }
+      },
+      "jcs": "{\"params\":{\"label\":\"çalışma\",\"limits\":{\"max\":3,\"ratio\":0.5},\"worker\":true},\"preset\":\"broca\"}",
+      "composition_digest": "42f00650c5d0c19c4f855927b29d776bd43665b4c6f440312e478598f2bdfe44"
+    }
+  ],
+  "same_digest": [
+    {
+      "name": "key order does not change the digest",
+      "a": {
+        "b": 1,
+        "a": [
+          2,
+          {
+            "d": 3,
+            "c": 4
+          }
+        ]
+      },
+      "b": {
+        "a": [
+          2,
+          {
+            "c": 4,
+            "d": 3
+          }
+        ],
+        "b": 1
+      }
+    }
+  ]
+}
