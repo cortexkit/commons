@@ -33,9 +33,10 @@ static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
 // consumes backslash pairs, so a quote written `\"` inside a quoted field value
 // is redacted with the rest instead of ending the match and leaving the
 // field's closing quote unbalanced.
+// Stop at URL wrapper delimiters, preserving causes after reqwest's `for url (…)`.
 static CREDENTIAL_QUERY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)([?&](?:access_token|token|api_key|apikey|password|secret|client_secret)=)(?:\\.|[^&#\s"\\])+"#,
+        r#"(?i)([?&](?:access_token|token|api_key|apikey|password|secret|client_secret)=)(?:\\.|[^&#\s"\\)\]])+"#,
     )
     .expect("valid credential query regex")
 });
