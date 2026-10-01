@@ -268,8 +268,9 @@ pub struct ModelPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
     /// The transcript ordinal to read from next, when the page stopped
-    /// early. Always past covered ordinals and insertion anchors, so the
-    /// next page never repeats a replacement.
+    /// early. Past the anchored entry: at least A + 1 for a message at A,
+    /// or the replacement's exclusive end. Insertions share that entry's
+    /// page, even over the caps; tail insertions have no next cursor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
     /// The position of the last durable event covered by the same snapshot
@@ -372,6 +373,10 @@ pub enum ModelPageProblem {
     /// An insertion follows a message or non-empty replacement at the same
     /// anchor. Insertions must precede both at equal ordinals.
     InsertionAfterEntry { from_ordinal: u64 },
+    /// The page ends with an insertion but has a continuation cursor. The
+    /// anchored entry must travel on this page too; only tail insertions
+    /// may end a page, and their page has no cursor.
+    NonTailInsertion { from_ordinal: u64 },
     /// An entry starts below the ordinal the page was read from. A
     /// replacement belongs only on the page holding its `from_ordinal`; a
     /// page read from inside the replaced range must not repeat it.
@@ -379,8 +384,8 @@ pub enum ModelPageProblem {
         entry_from_ordinal: u64,
         from_ordinal: u64,
     },
-    /// `next_from_ordinal` is not past a covered ordinal or an insertion's
-    /// anchor, so a page read from it would repeat that entry.
+    /// `next_from_ordinal` is not past a covered ordinal or an insertion
+    /// anchor whose anchored entry is absent, so the next page would overlap.
     NextInsideEntry {
         next_from_ordinal: u64,
         last_ordinal: u64,
@@ -434,9 +439,10 @@ impl ModelPage {
     /// `from_ordinal` (`None` for a tail read, whose start the runner chose).
     /// Entries have non-decreasing anchors, with insertions before messages
     /// or non-empty replacements at a tie. Replacements come whole, once,
-    /// on the page holding their anchor; a tail insertion goes on the last
-    /// page. The next cursor is past covered ordinals and insertion anchors
-    /// to prevent repeats. A replacement requires compaction state.
+    /// on the page holding their anchor. Insertions travel together with
+    /// their anchored entry even over the page caps. Only tail insertions
+    /// may end a page, without a cursor. The next cursor is past the anchored
+    /// entry, not a reason to skip it. A replacement requires compaction state.
     pub fn check(&self, from_ordinal: Option<u64>) -> Result<(), ModelPageProblem> {
         let has_compaction_state = self.compaction_id.is_some() || self.version.is_some();
         if self.lineage_id.is_none()
@@ -489,8 +495,23 @@ impl ModelPage {
                     });
                 }
             }
-            if let Some(next_from_ordinal) = self.next_from_ordinal {
-                let last_ordinal = entry.source.last_covered_ordinal().unwrap_or(anchor);
+            previous = Some((anchor, insertion));
+        }
+        if let Some(next_from_ordinal) = self.next_from_ordinal {
+            if let Some(entry) = self.messages.last() {
+                if entry.source.is_insertion() {
+                    return Err(ModelPageProblem::NonTailInsertion {
+                        from_ordinal: entry.source.from_ordinal(),
+                    });
+                }
+            }
+            for entry in &self.messages {
+                // Covered entries bound the cursor. An unpaired insertion
+                // also prevents a cursor from landing on or before its anchor.
+                let last_ordinal = entry
+                    .source
+                    .last_covered_ordinal()
+                    .unwrap_or_else(|| entry.source.from_ordinal());
                 if next_from_ordinal <= last_ordinal {
                     return Err(ModelPageProblem::NextInsideEntry {
                         next_from_ordinal,
@@ -498,7 +519,6 @@ impl ModelPage {
                     });
                 }
             }
-            previous = Some((anchor, insertion));
         }
         Ok(())
     }
@@ -847,6 +867,7 @@ mod tests {
             ModelPageProblem::InvertedRange { .. } => "inverted_range",
             ModelPageProblem::OutOfOrder { .. } => "out_of_order",
             ModelPageProblem::InsertionAfterEntry { .. } => "insertion_after_entry",
+            ModelPageProblem::NonTailInsertion { .. } => "non_tail_insertion",
             ModelPageProblem::StartsBeforePage { .. } => "starts_before_page",
             ModelPageProblem::NextInsideEntry { .. } => "next_inside_entry",
         }
@@ -876,8 +897,12 @@ mod tests {
             assert!(kinds.contains(&Value::from(kind)), "no {kind} entry");
         }
         for case in vectors::cases(&file, "model_pages_rejected") {
-            if ["inverted_range", "insertion_after_entry"]
-                .contains(&case["problem"].as_str().unwrap())
+            if [
+                "inverted_range",
+                "insertion_after_entry",
+                "non_tail_insertion",
+            ]
+            .contains(&case["problem"].as_str().unwrap())
             {
                 continue;
             }
@@ -912,6 +937,70 @@ mod tests {
             Err(expected),
             "{name}"
         );
+    }
+
+    #[test]
+    fn model_page_refuses_ending_on_a_non_tail_insertion() {
+        rejected_model_vector(
+            "non-tail page ends between insertion and message five",
+            ModelPageProblem::NonTailInsertion { from_ordinal: 5 },
+        );
+        rejected_model_vector(
+            "next cursor repeats an insertion anchor",
+            ModelPageProblem::NonTailInsertion { from_ordinal: 2 },
+        );
+    }
+
+    #[test]
+    fn model_page_keeps_insertions_and_anchored_entries_together_over_caps() {
+        let file = vectors::load("read-pages.json");
+        for (name, anchor, next) in [
+            (
+                "count cap after insertion keeps message five on the page",
+                5,
+                6,
+            ),
+            (
+                "count cap after insertion keeps replacement on the page",
+                3,
+                7,
+            ),
+            (
+                "several insertions travel together in order over the byte cap",
+                5,
+                6,
+            ),
+        ] {
+            let case = vectors::cases(&file, "model_pages")
+                .iter()
+                .find(|case| case["name"] == name)
+                .unwrap();
+            let page: ModelPage = vectors::round_trip(name, &case["page"]);
+            assert_eq!(page.check(Some(anchor)), Ok(()), "{name}");
+            assert_eq!(page.next_from_ordinal, Some(next), "{name}");
+            let (anchored_entry, insertions) = page.messages.split_last().unwrap();
+            assert!(!anchored_entry.source.is_insertion(), "{name}");
+            assert_eq!(anchored_entry.source.from_ordinal(), anchor, "{name}");
+            assert!(!insertions.is_empty(), "{name}");
+            assert!(
+                insertions
+                    .iter()
+                    .all(|entry| entry.source.is_insertion()
+                        && entry.source.from_ordinal() == anchor),
+                "{name}"
+            );
+            if let Some(limit) = case["limit"].as_u64() {
+                assert!(page.messages.len() as u64 > limit, "{name}");
+            }
+            if let Some(max_bytes) = case["max_bytes"].as_u64() {
+                assert!(
+                    serde_json::to_vec(&page.messages).unwrap().len() as u64 > max_bytes,
+                    "{name}"
+                );
+                assert_eq!(insertions[0].message["text"], "first");
+                assert_eq!(insertions[1].message["text"], "second");
+            }
+        }
     }
 
     #[test]

@@ -312,6 +312,43 @@
   ],
   "model_pages": [
     {
+      "name": "count cap after insertion keeps message five on the page",
+      "from_ordinal": 5, "limit": 1, "compacted": true,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "insert"}},
+          {"source": {"kind": "message", "ordinal": 5, "mid": "m5"}, "message": {"text": "message five"}}
+        ],
+        "next_from_ordinal": 6
+      }
+    },
+    {
+      "name": "count cap after insertion keeps replacement on the page",
+      "from_ordinal": 3, "limit": 1, "compacted": true,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 3, "to_ordinal": 3}, "message": {"text": "insert"}},
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 3, "to_ordinal": 7}, "message": {"text": "summary"}}
+        ],
+        "next_from_ordinal": 7
+      }
+    },
+    {
+      "name": "several insertions travel together in order over the byte cap",
+      "from_ordinal": 5, "max_bytes": 1, "compacted": true,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "first"}},
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "second"}},
+          {"source": {"kind": "message", "ordinal": 5, "mid": "m5"}, "message": {"text": "message five"}}
+        ],
+        "next_from_ordinal": 6
+      }
+    },
+    {
       "name": "Setup head insertion before message zero",
       "from_ordinal": 0,
       "compacted": true,
@@ -467,6 +504,31 @@
   ],
   "model_pages_rejected": [
     {
+      "name": "non-tail page ends between insertion and message five",
+      "problem": "non_tail_insertion",
+      "from_ordinal": 5,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "insert"}}
+        ],
+        "next_from_ordinal": 6
+      }
+    },
+    {
+      "name": "cursor before an unpaired insertion anchor",
+      "problem": "next_inside_entry",
+      "from_ordinal": 5,
+      "page": {
+        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
+        "messages": [
+          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "insert"}},
+          {"source": {"kind": "message", "ordinal": 6, "mid": "m6"}, "message": {}}
+        ],
+        "next_from_ordinal": 5
+      }
+    },
+    {
       "name": "insertion after message at the same anchor",
       "problem": "insertion_after_entry",
       "from_ordinal": 2,
@@ -492,7 +554,7 @@
     },
     {
       "name": "next cursor repeats an insertion anchor",
-      "problem": "next_inside_entry",
+      "problem": "non_tail_insertion",
       "from_ordinal": 2,
       "page": {
         "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,

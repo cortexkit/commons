@@ -305,10 +305,20 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] Tail and range reads apply, keyed on transcript ordinals. A
   replacement is returned whole, exactly once, on the page holding its
   `from_ordinal`: it is never split, and a later page that intersects its
-  range does not repeat it. An empty range at the tail goes on the last
-  page. `next_from_ordinal` is past every ordinal the page covers and every
-  insertion anchor, so an insertion is not returned again. For a non-empty
-  replacement, the next cursor may equal its exclusive `to_ordinal`.
+  range does not repeat it.
+- [pinned] An insertion at anchor A travels on the same page as the entry
+  anchored at A: the message holding ordinal A or a replacement whose
+  `from_ordinal` is A. Several insertions at one anchor travel together, in
+  order. The page may exceed its count or byte cap to keep this group whole,
+  like the oversize single-message rule; it never ends between an insertion
+  and its anchored entry.
+- [pinned] That page's `next_from_ordinal` is past the anchored entry: A + 1
+  for a message, or the replacement's exclusive `to_ordinal`. An insertion
+  past the last ordinal goes on the last page, with no cursor.
+- [pinned] A page ending on an insertion with `next_from_ordinal` present is
+  malformed (`ModelPageProblem::NonTailInsertion`). A next cursor on or
+  before an insertion anchor whose anchored entry was not returned is also
+  malformed (`ModelPageProblem::NextInsideEntry`).
 - [pinned] `after_mid` with `view: "model"` is refused `invalid_params
   {field: "view"}` in v1. `after_mid` is defined against the raw lineage,
   and a message inside a replaced range has no clean "after" in the model
