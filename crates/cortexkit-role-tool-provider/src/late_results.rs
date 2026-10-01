@@ -52,11 +52,34 @@ pub struct Cursor {
 }
 
 /// `late_results {since, limit?}`. `since: null` reads from the start.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`LateResultsRequest::new`] and the `with_*` setters, or decode one.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct LateResultsRequest {
     pub since: Option<Cursor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+}
+
+impl LateResultsRequest {
+    /// Read from the start with no limit.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Continue reading after this cursor.
+    pub fn with_since(mut self, since: Cursor) -> Self {
+        self.since = Some(since);
+        self
+    }
+
+    /// Limit the number of entries returned.
+    pub fn with_limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
 }
 
 /// The `late_results` reply.
@@ -79,10 +102,14 @@ pub struct AckRequest {
 
 /// One late-result entry.
 ///
+/// Non-exhaustive so later optional members are additive: use
+/// [`LateEntry::new`] and the `with_*` setters, or decode one.
+///
 /// `kind` is decoded open: an entry of a kind this crate does not know still
 /// decodes, keeps every member in `extra`, and is recorded and acked like
 /// any other, never retried.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct LateEntry {
     pub kind: String,
     pub owner: String,
@@ -127,6 +154,73 @@ pub enum EntryKind {
 }
 
 impl LateEntry {
+    /// An entry with its required identity and settlement time, and no optional content.
+    // Accept each required wire member directly rather than bundling unrelated fields to satisfy the argument-count lint.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        kind: impl Into<String>,
+        owner: impl Into<String>,
+        scope_ref: impl Into<String>,
+        scope_epoch: u64,
+        custodian: impl Into<String>,
+        call_key: impl Into<String>,
+        event_id: impl Into<String>,
+        settled_at: u64,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            owner: owner.into(),
+            scope_ref: scope_ref.into(),
+            scope_epoch,
+            custodian: custodian.into(),
+            call_key: call_key.into(),
+            event_id: event_id.into(),
+            settled_at,
+            invocation_id: None,
+            reduced: false,
+            result: None,
+            outcome: None,
+            reason: None,
+            extra: Map::new(),
+        }
+    }
+
+    /// Name the onward invocation.
+    pub fn with_invocation_id(mut self, invocation_id: impl Into<String>) -> Self {
+        self.invocation_id = Some(invocation_id.into());
+        self
+    }
+
+    /// Set whether only the outcome was retained.
+    pub fn with_reduced(mut self, reduced: bool) -> Self {
+        self.reduced = reduced;
+        self
+    }
+
+    /// Include the retained result.
+    pub fn with_result(mut self, result: Value) -> Self {
+        self.result = Some(result);
+        self
+    }
+
+    /// Include the retained outcome code.
+    pub fn with_outcome(mut self, outcome: impl Into<String>) -> Self {
+        self.outcome = Some(outcome.into());
+        self
+    }
+
+    /// Explain why the call never started.
+    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = Some(reason.into());
+        self
+    }
+
+    /// Carry extension members verbatim.
+    pub fn with_extra(mut self, extra: Map<String, Value>) -> Self {
+        self.extra = extra;
+        self
+    }
+
     pub fn kind(&self) -> EntryKind {
         match self.kind.as_str() {
             kinds::RESULT => EntryKind::Result,

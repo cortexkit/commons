@@ -64,7 +64,11 @@ pub mod reasons {
 pub const OUTCOME_UNKNOWN: &str = "unknown";
 
 /// The arguments of a `tool.withdraw` request.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`WithdrawArguments::new`] and the `with_*` setters, or decode one.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct WithdrawArguments {
     /// The key of the call to withdraw.
     pub call_key: String,
@@ -79,6 +83,7 @@ pub struct WithdrawArguments {
 }
 
 impl WithdrawArguments {
+    /// Withdraw the named call with no optional attribution checks.
     pub fn new(call_key: impl Into<String>) -> Self {
         Self {
             call_key: call_key.into(),
@@ -87,8 +92,15 @@ impl WithdrawArguments {
         }
     }
 
+    /// Name the principal that carried the call.
     pub fn with_carrier(mut self, carrier: impl Into<String>) -> Self {
         self.carrier = Some(carrier.into());
+        self
+    }
+
+    /// Set the scope to check against the route's stamp.
+    pub fn with_scope(mut self, scope: ScopeIdentity) -> Self {
+        self.scope = Some(scope);
         self
     }
 

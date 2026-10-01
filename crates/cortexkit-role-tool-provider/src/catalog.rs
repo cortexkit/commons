@@ -111,7 +111,11 @@ pub struct SystemTextItem {
 
 /// The `tool.catalog` answer. A `digest_only` answer carries only
 /// `generation` and `catalog_digest`.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`CatalogAnswer::new`] and the `with_*` setters, or decode one.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct CatalogAnswer {
     /// Opaque; changes whenever the catalog's content changes.
     pub generation: String,
@@ -137,6 +141,39 @@ pub struct CatalogAnswer {
 }
 
 impl CatalogAnswer {
+    /// An answer with its required digests and no optional content.
+    pub fn new(generation: impl Into<String>, catalog_digest: impl Into<String>) -> Self {
+        Self {
+            generation: generation.into(),
+            catalog_digest: catalog_digest.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Name the composition the answer was resolved against.
+    pub fn with_composition_digest(mut self, composition_digest: impl Into<String>) -> Self {
+        self.composition_digest = Some(composition_digest.into());
+        self
+    }
+
+    /// Set the tools served under these inputs.
+    pub fn with_tools(mut self, tools: Vec<CatalogTool>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Include the system-prompt item's answer.
+    pub fn with_system_text(mut self, system_text: SystemTextAnswer) -> Self {
+        self.system_text = Some(system_text);
+        self
+    }
+
+    /// Set the session-level capability declarations.
+    pub fn with_capabilities(mut self, capabilities: Map<String, Value>) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
     /// Whether the answer declares the session capability `name`.
     pub fn declares(&self, name: &str) -> bool {
         self.capabilities.get(name) == Some(&Value::Bool(true))
@@ -144,7 +181,25 @@ impl CatalogAnswer {
 }
 
 /// One tool in a catalog answer.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`CatalogTool::new`] and the `with_*` setters, or decode one.
+/// External callers cannot construct a tool with a struct literal:
+///
+/// ```compile_fail,E0639
+/// use cortexkit_role_tool_provider::catalog::CatalogTool;
+/// let tool = CatalogTool {
+///     name: "example".into(),
+///     schema_digest: "digest".into(),
+///     semantics: 1,
+///     input_schema: serde_json::json!({"type": "object"}),
+///     result_ops: None,
+///     capabilities: Vec::new(),
+///     description: None,
+/// };
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct CatalogTool {
     /// The provider's exact tool name, which is also how the user disables it.
     pub name: String,
@@ -171,6 +226,40 @@ pub struct CatalogTool {
 }
 
 impl CatalogTool {
+    /// A tool with its required identity and schema, and no optional content.
+    pub fn new(
+        name: impl Into<String>,
+        schema_digest: impl Into<String>,
+        semantics: u64,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            schema_digest: schema_digest.into(),
+            semantics,
+            input_schema,
+            ..Self::default()
+        }
+    }
+
+    /// Set the result operations accepted from hooks.
+    pub fn with_result_ops(mut self, result_ops: Vec<String>) -> Self {
+        self.result_ops = Some(result_ops);
+        self
+    }
+
+    /// Set the tool's capability tags.
+    pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    /// Set the tool's description.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
     pub fn effective_result_ops(&self) -> Vec<&str> {
         match &self.result_ops {
             Some(ops) => ops.iter().map(String::as_str).collect(),
@@ -181,7 +270,11 @@ impl CatalogTool {
 
 /// The system-prompt item's answer, from the same configuration resolution
 /// as the catalog in the same reply.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`SystemTextAnswer::new`] and the `with_*` setters, or decode one.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct SystemTextAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -189,6 +282,29 @@ pub struct SystemTextAnswer {
     pub preflight_digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_digest: Option<String>,
+}
+
+impl SystemTextAnswer {
+    /// An answer with its required digests and no optional content.
+    pub fn new(item_digest: impl Into<String>, preflight_digest: impl Into<String>) -> Self {
+        Self {
+            item_digest: item_digest.into(),
+            preflight_digest: preflight_digest.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Set the resolved system-prompt text.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
+
+    /// Name the composition the text was resolved against.
+    pub fn with_composition_digest(mut self, composition_digest: impl Into<String>) -> Self {
+        self.composition_digest = Some(composition_digest.into());
+        self
+    }
 }
 
 /// Why an argument schema is not flat.
