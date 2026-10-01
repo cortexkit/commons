@@ -7,6 +7,7 @@ fixture bound-room room_gold_bound
 fixture unbound-room room_gold_unbound
 fixture flow-engine-module basal
 fixture foreign-module other
+fixture delivery-authority-module prefrontal-core
 
 allow participant publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT.*.>
 allow participant publish $JS.ACK.CK_BOX_GOLDENFIXTURE_PEER.*.>
@@ -35,6 +36,7 @@ allow participant subscribe _INBOX.ckbus.>
 allow participant subscribe ck.box_goldenfixture.room.room_gold_bound.>
 allow delivery-authority publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT.*.>
 allow delivery-authority publish $JS.ACK.CK_BOX_GOLDENFIXTURE_PEER.*.>
+allow delivery-authority publish $JS.ACK.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core.>
 allow delivery-authority publish $JS.ACK.CK_BOX_GOLDENFIXTURE_WAKE.*.>
 allow delivery-authority publish $JS.API.CONSUMER.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow delivery-authority publish $JS.API.CONSUMER.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
@@ -42,24 +44,28 @@ allow delivery-authority publish $JS.API.CONSUMER.DELETE.KV_CK_BOX_GOLDENFIXTURE
 allow delivery-authority publish $JS.API.CONSUMER.DURABLE.CREATE.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow delivery-authority publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_EFFECT.*
 allow delivery-authority publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_PEER.*
+allow delivery-authority publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core
 allow delivery-authority publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_WAKE.*
 allow delivery-authority publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_EFFECT.*
 allow delivery-authority publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_PEER.*
+allow delivery-authority publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core
 allow delivery-authority publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_WAKE.*
 allow delivery-authority publish $JS.API.DIRECT.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow delivery-authority publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_EFFECT
 allow delivery-authority publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_PEER
+allow delivery-authority publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_ROOM
 allow delivery-authority publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_WAKE
 allow delivery-authority publish $JS.API.STREAM.INFO.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow delivery-authority publish $JS.API.STREAM.MSG.GET.KV_CK_BOX_GOLDENFIXTURE_CENSUS
 allow delivery-authority publish ck.box_goldenfixture.effect.*.*.intent
 allow delivery-authority publish ck.box_goldenfixture.effect.dead
-allow delivery-authority publish ck.box_goldenfixture.event.ckbus.>
+allow delivery-authority publish ck.box_goldenfixture.event.prefrontal-core.>
 allow delivery-authority publish ck.box_goldenfixture.peer.*.*.deliver
+allow delivery-authority publish ck.box_goldenfixture.room.*.post
 allow delivery-authority publish ck.box_goldenfixture.room.room_gold_bound.post
 allow delivery-authority publish ck.box_goldenfixture.wake.*.fire
 allow delivery-authority subscribe $KV.CK_BOX_GOLDENFIXTURE_CENSUS.>
-allow delivery-authority subscribe _INBOX.ckbus.>
+allow delivery-authority subscribe _INBOX.prefrontal-core.>
 allow delivery-authority subscribe ck.box_goldenfixture.room.room_gold_bound.>
 allow bus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.c_ckbus_dead.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.>
@@ -158,10 +164,12 @@ allow flow-engine publish ck.box_goldenfixture.effect.dead
 allow flow-engine subscribe $KV.CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow flow-engine subscribe _INBOX.basal.>
 
+expect-refused participant publish $JS.ACK.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core.> room-durable
 expect-refused participant publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.c_agent_gold_a consumer-create
 expect-refused participant publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_PEER.c_agent_gold_a consumer-create
 expect-refused participant publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_ROOM.c_agent_gold_a consumer-create
 expect-refused participant publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_WAKE.c_agent_gold_a consumer-create
+expect-refused participant publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core room-durable
 expect-refused participant publish $KV.CK_BOX_GOLDENFIXTURE_CENSUS.forbidden census-write
 expect-refused participant publish $SYS.REQ.CLAIMS.UPDATE system-subject
 expect-refused participant publish ck.box_goldenfixture.effect.agent_gold_a.session_gold.intent workload-publish
@@ -173,13 +181,20 @@ expect-refused participant publish ck.box_goldenfixture.room.room_gold_unbound.p
 expect-refused participant publish ck.box_goldenfixture.sentinel.ping sentinel-subject
 expect-refused participant publish ck.box_goldenfixture.wake.agent_gold_a.fire workload-publish
 expect-refused participant publish ck.box_goldenfixture.wake.agent_gold_b.fire workload-publish
+expect-refused delivery-authority publish $JS.ACK.CK_BOX_GOLDENFIXTURE_ROOM.m_other.> foreign-room-durable
 expect-refused delivery-authority publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.c_agent_gold_a consumer-create
 expect-refused delivery-authority publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_PEER.c_agent_gold_a consumer-create
+expect-refused delivery-authority publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_ROOM consumer-create
 expect-refused delivery-authority publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_ROOM.c_agent_gold_a consumer-create
+expect-refused delivery-authority publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core.ck.box_goldenfixture.room.*.post named-consumer-create
 expect-refused delivery-authority publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_WAKE.c_agent_gold_a consumer-create
+expect-refused delivery-authority publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_ROOM.m_other consumer-delete
+expect-refused delivery-authority publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core consumer-delete
+expect-refused delivery-authority publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core durable-create
+expect-refused delivery-authority publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_ROOM.m_ckbus foreign-room-durable
+expect-refused delivery-authority publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_ROOM.m_other foreign-room-durable
 expect-refused delivery-authority publish $KV.CK_BOX_GOLDENFIXTURE_CENSUS.forbidden census-write
 expect-refused delivery-authority publish $SYS.REQ.CLAIMS.UPDATE system-subject
-expect-refused delivery-authority publish ck.box_goldenfixture.room.room_gold_unbound.post unbound-room
 expect-refused bus publish ck.box_goldenfixture.effect.agent_gold_a.session_gold.intent workload-publish
 expect-refused bus publish ck.box_goldenfixture.peer.agent_gold_a.session_gold.deliver workload-publish
 expect-refused bus publish ck.box_goldenfixture.room.room_gold_bound.post workload-publish
@@ -188,9 +203,16 @@ expect-refused system publish ck.box_goldenfixture.effect.agent_gold_a.session_g
 expect-refused system publish ck.box_goldenfixture.peer.agent_gold_a.session_gold.deliver workload-publish
 expect-refused system publish ck.box_goldenfixture.room.room_gold_bound.post workload-publish
 expect-refused system publish ck.box_goldenfixture.wake.agent_gold_a.fire workload-publish
+expect-refused flow-engine publish $JS.ACK.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core.> room-stream
 expect-refused flow-engine publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EVENT.m_basal.ck.box_goldenfixture.event.> named-consumer-create
+expect-refused flow-engine publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_ROOM room-stream
 expect-refused flow-engine publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EVENT.m_basal consumer-delete
 expect-refused flow-engine publish $JS.API.CONSUMER.DELETE.CK_BOX_GOLDENFIXTURE_EVENT.m_other consumer-delete
 expect-refused flow-engine publish $JS.API.CONSUMER.DURABLE.CREATE.CK_BOX_GOLDENFIXTURE_EVENT.m_other durable-create
+expect-refused flow-engine publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core room-stream
+expect-refused flow-engine publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_ROOM.m_prefrontal-core room-stream
 expect-refused flow-engine publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_WAKE.c_agent_gold_a agent-durable
+expect-refused flow-engine publish $JS.API.STREAM.INFO.CK_BOX_GOLDENFIXTURE_ROOM room-stream
+expect-refused flow-engine publish ck.box_goldenfixture.room.room_gold_bound.post room-stream
 expect-refused flow-engine publish ck.box_goldenfixture.wake.agent_gold_a.fire workload-publish
+expect-refused flow-engine subscribe ck.box_goldenfixture.room.room_gold_bound.> room-stream

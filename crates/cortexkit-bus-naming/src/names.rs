@@ -34,8 +34,8 @@ impl StreamNames {
     /// in the consumer position on exactly these streams (NATS wildcards cannot
     /// match a `c_` prefix), which admits every consumer on them. So no non-agent
     /// durable may ever be created on these streams; ck-bus asserts that against
-    /// this list. ROOM, EFFECT_DEAD and EVENT are not agent streams: EVENT holds
-    /// module durables (`m_{module_id}`), never a `c_` durable.
+    /// this list. ROOM, EFFECT_DEAD and EVENT are not agent streams: EVENT and
+    /// ROOM hold module durables (`m_{module_id}`), never a `c_` durable.
     pub fn agent_streams(&self) -> [&str; 3] {
         [&self.wake, &self.peer, &self.effect]
     }
@@ -220,10 +220,12 @@ impl AccountNames {
         Ok(format!("c_{agent_id}"))
     }
 
-    /// The durable a module reads module events through, `m_{module_id}`.
+    /// The durable a module reads a non-agent stream through, `m_{module_id}`.
     ///
     /// The `m_` prefix keeps module durables apart from the agent namespace
-    /// `c_`, and they live only on the event stream.
+    /// `c_`. They live on the event stream (one per flow-engine module) and on
+    /// the ROOM stream (the delivery authority's one durable, filtered on
+    /// `room_binding`), never on an agent stream.
     pub fn module_consumer_name(module_id: &str) -> Result<String, NamingError> {
         validate_token(TokenKind::ModuleId, module_id)?;
         Ok(format!("m_{module_id}"))

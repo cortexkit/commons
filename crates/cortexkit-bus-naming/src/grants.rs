@@ -73,6 +73,9 @@ pub struct GoldenFixture {
     /// A module that is neither the participant nor the flow engine; the
     /// golden refuses its event subjects and its durable to both.
     pub foreign_module: &'static str,
+    /// Module id, and inbox component, of the delivery authority in the
+    /// golden; its ROOM durable is `m_` followed by this id.
+    pub delivery_authority_module: &'static str,
 }
 
 pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
@@ -85,6 +88,7 @@ pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
     system_credential: "cksys",
     flow_engine_module: "basal",
     foreign_module: "other",
+    delivery_authority_module: "prefrontal-core",
 };
 
 /// The session token in the golden's refused peer and effect subjects.
@@ -123,6 +127,10 @@ impl PermissionDocument {
             ("unbound-room", self.fixture.unbound_room),
             ("flow-engine-module", self.fixture.flow_engine_module),
             ("foreign-module", self.fixture.foreign_module),
+            (
+                "delivery-authority-module",
+                self.fixture.delivery_authority_module,
+            ),
         ] {
             output.push_str(&format!("fixture {name} {value}\n"));
         }
@@ -221,6 +229,16 @@ pub fn participant_permissions(
 /// deliveries into the survivor. Keeping workload publish here, and out of every
 /// host credential and out of ck-bus's own, means the module that decides a
 /// delivery is the only one that can make one.
+///
+/// Rooms follow the same shape. prefrontal-core is the only producer and the
+/// only consumer of room posts (hosts never consume rooms), so it publishes on
+/// the ROOM binding `ck.{acct}.room.*.post` rather than per bound room, which
+/// would re-mint its credential on every room create. It reads every room
+/// through one module durable, `m_{module_id}` on the ROOM stream, filtered on
+/// that binding and created by ck-bus: pull, ack and consumer info are granted
+/// on that one durable by name, never with a wildcard consumer token, so it can
+/// read no other consumer on ROOM, and it holds no consumer create or delete
+/// there.
 pub fn delivery_authority_permissions(
     account: &AccountNames,
     credential_public: &str,
@@ -236,10 +254,17 @@ pub fn delivery_authority_permissions(
         module_id,
         bound_rooms,
     )?;
+    let room_stream = &account.streams().room;
+    let room_durable = AccountNames::module_consumer_name(module_id)?;
     for subject in [
         account.wake_binding(),
         account.peer_binding(),
         account.effect_binding(),
+        account.room_binding(),
+        format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.{room_durable}"),
+        format!("$JS.API.CONSUMER.INFO.{room_stream}.{room_durable}"),
+        format!("$JS.ACK.{room_stream}.{room_durable}.>"),
+        format!("$JS.API.STREAM.INFO.{room_stream}"),
     ] {
         add(
             &mut entries,
@@ -352,8 +377,8 @@ pub fn bus_permissions(
 
     // Stream and consumer management on every stream, the event stream
     // included: the consumer-create rows are how ck-bus creates the module
-    // durables `m_{module_id}` on the event stream, as it creates the agents'
-    // `c_` durables on the agent streams.
+    // durables `m_{module_id}` on the event and ROOM streams, as it creates the
+    // agents' `c_` durables on the agent streams.
     for stream in account.streams().all() {
         for subject in [
             format!("$JS.API.STREAM.CREATE.{stream}"),
@@ -498,6 +523,7 @@ pub fn generate_permission_golden(
     validate_token(TokenKind::AgentId, fixture.foreign_agent)?;
     validate_token(TokenKind::RoomId, fixture.unbound_room)?;
     validate_token(TokenKind::ModuleId, fixture.foreign_module)?;
+    validate_token(TokenKind::ModuleId, fixture.delivery_authority_module)?;
 
     let mut allows = BTreeSet::new();
     allows.extend(participant_permissions(
@@ -508,8 +534,8 @@ pub fn generate_permission_golden(
     )?);
     allows.extend(delivery_authority_permissions(
         &account,
-        fixture.module_id,
-        fixture.module_id,
+        fixture.delivery_authority_module,
+        fixture.delivery_authority_module,
         &[fixture.bound_room],
     )?);
     allows.extend(bus_permissions(&account, fixture.module_id)?);
@@ -586,13 +612,14 @@ pub fn generate_permission_golden(
             });
         }
     }
+    // The delivery authority publishes on the whole ROOM binding, so an
+    // unbound room's post is not refused to it the way it is to a participant.
     for (subject, reason) in [
         (
             format!("$KV.{}.forbidden", account.buckets().census),
             "census-write",
         ),
         ("$SYS.REQ.CLAIMS.UPDATE".to_owned(), "system-subject"),
-        (account.room_post(fixture.unbound_room)?, "unbound-room"),
     ] {
         refused.insert(RefusedEntry {
             principal: Principal::DeliveryAuthority,
@@ -616,6 +643,111 @@ pub fn generate_permission_golden(
             });
         }
     }
+
+    // The ROOM module durable is the delivery authority's alone. A participant
+    // cannot read it; the delivery authority cannot read another module's
+    // durable on ROOM, nor create or delete any ROOM consumer (ck-bus creates
+    // its durable); the flow engine does not touch ROOM at all.
+    let room_stream = &account.streams().room;
+    let room_durable = AccountNames::module_consumer_name(fixture.delivery_authority_module)?;
+    let foreign_room_durable = AccountNames::module_consumer_name(fixture.foreign_module)?;
+    let participant_room_durable = AccountNames::module_consumer_name(fixture.module_id)?;
+    let room_binding = account.room_binding();
+    for (principal, subject, reason) in [
+        (
+            Principal::Participant,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.{room_durable}"),
+            "room-durable",
+        ),
+        (
+            Principal::Participant,
+            format!("$JS.ACK.{room_stream}.{room_durable}.>"),
+            "room-durable",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.{foreign_room_durable}"),
+            "foreign-room-durable",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.{participant_room_durable}"),
+            "foreign-room-durable",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.ACK.{room_stream}.{foreign_room_durable}.>"),
+            "foreign-room-durable",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.CREATE.{room_stream}"),
+            "consumer-create",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.CREATE.{room_stream}.{room_durable}.{room_binding}"),
+            "named-consumer-create",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.DURABLE.CREATE.{room_stream}.{room_durable}"),
+            "durable-create",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.DELETE.{room_stream}.{room_durable}"),
+            "consumer-delete",
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.DELETE.{room_stream}.{foreign_room_durable}"),
+            "consumer-delete",
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.{room_durable}"),
+            "room-stream",
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.ACK.{room_stream}.{room_durable}.>"),
+            "room-stream",
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.API.CONSUMER.INFO.{room_stream}.{room_durable}"),
+            "room-stream",
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.API.CONSUMER.CREATE.{room_stream}"),
+            "room-stream",
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.API.STREAM.INFO.{room_stream}"),
+            "room-stream",
+        ),
+        (
+            Principal::FlowEngine,
+            account.room_post(fixture.bound_room)?,
+            "room-stream",
+        ),
+    ] {
+        refused.insert(RefusedEntry {
+            principal,
+            operation: Operation::Publish,
+            subject,
+            reason,
+        });
+    }
+    refused.insert(RefusedEntry {
+        principal: Principal::FlowEngine,
+        operation: Operation::Subscribe,
+        subject: account.room_subscription(fixture.bound_room)?,
+        reason: "room-stream",
+    });
 
     // The flow engine cannot create a named or durable consumer on the event
     // stream, cannot delete any consumer there, cannot read an agent's

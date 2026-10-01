@@ -89,6 +89,7 @@ fn golden_names_bound_and_refused_fixture_identities() {
         "room_gold_unbound",
         "basal",
         "other",
+        "prefrontal-core",
     ] {
         assert!(CHECKED_IN_GOLDEN.contains(literal), "missing {literal}");
     }
@@ -191,8 +192,11 @@ fn participants_read_any_agent_durable_but_publish_no_workload() {
     );
 }
 
+/// The delivery authority's grant is a participant's plus exactly: publish on
+/// the three agent stream bindings and the ROOM binding, and pull, ack and
+/// info on its own ROOM durable `m_{module_id}` with stream info on ROOM.
 #[test]
-fn the_delivery_authority_adds_exactly_the_three_agent_stream_bindings() {
+fn the_delivery_authority_adds_the_workload_bindings_and_its_room_durable_only() {
     use cortexkit_bus_naming::{delivery_authority_permissions, participant_permissions};
     use std::collections::BTreeSet;
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
@@ -216,16 +220,29 @@ fn the_delivery_authority_adds_exactly_the_three_agent_stream_bindings() {
         .difference(&participant)
         .map(|(operation, subject)| (operation.as_str(), subject.as_str()))
         .collect::<Vec<_>>();
-    let (wake, peer, effect) = (
+    let (wake, peer, effect, room) = (
         account.wake_binding(),
         account.peer_binding(),
         account.effect_binding(),
+        account.room_binding(),
+    );
+    let room_stream = &account.streams().room;
+    let (ack, info, next, stream_info) = (
+        format!("$JS.ACK.{room_stream}.m_ckcore.>"),
+        format!("$JS.API.CONSUMER.INFO.{room_stream}.m_ckcore"),
+        format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.m_ckcore"),
+        format!("$JS.API.STREAM.INFO.{room_stream}"),
     );
     assert_eq!(
         extra,
         vec![
+            ("publish", ack.as_str()),
+            ("publish", info.as_str()),
+            ("publish", next.as_str()),
+            ("publish", stream_info.as_str()),
             ("publish", effect.as_str()),
             ("publish", peer.as_str()),
+            ("publish", room.as_str()),
             ("publish", wake.as_str()),
         ]
     );
@@ -316,19 +333,135 @@ fn flow_engine_cannot_name_a_durable() {
         );
     }
 
-    for row in &refused {
-        for allow in document.allows().iter().filter(|allow| {
-            allow.principal == Principal::FlowEngine && allow.operation == row.operation
-        }) {
+    assert_no_allow_overlaps(&document, &refused);
+}
+
+/// Fails when any allow entry of a refused row's own principal and operation
+/// shares a subject with that row.
+fn assert_no_allow_overlaps(
+    document: &cortexkit_bus_naming::PermissionDocument,
+    refused: &[&cortexkit_bus_naming::RefusedEntry],
+) {
+    for row in refused {
+        for allow in document
+            .allows()
+            .iter()
+            .filter(|allow| allow.principal == row.principal && allow.operation == row.operation)
+        {
             assert!(
                 !subjects_overlap(&allow.subject, &row.subject),
-                "flow-engine allow {} {} matches the refused row {} ({})",
+                "{} allow {} {} matches the refused row {} ({})",
+                allow.principal.as_str(),
                 allow.operation.as_str(),
                 allow.subject,
                 row.subject,
                 row.reason
             );
         }
+    }
+}
+
+/// The ROOM module durable `m_prefrontal-core` is the delivery authority's
+/// alone, and only that one durable: no participant reads it, the delivery
+/// authority reads no other ROOM consumer and creates or deletes none, and the
+/// flow engine does not touch ROOM. As with the flow engine, a golden diff
+/// would not catch a widened grant, so this asserts that no allow entry
+/// overlaps any refused row on the ROOM stream or its subjects.
+#[test]
+fn only_the_delivery_authority_reads_the_room_durable_and_only_its_own() {
+    use cortexkit_bus_naming::Operation;
+    let document = generate_permission_golden(PINNED_GOLDEN_FIXTURE).unwrap();
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let stream = &account.streams().room;
+    let room_prefix = format!("ck.{}.room.", account.account());
+    let touches_room = |subject: &str| {
+        subject.starts_with(&room_prefix) || subject.split('.').any(|token| token == stream)
+    };
+    let refused = document
+        .refused()
+        .iter()
+        .filter(|row| touches_room(&row.subject))
+        .collect::<Vec<_>>();
+
+    let binding = account.room_binding();
+    for (principal, expected) in [
+        (
+            Principal::Participant,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_other"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_ckbus"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.CREATE.{stream}"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.CREATE.{stream}.m_prefrontal-core.{binding}"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_prefrontal-core"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.DELETE.{stream}.m_prefrontal-core"),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            format!("$JS.API.CONSUMER.DELETE.{stream}.m_other"),
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
+        ),
+        (
+            Principal::FlowEngine,
+            format!("$JS.API.STREAM.INFO.{stream}"),
+        ),
+        (
+            Principal::FlowEngine,
+            account.room_post(PINNED_GOLDEN_FIXTURE.bound_room).unwrap(),
+        ),
+    ] {
+        assert!(
+            refused.iter().any(|row| row.principal == principal
+                && row.operation == Operation::Publish
+                && row.subject == expected),
+            "the golden lacks the refused {} row {expected}",
+            principal.as_str()
+        );
+    }
+
+    assert_no_allow_overlaps(&document, &refused);
+
+    // The positive half: the delivery authority does hold its own durable and
+    // the ROOM binding, so the refusals above are not passing over a grant that
+    // was never made.
+    for subject in [
+        format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
+        format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal-core"),
+        format!("$JS.ACK.{stream}.m_prefrontal-core.1.2.3.4.5"),
+        format!("$JS.API.STREAM.INFO.{stream}"),
+        account
+            .room_post(PINNED_GOLDEN_FIXTURE.unbound_room)
+            .unwrap(),
+    ] {
+        assert!(
+            allowed(
+                document.allows(),
+                Principal::DeliveryAuthority,
+                Operation::Publish,
+                &subject
+            ),
+            "delivery authority cannot {subject}"
+        );
     }
 }
 
