@@ -51,14 +51,20 @@ pub mod runner_codes {
     use cortexkit_role_llm_runner::errors;
 
     /// The runner's malformed-request refusal. At admission it refuses a
-    /// plan whose step-transform subscription exceeds the provider's
-    /// declaration, or gives `replace` on `pre_user` or `post_assistant` to
-    /// a provider that is not the reduction owner, with `detail.field` =
-    /// [`PLAN_STEP_TRANSFORM_ITEMS`].
+    /// plan whose step-transform subscription is malformed, covers tools or
+    /// ops the provider's declaration does not, or gives `replace` on
+    /// `pre_user` or `post_assistant` to a provider that is not the
+    /// reduction owner, with `detail.field` = [`PLAN_STEP_TRANSFORM_ITEMS`]
+    /// (`subscription::InvalidSubscriptionDetail`).
     pub const INVALID_PARAMS: &str = errors::INVALID_PARAMS;
     /// `detail.field` of that admission refusal. The runner role does not
     /// name it yet; see the contract's Appendix A.
     pub const PLAN_STEP_TRANSFORM_ITEMS: &str = "plan.step_transform_items";
+    /// The runner's admission refusal for a plan its providers' current
+    /// declarations no longer cover: a subscription whose hook or preset is
+    /// gone, or whose frozen `on_unavailable` or `budget_ms` is looser than
+    /// declared (`subscription::StaleDifference`).
+    pub const PLAN_STALE: &str = errors::PLAN_STALE;
     /// A user turn's `pre_user` hook was unavailable under `refuse`: the run
     /// ends `error` with this `provider_code`, and a steered or queued send
     /// is refused with it and writes nothing.
