@@ -17,6 +17,15 @@
       }
     },
     {
+      "name": "completed, its final message having no text parts: text is empty, never absent",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-14",
+        "state": "completed",
+        "final_message": {"ordinal": 512, "mid": "m512", "text": ""}
+      }
+    },
+    {
       "name": "interrupted by a runner restart",
       "terminal": true,
       "answer": {"run_id": "run-8", "state": "interrupted"}
@@ -50,6 +59,21 @@
       "terminal": false,
       "answer": {"run_id": "run-13", "state": "paused", "reason": "auth_required"}
     }
+  ],
+  "inconsistent": [
+    {
+      "name": "completed without a final message",
+      "answer": {"run_id": "run-14", "state": "completed"}
+    },
+    {
+      "name": "still running, with a final message",
+      "answer": {"run_id": "run-12", "state": "active", "final_message": {"ordinal": 3, "mid": "m3", "text": "partial"}}
+    }
+  ],
+  "text_joins": [
+    {"name": "parts are concatenated as emitted", "parts": ["All pass.", "\nThe fix is in parse.rs."], "text": "All pass.\nThe fix is in parse.rs."},
+    {"name": "a JSON verdict split across parts reads back whole", "parts": ["{\"verdict\": \"appr", "oved\"}"], "text": "{\"verdict\": \"approved\"}"},
+    {"name": "no text parts give the empty string", "parts": [], "text": ""}
   ],
   "refusals": [
     {"name": "unknown run", "request": {"run_id": "nope"}, "refusal": {"code": "unknown_run", "message": "no run nope in this session"}}

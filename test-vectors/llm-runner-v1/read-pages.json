@@ -309,5 +309,593 @@
         "message": "no message m999999 in this lineage"
       }
     }
-  ]
+  ],
+  "model_pages": [
+    {
+      "name": "before any compaction: messages passed through, no compaction state",
+      "from_ordinal": 0,
+      "compacted": false,
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 0,
+              "mid": "m0"
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "fix the parser"
+                }
+              ]
+            }
+          },
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 1,
+              "mid": "m1"
+            },
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Reading parse.rs."
+                }
+              ]
+            }
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "next_from_ordinal": 2
+      }
+    },
+    {
+      "name": "tail page with both source kinds, naming the compaction state it reflects",
+      "compacted": true,
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-ses_01J9Z",
+              "version": 4,
+              "first_ordinal": 3,
+              "last_ordinal": 9
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
+                }
+              ]
+            }
+          },
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 10,
+              "mid": "m10"
+            },
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "All pass."
+                }
+              ]
+            }
+          },
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 11,
+              "mid": "m11"
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "thanks"
+                }
+              ]
+            }
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "head": {
+          "wal_seq": 1300,
+          "sub_index": 0
+        },
+        "compaction_id": "cmp-ses_01J9Z",
+        "version": 4
+      }
+    },
+    {
+      "name": "a session never written",
+      "compacted": false,
+      "page": {
+        "messages": []
+      }
+    }
+  ],
+  "model_pages_rejected": [
+    {
+      "name": "a replacement on a page that names no compaction state",
+      "problem": "replacement_without_compaction_state",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-ses_01J9Z",
+              "version": 4,
+              "first_ordinal": 3,
+              "last_ordinal": 9
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
+                }
+              ]
+            }
+          },
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 10,
+              "mid": "m10"
+            },
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "All pass."
+                }
+              ]
+            }
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+      }
+    },
+    {
+      "name": "a compaction id without its version",
+      "problem": "partial_compaction_state",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 10,
+              "mid": "m10"
+            },
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "All pass."
+                }
+              ]
+            }
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "compaction_id": "cmp-ses_01J9Z"
+      }
+    },
+    {
+      "name": "entries not ordered by first covered ordinal",
+      "problem": "out_of_order",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 10,
+              "mid": "m10"
+            },
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "All pass."
+                }
+              ]
+            }
+          },
+          {
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-ses_01J9Z",
+              "version": 4,
+              "first_ordinal": 3,
+              "last_ordinal": 9
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
+                }
+              ]
+            }
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "compaction_id": "cmp-ses_01J9Z",
+        "version": 4
+      }
+    },
+    {
+      "name": "a replacement whose range is inverted",
+      "problem": "inverted_range",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-ses_01J9Z",
+              "version": 4,
+              "first_ordinal": 9,
+              "last_ordinal": 3
+            },
+            "message": {}
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "compaction_id": "cmp-ses_01J9Z",
+        "version": 4
+      }
+    },
+    {
+      "name": "a next ordinal inside the replacement's range",
+      "problem": "next_inside_entry",
+      "from_ordinal": 3,
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-ses_01J9Z",
+              "version": 4,
+              "first_ordinal": 3,
+              "last_ordinal": 9
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
+                }
+              ]
+            }
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "next_from_ordinal": 6,
+        "compaction_id": "cmp-ses_01J9Z",
+        "version": 4
+      }
+    },
+    {
+      "name": "entries without a lineage",
+      "problem": "no_lineage",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "message",
+              "ordinal": 0,
+              "mid": "m0"
+            },
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "fix the parser"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "model_pages_undecodable": [
+    {
+      "name": "a source of a kind this role does not define",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "summary",
+              "ordinal": 3
+            },
+            "message": {}
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+      }
+    },
+    {
+      "name": "a replacement without its range",
+      "page": {
+        "messages": [
+          {
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-ses_01J9Z",
+              "version": 4
+            },
+            "message": {}
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "compaction_id": "cmp-ses_01J9Z",
+        "version": 4
+      }
+    },
+    {
+      "name": "an entry without a source",
+      "page": {
+        "messages": [
+          {
+            "message": {}
+          }
+        ],
+        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+      }
+    }
+  ],
+  "replacement_once": {
+    "series": [
+      {
+        "name": "the page holding the replacement's first ordinal returns it whole",
+        "from_ordinal": 0,
+        "page": {
+          "messages": [
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 0,
+                "mid": "m0"
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "fix the parser"
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 1,
+                "mid": "m1"
+              },
+              "message": {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Reading parse.rs."
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 2,
+                "mid": "m2"
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "and run the tests"
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "replacement",
+                "compaction_id": "cmp-ses_01J9Z",
+                "version": 4,
+                "first_ordinal": 3,
+                "last_ordinal": 9
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
+                  }
+                ]
+              }
+            }
+          ],
+          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+          "next_from_ordinal": 10,
+          "compaction_id": "cmp-ses_01J9Z",
+          "version": 4
+        }
+      },
+      {
+        "name": "the next page starts past the replaced range",
+        "from_ordinal": 10,
+        "page": {
+          "messages": [
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 10,
+                "mid": "m10"
+              },
+              "message": {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "All pass."
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 11,
+                "mid": "m11"
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "thanks"
+                  }
+                ]
+              }
+            }
+          ],
+          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+          "compaction_id": "cmp-ses_01J9Z",
+          "version": 4
+        }
+      }
+    ],
+    "intersecting": [
+      {
+        "name": "a range read from inside the replaced range does not repeat it",
+        "from_ordinal": 5,
+        "page": {
+          "messages": [
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 10,
+                "mid": "m10"
+              },
+              "message": {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "All pass."
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 11,
+                "mid": "m11"
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "thanks"
+                  }
+                ]
+              }
+            }
+          ],
+          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+          "compaction_id": "cmp-ses_01J9Z",
+          "version": 4
+        }
+      }
+    ],
+    "repeated": [
+      {
+        "name": "a page read from inside the replaced range that repeats the replacement",
+        "from_ordinal": 5,
+        "page": {
+          "messages": [
+            {
+              "source": {
+                "kind": "replacement",
+                "compaction_id": "cmp-ses_01J9Z",
+                "version": 4,
+                "first_ordinal": 3,
+                "last_ordinal": 9
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 10,
+                "mid": "m10"
+              },
+              "message": {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "All pass."
+                  }
+                ]
+              }
+            },
+            {
+              "source": {
+                "kind": "message",
+                "ordinal": 11,
+                "mid": "m11"
+              },
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "thanks"
+                  }
+                ]
+              }
+            }
+          ],
+          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+          "compaction_id": "cmp-ses_01J9Z",
+          "version": 4
+        }
+      }
+    ]
+  }
 }

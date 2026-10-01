@@ -69,6 +69,22 @@
       "retryable": true
     },
     {
+      "code": "not_session_compaction_provider",
+      "retryable": false
+    },
+    {
+      "code": "rung_unsupported",
+      "retryable": false
+    },
+    {
+      "code": "pending_superseded",
+      "retryable": false
+    },
+    {
+      "code": "already_applied",
+      "retryable": false
+    },
+    {
       "code": "a_code_this_role_does_not_define",
       "retryable": false
     }

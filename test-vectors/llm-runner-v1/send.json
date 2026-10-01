@@ -365,5 +365,71 @@
         "delivery": "interrupt"
       }
     }
+  ],
+  "compaction_item_checks": [
+    {
+      "name": "a plan with a compaction item on a runner that declares compaction",
+      "declares": [
+        "queue",
+        "compaction"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "launch-2",
+        "plan": {
+          "items": [],
+          "compaction_item": {
+            "provider": "magic-context"
+          }
+        }
+      }
+    },
+    {
+      "name": "a plan with a compaction item on a runner without compaction is refused at admission",
+      "declares": [
+        "steer",
+        "queue"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "launch-3",
+        "plan": {
+          "items": [],
+          "compaction_item": {
+            "provider": "magic-context"
+          }
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "this runner does not declare compaction",
+        "detail": {
+          "field": "plan.compaction_item"
+        }
+      }
+    },
+    {
+      "name": "a plan without a compaction item on a runner without compaction",
+      "declares": [
+        "queue"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "launch-4",
+        "plan": {
+          "items": []
+        }
+      }
+    },
+    {
+      "name": "a later send without a plan",
+      "declares": [
+        "queue"
+      ],
+      "request": {
+        "prompt": "next",
+        "send_id": "owner-delivery-20"
+      }
+    }
   ]
 }

@@ -83,6 +83,30 @@ pub const TRANSIENT: &str = "transient";
 /// Retryable, with backoff, within the caller's hold bound.
 pub const SCOPE_NOT_SYNCED: &str = "scope_not_synced";
 
+/// A `compaction.ready` from a caller other than the session's frozen
+/// compaction provider: the route's caller stamp is not the provider of the
+/// plan's `compaction_item`, or the session has none. The session is not
+/// woken.
+pub const NOT_SESSION_COMPACTION_PROVIDER: &str = "not_session_compaction_provider";
+
+/// A `session.refresh` or `session.refresh_policy` names a policy whose rung
+/// the session does not support for that surface. Refused when the policy is
+/// set; nothing was written.
+pub const RUNG_UNSUPPORTED: &str = "rung_unsupported";
+
+/// A `session.refresh_policy` names a generation that is no longer the
+/// pending one, because the runner has since accepted a later refresh.
+/// Nothing was written.
+pub const PENDING_SUPERSEDED: &str = "pending_superseded";
+
+/// A `session.refresh_policy` names a generation a prefix rebuild or an
+/// append has already applied, so there is no pending change left for the
+/// policy to govern. Nothing was written.
+pub const ALREADY_APPLIED: &str = "already_applied";
+
+/// The refusals of the `session_change` group's ops.
+pub const SESSION_CHANGE_CODES: &[&str] = &[RUNG_UNSUPPORTED, PENDING_SUPERSEDED, ALREADY_APPLIED];
+
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
     INVALID_PARAMS,
@@ -102,6 +126,10 @@ pub const CODES: &[&str] = &[
     PRE_USER_UNAVAILABLE,
     TRANSIENT,
     SCOPE_NOT_SYNCED,
+    NOT_SESSION_COMPACTION_PROVIDER,
+    RUNG_UNSUPPORTED,
+    PENDING_SUPERSEDED,
+    ALREADY_APPLIED,
 ];
 
 /// Whether a runner's refusal is retryable with the same request. Route

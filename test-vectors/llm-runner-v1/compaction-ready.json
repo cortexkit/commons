@@ -1,8 +1,51 @@
 {
   "requests": [
-    {"name": "names its session", "request": {"session": "ses_01J9Z"}}
+    {"name": "names its session and the request it answers", "request": {"session": "ses_01J9Z", "request_id": "creq-41"}}
   ],
   "tolerated": [
-    {"name": "provider extras are ignored", "request": {"session": "ses_01J9Z", "version": 12}}
+    {"name": "provider extras are ignored", "request": {"session": "ses_01J9Z", "request_id": "creq-41", "version": 12}}
+  ],
+  "undecodable": [
+    {"name": "no request id", "field": "request_id", "request": {"session": "ses_01J9Z"}},
+    {"name": "no session", "field": "session", "request": {"request_id": "creq-41"}}
+  ],
+  "checks": [
+    {
+      "name": "from the session's provider, for the newest request: call again",
+      "caller": "magic-context",
+      "session_provider": "magic-context",
+      "newest_request_id": "creq-41",
+      "request": {"session": "ses_01J9Z", "request_id": "creq-41"},
+      "outcome": "call_again"
+    },
+    {
+      "name": "for an older request: ignored, not refused",
+      "caller": "magic-context",
+      "session_provider": "magic-context",
+      "newest_request_id": "creq-42",
+      "request": {"session": "ses_01J9Z", "request_id": "creq-41"},
+      "outcome": "ignored"
+    },
+    {
+      "name": "before any request was issued: ignored",
+      "caller": "magic-context",
+      "session_provider": "magic-context",
+      "request": {"session": "ses_01J9Z", "request_id": "creq-41"},
+      "outcome": "ignored"
+    },
+    {
+      "name": "from a module that is not the session's compaction provider: refused",
+      "caller": "other-module",
+      "session_provider": "magic-context",
+      "newest_request_id": "creq-41",
+      "request": {"session": "ses_01J9Z", "request_id": "creq-41"},
+      "refusal": {"code": "not_session_compaction_provider", "message": "other-module is not this session's compaction provider"}
+    },
+    {
+      "name": "into a session whose plan has no compaction item: refused",
+      "caller": "magic-context",
+      "request": {"session": "ses_01J9Z", "request_id": "creq-41"},
+      "refusal": {"code": "not_session_compaction_provider", "message": "this session has no compaction provider"}
+    }
   ]
 }

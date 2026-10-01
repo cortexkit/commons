@@ -16,8 +16,8 @@
 //! would silently change the question are strict.
 //!
 //! The session an op acts on is the session the route is bound to; no
-//! request in this crate names its session, except `compaction.ready`, which
-//! arrives on a module-level route.
+//! request in this crate names its session, except `compaction.ready` (in the
+//! `compaction` group), which arrives on a module-level route.
 
 #![forbid(unsafe_code)]
 
@@ -49,8 +49,8 @@ pub mod ops {
     /// Required.
     pub const SESSION_BASELINE: &str = "session.baseline";
     /// A compaction provider's signal that a step it asked the runner to
-    /// hold may be asked about again. Required: every runner serves the
-    /// compaction interface, and this is the one op of it the runner serves.
+    /// hold may be asked about again. In `compaction`: the one op of the
+    /// compaction interface the runner serves rather than calls.
     pub const COMPACTION_READY: &str = "compaction.ready";
     /// A page of the transcript. In `transcript_reads`, and in every group
     /// that adds fields to a page.
@@ -63,18 +63,22 @@ pub mod ops {
     /// The session's event stream, attachable at a page's `head`. In
     /// `streaming`.
     pub const SESSION_SUBSCRIBE: &str = "session.subscribe";
-    /// A prompt from the session's owner, with a delivery mode. In `steer`
-    /// and `queue`.
+    /// A prompt from the session's owner, with a delivery mode. In `steer`,
+    /// `queue` and `interrupt`.
     pub const SESSION_SEND: &str = "session.send";
+    /// A mid-session change: fetch a new plan's items and hold them as the
+    /// pending change, with its policy and generation. In `session_change`.
+    pub const SESSION_REFRESH: &str = "session.refresh";
+    /// A new policy for the pending change. In `session_change`.
+    pub const SESSION_REFRESH_POLICY: &str = "session.refresh_policy";
+    /// Drop the frozen prefix and apply any pending change on the next step,
+    /// whatever its policy. In `session_change`.
+    pub const SESSION_FLUSH_PREFIX: &str = "session.flush_prefix";
 }
 
 /// Ops every `llm-runner/v1` module must list in `role.describe`. A consumer
 /// refuses a module missing any of them, by name, before routing anything.
-pub const REQUIRED_OPS: &[&str] = &[
-    ops::ROLE_DESCRIBE,
-    ops::SESSION_BASELINE,
-    ops::COMPACTION_READY,
-];
+pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::SESSION_BASELINE];
 
 /// Capability names: the module-level groups `role.describe` declares, and
 /// the session-level capabilities a session's admission reply or baseline
@@ -103,6 +107,16 @@ pub mod capabilities {
     /// `steer` and `queue`, so a runner that cannot abort a model stream can
     /// still declare those two.
     pub const INTERRUPT: &str = "interrupt";
+    /// The compaction interface: the runner calls the session's compaction
+    /// provider (Setup, the per-step status, the request fence, durable
+    /// `WAIT` and its timeout, `REFUSE`) and serves `compaction.ready`. A
+    /// runner that hosts no sessions of its own declares none of it.
+    pub const COMPACTION: &str = "compaction";
+    /// Mid-session changes from the session's owner: `session.refresh`,
+    /// `session.refresh_policy` and `session.flush_prefix`. A runner without
+    /// it gets no mid-session changes; its owner applies them at the next
+    /// session instead.
+    pub const SESSION_CHANGE: &str = "session_change";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -120,6 +134,15 @@ pub mod capabilities {
         (STEER, &[ops::SESSION_SEND]),
         (QUEUE, &[ops::SESSION_SEND]),
         (INTERRUPT, &[ops::SESSION_SEND]),
+        (COMPACTION, &[ops::COMPACTION_READY]),
+        (
+            SESSION_CHANGE,
+            &[
+                ops::SESSION_REFRESH,
+                ops::SESSION_REFRESH_POLICY,
+                ops::SESSION_FLUSH_PREFIX,
+            ],
+        ),
     ];
 
     /// The ops a declared group requires, or `None` for a name that is not a
@@ -220,6 +243,7 @@ pub(crate) mod vectors {
         "role-describe.json",
         "run-result.json",
         "send.json",
+        "session-change.json",
         "subscribe.json",
     ];
 
@@ -291,6 +315,9 @@ mod tests {
             ops::RUN_RESULT,
             ops::SESSION_SUBSCRIBE,
             ops::SESSION_SEND,
+            ops::SESSION_REFRESH,
+            ops::SESSION_REFRESH_POLICY,
+            ops::SESSION_FLUSH_PREFIX,
         ];
         for (group, group_ops) in capabilities::GROUPS {
             assert!(!group_ops.is_empty(), "{group} names no op");
@@ -306,5 +333,45 @@ mod tests {
             capabilities::group_ops(capabilities::ORDERED_HOOK_PHASES),
             None
         );
+        assert_eq!(
+            capabilities::group_ops(capabilities::COMPACTION),
+            Some(&[ops::COMPACTION_READY][..])
+        );
+        // A group's ops are never required of every runner: a runner that
+        // declares no group serves only the required ops.
+        for (group, group_ops) in capabilities::GROUPS {
+            for op in *group_ops {
+                assert!(!REQUIRED_OPS.contains(op), "{group}: {op} is required");
+            }
+        }
+    }
+
+    #[test]
+    fn session_change_vectors_name_group_ops_and_refusals() {
+        let file = vectors::load("session-change.json");
+        let group = capabilities::group_ops(capabilities::SESSION_CHANGE).unwrap();
+        for case in vectors::cases(&file, "refusals") {
+            let name = case["name"].as_str().unwrap();
+            let op = case["op"].as_str().unwrap();
+            assert!(group.contains(&op), "{name}: {op} is not in session_change");
+            let code = case["refusal"]["code"].as_str().unwrap();
+            assert!(
+                errors::SESSION_CHANGE_CODES.contains(&code),
+                "{name}: {code}"
+            );
+            assert!(errors::CODES.contains(&code), "{name}: {code}");
+            assert_eq!(
+                errors::is_retryable(code),
+                case["retryable"].as_bool().unwrap(),
+                "{name}"
+            );
+        }
+        let declared: Vec<&str> = vectors::cases(&file, "refusals")
+            .iter()
+            .map(|case| case["refusal"]["code"].as_str().unwrap())
+            .collect();
+        for code in errors::SESSION_CHANGE_CODES {
+            assert!(declared.contains(code), "{code} has no vector");
+        }
     }
 }

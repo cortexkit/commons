@@ -11,7 +11,9 @@
         "steer",
         "queue",
         "ordered_hook_phases",
-        "interrupt"
+        "interrupt",
+        "compaction",
+        "session_change"
       ],
       "answer": {
         "majors": [
@@ -26,7 +28,10 @@
               "session.head",
               "run.result",
               "session.subscribe",
-              "session.send"
+              "session.send",
+              "session.refresh",
+              "session.refresh_policy",
+              "session.flush_prefix"
             ]
           }
         ],
@@ -40,7 +45,9 @@
           "steer",
           "queue",
           "ordered_hook_phases",
-          "interrupt"
+          "interrupt",
+          "compaction",
+          "session_change"
         ],
         "session_capabilities_from": "admission",
         "max_bytes": {
@@ -50,7 +57,7 @@
       }
     },
     {
-      "name": "steer only, session capabilities from the baseline",
+      "name": "steer only, hosting no sessions: no compaction, session capabilities from the baseline",
       "declares": [
         "steer"
       ],
@@ -62,7 +69,6 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready",
               "session.send"
             ]
           }
@@ -94,6 +100,56 @@
         "session_capabilities_from": "admission",
         "extra_top_level": true
       }
+    },
+    {
+      "name": "compaction declared with compaction.ready",
+      "declares": [
+        "compaction"
+      ],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "compaction.ready"
+            ]
+          }
+        ],
+        "implementation_version": "1",
+        "capabilities": [
+          "compaction"
+        ],
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "session_change declared with its three ops",
+      "declares": [
+        "session_change"
+      ],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.refresh",
+              "session.refresh_policy",
+              "session.flush_prefix"
+            ]
+          }
+        ],
+        "implementation_version": "1",
+        "capabilities": [
+          "session_change"
+        ],
+        "session_capabilities_from": "admission"
+      }
     }
   ],
   "canonical": [
@@ -105,8 +161,7 @@
             "version": "llm-runner/v1",
             "ops": [
               "role.describe",
-              "session.baseline",
-              "compaction.ready"
+              "session.baseline"
             ],
             "stability": "alpha"
           }
@@ -125,7 +180,6 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready",
               "session.read",
               "session.head"
             ],
@@ -154,8 +208,7 @@
             "version": "llm-runner/v1",
             "ops": [
               "role.describe",
-              "session.baseline",
-              "compaction.ready"
+              "session.baseline"
             ]
           }
         ],
@@ -173,8 +226,7 @@
             "stability": "stable",
             "ops": [
               "role.describe",
-              "session.baseline",
-              "compaction.ready"
+              "session.baseline"
             ]
           }
         ],
@@ -246,7 +298,6 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready",
               "session.read"
             ]
           }
@@ -268,8 +319,7 @@
             "stability": "alpha",
             "ops": [
               "role.describe",
-              "session.baseline",
-              "compaction.ready"
+              "session.baseline"
             ]
           }
         ],
@@ -290,8 +340,7 @@
             "stability": "alpha",
             "ops": [
               "role.describe",
-              "session.baseline",
-              "compaction.ready"
+              "session.baseline"
             ]
           }
         ],
@@ -309,7 +358,6 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready",
               "session.read",
               "session.head"
             ]
@@ -332,14 +380,57 @@
             "stability": "alpha",
             "ops": [
               "role.describe",
-              "session.baseline",
-              "compaction.ready"
+              "session.baseline"
             ]
           }
         ],
         "implementation_version": "1",
         "capabilities": [
           "interrupt"
+        ],
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "compaction declared without compaction.ready",
+      "problem": "group_incomplete",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline"
+            ]
+          }
+        ],
+        "implementation_version": "1",
+        "capabilities": [
+          "compaction"
+        ],
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "session_change declared without session.flush_prefix",
+      "problem": "group_incomplete",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.refresh",
+              "session.refresh_policy"
+            ]
+          }
+        ],
+        "implementation_version": "1",
+        "capabilities": [
+          "session_change"
         ],
         "session_capabilities_from": "admission"
       }

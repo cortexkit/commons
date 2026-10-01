@@ -9,6 +9,7 @@
     {"name": "after a message id", "mode": "after", "request": {"after_mid": "m41", "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"}},
     {"name": "with originals", "mode": "tail", "request": {"include_originals": true}},
     {"name": "model view", "mode": "tail", "request": {"view": "model"}},
+    {"name": "model view range, keyed on transcript ordinals", "mode": "range", "request": {"from_ordinal": 5, "view": "model"}},
     {"name": "raw view named", "mode": "range", "request": {"from_ordinal": 3, "view": "raw"}}
   ],
   "refused": [
@@ -35,6 +36,12 @@
       "field": "view",
       "request": {"view": "provider_bytes"},
       "refusal": {"code": "invalid_params", "message": "view must be raw or model", "detail": {"field": "view"}}
+    },
+    {
+      "name": "after_mid on the model view",
+      "field": "view",
+      "request": {"after_mid": "m41", "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "view": "model"},
+      "refusal": {"code": "invalid_params", "message": "after_mid is not served on the model view; read by ordinal", "detail": {"field": "view"}}
     }
   ]
 }

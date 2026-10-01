@@ -158,6 +158,18 @@ impl SendRequest {
             Err(delivery)
         }
     }
+
+    /// Admission's check of the request's `plan` against `declared` (a
+    /// runner's module-level capabilities): `Err` with the `field` of an
+    /// `invalid_params` refusal (`plan.compaction_item`) when the plan names
+    /// a compaction provider and the runner does not declare `compaction`.
+    /// A request without a plan passes.
+    pub fn check_compaction_item<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        match &self.plan {
+            Some(plan) => crate::compaction::check_plan_compaction(plan, declared),
+            None => Ok(()),
+        }
+    }
 }
 
 /// Send reply states. A decoder keeps any other value as a plain string
@@ -297,6 +309,36 @@ mod tests {
                         "{name}"
                     );
                     assert!(!errors::is_retryable(errors::DELIVERY_UNSUPPORTED));
+                }
+                (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_compaction_item_is_refused_at_admission_without_the_compaction_group() {
+        let file = vectors::load("send.json");
+        for case in vectors::cases(&file, "compaction_item_checks") {
+            let name = case["name"].as_str().unwrap();
+            let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            let declared: Vec<&str> = case["declares"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c.as_str().unwrap())
+                .collect();
+            match (
+                request.check_compaction_item(&declared),
+                case.get("refusal"),
+            ) {
+                (Ok(()), None) => {}
+                (Err(field), Some(refusal)) => {
+                    assert_eq!(refusal["code"], errors::INVALID_PARAMS, "{name}");
+                    assert_eq!(
+                        errors::refused_field(errors::INVALID_PARAMS, refusal.get("detail")),
+                        Some(field),
+                        "{name}"
+                    );
                 }
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }

@@ -1,0 +1,40 @@
+{
+  "refusals": [
+    {
+      "name": "a refresh whose policy names a rung the session does not support",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "rung_unsupported",
+        "message": "this session does not support on_history_rebuild for tools"
+      }
+    },
+    {
+      "name": "a policy change naming a rung the session does not support",
+      "op": "session.refresh_policy",
+      "retryable": false,
+      "refusal": {
+        "code": "rung_unsupported",
+        "message": "this session does not support immediately for system_text"
+      }
+    },
+    {
+      "name": "a policy change for a generation a later refresh superseded",
+      "op": "session.refresh_policy",
+      "retryable": false,
+      "refusal": {
+        "code": "pending_superseded",
+        "message": "generation 3 is no longer pending; generation 4 is"
+      }
+    },
+    {
+      "name": "a policy change for a generation already applied",
+      "op": "session.refresh_policy",
+      "retryable": false,
+      "refusal": {
+        "code": "already_applied",
+        "message": "generation 3 was applied by a prefix rebuild"
+      }
+    }
+  ]
+}

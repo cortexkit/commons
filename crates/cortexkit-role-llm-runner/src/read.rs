@@ -17,6 +17,13 @@
 //! A page is an ordinal range and nothing more: it is not aligned to turns,
 //! runs or tool-call boundaries, so a tool call and its result may arrive on
 //! different pages.
+//!
+//! With `view: "model"` the page is a [`ModelPage`]: the message list the
+//! next model request would be built from, after hooks and compaction. Its
+//! entries say where they come from ([`EntrySource`]), and tail and range
+//! reads key on transcript ordinals as they do for the raw view. `after_mid`
+//! is refused on the model view, because a message inside a replaced range
+//! has no clean "after" there.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
@@ -38,7 +45,9 @@ pub enum ReadView {
     /// default.
     Raw,
     /// The canonical message list the model is given after hooks and
-    /// compaction. Served only by a runner that declares `model_view`.
+    /// compaction, answered as a [`ModelPage`]. Served only by a runner that
+    /// declares `model_view`. Tail and range reads only: `after_mid` is
+    /// refused naming `view`.
     Model,
 }
 
@@ -152,9 +161,13 @@ impl ReadRequest {
     }
 
     /// The read mode, or the field an `invalid_params` refusal names:
+    /// `view` when `after_mid` is combined with the model view,
     /// `from_ordinal` when it is combined with `after_mid`, `lineage_id`
     /// when `after_mid` comes without it.
     pub fn mode(&self) -> Result<ReadMode<'_>, &'static str> {
+        if self.after_mid.is_some() && self.view == Some(ReadView::Model) {
+            return Err(fields::VIEW);
+        }
         match (&self.after_mid, self.from_ordinal, &self.lineage_id) {
             (Some(_), Some(_), _) => Err(fields::FROM_ORDINAL),
             (Some(_), None, None) => Err(fields::LINEAGE_ID),
@@ -230,6 +243,233 @@ impl ReadPage {
     /// session that has messages has a lineage.
     pub fn lineage_consistent(&self) -> bool {
         self.lineage_id.is_some() || (self.messages.is_empty() && self.next_from_ordinal.is_none())
+    }
+}
+
+/// A `session.read` page of the model view (`view: "model"`). Decoded
+/// leniently: unknown fields are ignored.
+///
+/// It names the compaction state it reflects (`compaction_id` and
+/// `version`, both absent before any compaction applied), so a reader knows
+/// which applied CompactionMessage it saw. It is what the next request would
+/// be built from, not the bytes a model provider was sent.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`ModelPage::new`], [`ModelPage::no_lineage`] and the `with_*` setters,
+/// or decode one.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ModelPage {
+    /// The entries, ordered by the first transcript ordinal each covers.
+    pub messages: Vec<ModelEntry>,
+    /// As on a raw page: absent only for a session never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_id: Option<String>,
+    /// The transcript ordinal to read from next, when the page stopped
+    /// early. Always past the last ordinal any entry on the page covers, so
+    /// the next page never repeats a replacement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_from_ordinal: Option<u64>,
+    /// As on a raw page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<Map<String, Value>>,
+    /// The compaction whose latest applied CompactionMessage this page
+    /// reflects. Absent, with `version`, before any compaction applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_id: Option<String>,
+    /// The version of that CompactionMessage. Present exactly when
+    /// `compaction_id` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
+}
+
+/// One entry of the model view: a message as the next request would carry
+/// it, and where it comes from.
+///
+/// Non-exhaustive so later optional members are additive: use
+/// [`ModelEntry::new`], or decode one.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ModelEntry {
+    /// Which transcript message, or which replaced range, this entry is.
+    pub source: EntrySource,
+    /// The message itself, in the runner's own schema.
+    pub message: Value,
+}
+
+/// Where a model-view entry comes from. Tagged by `kind`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EntrySource {
+    /// A transcript message passed through, with its hooks applied. It keeps
+    /// its transcript ordinal and `mid`.
+    Message { ordinal: u64, mid: String },
+    /// A compaction replacement standing for the raw transcript range
+    /// `first_ordinal..=last_ordinal`, from the CompactionMessage named by
+    /// `compaction_id` and `version`.
+    Replacement {
+        compaction_id: String,
+        version: u64,
+        first_ordinal: u64,
+        last_ordinal: u64,
+    },
+}
+
+impl EntrySource {
+    /// The first transcript ordinal the entry covers.
+    pub fn first_ordinal(&self) -> u64 {
+        match self {
+            Self::Message { ordinal, .. } => *ordinal,
+            Self::Replacement { first_ordinal, .. } => *first_ordinal,
+        }
+    }
+
+    /// The last transcript ordinal the entry covers.
+    pub fn last_ordinal(&self) -> u64 {
+        match self {
+            Self::Message { ordinal, .. } => *ordinal,
+            Self::Replacement { last_ordinal, .. } => *last_ordinal,
+        }
+    }
+}
+
+impl ModelEntry {
+    pub fn new(source: EntrySource, message: Value) -> Self {
+        Self { source, message }
+    }
+}
+
+/// Why a [`ModelPage`] breaks the model view's paging rules. A consumer
+/// treats such a page as malformed; it is not a refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelPageProblem {
+    /// The page has no lineage but carries entries, a next ordinal or a
+    /// compaction state.
+    NoLineage,
+    /// Only one of `compaction_id` and `version` is present.
+    PartialCompactionState,
+    /// The page carries a replacement but names no compaction state.
+    ReplacementWithoutCompactionState,
+    /// A replacement's `first_ordinal` is above its `last_ordinal`.
+    InvertedRange {
+        first_ordinal: u64,
+        last_ordinal: u64,
+    },
+    /// An entry does not start after the one before it.
+    OutOfOrder { first_ordinal: u64 },
+    /// An entry covers an ordinal below the one the page was read from: a
+    /// replacement whose `first_ordinal` falls on an earlier page, repeated
+    /// on a later page that intersects its range.
+    StartsBeforePage {
+        first_ordinal: u64,
+        from_ordinal: u64,
+    },
+    /// `next_from_ordinal` falls inside or before an entry on the page, so
+    /// the next page would intersect it.
+    NextInsideEntry {
+        next_from_ordinal: u64,
+        last_ordinal: u64,
+    },
+}
+
+impl ModelPage {
+    /// A page of a session whose lineage is `lineage_id`, before any
+    /// compaction applied.
+    pub fn new(lineage_id: impl Into<String>, messages: Vec<ModelEntry>) -> Self {
+        Self {
+            messages,
+            lineage_id: Some(lineage_id.into()),
+            next_from_ordinal: None,
+            head: None,
+            compaction_id: None,
+            version: None,
+        }
+    }
+
+    /// The page of a session that was never written.
+    pub fn no_lineage() -> Self {
+        Self {
+            messages: Vec::new(),
+            lineage_id: None,
+            next_from_ordinal: None,
+            head: None,
+            compaction_id: None,
+            version: None,
+        }
+    }
+
+    pub fn with_next_from_ordinal(mut self, next_from_ordinal: u64) -> Self {
+        self.next_from_ordinal = Some(next_from_ordinal);
+        self
+    }
+
+    pub fn with_head(mut self, head: Map<String, Value>) -> Self {
+        self.head = Some(head);
+        self
+    }
+
+    /// Name the compaction state the page reflects.
+    pub fn with_compaction(mut self, compaction_id: impl Into<String>, version: u64) -> Self {
+        self.compaction_id = Some(compaction_id.into());
+        self.version = Some(version);
+        self
+    }
+
+    /// Check the page against the model view's paging rules, for a page read
+    /// from `from_ordinal` (`None` for a tail read, whose start the runner
+    /// chose). The entries are ordered by the first ordinal each covers; a
+    /// replacement comes whole, only on the page holding its
+    /// `first_ordinal`, so no entry starts below `from_ordinal`, and
+    /// `next_from_ordinal` is past every ordinal the page covers. A page
+    /// carrying a replacement names its compaction state. Returns the first
+    /// problem found.
+    pub fn check(&self, from_ordinal: Option<u64>) -> Result<(), ModelPageProblem> {
+        let has_compaction_state = self.compaction_id.is_some() || self.version.is_some();
+        if self.lineage_id.is_none()
+            && (!self.messages.is_empty()
+                || self.next_from_ordinal.is_some()
+                || has_compaction_state)
+        {
+            return Err(ModelPageProblem::NoLineage);
+        }
+        if self.compaction_id.is_some() != self.version.is_some() {
+            return Err(ModelPageProblem::PartialCompactionState);
+        }
+        let mut previous_first: Option<u64> = None;
+        for entry in &self.messages {
+            let first_ordinal = entry.source.first_ordinal();
+            let last_ordinal = entry.source.last_ordinal();
+            if first_ordinal > last_ordinal {
+                return Err(ModelPageProblem::InvertedRange {
+                    first_ordinal,
+                    last_ordinal,
+                });
+            }
+            if matches!(entry.source, EntrySource::Replacement { .. }) && !has_compaction_state {
+                return Err(ModelPageProblem::ReplacementWithoutCompactionState);
+            }
+            if let Some(from_ordinal) = from_ordinal {
+                if first_ordinal < from_ordinal {
+                    return Err(ModelPageProblem::StartsBeforePage {
+                        first_ordinal,
+                        from_ordinal,
+                    });
+                }
+            }
+            if previous_first.is_some_and(|previous| first_ordinal <= previous) {
+                return Err(ModelPageProblem::OutOfOrder { first_ordinal });
+            }
+            if let Some(next_from_ordinal) = self.next_from_ordinal {
+                if next_from_ordinal <= last_ordinal {
+                    return Err(ModelPageProblem::NextInsideEntry {
+                        next_from_ordinal,
+                        last_ordinal,
+                    });
+                }
+            }
+            previous_first = Some(first_ordinal);
+        }
+        Ok(())
     }
 }
 
@@ -566,6 +806,124 @@ mod tests {
         }
     }
 
+    fn model_problem_name(problem: &ModelPageProblem) -> &'static str {
+        match problem {
+            ModelPageProblem::NoLineage => "no_lineage",
+            ModelPageProblem::PartialCompactionState => "partial_compaction_state",
+            ModelPageProblem::ReplacementWithoutCompactionState => {
+                "replacement_without_compaction_state"
+            }
+            ModelPageProblem::InvertedRange { .. } => "inverted_range",
+            ModelPageProblem::OutOfOrder { .. } => "out_of_order",
+            ModelPageProblem::StartsBeforePage { .. } => "starts_before_page",
+            ModelPageProblem::NextInsideEntry { .. } => "next_inside_entry",
+        }
+    }
+
+    #[test]
+    fn model_page_vectors_decode_round_trip_and_follow_the_paging_rules() {
+        let file = vectors::load("read-pages.json");
+        let mut kinds = Vec::new();
+        for case in vectors::cases(&file, "model_pages") {
+            let name = case["name"].as_str().unwrap();
+            let page: ModelPage = vectors::round_trip(name, &case["page"]);
+            page.check(case["from_ordinal"].as_u64())
+                .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
+            // A page names a compaction state exactly when the vector says a
+            // compaction applied; before any, both members are absent.
+            let compacted = case["compacted"].as_bool().unwrap();
+            assert_eq!(page.compaction_id.is_some(), compacted, "{name}");
+            assert_eq!(page.version.is_some(), compacted, "{name}");
+            for entry in &page.messages {
+                let kind = serde_json::to_value(&entry.source).unwrap()["kind"].clone();
+                kinds.push(kind);
+            }
+        }
+        for kind in ["message", "replacement"] {
+            assert!(kinds.contains(&Value::from(kind)), "no {kind} entry");
+        }
+        for case in vectors::cases(&file, "model_pages_rejected") {
+            let name = case["name"].as_str().unwrap();
+            let page: ModelPage = serde_json::from_value(case["page"].clone())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let problem = page.check(case["from_ordinal"].as_u64()).expect_err(name);
+            assert_eq!(
+                model_problem_name(&problem),
+                case["problem"].as_str().unwrap(),
+                "{name}"
+            );
+        }
+        for case in vectors::cases(&file, "model_pages_undecodable") {
+            let name = case["name"].as_str().unwrap();
+            assert!(
+                serde_json::from_value::<ModelPage>(case["page"].clone()).is_err(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_view_replacement_comes_once_on_the_page_holding_its_first_ordinal() {
+        let file = vectors::load("read-pages.json");
+        let once = &file["replacement_once"];
+        let replacements = |page: &ModelPage| -> Vec<EntrySource> {
+            page.messages
+                .iter()
+                .filter(|entry| matches!(entry.source, EntrySource::Replacement { .. }))
+                .map(|entry| entry.source.clone())
+                .collect()
+        };
+
+        // Paging through the view from its first ordinal, each read starting
+        // where the last one stopped, meets every replacement exactly once.
+        let mut seen = Vec::new();
+        let mut expected_from = None;
+        for case in vectors::cases(once, "series") {
+            let name = case["name"].as_str().unwrap();
+            let from_ordinal = case["from_ordinal"].as_u64().unwrap();
+            if let Some(expected) = expected_from {
+                assert_eq!(
+                    from_ordinal, expected,
+                    "{name}: not where the last page stopped"
+                );
+            }
+            let page: ModelPage = vectors::round_trip(name, &case["page"]);
+            page.check(Some(from_ordinal))
+                .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
+            for source in replacements(&page) {
+                assert!(source.first_ordinal() >= from_ordinal, "{name}");
+                assert!(!seen.contains(&source), "{name}: {source:?} repeated");
+                seen.push(source);
+            }
+            expected_from = page.next_from_ordinal;
+        }
+        assert_eq!(seen.len(), 1, "the series holds one replacement");
+
+        // A read starting inside the replacement's range does not repeat it.
+        for case in vectors::cases(once, "intersecting") {
+            let name = case["name"].as_str().unwrap();
+            let from_ordinal = case["from_ordinal"].as_u64().unwrap();
+            let page: ModelPage = vectors::round_trip(name, &case["page"]);
+            page.check(Some(from_ordinal))
+                .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
+            let replacement = &seen[0];
+            assert!(
+                replacement.first_ordinal() < from_ordinal
+                    && from_ordinal <= replacement.last_ordinal(),
+                "{name}: the read does not intersect the replacement"
+            );
+            assert!(replacements(&page).is_empty(), "{name}");
+        }
+
+        // A page that repeats it there is malformed.
+        for case in vectors::cases(once, "repeated") {
+            let name = case["name"].as_str().unwrap();
+            let page: ModelPage = serde_json::from_value(case["page"].clone()).unwrap();
+            let problem = page.check(case["from_ordinal"].as_u64()).expect_err(name);
+            assert_eq!(model_problem_name(&problem), "starts_before_page", "{name}");
+        }
+    }
+
     #[test]
     fn head_vectors_decode_and_round_trip() {
         let file = vectors::load("head.json");
@@ -639,5 +997,39 @@ mod tests {
             ReadRequest::range(5).with_lineage_id("lin-1").mode(),
             Ok(ReadMode::Range { from_ordinal: 5 })
         );
+        assert_eq!(
+            ReadRequest::after("m7", "lin-1")
+                .with_view(ReadView::Model)
+                .mode(),
+            Err(fields::VIEW)
+        );
+
+        let model = ModelPage::new(
+            "lin-1",
+            vec![
+                ModelEntry::new(
+                    EntrySource::Replacement {
+                        compaction_id: "cmp-1".into(),
+                        version: 2,
+                        first_ordinal: 0,
+                        last_ordinal: 9,
+                    },
+                    serde_json::json!({"role": "user"}),
+                ),
+                ModelEntry::new(
+                    EntrySource::Message {
+                        ordinal: 10,
+                        mid: "m10".into(),
+                    },
+                    serde_json::json!({"role": "assistant"}),
+                ),
+            ],
+        )
+        .with_compaction("cmp-1", 2)
+        .with_next_from_ordinal(11);
+        assert_eq!(model.check(Some(0)), Ok(()));
+        let encoded = serde_json::to_value(&model).unwrap();
+        assert_eq!(serde_json::from_value::<ModelPage>(encoded).unwrap(), model);
+        assert_eq!(ModelPage::no_lineage().check(None), Ok(()));
     }
 }

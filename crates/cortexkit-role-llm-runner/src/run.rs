@@ -98,7 +98,9 @@ pub struct RunResult {
     /// run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<Value>,
-    /// The final assistant message of a run that ended `completed`.
+    /// The final assistant message of a run that ended `completed`: always
+    /// present on a completed run, with `text: ""` when the message has no
+    /// text parts. Absent on a run that has not ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_message: Option<FinalMessage>,
 }
@@ -132,6 +134,41 @@ impl RunResult {
     pub fn run_state(&self) -> RunState {
         RunState::parse(&self.state)
     }
+
+    /// Whether `final_message` agrees with the state: present on a
+    /// `completed` run (a final message with no text parts still answers,
+    /// with `text: ""`), and absent on a run that has not ended (`active`,
+    /// `paused`). So an absent `final_message` means only that the run has
+    /// not ended, and a consumer can tell "completed with no text" from "no
+    /// final message yet". Other terminal states and unknown states are not
+    /// constrained. A consumer treats an inconsistent answer as malformed;
+    /// it is not a refusal.
+    pub fn final_message_consistent(&self) -> bool {
+        match self.run_state() {
+            RunState::Completed => self.final_message.is_some(),
+            RunState::Active | RunState::Paused => self.final_message.is_none(),
+            _ => true,
+        }
+    }
+}
+
+/// What a final message's text parts are joined with: nothing. Text parts
+/// are concatenated exactly as emitted, so a JSON value a provider split
+/// across parts reads back whole.
+pub const TEXT_SEPARATOR: &str = "";
+
+/// A final message's `text`: its text parts, in order, joined with
+/// [`TEXT_SEPARATOR`]. No parts give `""`.
+pub fn join_text_parts<I, S>(parts: I) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    parts
+        .into_iter()
+        .map(|part| part.as_ref().to_owned())
+        .collect::<Vec<_>>()
+        .join(TEXT_SEPARATOR)
 }
 
 /// A completed run's final assistant message, with its final values.
@@ -139,8 +176,10 @@ impl RunResult {
 pub struct FinalMessage {
     pub ordinal: u64,
     pub mid: String,
-    /// The message's text parts joined in order. Reasoning parts are
-    /// excluded.
+    /// The message's text parts concatenated in order, with nothing
+    /// inserted between them ([`join_text_parts`]). Reasoning parts are
+    /// excluded. `""` when the message has no text parts (reasoning only,
+    /// or a provider's safety halt).
     pub text: String,
 }
 
@@ -173,12 +212,36 @@ mod tests {
                 case["terminal"].as_bool().unwrap(),
                 "{name}"
             );
-            if result.run_state() == RunState::Completed {
-                assert!(result.final_message.is_some(), "{name}");
-            }
+            assert!(result.final_message_consistent(), "{name}");
         }
         for case in vectors::cases(&file, "refusals") {
             assert_eq!(case["refusal"]["code"], errors::UNKNOWN_RUN);
+        }
+    }
+
+    #[test]
+    fn a_completed_run_always_answers_its_final_message() {
+        let file = vectors::load("run-result.json");
+        for case in vectors::cases(&file, "inconsistent") {
+            let name = case["name"].as_str().unwrap();
+            let result: RunResult = serde_json::from_value(case["answer"].clone())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!result.final_message_consistent(), "{name}");
+        }
+    }
+
+    #[test]
+    fn text_parts_are_joined_with_nothing_inserted() {
+        let file = vectors::load("run-result.json");
+        for case in vectors::cases(&file, "text_joins") {
+            let name = case["name"].as_str().unwrap();
+            let parts: Vec<&str> = case["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|part| part.as_str().unwrap())
+                .collect();
+            assert_eq!(join_text_parts(&parts), case["text"], "{name}");
         }
     }
 
