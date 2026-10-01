@@ -33,6 +33,18 @@
       }
     },
     {
+      "name": "admitted without a fetch plan",
+      "answer": {
+        "state": "ready",
+        "baseline": {
+          "items": [],
+          "tool_names": ["bash", "edit", "read"],
+          "accepted_generation": 0,
+          "applied_generation": 0
+        }
+      }
+    },
+    {
       "name": "after a fold applied generation 3, with generation 4 pending",
       "answer": {
         "state": "ready",

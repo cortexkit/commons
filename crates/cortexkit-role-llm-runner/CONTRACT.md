@@ -404,7 +404,10 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
     optional items recorded as absent (`absent_items`);
   - the composition digest and tool-name set of the latest fold, or of the
     start record before any fold (`composition_digest`, `tool_names`): the
-    frozen-prefix digest;
+    frozen-prefix digest. `composition_digest` is absent on a session
+    admitted without a fetch plan and present whenever the session was
+    admitted with one. A plan-less session also has `items: []` and no
+    `absent_items` (`Baseline::plan_consistent`);
   - the effective baseline: the latest applied generation, whether a fold or
     an append applied it, and its manifest digest (`effective`);
   - `accepted_generation`, the highest change generation the runner
