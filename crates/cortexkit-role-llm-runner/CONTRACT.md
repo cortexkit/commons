@@ -18,10 +18,18 @@ Every item is marked:
 - **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
   option down so the types and vectors have something to pin. Question `Qn`
   under "Open questions" lists the options.
+- **[open]** (no question number): not yet defined, because it depends on a
+  section this crate has not written yet. Nothing may build against it.
+- **[provisional]**: settled in substance, but its exact name or position
+  depends on an unwritten section and may still change. Do not build
+  against the spelling yet.
 
 A question the role's owner has settled keeps its number and is marked
 "settled" there; the items it governs are marked **[pinned]** here. In this
-revision no item is open.
+revision every numbered question is settled. Two items wait on the
+fetch-plan section (§10): the `compaction_item` provider field (§10.1,
+provisional) and the `session_change` request and reply types (§10.2,
+open).
 
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation; "Gaps in broca today" at the end compares the one
@@ -424,8 +432,11 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] A plan carrying a `compaction_item`, sent to a runner that does
   not declare `compaction`, is refused at admission `invalid_params {field:
   "plan.compaction_item"}` and writes nothing
-  (`SendRequest::check_compaction_item`). The `compaction_item` names the
-  session's compaction provider as `provider`, frozen with the plan.
+  (`SendRequest::check_compaction_item`).
+- [provisional] The `compaction_item` names the session's compaction provider
+  as `provider`, frozen with the plan. The field name and position are
+  provisional until the fetch-plan section (§10) defines `plan`; do not build
+  against `plan.compaction_item.provider` yet.
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
@@ -452,9 +463,11 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] A runner that does not declare the group gets no mid-session
   changes: its owner never sends one undeclared, and applies the change at
   the next session instead.
-- [pinned] The members are the ones listed. Their request and reply types,
-  and the refusals of a stale or reused generation, follow the fetch-plan
-  section of this crate (§10), which defines `plan`.
+- [pinned] The members are the ones listed.
+- [open] Their request and reply types, the detail shape of each refusal,
+  and the refusals of a stale or reused generation are not pinned. They
+  follow the fetch-plan section of this crate (§10), which defines `plan`.
+  Do not build against them yet.
 
 ## 11. Calls the runner makes
 
