@@ -153,8 +153,9 @@ impl RunResult {
 }
 
 /// What a final message's text parts are joined with: nothing. Text parts
-/// are concatenated exactly as emitted, so a JSON value a provider split
-/// across parts reads back whole.
+/// are concatenated exactly as emitted, so when a provider splits a JSON
+/// value across parts, the joined text is that JSON value, byte for byte;
+/// any separator would land inside one of its strings.
 pub const TEXT_SEPARATOR: &str = "";
 
 /// A final message's `text`: its text parts, in order, joined with

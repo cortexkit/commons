@@ -251,7 +251,8 @@ impl ReadPage {
 ///
 /// It names the compaction state it reflects (`compaction_id` and
 /// `version`, both absent before any compaction applied), so a reader knows
-/// which applied CompactionMessage it saw. It is what the next request would
+/// which applied CompactionMessage it saw: the compaction provider's answer
+/// that replaces ranges of raw history with replacement messages. It is what the next request would
 /// be built from, not the bytes a model provider was sent.
 ///
 /// Non-exhaustive so later optional members are additive: use
@@ -262,7 +263,8 @@ impl ReadPage {
 pub struct ModelPage {
     /// The entries, ordered by the first transcript ordinal each covers.
     pub messages: Vec<ModelEntry>,
-    /// As on a raw page: absent only for a session never written.
+    /// The session's lineage, as on a raw page ([`ReadPage::lineage_id`]):
+    /// absent only for a session never written, whose page is empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
     /// The transcript ordinal to read from next, when the page stopped
@@ -270,7 +272,9 @@ pub struct ModelPage {
     /// the next page never repeats a replacement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
-    /// As on a raw page.
+    /// The position of the last durable event covered by the same snapshot
+    /// as this page, as on a raw page ([`ReadPage::head`]): opaque to
+    /// consumers, absent on a session with no events yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<Map<String, Value>>,
     /// The compaction whose latest applied CompactionMessage this page
@@ -357,15 +361,16 @@ pub enum ModelPageProblem {
     },
     /// An entry does not start after the one before it.
     OutOfOrder { first_ordinal: u64 },
-    /// An entry covers an ordinal below the one the page was read from: a
-    /// replacement whose `first_ordinal` falls on an earlier page, repeated
-    /// on a later page that intersects its range.
+    /// An entry starts below the ordinal the page was read from. A
+    /// replacement belongs only on the page holding its `first_ordinal`; a
+    /// page read from an ordinal inside the replaced range must not repeat
+    /// it.
     StartsBeforePage {
         first_ordinal: u64,
         from_ordinal: u64,
     },
-    /// `next_from_ordinal` falls inside or before an entry on the page, so
-    /// the next page would intersect it.
+    /// `next_from_ordinal` is not past the last ordinal some entry on the page
+    /// covers, so a page read from it would overlap that entry.
     NextInsideEntry {
         next_from_ordinal: u64,
         last_ordinal: u64,
@@ -829,8 +834,9 @@ mod tests {
             let page: ModelPage = vectors::round_trip(name, &case["page"]);
             page.check(case["from_ordinal"].as_u64())
                 .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
-            // A page names a compaction state exactly when the vector says a
-            // compaction applied; before any, both members are absent.
+            // The case's `compacted` flag says whether a compaction had
+            // applied: if so the page carries both `compaction_id` and
+            // `version`, and if not it carries neither.
             let compacted = case["compacted"].as_bool().unwrap();
             assert_eq!(page.compaction_id.is_some(), compacted, "{name}");
             assert_eq!(page.version.is_some(), compacted, "{name}");
@@ -874,8 +880,9 @@ mod tests {
                 .collect()
         };
 
-        // Paging through the view from its first ordinal, each read starting
-        // where the last one stopped, meets every replacement exactly once.
+        // The series reads the model view from ordinal 0, each read starting
+        // at the previous page's `next_from_ordinal`; together its pages
+        // hold the view's one replacement exactly once.
         let mut seen = Vec::new();
         let mut expected_from = None;
         for case in vectors::cases(once, "series") {
@@ -899,7 +906,8 @@ mod tests {
         }
         assert_eq!(seen.len(), 1, "the series holds one replacement");
 
-        // A read starting inside the replacement's range does not repeat it.
+        // A read starting inside that replacement's ordinal range does not
+        // return the replacement again.
         for case in vectors::cases(once, "intersecting") {
             let name = case["name"].as_str().unwrap();
             let from_ordinal = case["from_ordinal"].as_u64().unwrap();
@@ -915,7 +923,8 @@ mod tests {
             assert!(replacements(&page).is_empty(), "{name}");
         }
 
-        // A page that repeats it there is malformed.
+        // A page read from inside the range that does return the
+        // replacement again is malformed.
         for case in vectors::cases(once, "repeated") {
             let name = case["name"].as_str().unwrap();
             let page: ModelPage = serde_json::from_value(case["page"].clone()).unwrap();

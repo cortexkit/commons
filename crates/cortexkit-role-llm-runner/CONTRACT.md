@@ -738,8 +738,8 @@ the decision; the items it governs are pinned above.
   `capabilities`, the shape `tool-provider/v1` uses (§2).
 - **Q3. The session-capability source.** Settled as drafted:
   `session_capabilities_from: "admission" | "baseline"` (§2).
-- **Q4. `compaction.ready`.** Settled, option (b), as the compaction
-  provider's role owner proposed: a `compaction` group, all or nothing,
+- **Q4. `compaction.ready`.** Settled, as the compaction provider's role
+  owner proposed: not a required op but a `compaction` group, all or nothing,
   owning everything in §11.1 plus the inbound `compaction.ready {session,
   request_id}`. A runner that only steers sessions it does not host declares
   none of it. `REQUIRED_OPS` drops to `role.describe` and
