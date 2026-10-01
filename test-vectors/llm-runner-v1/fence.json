@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "name": "fence: a delayed answer to an earlier request, with a higher version",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40
+      },
+      "answer": {
+        "answer": "compaction_message",
+        "request_id": "cr-9",
+        "compaction": {
+          "compaction_id": "old",
+          "version": 9,
+          "range": { "from": 0, "to": 30 },
+          "replacement": []
+        }
+      },
+      "disposition": "superseded_request"
+    },
+    {
+      "name": "late: an answer arriving exactly at the deadline is late",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40,
+        "newest_deadline_ms": 1727780402000
+      },
+      "arrived_at_ms": 1727780402000,
+      "answer": { "answer": "noop", "request_id": "cr-10" },
+      "disposition": "late"
+    },
+    {
+      "name": "in time: the same answer before the deadline applies",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40,
+        "newest_deadline_ms": 1727780402000
+      },
+      "arrived_at_ms": 1727780401999,
+      "answer": {
+        "answer": "compaction_message",
+        "request_id": "cr-10",
+        "compaction": {
+          "compaction_id": "c-late",
+          "version": 6,
+          "range": { "from": 0, "to": 30 },
+          "replacement": []
+        }
+      },
+      "disposition": "act"
+    }
+  ]
+}

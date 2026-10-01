@@ -237,6 +237,7 @@ pub(crate) mod vectors {
         "baseline.json",
         "compaction-ready.json",
         "errors.json",
+        "fence.json",
         "head.json",
         "read-pages.json",
         "read-requests.json",

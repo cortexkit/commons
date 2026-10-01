@@ -121,6 +121,45 @@ mod tests {
     use super::*;
     use crate::vectors;
 
+    // This crate defines neither provider-answer shapes nor their application
+    // classifier: the provider's role owns the shapes, and a runner implements
+    // the fence. Keep answers as JSON objects and round-trip the case metadata
+    // without claiming to test whether a running engine applies an answer.
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct FenceCase {
+        name: String,
+        state: FenceState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arrived_at_ms: Option<u64>,
+        answer: Map<String, Value>,
+        disposition: FenceDisposition,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct FenceState {
+        newest_request_id: String,
+        last_applied_version: u64,
+        newest_ordinal: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        newest_deadline_ms: Option<u64>,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    enum FenceDisposition {
+        SupersededRequest,
+        Late,
+        Act,
+    }
+
+    #[test]
+    fn compaction_answer_fence_vectors_round_trip() {
+        let file = vectors::load("fence.json");
+        for case in vectors::cases(&file, "cases") {
+            vectors::round_trip::<FenceCase>(case["name"].as_str().unwrap(), case);
+        }
+    }
+
     #[test]
     fn compaction_ready_vectors_decode() {
         let file = vectors::load("compaction-ready.json");

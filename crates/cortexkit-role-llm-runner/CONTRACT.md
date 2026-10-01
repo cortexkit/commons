@@ -517,8 +517,11 @@ owes.
   never skips them. `NOOP` advances it.
 - [pinned] A CompactionMessage applies only if its version is higher than
   the last applied and it answers the newest issued request (the request
-  fence). Every applied CompactionMessage, `WAIT` entry and exit, and call
-  timeout is durable before the request it affects is sent.
+  fence). An answer applies only if it names the newest issued request and
+  arrives before that call's deadline. An answer arriving at or after the
+  deadline is late: it is recorded and never applied. Every applied
+  CompactionMessage, `WAIT` entry and exit, and call timeout is durable before
+  the request it affects is sent.
 - [pinned] `REFUSE` ends the run `error` with the provider's code as
   `provider_code`, adds nothing to history, and leaves the session usable.
 - [pinned] `compaction.ready {session, request_id}` (`CompactionReady`):
@@ -530,7 +533,10 @@ owes.
 - [pinned] The ready is fenced like the answers: it acts only when
   `request_id` is the newest request the runner issued for the session. A
   ready for an older request, or before any was issued, is ignored, and is
-  not an error (`CompactionReady::check`).
+  not an error (`CompactionReady::check`). An answer applies only if it names
+  the newest issued request and arrives before that call's deadline. An
+  answer arriving at or after the deadline is late: it is recorded and never
+  applied.
 - [pinned] The runner accepts `compaction.ready` only from the session's
   frozen compaction provider: the route's caller stamp must equal the
   provider of the plan's `compaction_item`. Any other caller, and any caller
