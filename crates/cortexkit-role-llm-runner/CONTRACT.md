@@ -1,8 +1,8 @@
 # `llm-runner/v1` — role contract (draft)
 
 Stability: **alpha, draft**. Approved by the role's owner with the
-decisions recorded under "Open questions"; the remaining open items go to the
-design room, and nothing here ships until it signs off. This document is the role definition; the
+decisions recorded under "Open questions", every one of which is now
+settled; nothing here ships until the design room signs off. This document is the role definition; the
 Rust types in this crate are its wire shapes, `test-vectors/llm-runner-v1/` at
 the repository root holds its vectors, and a separate `-conformance` crate
 will hold its suite (§15).
@@ -20,7 +20,8 @@ Every item is marked:
   under "Open questions" lists the options.
 
 A question the role's owner has settled keeps its number and is marked
-"settled" there; the items it governs are marked **[pinned]** here.
+"settled" there; the items it governs are marked **[pinned]** here. In this
+revision no item is open.
 
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation; "Gaps in broca today" at the end compares the one
@@ -30,11 +31,13 @@ shipping runner with this document.
 
 - [pinned] A runner lists `llm-runner/v1` in its manifest's
   `capabilities.provides` (`PROVIDES`). A module may serve several majors.
-- [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, `session.baseline`,
-  and the compaction interface's one inbound op, `compaction.ready` (§11).
-  [open: Q4] whether `compaction.ready` belongs in the required set.
-- [pinned] The hook call sites (§11) are required too. They are calls the
-  runner makes, not ops it serves, so `role.describe` does not list them.
+- [pinned] Required ops (`REQUIRED_OPS`): `role.describe` and
+  `session.baseline`. `compaction.ready` is not required: it belongs to the
+  `compaction` group (§3, §11.1).
+- [pinned] The hook call sites and the tool-call rules (§11.2, §11.3) are
+  required too. They are calls the runner makes, not ops it serves, so
+  `role.describe` does not list them. The compaction interface (§11.1) is
+  not required: it is the `compaction` group.
 - [pinned] Everything else is a declared capability group (§3). A runner
   serves a group only if it declares it, and a consumer uses a group only if
   it is declared.
@@ -44,7 +47,8 @@ shipping runner with this document.
 - [pinned] Every role op is a request `{method, params}` on the runner's
   session-bound management route: `method` is the op's name and `params` its
   request. The session it acts on is the session the route is bound to; no
-  request names its session, except `compaction.ready`.
+  request names its session, except `compaction.ready`, which arrives on the
+  compaction provider's module-level route (§11.1).
 
 ## 2. `role.describe`
 
@@ -97,11 +101,25 @@ shipping runner with this document.
 | `steer` | `session.send` with `delivery: "steer"` | §9 |
 | `queue` | `session.send` with `delivery: "queue"` | §9 |
 | `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
+| `compaction` | `compaction.ready`, and the calls of §11.1 the runner makes | §11.1 |
+| `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue
   without being able to abort a model stream.
+- [pinned] `compaction` is all of §11.1 or none of it: Setup, the per-step
+  status with its cursor rules, the request fence, durable `WAIT` and its
+  timeout, `REFUSE`, and the inbound `compaction.ready`. A runner that hosts
+  no sessions of its own (one that only steers sessions another runner
+  hosts) declares none of it, never a stub.
+- [pinned] A compaction provider requires `compaction` of any runner it
+  serves. A session starter never pairs a plan's `compaction_item` with a
+  runner that lacks it, and the runner refuses such a plan at admission
+  (§10.1), so a session never runs with a compaction owner nothing calls.
+- [pinned] A session owner sends a mid-session change only to a runner that
+  declares `session_change`. A runner without it gets no mid-session
+  changes; its owner applies them at the next session instead.
 - [pinned] What consumers require is the consumer's business, checked before
   use. A session owner that reads a runner's sessions requires the five
   read-side groups (`transcript_reads`, `run_ops`, `dispatch_attribution`,
@@ -129,7 +147,8 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   lineage is refused `lineage_changed`, whatever its mode.
 - [pinned] `after_mid` without `lineage_id` is refused `invalid_params
   {field: "lineage_id"}`; `after_mid` with `from_ordinal` is refused naming
-  `from_ordinal`.
+  `from_ordinal`; `after_mid` with `view: "model"` is refused naming `view`
+  (§8).
 - [pinned] `max_bytes` asks for a byte cap on the page. Absent means the
   runner's default; a value above the runner's maximum is capped to it. Both
   are stated in `role.describe` (§2).
@@ -210,8 +229,18 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   reasoning parts excluded.
   [pinned] The answer is `{run_id, state, reason?, error?, final_message?:
   {ordinal, mid, text}}` (`RunResult`), and a run that has not ended answers
-  its current state with no final message. [open: Q9] the separator the text
-  parts are joined with.
+  its current state with no final message. [pinned] The separator is the
+  empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
+  are concatenated exactly as emitted, with nothing inserted, so a JSON
+  value a provider split across parts reads back whole.
+- [pinned] A completed run whose final message has no text parts (reasoning
+  only, or a provider's safety halt) answers `final_message` with `text:
+  ""`, never an absent `final_message`. An absent `final_message` then means
+  only that the run has not ended, so a consumer tells "completed with no
+  text" (which it reads through `session.read` for the reasoning) from "no
+  final message yet" (which it waits on). An answer that breaks this (a
+  `completed` run without `final_message`, or an `active` or `paused` one
+  with it) is malformed, not a refusal (`RunResult::final_message_consistent`).
 - [pinned] Each run gets exactly one terminal state, and a crash never gives
   it a second. `interrupted` (the runner stopped or crashed under the run) is
   distinct from `cancelled` (a caller stopped it).
@@ -246,9 +275,38 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] Raw is the default view. The model view is the canonical message
   list after hooks and compaction. The bytes a model provider was sent are not
   promised.
-- [open: Q8] It is `session.read` with `view: "model"` (`ReadView`); the
-  value is strict, so an unknown view is refused naming `view`; how
-  replacement messages are numbered.
+- [pinned] It is `session.read` with `view: "model"` (`ReadView`), answered
+  as `{messages, lineage_id?, next_from_ordinal?, head?, compaction_id?,
+  version?}` (`ModelPage`). The value is strict, so an unknown view is
+  refused naming `view`. `lineage_id`, `next_from_ordinal` and `head` mean
+  what they mean on a raw page (§4.2).
+- [pinned] Each entry is `{source, message}` (`ModelEntry`), `message` in the
+  runner's own schema. `source` (`EntrySource`) says what the entry is:
+  - `{kind: "message", ordinal, mid}`: a transcript message passed through,
+    with its hooks applied, keeping its transcript ordinal;
+  - `{kind: "replacement", compaction_id, version, first_ordinal,
+    last_ordinal}`: a compaction replacement, naming the raw range
+    `first_ordinal..=last_ordinal` it stands for and the CompactionMessage
+    it came from.
+- [pinned] Entries are ordered by the first transcript ordinal each covers.
+- [pinned] Tail and range reads apply, keyed on transcript ordinals. A
+  replacement is returned whole, exactly once, on the page holding its
+  `first_ordinal`: it is never split, and a later page that intersects its
+  range does not repeat it. `next_from_ordinal` is past every ordinal the
+  page covers.
+- [pinned] `after_mid` with `view: "model"` is refused `invalid_params
+  {field: "view"}` in v1. `after_mid` is defined against the raw lineage,
+  and a message inside a replaced range has no clean "after" in the model
+  view; incremental readers use ordinal cursors.
+- [pinned] The page names the compaction state it reflects: the
+  `compaction_id` and `version` of the latest applied CompactionMessage,
+  both absent before any compaction applied. A page carrying a replacement
+  names it. The view is what the next request would be built from, not the
+  bytes sent.
+- [pinned] A page that breaks these rules is malformed, not a refusal
+  (`ModelPage::check`). The `source` kind is strict: an entry of a kind this
+  role does not define does not decode, because a consumer cannot place it
+  by ordinal.
 
 ## 9. `steer`, `queue` and `interrupt`: `session.send` from the owner
 
@@ -343,7 +401,9 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   first step and frozen for the session. `mid_session_appends` is
   re-evaluated only on a model switch, which rebuilds the prefix anyway.
 - [pinned] A policy naming a rung the session does not support for that
-  surface is refused when it is set. [open: Q14] the ops that set a policy.
+  surface is refused `rung_unsupported` when it is set. [pinned] The ops
+  that set a policy are `session.refresh` and `session.refresh_policy`, in
+  the `session_change` group (§10.2).
 - [pinned] A baseline item is identified by `provider`, and by `item` for a
   provider with more than one plan item. The `item` values follow the
   fetch-plan section of this crate, still to be written.
@@ -361,6 +421,11 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   refused by name. The collision is `tool_name_collision` and the plan drift
   `plan_changed`.
 - [pinned] Any refusal during admission writes nothing.
+- [pinned] A plan carrying a `compaction_item`, sent to a runner that does
+  not declare `compaction`, is refused at admission `invalid_params {field:
+  "plan.compaction_item"}` and writes nothing
+  (`SendRequest::check_compaction_item`). The `compaction_item` names the
+  session's compaction provider as `provider`, frozen with the plan.
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
@@ -368,12 +433,42 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] The plan travels as `plan` on the session's first send, carried
   verbatim (`SendRequest::plan`); its shape is the fetch-plan section's.
 
+### 10.2 `session_change`: mid-session changes
+
+- [pinned] The `session_change` group holds the owner's mid-session change
+  ops: `session.refresh {plan, policy, generation}` (fetch a new plan's
+  items and hold them as the pending change, under its generation, with its
+  policy), `session.refresh_policy {generation, policy, send_id}` (a new
+  policy for the pending change) and `session.flush_prefix` (drop the
+  frozen prefix and apply any pending change on the next step, whatever its
+  policy). They are role ops, so one owner drives every runner through the
+  same interface.
+- [pinned] Their refusals, none retryable and each writing nothing:
+  `rung_unsupported` (a policy naming a rung the session does not support
+  for that surface), `pending_superseded` (a `session.refresh_policy` for a
+  generation a later refresh has superseded) and `already_applied` (a
+  `session.refresh_policy` for a generation a prefix rebuild or an append
+  already applied) (`errors::SESSION_CHANGE_CODES`).
+- [pinned] A runner that does not declare the group gets no mid-session
+  changes: its owner never sends one undeclared, and applies the change at
+  the next session instead.
+- [pinned] The members are the ones listed. Their request and reply types,
+  and the refusals of a stale or reused generation, follow the fetch-plan
+  section of this crate (§10), which defines `plan`.
+
 ## 11. Calls the runner makes
 
-These are required of every runner (§1). Their wire shapes belong to the
-provider roles named; this role states what the runner owes.
+The hook call sites and the tool-call rules (§11.2, §11.3) are required of
+every runner (§1). The compaction interface (§11.1) is owed by a runner
+that declares the `compaction` group (§3), and only by one. Their wire
+shapes belong to the provider roles named; this role states what the runner
+owes.
 
 ### 11.1 The compaction interface
+
+- [pinned] A runner that declares `compaction` owes everything in this
+  section; a runner that does not owes none of it, and never calls a
+  compaction provider.
 
 - [pinned] Setup is called once when a session starts. Its initial
   CompactionMessage is recorded before the first model call, and once
@@ -393,10 +488,21 @@ provider roles named; this role states what the runner owes.
   timeout is durable before the request it affects is sent.
 - [pinned] `REFUSE` ends the run `error` with the provider's code as
   `provider_code`, adds nothing to history, and leaves the session usable.
-- [pinned] `compaction.ready {session}` (`CompactionReady`): after a `WAIT`,
-  the provider signals that it is done, and the runner calls again with a
-  fresh status instead of waiting out the bound. It is a hint; the bound is
-  the backstop. [open: Q4] how the session is named on a module-level route.
+- [pinned] `compaction.ready {session, request_id}` (`CompactionReady`):
+  after a `WAIT`, the provider signals that it is done, and the runner calls
+  again with a fresh status instead of waiting out the bound. It is a hint;
+  the bound is the backstop. `session` is echoed verbatim from the status
+  that carried the `WAIT`, and is opaque to the provider; `request_id` is
+  that status's request id.
+- [pinned] The ready is fenced like the answers: it acts only when
+  `request_id` is the newest request the runner issued for the session. A
+  ready for an older request, or before any was issued, is ignored, and is
+  not an error (`CompactionReady::check`).
+- [pinned] The runner accepts `compaction.ready` only from the session's
+  frozen compaction provider: the route's caller stamp must equal the
+  provider of the plan's `compaction_item`. Any other caller, and any caller
+  for a session without a `compaction_item`, is refused
+  `not_session_compaction_provider`, and the session is not woken.
 - [pinned] The status and answers are the `compaction-provider/v1` role's
   shapes, not this crate's.
 
@@ -442,7 +548,7 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes | `field` | no |
+| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `unknown_run` | `run.result` names no run of the session | — | no |
@@ -459,6 +565,10 @@ treats it as a terminal refusal of that one request.
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
+| `not_session_compaction_provider` | a `compaction.ready` from anyone but the session's frozen compaction provider | — | no |
+| `rung_unsupported` | a `session.refresh` or `session.refresh_policy` whose policy names a rung the session does not support for that surface | — | no |
+| `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | — | no |
+| `already_applied` | a `session.refresh_policy` for a generation already applied | — | no |
 
 - [pinned] Only the codes marked retryable are retried with the same request
   (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
@@ -497,8 +607,9 @@ treats it as a terminal refusal of that one request.
 - [pinned] Every field is declared required or optional.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
   strings): `role.describe`, every reply and event a consumer decodes
-  (`ReadPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`, `SendReply`,
-  `BaselineReply`), and `compaction.ready`.
+  (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
+  `SendReply`, `BaselineReply`), and `compaction.ready`. One exception: a
+  model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `run.result`,
   `session.subscribe` and `session.baseline` requests. A runner refuses an
@@ -584,12 +695,14 @@ step-transform providers. It will check:
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
-| `compaction_ready_reasks_after_wait`, `compaction_cursor_never_skips` | a compaction provider in the plan |
+| `compaction_ready_reasks_after_wait`, `compaction_ready_stale_request_ignored`, `compaction_ready_other_caller_refused`, `compaction_cursor_never_skips` | `compaction`, and a compaction provider in the plan |
+| `compaction_item_without_group_refused_writes_nothing` | a subject that does not declare `compaction` |
 | `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals`, `oversize_message_alone_on_its_page`, `never_written_session_empty_page`, `never_written_session_empty_head`, `describe_states_max_bytes` | `transcript_reads` |
-| `run_result_completed_final_text`, `run_result_interrupted_not_cancelled`, `run_attribution_per_message` | `run_ops` |
+| `run_result_completed_final_text`, `run_result_text_parts_joined_unchanged`, `run_result_completed_no_text_is_empty`, `run_result_interrupted_not_cancelled`, `run_attribution_per_message` | `run_ops` |
 | `dispatched_to_per_call`, `indeterminate_until_closed`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution` |
 | `subscribe_from_head_no_gap_no_duplicate` | `streaming` |
-| `model_view_differs_only_by_compaction` | `model_view` |
+| `model_view_differs_only_by_compaction`, `model_view_entry_sources`, `model_view_replacement_once_on_its_first_page`, `model_view_after_mid_refused`, `model_view_names_compaction_state` | `model_view` |
+| `refresh_unsupported_rung_refused`, `refresh_policy_superseded_refused`, `refresh_policy_already_applied_refused`, `flush_prefix_applies_pending` | `session_change` |
 | `steer_lands_at_step_boundary`, `steer_never_between_call_and_result` | `steer` |
 | `queue_starts_next_turn` | `queue` |
 | `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
@@ -598,8 +711,9 @@ step-transform providers. It will check:
 | `crash_at_<point>` for each point in §14, asserting its properties | the points the harness declares |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run
-state, an unknown event kind, a describe answer with a partial group) are
-tested against the vectors in this crate.
+state, an unknown event kind, a describe answer with a partial group, a
+model page that repeats a replacement, a completed run without its final
+message) are tested against the vectors in this crate.
 
 Verdict, as for `tool-provider/v1`: a case whose requirements the subject
 does not declare is skipped, never passed; a run with skips is "conforming
@@ -624,13 +738,18 @@ the decision; the items it governs are pinned above.
   `capabilities`, the shape `tool-provider/v1` uses (§2).
 - **Q3. The session-capability source.** Settled as drafted:
   `session_capabilities_from: "admission" | "baseline"` (§2).
-- **Q4. `compaction.ready`.** Open; the compaction provider's role owner
-  decides. r7.3 makes the compaction interface required of every runner, but
-  a runner that only steers sessions it does not host (Thalamus) may have
-  nothing to compact. (a) **draft:** a required op; (b) a `compaction` group,
-  required by any consumer that is a compaction provider. Also how it names
-  its session on a module-level route: **draft** `{session}` as the status
-  named it, which needs the status to name the session.
+- **Q4. `compaction.ready`.** Settled, option (b), as the compaction
+  provider's role owner proposed: a `compaction` group, all or nothing,
+  owning everything in §11.1 plus the inbound `compaction.ready {session,
+  request_id}`. A runner that only steers sessions it does not host declares
+  none of it. `REQUIRED_OPS` drops to `role.describe` and
+  `session.baseline`. `session` is echoed verbatim from the status that
+  carried the `WAIT` and is opaque to the provider; `request_id` is fenced to
+  the newest issued request, and a ready for an older one is ignored. A
+  ready from anyone but the session's frozen compaction provider is refused
+  `not_session_compaction_provider`. A plan with a `compaction_item` on a
+  runner without the group is refused at admission `invalid_params {field:
+  "plan.compaction_item"}` and writes nothing (§3, §10.1, §11.1).
 - **Q5. Head metadata.** Settled as drafted: its own op `session.head`, with
   `updated_at` in milliseconds since the epoch and `last_run_state` as
   `{run_id, state, reason?}` (§4.3).
@@ -640,14 +759,22 @@ the decision; the items it governs are pinned above.
   `next_from_ordinal` set, and is never truncated or refused (§2, §4).
 - **Q7. The message body.** Settled: the runner's own schema, opaque to the
   role. A neutral schema is not in v1.
-- **Q8. The model view.** Open. How compaction's replacement messages are
-  numbered and identified (they have no transcript ordinal), and whether
-  range and `after_mid` reads apply to it.
+- **Q8. The model view.** Settled, in the compaction provider's role
+  owner's shape: each entry carries a `source`, `{kind: "message", ordinal,
+  mid}` or `{kind: "replacement", compaction_id, version, first_ordinal,
+  last_ordinal}`, and entries are ordered by first covered ordinal. Tail and
+  range reads apply, keyed on transcript ordinals; a replacement is returned
+  whole, once, on the page holding its `first_ordinal`. `after_mid` with
+  `view: "model"` is refused `invalid_params {field: "view"}` in v1. The page
+  names the compaction state it reflects, `compaction_id` and `version`,
+  both absent before any compaction (§8).
 - **Q9. `run.result`.** Settled: a run that has not ended answers its current
   state with no final message; `max_steps` is a terminal state of the role;
-  `transform_unavailable` stays a runner state, decoded open (§6). Still
-  open: the separator the text parts are joined with, which the session
-  owner's role owner chooses.
+  `transform_unavailable` stays a runner state, decoded open (§6). The
+  separator, chosen by the session owner's role owner, is the empty string:
+  text parts are concatenated exactly as emitted. A completed run whose
+  final message has no text parts answers `final_message {text: ""}`, so an
+  absent `final_message` means only that the run has not ended (§6).
 - **Q10. Episodes.** Settled as drafted: an opaque string (§6).
 - **Q11. Dispatch attribution placement.** Settled as drafted: a per-message
   `tool_calls` list beside the message body, and a group that extends
@@ -658,11 +785,13 @@ the decision; the items it governs are pinned above.
   `queue`, a declared group like the others, and a runner that admits
   sessions declares it (§3, §9).
 - **Q13. The mark.** Settled as drafted: `mark`, opaque JSON (§9).
-- **Q14. Change ops.** Open. `session.refresh {plan, policy, generation}`,
-  `session.refresh_policy {generation, policy, send_id}` and
-  `session.flush_prefix`, with their refusals (`rung_unsupported`,
-  `pending_superseded`, `already_applied`): role ops under a group (which
-  one?), or runner ops outside the role. r7.3 §10 does not list them.
+- **Q14. Change ops.** Settled, as the session owner's role owner chose:
+  role ops in their own group, `session_change`, holding `session.refresh
+  {plan, policy, generation}`, `session.refresh_policy {generation, policy,
+  send_id}` and `session.flush_prefix`, with their refusals
+  (`rung_unsupported`, `pending_superseded`, `already_applied`). A runner
+  without the group gets no mid-session changes, and owners never send them
+  undeclared (§3, §10.2).
 - **Q15. The admission reply and baseline.** Settled as drafted: one nested
   `baseline` object, the same struct `session.baseline` answers, with
   `not_yet` as the answer before the first request (§10).
@@ -702,15 +831,22 @@ broca beyond what that plan already schedules.
    (`crates/broca-module-serve/src/serve.rs:1514-1836`); any other op gets
    `unknown_method` (`crates/broca-module-serve/src/serve.rs:1837-1848`).
    Until `role.describe` ships, the manifest claims
-   `session-send-delivery/v1` instead. Planned in B9
-   (`docs/extensibility-build-plan.md:358-367`).
+   `session-send-delivery/v1` instead
+   (`crates/broca-module-serve/src/manifest.rs:37`), so broca has nowhere to
+   declare a group: no `compaction` and no `session_change` declaration
+   exists. Planned in B9 (`docs/extensibility-build-plan.md:358-367`).
 2. **No `session.baseline`, and the admission reply carries no baseline.**
    `SendResult` is `active {run_id} | finished {run_id, reason} | pending
    {submission_id}` (`crates/broca-wire/src/lib.rs:510-523`). Planned in B8
    (`docs/extensibility-build-plan.md:347-356`).
-3. **No `compaction.ready` and no `model_view`.** Planned in B14 as inbound
-   `compaction.ready(session)` and `session.read {view: model}`
-   (`docs/extensibility-build-plan.md:434-443`).
+3. **No `compaction` group and no `model_view`.** Broca serves no
+   `compaction.ready`, has no `not_session_compaction_provider` caller check,
+   and does not check a plan's `compaction_item` at admission. B14 plans
+   inbound `compaction.ready(session)` and `session.read {view: model}`
+   (`docs/extensibility-build-plan.md:441`): the planned ready names only the
+   session, where the role's also carries `request_id`. Page messages carry
+   no `source` (`crates/broca-wire/src/lib.rs:525-532`), and a page names no
+   compaction state (`crates/broca-wire/src/lib.rs:568-585`).
 4. **`session.read` takes only `from_ordinal`, `limit` and `include_tools`**
    (`crates/broca-wire/src/lib.rs:464-476`): no `after_mid`, `lineage_id`,
    `max_bytes`, `include_originals` or `view`, so no `lineage_changed` or
@@ -745,7 +881,12 @@ broca beyond what that plan already schedules.
     but needs a page with bodies to reach.
 11. **No `run.result`.** `run.status` answers a run's state without its final
     message, and its states include `transform_unavailable` and `unknown`
-    beside the role's (`crates/broca-wire/src/lib.rs:669-743`).
+    beside the role's (`crates/broca-wire/src/lib.rs:669-743`). The
+    `broca-session` tool's final reply already joins text parts with nothing
+    inserted (`crates/broca-module-serve/src/bin/broca-session.rs:1109-1122`),
+    but emits nothing for an empty text
+    (`crates/broca-module-serve/src/bin/broca-session.rs:1592-1601`), where
+    `run.result` answers `text: ""`.
 12. **`session.subscribe` is lenient on unknown fields**
     (`crates/broca-wire/src/lib.rs:420-424`): a misspelled `from` attaches
     live. The role makes the request strict. The `head` and cursor shape
@@ -766,3 +907,10 @@ broca beyond what that plan already schedules.
     broca. B12 still names new ops `session.steer` and `session.queue`
     (`docs/extensibility-build-plan.md:417`); the role uses `session.send`
     with `delivery` instead.
+16. **No `session_change` ops.** `session.refresh` and
+    `session.refresh_policy`, with `pending_superseded` and
+    `already_applied`, are planned in B15
+    (`docs/extensibility-build-plan.md:451,454`); `session.flush_prefix` and
+    `rung_unsupported` in B17 (`docs/extensibility-build-plan.md:475,478`).
+    None is served today: any of them gets `unknown_method`
+    (`crates/broca-module-serve/src/serve.rs:1837-1848`).
