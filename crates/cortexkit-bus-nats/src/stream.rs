@@ -4,8 +4,10 @@ use async_nats::jetstream::consumer::{pull, Consumer};
 use async_nats::jetstream::message::AckKind;
 use async_trait::async_trait;
 use bytes::Bytes;
+use cortexkit_bus_naming::AccountNames;
 use cortexkit_bus_trait::{
-    BusError, BusResult, ContentDigest, Headers, PublishAck, Stream, StreamCursor, StreamDelivery,
+    BusError, BusResult, ContentDigest, DurableOwner, Headers, PublishAck, Stream, StreamCursor,
+    StreamDelivery,
 };
 use futures_util::StreamExt;
 
@@ -67,21 +69,15 @@ impl Stream for NatsStream {
         })
     }
 
-    async fn consumer(&self, durable: &str, identity: &str) -> BusResult<Self::Cursor> {
-        let expected = format!("c_{identity}");
-        if durable != expected {
-            return Err(BusError::denied(
-                durable,
-                format!("durable for identity {identity} must be named {expected}"),
-            ));
-        }
+    async fn consumer(&self, owner: DurableOwner<'_>) -> BusResult<Self::Cursor> {
+        let durable = durable_name(owner)?;
         let mut events = self.connection.event_receiver();
         let consumer = self
             .connection
             .jetstream()
-            .get_consumer_from_stream::<pull::Config, _, _>(durable, &self.stream)
+            .get_consumer_from_stream::<pull::Config, _, _>(&durable, &self.stream)
             .await
-            .map_err(|error| map_operation_error(durable, error, &mut events))?;
+            .map_err(|error| map_operation_error(&durable, error, &mut events))?;
         Ok(NatsStreamCursor {
             connection: self.connection.clone(),
             consumer,
@@ -89,6 +85,20 @@ impl Stream for NatsStream {
             in_flight: None,
         })
     }
+}
+
+/// The owner's durable name, `c_{agent_id}` or `m_{module_id}`, from
+/// `AccountNames::consumer_name` and `AccountNames::module_consumer_name`.
+/// Both refuse an id that is not one plain subject token, since a dot or a
+/// wildcard in it would address some other consumer.
+fn durable_name(owner: DurableOwner<'_>) -> BusResult<String> {
+    let (id, name) = match owner {
+        DurableOwner::Agent(agent_id) => (agent_id, AccountNames::consumer_name(agent_id)),
+        DurableOwner::Module(module_id) => {
+            (module_id, AccountNames::module_consumer_name(module_id))
+        }
+    };
+    name.map_err(|error| BusError::denied(id, error.to_string()))
 }
 
 #[async_trait]

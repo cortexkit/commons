@@ -47,6 +47,20 @@ pub trait StreamCursor: Send {
     async fn in_progress(&mut self) -> BusResult<()>;
 }
 
+/// Whose durable a cursor binds: an agent or a module, with its id. The
+/// backend derives the durable name from the kind and the id (`c_` or `m_`
+/// followed by the id), so a cursor can bind only an agent's or a module's
+/// durable and never an arbitrary consumer name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurableOwner<'a> {
+    /// An agent's durable on an agent stream (WAKE, PEER, EFFECT), named
+    /// `c_{agent_id}`.
+    Agent(&'a str),
+    /// A module's durable on a non-agent stream (EVENT, or prefrontal-core's
+    /// one durable on ROOM), named `m_{module_id}`.
+    Module(&'a str),
+}
+
 #[async_trait]
 pub trait Stream: Send + Sync {
     type Cursor: StreamCursor;
@@ -59,6 +73,7 @@ pub trait Stream: Send + Sync {
         headers: Headers,
     ) -> BusResult<PublishAck>;
 
-    /// Attaches to a durable created separately; this client cannot create workload consumers.
-    async fn consumer(&self, durable: &str, identity: &str) -> BusResult<Self::Cursor>;
+    /// Attaches to the owner's durable, created separately; this client cannot
+    /// create workload consumers.
+    async fn consumer(&self, owner: DurableOwner<'_>) -> BusResult<Self::Cursor>;
 }

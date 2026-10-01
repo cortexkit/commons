@@ -2,11 +2,13 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use cortexkit_bus_trait::{
-    BusError, BusResult, ContentDigest, Headers, Message, PublishAck, Stream, StreamCursor,
-    StreamDelivery,
+    BusError, BusResult, ContentDigest, DurableOwner, Headers, Message, PublishAck, Stream,
+    StreamCursor, StreamDelivery,
 };
 
-use crate::backend::{BackendEvent, DurableState, InMemoryBus, Lease, QueueEntry, StoredMessage};
+use crate::backend::{
+    durable_name, BackendEvent, DurableState, InMemoryBus, Lease, QueueEntry, StoredMessage,
+};
 
 /// A cursor on one durable. Several cursors may share a durable, as several
 /// pullers may share a JetStream durable: an unsettled delivery is withheld
@@ -14,7 +16,8 @@ use crate::backend::{BackendEvent, DurableState, InMemoryBus, Lease, QueueEntry,
 /// pulls next.
 pub struct InMemoryStreamCursor {
     bus: InMemoryBus,
-    key: (String, String),
+    /// The durable's name.
+    key: String,
     id: u64,
     in_flight_index: Option<usize>,
 }
@@ -95,13 +98,11 @@ impl Stream for InMemoryBus {
         Ok(PublishAck { stream_seq })
     }
 
-    async fn consumer(&self, durable: &str, identity: &str) -> BusResult<Self::Cursor> {
-        let key = (durable.to_owned(), identity.to_owned());
+    async fn consumer(&self, owner: DurableOwner<'_>) -> BusResult<Self::Cursor> {
+        let key = durable_name(owner)?;
         let mut state = self.inner.lock().expect("in-memory bus poisoned");
         let Some(durable_state) = state.durable_cursors.get_mut(&key) else {
-            return Err(BusError::absent(format!(
-                "durable consumer {durable} for identity {identity}"
-            )));
+            return Err(BusError::absent(format!("durable consumer {key}")));
         };
         durable_state.next_cursor_id += 1;
         let id = durable_state.next_cursor_id;
@@ -250,8 +251,8 @@ impl Drop for InMemoryStreamCursor {
 }
 
 fn durable_mut<'a>(
-    durables: &'a mut std::collections::HashMap<(String, String), DurableState>,
-    key: &(String, String),
+    durables: &'a mut std::collections::HashMap<String, DurableState>,
+    key: &str,
 ) -> &'a mut DurableState {
     durables
         .get_mut(key)
@@ -271,4 +272,45 @@ fn advance(durable: &mut DurableState) {
     durable.available_at = None;
     durable.delivery_count = 0;
     durable.lease = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::InMemoryConfig;
+
+    #[tokio::test]
+    async fn a_cursor_binds_the_durable_of_the_kind_its_caller_names() {
+        let bus = InMemoryBus::new(
+            InMemoryConfig::default().with_durable(DurableOwner::Module("prefrontal-core")),
+        );
+        bus.publish(
+            "ck.box.room.room_a.post",
+            "room:room_a:1",
+            ContentDigest::of_bytes(b"post"),
+            Headers::new(),
+        )
+        .await
+        .expect("publish");
+
+        let mut cursor = bus
+            .consumer(DurableOwner::Module("prefrontal-core"))
+            .await
+            .expect("the module durable binds");
+        let delivery = cursor.next().await.expect("next").expect("a delivery");
+        assert_eq!(delivery.message.id, "room:room_a:1");
+        cursor.ack().await.expect("ack");
+
+        // The same id as an agent names `c_prefrontal-core`, which was never
+        // created: the kind, not the string, decides the durable.
+        assert!(matches!(
+            bus.consumer(DurableOwner::Agent("prefrontal-core")).await,
+            Err(BusError::Absent { .. })
+        ));
+        // An id that is not a single subject token is refused before lookup.
+        assert!(matches!(
+            bus.consumer(DurableOwner::Module("prefrontal.core")).await,
+            Err(BusError::Denied { .. })
+        ));
+    }
 }

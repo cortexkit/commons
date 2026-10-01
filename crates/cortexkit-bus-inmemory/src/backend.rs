@@ -2,8 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use cortexkit_bus_naming::AccountNames;
 use cortexkit_bus_trait::{
-    AsyncPermissionViolation, DeliveryToken, Message, RegisterUpdate, RegisterValue, Revision,
+    AsyncPermissionViolation, BusError, BusResult, DeliveryToken, DurableOwner, Message,
+    RegisterUpdate, RegisterValue, Revision,
 };
 use tokio::sync::mpsc;
 
@@ -32,7 +34,8 @@ pub const DEFAULT_STREAM_ACK_WAIT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct InMemoryConfig {
-    pub(crate) durables: BTreeSet<(String, String)>,
+    /// Durable names, `c_{agent_id}` or `m_{module_id}`.
+    pub(crate) durables: BTreeSet<String>,
     pub(crate) denied_subjects: BTreeSet<String>,
     pub(crate) work_queue: Option<WorkQueueConfig>,
     pub(crate) stream_ack_wait: Duration,
@@ -57,8 +60,15 @@ impl InMemoryConfig {
         self
     }
 
-    pub fn with_durable(mut self, durable: impl Into<String>, identity: impl Into<String>) -> Self {
-        self.durables.insert((durable.into(), identity.into()));
+    /// Creates the owner's durable, as ck-bus would before any cursor binds.
+    ///
+    /// # Panics
+    ///
+    /// When the owner's id is not a valid agent or module id token: the
+    /// fixture would otherwise hold a durable no cursor can bind.
+    pub fn with_durable(mut self, owner: DurableOwner<'_>) -> Self {
+        let name = durable_name(owner).expect("fixture durable owner must be a valid id token");
+        self.durables.insert(name);
         self
     }
 
@@ -71,6 +81,20 @@ impl InMemoryConfig {
         self.work_queue = Some(config);
         self
     }
+}
+
+/// The owner's durable name, `c_{agent_id}` or `m_{module_id}`, from
+/// `AccountNames::consumer_name` and `AccountNames::module_consumer_name`.
+/// Both refuse an id that is not one plain subject token, since a dot or a
+/// wildcard in it would address some other consumer.
+pub(crate) fn durable_name(owner: DurableOwner<'_>) -> BusResult<String> {
+    let (id, name) = match owner {
+        DurableOwner::Agent(agent_id) => (agent_id, AccountNames::consumer_name(agent_id)),
+        DurableOwner::Module(module_id) => {
+            (module_id, AccountNames::module_consumer_name(module_id))
+        }
+    };
+    name.map_err(|error| BusError::denied(id, error.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,7 +184,7 @@ pub(crate) struct State {
     pub config: InMemoryConfig,
     pub next_stream_seq: u64,
     pub stream_messages: Vec<StoredMessage>,
-    pub durable_cursors: HashMap<(String, String), DurableState>,
+    pub durable_cursors: HashMap<String, DurableState>,
     pub register_revision: u64,
     pub register_values: BTreeMap<String, RegisterValue>,
     pub watchers: Vec<Watcher>,

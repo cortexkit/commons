@@ -28,7 +28,7 @@ pub use register::{
     Register, RegisterEntry, RegisterUpdate, RegisterValue, RegisterWatch, Revision, Tombstone,
     WatchEvent,
 };
-pub use stream::{PublishAck, Stream, StreamCursor, StreamDelivery};
+pub use stream::{DurableOwner, PublishAck, Stream, StreamCursor, StreamDelivery};
 pub use work_queue::{
     effect_dead_subject, terminally_dispose, ClaimOutcome, DeadLetterRecord, DeliveryToken,
     MaxDeliveriesExceeded, WorkItem, WorkQueue, DEAD_LETTER_REASON_MAX_DELIVERIES,

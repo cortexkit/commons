@@ -8,9 +8,12 @@ use async_nats::jetstream::consumer::{pull, AckPolicy};
 use async_nats::jetstream::{kv, stream};
 use async_nats::ConnectOptions;
 use bytes::Bytes;
+use cortexkit_bus_naming::{
+    delivery_authority_permissions, participant_permissions, AccountNames, AllowEntry, Operation,
+};
 use cortexkit_bus_trait::{
-    terminally_dispose, BusError, ClaimOutcome, ContentDigest, DeadLetterRecord, Headers, Register,
-    RegisterUpdate, RegisterWatch, Stream, StreamCursor, WatchEvent, WorkQueue,
+    terminally_dispose, BusError, ClaimOutcome, ContentDigest, DeadLetterRecord, DurableOwner,
+    Headers, Register, RegisterUpdate, RegisterWatch, Stream, StreamCursor, WatchEvent, WorkQueue,
 };
 use tempfile::TempDir;
 use tokio::net::TcpStream;
@@ -20,6 +23,9 @@ use crate::{ConnectConfig, NatsConnection};
 
 const ADMIN_PUBLIC: &str = "UADMIN";
 const PARTICIPANT_PUBLIC: &str = "UPARTICIPANT";
+
+/// Writes a server configuration file from the port and the store directory.
+type RenderConfig<'a> = dyn Fn(u16, &TempDir) -> String + 'a;
 
 struct TestServer {
     child: Child,
@@ -40,10 +46,16 @@ impl TestServer {
     }
 
     async fn with_participant_permissions() -> Option<Self> {
-        Self::start(Some(permission_config)).await
+        Self::start(Some(&permission_config)).await
     }
 
-    async fn start(config: Option<fn(u16, &TempDir) -> String>) -> Option<Self> {
+    /// A server whose configuration file `render` writes from the port and
+    /// the store directory; it may capture data, such as per-user grants.
+    async fn with_config(render: &RenderConfig<'_>) -> Option<Self> {
+        Self::start(Some(render)).await
+    }
+
+    async fn start(config: Option<&RenderConfig<'_>>) -> Option<Self> {
         let binary = env::var_os("CK_NATS_SERVER_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("nats-server"));
@@ -257,7 +269,7 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
     let original = connect(&server.url, "UORIGINAL").await;
     let mut cursor = original
         .stream("CK_BOX_PEER")
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .expect("bind original cursor");
     let first = cursor
@@ -282,7 +294,7 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
     let restarted = connect(&server.url, "UORIGINAL").await;
     let mut cursor = restarted
         .stream("CK_BOX_PEER")
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .expect("bind after restart");
     let second = cursor
@@ -307,7 +319,7 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
     let rekeyed = connect(&server.url, "UREKEYED").await;
     let mut cursor = rekeyed
         .stream("CK_BOX_PEER")
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .expect("bind after re-key");
     let third = cursor
@@ -432,7 +444,7 @@ async fn workload_binding_never_creates_and_server_denials_name_subjects() {
     for (stream, _, _) in workloads {
         participant
             .stream(stream)
-            .consumer("c_agent", "agent")
+            .consumer(DurableOwner::Agent("agent"))
             .await
             .expect("INFO-only bind succeeds");
 
@@ -556,7 +568,7 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
 
     let mut dead = admin
         .stream("CK_BOX_EFFECT_DEAD")
-        .consumer("c_ckbus_dead", "ckbus_dead")
+        .consumer(DurableOwner::Agent("ckbus_dead"))
         .await
         .expect("bind dead-letter durable");
     let dead_record = dead
@@ -733,7 +745,7 @@ async fn stream_delivery_count_rises_on_each_nak() {
 
     let mut cursor = admin
         .stream("CK_BOX_PEER")
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .expect("bind cursor");
     for expected in 1..=3 {
@@ -768,7 +780,7 @@ async fn stream_term_is_never_redelivered() {
 
     let mut cursor = admin
         .stream("CK_BOX_PEER")
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .expect("bind cursor");
     let first = next_delivery(&mut cursor).await;
@@ -814,13 +826,16 @@ async fn stream_in_progress_extends_ack_wait() {
     publish_peer(&admin, &["m1", "m2"]).await;
     let stream = admin.stream("CK_BOX_PEER");
     let mut other = stream
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .expect("bind second cursor");
 
     // Control: without a progress report the message comes back to another
     // puller once the ack wait runs out.
-    let mut slow = stream.consumer("c_agent", "agent").await.expect("bind");
+    let mut slow = stream
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("bind");
     assert_eq!(next_delivery(&mut slow).await.message.id, "m1");
     sleep(ack_wait + Duration::from_millis(300)).await;
     let redelivered = next_delivery(&mut other).await;
@@ -835,7 +850,10 @@ async fn stream_in_progress_extends_ack_wait() {
     // instead of expecting an empty pull this checks when a redelivery, if any,
     // arrives: never before the report plus one ack wait. Without the report it
     // would arrive as soon as the pull starts, past the original deadline.
-    let mut slow = stream.consumer("c_agent", "agent").await.expect("rebind");
+    let mut slow = stream
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("rebind");
     assert_eq!(next_delivery(&mut slow).await.message.id, "m2");
     sleep(ack_wait * 3 / 5).await;
     let reported_at = Instant::now();
@@ -854,4 +872,174 @@ async fn stream_in_progress_extends_ack_wait() {
             other.ack().await.expect("ack m2");
         }
     }
+}
+
+/// A fixture user's name, which is also its password, and its grant.
+type GrantUser<'a> = (&'a str, &'a [AllowEntry]);
+
+/// A server configuration with an unrestricted `admin` user (standing in for
+/// ck-bus provisioning) and one password user per `(name, grant)`, each
+/// allowed exactly its grant's publish and subscribe subjects. The server
+/// enforces a password user's permission lists the same way it enforces the
+/// ones a ck-bus-issued user JWT carries, so this exercises the grant itself
+/// without an operator and account setup.
+fn grant_users_config(port: u16, directory: &TempDir, users: &[GrantUser<'_>]) -> String {
+    let quoted = |grant: &[AllowEntry], operation: Operation| {
+        grant
+            .iter()
+            .filter(|entry| entry.operation == operation)
+            .map(|entry| format!("\"{}\"", entry.subject))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let users = users
+        .iter()
+        .map(|(name, grant)| {
+            format!(
+                r#"{{
+      user: "{name}",
+      password: "{name}",
+      permissions: {{
+        publish: {{ allow: [{}] }},
+        subscribe: {{ allow: [{}] }}
+      }}
+    }}"#,
+                quoted(grant, Operation::Publish),
+                quoted(grant, Operation::Subscribe)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    let store_path = directory.path().join("store");
+    let store = store_path.display();
+    format!(
+        r#"
+port: {port}
+jetstream {{ store_dir: "{store}" }}
+authorization {{
+  users: [
+    {{ user: "admin", password: "admin" }},
+    {users}
+  ]
+}}
+"#
+    )
+}
+
+async fn connect_user(url: &str, user: &str, credential_public: &str) -> NatsConnection {
+    NatsConnection::connect(
+        url,
+        ConnectOptions::with_user_and_password(user.into(), user.into())
+            .request_timeout(Some(Duration::from_millis(300))),
+        ConnectConfig::new(credential_public).expect("valid fixture public key"),
+    )
+    .await
+    .expect("connect fixture user")
+}
+
+/// prefrontal-core, holding the delivery-authority grant, publishes a room
+/// post and reads it through its ROOM durable `m_prefrontal-core`; the server
+/// refuses that durable to another module's participant grant and refuses
+/// another module's ROOM durable to the delivery authority. Each refusal is
+/// asserted on the server's permission error naming the subject, which a
+/// request timeout would not produce.
+#[tokio::test]
+async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
+    let account = AccountNames::derive("box_live").expect("account");
+    let authority = delivery_authority_permissions(&account, "UCORE", "prefrontal-core", &[])
+        .expect("delivery-authority grant");
+    let other_module =
+        participant_permissions(&account, "UOTHER", "other", &[]).expect("participant grant");
+    let render = |port: u16, directory: &TempDir| {
+        grant_users_config(
+            port,
+            directory,
+            &[("authority", &authority), ("other", &other_module)],
+        )
+    };
+    let Some(server) = TestServer::with_config(&render).await else {
+        return;
+    };
+
+    // Provision as ck-bus does: the ROOM stream bound on the ROOM binding,
+    // prefrontal-core's durable filtered on it, and a second module durable
+    // so the delivery authority has a real foreign target to be refused.
+    let room = account.streams().room.clone();
+    let admin = connect_admin(&server.url).await;
+    let stream = admin
+        .jetstream()
+        .create_stream(stream::Config {
+            name: room.clone(),
+            subjects: vec![account.room_binding()],
+            storage: stream::StorageType::File,
+            ..Default::default()
+        })
+        .await
+        .expect("create ROOM stream");
+    for module in ["prefrontal-core", "other"] {
+        stream
+            .create_consumer(pull::Config {
+                durable_name: Some(AccountNames::module_consumer_name(module).expect("name")),
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(30),
+                max_deliver: -1,
+                filter_subject: account.room_binding(),
+                ..Default::default()
+            })
+            .await
+            .expect("create ROOM module durable");
+    }
+
+    let core = connect_user(&server.url, "authority", "UCORE").await;
+    let post = account.room_post("room_live").expect("room subject");
+    core.stream(room.clone())
+        .publish(&post, "room:room_live:1", digest("post"), Headers::new())
+        .await
+        .expect("the delivery authority publishes a room post");
+    let mut cursor = core
+        .stream(room.clone())
+        .consumer(DurableOwner::Module("prefrontal-core"))
+        .await
+        .expect("the delivery authority binds its ROOM durable");
+    let delivery = next_delivery(&mut cursor).await;
+    assert_eq!(delivery.message.subject, post);
+    assert_eq!(delivery.message.id, "room:room_live:1");
+    assert_eq!(delivery.delivery_count, 1);
+    cursor.ack().await.expect("ack the room post");
+
+    let pull = Bytes::from_static(br#"{"batch":1,"no_wait":true}"#);
+    let refused = |error: BusError, expected: &str| {
+        assert!(
+            matches!(&error, BusError::Denied { subject, .. } if subject == expected),
+            "expected the server to refuse {expected}, got {error:?}"
+        );
+    };
+
+    // Another module, holding a participant grant, can neither bind nor pull
+    // prefrontal-core's ROOM durable.
+    let other = connect_user(&server.url, "other", "UOTHER").await;
+    let error = other
+        .stream(room.clone())
+        .consumer(DurableOwner::Module("prefrontal-core"))
+        .await
+        .err()
+        .expect("another module must not bind m_prefrontal-core");
+    refused(
+        error,
+        &format!("$JS.API.CONSUMER.INFO.{room}.m_prefrontal-core"),
+    );
+    let core_pull = format!("$JS.API.CONSUMER.MSG.NEXT.{room}.m_prefrontal-core");
+    let error = other
+        .request(&core_pull, pull.clone())
+        .await
+        .expect_err("another module must not pull m_prefrontal-core");
+    refused(error, &core_pull);
+
+    // The delivery authority cannot pull another module's ROOM durable.
+    let foreign_pull = format!("$JS.API.CONSUMER.MSG.NEXT.{room}.m_other");
+    let error = core
+        .request(&foreign_pull, pull)
+        .await
+        .expect_err("the delivery authority must not pull m_other");
+    refused(error, &foreign_pull);
 }

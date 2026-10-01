@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use cortexkit_bus_trait::{
     map_connection_failure, map_credential_sign_failure, terminally_dispose, BackendKind, BusError,
     ClaimOutcome, ConformanceBackend, ConnectionFailure, ContentDigest, CredentialSignFailure,
-    Headers, PropertyOutcome, PropertySpec, Register, RegisterUpdate, RegisterWatch, Stream,
-    StreamCursor, WatchEvent, WorkQueue,
+    DurableOwner, Headers, PropertyOutcome, PropertySpec, Register, RegisterUpdate, RegisterWatch,
+    Stream, StreamCursor, WatchEvent, WorkQueue,
 };
 
 use crate::{BackendEvent, InMemoryBus, InMemoryConfig, WorkQueueConfig};
@@ -58,7 +58,8 @@ async fn publish_ack_sequence() -> Result<(), String> {
 }
 
 async fn replay_from_cursor() -> Result<(), String> {
-    let bus = InMemoryBus::new(InMemoryConfig::default().with_durable("c_agent", "agent"));
+    let bus =
+        InMemoryBus::new(InMemoryConfig::default().with_durable(DurableOwner::Agent("agent")));
     bus.publish(
         "ck.box.peer.agent.s.deliver",
         "m1",
@@ -68,14 +69,17 @@ async fn replay_from_cursor() -> Result<(), String> {
     .await
     .map_err(debug)?;
     let expected = bus
-        .consumer("c_agent", "agent")
+        .consumer(DurableOwner::Agent("agent"))
         .await
         .map_err(debug)?
         .next()
         .await
         .map_err(debug)?
         .ok_or("first cursor saw no message")?;
-    let mut reopened = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let mut reopened = bus
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .map_err(debug)?;
     let replayed = reopened
         .next()
         .await
@@ -91,11 +95,15 @@ async fn replay_from_cursor() -> Result<(), String> {
 const STREAM_SUBJECT: &str = "ck.box.peer.agent.s.deliver";
 
 async fn stream_delivery_count() -> Result<(), String> {
-    let bus = InMemoryBus::new(InMemoryConfig::default().with_durable("c_agent", "agent"));
+    let bus =
+        InMemoryBus::new(InMemoryConfig::default().with_durable(DurableOwner::Agent("agent")));
     bus.publish(STREAM_SUBJECT, "m1", digest("m1"), Headers::new())
         .await
         .map_err(debug)?;
-    let mut cursor = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let mut cursor = bus
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .map_err(debug)?;
     for expected in 1..=3 {
         let delivery = cursor
             .next()
@@ -117,13 +125,17 @@ async fn stream_delivery_count() -> Result<(), String> {
 }
 
 async fn stream_term() -> Result<(), String> {
-    let bus = InMemoryBus::new(InMemoryConfig::default().with_durable("c_agent", "agent"));
+    let bus =
+        InMemoryBus::new(InMemoryConfig::default().with_durable(DurableOwner::Agent("agent")));
     for id in ["m1", "m2"] {
         bus.publish(STREAM_SUBJECT, id, digest(id), Headers::new())
             .await
             .map_err(debug)?;
     }
-    let mut cursor = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let mut cursor = bus
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .map_err(debug)?;
     let first = cursor
         .next()
         .await
@@ -141,7 +153,10 @@ async fn stream_term() -> Result<(), String> {
         "a terminated message was redelivered",
     )?;
     cursor.ack().await.map_err(debug)?;
-    let mut reopened = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let mut reopened = bus
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .map_err(debug)?;
     require(
         reopened.next().await.map_err(debug)?.is_none(),
         "a terminated message was redelivered to a reopened cursor",
@@ -162,7 +177,7 @@ async fn stream_in_progress() -> Result<(), String> {
     let ack_wait = Duration::from_millis(200);
     let bus = InMemoryBus::new(
         InMemoryConfig::default()
-            .with_durable("c_agent", "agent")
+            .with_durable(DurableOwner::Agent("agent"))
             .with_stream_ack_wait(ack_wait),
     );
     for id in ["m1", "m2"] {
@@ -170,8 +185,14 @@ async fn stream_in_progress() -> Result<(), String> {
             .await
             .map_err(debug)?;
     }
-    let mut slow = bus.consumer("c_agent", "agent").await.map_err(debug)?;
-    let mut other = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let mut slow = bus
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .map_err(debug)?;
+    let mut other = bus
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .map_err(debug)?;
 
     // Control: without a progress report the message comes back to another
     // cursor once the ack wait runs out.

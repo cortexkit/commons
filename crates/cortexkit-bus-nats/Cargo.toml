@@ -12,6 +12,7 @@ async-nats = { version = "0.50", default-features = false, features = ["jetstrea
 async-trait = "0.1"
 bytes = "1"
 futures-util = "0.3"
+cortexkit-bus-naming = { version = "0.2.0", path = "../cortexkit-bus-naming" }
 cortexkit-bus-trait = { version = "0.2.0", path = "../cortexkit-bus-trait" }
 tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 

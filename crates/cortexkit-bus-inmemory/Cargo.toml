@@ -9,6 +9,7 @@ description = "Deterministic in-memory backend for the CortexKit NATS-shaped bus
 
 [dependencies]
 async-trait = "0.1"
+cortexkit-bus-naming = { version = "0.2.0", path = "../cortexkit-bus-naming" }
 cortexkit-bus-trait = { version = "0.2.0", path = "../cortexkit-bus-trait" }
 tokio = { version = "1", features = ["sync", "time"] }
 
