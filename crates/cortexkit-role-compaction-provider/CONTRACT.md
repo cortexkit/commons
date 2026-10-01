@@ -228,7 +228,8 @@ The status (`StepStatus`) carries:
 - [pinned] A call has a budget of about 2 s for `noop` and
   `compaction_message`. On a timeout the runner records it and proceeds with
   the last applied CompactionMessage; one always exists, because Setup's is
-  recorded first. A provider that needs longer answers `wait`.
+  recorded first. An answer to that call arriving after its deadline is
+  late and never applies (§9). A provider that needs longer answers `wait`.
 - [pinned] A provider's `ERROR` refusal of the call (§14) counts as a failed
   call, like a timeout.
 
@@ -277,20 +278,23 @@ The status (`StepStatus`) carries:
 - [pinned] Before each call the runner durably records the id of the
   request it issues, its newest, and the request carries it.
 - [pinned] An answer applies only if it names the newest issued request
-  (`fence::dispose`). Any other answer, including a late one, is recorded
-  and never applied: not at the next step boundary, not when the fresh
-  request's answer is slow, and not when its version is higher. This holds
+  and arrives before that request's call deadline, the instant the runner
+  times the call out (`fence::dispose`). Any other answer is recorded and
+  never applied, whatever its version: an answer to an earlier request, and
+  an answer to the newest request that arrives at or after its deadline,
+  even when no newer request has been issued. It does not apply at the next
+  step boundary, nor when the fresh request's answer is slow. This holds
   for every answer: a late `refuse` never ends a run that moved on, a late
   `wait` never holds a step, a late `noop` never moves the cursor. The
-  provider's answer to the fresh request carries its content, at a higher
-  version.
+  provider's answer to the next request carries the content instead, at a
+  higher version.
 - [pinned] A CompactionMessage that passes the fence applies only if it is
   well formed (§8) and its version is higher than the last applied. A
   delayed answer from before a provider restart, even one with a higher
   version, never applies over content the provider produced after it.
-- [pinned] Checks run in a fixed order: the fence, then the message on its
-  own, then the version, then the range against the request's newest
-  message. The first that fails names the reason.
+- [pinned] Checks run in a fixed order: the fence, then the deadline, then
+  the message on its own, then the version, then the range against the
+  request's newest message. The first that fails names the reason.
 - [pinned] Every applied CompactionMessage, `wait` entry and exit, and call
   timeout is durable before the request it affects is sent.
 - [pinned] A provider that keeps its counter in memory reads `last_applied`
@@ -304,6 +308,7 @@ The status (`StepStatus`) carries:
 | Reason | When |
 |---|---|
 | `superseded_request` | the answer names a request other than the newest issued, whether an earlier one or one never issued |
+| `late` | the answer names the newest issued request but arrived at or after that request's call deadline |
 | `range_inverted` | the CompactionMessage's `from` is above its `to` |
 | `stale_version` | its version is not higher than the last applied |
 | `range_beyond_newest` | `to` is past one beyond the request's newest message |
@@ -577,10 +582,12 @@ questions" below, with the decision.
   role defines no source kind of its own: the earlier draft's `inserted`
   kind is dropped, and `EntrySource` is imported from the runner crate.
 - **Q11. Late answers.** Settled by the room: the fence is strict (§9). An
-  answer applies only if it names the newest issued request; any other
-  answer, including a late one, is recorded and never applied. The
-  provider's answer to the fresh request carries the content at a higher
-  version.
+  answer applies only if it names the newest issued request and arrives
+  before that request's call deadline; any other answer, including one to
+  the newest request that arrives after its timeout, is recorded and never
+  applied, whatever its version (`superseded_request` or `late`). The
+  provider's answer to the next request carries the content instead, at a
+  higher version.
 - **Q12. The `provider_code` when Setup times out or fails without an
   answer.** Settled in the runner role: `compaction_unavailable`, one of
   `llm-runner/v1`'s provider codes, re-exported here (§4, §14.2).
@@ -645,10 +652,11 @@ What remains:
    follow it and carry the same marker.
 3. **The fence's wording.** The runner role states the fence for a
    CompactionMessage (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
-   and for `compaction.ready` (`:530-533`). This document states it for
-   every answer: a late `noop`, `wait` or `refuse` is recorded and never
-   acted on either (§9). No disagreement; the runner role is narrower in
-   what it spells out.
+   and for `compaction.ready` (`:530-533`), and does not mention the call
+   deadline. This document states it for every answer, and adds that an
+   answer to the newest request arriving at or after its deadline is late
+   and never applied (§9), as the approved r7.3 erratum rules (item 5). No
+   disagreement; the runner role is narrower in what it spells out.
 4. **Not a divergence, a concern.** Versions and ordinals are `u64` on both
    sides. JSON readers that use doubles (JavaScript) lose exactness above
    2^53 − 1, so a TypeScript provider must read them as big integers. This
@@ -658,14 +666,14 @@ Against the design itself (paths in the magic-context repository,
 `.cortexkit/alfonso/plans/`):
 
 5. **Late answers.** r7.3 §5.3 "Timeout"
-   (`ck-extensibility-design-r7.3.md:721`) lets an answer that arrives after
-   its timeout, with a higher version, apply at the next step boundary, and
-   the owner corrections add that a late answer applies when the fresh
-   request's answer does not arrive in time
-   (`ck-extensibility-r7.3-errata.md:18`). The room's ruling, this document
-   §9 and `llm-runner/v1` (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
-   apply only an answer to the newest issued request. The design text is
-   the one to change.
+   (`ck-extensibility-design-r7.3.md:721`) let an answer that arrives after
+   its timeout, with a higher version, apply at the next step boundary. The
+   erratum that first adjusted this is superseded by an approved one
+   (`ck-extensibility-r7.3-errata.md:18`): a late answer never applies,
+   whatever its version. This document §9 states that rule, including an
+   answer to the newest request that arrives after its deadline, and
+   `llm-runner/v1` (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
+   agrees for answers to older requests.
 6. **Range ends.** r7.3 §5.4 (`ck-extensibility-design-r7.3.md:725`) names
    both ends by message id. This document uses half-open ordinals (Q3), as
    the runner's model view does.

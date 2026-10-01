@@ -210,6 +210,84 @@
       "disposition": "superseded_request"
     },
     {
+      "name": "late: an answer to the newest request after its deadline, with a higher version",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40,
+        "newest_deadline_ms": 1727780402000
+      },
+      "arrived_at_ms": 1727780402600,
+      "answer": {
+        "answer": "compaction_message",
+        "request_id": "cr-10",
+        "compaction": {
+          "compaction_id": "c-late",
+          "version": 6,
+          "range": {
+            "from": 0,
+            "to": 30
+          },
+          "replacement": []
+        }
+      },
+      "disposition": "late"
+    },
+    {
+      "name": "late: an answer arriving exactly at the deadline is late",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40,
+        "newest_deadline_ms": 1727780402000
+      },
+      "arrived_at_ms": 1727780402000,
+      "answer": {
+        "answer": "noop",
+        "request_id": "cr-10"
+      },
+      "disposition": "late"
+    },
+    {
+      "name": "in time: the same answer before the deadline applies",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40,
+        "newest_deadline_ms": 1727780402000
+      },
+      "arrived_at_ms": 1727780401999,
+      "answer": {
+        "answer": "compaction_message",
+        "request_id": "cr-10",
+        "compaction": {
+          "compaction_id": "c-late",
+          "version": 6,
+          "range": {
+            "from": 0,
+            "to": 30
+          },
+          "replacement": []
+        }
+      },
+      "disposition": "act"
+    },
+    {
+      "name": "fence before deadline: an older request's answer after the deadline is superseded",
+      "state": {
+        "newest_request_id": "cr-10",
+        "last_applied_version": 5,
+        "newest_ordinal": 40,
+        "newest_deadline_ms": 1727780402000
+      },
+      "arrived_at_ms": 1727780402600,
+      "answer": {
+        "answer": "noop",
+        "request_id": "cr-9"
+      },
+      "disposition": "superseded_request"
+    },
+    {
       "name": "fence: an answer naming a request never issued is recorded, not applied",
       "state": {
         "newest_request_id": "cr-10",
