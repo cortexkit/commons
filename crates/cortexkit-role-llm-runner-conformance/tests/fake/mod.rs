@@ -9,7 +9,8 @@
 //! > send, assistant step, dispatch intent, tool result, terminal), rebuilds
 //! > every session from that log on restart, and resumes what was cut: a
 //! > call with an intent and no result is closed `outcome_unknown` and its
-//! > run sealed `interrupted`; anything else carries on.
+//! > run sealed `interrupted`; a step without an intent either resumes or
+//! > is sealed `interrupted`, according to the test's recovery policy.
 //!
 //! It runs a session's run synchronously inside the request that starts it,
 //! stopping only at a call the scripted tool provider holds. Everything it
@@ -82,9 +83,22 @@ pub struct Defects {
     /// Resume seals a run cut by a kill `cancelled` instead of
     /// `interrupted`.
     pub cancel_cut_runs: bool,
+    /// A never-sent call in a sealed run falsely reports an unknown outcome
+    /// through `indeterminate: true`.
+    pub sealed_call_indeterminate: bool,
+    /// Resumption invokes a never-sent call twice, breaking at-most-once dispatch.
+    pub dispatch_twice_on_resume: bool,
     /// role.describe declares `interrupt`, which the runner does not serve
     /// and the subject does not declare.
     pub claim_unserved_group: bool,
+}
+
+/// Recovery of a recorded assistant step whose tool calls were never sent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StepRecovery {
+    #[default]
+    Resume,
+    SealInterrupted,
 }
 
 /// What the subject and every module incarnation share: the scripted model
@@ -92,6 +106,7 @@ pub struct Defects {
 /// its kills.
 struct World {
     defects: Defects,
+    step_recovery: StepRecovery,
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
     invocations: Mutex<BTreeMap<String, usize>>,
@@ -298,7 +313,27 @@ impl Module {
                 .map(|(key, _)| key.clone())
                 .collect();
             if open.is_empty() {
-                self.drive(&session, &run_id)?;
+                let pending: Vec<Value> = self.sessions.lock().unwrap()[&session]
+                    .calls
+                    .values()
+                    .filter(|call| call.run_id == run_id && !call.intent)
+                    .map(|call| call.arguments.clone())
+                    .collect();
+                if !pending.is_empty() && self.world.step_recovery == StepRecovery::SealInterrupted
+                {
+                    self.commit(
+                        &session,
+                        json!({ "kind": "terminal", "run_id": run_id,
+                        "state": "interrupted" }),
+                    )?;
+                } else {
+                    if self.world.defects.dispatch_twice_on_resume {
+                        for arguments in pending {
+                            self.world.invoke(&arguments);
+                        }
+                    }
+                    self.drive(&session, &run_id)?;
+                }
                 continue;
             }
             for key in open {
@@ -797,7 +832,12 @@ impl Module {
                 let call = &sess.calls[key];
                 let mut entry = ToolCallAttribution::new(&call.tool_call_id)
                     .with_call_key(key)
-                    .with_indeterminate(call.intent && !call.result);
+                    .with_indeterminate(
+                        (call.intent && !call.result)
+                            || (self.world.defects.sealed_call_indeterminate
+                                && !call.intent
+                                && run.is_some_and(|run| run.state == "interrupted")),
+                    );
                 if call.intent {
                     entry = entry.with_dispatched_to(TOOL_MODULE);
                 }
@@ -945,6 +985,7 @@ impl RunnerRoute for FakeRoute {
 
 pub struct FakeSubject {
     pub defects: Defects,
+    pub step_recovery: StepRecovery,
     pub capabilities: BTreeSet<Capability>,
     pub kill_points: Vec<&'static str>,
     /// Report every kill as a real process kill, which this in-process fake
@@ -985,6 +1026,7 @@ impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
             defects,
+            step_recovery: StepRecovery::Resume,
             capabilities: served(),
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
@@ -1002,6 +1044,7 @@ impl FakeSubject {
             .get_or_insert_with(|| {
                 Arc::new(World {
                     defects: self.defects,
+                    step_recovery: self.step_recovery,
                     groups: self
                         .capabilities
                         .iter()

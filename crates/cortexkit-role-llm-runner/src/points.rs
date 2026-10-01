@@ -23,8 +23,10 @@ pub const SEND_RECORDED: &str = "SendRecorded";
 pub const COMPACTION_APPLIED: &str = "CompactionApplied";
 
 /// An assistant step is durable with its PostAssistant output. No tool call
-/// from it has a dispatch intent yet. Resume runs PreTool for its calls and
-/// dispatches them; nothing was sent, so at-most-once holds.
+/// from it has a dispatch intent yet. The runner either resumes and dispatches
+/// each call exactly once, or seals the run `interrupted` without dispatch.
+/// The calls are never indeterminate, and no later request carries them
+/// without results.
 pub const STEP_RECORDED: &str = "StepRecorded";
 
 /// A tool call's dispatch intent is durable, holding the input that

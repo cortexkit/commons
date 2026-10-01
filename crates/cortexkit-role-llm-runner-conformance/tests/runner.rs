@@ -7,7 +7,7 @@ use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject};
+use fake::{Defects, FakeSubject, StepRecovery};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -95,6 +95,50 @@ async fn a_crash_cut_sealed_cancelled_fails_the_dispatch_intent_and_interrupted_
     let reason = failed(&report, "run_result_interrupted_not_cancelled");
     assert!(reason.contains("cancelled"), "{reason}");
     assert_passed(&report, "crash_at_Terminal");
+}
+
+#[tokio::test]
+async fn step_recorded_resume_passes() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert_passed(&report, "crash_at_StepRecorded");
+}
+
+#[tokio::test]
+async fn step_recorded_seal_interrupted_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.step_recovery = StepRecovery::SealInterrupted;
+    let report = run(&subject).await;
+    for spec in CASES {
+        assert_passed(&report, spec.name);
+    }
+}
+
+#[tokio::test]
+async fn step_recorded_sealed_indeterminate_fails() {
+    let mut subject = FakeSubject::new(Defects {
+        sealed_call_indeterminate: true,
+        ..Defects::default()
+    });
+    subject.step_recovery = StepRecovery::SealInterrupted;
+    let report = run(&subject).await;
+    let reason = failed(&report, "crash_at_StepRecorded");
+    assert!(reason.contains("sealed branch"), "{reason}");
+    assert!(reason.contains("indeterminate: false"), "{reason}");
+    assert_passed(&report, "crash_at_DispatchIntent");
+}
+
+#[tokio::test]
+async fn step_recorded_dispatch_twice_fails() {
+    let report = run(&FakeSubject::new(Defects {
+        dispatch_twice_on_resume: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "crash_at_StepRecorded");
+    assert!(reason.contains("resume branch"), "{reason}");
+    assert!(reason.contains("at-most-once dispatch"), "{reason}");
+    assert!(reason.contains("ran 2 times"), "{reason}");
+    assert_passed(&report, "crash_at_DispatchIntent");
 }
 
 #[tokio::test]

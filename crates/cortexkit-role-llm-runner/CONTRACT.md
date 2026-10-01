@@ -687,8 +687,11 @@ state root (`cortexkit-role-harness`):
    once. A call with a durable dispatch intent and no result is closed with
    an `outcome_unknown` result before any later model call in the session,
    is visible as indeterminate until then, and is never re-dispatched. A call
-   whose step is durable and whose intent is not was never sent, and is
-   dispatched on resume.
+   whose step is durable but whose intent is not was never sent. The runner
+   either resumes the run and dispatches it exactly once, or seals the run
+   `interrupted` without dispatching it. Either way the call is never marked
+   indeterminate, its tool runs at most once, and no later request carries
+   the call without a result.
 5. [pinned] **Replay, not re-invocation.** Applied compaction and every hook
    output replay from durable state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
@@ -747,7 +750,8 @@ step-transform providers. It will check:
 | `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
 | `undeclared_delivery_refused` | a delivery mode the subject does not declare |
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
-| `crash_at_<point>` for each point in §14, asserting its properties | the points the harness declares |
+| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
+| `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run
 state, an unknown event kind, a describe answer with a partial group, a

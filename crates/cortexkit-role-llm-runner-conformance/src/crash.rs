@@ -250,7 +250,18 @@ pub fn check(
             )),
         };
     }
-    common(point, observed)?;
+    common(point, observed).map_err(|reason| {
+        if point == points::STEP_RECORDED {
+            let branch = if observed.invocations_after == 0 {
+                "sealed"
+            } else {
+                "resume"
+            };
+            format!("{branch} branch: {reason}")
+        } else {
+            reason
+        }
+    })?;
     let b = &observed.after_b;
     let last = observed
         .head_b
@@ -261,12 +272,58 @@ pub fn check(
     let result_text = result_marker(&observed.call);
     match point {
         points::STEP_RECORDED => {
-            if invoked != 1 {
-                return Err(format!(
-                    "the call of a step durable without a dispatch intent ran {invoked} times; resume must dispatch it exactly once"
-                ));
-            }
-            expect_holding(b, &observed.step_text, 1, "the durable step's text")?;
+            // Zero observed tool invocations selects sealing; any invocation
+            // selects resumption, whose at-most-once limit is checked below.
+            let branch = if invoked == 0 { "sealed" } else { "resume" };
+            let check_branch = || -> Result<(), String> {
+                if observed.invocations_at_kill != 0 {
+                    return Err(format!(
+                        "the call ran {} times before its dispatch intent was durable",
+                        observed.invocations_at_kill
+                    ));
+                }
+                if invoked > 1 {
+                    return Err(format!(
+                        "at-most-once dispatch broke: the call ran {invoked} times"
+                    ));
+                }
+                match entries_for(b, &observed.call.tool_call_id).as_slice() {
+                    [entry] if !entry.indeterminate => {}
+                    other => {
+                        return Err(format!(
+                        "the never-sent call must have indeterminate: false; entries are {other:?}"
+                    ))
+                    }
+                }
+                expect_holding(b, &observed.step_text, 1, "the durable step's text")?;
+                if invoked == 0 {
+                    if RunState::parse(&last.state) != RunState::Interrupted {
+                        return Err(format!(
+                            "zero dispatches require interrupted, not {}",
+                            last.state
+                        ));
+                    }
+                    expect_holding(b, &observed.final_text, 0, "a later model turn's text")?;
+                } else {
+                    expect_holding(b, &observed.final_text, 1, "the continued run's final text")?;
+                    expect_holding(b, &result_text, 1, "the dispatched call's result")?;
+                    let result = b
+                        .iter()
+                        .find(|m| holding(std::slice::from_ref(m), &result_text) == 1)
+                        .expect("checked result");
+                    let later = b
+                        .iter()
+                        .find(|m| holding(std::slice::from_ref(m), &observed.final_text) == 1)
+                        .expect("checked continued turn");
+                    if result.ordinal >= later.ordinal {
+                        return Err(
+                            "a later model turn carries the call without a preceding result".into(),
+                        );
+                    }
+                }
+                Ok(())
+            };
+            check_branch().map_err(|reason| format!("{branch} branch: {reason}"))?;
         }
         points::DISPATCH_INTENT => {
             if observed.invocations_at_kill > 1 || invoked != observed.invocations_at_kill {
