@@ -298,7 +298,9 @@ fn flow_engine_cannot_name_a_durable() {
         .filter(|row| row.principal == Principal::FlowEngine)
         .collect::<Vec<_>>();
 
-    // The rows this property rests on are present, so the loop below can fail.
+    // The refused rows for durable create, named create and consumer delete
+    // must be in the golden; without them the overlap check below would pass
+    // over nothing.
     let event_binding = account.event_binding();
     for expected in [
         format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_other"),
@@ -376,14 +378,16 @@ fn flow_engine_reads_its_own_durable_and_replays_through_ephemeral_consumers_onl
         );
     }
 
-    // No consumer delete on the event stream in any form: abandoned ephemeral
-    // consumers expire on their inactivity threshold instead.
+    // No consumer delete on the event stream in any form: the flow engine
+    // creates its ephemeral consumers with a short inactivity threshold, so
+    // the server removes abandoned ones (see `flow_engine_permissions`).
     let delete_prefix = format!("$JS.API.CONSUMER.DELETE.{stream}");
     assert!(!allows
         .iter()
         .any(|entry| entry.subject.starts_with(&delete_prefix)));
 
-    // It publishes no account subject but the dead-letter record.
+    // The only account subject the flow engine publishes is the dead-letter
+    // record.
     let account_prefix = format!("ck.{}.", account.account());
     let published = allows
         .iter()

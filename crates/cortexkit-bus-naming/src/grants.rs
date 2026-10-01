@@ -470,12 +470,12 @@ pub fn flow_engine_permissions(
     add_census_read_permissions(&mut entries, Principal::FlowEngine, account);
     for subject in [
         account.effect_dead(),
-        // Its own durable.
+        // The flow engine's own durable, `m_{module_id}`.
         format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{durable}"),
         format!("$JS.API.CONSUMER.INFO.{stream}.{durable}"),
         format!("$JS.ACK.{stream}.{durable}.>"),
         format!("$JS.API.STREAM.INFO.{stream}"),
-        // Ephemeral ordered consumers.
+        // The flow engine's ephemeral ordered consumers, for dry-run replay.
         format!("$JS.API.CONSUMER.CREATE.{stream}"),
         format!("$JS.API.CONSUMER.INFO.{stream}.*"),
         format!("$JS.FC.{stream}.>"),
@@ -617,8 +617,9 @@ pub fn generate_permission_golden(
         }
     }
 
-    // The flow engine can name no durable and delete no consumer on the event
-    // stream; it can read only its own durable and produces no workload.
+    // The flow engine cannot create a named or durable consumer on the event
+    // stream, cannot delete any consumer there, cannot read an agent's
+    // durable, and publishes no workload message.
     let event_stream = &account.streams().event;
     let own_durable = AccountNames::module_consumer_name(fixture.flow_engine_module)?;
     let foreign_durable = AccountNames::module_consumer_name(fixture.foreign_module)?;
