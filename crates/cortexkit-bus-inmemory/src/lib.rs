@@ -9,7 +9,9 @@ mod register;
 mod stream;
 mod work_queue;
 
-pub use backend::{BackendEvent, InMemoryBus, InMemoryConfig, WorkQueueConfig};
+pub use backend::{
+    BackendEvent, InMemoryBus, InMemoryConfig, WorkQueueConfig, DEFAULT_STREAM_ACK_WAIT,
+};
 pub use conformance::InMemoryConformance;
 pub use register::InMemoryRegisterWatch;
 pub use stream::InMemoryStreamCursor;

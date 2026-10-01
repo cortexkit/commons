@@ -37,6 +37,18 @@ pub const CONFORMANCE_PROPERTIES: &[PropertySpec] = &[
         set: PropertySet::Parity,
     },
     PropertySpec {
+        name: "stream_delivery_count_rises_on_each_nak",
+        set: PropertySet::Parity,
+    },
+    PropertySpec {
+        name: "stream_term_is_never_redelivered",
+        set: PropertySet::Parity,
+    },
+    PropertySpec {
+        name: "stream_in_progress_extends_ack_wait",
+        set: PropertySet::Parity,
+    },
+    PropertySpec {
         name: "register_revision",
         set: PropertySet::Parity,
     },

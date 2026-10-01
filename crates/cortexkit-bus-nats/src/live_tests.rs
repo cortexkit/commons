@@ -678,3 +678,180 @@ async fn a_term_survives_the_claimant_exiting_straight_after_it() {
         other => panic!("a terminated item came back: {other:?}"),
     }
 }
+
+/// Pulls from `cursor` until a delivery arrives or three seconds pass.
+async fn next_delivery(
+    cursor: &mut crate::NatsStreamCursor,
+) -> cortexkit_bus_trait::StreamDelivery {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(delivery) = cursor.next().await.expect("pull stream delivery") {
+            return delivery;
+        }
+        assert!(Instant::now() < deadline, "no stream delivery arrived");
+    }
+}
+
+async fn peer_stream_with_ack_wait(admin: &NatsConnection, ack_wait: Duration) {
+    create_stream_and_consumer(
+        admin,
+        "CK_BOX_PEER",
+        "ck.box.peer.agent.*.deliver",
+        "ck.box.peer.agent.*.deliver",
+        "c_agent",
+        -1,
+        ack_wait,
+    )
+    .await;
+}
+
+async fn publish_peer(admin: &NatsConnection, ids: &[&str]) {
+    let stream = admin.stream("CK_BOX_PEER");
+    for id in ids {
+        stream
+            .publish(
+                "ck.box.peer.agent.s.deliver",
+                id,
+                digest(id),
+                Headers::new(),
+            )
+            .await
+            .expect("publish peer delivery");
+    }
+}
+
+/// The live counterpart of the `stream_delivery_count_rises_on_each_nak`
+/// conformance property: the count is JetStream's `num_delivered`.
+#[tokio::test]
+async fn stream_delivery_count_rises_on_each_nak() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    peer_stream_with_ack_wait(&admin, Duration::from_secs(30)).await;
+    publish_peer(&admin, &["m1"]).await;
+
+    let mut cursor = admin
+        .stream("CK_BOX_PEER")
+        .consumer("c_agent", "agent")
+        .await
+        .expect("bind cursor");
+    for expected in 1..=3 {
+        let delivery = next_delivery(&mut cursor).await;
+        assert_eq!(delivery.message.id, "m1");
+        assert_eq!(delivery.delivery_count, expected);
+        if expected < 3 {
+            cursor.nak(Duration::ZERO).await.expect("nak");
+        }
+    }
+    cursor.ack().await.expect("ack");
+}
+
+/// The live counterpart of `stream_term_is_never_redelivered`: neither the
+/// `+TERM <reason>` form nor the bare `+TERM` is redelivered past the ack
+/// wait, and the server's termination advisory carries the reason.
+#[tokio::test]
+async fn stream_term_is_never_redelivered() {
+    use futures_util::StreamExt;
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let ack_wait = Duration::from_millis(500);
+    peer_stream_with_ack_wait(&admin, ack_wait).await;
+    publish_peer(&admin, &["m1", "m2", "m3"]).await;
+    let mut advisories = admin
+        .client()
+        .subscribe("$JS.EVENT.ADVISORY.CONSUMER.MSG_TERMINATED.CK_BOX_PEER.c_agent")
+        .await
+        .expect("subscribe to termination advisories");
+
+    let mut cursor = admin
+        .stream("CK_BOX_PEER")
+        .consumer("c_agent", "agent")
+        .await
+        .expect("bind cursor");
+    let first = next_delivery(&mut cursor).await;
+    assert_eq!(first.message.id, "m1");
+    cursor.term(Some("body_absent")).await.expect("term m1");
+    let second = next_delivery(&mut cursor).await;
+    assert_eq!(second.message.id, "m2");
+    assert_eq!(second.delivery_count, 1);
+    cursor.term(None).await.expect("term m2");
+
+    let advisory = tokio::time::timeout(Duration::from_secs(2), advisories.next())
+        .await
+        .expect("termination advisory in time")
+        .expect("advisory subscription open");
+    let advisory = String::from_utf8_lossy(&advisory.payload).into_owned();
+    assert!(
+        advisory.contains("body_absent"),
+        "the termination advisory lacks the reason: {advisory}"
+    );
+
+    // Past the ack wait the only message left is the one never terminated.
+    sleep(ack_wait + Duration::from_millis(300)).await;
+    let third = next_delivery(&mut cursor).await;
+    assert_eq!(third.message.id, "m3");
+    assert_eq!(third.delivery_count, 1);
+    cursor.ack().await.expect("ack m3");
+    sleep(ack_wait + Duration::from_millis(300)).await;
+    assert!(
+        cursor.next().await.expect("pull after terms").is_none(),
+        "a terminated message was redelivered"
+    );
+}
+
+/// The live counterpart of `stream_in_progress_extends_ack_wait`.
+#[tokio::test]
+async fn stream_in_progress_extends_ack_wait() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let ack_wait = Duration::from_secs(2);
+    peer_stream_with_ack_wait(&admin, ack_wait).await;
+    publish_peer(&admin, &["m1", "m2"]).await;
+    let stream = admin.stream("CK_BOX_PEER");
+    let mut other = stream
+        .consumer("c_agent", "agent")
+        .await
+        .expect("bind second cursor");
+
+    // Control: without a progress report the message comes back to another
+    // puller once the ack wait runs out.
+    let mut slow = stream.consumer("c_agent", "agent").await.expect("bind");
+    assert_eq!(next_delivery(&mut slow).await.message.id, "m1");
+    sleep(ack_wait + Duration::from_millis(300)).await;
+    let redelivered = next_delivery(&mut other).await;
+    assert_eq!(redelivered.message.id, "m1");
+    assert_eq!(redelivered.delivery_count, 2);
+    other.ack().await.expect("ack m1");
+    drop(slow);
+
+    // A progress report inside the window restarts the ack wait from the
+    // moment it is sent, so the message is not redelivered at the original
+    // deadline. The server may hold a pull open past its requested expiry, so
+    // instead of expecting an empty pull this checks when a redelivery, if any,
+    // arrives: never before the report plus one ack wait. Without the report it
+    // would arrive as soon as the pull starts, past the original deadline.
+    let mut slow = stream.consumer("c_agent", "agent").await.expect("rebind");
+    assert_eq!(next_delivery(&mut slow).await.message.id, "m2");
+    sleep(ack_wait * 3 / 5).await;
+    let reported_at = Instant::now();
+    slow.in_progress().await.expect("report progress");
+    sleep(ack_wait * 3 / 5).await;
+    match other.next().await.expect("pull during progress") {
+        None => slow.ack().await.expect("ack m2"),
+        Some(redelivered) => {
+            assert_eq!(redelivered.message.id, "m2");
+            assert!(
+                Instant::now() >= reported_at + ack_wait,
+                "a message reported in progress was redelivered {:?} after the report, \
+                 before the restarted ack wait of {ack_wait:?}",
+                reported_at.elapsed()
+            );
+            other.ack().await.expect("ack m2");
+        }
+    }
+}

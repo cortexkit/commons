@@ -96,7 +96,7 @@ impl StreamCursor for NatsStreamCursor {
     async fn next(&mut self) -> BusResult<Option<StreamDelivery>> {
         if self.in_flight.is_some() {
             return Err(BusError::unavailable(
-                "the current delivery must be acknowledged or negatively acknowledged",
+                "the current delivery must be acknowledged, negatively acknowledged or terminated",
             ));
         }
         let mut events = self.connection.event_receiver();
@@ -118,6 +118,9 @@ impl StreamCursor for NatsStreamCursor {
         })?;
         let delivery = StreamDelivery {
             stream_seq: info.stream_sequence,
+            // `num_delivered` from the delivery's metadata; the server counts
+            // from 1, so a negative value cannot occur on a real delivery.
+            delivery_count: u64::try_from(info.delivered).unwrap_or(0),
             message: decode_message(&message)?,
         };
         self.in_flight = Some(message);
@@ -130,6 +133,30 @@ impl StreamCursor for NatsStreamCursor {
 
     async fn nak(&mut self, delay: Duration) -> BusResult<()> {
         self.ack_with(AckKind::Nak(Some(delay))).await
+    }
+
+    async fn term(&mut self, reason: Option<&str>) -> BusResult<()> {
+        match reason {
+            None | Some("") => self.ack_with(AckKind::Term).await,
+            // async-nats 0.50 has no `+TERM <reason>` ack kind, so the reason
+            // form is sent on the delivery's reply subject directly, the same
+            // request-and-wait exchange `double_ack_with` performs.
+            Some(reason) => self.term_with_reason(reason).await,
+        }
+    }
+
+    async fn in_progress(&mut self) -> BusResult<()> {
+        let message = self
+            .in_flight
+            .as_ref()
+            .ok_or_else(|| BusError::absent("in-flight stream delivery"))?;
+        let mut events = self.connection.event_receiver();
+        // The delivery stays in flight: a progress report only restarts the
+        // ack wait, and the handler still has to settle it.
+        message
+            .double_ack_with(AckKind::Progress)
+            .await
+            .map_err(|error| map_operation_error("delivery progress", error, &mut events))
     }
 }
 
@@ -146,6 +173,25 @@ impl NatsStreamCursor {
             .double_ack_with(kind)
             .await
             .map_err(|error| map_operation_error("delivery acknowledgement", error, &mut events))?;
+        self.in_flight = None;
+        Ok(())
+    }
+
+    async fn term_with_reason(&mut self, reason: &str) -> BusResult<()> {
+        let message = self
+            .in_flight
+            .as_ref()
+            .ok_or_else(|| BusError::absent("in-flight stream delivery"))?;
+        let reply = message
+            .reply
+            .clone()
+            .ok_or_else(|| BusError::absent("reply subject of the in-flight stream delivery"))?;
+        let mut events = self.connection.event_receiver();
+        self.connection
+            .client()
+            .request(reply, Bytes::from(format!("+TERM {reason}")))
+            .await
+            .map_err(|error| map_operation_error("delivery termination", error, &mut events))?;
         self.in_flight = None;
         Ok(())
     }

@@ -22,6 +22,9 @@ impl ConformanceBackend for InMemoryConformance {
         let result = match property.name {
             "publish_ack_monotonic_sequence" => publish_ack_sequence().await,
             "consumer_replay_within_process_lifetime" => replay_from_cursor().await,
+            "stream_delivery_count_rises_on_each_nak" => stream_delivery_count().await,
+            "stream_term_is_never_redelivered" => stream_term().await,
+            "stream_in_progress_extends_ack_wait" => stream_in_progress().await,
             "register_revision" => register_revision().await,
             "register_absent_vs_empty" => register_absent_vs_empty().await,
             "watch_snapshot_then_updates_with_connection_flag" => register_watch().await,
@@ -83,6 +86,130 @@ async fn replay_from_cursor() -> Result<(), String> {
         "cursor did not replay",
     )?;
     reopened.ack().await.map_err(debug)
+}
+
+const STREAM_SUBJECT: &str = "ck.box.peer.agent.s.deliver";
+
+async fn stream_delivery_count() -> Result<(), String> {
+    let bus = InMemoryBus::new(InMemoryConfig::default().with_durable("c_agent", "agent"));
+    bus.publish(STREAM_SUBJECT, "m1", digest("m1"), Headers::new())
+        .await
+        .map_err(debug)?;
+    let mut cursor = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    for expected in 1..=3 {
+        let delivery = cursor
+            .next()
+            .await
+            .map_err(debug)?
+            .ok_or("a nak'd message was not redelivered")?;
+        require(
+            delivery.delivery_count == expected,
+            &format!(
+                "delivery {expected} reported count {}",
+                delivery.delivery_count
+            ),
+        )?;
+        if expected < 3 {
+            cursor.nak(Duration::ZERO).await.map_err(debug)?;
+        }
+    }
+    cursor.ack().await.map_err(debug)
+}
+
+async fn stream_term() -> Result<(), String> {
+    let bus = InMemoryBus::new(InMemoryConfig::default().with_durable("c_agent", "agent"));
+    for id in ["m1", "m2"] {
+        bus.publish(STREAM_SUBJECT, id, digest(id), Headers::new())
+            .await
+            .map_err(debug)?;
+    }
+    let mut cursor = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let first = cursor
+        .next()
+        .await
+        .map_err(debug)?
+        .ok_or("first message was not delivered")?;
+    require(first.message.id == "m1", "first delivery was not m1")?;
+    cursor.term(Some("body_absent")).await.map_err(debug)?;
+    let second = cursor
+        .next()
+        .await
+        .map_err(debug)?
+        .ok_or("the message after a term was not delivered")?;
+    require(
+        second.message.id == "m2" && second.delivery_count == 1,
+        "a terminated message was redelivered",
+    )?;
+    cursor.ack().await.map_err(debug)?;
+    let mut reopened = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    require(
+        reopened.next().await.map_err(debug)?.is_none(),
+        "a terminated message was redelivered to a reopened cursor",
+    )?;
+    require(
+        bus.events().iter().any(|event| {
+            matches!(
+                event,
+                BackendEvent::StreamTerminated { stream_seq, reason: Some(reason) }
+                    if *stream_seq == first.stream_seq && reason == "body_absent"
+            )
+        }),
+        "the termination and its reason were not recorded",
+    )
+}
+
+async fn stream_in_progress() -> Result<(), String> {
+    let ack_wait = Duration::from_millis(200);
+    let bus = InMemoryBus::new(
+        InMemoryConfig::default()
+            .with_durable("c_agent", "agent")
+            .with_stream_ack_wait(ack_wait),
+    );
+    for id in ["m1", "m2"] {
+        bus.publish(STREAM_SUBJECT, id, digest(id), Headers::new())
+            .await
+            .map_err(debug)?;
+    }
+    let mut slow = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+    let mut other = bus.consumer("c_agent", "agent").await.map_err(debug)?;
+
+    // Control: without a progress report the message comes back to another
+    // cursor once the ack wait runs out.
+    slow.next()
+        .await
+        .map_err(debug)?
+        .ok_or("m1 was not delivered")?;
+    tokio::time::sleep(ack_wait + Duration::from_millis(100)).await;
+    let redelivered = other
+        .next()
+        .await
+        .map_err(debug)?
+        .ok_or("m1 was not redelivered after the ack wait")?;
+    require(
+        redelivered.message.id == "m1" && redelivered.delivery_count == 2,
+        "the ack-wait redelivery was not m1's second delivery",
+    )?;
+    other.ack().await.map_err(debug)?;
+    let _ = slow.ack().await;
+
+    // A progress report inside the window restarts the ack wait, so the
+    // message is not redelivered past the original deadline.
+    slow.next()
+        .await
+        .map_err(debug)?
+        .ok_or("m2 was not delivered")?;
+    tokio::time::sleep(ack_wait * 3 / 5).await;
+    slow.in_progress().await.map_err(debug)?;
+    tokio::time::sleep(ack_wait * 3 / 5).await;
+    require(
+        other.next().await.map_err(debug)?.is_none(),
+        "a message reported in progress was redelivered past the original ack wait",
+    )?;
+    slow.ack().await.map_err(debug)?;
+    require(
+        other.next().await.map_err(debug)?.is_none(),
+        "an acknowledged message was redelivered",
+    )
 }
 
 async fn register_revision() -> Result<(), String> {

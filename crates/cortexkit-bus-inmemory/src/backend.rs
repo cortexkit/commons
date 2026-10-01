@@ -26,14 +26,37 @@ impl WorkQueueConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// The stream durables' ack wait unless a test sets another: the plane's
+/// consumers use 30 seconds.
+pub const DEFAULT_STREAM_ACK_WAIT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone)]
 pub struct InMemoryConfig {
     pub(crate) durables: BTreeSet<(String, String)>,
     pub(crate) denied_subjects: BTreeSet<String>,
     pub(crate) work_queue: Option<WorkQueueConfig>,
+    pub(crate) stream_ack_wait: Duration,
+}
+
+impl Default for InMemoryConfig {
+    fn default() -> Self {
+        Self {
+            durables: BTreeSet::new(),
+            denied_subjects: BTreeSet::new(),
+            work_queue: None,
+            stream_ack_wait: DEFAULT_STREAM_ACK_WAIT,
+        }
+    }
 }
 
 impl InMemoryConfig {
+    /// How long a stream delivery may stay unsettled before another cursor on
+    /// the same durable receives it again; applies to every durable.
+    pub fn with_stream_ack_wait(mut self, ack_wait: Duration) -> Self {
+        self.stream_ack_wait = ack_wait;
+        self
+    }
+
     pub fn with_durable(mut self, durable: impl Into<String>, identity: impl Into<String>) -> Self {
         self.durables.insert((durable.into(), identity.into()));
         self
@@ -52,10 +75,24 @@ impl InMemoryConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendEvent {
-    Published { subject: String, id: String },
-    Acknowledged { token: DeliveryToken },
-    NegativelyAcknowledged { token: DeliveryToken },
-    Terminated { token: DeliveryToken },
+    Published {
+        subject: String,
+        id: String,
+    },
+    Acknowledged {
+        token: DeliveryToken,
+    },
+    NegativelyAcknowledged {
+        token: DeliveryToken,
+    },
+    Terminated {
+        token: DeliveryToken,
+    },
+    /// A stream delivery settled with `StreamCursor::term`.
+    StreamTerminated {
+        stream_seq: u64,
+        reason: Option<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -139,10 +176,27 @@ pub(crate) struct StoredMessage {
     pub message: Message,
 }
 
+/// One durable's position. Delivery is strictly in order: the message at
+/// `next_index` is the only one a cursor can receive until it is acked or
+/// terminated.
 #[derive(Default)]
 pub(crate) struct DurableState {
     pub next_index: usize,
+    /// Set by a nak: no cursor receives the head message before this instant.
     pub available_at: Option<Instant>,
+    /// How many times the head message has been delivered.
+    pub delivery_count: u64,
+    /// The cursor holding the head message unsettled, if any.
+    pub lease: Option<Lease>,
+    pub next_cursor_id: u64,
+}
+
+/// An unsettled delivery of the head message. Until `deadline` no other
+/// cursor receives the message; after it the next `next` on any cursor
+/// redelivers it, as JetStream does once the ack wait expires.
+pub(crate) struct Lease {
+    pub cursor_id: u64,
+    pub deadline: Instant,
 }
 
 pub(crate) struct Watcher {
