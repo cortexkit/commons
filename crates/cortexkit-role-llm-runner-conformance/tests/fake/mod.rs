@@ -88,6 +88,8 @@ pub struct Defects {
     pub sealed_call_indeterminate: bool,
     /// Sealing leaves the never-sent call dangling in the next model history.
     pub sealed_call_without_result: bool,
+    /// Sealing hides attribution but leaves the dangling call in the raw message.
+    pub sealed_call_without_attribution: bool,
     /// Resumption invokes a never-sent call twice, breaking at-most-once dispatch.
     pub dispatch_twice_on_resume: bool,
     /// role.describe declares `interrupt`, which the runner does not serve
@@ -101,6 +103,8 @@ pub enum StepRecovery {
     #[default]
     Resume,
     SealInterrupted,
+    SealDropStep,
+    SealDropCall,
 }
 
 /// What the subject and every module incarnation share: the scripted model
@@ -321,9 +325,17 @@ impl Module {
                     .filter(|(_, call)| call.run_id == run_id && !call.intent)
                     .map(|(key, call)| (key.clone(), call.arguments.clone()))
                     .collect();
-                if !pending.is_empty() && self.world.step_recovery == StepRecovery::SealInterrupted
-                {
-                    if !self.world.defects.sealed_call_without_result {
+                if !pending.is_empty() && self.world.step_recovery != StepRecovery::Resume {
+                    if matches!(
+                        self.world.step_recovery,
+                        StepRecovery::SealDropStep | StepRecovery::SealDropCall
+                    ) {
+                        self.commit(
+                            &session,
+                            json!({ "kind": "drop_step", "run_id": run_id,
+                            "keep_text": self.world.step_recovery == StepRecovery::SealDropCall }),
+                        )?;
+                    } else if !self.world.defects.sealed_call_without_result {
                         for (key, _) in &pending {
                             self.commit(
                                 &session,
@@ -458,6 +470,25 @@ impl Module {
                     keys,
                 );
             }
+            "drop_step" => {
+                let run_id = text("run_id");
+                sess.calls.retain(|_, call| call.run_id != run_id);
+                if record["keep_text"] == json!(true) {
+                    for message in sess
+                        .messages
+                        .iter_mut()
+                        .filter(|m| m.run_id == run_id && !m.calls.is_empty())
+                    {
+                        message.calls.clear();
+                        if let Some(parts) = message.body["parts"].as_array_mut() {
+                            parts.retain(|part| part["type"] != "tool_call");
+                        }
+                    }
+                } else {
+                    sess.messages
+                        .retain(|m| m.run_id != run_id || m.calls.is_empty());
+                }
+            }
             "intent" => {
                 if let Some(call) = sess.calls.get_mut(&text("call_key")) {
                     call.intent = true;
@@ -528,11 +559,8 @@ impl Module {
             if sess.run(run_id).is_none_or(|run| run.state != "active") {
                 return Ok(());
             }
-            let turn_index = sess
-                .messages
-                .iter()
-                .filter(|m| m.body["role"] == "assistant")
-                .count();
+            // The model consumed a turn even if recovery removed it from history.
+            let turn_index = sess.events.iter().filter(|kind| *kind == "step").count();
             let turn = self
                 .world
                 .scripts
@@ -839,6 +867,11 @@ impl Module {
         let tool_calls = m
             .calls
             .iter()
+            .filter(|key| {
+                !(self.world.defects.sealed_call_without_attribution
+                    && run.is_some_and(|run| run.state == "interrupted")
+                    && !sess.calls[*key].intent)
+            })
             .map(|key| {
                 let call = &sess.calls[key];
                 let mut entry = ToolCallAttribution::new(&call.tool_call_id)

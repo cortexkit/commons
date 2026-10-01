@@ -114,6 +114,40 @@ async fn step_recorded_seal_interrupted_passes() {
 }
 
 #[tokio::test]
+async fn step_recorded_seal_drop_step_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.step_recovery = StepRecovery::SealDropStep;
+    let report = run(&subject).await;
+    assert_passed(&report, "crash_at_StepRecorded");
+}
+
+#[tokio::test]
+async fn step_recorded_seal_drop_call_keep_text_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.step_recovery = StepRecovery::SealDropCall;
+    let report = run(&subject).await;
+    assert_passed(&report, "crash_at_StepRecorded");
+}
+
+#[tokio::test]
+async fn step_recorded_sealed_unattributed_dangling_call_fails() {
+    let mut subject = FakeSubject::new(Defects {
+        sealed_call_without_result: true,
+        sealed_call_without_attribution: true,
+        ..Defects::default()
+    });
+    subject.step_recovery = StepRecovery::SealInterrupted;
+    let report = run(&subject).await;
+    let reason = failed(&report, "crash_at_StepRecorded");
+    assert!(reason.contains("sealed branch:"), "{reason}");
+    assert!(
+        reason.contains("remains in attribution or message history"),
+        "{reason}"
+    );
+    assert_passed(&report, "crash_at_DispatchIntent");
+}
+
+#[tokio::test]
 async fn step_recorded_sealed_indeterminate_fails() {
     let mut subject = FakeSubject::new(Defects {
         sealed_call_indeterminate: true,

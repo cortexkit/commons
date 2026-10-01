@@ -334,15 +334,6 @@ pub fn check(
                         "at-most-once dispatch broke: the call ran {invoked} times"
                     ));
                 }
-                match entries_for(b, &observed.call.tool_call_id).as_slice() {
-                    [entry] if !entry.indeterminate => {}
-                    other => {
-                        return Err(format!(
-                        "the never-sent call must have indeterminate: false; entries are {other:?}"
-                    ))
-                    }
-                }
-                expect_holding(b, &observed.step_text, 1, "the durable step's text")?;
                 if invoked == 0 {
                     if RunState::parse(&last.state) != RunState::Interrupted {
                         return Err(format!(
@@ -357,21 +348,9 @@ pub fn check(
                         .ok_or("no owner follow-up was observed")?
                         .as_ref()
                         .map_err(Clone::clone)?;
-                    match entries_for(follow_up, &observed.call.tool_call_id).as_slice() {
-                        [entry] if !entry.indeterminate => {}
-                        _ => {
-                            return Err(
-                                "the call must remain indeterminate: false after the follow-up"
-                                    .into(),
-                            )
-                        }
-                    }
-                    result_before_turn(
-                        follow_up,
-                        &observed.call.tool_call_id,
-                        &observed.final_text,
-                    )?;
+                    check_sealed_history(observed, b, follow_up)?;
                 } else {
+                    expect_kept_step(b, observed)?;
                     expect_holding(b, &observed.final_text, 1, "the continued run's final text")?;
                     expect_holding(b, &result_text, 1, "the dispatched call's result")?;
                     result_before_turn(b, &observed.call.tool_call_id, &observed.final_text)?;
@@ -538,6 +517,97 @@ fn expect_holding(
     }
 }
 
+fn contains_id(value: &serde_json::Value, id: &str) -> bool {
+    match value {
+        serde_json::Value::String(text) => text == id,
+        serde_json::Value::Array(values) => values.iter().any(|v| contains_id(v, id)),
+        serde_json::Value::Object(values) => values.values().any(|v| contains_id(v, id)),
+        _ => false,
+    }
+}
+
+fn expect_kept_step(messages: &[ReadMessage], observed: &CrashObservation) -> Result<(), String> {
+    match entries_for(messages, &observed.call.tool_call_id).as_slice() {
+        [entry] if !entry.indeterminate => {}
+        other => {
+            return Err(format!(
+                "the never-sent call must have indeterminate: false; entries are {other:?}"
+            ))
+        }
+    }
+    expect_holding(messages, &observed.step_text, 1, "the durable step's text")
+}
+
+/// Sealing may retain a closed call or remove it entirely, but the follow-up
+/// must preserve that choice so no dangling call enters later model history.
+fn check_sealed_history(
+    observed: &CrashObservation,
+    cut: &[ReadMessage],
+    follow_up: &[ReadMessage],
+) -> Result<(), String> {
+    let id = &observed.call.tool_call_id;
+    let keys: Vec<_> = cut
+        .iter()
+        .chain(follow_up)
+        .flat_map(|m| &m.tool_calls)
+        .filter(|entry| entry.tool_call_id == *id)
+        .filter_map(|entry| entry.call_key.as_deref())
+        .collect();
+    let carries_call = |m: &ReadMessage| {
+        contains_id(&m.message, id) || keys.iter().any(|key| contains_id(&m.message, key))
+    };
+    if entries_for(cut, id).is_empty() {
+        let text_copies = holding(cut, &observed.step_text);
+        if text_copies > 1 {
+            return Err("the dropped call's assistant text is held more than once".into());
+        }
+        for messages in [cut, follow_up] {
+            if !entries_for(messages, id).is_empty() || messages.iter().any(carries_call) {
+                return Err("the dropped call remains in attribution or message history".into());
+            }
+            expect_holding(
+                messages,
+                &result_marker(&observed.call),
+                0,
+                "the dropped call's result",
+            )?;
+            expect_holding(
+                messages,
+                &observed.step_text,
+                text_copies,
+                "the dropped call's assistant text",
+            )?;
+        }
+        expect_holding(
+            follow_up,
+            &observed.final_text,
+            1,
+            "the later assistant turn",
+        )?;
+    } else {
+        for messages in [cut, follow_up] {
+            expect_kept_step(messages, observed)?;
+            let results = messages
+                .iter()
+                .filter(|m| m.tool_calls.is_empty() && carries_call(m))
+                .count();
+            if results != 1 {
+                return Err(format!("dangling call {id}: expected one result before the later assistant turn, found {results}"));
+            }
+            if messages
+                .iter()
+                .filter(|m| !m.tool_calls.is_empty() && carries_call(m))
+                .count()
+                > 1
+            {
+                return Err("the kept call is carried by more than one message".into());
+            }
+        }
+        result_before_turn(follow_up, id, &observed.final_text)?;
+    }
+    Ok(())
+}
+
 /// Result bodies are runner-specific. Join a non-call message to the call
 /// through its model id or attributed call key, without inspecting result content.
 fn result_before_turn(
@@ -545,14 +615,6 @@ fn result_before_turn(
     call_id: &str,
     later_text: &str,
 ) -> Result<(), String> {
-    fn contains_id(value: &serde_json::Value, id: &str) -> bool {
-        match value {
-            serde_json::Value::String(text) => text == id,
-            serde_json::Value::Array(values) => values.iter().any(|v| contains_id(v, id)),
-            serde_json::Value::Object(values) => values.values().any(|v| contains_id(v, id)),
-            _ => false,
-        }
-    }
     expect_holding(messages, later_text, 1, "the later assistant turn")?;
     let later = messages
         .iter()

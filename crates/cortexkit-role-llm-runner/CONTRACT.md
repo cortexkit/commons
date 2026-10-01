@@ -691,7 +691,11 @@ state root (`cortexkit-role-harness`):
    either resumes the run and dispatches it exactly once, or seals the run
    `interrupted` without dispatching it. Either way the call is never marked
    indeterminate, its tool runs at most once, and no later request carries
-   the call without a result.
+   the call without a result; a runner may drop the never-sent call from
+   history. In that dropped shape, neither the cut-run transcript nor the
+   follow-up transcript carries its id or `call_key`, attribution, or result.
+   The assistant step's text may also be dropped, or retained exactly once
+   without the call. The same shape is preserved through the follow-up.
 5. [pinned] **Replay, not re-invocation.** Applied compaction and every hook
    output replay from durable state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
