@@ -81,7 +81,11 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
 ];
 
 /// Why a capability tag is not acceptable in a catalog.
+///
+/// `#[non_exhaustive]` so a later check (for example on the tag's own shape)
+/// can add a variant without breaking callers that match on this.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CapabilityTagProblem {
     /// The tag has no `<namespace>:` prefix and this role does not define it.
     UndefinedUnprefixed,
