@@ -34,8 +34,10 @@ pub mod delivered_as {
     pub const UNKNOWN: &str = "unknown";
 }
 
-/// A steer delivery state, classified.
+/// A steer delivery state, classified. Non-exhaustive: a state the role adds
+/// later must not break a consumer's `match`, which keeps a catch-all arm.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DeliveredAs {
     Step,
     Turn,
@@ -79,11 +81,6 @@ pub struct Delivered {
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub r#ref: Option<String>,
 }
-
-/// Type alias for [`Delivered`].
-pub type SteerReceipt = Delivered;
-/// Type alias for [`Delivered`].
-pub type SteerDelivery = Delivered;
 
 impl Delivered {
     pub fn new(r#as: impl Into<String>) -> Self {
