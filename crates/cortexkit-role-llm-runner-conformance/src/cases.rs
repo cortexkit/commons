@@ -62,6 +62,12 @@ const OVERSIZE_CAP: u64 = 1024;
 const NO_SEND_MODE: &str =
     "the runner declares neither queue nor steer, so it takes no send to retry or reuse";
 
+/// Why the settled retry case cannot run when the send's reply names no
+/// run: `run.result` is the only way it can see a run end without reading
+/// the transcript, and it takes a `run_id`.
+const NO_RUN_TO_SETTLE: &str = "the send's reply names no run_id, so the suite cannot wait \
+     for its run to end through run.result and compare retries made after it";
+
 /// Why a written-once half of a `send_id` case cannot run.
 const NO_TRANSCRIPT: &str = "the runner does not declare transcript_reads, so the suite cannot \
      read what the send wrote; the reply half of this check still runs";
@@ -102,6 +108,7 @@ where
             "recurring_model_id_distinct_call_keys" => passed(self.recurring_call_keys().await),
             "subscribe_from_head_no_gap_no_duplicate" => passed(self.subscribe_from_head().await),
             "send_id_retry_same_answer" => self.send_id_retry().await,
+            "send_id_retry_settled_same_answer" => self.send_id_retry_settled().await,
             "send_id_retry_written_once" => self.send_id_retry_written_once().await,
             "send_id_reuse_refused_naming_field" => self.send_id_reuse().await,
             "send_id_reuse_writes_nothing" => self.send_id_reuse_writes_nothing().await,
@@ -1324,39 +1331,86 @@ where
         Ok((session, send_id, prompt, reply))
     }
 
-    /// Wait, without reading the transcript, until the run `reply` names
-    /// has a terminal state. The suite can only do so through `run.result`,
-    /// so only when the runner declares `run_ops` and the reply names its
-    /// run. Answers whether it waited.
-    async fn settle_unread(&self, route: &S::Route, reply: &SendReply) -> Result<bool, String> {
-        let run_id = match &reply.run_id {
-            Some(run_id) if self.declares(Capability::RunOps) => run_id,
-            _ => return Ok(false),
-        };
+    /// Wait, without reading the transcript, until run `run_id` has a
+    /// terminal state, through `run.result`. Only the case that requires
+    /// `run_ops` calls this, so a runner without it is never asked. Bounded
+    /// by [`MAX_POLLS`], so a run that never ends fails by name.
+    async fn settle_unread(&self, route: &S::Route, run_id: &str) -> Check {
         for _ in 0..MAX_POLLS {
             if run_result(route, run_id).await?.run_state().is_terminal() {
-                return Ok(true);
+                return Ok(());
             }
             self.subject.pause().await;
         }
         Err(format!("run {run_id} did not end within {MAX_POLLS} polls"))
     }
 
+    /// Retry a send twice with the same `send_id` and payload, answering
+    /// the two retries' replies.
+    async fn retried_twice(
+        &self,
+        session: &Session<S::Route>,
+        prompt: &str,
+        send_id: &str,
+        delivery: Option<&str>,
+    ) -> Result<(SendReply, SendReply), String> {
+        let first = self
+            .retry_once("the first retry", session, prompt, send_id, delivery)
+            .await?;
+        let second = self
+            .retry_once("the second retry", session, prompt, send_id, delivery)
+            .await?;
+        Ok((first, second))
+    }
+
+    async fn retry_once(
+        &self,
+        what: &str,
+        session: &Session<S::Route>,
+        prompt: &str,
+        send_id: &str,
+        delivery: Option<&str>,
+    ) -> Result<SendReply, String> {
+        let reply = expect_ok(
+            what,
+            self.send_raw(session, prompt, send_id, delivery).await?,
+        )?;
+        decode(what, reply)
+    }
+
+    /// Retries right after the send, never waiting: the send's state may
+    /// still move between them, so only the ids and the forward-only
+    /// `delivered` rule are checked.
     async fn send_id_retry(&self) -> Result<Ending, String> {
         let Some(delivery) = self.reply_half_delivery() else {
             return Ok(Ending::Inapplicable(NO_SEND_MODE.to_owned()));
         };
         let (session, send_id, prompt, original) = self.sent_unread("retry", delivery).await?;
-        let settled = self.settle_unread(&session.route, &original).await?;
-        let mut retries = Vec::new();
-        for what in ["the first retry", "the second retry"] {
-            let reply = expect_ok(
-                what,
-                self.send_raw(&session, &prompt, &send_id, delivery).await?,
-            )?;
-            retries.push(decode::<SendReply>(what, reply)?);
-        }
-        same_answer(&original, &retries[0], &retries[1], settled)?;
+        let (first, second) = self
+            .retried_twice(&session, &prompt, &send_id, delivery)
+            .await?;
+        same_answer(&original, &first, &second, false)?;
+        Ok(Ending::Passed)
+    }
+
+    /// Retries once the send's run has ended, seen through `run.result`
+    /// (the case requires `run_ops`): nothing may move between them any
+    /// more, so the two retries must be the same answer apart from
+    /// `delivered`.
+    async fn send_id_retry_settled(&self) -> Result<Ending, String> {
+        let Some(delivery) = self.reply_half_delivery() else {
+            return Ok(Ending::Inapplicable(NO_SEND_MODE.to_owned()));
+        };
+        let (session, send_id, prompt, original) =
+            self.sent_unread("retry-settled", delivery).await?;
+        let Some(run_id) = original.run_id.clone() else {
+            return Ok(Ending::Inapplicable(NO_RUN_TO_SETTLE.to_owned()));
+        };
+        self.settle_unread(&session.route, &run_id).await?;
+        let (first, second) = self
+            .retried_twice(&session, &prompt, &send_id, delivery)
+            .await?;
+        same_answer(&original, &first, &second, true)?;
         Ok(Ending::Passed)
     }
 
@@ -1677,7 +1731,8 @@ fn show_receipt(receipt: Option<&Delivered>) -> String {
 /// earlier answer had not yet), and `delivered` moves only forward
 /// ([`delivered_move_allowed`]). When `settled`, the send's run had ended
 /// before the retries, so nothing may move between them: the two retries
-/// are the same answer, apart from `delivered`.
+/// are the same answer, apart from `delivered`. Only the case that saw the
+/// run end through `run.result` passes `settled`.
 fn same_answer(
     original: &SendReply,
     first: &SendReply,
