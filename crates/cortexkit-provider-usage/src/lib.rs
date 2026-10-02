@@ -21,7 +21,7 @@
 //!   [`ProviderUsage`] carrying `error`, not a request-level failure.
 //!
 //! # Serialization contract consumers depend on
-//! - camelCase keys (`usedPercent`, `resetsAt`, `windowMinutes`,
+//! - camelCase keys (`usedPercent`, `resetsAt`, `windowMinutes`, `windowKind`,
 //!   `extraRateWindows`, `rawUsedPercent`, `accountInfo`, `savedResets`,
 //!   `usedCount`, `totalCount`).
 //! - A healthy entry MUST NOT carry `error` (consumers skip truthy-`error`
@@ -66,6 +66,26 @@ pub struct RateWindow {
     /// the consumer then paces on utilization alone rather than a burn rate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_minutes: Option<i64>,
+    /// The period this window covers, when the upstream names it: one of the
+    /// values in [`window_kind`], or a value a consumer has not seen yet.
+    ///
+    /// It exists for windows whose length cannot be stated in minutes. A month
+    /// varies, so a monthly window carries no `window_minutes`, and without a
+    /// name a consumer cannot tell it from any other window with no stated
+    /// length, or from whatever a provider's other page shape puts in the same
+    /// slot. The first reader matches a refusal that names its limit ("monthly
+    /// usage limit reached") to the window it refers to.
+    ///
+    /// **Absence means the upstream did not name the period, never "some other
+    /// kind".** A producer sets it only from the upstream's own label or field (a
+    /// page's "Monthly usage" heading, an API key such as `seven_day`), mapped
+    /// onto this vocabulary. A consumer that needs the period of an unnamed
+    /// window falls back to `window_minutes`.
+    ///
+    /// An open string, not an enum: an unknown kind must reach the consumer
+    /// intact, not fail the decode of the whole response.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub window_kind: Option<String>,
     /// Absolute consumed count in the window (e.g. tokens, requests). A count
     /// of things, so integral by contract, and only ever the upstream's own
     /// figure — never recovered from a percentage and a cap (a derived figure
@@ -94,6 +114,32 @@ pub struct RateWindow {
     /// providers state no split, so absence is the common case.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub breakdown: Option<UsageBreakdown>,
+}
+
+/// The values [`RateWindow::window_kind`] carries today.
+///
+/// Named by PERIOD, not by each upstream's own term, so a consumer branches on
+/// one vocabulary across providers. A producer maps the upstream's name onto it:
+/// Anthropic's `five_hour` and Ollama's "Session usage" are both
+/// [`FIVE_HOUR`]; Anthropic's `seven_day` and Ollama's "Weekly usage" are both
+/// [`WEEKLY`].
+///
+/// The list is open. A consumer must handle a value it does not know, and a
+/// new period is a new constant here, never a reuse of an existing one.
+pub mod window_kind {
+    /// A window that rolls over hourly, as the upstream names it. Its length can
+    /// still be unstated: Ollama's "Hourly usage" block gives none.
+    pub const HOURLY: &str = "hourly";
+    /// A five-hour window, which several upstreams call a session.
+    pub const FIVE_HOUR: &str = "five_hour";
+    /// A one-day window.
+    pub const DAILY: &str = "daily";
+    /// A seven-day window.
+    pub const WEEKLY: &str = "weekly";
+    /// A month-long window. Its length changes with the month, so it carries no
+    /// `window_minutes`, and it resets on the upstream's billing anchor, which
+    /// need not be the first of a calendar month.
+    pub const MONTHLY: &str = "monthly";
 }
 
 /// A window's consumption split by category, as the upstream reports it.
@@ -904,6 +950,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            window_kind: None,
             breakdown: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
@@ -943,6 +990,7 @@ mod tests {
                     per_minutes: 43_200,
                 }),
             }),
+            window_kind: None,
             breakdown: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
@@ -1079,6 +1127,7 @@ mod tests {
                     used_count: None,
                     total_count: None,
                     regeneration: None,
+                    window_kind: None,
                     breakdown: None,
                 }),
                 ..Default::default()
@@ -1132,6 +1181,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            window_kind: None,
             breakdown: None,
         };
         let json = serde_json::to_string(&unrelaxed).unwrap();
@@ -1148,6 +1198,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            window_kind: None,
             breakdown: None,
         };
         let json = serde_json::to_string(&relaxed).unwrap();
@@ -1194,6 +1245,7 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            window_kind: None,
             breakdown: None,
         };
         let json = serde_json::to_string(&window).unwrap();
@@ -1448,8 +1500,68 @@ mod tests {
             used_count: None,
             total_count: None,
             regeneration: None,
+            window_kind: None,
             breakdown,
         }
+    }
+
+    /// `windowKind` is additive: a window that names no period serializes with no
+    /// key, so every existing entry is byte-for-byte unchanged.
+    #[test]
+    fn a_window_naming_no_period_omits_the_kind_key() {
+        let json = serde_json::to_string(&weekly(None)).unwrap();
+        assert!(!json.contains("windowKind"), "{json}");
+    }
+
+    /// A window written before `windowKind` existed still decodes, to `None`.
+    #[test]
+    fn a_window_from_before_the_kind_decodes_without_one() {
+        let json =
+            r#"{"usedPercent":85.0,"resetsAt":"2026-09-30T14:00:00Z","windowMinutes":10080}"#;
+        let window: RateWindow = serde_json::from_str(json).unwrap();
+        assert_eq!(window.window_kind, None);
+    }
+
+    /// The case the field exists for: a monthly window with no stated length
+    /// carries its kind under the camelCase key and round-trips.
+    #[test]
+    fn a_monthly_window_with_no_length_carries_its_kind() {
+        let window = RateWindow {
+            window_minutes: None,
+            window_kind: Some(window_kind::MONTHLY.to_string()),
+            ..weekly(None)
+        };
+        let json = serde_json::to_string(&window).unwrap();
+        assert!(json.contains(r#""windowKind":"monthly""#), "{json}");
+        assert!(!json.contains("windowMinutes"), "{json}");
+        let back: RateWindow = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, window);
+    }
+
+    /// A kind no consumer has seen arrives as itself rather than failing the
+    /// decode: the field is an open string, and an enum here would turn one new
+    /// period into a response nobody can read.
+    #[test]
+    fn an_unknown_kind_decodes_as_itself() {
+        let json = r#"{"usedPercent":5.0,"windowKind":"fortnightly"}"#;
+        let window: RateWindow = serde_json::from_str(json).unwrap();
+        assert_eq!(window.window_kind.as_deref(), Some("fortnightly"));
+    }
+
+    /// The vocabulary is pinned, so renaming a value (which every consumer
+    /// matches as a string) fails here instead of silently on the wire.
+    #[test]
+    fn the_window_kind_vocabulary_is_pinned() {
+        assert_eq!(
+            [
+                window_kind::HOURLY,
+                window_kind::FIVE_HOUR,
+                window_kind::DAILY,
+                window_kind::WEEKLY,
+                window_kind::MONTHLY,
+            ],
+            ["hourly", "five_hour", "daily", "weekly", "monthly"]
+        );
     }
 
     /// The field is additive: a window without a split serializes exactly as
