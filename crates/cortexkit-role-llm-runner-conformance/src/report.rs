@@ -189,20 +189,37 @@ pub const CASES: &[CaseSpec] = &[
     ),
     case(
         "send_id_retry_same_answer",
-        SENDS,
-        "a send retried with the same send_id and payload is answered with the run it started, the same answer each time, and its prompt is written once",
+        &[],
+        "on a runner that declares queue or steer, and without reading the transcript: a send retried twice with the same send_id and payload names the run_id and submission_id the send was answered with, and its delivered receipt moves only forward (absent or pending to step, turn or unknown, which are final, ref included); once the send's run has ended, the two retries are the same answer apart from delivered",
+    ),
+    case(
+        "send_id_retry_written_once",
+        &[Queue],
+        "on a runner that declares transcript_reads, a send retried twice with the same send_id and payload is answered with the run it started, starts no other run, and its prompt is written once",
     ),
     case(
         "send_id_reuse_refused_naming_field",
-        SENDS,
-        "a send_id reused with another prompt is refused send_id_reuse naming prompt, and nothing is written",
+        &[],
+        "on a runner that declares queue or steer, and without reading the transcript: a send_id reused with another prompt is refused send_id_reuse naming prompt",
+    ),
+    case(
+        "send_id_reuse_writes_nothing",
+        &[Queue],
+        "on a runner that declares transcript_reads, a send_id reused with another prompt writes nothing, however it is answered",
     ),
     CaseSpec {
         name: "delivery_change_refused",
-        requires: SENDS,
+        requires: &[],
         requires_any: &[Steer, Interrupt],
         requires_undeclared_any: &[],
-        checks: "a send_id reused with another declared delivery mode is refused send_id_reuse naming delivery, and nothing is written",
+        checks: "on a runner that declares queue or steer, and without reading the transcript: a send_id reused with another declared delivery mode is refused send_id_reuse naming delivery",
+    },
+    CaseSpec {
+        name: "delivery_change_writes_nothing",
+        requires: &[Queue],
+        requires_any: &[Steer, Interrupt],
+        requires_undeclared_any: &[],
+        checks: "on a runner that declares transcript_reads, a send_id reused with another declared delivery mode writes nothing, however it is answered",
     },
     case(
         "unknown_delivery_refused",
@@ -224,7 +241,7 @@ pub const CASES: &[CaseSpec] = &[
     case(
         "resend_steer_delivered_stable",
         SENDS,
-        "a re-send's delivered receipt is stable once it is step or turn",
+        "a steer re-sent twice with the same send_id carries a delivered receipt that moves only forward: absent or pending to step, turn or unknown, which are final, ref included",
     ),
     case(
         "crash_at_Admitted",
@@ -288,6 +305,9 @@ pub const NARROWINGS: &[&str] = &[
     "baseline_matches_admission_reply is inapplicable to a runner whose session capabilities come from session.baseline, which has no admission reply",
     "undeclared_delivery_refused is inapplicable to a runner that declares every delivery mode",
     "the suite fails a run with no kill at all, because §14 fails every run in which no kill ended a real process",
+    "each send_id case is split in two: send_id_retry_same_answer, send_id_reuse_refused_naming_field and delivery_change_refused check only the reply, never read the transcript, and run on a runner that declares queue or steer (their first send is steer when queue is not declared); send_id_retry_written_once, send_id_reuse_writes_nothing and delivery_change_writes_nothing check what was written and are inapplicable without transcript_reads",
+    "send_id_retry_same_answer requires the two retries to be the same answer (apart from delivered) only once it has seen the send's run end, through run.result, which needs run_ops and a reply naming its run; before that a send's state may move on between retries",
+    "a delivered receipt may also move from absent to pending, because on a confirm runner an absent receipt already means pending (§9)",
 ];
 
 /// How one case ended.

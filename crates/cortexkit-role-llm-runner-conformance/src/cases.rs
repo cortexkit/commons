@@ -10,7 +10,7 @@ use cortexkit_role_llm_runner::{
     errors, ops,
     read::{HeadMeta, ReadMessage, ReadPage, ReadRequest, ToolCallAttribution},
     run::{join_text_parts, states as run_states},
-    send::{delivered_as, SendReply, DELIVERY_FIELD},
+    send::{delivered_as, Delivered, DeliveredAs, SendReply, DELIVERY_FIELD},
     subscribe::{kinds, SubscribeEvent, SubscribeFrom, SubscribeRequest},
     PROVIDES,
 };
@@ -58,6 +58,14 @@ const OVERSIZE_BYTES: usize = 16 * 1024;
 /// The byte cap the oversize case reads with.
 const OVERSIZE_CAP: u64 = 1024;
 
+/// Why a reply half of a `send_id` case cannot run.
+const NO_SEND_MODE: &str =
+    "the runner declares neither queue nor steer, so it takes no send to retry or reuse";
+
+/// Why a written-once half of a `send_id` case cannot run.
+const NO_TRANSCRIPT: &str = "the runner does not declare transcript_reads, so the suite cannot \
+     read what the send wrote; the reply half of this check still runs";
+
 impl<S> Case<'_, S>
 where
     S: LlmRunnerSubject,
@@ -93,9 +101,12 @@ where
             "sibling_calls_distinct_call_keys" => passed(self.sibling_call_keys().await),
             "recurring_model_id_distinct_call_keys" => passed(self.recurring_call_keys().await),
             "subscribe_from_head_no_gap_no_duplicate" => passed(self.subscribe_from_head().await),
-            "send_id_retry_same_answer" => passed(self.send_id_retry().await),
-            "send_id_reuse_refused_naming_field" => passed(self.send_id_reuse().await),
-            "delivery_change_refused" => passed(self.delivery_change().await),
+            "send_id_retry_same_answer" => self.send_id_retry().await,
+            "send_id_retry_written_once" => self.send_id_retry_written_once().await,
+            "send_id_reuse_refused_naming_field" => self.send_id_reuse().await,
+            "send_id_reuse_writes_nothing" => self.send_id_reuse_writes_nothing().await,
+            "delivery_change_refused" => self.delivery_change().await,
+            "delivery_change_writes_nothing" => self.delivery_change_writes_nothing().await,
             "unknown_delivery_refused" => passed(self.unknown_delivery().await),
             "undeclared_delivery_refused" => passed(self.undeclared_delivery().await),
             "guaranteed_steer_never_pending_or_unknown" => {
@@ -1217,6 +1228,31 @@ where
         Ok((session, send_id, prompt))
     }
 
+    /// Send, and check the head did not move, however the send was
+    /// answered. Returns the answer.
+    async fn writes_nothing(
+        &self,
+        what: &str,
+        session: &Session<S::Route>,
+        prompt: &str,
+        send_id: &str,
+        delivery: Option<&str>,
+    ) -> Result<crate::route::Reply, String> {
+        let before = head(&session.route).await?;
+        let reply = self.send_raw(session, prompt, send_id, delivery).await?;
+        let after = head(&session.route).await?;
+        if after != before {
+            let answered = match &reply {
+                crate::route::Reply::Error(error) => format!("refused {}", error.code),
+                crate::route::Reply::Response(_) => "answered".to_owned(),
+            };
+            return Err(format!(
+                "{what} was {answered} but the session changed: head {before:?} then {after:?}"
+            ));
+        }
+        Ok(reply)
+    }
+
     /// Send, expect a refusal, and check the head did not move.
     async fn refused_writes_nothing(
         &self,
@@ -1226,85 +1262,215 @@ where
         send_id: &str,
         delivery: Option<&str>,
     ) -> Result<subc_protocol::ErrorBody, String> {
-        let before = head(&session.route).await?;
-        let error = expect_error(
+        expect_error(
             what,
-            self.send_raw(session, prompt, send_id, delivery).await?,
-        )?;
-        let after = head(&session.route).await?;
-        if after != before {
-            return Err(format!(
-                "{what} was refused {} but the session changed: head {before:?} then {after:?}",
-                error.code
-            ));
-        }
-        Ok(error)
+            self.writes_nothing(what, session, prompt, send_id, delivery)
+                .await?,
+        )
     }
 
-    async fn send_id_retry(&self) -> Check {
-        let (session, send_id, prompt) = self.sent_session("retry").await?;
+    // The `send_id` cases come in two halves. The reply half checks only
+    // what `session.send` answers, never reads the transcript, and so runs
+    // on any runner that takes a send. The written-once half checks what
+    // the send wrote, through `session.read` and `session.head`, and is
+    // inapplicable on a runner without `transcript_reads`.
+
+    /// The `delivery` of a reply half's first send: absent (`queue`) when
+    /// the runner declares `queue`, otherwise `steer`, which with no run
+    /// active is a plain send. `None` when the runner declares neither.
+    fn reply_half_delivery(&self) -> Option<Option<&'static str>> {
+        if self.declares(Capability::Queue) {
+            Some(None)
+        } else if self.declares(Capability::Steer) {
+            Some(Some(groups::STEER))
+        } else {
+            None
+        }
+    }
+
+    /// `Some` with the inapplicable ending of a written-once half, when the
+    /// runner does not declare `transcript_reads`.
+    fn without_transcript(&self) -> Option<Ending> {
+        (!self.declares(Capability::TranscriptReads))
+            .then(|| Ending::Inapplicable(NO_TRANSCRIPT.to_owned()))
+    }
+
+    /// A fresh session with one send of a fresh prompt, made with
+    /// `delivery` and not waited on: a reply half never reads the
+    /// transcript, so it cannot wait through it. Returns the session, the
+    /// send's id and prompt, and its reply.
+    async fn sent_unread(
+        &self,
+        label: &str,
+        delivery: Option<&str>,
+    ) -> Result<(Session<S::Route>, String, String, SendReply), String> {
+        let (part, _) = self.mint.text("answer");
+        let mut session = self
+            .open(
+                label,
+                Script {
+                    turns: vec![ScriptedTurn { parts: vec![part] }],
+                },
+            )
+            .await?;
+        let send_id = self.mint.next("send");
+        let prompt = self.mint.next("prompt");
+        let reply = expect_ok(
+            "session.send",
+            self.send_raw(&session, &prompt, &send_id, delivery).await?,
+        )?;
+        session.first = Some((send_id.clone(), prompt.clone()));
+        let reply = decode("session.send", reply)?;
+        Ok((session, send_id, prompt, reply))
+    }
+
+    /// Wait, without reading the transcript, until the run `reply` names
+    /// has a terminal state. The suite can only do so through `run.result`,
+    /// so only when the runner declares `run_ops` and the reply names its
+    /// run. Answers whether it waited.
+    async fn settle_unread(&self, route: &S::Route, reply: &SendReply) -> Result<bool, String> {
+        let run_id = match &reply.run_id {
+            Some(run_id) if self.declares(Capability::RunOps) => run_id,
+            _ => return Ok(false),
+        };
+        for _ in 0..MAX_POLLS {
+            if run_result(route, run_id).await?.run_state().is_terminal() {
+                return Ok(true);
+            }
+            self.subject.pause().await;
+        }
+        Err(format!("run {run_id} did not end within {MAX_POLLS} polls"))
+    }
+
+    async fn send_id_retry(&self) -> Result<Ending, String> {
+        let Some(delivery) = self.reply_half_delivery() else {
+            return Ok(Ending::Inapplicable(NO_SEND_MODE.to_owned()));
+        };
+        let (session, send_id, prompt, original) = self.sent_unread("retry", delivery).await?;
+        let settled = self.settle_unread(&session.route, &original).await?;
+        let mut retries = Vec::new();
+        for what in ["the first retry", "the second retry"] {
+            let reply = expect_ok(
+                what,
+                self.send_raw(&session, &prompt, &send_id, delivery).await?,
+            )?;
+            retries.push(decode::<SendReply>(what, reply)?);
+        }
+        same_answer(&original, &retries[0], &retries[1], settled)?;
+        Ok(Ending::Passed)
+    }
+
+    async fn send_id_retry_written_once(&self) -> Result<Ending, String> {
+        if let Some(ending) = self.without_transcript() {
+            return Ok(ending);
+        }
+        let (session, send_id, prompt) = self.sent_session("retry-written").await?;
         let last = self.last_run_id(&session.route).await?;
-        let (session_ref, prompt_ref, send_id_ref) = (&session, &prompt, &send_id);
-        let retry = |what: &'static str| async move {
-            decode::<Value>(
+        for what in ["the first retry", "the second retry"] {
+            let reply: SendReply = decode(
                 what,
                 expect_ok(
                     what,
-                    self.send_raw(session_ref, prompt_ref, send_id_ref, None)
-                        .await?,
+                    self.send_raw(&session, &prompt, &send_id, None).await?,
                 )?,
-            )
-        };
-        let first = retry("the first retry").await?;
-        let second = retry("the second retry").await?;
-        if first != second {
-            return Err(format!(
-                "two retries of one send answered {first} and {second}"
-            ));
-        }
-        let reply: SendReply = decode("the retry", first)?;
-        if reply.run_id.is_some() && reply.run_id != last {
-            return Err(format!(
-                "the retry names run {:?}; the send started run {last:?}",
-                reply.run_id
-            ));
+            )?;
+            if reply.run_id.is_some() && reply.run_id != last {
+                return Err(format!(
+                    "{what} names run {:?}; the send started run {last:?}",
+                    reply.run_id
+                ));
+            }
         }
         if self.last_run_id(&session.route).await? != last {
             return Err("a retried send started another run".into());
         }
         let (_, all) = read_all(&session.route).await?;
-        let (_, prompt) = session.first.clone().expect("recorded");
         let copies = holding(&all, &prompt);
         if copies != 1 {
             return Err(format!(
                 "the retried prompt is written in {copies} messages, not one"
             ));
         }
-        Ok(())
+        Ok(Ending::Passed)
     }
 
-    async fn send_id_reuse(&self) -> Check {
-        let (session, send_id, _) = self.sent_session("reuse").await?;
+    async fn send_id_reuse(&self) -> Result<Ending, String> {
+        let Some(delivery) = self.reply_half_delivery() else {
+            return Ok(Ending::Inapplicable(NO_SEND_MODE.to_owned()));
+        };
+        let (session, send_id, _, _) = self.sent_unread("reuse", delivery).await?;
         let other = self.mint.next("other-prompt");
         let what = "a send_id reused with another prompt";
-        let error = self
-            .refused_writes_nothing(what, &session, &other, &send_id, None)
-            .await?;
-        expect_field(what, &error, errors::SEND_ID_REUSE, "prompt")
+        let error = expect_error(
+            what,
+            self.send_raw(&session, &other, &send_id, delivery).await?,
+        )?;
+        expect_field(what, &error, errors::SEND_ID_REUSE, "prompt")?;
+        Ok(Ending::Passed)
     }
 
-    async fn delivery_change(&self) -> Check {
+    async fn send_id_reuse_writes_nothing(&self) -> Result<Ending, String> {
+        if let Some(ending) = self.without_transcript() {
+            return Ok(ending);
+        }
+        let (session, send_id, _) = self.sent_session("reuse-written").await?;
+        let other = self.mint.next("other-prompt");
+        self.writes_nothing(
+            "a send_id reused with another prompt",
+            &session,
+            &other,
+            &send_id,
+            None,
+        )
+        .await?;
+        Ok(Ending::Passed)
+    }
+
+    async fn delivery_change(&self) -> Result<Ending, String> {
+        let Some(delivery) = self.reply_half_delivery() else {
+            return Ok(Ending::Inapplicable(NO_SEND_MODE.to_owned()));
+        };
+        let first_mode = delivery.unwrap_or(groups::QUEUE);
+        let Some(mode) = [Capability::Steer, Capability::Interrupt]
+            .into_iter()
+            .filter(|mode| self.declares(*mode))
+            .filter_map(Capability::group)
+            .find(|mode| *mode != first_mode)
+        else {
+            return Ok(Ending::Inapplicable(format!(
+                "the runner declares no delivery mode other than {first_mode} to change to"
+            )));
+        };
+        let (session, send_id, prompt, _) = self.sent_unread("delivery-change", delivery).await?;
+        let what = format!("a send_id reused with delivery {mode}");
+        let error = expect_error(
+            &what,
+            self.send_raw(&session, &prompt, &send_id, Some(mode))
+                .await?,
+        )?;
+        expect_field(&what, &error, errors::SEND_ID_REUSE, DELIVERY_FIELD)?;
+        Ok(Ending::Passed)
+    }
+
+    async fn delivery_change_writes_nothing(&self) -> Result<Ending, String> {
+        if let Some(ending) = self.without_transcript() {
+            return Ok(ending);
+        }
         let mode = if self.declares(Capability::Steer) {
             groups::STEER
         } else {
             groups::INTERRUPT
         };
-        let (session, send_id, prompt) = self.sent_session("delivery-change").await?;
-        let what = format!("a send_id reused with delivery {mode}");
-        let error = self
-            .refused_writes_nothing(&what, &session, &prompt, &send_id, Some(mode))
-            .await?;
-        expect_field(&what, &error, errors::SEND_ID_REUSE, DELIVERY_FIELD)
+        let (session, send_id, prompt) = self.sent_session("delivery-change-written").await?;
+        self.writes_nothing(
+            &format!("a send_id reused with delivery {mode}"),
+            &session,
+            &prompt,
+            &send_id,
+            Some(mode),
+        )
+        .await?;
+        Ok(Ending::Passed)
     }
 
     async fn unknown_delivery(&self) -> Check {
@@ -1429,32 +1595,143 @@ where
         )?;
         let retry2: SendReply = decode("session.send steer retry 2", retry2_raw)?;
 
-        let receipt1 = match &retry1.delivered {
-            Some(d) if matches!(d.r#as.as_str(), delivered_as::STEP | delivered_as::TURN) => d,
-            _ => return Ok(Ending::Passed),
-        };
-        let receipt2 = retry2
-            .delivered
-            .as_ref()
-            .ok_or_else(|| "the second re-send carries no delivered receipt".to_owned())?;
-        if receipt1 != receipt2 {
-            return Err(format!(
-                "re-send delivered changed from {receipt1:?} to {receipt2:?}"
-            ));
-        }
-        if let Some(first_receipt) = &first_reply.delivered {
-            if matches!(
-                first_receipt.r#as.as_str(),
-                delivered_as::STEP | delivered_as::TURN
-            ) && first_receipt != receipt1
-            {
-                return Err(format!(
-                    "re-send delivered {receipt1:?} differs from initial reply {first_receipt:?}"
-                ));
-            }
+        let receipts = [
+            first_reply.delivered.as_ref(),
+            retry1.delivered.as_ref(),
+            retry2.delivered.as_ref(),
+        ];
+        for pair in receipts.windows(2) {
+            check_delivered_move(pair[0], pair[1]).map_err(|e| format!("re-send {e}"))?;
         }
         Ok(Ending::Passed)
     }
+}
+
+/// Whether a re-send's `delivered` receipt may follow `before`, the receipt
+/// an earlier answer to the same `send_id` carried. A receipt moves only
+/// forward: from absent or `pending` to `step`, `turn` or `unknown`. It may
+/// also go from absent to `pending`, because on a `confirm` runner an
+/// absent receipt already means `pending` and a re-send states it. `step`,
+/// `turn` and `unknown` are final: once one appears, every later answer
+/// carries it unchanged, `ref` included. Any other change, to or from an
+/// `as` the role does not define included, is refused.
+///
+/// The one rule both the retry case and the steer re-send case apply.
+pub(crate) fn delivered_move_allowed(
+    before: Option<&Delivered>,
+    after: Option<&Delivered>,
+) -> bool {
+    if before == after {
+        return true;
+    }
+    let Some(after) = after else {
+        return false;
+    };
+    match before.map(Delivered::r#as) {
+        None => is_final(after) || after.r#as() == DeliveredAs::Pending,
+        Some(DeliveredAs::Pending) => is_final(after),
+        Some(_) => false,
+    }
+}
+
+/// `step`, `turn` and `unknown`: the receipts that never change once given.
+fn is_final(receipt: &Delivered) -> bool {
+    matches!(
+        receipt.r#as(),
+        DeliveredAs::Step | DeliveredAs::Turn | DeliveredAs::Unknown
+    )
+}
+
+/// [`delivered_move_allowed`], failing with both receipts named.
+fn check_delivered_move(before: Option<&Delivered>, after: Option<&Delivered>) -> Check {
+    if delivered_move_allowed(before, after) {
+        return Ok(());
+    }
+    let why = match before {
+        Some(before) if is_final(before) => {
+            format!("{} is final and never changes, ref included", before.r#as)
+        }
+        _ => "a receipt moves only forward, from absent or pending to step, turn or unknown"
+            .to_owned(),
+    };
+    Err(format!(
+        "delivered changed from {} to {}: {why}",
+        show_receipt(before),
+        show_receipt(after)
+    ))
+}
+
+fn show_receipt(receipt: Option<&Delivered>) -> String {
+    match receipt {
+        None => "absent".to_owned(),
+        Some(receipt) => match &receipt.r#ref {
+            None => receipt.r#as.clone(),
+            Some(id) => format!("{} (ref {id})", receipt.r#as),
+        },
+    }
+}
+
+/// Check the answers to a send and to its two retries with the same
+/// `send_id` and payload. Each retry names the `run_id` and
+/// `submission_id` the earlier answers named (a retry may name one an
+/// earlier answer had not yet), and `delivered` moves only forward
+/// ([`delivered_move_allowed`]). When `settled`, the send's run had ended
+/// before the retries, so nothing may move between them: the two retries
+/// are the same answer, apart from `delivered`.
+fn same_answer(
+    original: &SendReply,
+    first: &SendReply,
+    second: &SendReply,
+    settled: bool,
+) -> Check {
+    let answers = [
+        ("the send", original),
+        ("the first retry", first),
+        ("the second retry", second),
+    ];
+    for (i, (earlier_name, earlier)) in answers.iter().enumerate() {
+        for (later_name, later) in &answers[i + 1..] {
+            for (field, a, b) in [
+                ("run_id", &earlier.run_id, &later.run_id),
+                (
+                    "submission_id",
+                    &earlier.submission_id,
+                    &later.submission_id,
+                ),
+            ] {
+                if let (Some(a), Some(b)) = (a, b) {
+                    if a != b {
+                        return Err(format!(
+                            "{later_name} names {field} {b}; {earlier_name} named {a}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if original.run_id.is_some() && (first.run_id.is_none() || second.run_id.is_none()) {
+        return Err(format!(
+            "the send named run {:?}, but a retry names none",
+            original.run_id
+        ));
+    }
+    check_delivered_move(original.delivered.as_ref(), first.delivered.as_ref())
+        .map_err(|e| format!("the first retry's {e}"))?;
+    check_delivered_move(first.delivered.as_ref(), second.delivered.as_ref())
+        .map_err(|e| format!("the second retry's {e}"))?;
+    if settled {
+        let without_receipt = |reply: &SendReply| {
+            let mut reply = reply.clone();
+            reply.delivered = None;
+            reply
+        };
+        if without_receipt(first) != without_receipt(second) {
+            return Err(format!(
+                "two retries of one send, after its run ended, answered {first:?} and {second:?}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn ordinals(messages: &[ReadMessage]) -> Vec<u64> {
@@ -1493,5 +1770,143 @@ fn distinct_keys(what: &str, keys: &[Option<String>]) -> Check {
         (Some(a), Some(b)) if a != b => Ok(()),
         (Some(a), Some(_)) => Err(format!("{what} share call_key {a}")),
         _ => Err(format!("{what}: a call carries no call_key ({keys:?})")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn receipt(r#as: &str) -> Option<Delivered> {
+        Some(Delivered::new(r#as))
+    }
+
+    fn allowed(before: &Option<Delivered>, after: &Option<Delivered>) -> bool {
+        delivered_move_allowed(before.as_ref(), after.as_ref())
+    }
+
+    #[test]
+    fn a_receipt_may_move_forward_or_stay() {
+        let open = [None, receipt(delivered_as::PENDING)];
+        let finals = [
+            receipt(delivered_as::STEP),
+            Some(Delivered::new(delivered_as::TURN).with_ref("run-1")),
+            receipt(delivered_as::UNKNOWN),
+        ];
+        for before in &open {
+            for after in &finals {
+                assert!(allowed(before, after), "{before:?} -> {after:?}");
+            }
+            assert!(allowed(before, before), "{before:?} unchanged");
+        }
+        for receipt in &finals {
+            assert!(allowed(receipt, receipt), "{receipt:?} unchanged");
+        }
+        assert!(allowed(&None, &receipt(delivered_as::PENDING)));
+        assert!(allowed(
+            &receipt("future_delivery"),
+            &receipt("future_delivery")
+        ));
+    }
+
+    #[test]
+    fn a_backward_receipt_move_is_refused() {
+        let backward = [
+            (receipt(delivered_as::STEP), None),
+            (receipt(delivered_as::STEP), receipt(delivered_as::PENDING)),
+            (receipt(delivered_as::TURN), receipt(delivered_as::PENDING)),
+            (
+                receipt(delivered_as::UNKNOWN),
+                receipt(delivered_as::PENDING),
+            ),
+            (receipt(delivered_as::UNKNOWN), None),
+            (receipt(delivered_as::PENDING), None),
+        ];
+        for (before, after) in &backward {
+            assert!(!allowed(before, after), "{before:?} -> {after:?}");
+        }
+        let error = check_delivered_move(
+            receipt(delivered_as::STEP).as_ref(),
+            receipt(delivered_as::PENDING).as_ref(),
+        )
+        .unwrap_err();
+        assert!(error.contains("from step to pending"), "{error}");
+    }
+
+    #[test]
+    fn a_final_receipt_never_changes() {
+        let changes = [
+            (receipt(delivered_as::UNKNOWN), receipt(delivered_as::STEP)),
+            (receipt(delivered_as::STEP), receipt(delivered_as::TURN)),
+            (receipt(delivered_as::TURN), receipt(delivered_as::UNKNOWN)),
+            (
+                Some(Delivered::new(delivered_as::TURN).with_ref("run-1")),
+                Some(Delivered::new(delivered_as::TURN).with_ref("run-2")),
+            ),
+            (
+                Some(Delivered::new(delivered_as::STEP).with_ref("row-1")),
+                receipt(delivered_as::STEP),
+            ),
+            (
+                receipt(delivered_as::PENDING),
+                Some(Delivered::new(delivered_as::PENDING).with_ref("row-1")),
+            ),
+            (receipt(delivered_as::PENDING), receipt("future_delivery")),
+        ];
+        for (before, after) in &changes {
+            assert!(!allowed(before, after), "{before:?} -> {after:?}");
+        }
+        let error = check_delivered_move(
+            Some(&Delivered::new(delivered_as::TURN).with_ref("run-1")),
+            Some(&Delivered::new(delivered_as::TURN).with_ref("run-2")),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("from turn (ref run-1) to turn (ref run-2)"),
+            "{error}"
+        );
+        assert!(error.contains("final"), "{error}");
+    }
+
+    #[test]
+    fn retries_must_name_the_send_and_agree_once_settled() {
+        let send = SendReply::new("active")
+            .with_run_id("run-1")
+            .with_submission_id("sub-1");
+        let finished = SendReply::new("finished")
+            .with_run_id("run-1")
+            .with_reason("completed");
+        assert_eq!(same_answer(&send, &finished, &finished, true), Ok(()));
+
+        let other_submission = finished.clone().with_submission_id("sub-2");
+        let error = same_answer(&send, &other_submission, &other_submission, true).unwrap_err();
+        assert!(error.contains("submission_id sub-2"), "{error}");
+
+        let other_run = finished.clone().with_run_id("run-2");
+        let error = same_answer(&send, &finished, &other_run, true).unwrap_err();
+        assert!(error.contains("run_id run-2"), "{error}");
+
+        let error = same_answer(&send, &SendReply::new("finished"), &finished, false).unwrap_err();
+        assert!(error.contains("names none"), "{error}");
+
+        // Before the run is seen to end, its state may move between the
+        // retries; after, it may not.
+        let active = SendReply::new("active").with_run_id("run-1");
+        assert_eq!(same_answer(&send, &active, &finished, false), Ok(()));
+        let error = same_answer(&send, &active, &finished, true).unwrap_err();
+        assert!(error.contains("after its run ended"), "{error}");
+
+        let pending = active
+            .clone()
+            .with_delivered(Delivered::new(delivered_as::PENDING));
+        let unknown = active
+            .clone()
+            .with_delivered(Delivered::new(delivered_as::UNKNOWN));
+        assert_eq!(same_answer(&pending, &unknown, &unknown, true), Ok(()));
+        let error = same_answer(&unknown, &pending, &pending, true).unwrap_err();
+        assert!(
+            error.contains("the first retry's delivered changed from unknown to pending"),
+            "{error}"
+        );
     }
 }
