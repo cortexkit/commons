@@ -44,11 +44,20 @@ pub struct Control {
     #[serde(default)]
     pub only: bool,
     pub equivalent: Option<String>,
+    /// Bounds the test run only; the build has its own deadline below.
     #[serde(default = "default_timeout")]
     pub timeout_s: u64,
+    /// Bounds the separate build of the mutant (and the compile inside list
+    /// mode). Kept apart from `timeout_s` so a slow compile on a loaded host is
+    /// never read as a hung test.
+    #[serde(default = "default_build_timeout")]
+    pub build_timeout_s: u64,
 }
 fn default_timeout() -> u64 {
     600
+}
+pub fn default_build_timeout() -> u64 {
+    1800
 }
 
 impl Control {
@@ -146,31 +155,80 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
             return Err(format!("invalid or duplicate id: {}", c.id));
         }
         if c.guards.trim().is_empty()
-            || c.package.trim().is_empty()
-            || !matches!(c.runner.as_str(), "cargo" | "nextest")
-            || c.timeout_s == 0
             || c.expect_red.is_empty()
             || c.expect_red.iter().any(|n| n.trim().is_empty())
             || c.equivalent.as_ref().is_some_and(|s| s.trim().is_empty())
         {
             return Err(format!("{}: invalid required field", c.id));
         }
-        c.targets()?;
         safe_path(root, &c.test_file)?;
-        for edit in c.edits()? {
-            // Deleted edit targets are row outcomes, not catalogue-wide errors.
-            // Check mode still rejects them when it verifies the anchors.
-            match safe_path(root, &edit.file) {
-                Ok(_) => {}
-                Err(e) if e.starts_with("ANCHOR_MISSING ") => {}
-                Err(e) => return Err(e),
-            }
-            if edit.old.is_empty() || edit.old == edit.new {
-                return Err(format!("{}: empty or unchanged edit", c.id));
-            }
+        validate_mutant(root, c)?;
+    }
+    Ok(())
+}
+
+/// The checks a control needs before it may be replayed at all: a runnable
+/// command (package, runner, timeout, target selector) and well-formed edits.
+/// Catalogue validation and `explore` share it; `explore` has no catalogue
+/// fields (id, guards, test file, expected names) until it appends a row.
+pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
+    if c.package.trim().is_empty()
+        || !matches!(c.runner.as_str(), "cargo" | "nextest")
+        || c.timeout_s == 0
+        || c.build_timeout_s == 0
+    {
+        return Err(format!("{}: invalid required field", c.id));
+    }
+    c.targets()?;
+    for edit in c.edits()? {
+        // Deleted edit targets are row outcomes, not catalogue-wide errors.
+        // Check mode still rejects them when it verifies the anchors.
+        match safe_path(root, &edit.file) {
+            Ok(_) => {}
+            Err(e) if e.starts_with("ANCHOR_MISSING ") => {}
+            Err(e) => return Err(e),
+        }
+        if edit.old.is_empty() || edit.old == edit.new {
+            return Err(format!("{}: empty or unchanged edit", c.id));
         }
     }
     Ok(())
+}
+
+/// Append one control to the catalogue file as a new `[[control]]` table.
+/// `prove` and `explore --append` both write rows through this function.
+pub fn append_control(path: &Path, c: &Control) -> Result<()> {
+    use std::io::Write;
+    let row = toml::to_string(&Catalogue {
+        control: vec![c.clone()],
+    })
+    .map_err(|e| e.to_string())?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "\n{row}").map_err(|e| e.to_string())
+}
+
+/// Parse `explore --edits`: a JSON array of `{file, old, new}` objects, a JSON
+/// or TOML document with an `edits` array, or a bare TOML inline array.
+pub fn parse_edits(text: &str) -> Result<Vec<Edit>> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Doc {
+        edits: Vec<Edit>,
+    }
+    if let Ok(edits) = serde_json::from_str::<Vec<Edit>>(text) {
+        return Ok(edits);
+    }
+    if let Ok(doc) = serde_json::from_str::<Doc>(text) {
+        return Ok(doc.edits);
+    }
+    toml::from_str::<Doc>(text)
+        .or_else(|_| toml::from_str::<Doc>(&format!("edits = {text}")))
+        .map(|doc| doc.edits)
+        .map_err(|e| format!("--edits is neither JSON nor TOML edits: {e}"))
 }
 
 pub fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -351,10 +409,22 @@ pub enum Outcome {
     Equivalent,
     Error,
 }
+/// Which deadline a TIMED_OUT row hit.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    /// The separate `--no-run` build, bounded by `build_timeout_s`.
+    Build,
+    /// The test run, bounded by `timeout_s`.
+    Test,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub id: String,
     pub outcome: Outcome,
+    /// Set only on TIMED_OUT: the phase whose deadline expired.
+    pub timed_out_phase: Option<Phase>,
     pub red: Vec<String>,
     pub green: Vec<String>,
     pub build_ms: u128,
@@ -368,6 +438,7 @@ impl Report {
         Self {
             id: c.id.clone(),
             outcome: Outcome::Error,
+            timed_out_phase: None,
             red: vec![],
             green: vec![],
             build_ms: 0,
@@ -389,7 +460,22 @@ struct Output {
     text: String,
     ms: u128,
 }
-fn command(c: &Control, mode: &str, unscoped: bool) -> Result<Command> {
+/// Which tests one replay runs and how their per-test results are graded.
+/// Every scope goes through the same `replay` body (tree state, build, test,
+/// parse, restore); only the command's selection and the grading differ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scope {
+    /// The row's package and target selector, graded against `expect_red`.
+    Row,
+    /// The row's whole package without target selection, graded against
+    /// `expect_red` (the second replay `prove` makes for a survivor).
+    Package,
+    /// `explore`: the whole package, or the whole workspace; any red test is a
+    /// catch because nobody has named the guarding tests yet.
+    Explore { workspace: bool },
+}
+
+fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
     let mut cmd = Command::new("cargo");
     if c.runner == "nextest" {
         cmd.args(["nextest", if mode == "list" { "list" } else { "run" }]);
@@ -397,11 +483,17 @@ fn command(c: &Control, mode: &str, unscoped: bool) -> Result<Command> {
         cmd.arg("test");
     }
     cmd.arg("--locked");
-    if !unscoped {
-        cmd.args(["-p", &c.package]);
-        cmd.args(c.targets()?);
-    } else {
-        cmd.args(["-p", &c.package]);
+    match scope {
+        Scope::Row => {
+            cmd.args(["-p", &c.package]);
+            cmd.args(c.targets()?);
+        }
+        Scope::Package | Scope::Explore { workspace: false } => {
+            cmd.args(["-p", &c.package]);
+        }
+        Scope::Explore { workspace: true } => {
+            cmd.arg("--workspace");
+        }
     }
     match mode {
         "build" => {
@@ -617,12 +709,76 @@ pub fn grade(c: &Control, red: &[String], green: &[String]) -> Outcome {
     Outcome::Caught
 }
 
+/// Grade an `explore` run: nobody has named the guarding tests, so any red test
+/// is a catch. Only parsed per-test results count, never the exit status.
+pub fn explore_grade(red: &[String], green: &[String]) -> Outcome {
+    if red.is_empty() && green.is_empty() {
+        Outcome::NoTestsRan
+    } else if red.is_empty() {
+        Outcome::Survived
+    } else {
+        Outcome::Caught
+    }
+}
+
+/// What a SURVIVED `explore` means. It is the survivor diagnosis `prove` gives
+/// (scope omitted the guarding test, coverage gap, or equivalent mutant), worded
+/// for a run that was already unscoped: explore runs every test in the package
+/// or workspace by design, so "outside the scope" means outside that run.
+pub fn survivor_diagnosis(package: &str, workspace: bool) -> String {
+    let scope = if workspace {
+        "the whole workspace".to_owned()
+    } else {
+        format!("every test in package `{package}`")
+    };
+    let elsewhere = if workspace {
+        "in another repository or workspace, in an ignored test, or behind a feature or cfg this run did not enable"
+    } else {
+        "in another package (rerun with --workspace), in an ignored test, or behind a feature or cfg this run did not enable"
+    };
+    format!(
+        "No test went red: this run covered {scope}, unscoped by design. Three causes remain:\n\
+         1. The mutant is equivalent: it computes exactly the same result. Inspect semantics; use equivalent = <reason> only when justified.\n\
+         2. The guarding test lives outside the scope run: {elsewhere}.\n\
+         3. The guard is missing: a real coverage gap. Write the test, then prove it."
+    )
+}
+
+/// Replay one catalogue row: with its target selector, or (`unscoped`) across
+/// its whole package. A thin entry point to the shared `replay` path.
 pub fn run_row(
     root: &Path,
     c: &Control,
     allow_dirty: bool,
     stop: &AtomicBool,
     unscoped: bool,
+) -> Result<Report> {
+    let scope = if unscoped { Scope::Package } else { Scope::Row };
+    replay(root, c, allow_dirty, stop, scope)
+}
+
+/// Apply one mutant and run every test in its package (or the workspace),
+/// reporting which tests went red. `c.expect_red` and `c.target` are ignored.
+/// A thin entry point to the same `replay` path `run_row` uses.
+pub fn explore_row(
+    root: &Path,
+    c: &Control,
+    allow_dirty: bool,
+    stop: &AtomicBool,
+    workspace: bool,
+) -> Result<Report> {
+    replay(root, c, allow_dirty, stop, Scope::Explore { workspace })
+}
+
+// The only code that mutates source: dirty-target refusal, exact-once anchors,
+// the separate build, the test run, per-test parsing and byte restoration of
+// targets and Cargo.lock all live here, for every command.
+fn replay(
+    root: &Path,
+    c: &Control,
+    allow_dirty: bool,
+    stop: &AtomicBool,
+    scope: Scope,
 ) -> Result<Report> {
     let mut report = Report::new(c);
     if let Some(reason) = &c.equivalent {
@@ -656,7 +812,7 @@ pub fn run_row(
         for (path, text) in files {
             fs::write(path, text).map_err(|e| e.to_string())?;
         }
-        let build = execute(root, command(c, "build", unscoped)?, c.timeout_s, stop)?;
+        let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
         report.build_ms = build.ms;
         report.build_tail = tail(&build.text);
         if build.interrupted {
@@ -664,13 +820,18 @@ pub fn run_row(
         }
         if build.timeout {
             report.outcome = Outcome::TimedOut;
+            report.timed_out_phase = Some(Phase::Build);
+            report.reason = Some(format!(
+                "build exceeded build_timeout_s = {}",
+                c.build_timeout_s
+            ));
             return Ok(());
         }
         if !build.success {
             report.outcome = Outcome::DidNotCompile;
             return Ok(());
         }
-        let tests = execute(root, command(c, "run", unscoped)?, c.timeout_s, stop)?;
+        let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
         report.test_ms = tests.ms;
         report.test_tail = tail(&tests.text);
         if tests.interrupted {
@@ -678,10 +839,15 @@ pub fn run_row(
         }
         if tests.timeout {
             report.outcome = Outcome::TimedOut;
+            report.timed_out_phase = Some(Phase::Test);
+            report.reason = Some(format!("test run exceeded timeout_s = {}", c.timeout_s));
             return Ok(());
         }
         let (red, green) = parse_tests(&tests.text, &c.runner)?;
-        report.outcome = grade(c, &red, &green);
+        report.outcome = match scope {
+            Scope::Explore { .. } => explore_grade(&red, &green),
+            Scope::Row | Scope::Package => grade(c, &red, &green),
+        };
         report.red = red;
         report.green = green;
         Ok(())
@@ -689,10 +855,12 @@ pub fn run_row(
     let restoration = saved.restore();
     if let Err(e) = work {
         report.outcome = Outcome::Error;
+        report.timed_out_phase = None;
         report.reason = Some(e);
     }
     if let Err(e) = restoration {
         report.outcome = Outcome::Error;
+        report.timed_out_phase = None;
         report.reason = Some(e);
     }
     Ok(report)
@@ -702,7 +870,13 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
     validate(root, catalogue)?;
     for c in &catalogue.control {
         replaced(root, &c.edits()?)?;
-        let output = execute(root, command(c, "list", false)?, c.timeout_s, stop)?;
+        // List mode compiles the test binaries, so the build deadline bounds it.
+        let output = execute(
+            root,
+            command(c, "list", Scope::Row)?,
+            c.build_timeout_s,
+            stop,
+        )?;
         if !output.success || output.timeout || output.interrupted {
             return Err(format!("{}: list failed: {}", c.id, tail(&output.text)));
         }
