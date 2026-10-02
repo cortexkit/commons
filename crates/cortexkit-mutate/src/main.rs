@@ -36,6 +36,48 @@ enum Action {
     },
     /// Prove one edit and append it only when caught.
     Prove(Proof),
+    /// Find which tests, if any, catch one mutant: runs the whole package (or
+    /// workspace) and lists every red test. Unscoped by design.
+    Explore(Exploration),
+}
+#[derive(Args)]
+struct Exploration {
+    #[arg(long)]
+    package: String,
+    /// Run every test in the workspace instead of only the package.
+    #[arg(long)]
+    workspace: bool,
+    #[arg(long, required_unless_present = "edits", conflicts_with = "edits", requires_all = ["old", "new"])]
+    file: Option<String>,
+    #[arg(long, requires = "file")]
+    old: Option<String>,
+    #[arg(long, requires = "file")]
+    new: Option<String>,
+    /// Inline TOML or JSON edits (or a path to a file holding them), instead of
+    /// --file/--old/--new.
+    #[arg(long)]
+    edits: Option<String>,
+    #[arg(long, default_value = "cargo")]
+    runner: String,
+    #[arg(long, default_value_t = 600)]
+    timeout_s: u64,
+    /// Bounds the mutant's build; --timeout-s bounds only the test run.
+    #[arg(long, default_value_t = default_build_timeout())]
+    build_timeout_s: u64,
+    /// On CAUGHT only, append a row naming the red tests as expect_red.
+    #[arg(long, requires_all = ["id", "guards", "test_file"])]
+    append: bool,
+    #[arg(long)]
+    id: Option<String>,
+    #[arg(long, requires = "append")]
+    guards: Option<String>,
+    /// The appended row's test_file (required with --append).
+    #[arg(long, requires = "append")]
+    test_file: Option<String>,
+    #[arg(long)]
+    allow_dirty: bool,
+    #[arg(long)]
+    report: Option<PathBuf>,
 }
 #[derive(Args)]
 struct Proof {
@@ -63,6 +105,9 @@ struct Proof {
     only: bool,
     #[arg(long, default_value_t = 600)]
     timeout_s: u64,
+    /// Bounds the mutant's build; --timeout-s bounds only the test run.
+    #[arg(long, default_value_t = default_build_timeout())]
+    build_timeout_s: u64,
     #[arg(long)]
     allow_dirty: bool,
     #[arg(long)]
@@ -182,6 +227,7 @@ fn run() -> Result<bool> {
                 only: p.only,
                 equivalent: None,
                 timeout_s: p.timeout_s,
+                build_timeout_s: p.build_timeout_s,
             };
             let mut catalogue = if cli.catalogue.exists() {
                 load(&cli.catalogue)?
@@ -194,15 +240,7 @@ fn run() -> Result<bool> {
             let caught = first.outcome == Outcome::Caught;
             let mut rows = vec![first];
             if caught {
-                let row =
-                    toml::to_string(&Catalogue { control: vec![c] }).map_err(|e| e.to_string())?;
-                use std::io::Write;
-                let mut file = fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(cli.catalogue)
-                    .map_err(|e| e.to_string())?;
-                writeln!(file, "\n{row}").map_err(|e| e.to_string())?;
+                append_control(&cli.catalogue, &c)?;
                 println!("A mutation inside a function proves nothing about callers reaching it. Add a second row removing its call site.");
             } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
                 let broader = run_row(&root, &c, p.allow_dirty, &stop, true)?;
@@ -221,7 +259,88 @@ fn run() -> Result<bool> {
             write_report(p.report, &rows)?;
             Ok(caught)
         }
+        Action::Explore(x) => explore(&root, &cli.catalogue, x, &stop),
     }
+}
+fn explore(
+    root: &std::path::Path,
+    catalogue_path: &std::path::Path,
+    x: Exploration,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<bool> {
+    let edits = match x.edits {
+        Some(text) => {
+            let path = std::path::Path::new(&text);
+            if !text.contains('\n') && path.is_file() {
+                parse_edits(&fs::read_to_string(path).map_err(|e| e.to_string())?)?
+            } else {
+                parse_edits(&text)?
+            }
+        }
+        None => vec![],
+    };
+    let mut c = Control {
+        id: x.id.unwrap_or_else(|| "explore".into()),
+        guards: x.guards.unwrap_or_default(),
+        file: x.file,
+        old: x.old,
+        new: x.new,
+        edits,
+        test_file: x.test_file.unwrap_or_default(),
+        runner: x.runner,
+        package: x.package,
+        // An appended row replays the whole package, as explore ran it.
+        target: String::new(),
+        expect_red: vec![],
+        only: false,
+        equivalent: None,
+        timeout_s: x.timeout_s,
+        build_timeout_s: x.build_timeout_s,
+    };
+    validate_mutant(root, &c)?;
+    let mut catalogue = Catalogue::default();
+    if x.append {
+        if catalogue_path.exists() {
+            catalogue = load(catalogue_path)?;
+        }
+        // Reject a bad id, guard text or test file before the (long) run. The
+        // placeholder stands in for the red names, which only the run supplies.
+        let mut candidate = catalogue.control.clone();
+        candidate.push(Control {
+            expect_red: vec!["explore-pending".into()],
+            ..c.clone()
+        });
+        validate(root, &Catalogue { control: candidate })?;
+    }
+    let row = explore_row(root, &c, x.allow_dirty, stop, x.workspace)?;
+    let caught = row.outcome == Outcome::Caught;
+    if caught {
+        println!("Red tests ({}):", row.red.len());
+        for name in &row.red {
+            println!("  {name}");
+        }
+    } else if row.outcome == Outcome::Survived {
+        println!("{}", survivor_diagnosis(&c.package, x.workspace));
+    }
+    let outcome = row.outcome.clone();
+    let red = row.red.clone();
+    write_report(x.report, &[row])?;
+    if !x.append {
+        return Ok(caught);
+    }
+    if !caught || stop.load(Ordering::SeqCst) {
+        println!("--append: nothing appended; only CAUGHT appends (outcome {outcome:?})");
+        return Ok(false);
+    }
+    c.expect_red = red;
+    catalogue.control.push(c.clone());
+    validate(root, &catalogue)?;
+    check(root, &Catalogue { control: vec![c.clone()] }, stop).map_err(|e| {
+        format!("explore row failed check, nothing appended (with --workspace, red tests outside --package cannot be named in its row): {e}")
+    })?;
+    append_control(catalogue_path, &c)?;
+    println!("Appended row {} to {}", c.id, catalogue_path.display());
+    Ok(true)
 }
 fn main() {
     match run() {

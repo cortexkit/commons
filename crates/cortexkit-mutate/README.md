@@ -28,8 +28,16 @@ target = "--test list_contract"
 expect_red = ["list_agent_cannot_see_another_agents_flow"]
 only = true
 # timeout_s = 600
+# build_timeout_s = 1800
 # equivalent = "Explain why this mutant computes exactly the same result"
 ```
+
+The two deadlines are separate. `timeout_s` (default 600) bounds only the test
+run. `build_timeout_s` (default 1800) bounds the separate build of the mutant and
+the compile inside `check`'s list mode. A slow compile on a loaded host is
+therefore never read as a hung test, and a TIMED_OUT row says which deadline
+expired. `prove` and `explore` take `--timeout-s` and `--build-timeout-s` for the
+same two deadlines.
 
 IDs are unique nonempty `[a-z0-9-]+`. `guards`, `test_file`, `runner`, `package`
 and `expect_red` are required. `runner` is `cargo` or `nextest`. `target` defaults
@@ -101,6 +109,60 @@ and supplying a justified `equivalent` reason. A proof inside a function says
 nothing about callers reaching it: every CAUGHT proof reminds the author to add
 another row removing the call site.
 
+### `explore`: when nobody knows the guarding tests yet
+
+```sh
+ck-mutate explore --package my-package --file src/lib.rs \
+  --old 'value > 0' --new 'value >= 0' --report explore.json
+ck-mutate explore --package my-package --workspace --edits edits.toml
+ck-mutate explore --package my-package --file src/lib.rs \
+  --old 'value > 0' --new 'value >= 0' \
+  --append --id rejects-zero --guards 'zero is rejected' --test-file src/lib.rs
+```
+
+Use `prove` when you already know which test should catch a mutant: it runs
+only that row's target and checks the names you give it. Use `explore` when you
+don't (an age-selected sweep, a new mutant, auditing old code). It answers "does
+anything catch this mutant?" and names the tests that do.
+
+**Explore's answer is unscoped by design.** It ignores target selectors and runs
+every test in `--package`, or every test in the workspace with `--workspace`, so
+it costs a full package or workspace test run per mutant. It grades parsed
+per-test results, never the command's exit status:
+
+| Outcome | Meaning for explore |
+| --- | --- |
+| CAUGHT | At least one test went red. Every red test is listed by exact full name. |
+| SURVIVED | Tests ran and none went red. Prints the survivor diagnosis below. |
+| NO_TESTS_RAN | Passed plus failed is zero. |
+
+Explore exits 0 only on CAUGHT, 1 on any other outcome, and 2 on a preflight
+error such as a dirty target.
+
+ANCHOR_MISSING, DID_NOT_COMPILE, TIMED_OUT and ERROR mean exactly what they mean
+for `run`. A SURVIVED explore prints the same three causes `prove` diagnoses,
+worded for a run that was already unscoped: the mutant is equivalent; the
+guarding test lives outside the scope run (another package, so rerun with
+`--workspace`; an ignored test; a feature or cfg the run did not enable); or the
+guard is missing.
+
+Explore uses the same machinery as `run` for every mutant: the tree lock, the
+dirty-target refusal (`--allow-dirty` opts in), the exact-once anchors, the
+separate build, per-test parsing, byte restoration of targets and `Cargo.lock`,
+and signal and timeout handling. `--edits` takes inline TOML or JSON (an array of
+`{ file, old, new }`, or a document with an `edits` array), or a path to a file
+holding it (relative to the Git root, like `--catalogue`). `--report` writes the same JSON array `run` writes. Test names repeated
+across test binaries fail closed as ERROR, as they do for `run`. That happens more
+often with `--workspace`.
+
+`--append` requires `--id`, `--guards` and `--test-file`, and acts only on
+CAUGHT. It checks the id, guards and test file before the run. After a catch it
+builds a row for the whole package (no `target`, `only = false`) that names every
+red test as `expect_red`. It validates that row with `check` and then appends it
+with the same writer `prove` uses. On any other outcome nothing is appended. With
+`--workspace`, red tests outside `--package` cannot be named in the row: `check`
+rejects it and nothing is written.
+
 ## Outcomes and evidence
 
 Only CAUGHT or an explicitly skipped EQUIVALENT row succeeds:
@@ -113,11 +175,12 @@ Only CAUGHT or an explicitly skipped EQUIVALENT row succeeds:
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |
 | ANCHOR_MISSING | The replacement count was zero or greater than one. |
 | DID_NOT_COMPILE | The separate build command exited nonzero. |
-| TIMED_OUT | A build or test exceeded `timeout_s`. |
+| TIMED_OUT | The build exceeded `build_timeout_s`, or the test run exceeded `timeout_s`. `timed_out_phase` is `"build"` or `"test"`, and the reason names the deadline. |
 | EQUIVALENT | Explicitly skipped with the catalogue's reason. |
 | ERROR | Invalid/incomplete runner output, interruption, or restoration/lockfile integrity error. |
 
-The JSON array holds each ID, outcome, red and green full test names, build/test
+The JSON array holds each ID, outcome, `timed_out_phase` (`"build"`, `"test"`,
+or null when the row did not time out), red and green full test names, build/test
 milliseconds, reasons, and up to 8,000 characters of each output tail. Summary
 lines are uppercase outcomes. Exit status is nonzero on any failing row or hard
 preflight error. A dirty-target refusal is a preflight error (no mutation/report
