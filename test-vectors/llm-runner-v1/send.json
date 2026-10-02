@@ -248,16 +248,8 @@
         "code": "tool_name_collision",
         "message": "two tools named search",
         "detail": {
-          "tools": [
-            {
-              "provider": "aft",
-              "tool": "search"
-            },
-            {
-              "provider": "plexus",
-              "tool": "search"
-            }
-          ]
+          "name": "search",
+          "providers": ["aft", "plexus"]
         }
       }
     },
@@ -265,8 +257,12 @@
       "name": "a later send carries a different plan",
       "retryable": false,
       "refusal": {
-        "code": "plan_changed",
-        "message": "the session's plan is frozen"
+        "code": "plan_drift",
+        "message": "the session's plan is frozen",
+        "detail": {
+          "frozen": "edf948ae9b6f4d56e9196060fb1be01922066e176ecce6b2df9f79edbbf14879",
+          "sent": "f6e3694c3b2c0ea5368d38d653aa85c10fe017e5c74abe1fa00cbedb5a3e5206"
+        }
       }
     },
     {

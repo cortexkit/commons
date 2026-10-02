@@ -436,6 +436,13 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   provider with more than one plan item. The `item` values follow the
   fetch-plan section of this crate, still to be written.
 
+- [pinned] An absent optional item (`AbsentItem`) is `{provider, kind,
+  reason, provider_code?}`. `kind` is an open string; `system_text` is the
+  only kind currently defined. `provider_code` is present exactly when
+  `reason` is `refused`; decoding refuses either a refusal without a code or
+  a code with another reason (`AbsentItem::check` also checks constructed
+  items). Fetched items retain their separate `item` identifier above.
+
 ### 10.1 Admission
 
 - [pinned] A runner that admits sessions fetches the plan's items itself, with
@@ -443,11 +450,11 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   required item arrived, the staleness check passed and no tool names
   collide. The plan and composition are passed to providers verbatim.
 - [pinned] Admission refuses as: `fetch_unavailable {provider}`, retryable;
-  `plan_stale`, naming the differences; a tool-name collision naming both
-  tools; `scope_unsupported` when the send is under a scope and the daemon
-  lacks scopes. A later send whose plan differs from the frozen one is
-  refused by name. The collision is `tool_name_collision` and the plan drift
-  `plan_changed`.
+  `plan_stale`, naming the differences; `tool_name_collision {name, providers}`,
+  naming the colliding model-facing name and every provider that offered it;
+  `scope_unsupported` when the send is under a scope and the daemon lacks scopes. A later send whose plan differs from the frozen one is
+  refused `plan_drift {frozen?, sent}`, naming the two plan identities.
+  `frozen` is absent when the session's first episode was plan-less.
 - [pinned] Any refusal during admission writes nothing.
 - [pinned] A plan carrying a `compaction_item`, sent to a runner that does
   not declare `compaction`, is refused at admission `invalid_params {field:
@@ -599,8 +606,8 @@ treats it as a terminal refusal of that one request.
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
 | `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
-| `tool_name_collision` | two tools share a model-facing name | `tools` | no |
-| `plan_changed` | a later send's plan differs from the frozen one | — | no |
+| `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
+| `plan_drift` | a later send's plan differs from the frozen one | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
@@ -854,7 +861,7 @@ the decision; the items it governs are pinned above.
 - **Q16. Unnamed codes.** Settled: `invalid_params` stays, and
   `tool-provider/v1`'s `invalid_request` is a difference between roles;
   `send_id_reuse` names the differing field in `detail.field`; the drafted
-  names `unknown_run`, `tool_name_collision`, `plan_changed` and
+  names `unknown_run`, `tool_name_collision`, `plan_drift` and
   `scope_owner_mismatch` stay (§12).
 - **Q17. A session with no lineage yet.** Settled, a third option: a read of
   a session never written returns an empty page with no `lineage_id` and no

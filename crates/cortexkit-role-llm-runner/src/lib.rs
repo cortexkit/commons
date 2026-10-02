@@ -234,6 +234,12 @@ pub(crate) mod vectors {
     /// Every vector file. A test checks this list against the directory, so
     /// a new file cannot land without a test reading it.
     pub const FILES: &[&str] = &[
+        "admit-optional-text-refused.json",
+        "admit-optional-text-timeout.json",
+        "admit-optional-text-unknown-provider.json",
+        "refuse-later-send-with-different-plan.json",
+        "refuse-later-plan-after-planless-first-episode.json",
+        "refuse-tool-name-collision.json",
         "baseline.json",
         "compaction-ready.json",
         "errors.json",
@@ -260,6 +266,29 @@ pub(crate) mod vectors {
         let path = format!("{}/{name}", dir());
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    /// Re-encode a typed object inside an unchanged upstream fixture envelope.
+    /// Compare actual bytes, including field order and indentation, rather than
+    /// normalizing through `Value`, which would hide order and whitespace changes.
+    pub fn exact_object_round_trip<T>(name: &str, marker: &str, indent: usize) -> T
+    where
+        T: DeserializeOwned + Serialize,
+    {
+        assert!(FILES.contains(&name));
+        let bytes = std::fs::read_to_string(format!("{}/{name}", dir())).unwrap();
+        let start = bytes.find(marker).unwrap() + marker.len();
+        let mut stream = serde_json::Deserializer::from_str(&bytes[start..]).into_iter::<Value>();
+        stream.next().unwrap().unwrap();
+        let end = start + stream.byte_offset();
+        let decoded: T = serde_json::from_str(&bytes[start..end]).unwrap();
+        let encoded = serde_json::to_string_pretty(&decoded)
+            .unwrap()
+            .replace('\n', &format!("\n{}", " ".repeat(indent)));
+        let mut rebuilt = bytes.clone();
+        rebuilt.replace_range(start..end, &encoded);
+        assert_eq!(rebuilt.as_bytes(), bytes.as_bytes(), "{name}: bytes differ");
+        decoded
     }
 
     /// The array at `key`, panicking with the key's name if it is missing or

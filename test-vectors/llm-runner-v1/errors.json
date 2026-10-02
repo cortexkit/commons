@@ -53,7 +53,7 @@
       "retryable": false
     },
     {
-      "code": "plan_changed",
+      "code": "plan_drift",
       "retryable": false
     },
     {

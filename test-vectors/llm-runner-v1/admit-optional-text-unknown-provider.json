@@ -1,0 +1,22 @@
+{
+  "design": "D 4.5 'Optional items'; D 10.6 'The admission reply'",
+  "plan": "plans/broca-head-optional-text.json",
+  "composition": "compositions/broca-head-optional-text.json",
+  "fetches": [
+    {
+      "provider": "notes-provider",
+      "route_open": "unknown_module"
+    }
+  ],
+  "expected": {
+    "admitted": true,
+    "absent_items": [
+      {
+        "provider": "notes-provider",
+        "kind": "system_text",
+        "reason": "unknown_module"
+      }
+    ]
+  },
+  "settled": "BROCA, room #881"
+}

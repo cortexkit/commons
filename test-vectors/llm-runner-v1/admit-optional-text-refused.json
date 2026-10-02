@@ -1,0 +1,23 @@
+{
+  "plan": "plans/broca-head-optional-text.json",
+  "composition": "compositions/broca-head-optional-text.json",
+  "fetches": [
+    {
+      "provider": "notes-provider",
+      "reason": "refused",
+      "provider_code": "catalog_refused"
+    }
+  ],
+  "expected": {
+    "admitted": true,
+    "absent_items": [
+      {
+        "provider": "notes-provider",
+        "kind": "system_text",
+        "reason": "refused",
+        "provider_code": "catalog_refused"
+      }
+    ]
+  },
+  "settled": "BROCA, room #881"
+}

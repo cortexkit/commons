@@ -214,13 +214,62 @@ impl BaselineItem {
 
 /// An optional plan item that was not fetched, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "AbsentItemWire", into = "AbsentItemWire")]
 pub struct AbsentItem {
     pub provider: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub item: Option<String>,
-    /// Why the item was not fetched, for example `timeout` or
+    /// Open item kind; `system_text` is the only kind currently defined.
+    pub kind: String,
+    /// Why the item was not fetched, for example `timeout`, `refused` or
     /// `unknown_module`. Any other value decodes as a plain string.
     pub reason: String,
+    /// Present exactly when `reason` is `refused`.
+    pub provider_code: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct AbsentItemWire {
+    provider: String,
+    kind: String,
+    reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_code: Option<String>,
+}
+
+impl TryFrom<AbsentItemWire> for AbsentItem {
+    type Error = &'static str;
+
+    fn try_from(wire: AbsentItemWire) -> Result<Self, Self::Error> {
+        let item = Self {
+            provider: wire.provider,
+            kind: wire.kind,
+            reason: wire.reason,
+            provider_code: wire.provider_code,
+        };
+        item.check()?;
+        Ok(item)
+    }
+}
+
+impl From<AbsentItem> for AbsentItemWire {
+    fn from(item: AbsentItem) -> Self {
+        Self {
+            provider: item.provider,
+            kind: item.kind,
+            reason: item.reason,
+            provider_code: item.provider_code,
+        }
+    }
+}
+
+impl AbsentItem {
+    /// Refuse a missing refusal code or a code attached to a non-refusal.
+    /// Runners constructing an item directly must check it before sending.
+    pub fn check(&self) -> Result<(), &'static str> {
+        if (self.reason == "refused") != self.provider_code.is_some() {
+            return Err("provider_code must be present exactly when reason is refused");
+        }
+        Ok(())
+    }
 }
 
 /// How the latest applied change was applied.
@@ -321,10 +370,46 @@ mod tests {
         let mut absent = Baseline::plan_less(vec!["read".into()]);
         absent.absent_items = vec![AbsentItem {
             provider: "aft".into(),
-            item: None,
+            kind: "system_text".into(),
             reason: "timeout".into(),
+            provider_code: None,
         }];
         assert!(!absent.plan_consistent());
+    }
+
+    #[test]
+    fn prefrontal_absent_item_bytes_round_trip() {
+        for name in [
+            "admit-optional-text-refused.json",
+            "admit-optional-text-timeout.json",
+            "admit-optional-text-unknown-provider.json",
+        ] {
+            let item: AbsentItem =
+                vectors::exact_object_round_trip(name, "\"absent_items\": [\n      ", 6);
+            assert_eq!(item.kind, "system_text");
+            assert!(item.check().is_ok());
+        }
+    }
+
+    #[test]
+    fn absent_item_requires_provider_code_exactly_for_refused() {
+        let file = vectors::load("admit-optional-text-refused.json");
+        let mut item = file["expected"]["absent_items"][0].clone();
+        item.as_object_mut().unwrap().remove("provider_code");
+        assert!(serde_json::from_value::<AbsentItem>(item).is_err());
+
+        for reason in ["timeout", "unknown_module", "future_reason"] {
+            let mut item = file["expected"]["absent_items"][0].clone();
+            item["reason"] = reason.into();
+            assert!(
+                serde_json::from_value::<AbsentItem>(item).is_err(),
+                "{reason}"
+            );
+        }
+
+        let mut item = file["expected"]["absent_items"][0].clone();
+        item["kind"] = "future_kind".into();
+        assert!(serde_json::from_value::<AbsentItem>(item).is_ok());
     }
 
     #[test]

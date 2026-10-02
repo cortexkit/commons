@@ -1,0 +1,21 @@
+{
+  "plan": "plans/broca-head-optional-text.json",
+  "composition": "compositions/broca-head-optional-text.json",
+  "fetches": [
+    {
+      "provider": "notes-provider",
+      "reason": "timeout"
+    }
+  ],
+  "expected": {
+    "admitted": true,
+    "absent_items": [
+      {
+        "provider": "notes-provider",
+        "kind": "system_text",
+        "reason": "timeout"
+      }
+    ]
+  },
+  "settled": "BROCA, room #881"
+}

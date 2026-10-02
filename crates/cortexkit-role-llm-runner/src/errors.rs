@@ -12,6 +12,7 @@
 //! the body's `code` and `detail` as found in whatever frame type the
 //! caller's transport decodes.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A request field is malformed, unknown, or combined with a field it
@@ -63,13 +64,29 @@ pub const FETCH_UNAVAILABLE: &str = "fetch_unavailable";
 /// preflights again and retries once with a new plan, never the same one.
 pub const PLAN_STALE: &str = "plan_stale";
 
-/// Admission found two tools with the same model-facing name.
-/// `detail.tools` names both. Nothing was written.
+/// Admission found tools with the same model-facing name.
+/// `detail` is [`ToolNameCollisionDetail`]. Nothing was written.
 pub const TOOL_NAME_COLLISION: &str = "tool_name_collision";
 
 /// A later send carried a plan that differs from the session's frozen plan.
-/// Nothing was applied.
-pub const PLAN_CHANGED: &str = "plan_changed";
+/// `detail` is [`PlanDriftDetail`]. Nothing was applied.
+pub const PLAN_DRIFT: &str = "plan_drift";
+
+/// The identities of the frozen and sent plans in a `plan_drift` refusal.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PlanDriftDetail {
+    /// Absent when the session's first episode had no plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen: Option<String>,
+    pub sent: String,
+}
+
+/// The model-facing name and every provider that offered it.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ToolNameCollisionDetail {
+    pub name: String,
+    pub providers: Vec<String>,
+}
 
 /// A steered or queued send whose PreUser hook was unavailable under
 /// `on_unavailable: refuse`. Nothing was written.
@@ -122,7 +139,7 @@ pub const CODES: &[&str] = &[
     FETCH_UNAVAILABLE,
     PLAN_STALE,
     TOOL_NAME_COLLISION,
-    PLAN_CHANGED,
+    PLAN_DRIFT,
     PRE_USER_UNAVAILABLE,
     TRANSIENT,
     SCOPE_NOT_SYNCED,
@@ -194,6 +211,34 @@ pub mod provider_codes {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn prefrontal_plan_drift_bytes_round_trip() {
+        for name in [
+            "refuse-later-send-with-different-plan.json",
+            "refuse-later-plan-after-planless-first-episode.json",
+        ] {
+            let file = vectors::load(name);
+            assert_eq!(file["expected"]["code"], PLAN_DRIFT);
+            assert!(!is_retryable(PLAN_DRIFT));
+            let detail: PlanDriftDetail = vectors::exact_object_round_trip(name, "\"detail\": ", 4);
+            assert_eq!(
+                detail.frozen.is_some(),
+                name == "refuse-later-send-with-different-plan.json"
+            );
+        }
+    }
+
+    #[test]
+    fn prefrontal_tool_name_collision_bytes_round_trip() {
+        let name = "refuse-tool-name-collision.json";
+        let file = vectors::load(name);
+        assert_eq!(file["expected"]["code"], TOOL_NAME_COLLISION);
+        let detail: ToolNameCollisionDetail =
+            vectors::exact_object_round_trip(name, "\"detail\": ", 4);
+        assert_eq!(detail.name, "web_search");
+        assert_eq!(detail.providers, ["plexus", "prefrontal-core"]);
+    }
 
     #[test]
     fn retryability_matches_the_vectors() {

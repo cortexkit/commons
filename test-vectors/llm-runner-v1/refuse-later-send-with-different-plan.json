@@ -1,0 +1,15 @@
+{
+  "design": "D 4.5 'The freeze covers the whole session'",
+  "first_send": "sends/broca-head-first-send.json",
+  "later_plan": "plans/broca-head-text-reordered.json",
+  "expected": {
+    "admitted": false,
+    "code": "plan_drift",
+    "writes": "nothing",
+    "detail": {
+      "frozen": "edf948ae9b6f4d56e9196060fb1be01922066e176ecce6b2df9f79edbbf14879",
+      "sent": "f6e3694c3b2c0ea5368d38d653aa85c10fe017e5c74abe1fa00cbedb5a3e5206"
+    }
+  },
+  "settled": "BROCA, room #881"
+}

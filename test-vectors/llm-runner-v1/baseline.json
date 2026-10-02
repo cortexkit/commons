@@ -52,7 +52,7 @@
           "items": [
             {"provider": "aft", "item": "tools", "item_digest": "8888888888888888888888888888888888888888888888888888888888888888", "preflight_digest": "9999999999999999999999999999999999999999999999999999999999999999"}
           ],
-          "absent_items": [{"provider": "vendor-guidance", "item": "system_text", "reason": "timeout"}],
+          "absent_items": [{"provider": "vendor-guidance", "kind": "system_text", "reason": "timeout"}],
           "composition_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "tool_names": ["bash", "edit", "read"],
           "effective": {"generation": 3, "applied_by": "fold", "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},

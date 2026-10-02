@@ -20,6 +20,22 @@ reviewed.
 | `session-change.json` | the `session_change` group's refusals (`rung_unsupported`, `pending_superseded`, `already_applied`), each with the op that gets it and its retryability | the wire crate's session-change test |
 | `errors.json` | every refusal code the role defines, plus one it does not, with whether a caller retries it | the wire crate's retryability test |
 
+The following admission fixtures are copied byte-for-byte from the prefrontal
+repository's `test-vectors/fetch-plan-v1/admission/` at commit `7079a4025`. The wire tests
+re-encode the typed detail or absent item inside the unchanged fixture envelope
+and compare the complete bytes, including field order and whitespace.
+
+| File | Source commit and file | Checked by |
+|---|---|---|
+| `refuse-later-send-with-different-plan.json` | `7079a4025`, `admission/refuse-later-send-with-different-plan.json` | `prefrontal_plan_drift_bytes_round_trip` |
+| `refuse-later-plan-after-planless-first-episode.json` | `7079a4025`, `admission/refuse-later-plan-after-planless-first-episode.json` | `prefrontal_plan_drift_bytes_round_trip` |
+| `refuse-tool-name-collision.json` | `7079a4025`, `admission/refuse-tool-name-collision.json` | `prefrontal_tool_name_collision_bytes_round_trip` |
+| `admit-optional-text-refused.json` | `7079a4025`, `admission/admit-optional-text-refused.json` | `prefrontal_absent_item_bytes_round_trip` |
+| `admit-optional-text-timeout.json` | `7079a4025`, `admission/admit-optional-text-timeout.json` | `prefrontal_absent_item_bytes_round_trip` |
+| `admit-optional-text-unknown-provider.json` | `7079a4025`, `admission/admit-optional-text-unknown-provider.json` | `prefrontal_absent_item_bytes_round_trip` |
+
 Every pinned vector round-trips: decoding it and encoding the result gives
-back the same JSON. Changing a vector changes the contract: bump the role
-crate's version and say why in the commit.
+back the same JSON. Changing a vector changes the contract: say why in the
+commit. These admission shapes align the unpublished `cortexkit-role-llm-runner`
+0.1.0 draft with prefrontal's fetch-plan consumer; the crate remains
+`publish = false` until review.
