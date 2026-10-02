@@ -116,11 +116,14 @@ to them. Nothing here names a particular implementation.
     | `browser.use/v1` | drives a web browser session: navigates, reads the page and acts on it |
     | `computer.use/v1` | drives desktop applications: reads their state and acts on them |
 
-    A defined tag promises only what its row says. How a tool does it (its
-    arguments, grants and consent) is its schema and description; a provider
-    that wants a consumer to match its specific contract adds its own
+    A defined tag promises only the activity in its row. Everything else is
+    the provider's own: its arguments, permission grants, consent flow,
+    element or object identifiers, output format and refusal wording. A
+    consumer that matched a defined tag must not depend on any of those. A
+    provider that wants consumers to match its specific contract adds its own
     namespaced tag beside the defined one (for example
-    `cerebellum:browser.use/v1`).
+    `cerebellum:browser.use/v1`), and a consumer that depends on that contract
+    pins the namespaced tag.
 
     Any other tag is `<namespace>:<name>/v<N>`: a namespace of lowercase letters
     and digits in `-`-separated words, a name of `.`-separated words of
