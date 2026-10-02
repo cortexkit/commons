@@ -181,6 +181,10 @@ impl DeclaredSubscription {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoosenedField {
+    /// Tools outside the declared bounds.
+    Tools,
+    /// Operations outside the declared bounds.
+    Ops,
     /// `pass` planned where the declaration says `refuse`.
     OnUnavailable,
     /// A budget above the declared one.
@@ -240,10 +244,6 @@ pub enum SubscriptionProblem {
     /// The planned subscription is looser than the declared one on this
     /// field.
     SubscriptionLoosened(LoosenedField),
-    /// The plan covers tools the declaration does not.
-    ToolsNotCovered,
-    /// The plan names an operation the declaration does not.
-    OpNotDeclared,
     /// `replace` on `pre_user` or `post_assistant` by a provider that is not
     /// the session's reduction owner.
     ReplaceNotReductionOwner,
@@ -263,8 +263,6 @@ impl SubscriptionProblem {
             Self::SubscriptionMissing => "subscription_missing",
             Self::PresetMissing => "preset_missing",
             Self::SubscriptionLoosened(_) => "subscription_loosened",
-            Self::ToolsNotCovered => "tools_not_covered",
-            Self::OpNotDeclared => "op_not_declared",
             Self::ReplaceNotReductionOwner => "replace_not_reduction_owner",
         }
     }
@@ -290,18 +288,31 @@ impl SubscriptionProblem {
         }
     }
 
-    /// The `plan_stale` difference for this problem, found on `provider`'s
-    /// subscription to `hook`, or `None` for an `invalid_params` problem.
-    pub fn stale_difference(self, provider: &str, hook: Hook) -> Option<StaleDifference> {
+    /// Construct the `plan_stale` difference from this problem and the
+    /// supplied provider, preset, hook and phase. Returns `None` for an
+    /// `invalid_params` problem.
+    pub fn stale_difference(
+        self,
+        provider: &str,
+        preset: &str,
+        hook: Hook,
+        phase: Option<Phase>,
+    ) -> Option<StaleDifference> {
         let provider = provider.to_owned();
         match self {
-            Self::SubscriptionMissing => {
-                Some(StaleDifference::SubscriptionMissing { provider, hook })
-            }
-            Self::PresetMissing => Some(StaleDifference::PresetMissing { provider, hook }),
+            Self::SubscriptionMissing => Some(StaleDifference::SubscriptionMissing {
+                provider,
+                hook,
+                phase,
+            }),
+            Self::PresetMissing => Some(StaleDifference::PresetMissing {
+                provider,
+                preset: preset.to_owned(),
+            }),
             Self::SubscriptionLoosened(field) => Some(StaleDifference::SubscriptionLoosened {
                 provider,
                 hook,
+                phase,
                 field,
             }),
             _ => None,
@@ -310,24 +321,32 @@ impl SubscriptionProblem {
 }
 
 /// One entry of a `plan_stale` refusal's `detail.differences` that this
-/// role defines, externally tagged as the fetch plan spells it:
-/// `{"subscription_loosened": {provider, hook, field}}`. The same array may
-/// carry the fetch plan's own kinds (a digest or tool difference), which
+/// role defines, internally tagged as the fetch plan spells it:
+/// `{kind: "subscription_loosened", provider, hook, phase, field}`.
+/// The same array may carry the fetch plan's own kinds (a digest or tool difference), which
 /// this type does not decode.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StaleDifference {
     /// The provider's current declaration for the plan item's preset and
     /// params has no subscription with the planned hook and phase.
-    SubscriptionMissing { provider: String, hook: Hook },
+    SubscriptionMissing {
+        provider: String,
+        hook: Hook,
+        #[serde(deserialize_with = "Option::deserialize")]
+        phase: Option<Phase>,
+    },
     /// The provider no longer knows the plan item's preset, so it declares
     /// nothing for it.
-    PresetMissing { provider: String, hook: Hook },
+    PresetMissing { provider: String, preset: String },
     /// A planned subscription's frozen `field` is looser than the current
-    /// declaration's: `pass` for a declared `refuse`, or a larger budget.
+    /// declaration's: wider tools or ops, `pass` for a declared `refuse`,
+    /// or a larger budget.
     SubscriptionLoosened {
         provider: String,
         hook: Hook,
+        #[serde(deserialize_with = "Option::deserialize")]
+        phase: Option<Phase>,
         field: LoosenedField,
     },
 }
@@ -432,16 +451,16 @@ impl Declaration {
     }
 
     /// Find the declared subscription that bounds `planned`, and return its
-    /// index. Checks run in a fixed order and the first that fails names
-    /// the problem: the planned subscription on its own
-    /// ([`Subscription::check`]); a declared subscription with the same
-    /// hook and phase (`subscription_missing`); one whose tools cover the
-    /// planned tools, where absent covers every tool and only absent covers
-    /// an absent list (`tools_not_covered`); one whose ops include every
-    /// planned op (`op_not_declared`); and one the planned `on_unavailable`
-    /// and `budget_ms` are equal to or stricter than
-    /// (`subscription_loosened`, naming the first loosened field of the
-    /// first candidate left).
+    /// index. Checks run in a fixed order and report the first failure.
+    /// First check the planned subscription itself ([`Subscription::check`]).
+    /// If no declaration has the same hook and phase, report
+    /// `subscription_missing`. Then filter candidates by tool coverage
+    /// (absent covers every tool; only absent covers an absent planned list)
+    /// and by ops coverage (every planned op must be declared). Finally
+    /// require the planned policy and budget to equal or tighten a candidate's
+    /// bounds. Failed bounds report `subscription_loosened`, naming `tools`
+    /// or `ops` when those filters fail, otherwise the first loosened policy
+    /// or budget field of the first remaining candidate.
     pub fn bound(&self, planned: &Subscription) -> Result<usize, SubscriptionProblem> {
         planned.check()?;
         let candidates: Vec<(usize, &DeclaredSubscription)> = self
@@ -458,14 +477,18 @@ impl Declaration {
             .filter(|(_, d)| tools_cover(d.tools.as_ref(), planned.tools.as_ref()))
             .collect();
         if covering.is_empty() {
-            return Err(SubscriptionProblem::ToolsNotCovered);
+            return Err(SubscriptionProblem::SubscriptionLoosened(
+                LoosenedField::Tools,
+            ));
         }
         let with_ops: Vec<(usize, &DeclaredSubscription)> = covering
             .into_iter()
             .filter(|(_, d)| planned.ops.iter().all(|op| d.ops.contains(op)))
             .collect();
         let Some((_, first)) = with_ops.first() else {
-            return Err(SubscriptionProblem::OpNotDeclared);
+            return Err(SubscriptionProblem::SubscriptionLoosened(
+                LoosenedField::Ops,
+            ));
         };
         if let Some((index, _)) = with_ops
             .iter()
@@ -524,20 +547,23 @@ pub enum ItemRefusal {
     PlanStale(Vec<StaleDifference>),
 }
 
-/// Admit one plan item: plan item `item`, naming `provider`, whose frozen
-/// subscriptions are `planned`, against the provider's current
+/// Admit plan item `item`, naming `provider` and `preset`, with frozen
+/// subscriptions `planned`, against the provider's current
 /// `declaration` for the item's preset and params. `declaration` is `None`
 /// when the provider refused `transform.declare` with `invalid_params
 /// {field: "preset"}`: it no longer knows the preset.
 ///
 /// Returns the index of the declared subscription that bounds each planned
-/// one. An `invalid_params` problem (a malformed subscription, tools or ops
-/// beyond the declaration, a `replace` the provider may not have) wins over
-/// any staleness, and the first one in subscription order is reported.
-/// Otherwise every stale subscription is listed, in order.
+/// one. An `invalid_params` problem (a malformed subscription or `replace`
+/// on `pre_user` or `post_assistant` by a provider other than the reduction
+/// owner) wins over any staleness. The first such problem in subscription
+/// order is reported.
+/// Otherwise every stale subscription is listed, in order. A missing preset
+/// produces one difference per item, even if the item has no subscriptions.
 pub fn check_item(
     item: usize,
     provider: &str,
+    preset: &str,
     declaration: Option<&Declaration>,
     planned: &[Subscription],
     reduction_owner: Option<&str>,
@@ -556,8 +582,17 @@ pub fn check_item(
             });
         match outcome {
             Ok(bound) => bounds.push(bound),
-            Err(problem) => match problem.stale_difference(provider, subscription.hook) {
-                Some(difference) => differences.push(difference),
+            Err(problem) => match problem.stale_difference(
+                provider,
+                preset,
+                subscription.hook,
+                subscription.phase,
+            ) {
+                Some(difference) => {
+                    if declaration.is_some() {
+                        differences.push(difference);
+                    }
+                }
                 None => {
                     return Err(ItemRefusal::InvalidParams(InvalidSubscriptionDetail::new(
                         item, index, problem,
@@ -565,6 +600,12 @@ pub fn check_item(
                 }
             },
         }
+    }
+    if declaration.is_none() {
+        differences.push(StaleDifference::PresetMissing {
+            provider: provider.to_owned(),
+            preset: preset.to_owned(),
+        });
     }
     if differences.is_empty() {
         Ok(bounds)
@@ -682,11 +723,19 @@ mod tests {
     fn admission(
         item: usize,
         provider: &str,
+        preset: &str,
         declaration: Option<&Declaration>,
         planned: &[Subscription],
         reduction_owner: Option<&str>,
     ) -> Value {
-        match check_item(item, provider, declaration, planned, reduction_owner) {
+        match check_item(
+            item,
+            provider,
+            preset,
+            declaration,
+            planned,
+            reduction_owner,
+        ) {
             Ok(bounds) => serde_json::json!({"bounds": bounds}),
             Err(ItemRefusal::InvalidParams(detail)) => serde_json::json!({
                 "code": runner_codes::INVALID_PARAMS,
@@ -717,11 +766,22 @@ mod tests {
             let outcome = admission(
                 case["item"].as_u64().unwrap_or(0) as usize,
                 case["provider"].as_str().unwrap(),
+                case["preset"].as_str().unwrap(),
                 declaration,
                 &planned,
                 case["reduction_owner"].as_str(),
             );
             assert_eq!(outcome, case["expected"], "{name}");
+            if let Some(differences) = outcome["detail"]["differences"].as_array() {
+                for difference in differences {
+                    vectors::round_trip::<StaleDifference>(name, difference);
+                    if difference["kind"] != "preset_missing" {
+                        let mut missing_phase = difference.clone();
+                        missing_phase.as_object_mut().unwrap().remove("phase");
+                        vectors::refused::<StaleDifference>(name, &missing_phase);
+                    }
+                }
+            }
         }
     }
 
@@ -731,7 +791,12 @@ mod tests {
     #[test]
     fn fetch_plan_admission_vectors_agree() {
         let file = vectors::load("subscriptions.json");
-        for case in vectors::cases(&file, "fetch_plan_v1") {
+        let cases = vectors::cases(&file, "fetch_plan_v1");
+        assert_eq!(cases.len(), 11);
+        for case in cases {
+            assert!(case["source"].as_str().unwrap().starts_with(
+                "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/"
+            ));
             let name = case["name"].as_str().unwrap();
             let planned: Vec<Subscription> = case["subscriptions"]
                 .as_array()
@@ -746,6 +811,7 @@ mod tests {
             let outcome = admission(
                 0,
                 case["provider"].as_str().unwrap(),
+                case["preset"].as_str().unwrap(),
                 declaration.as_ref(),
                 &planned,
                 None,

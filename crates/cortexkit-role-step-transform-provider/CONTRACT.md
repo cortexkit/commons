@@ -125,21 +125,28 @@ planned provider with this document.
 - [pinned] The runner refuses a plan the current declaration no longer
   covers with `plan_stale`, with one entry in `detail.differences` per such
   subscription (`StaleDifference`):
-  - `{subscription_loosened: {provider, hook, field}}`: the frozen
-    `on_unavailable` or `budget_ms` (`field`) is looser than declared;
-  - `{subscription_missing: {provider, hook}}`: the declaration has no
-    subscription with the planned hook and phase;
-  - `{preset_missing: {provider, hook}}`: the provider no longer knows the
-    item's preset, and refused `transform.declare` with `invalid_params
-    {field: "preset"}`.
+  - `{kind: "subscription_loosened", provider, hook, phase, field}`: the
+    frozen `tools`, `ops`, `on_unavailable` or `budget_ms` (`field`) is looser
+    than declared;
+  - `{kind: "subscription_missing", provider, hook, phase}`: the declaration
+    has no subscription with the planned hook and phase;
+  - `{kind: "preset_missing", provider, preset}`: the provider no longer
+    knows the item's preset, and refused `transform.declare` with
+    `invalid_params {field: "preset"}`. This difference occurs once per item,
+    regardless of its subscription count.
+  Subscription-scoped differences always carry `phase`, set to `null` for
+  hooks without phases. All `plan_stale` differences are internally tagged
+  with `kind`; fetched-item kinds are `composition_digest`, `tools`,
+  `capabilities` and `text_tool_names`, each with `provider` and its existing
+  payload. `field` names only a subscription field.
 - [pinned] A plan that is malformed in itself is refused `invalid_params
   {field: "plan.step_transform_items", item, subscription, problem}`
   (`InvalidSubscriptionDetail`), `item` and `subscription` being indices
   and `problem` named as `SubscriptionProblem::name` spells it. Such a
   problem wins over any staleness, and the first in plan order is reported
-  (`check_item`). [open: Q11] Tools or ops beyond the declaration
-  (`tools_not_covered`, `op_not_declared`) are drafted as `invalid_params`
-  too.
+  (`check_item`). Tools or ops beyond the declaration are instead stale
+  (`subscription_loosened`), because rebuilding the plan against the current
+  declaration is the remedy.
 - [pinned] The declaration is a pure function of the preset, the params,
   the provider's configuration and the composition. The same inputs give
   the same bytes, and no scope, agent or session identity enters it.
@@ -388,25 +395,20 @@ questions" below, with the decision.
 - **Q10. The user's `replace` grant on `post_tool`.** Not carried by this
   role. Options: (a) the plan carries `grants: [{module, hook, tools}]`
   from the starter; (b) the runner reads the user tier itself.
-- **Q11. Tools or ops beyond the declaration.** The refusal's shape is
-  settled: a malformed plan is `invalid_params {field:
-  "plan.step_transform_items", item, subscription, problem}`, and a plan
-  the declaration no longer covers is `plan_stale` (§4). Open: which of the
-  two a planned subscription gets whose `tools` or `ops` exceed the
-  declaration. (a) **draft:** `invalid_params` with `tools_not_covered` or
-  `op_not_declared`, because the composer chooses tools and ops within the
-  declaration rather than copying them; (b) `plan_stale`, because a plan
-  composed against an older, wider declaration is stale like a missing
-  hook. The fetch-plan vectors have no case for either.
 - **Q12. `runner_groups`.** As in `compaction-provider/v1`.
 
 ## Settled questions
+
+- **Q11. Tools or ops beyond the declaration.** Settled: `plan_stale` with
+  `{kind: "subscription_loosened", provider, hook, phase, field}`, naming
+  `tools` or `ops`. A plan composed against an older, wider declaration is
+  stale like a missing hook. Malformed plans remain `invalid_params` (§4).
 
 - **Q4. Where `on_unavailable` and the budget live.** Settled: the
   declaration is the source, and the composer copies both into every
   planned subscription, where they are frozen. At admission an equal or
   stricter planned subscription admits; a looser one refuses `plan_stale`
-  with `subscription_loosened {provider, hook, field}`; a declared hook or
+  with `{kind: "subscription_loosened", provider, hook, phase, field}`; a declared hook or
   preset that is gone refuses `plan_stale` with `subscription_missing` or
   `preset_missing` (§4).
 - **Q5. `ops` on `pre_tool`.** Settled: empty. `pre_tool` answers by phase;
@@ -456,63 +458,38 @@ What remains:
 
 ### A.2 Prefrontal's `fetch-plan-v1` vectors
 
-Checked against prefrontal at `26590b8d4`, `test-vectors/fetch-plan-v1/`.
-`test-vectors/step-transform-provider-v1/subscriptions.json` carries its
-seven step-transform admission cases (`fetch_plan_v1`), each with the plan's
-subscriptions, the declaration and the expected answer copied from
-prefrontal's files, and this crate's `check_item` gives the same refusal
-bytes or admits and freezes the plan's subscriptions unchanged.
+Checked against prefrontal at `3e69ed9d4a048a458db54203bd93a1069598222e`,
+`test-vectors/fetch-plan-v1/`, including the README's "Digest migration
+(2026-10-02)". `test-vectors/step-transform-provider-v1/subscriptions.json`
+carries all eleven step-transform admission cases (`fetch_plan_v1`), each
+with the plan's subscriptions, preset, current declaration and expected answer
+copied from that revision. `fetch_plan_admission_vectors_agree` pins the full
+revision and checks that `check_item` gives the same refusal bytes or admits
+and freezes the subscriptions unchanged.
 
-Resolved since the first draft (commons `ff1fe00`):
+Resolved since the first draft:
 
-- **`ops` on `pre_tool`.** Prefrontal's vectors now give every `pre_tool`
-  subscription `ops: []` (`subscriptions.json:13-35`) and refuse a plan
-  with `append` there as `invalid_params {field:
-  "plan.step_transform_items", item, subscription, problem:
-  "ops_on_pre_tool"}` (`admission/refuse-pre-tool-append.json`,
-  `README.md:199-205`), as this document does (Q5).
-- **Where `on_unavailable` and budgets live.** Prefrontal's planned
-  subscriptions carry `on_unavailable` and `budget_ms`, copied from the
-  declaration and frozen, with an omitted declared policy meaning `refuse`
-  except on `post_assistant` (`README.md:196,213-219`), as this document
-  does (Q4). The subscription shape agrees field for field.
-- **The admission comparison.** Equal or stricter admits; looser refuses
-  `plan_stale` with `subscription_loosened {provider, hook, field}`; a gone
-  hook or preset refuses `plan_stale` with `subscription_missing` or
-  `preset_missing {provider, hook}` (`README.md:221-227`,
-  `admission/admit-pre-tool-*`, `admission/refuse-subscription-loosened-*`,
-  `admission/refuse-declared-{hook,preset}-gone.json`). The names and
-  shapes agree with `StaleDifference`; the previous draft's single
-  `not_declared` is gone.
+- **`ops` on `pre_tool`.** Empty; a planned op there is malformed and refuses
+  `invalid_params` with `ops_on_pre_tool` (Q5).
+- **Frozen policy and budget.** The declaration supplies both; equal or
+  stricter subscriptions admit unchanged, looser ones are stale (Q4).
+- **Tools and ops bounds.** Wider planned bounds refuse `plan_stale` with
+  `subscription_loosened`, naming `tools` or `ops` (Q11).
+- **Phase attribution.** Every subscription difference includes `phase`,
+  including `null` on phase-less hooks. The two-phase plan's refusal names
+  only the loosened `validate` subscription, not `mutate`.
+- **Missing presets.** One `{kind: "preset_missing", provider, preset}` per
+  item, including the vector with two subscriptions.
+- **One difference encoding.** All `plan_stale` differences use an internal
+  `kind` tag and `provider`. Fetched-item kinds are `composition_digest`,
+  `tools`, `capabilities` and `text_tool_names`; `field` names only a
+  subscription field.
+- **Malformed plans.** Every malformed-plan refusal uses `invalid_params`,
+  including the fetch plan's own checks, not `invalid_request`.
+- **Digest migration.** Admission shape changes replace no existing plan or
+  composition digests. The two-phase plan adds new digests only.
 
-What still differs, or has no case in the fetch-plan vectors:
-
-1. **Tools or ops beyond the declaration.** Prefrontal has no case for a
-   planned subscription whose `tools` or `ops` the declaration does not
-   cover. This document drafts `invalid_params` (Q11).
-2. **A difference does not name the phase.** `subscription_missing` and
-   `subscription_loosened` carry `{provider, hook}`, so a provider
-   subscribed on two `pre_tool` phases cannot tell from the refusal which
-   one changed. This crate follows prefrontal's shape.
-3. **`preset_missing` is per subscription.** The preset belongs to the
-   item, but the difference names a hook, so an item with several
-   subscriptions gets one entry per subscription (`check_item`). This crate
-   follows prefrontal's shape; prefrontal's only case has one subscription.
-4. **Two difference shapes in one array.** Prefrontal's other `plan_stale`
-   differences are flat, `{provider, field, ...}` with `field` naming the
-   kind (`README.md:356-359`); the step-transform ones are externally
-   tagged, `{subscription_loosened: {provider, hook, field}}`, with `field`
-   naming the subscription field. Both are pinned there; a consumer
-   decoding `differences` must accept both.
-5. **Two malformed-request spellings at one admission.** Prefrontal refuses
-   its own malformed sends `invalid_request` (`README.md:362-364`) and the
-   `ops_on_pre_tool` plan `invalid_params`, the runner role's spelling,
-   which this document uses.
-6. **References to the earlier draft.** Prefrontal's README cites this
-   document at commons `ff1fe00` (`README.md:205,231`), the draft before
-   this revision; the names it relies on (`ops_on_pre_tool`,
-   `SubscriptionProblem`, Q4, Q5, Q11) keep their meaning here. Wording
-   only.
+What still differs: nothing.
 
 ### A.3 The design
 
