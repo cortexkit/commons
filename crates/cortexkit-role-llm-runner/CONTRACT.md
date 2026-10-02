@@ -812,6 +812,7 @@ step-transform providers. It will check:
 | `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
 | `undeclared_delivery_refused` | a delivery mode the subject does not declare |
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
+| `send_id_retry_settled_same_answer` | `steer` or `queue`, and `run_ops` |
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
 | `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |

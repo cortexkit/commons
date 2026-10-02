@@ -447,14 +447,16 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
     subject.claim_process_kill = true;
     subject.capabilities.remove(&Capability::RunOps);
     // Each poll pauses half a second, so a case that waited out the suite's
-    // poll bound would take 400 polls, over three minutes. The timeout is
-    // far under that, so a case that waits on a run it cannot observe fails
-    // this test by name instead of passing slowly or hanging it.
+    // poll bound would take 400 polls, over three minutes. The timeout sits
+    // under that, so a case that waits on a run it cannot observe fails this
+    // test by name instead of passing slowly or hanging it. It sits well over
+    // an honest suite run, which other cases' half-second polls make take
+    // about half a minute on a loaded host.
     subject.pause_for = Some(Duration::from_millis(500));
     let dir = tempfile::tempdir().unwrap();
-    let report = tokio::time::timeout(Duration::from_secs(60), run_suite(&subject, dir.path()))
+    let report = tokio::time::timeout(Duration::from_secs(150), run_suite(&subject, dir.path()))
         .await
-        .expect("the suite did not finish within 60 seconds on a runner without run_ops")
+        .expect("the suite did not finish within 150 seconds on a runner without run_ops")
         .unwrap();
     assert_passed(&report, "send_id_retry_same_answer");
     assert_eq!(
