@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-tool-provider"
-version = "0.4.4"
+version = "0.4.5"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
