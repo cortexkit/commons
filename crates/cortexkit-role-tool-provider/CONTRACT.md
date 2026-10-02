@@ -113,6 +113,14 @@ to them. Nothing here names a particular implementation.
     | `code.outline/v1` | returns the structure of a file or directory (symbols, headings) |
     | `code.callgraph/v1` | answers caller, callee and impact questions about code |
     | `code.diagnostics/v1` | returns compiler or linter diagnostics |
+    | `browser.use/v1` | drives a web browser session: navigates, reads the page and acts on it |
+    | `computer.use/v1` | drives desktop applications: reads their state and acts on them |
+
+    A defined tag promises only what its row says. How a tool does it (its
+    arguments, grants and consent) is its schema and description; a provider
+    that wants a consumer to match its specific contract adds its own
+    namespaced tag beside the defined one (for example
+    `cerebellum:browser.use/v1`).
 
     Any other tag is `<namespace>:<name>/v<N>`: a namespace of lowercase letters
     and digits in `-`-separated words, a name of `.`-separated words of

@@ -78,6 +78,15 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     "code.callgraph/v1",
     // Returns compiler or linter diagnostics.
     "code.diagnostics/v1",
+    // Drives a web browser session: navigate, read the page and act on it.
+    // The tool's own schema and contract say how; this tag promises only that
+    // a browser is driven, so a preset can ask for one without naming a
+    // provider. A provider adds its own namespaced tag for its specific
+    // contract.
+    "browser.use/v1",
+    // Drives desktop applications: read their state and act on them. Promises
+    // only that much, like browser.use/v1.
+    "computer.use/v1",
 ];
 
 /// Why a capability tag is not acceptable in a catalog.
