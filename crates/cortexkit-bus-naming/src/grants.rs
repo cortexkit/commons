@@ -225,8 +225,8 @@ pub fn participant_permissions(
 ///
 /// Everything a participant holds, plus publish on each agent stream's own
 /// binding: prefrontal-core is the only producer of wakes, peer deliveries and
-/// effect intents, and it also copies a merged agent's queued wakes and peer
-/// deliveries into the survivor. Keeping workload publish here, and out of every
+/// effect intents, so it publishes every agent's wake fires and peer deliveries.
+/// Keeping workload publish here, and out of every
 /// host credential and out of ck-bus's own, means the module that decides a
 /// delivery is the only one that can make one.
 ///
