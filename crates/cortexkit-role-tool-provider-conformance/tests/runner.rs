@@ -102,6 +102,18 @@ async fn a_root_level_union_fails_the_flatness_case() {
 }
 
 #[tokio::test]
+async fn an_undefined_unprefixed_capability_tag_fails_the_catalog_case() {
+    let report = run(&FakeSubject::new(Defects {
+        undefined_unprefixed_tag: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_schemas_flat");
+    assert!(reason.contains("code.refactor/v1"), "{reason}");
+    assert!(reason.contains("DEFINED_CAPABILITY_TAGS"), "{reason}");
+}
+
+#[tokio::test]
 async fn guessing_a_variant_for_an_undefined_preset_fails_the_unknown_preset_case() {
     let report = run(&FakeSubject::new(Defects {
         accept_any_preset: true,

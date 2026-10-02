@@ -14,6 +14,7 @@ use cortexkit_role_tool_provider::{
     catalog::{
         check_flat_schema, is_schema_digest, schema_digest, session_capabilities, CatalogAnswer,
     },
+    check_capability_tag,
     describe::check_describe,
     errors,
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
@@ -375,6 +376,11 @@ where
             }
             check_flat_schema(&tool.input_schema)
                 .map_err(|problem| format!("{} schema is not flat: {problem:?}", tool.name))?;
+            for tag in &tool.capabilities {
+                check_capability_tag(tag).map_err(|problem| {
+                    format!("{} carries capability tag {tag:?}: {problem}", tool.name)
+                })?;
+            }
         }
         Ok(())
     }

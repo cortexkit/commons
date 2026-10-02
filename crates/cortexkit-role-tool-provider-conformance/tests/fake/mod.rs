@@ -79,6 +79,9 @@ pub struct Defects {
     /// `tool.catalog` answers with its default variant for any preset,
     /// including one it does not define.
     pub accept_any_preset: bool,
+    /// The held tool carries an unprefixed capability tag the role document
+    /// does not define.
+    pub undefined_unprefixed_tag: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -320,11 +323,16 @@ impl Module {
         } else {
             json!({ "type": "object", "properties": { "marker": { "type": "string" } }, "required": ["marker"] })
         };
+        let held_capabilities = if self.defects.undefined_unprefixed_tag {
+            json!(["fake:effect/v1", "code.refactor/v1"])
+        } else {
+            json!(["fake:effect/v1", "code.edit/v1"])
+        };
         let mut tools = vec![
             json!({ "name": QUICK, "semantics": 1, "input_schema": object }),
             json!({ "name": SLOW, "semantics": 1, "input_schema": { "type": "object" } }),
             json!({ "name": HELD, "semantics": 2, "result_ops": ["prepend", "append"],
-                    "capabilities": ["fake:effect/v1"], "input_schema": held_schema }),
+                    "capabilities": held_capabilities, "input_schema": held_schema }),
         ];
         for tool in &mut tools {
             tool["schema_digest"] = json!(schema_digest(&tool["input_schema"]).unwrap());

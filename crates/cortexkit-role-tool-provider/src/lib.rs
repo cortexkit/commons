@@ -56,6 +56,100 @@ pub mod ops {
 /// consumer refuses a module missing any of them before routing anything.
 pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::TOOL_CATALOG];
 
+/// The unprefixed capability tags this role defines. Each is a promise any
+/// provider can make about a tool, so a preset or peer can match the tag
+/// without naming a provider. Every other tag must carry a `<namespace>:`
+/// prefix; see [`check_capability_tag`].
+pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
+    // Runs a shell command in the session's workspace and returns its output
+    // and exit status.
+    "shell.exec/v1",
+    // Returns file contents, whole or by range.
+    "code.read/v1",
+    // Changes files in the workspace.
+    "code.edit/v1",
+    // Finds code by text, regular expression or meaning.
+    "code.search/v1",
+    // Lists or finds files by path pattern.
+    "code.files/v1",
+    // Returns the structure of a file or directory (symbols, headings).
+    "code.outline/v1",
+    // Answers caller, callee and impact questions about code.
+    "code.callgraph/v1",
+    // Returns compiler or linter diagnostics.
+    "code.diagnostics/v1",
+];
+
+/// Why a capability tag is not acceptable in a catalog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapabilityTagProblem {
+    /// The tag has no `<namespace>:` prefix and this role does not define it.
+    UndefinedUnprefixed,
+    /// The tag has a `:` but nothing before it.
+    EmptyNamespace,
+}
+
+impl std::fmt::Display for CapabilityTagProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UndefinedUnprefixed => write!(
+                f,
+                "an unprefixed tag must be one this role defines (DEFINED_CAPABILITY_TAGS); prefix it with a namespace"
+            ),
+            Self::EmptyNamespace => write!(f, "the namespace before ':' is empty"),
+        }
+    }
+}
+
+/// Check one capability tag: either one of [`DEFINED_CAPABILITY_TAGS`], or a
+/// tag with a non-empty `<namespace>:` prefix, which anyone may define.
+pub fn check_capability_tag(tag: &str) -> Result<(), CapabilityTagProblem> {
+    match tag.split_once(':') {
+        Some(("", _)) => Err(CapabilityTagProblem::EmptyNamespace),
+        Some(_) => Ok(()),
+        None if DEFINED_CAPABILITY_TAGS.contains(&tag) => Ok(()),
+        None => Err(CapabilityTagProblem::UndefinedUnprefixed),
+    }
+}
+
+#[cfg(test)]
+mod capability_tag_tests {
+    use super::*;
+
+    #[test]
+    fn defined_unprefixed_tags_are_accepted() {
+        for tag in DEFINED_CAPABILITY_TAGS {
+            assert_eq!(check_capability_tag(tag), Ok(()), "{tag}");
+        }
+    }
+
+    #[test]
+    fn namespaced_tags_are_accepted() {
+        assert_eq!(check_capability_tag("acme:code.callgraph/v1"), Ok(()));
+        assert_eq!(check_capability_tag("aft:safety/v1"), Ok(()));
+    }
+
+    #[test]
+    fn undefined_unprefixed_tags_are_refused() {
+        assert_eq!(
+            check_capability_tag("code.refactor/v1"),
+            Err(CapabilityTagProblem::UndefinedUnprefixed)
+        );
+        assert_eq!(
+            check_capability_tag("context.reduce/v1"),
+            Err(CapabilityTagProblem::UndefinedUnprefixed)
+        );
+    }
+
+    #[test]
+    fn an_empty_namespace_is_refused() {
+        assert_eq!(
+            check_capability_tag(":code.read/v1"),
+            Err(CapabilityTagProblem::EmptyNamespace)
+        );
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod vectors {
     //! The shared test vectors, read from the repository's `test-vectors`

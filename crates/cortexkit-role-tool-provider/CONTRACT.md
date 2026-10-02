@@ -100,7 +100,24 @@ to them. Nothing here names a particular implementation.
     `prepend`, `append`, `replace`. Absent means all three.
   - `capabilities` lists capability tags: unprefixed (`code.outline/v1`,
     defined only by this document) or namespaced (`acme:code.callgraph/v1`,
-    free for anyone). Data in this answer only.
+    free for anyone). Data in this answer only. This document defines these
+    unprefixed tags, each a promise any provider can make about a tool:
+
+    | Tag | The tool |
+    |---|---|
+    | `shell.exec/v1` | runs a shell command in the session's workspace and returns its output and exit status |
+    | `code.read/v1` | returns file contents, whole or by range |
+    | `code.edit/v1` | changes files in the workspace |
+    | `code.search/v1` | finds code by text, regular expression or meaning |
+    | `code.files/v1` | lists or finds files by path pattern |
+    | `code.outline/v1` | returns the structure of a file or directory (symbols, headings) |
+    | `code.callgraph/v1` | answers caller, callee and impact questions about code |
+    | `code.diagnostics/v1` | returns compiler or linter diagnostics |
+
+    Any other tag must carry a non-empty `<namespace>:` prefix. The crate lists
+    these as `DEFINED_CAPABILITY_TAGS` and checks a tag with
+    `check_capability_tag`; the conformance suite refuses a catalog with any
+    other unprefixed tag.
   - `input_schema` is the argument schema; `description` its description.
 - The answer is a pure function of its inputs (the plan item's preset and
   params, the composition, user and project configuration, host facts), so

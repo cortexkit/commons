@@ -49,7 +49,7 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "catalog_schemas_flat",
         requires: &[],
-        checks: "every catalog tool has a schema_digest and a flat input_schema, no role op is listed as a tool, and the quick call's tool is listed",
+        checks: "every catalog tool has a schema_digest, a flat input_schema and only defined or namespaced capability tags, no role op is listed as a tool, and the quick call's tool is listed",
     },
     CaseSpec {
         name: "catalog_schema_digest_stable",
