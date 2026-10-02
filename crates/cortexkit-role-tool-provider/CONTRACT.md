@@ -115,6 +115,7 @@ to them. Nothing here names a particular implementation.
     | `code.diagnostics/v1` | returns compiler or linter diagnostics |
     | `browser.use/v1` | drives a web browser session: navigates, reads the page and acts on it |
     | `computer.use/v1` | drives desktop applications: reads their state and acts on them |
+    | `git.history/v1` | reads repository history: commits, file contents at a revision, and diffs between revisions, without changing the repository |
 
     A defined tag promises only the activity in its row. Everything else is
     the provider's own: its arguments, permission grants, consent flow,

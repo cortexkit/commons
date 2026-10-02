@@ -87,6 +87,10 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     // Drives desktop applications: read their state and act on them. Promises
     // only that much, like browser.use/v1.
     "computer.use/v1",
+    // Reads repository history: commits, file contents at a revision and
+    // diffs between revisions. Read-only; how revisions are named and what
+    // the output looks like are the provider's own.
+    "git.history/v1",
 ];
 
 /// Why a capability tag is not acceptable in a catalog.
