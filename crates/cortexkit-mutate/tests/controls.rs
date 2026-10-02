@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use cortexkit_mutate::*;
 use std::{
     fs,
@@ -474,7 +476,7 @@ fn cli_report_shard_equivalent_and_prove_append() {
     );
 }
 #[cfg(unix)]
-fn signal_restores(signal: i32) {
+fn signal_restores(signal: rustix::process::Signal) {
     use std::process::Stdio;
     let f = Fixture::new();
     let mut c = f.control();
@@ -498,9 +500,7 @@ fn signal_restores(signal: i32) {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_ne!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
-    unsafe {
-        libc::kill(child.id() as i32, signal);
-    }
+    rustix::process::kill_process(rustix::process::Pid::from_child(&child), signal).unwrap();
     let start = Instant::now();
     while child.try_wait().unwrap().is_none() {
         assert!(start.elapsed() < Duration::from_secs(10));
@@ -512,12 +512,12 @@ fn signal_restores(signal: i32) {
 #[cfg(unix)]
 #[test]
 fn sigint_restores_and_releases_lock() {
-    signal_restores(libc::SIGINT);
+    signal_restores(rustix::process::Signal::INT);
 }
 #[cfg(unix)]
 #[test]
 fn sigterm_restores_and_releases_lock() {
-    signal_restores(libc::SIGTERM);
+    signal_restores(rustix::process::Signal::TERM);
 }
 #[test]
 fn nextest_status_parsing_is_full_name_not_exit_status() {
@@ -637,4 +637,123 @@ fn prove_survivor_replays_unscoped_package() {
         1
     );
     assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
+}
+
+#[test]
+fn reasoned_ignore_in_target_still_grades_caught() {
+    let f = Fixture::new();
+    let row = f.run(&f.control());
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert!(row
+        .test_tail
+        .contains("test tests::daemon_contract ... ignored, needs a daemon"));
+    assert_eq!(row.red, ["tests::guard_rejects_zero"]);
+    assert!(!row.green.contains(&"tests::daemon_contract".into()));
+}
+
+#[test]
+fn deleted_target_reports_anchor_missing_and_next_cli_row_runs() {
+    let f = Fixture::new();
+    fs::write(f.root().join("deleted.rs"), "original guard\n").unwrap();
+    cmd(f.root(), "git", &["add", "deleted.rs"]);
+    f.commit();
+    let base = String::from_utf8(git(f.root(), &["rev-parse", "HEAD"]).unwrap()).unwrap();
+    fs::remove_file(f.root().join("deleted.rs")).unwrap();
+    cmd(f.root(), "git", &["add", "deleted.rs"]);
+    let mut deleted = f.control();
+    deleted.id = "a-deleted".into();
+    deleted.file = Some("deleted.rs".into());
+    deleted.old = Some("original guard".into());
+    deleted.new = Some("removed guard".into());
+    let mut caught = f.control();
+    caught.id = "b-caught".into();
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![deleted, caught],
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    let before = fs::read(f.root().join("src/lib.rs")).unwrap();
+    let lock = fs::read(f.root().join("Cargo.lock")).unwrap();
+    let out = f.cli(&[
+        "run",
+        "--diff",
+        base.trim(),
+        "--report",
+        "deleted-report.json",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(
+        &fs::read(f.root().join("deleted-report.json")).expect("both rows must be reported"),
+    )
+    .unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert_eq!(rows[0]["id"], "a-deleted");
+    assert_eq!(rows[0]["outcome"], "ANCHOR_MISSING");
+    assert!(rows[0]["reason"].as_str().unwrap().contains("deleted.rs"));
+    assert_eq!(rows[1]["id"], "b-caught");
+    assert_eq!(rows[1]["outcome"], "CAUGHT");
+    assert_eq!(rows[1]["red"][0], "tests::guard_rejects_zero");
+    assert!(!f.root().join("deleted.rs").exists());
+    assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
+    assert_eq!(lock, fs::read(f.root().join("Cargo.lock")).unwrap());
+    assert!(TreeLock::acquire(f.root()).is_ok());
+}
+
+#[test]
+fn nextest_check_and_run_agree_on_exact_test_names() {
+    let name = "nextest_check_and_run_agree_on_exact_test_names";
+    let installed = Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !installed {
+        assert!(
+            std::env::var("CK_MUTATE_REQUIRE_NEXTEST").as_deref() != Ok("1"),
+            "{name}: CI must install nextest"
+        );
+        eprintln!("SKIP {name}: nextest is not installed");
+        return;
+    }
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.runner = "nextest".into();
+    c.expect_red.push("tests::guard_accepts_positive".into());
+    c.new = Some("{ panic!(\"guard removed\") }".into());
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+    )
+    .unwrap();
+    let before = fs::read(f.root().join("src/lib.rs")).unwrap();
+    let lock = fs::read(f.root().join("Cargo.lock")).unwrap();
+    let checked = f.cli(&["check"]);
+    assert!(
+        checked.status.success(),
+        "{name}: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let run = f.cli(&["run", "--all", "--report", "parity-report.json"]);
+    assert!(
+        run.status.success(),
+        "{name}: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let rows: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join("parity-report.json")).unwrap()).unwrap();
+    assert_eq!(rows[0]["outcome"], "CAUGHT");
+    assert_eq!(
+        rows[0]["red"],
+        serde_json::json!(["tests::guard_accepts_positive", "tests::guard_rejects_zero"])
+    );
+    assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
+    assert_eq!(lock, fs::read(f.root().join("Cargo.lock")).unwrap());
 }

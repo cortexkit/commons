@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -98,6 +100,14 @@ pub fn load(path: &Path) -> Result<Catalogue> {
     toml::from_str(&fs::read_to_string(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
+fn target_io_error(name: &str, error: std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        format!("ANCHOR_MISSING {name}: {error}")
+    } else {
+        format!("{name}: {error}")
+    }
+}
+
 fn safe_path(root: &Path, name: &str) -> Result<PathBuf> {
     let path = Path::new(name);
     if path.as_os_str().is_empty()
@@ -108,7 +118,7 @@ fn safe_path(root: &Path, name: &str) -> Result<PathBuf> {
         return Err(format!("not a repository-relative path: {name}"));
     }
     let full = root.join(path);
-    let resolved = full.canonicalize().map_err(|e| format!("{name}: {e}"))?;
+    let resolved = full.canonicalize().map_err(|e| target_io_error(name, e))?;
     if !resolved.starts_with(root.canonicalize().map_err(|e| e.to_string())?) || !resolved.is_file()
     {
         return Err(format!("not a regular file inside repository: {name}"));
@@ -148,7 +158,13 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
         c.targets()?;
         safe_path(root, &c.test_file)?;
         for edit in c.edits()? {
-            safe_path(root, &edit.file)?;
+            // Deleted edit targets are row outcomes, not catalogue-wide errors.
+            // Check mode still rejects them when it verifies the anchors.
+            match safe_path(root, &edit.file) {
+                Ok(_) => {}
+                Err(e) if e.starts_with("ANCHOR_MISSING ") => {}
+                Err(e) => return Err(e),
+            }
             if edit.old.is_empty() || edit.old == edit.new {
                 return Err(format!("{}: empty or unchanged edit", c.id));
             }
@@ -213,7 +229,7 @@ impl Saved {
         let mut files = BTreeMap::new();
         for e in edits {
             let path = safe_path(root, &e.file)?;
-            let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+            let bytes = fs::read(&path).map_err(|err| target_io_error(&e.file, err))?;
             if !allow_dirty && git(root, &["show", &format!("HEAD:{}", e.file)])? != bytes {
                 return Err(format!(
                     "dirty target refused: {} (use --allow-dirty)",
@@ -484,8 +500,9 @@ impl Drop for RunningChild {
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     // The child was placed in its own process group before exec.
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    {
+        use rustix::process::{kill_process_group, Pid, Signal};
+        let _ = kill_process_group(Pid::from_child(child), Signal::KILL);
     }
     #[cfg(windows)]
     {
@@ -537,7 +554,7 @@ pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>
                         "FAILED" => {
                             red.insert(name.to_owned());
                         }
-                        "ignored" => {}
+                        status if status == "ignored" || status.starts_with("ignored,") => {}
                         _ => return Err(format!("unrecognized test status: {line}")),
                     }
                 }
@@ -614,7 +631,15 @@ pub fn run_row(
         return Ok(report);
     }
     let edits = c.edits()?;
-    let mut saved = Saved::new(root, &edits, allow_dirty)?;
+    let mut saved = match Saved::new(root, &edits, allow_dirty) {
+        Ok(saved) => saved,
+        Err(e) if e.starts_with("ANCHOR_MISSING ") => {
+            report.outcome = Outcome::AnchorMissing;
+            report.reason = Some(e);
+            return Ok(report);
+        }
+        Err(e) => return Err(e),
+    };
     let work = (|| -> Result<()> {
         let files = match replaced(root, &edits) {
             Ok(f) => f,

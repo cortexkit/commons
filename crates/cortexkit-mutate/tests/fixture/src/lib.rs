@@ -13,6 +13,12 @@ pub fn lock_hook() {}
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "needs a daemon"]
+    fn daemon_contract() {
+        panic!("a daemon is not available in this fixture");
+    }
+
+    #[test]
     fn guard_rejects_zero() {
         assert!(!super::guarded(0));
     }

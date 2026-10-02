@@ -76,6 +76,10 @@ list mode may compile test binaries. Missing full names are reported explicitly.
 
 `run --diff <base>` compares **committed** `<base>` to `HEAD`. A source edit file,
 any `edits[].file`, `test_file`, or a changed/new catalogue row selects that row.
+Selection cannot see an edit to a helper module or fixture used by a guarding
+test if that path is neither an edit target nor `test_file`. Only the full
+nightly replay catches regressions from those otherwise unselected changes.
+
 Row changes are compared as parsed TOML fields (comments/formatting alone are
 not changes to the proof). `--only` intersects this selection. Shards are 1-based
 `i/n`, assigned in sorted-ID order **after** filtering. Separate CI jobs need
@@ -140,7 +144,8 @@ List mode always uses nextest JSON. Current nextest is exercised in CI.
 
 An OS advisory lock at Git's `ck-mutate.lock` path excludes concurrent runs,
 including when `.git` is a worktree pointer. The lock file remains but the lock
-is released when its handle closes. Every target is compared **byte for byte to
+is released when its handle closes. A deleted or renamed edit target reports ANCHOR_MISSING for its row, naming the
+missing file; subsequent rows still run. Every existing target is compared **byte for byte to
 HEAD**, including staged changes, before any mutation. `--allow-dirty` opts in
 explicitly, and restoration still uses saved local bytes, not HEAD or the index.
 
@@ -157,7 +162,12 @@ group are not covered. Run proofs in disposable CI checkouts, not production.
 
 **Never `git checkout` a target mid-run.** It removes the mutation before tests
 execute and fakes SURVIVED. Do not edit targets or their tests while a replay is
-running. The lock coordinates runner instances, not editors or external Git
+running. After a SIGKILL the mutated file is left in place, and the next run
+refuses it as dirty. Once the killed runner and its children are no longer
+running, restore each affected file with `git checkout -- <file>` and rerun.
+This intentionally discards the mutant; if the interrupted run used
+`--allow-dirty`, recover your original local edits from a separate backup rather
+than checking them out. The lock coordinates runner instances, not editors or external Git
 commands. A restoration failure is a hard error naming the file: investigate
 before using that checkout again.
 
@@ -195,7 +205,7 @@ jobs:
           path: mutations.json
 ```
 
-The cortexkit/commons repository's continuous integration runs this runner's fixture controls on **every push and PR** on Linux,
+The cortexkit/commons repository's continuous integration runs this runner's fixture controls on pushes and PRs touching this crate or its workflow, on Linux,
 macOS and Windows, including actual nextest replay. Unix signals have dedicated
 controls. The workspace test gate includes these controls too. See
 `tests/controls.rs` and the library's panic restoration test.
@@ -206,5 +216,5 @@ No internal workspace crates or async runtime are used. `clap` provides strict C
 and help; `serde` derives the catalogue/report schema; `toml` reads/writes the
 catalogue; `serde_json` writes evidence and reads nextest events; `fs2` supplies
 portable advisory locks; `ctrlc` supplies Unix interruption/termination and
-Windows Ctrl-C handling; Unix-only `libc` kills process groups. `tempfile` is
+Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `tempfile` is
 only a dev dependency, isolating real Git/Cargo fixture repos for tests.

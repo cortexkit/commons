@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use clap::{Args, Parser, Subcommand};
 use cortexkit_mutate::*;
 use std::{fs, path::PathBuf, sync::atomic::Ordering};
