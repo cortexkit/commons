@@ -277,6 +277,50 @@ async fn a_runner_declaring_every_delivery_mode_cannot_be_asked_for_an_undeclare
 }
 
 #[tokio::test]
+async fn a_guaranteed_runner_answering_pending_fails() {
+    let report = run(&FakeSubject::new(Defects {
+        guaranteed_steer_pending: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "guaranteed_steer_never_pending_or_unknown");
+    assert!(reason.contains("pending"), "{reason}");
+    assert_passed(&report, "resend_steer_delivered_stable");
+}
+
+#[tokio::test]
+async fn an_unstable_resend_steer_receipt_fails() {
+    let report = run(&FakeSubject::new(Defects {
+        resend_steer_unstable: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "resend_steer_delivered_stable");
+    assert!(reason.contains("re-send delivered changed"), "{reason}");
+    assert_passed(&report, "guaranteed_steer_never_pending_or_unknown");
+}
+
+#[tokio::test]
+async fn a_runner_without_steer_reports_steer_checks_as_inapplicable() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::Steer);
+    let report = run(&subject).await;
+    for case in [
+        "guaranteed_steer_never_pending_or_unknown",
+        "resend_steer_delivered_stable",
+    ] {
+        assert!(
+            matches!(
+                report.outcome(case),
+                Some(CaseOutcome::Inapplicable { reason }) if reason.contains("does not declare steer")
+            ),
+            "{case}: {:?}",
+            report.outcome(case)
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_used_work_dir_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("left-over"), b"x").unwrap();

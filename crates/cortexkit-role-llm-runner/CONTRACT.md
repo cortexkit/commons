@@ -62,8 +62,8 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?}` (`RoleDescribe`), the shape `tool-provider/v1` uses. `version`
-  is spelled as in the manifest, `llm-runner/v1`.
+  max_bytes?, steer_receipt?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
   for every session.
@@ -78,6 +78,13 @@ shipping runner with this document.
   largest cap it honours. A consumer refuses a describe answer that
   declares `transcript_reads` without it (`check_describe`:
   `missing_max_bytes`).
+- [pinned] `steer_receipt` is optional, valued `guaranteed` or `confirm`, with
+  absent meaning `guaranteed`:
+  - on a `guaranteed` runner, a durably accepted steer is delivered:
+    `delivered` in `SendReply` may be absent, and must never be `pending` or
+    `unknown`;
+  - on a `confirm` runner, an absent `delivered` in `SendReply` means `pending`,
+    never delivered.
 - [pinned] Decoded leniently: unknown fields, majors, ops and capabilities
   are ignored, and an unknown `stability` decodes. Only what a consumer
   relies on is checked strictly (`check_describe`): the `llm-runner/v1`
@@ -390,8 +397,27 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   the session's frozen values, so an owner that knows only the role's
   members can send one.
 - [pinned] The reply is `{state, run_id?, submission_id?, reason?,
-  baseline?}` (`SendReply`), `state` decoded open (`active`, `finished`,
-  `pending`).
+  baseline?, delivered?}` (`SendReply`), `state` decoded open (`active`,
+  `finished`, `pending`).
+- [pinned] `delivered` (`Delivered`) is optional: `{as, ref?}`:
+  - `as` is one of `step | turn | pending | unknown`, decoded open: an
+    unknown string survives as itself and does not fail the decode;
+  - `ref` is an opaque string: a stored row id, or the run id when `as` is
+    `turn`;
+  - it is set on a re-send of the same `send_id` (the existing idempotent path),
+    and may be set on the first reply;
+  - `step` / `turn`: delivered;
+  - `pending`: accepted, not yet delivered, still deliverable;
+  - `unknown`: accepted, but delivery cannot be confirmed; the owner records
+    `outcome_unknown` and never re-sends;
+  - on a `guaranteed` runner (`role.describe.steer_receipt` absent or
+    `guaranteed`), a durably accepted steer is delivered: `delivered` may be
+    absent, and must never be `pending` or `unknown`;
+  - on a `confirm` runner (`role.describe.steer_receipt: confirm`), an absent
+    `delivered` means `pending`, never delivered;
+  - the owner re-checks a `confirm` runner's undelivered steers by re-sending
+    the same `send_id`, only on runner reconnect and on its next send to the
+    same session.
 
 ## 10. `session.baseline` and the admission reply
 

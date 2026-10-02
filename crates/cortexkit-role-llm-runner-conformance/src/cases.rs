@@ -6,11 +6,11 @@ use cortexkit_role_harness::DriverHandle;
 use cortexkit_role_llm_runner::{
     baseline::{BaselineReply, BaselineRequest},
     capabilities::{self as groups, source},
-    describe::{check_describe, RoleDescribe, Stability},
+    describe::{check_describe, steer_receipt, RoleDescribe, Stability},
     errors, ops,
     read::{HeadMeta, ReadMessage, ReadPage, ReadRequest, ToolCallAttribution},
     run::{join_text_parts, states as run_states},
-    send::{SendReply, DELIVERY_FIELD},
+    send::{delivered_as, SendReply, DELIVERY_FIELD},
     subscribe::{kinds, SubscribeEvent, SubscribeFrom, SubscribeRequest},
     PROVIDES,
 };
@@ -98,6 +98,10 @@ where
             "delivery_change_refused" => passed(self.delivery_change().await),
             "unknown_delivery_refused" => passed(self.unknown_delivery().await),
             "undeclared_delivery_refused" => passed(self.undeclared_delivery().await),
+            "guaranteed_steer_never_pending_or_unknown" => {
+                self.guaranteed_steer_never_pending_or_unknown().await
+            }
+            "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             other => Err(format!("the runner has no case named {other}")),
         }
     }
@@ -1348,6 +1352,108 @@ where
             ));
         }
         Ok(())
+    }
+
+    async fn guaranteed_steer_never_pending_or_unknown(&self) -> Result<Ending, String> {
+        let describe: RoleDescribe = decode("role.describe", self.describe().await?)?;
+        if !describe.declares(groups::STEER) || !self.declares(Capability::Steer) {
+            return Ok(Ending::Inapplicable(
+                "the runner does not declare steer".into(),
+            ));
+        }
+        if describe.steer_receipt() == steer_receipt::CONFIRM {
+            return Ok(Ending::Inapplicable(
+                "the runner declares steer_receipt: confirm".into(),
+            ));
+        }
+        let (session, _, _) = self.sent_session("steer-guaranteed").await?;
+        let steer_id = self.mint.next("steer");
+        let prompt = self.mint.next("prompt");
+        let reply_raw = expect_ok(
+            "session.send steer",
+            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
+                .await?,
+        )?;
+        let reply: SendReply = decode("session.send steer", reply_raw)?;
+        if let Some(delivered) = &reply.delivered {
+            if delivered.r#as == delivered_as::PENDING || delivered.r#as == delivered_as::UNKNOWN {
+                return Err(format!(
+                    "a guaranteed runner answered delivered.as: {}",
+                    delivered.r#as
+                ));
+            }
+        }
+        let retry_raw = expect_ok(
+            "session.send steer retry",
+            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
+                .await?,
+        )?;
+        let retry: SendReply = decode("session.send steer retry", retry_raw)?;
+        if let Some(delivered) = &retry.delivered {
+            if delivered.r#as == delivered_as::PENDING || delivered.r#as == delivered_as::UNKNOWN {
+                return Err(format!(
+                    "a guaranteed runner answered delivered.as: {} on re-send",
+                    delivered.r#as
+                ));
+            }
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn resend_steer_delivered_stable(&self) -> Result<Ending, String> {
+        let describe: RoleDescribe = decode("role.describe", self.describe().await?)?;
+        if !describe.declares(groups::STEER) || !self.declares(Capability::Steer) {
+            return Ok(Ending::Inapplicable(
+                "the runner does not declare steer".into(),
+            ));
+        }
+        let (session, _, _) = self.sent_session("steer-stable").await?;
+        let steer_id = self.mint.next("steer");
+        let prompt = self.mint.next("prompt");
+        let first_reply_raw = expect_ok(
+            "session.send steer",
+            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
+                .await?,
+        )?;
+        let first_reply: SendReply = decode("session.send steer", first_reply_raw)?;
+        let retry1_raw = expect_ok(
+            "session.send steer retry 1",
+            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
+                .await?,
+        )?;
+        let retry1: SendReply = decode("session.send steer retry 1", retry1_raw)?;
+        let retry2_raw = expect_ok(
+            "session.send steer retry 2",
+            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
+                .await?,
+        )?;
+        let retry2: SendReply = decode("session.send steer retry 2", retry2_raw)?;
+
+        let receipt1 = match &retry1.delivered {
+            Some(d) if matches!(d.r#as.as_str(), delivered_as::STEP | delivered_as::TURN) => d,
+            _ => return Ok(Ending::Passed),
+        };
+        let receipt2 = retry2
+            .delivered
+            .as_ref()
+            .ok_or_else(|| "the second re-send carries no delivered receipt".to_owned())?;
+        if receipt1 != receipt2 {
+            return Err(format!(
+                "re-send delivered changed from {receipt1:?} to {receipt2:?}"
+            ));
+        }
+        if let Some(first_receipt) = &first_reply.delivered {
+            if matches!(
+                first_receipt.r#as.as_str(),
+                delivered_as::STEP | delivered_as::TURN
+            ) && first_receipt != receipt1
+            {
+                return Err(format!(
+                    "re-send delivered {receipt1:?} differs from initial reply {first_receipt:?}"
+                ));
+            }
+        }
+        Ok(Ending::Passed)
     }
 }
 

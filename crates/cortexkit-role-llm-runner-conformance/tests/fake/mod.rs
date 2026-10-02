@@ -46,7 +46,10 @@ use cortexkit_role_llm_runner_conformance::{
             RunAttribution, ToolCallAttribution,
         },
         run::{FinalMessage, RunResult, RunResultRequest},
-        send::{delivery_unsupported_detail, SendReply, SendRequest, DELIVERY_FIELD},
+        send::{
+            delivered_as, delivery_unsupported_detail, Delivered, SendReply, SendRequest,
+            DELIVERY_FIELD,
+        },
         subscribe::{SubscribeFrom, SubscribeRequest},
         PROVIDES,
     },
@@ -95,6 +98,10 @@ pub struct Defects {
     /// role.describe declares `interrupt`, which the runner does not serve
     /// and the subject does not declare.
     pub claim_unserved_group: bool,
+    /// A guaranteed runner falsely answers pending for a steer send.
+    pub guaranteed_steer_pending: bool,
+    /// A re-send of a delivered steer changes its receipt.
+    pub resend_steer_unstable: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -173,6 +180,7 @@ struct SendRec {
     delivery: String,
     run_id: String,
     admitted: bool,
+    resend_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -438,6 +446,7 @@ impl Module {
                         delivery: text("delivery"),
                         run_id: run_id.clone(),
                         admitted: record["admitted"] == json!(true),
+                        resend_count: 0,
                     },
                 );
                 sess.runs.push(RunRec {
@@ -710,6 +719,18 @@ impl Module {
         if send.admitted {
             reply = reply.with_baseline(baseline());
         }
+        if send.delivery == groups::STEER {
+            if self.world.defects.guaranteed_steer_pending {
+                reply = reply.with_delivered(Delivered::new(delivered_as::PENDING));
+            } else if send.resend_count > 1 && self.world.defects.resend_steer_unstable {
+                reply = reply.with_delivered(
+                    Delivered::new(delivered_as::TURN).with_ref(format!("{}-unstable", run.run_id)),
+                );
+            } else {
+                reply =
+                    reply.with_delivered(Delivered::new(delivered_as::TURN).with_ref(&run.run_id));
+            }
+        }
         respond(reply)
     }
 
@@ -742,7 +763,13 @@ impl Module {
                         Some(json!({ "field": DELIVERY_FIELD })),
                     ));
                 }
-                return Ok(self.send_reply(session, send));
+                let mut sessions = self.sessions.lock().unwrap();
+                let sess = sessions.get_mut(session).unwrap();
+                let send = sess.sends.get_mut(&request.send_id).unwrap();
+                send.resend_count += 1;
+                let send = send.clone();
+                drop(sessions);
+                return Ok(self.send_reply(session, &send));
             }
             if sess.runs.iter().any(|run| run.state == "active") {
                 return Ok(refuse(errors::TRANSIENT, None));

@@ -243,6 +243,50 @@
         ],
         "session_capabilities_from": "admission"
       }
+    },
+    {
+      "name": "steer receipt guaranteed",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.send"
+            ],
+            "stability": "alpha"
+          }
+        ],
+        "implementation_version": "0.1.0",
+        "capabilities": [
+          "steer"
+        ],
+        "session_capabilities_from": "admission",
+        "steer_receipt": "guaranteed"
+      }
+    },
+    {
+      "name": "steer receipt confirm",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.send"
+            ],
+            "stability": "alpha"
+          }
+        ],
+        "implementation_version": "0.1.0",
+        "capabilities": [
+          "steer"
+        ],
+        "session_capabilities_from": "admission",
+        "steer_receipt": "confirm"
+      }
     }
   ],
   "stability_defaults": [

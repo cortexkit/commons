@@ -217,6 +217,16 @@ pub const CASES: &[CaseSpec] = &[
         checks: "a send with a delivery mode the runner does not declare is refused delivery_unsupported naming the mode, and nothing is written",
     },
     case(
+        "guaranteed_steer_never_pending_or_unknown",
+        SENDS,
+        "a guaranteed runner never answers pending or unknown for a steer send or re-send",
+    ),
+    case(
+        "resend_steer_delivered_stable",
+        SENDS,
+        "a re-send's delivered receipt is stable once it is step or turn",
+    ),
+    case(
         "crash_at_Admitted",
         &[Queue, TranscriptReads, KillAt(points::ADMITTED)],
         "killed at Admitted and restarted: another session's messages keep their ordinals, mids and bodies; the retried first send is answered and its prompt written once; the run is not cancelled",
