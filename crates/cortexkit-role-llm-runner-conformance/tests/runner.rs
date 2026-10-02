@@ -30,6 +30,30 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     );
 }
 
+/// Every case not in `failing` passed.
+fn assert_others_passed(report: &SuiteReport, failing: &[&str]) {
+    for spec in CASES {
+        if !failing.contains(&spec.name) {
+            assert_passed(report, spec.name);
+        }
+    }
+}
+
+/// The halves of the `send_id` cases that check only what `session.send`
+/// answers.
+const REPLY_HALVES: &[&str] = &[
+    "send_id_retry_same_answer",
+    "send_id_reuse_refused_naming_field",
+    "delivery_change_refused",
+];
+
+/// The halves of the `send_id` cases that read what the send wrote.
+const WRITTEN_ONCE_HALVES: &[&str] = &[
+    "send_id_retry_written_once",
+    "send_id_reuse_writes_nothing",
+    "delivery_change_writes_nothing",
+];
+
 #[tokio::test]
 async fn a_faithful_runner_passes_every_case_but_its_simulated_kills_fail_the_run() {
     let report = run(&FakeSubject::new(Defects::default())).await;
@@ -318,6 +342,107 @@ async fn a_runner_without_steer_reports_steer_checks_as_inapplicable() {
             report.outcome(case)
         );
     }
+}
+
+#[tokio::test]
+async fn without_transcript_reads_the_reply_halves_run_and_the_written_once_halves_are_inapplicable(
+) {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::TranscriptReads);
+    let report = run(&subject).await;
+    for case in REPLY_HALVES {
+        assert_passed(&report, case);
+    }
+    for case in WRITTEN_ONCE_HALVES {
+        assert!(
+            matches!(
+                report.outcome(case),
+                Some(CaseOutcome::Inapplicable { reason }) if reason.contains("transcript_reads")
+            ),
+            "{case}: {:?}\n{}",
+            report.outcome(case),
+            report.render()
+        );
+    }
+    // The fake refuses session.read and session.head here, as a runner that
+    // does not declare transcript_reads would; none should have been asked.
+    assert_eq!(subject.transcript_calls(), 0, "{}", report.render());
+}
+
+#[tokio::test]
+async fn a_retry_naming_another_submission_fails_the_retry_reply_half() {
+    let report = run(&FakeSubject::new(Defects {
+        retry_new_submission_id: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "send_id_retry_same_answer");
+    assert!(reason.contains("submission_id"), "{reason}");
+    assert_others_passed(&report, &["send_id_retry_same_answer"]);
+}
+
+#[tokio::test]
+async fn a_retry_moving_delivered_back_from_step_to_pending_fails_the_retry_reply_half() {
+    let report = run(&FakeSubject::new(Defects {
+        retry_delivered_step_then_pending: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "send_id_retry_same_answer");
+    assert!(
+        reason.contains("delivered changed from step to pending"),
+        "{reason}"
+    );
+    assert_others_passed(&report, &["send_id_retry_same_answer"]);
+}
+
+#[tokio::test]
+async fn a_retry_changing_unknown_to_step_fails_the_retry_reply_half() {
+    let report = run(&FakeSubject::new(Defects {
+        retry_delivered_unknown_then_step: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "send_id_retry_same_answer");
+    assert!(
+        reason.contains("delivered changed from unknown to step"),
+        "{reason}"
+    );
+    assert!(reason.contains("unknown is final"), "{reason}");
+    assert_others_passed(&report, &["send_id_retry_same_answer"]);
+}
+
+#[tokio::test]
+async fn a_reuse_answered_instead_of_refused_fails_the_reuse_reply_halves() {
+    let report = run(&FakeSubject::new(Defects {
+        reuse_accepted: true,
+        ..Defects::default()
+    }))
+    .await;
+    for case in [
+        "send_id_reuse_refused_naming_field",
+        "delivery_change_refused",
+    ] {
+        let reason = failed(&report, case);
+        assert!(reason.contains("not refused"), "{case}: {reason}");
+    }
+    // The fake answers the reuse as a retry and writes nothing, so the
+    // written-once halves still pass.
+    assert_others_passed(
+        &report,
+        &[
+            "send_id_reuse_refused_naming_field",
+            "delivery_change_refused",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn a_retry_moving_delivered_from_pending_to_unknown_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.queue_receipt_pending_then_unknown = true;
+    let report = run(&subject).await;
+    assert_others_passed(&report, &[]);
 }
 
 #[tokio::test]

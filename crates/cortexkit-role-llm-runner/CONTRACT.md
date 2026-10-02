@@ -418,6 +418,10 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   - the owner re-checks a `confirm` runner's undelivered steers by re-sending
     the same `send_id`, only on runner reconnect and on its next send to the
     same session.
+- [pinned] A re-send's `delivered` moves forward only: from absent or
+  `pending` to `step`, `turn` or `unknown`. Those three are final: once one
+  first appears, every later answer to the same `send_id` carries it
+  unchanged, `ref` included.
 
 ## 10. `session.baseline` and the admission reply
 
@@ -806,6 +810,7 @@ step-transform providers. It will check:
 | `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
 | `undeclared_delivery_refused` | a delivery mode the subject does not declare |
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
+| `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
 | `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
 

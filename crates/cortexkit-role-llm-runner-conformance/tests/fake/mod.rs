@@ -25,7 +25,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
@@ -102,6 +102,19 @@ pub struct Defects {
     pub guaranteed_steer_pending: bool,
     /// A re-send of a delivered steer changes its receipt.
     pub resend_steer_unstable: bool,
+    /// Every answer to a send names a submission_id of its own, so a retry
+    /// names another one than the send was answered with.
+    pub retry_new_submission_id: bool,
+    /// A queued send is answered `delivered: step`, and its retries
+    /// `pending`: a receipt moving backward.
+    pub retry_delivered_step_then_pending: bool,
+    /// A queued send is answered `delivered: unknown`, and its retries
+    /// `step`: a final receipt changing.
+    pub retry_delivered_unknown_then_step: bool,
+    /// A send_id reused with another prompt or delivery mode is answered as
+    /// a retry of the first send, writing nothing, instead of refused
+    /// `send_id_reuse`.
+    pub reuse_accepted: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -120,14 +133,22 @@ pub enum StepRecovery {
 struct World {
     defects: Defects,
     step_recovery: StepRecovery,
+    queue_receipt_pending_then_unknown: bool,
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
     invocations: Mutex<BTreeMap<String, usize>>,
     held: Mutex<BTreeSet<String>>,
     released: Mutex<BTreeSet<String>>,
+    /// Every `session.read` and `session.head` request received, served or
+    /// not.
+    transcript_calls: AtomicUsize,
 }
 
 impl World {
+    fn serves(&self, group: &str) -> bool {
+        self.groups.iter().any(|served| served == group)
+    }
+
     /// The scripted tool provider: count the call, and answer its scripted
     /// result unless the script holds it.
     fn invoke(&self, arguments: &Value) -> Option<Value> {
@@ -657,11 +678,21 @@ impl Module {
             return Err(RouteFailure::new("the module is not running"));
         }
         let reply = match method {
+            ops::SESSION_READ | ops::SESSION_HEAD => {
+                self.world.transcript_calls.fetch_add(1, Ordering::SeqCst);
+                if !self.world.serves(groups::TRANSCRIPT_READS) {
+                    // A runner that does not declare transcript_reads does
+                    // not serve its ops.
+                    Ok(refuse("unknown_method", Some(json!({ "method": method }))))
+                } else if method == ops::SESSION_READ {
+                    Ok(self.read(session, &params))
+                } else {
+                    Ok(self.head(session, &params))
+                }
+            }
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
             ops::SESSION_SEND => self.send(stamp, session, params),
-            ops::SESSION_READ => Ok(self.read(session, &params)),
-            ops::SESSION_HEAD => Ok(self.head(session, &params)),
             ops::RUN_RESULT => Ok(self.run_result(session, params)),
             other => Ok(refuse("unknown_method", Some(json!({ "method": other })))),
         };
@@ -719,6 +750,31 @@ impl Module {
         if send.admitted {
             reply = reply.with_baseline(baseline());
         }
+        let defects = &self.world.defects;
+        if defects.retry_new_submission_id {
+            reply = reply.with_submission_id(format!("sub-{}-{}", run.run_id, send.resend_count));
+        }
+        if send.delivery == groups::QUEUE {
+            // The send itself is answered with the first receipt, every
+            // retry with the second.
+            let receipts = if defects.retry_delivered_step_then_pending {
+                Some((delivered_as::STEP, delivered_as::PENDING))
+            } else if defects.retry_delivered_unknown_then_step {
+                Some((delivered_as::UNKNOWN, delivered_as::STEP))
+            } else if self.world.queue_receipt_pending_then_unknown {
+                Some((delivered_as::PENDING, delivered_as::UNKNOWN))
+            } else {
+                None
+            };
+            if let Some((sent, retried)) = receipts {
+                let r#as = if send.resend_count == 0 {
+                    sent
+                } else {
+                    retried
+                };
+                reply = reply.with_delivered(Delivered::new(r#as));
+            }
+        }
         if send.delivery == groups::STEER {
             if self.world.defects.guaranteed_steer_pending {
                 reply = reply.with_delivered(Delivered::new(delivered_as::PENDING));
@@ -751,13 +807,13 @@ impl Module {
                 return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
             }
             if let Some(send) = sess.sends.get(&request.send_id) {
-                if send.prompt != request.prompt {
+                if send.prompt != request.prompt && !self.world.defects.reuse_accepted {
                     return Ok(refuse(
                         errors::SEND_ID_REUSE,
                         Some(json!({ "field": "prompt" })),
                     ));
                 }
-                if send.delivery != delivery {
+                if send.delivery != delivery && !self.world.defects.reuse_accepted {
                     return Ok(refuse(
                         errors::SEND_ID_REUSE,
                         Some(json!({ "field": DELIVERY_FIELD })),
@@ -1062,6 +1118,9 @@ pub struct FakeSubject {
     /// Report every kill as a real process kill, which this in-process fake
     /// cannot make. Only for tests of the verdict.
     pub claim_process_kill: bool,
+    /// Answer a queued send `delivered: pending` and its retries
+    /// `delivered: unknown`: a receipt moving forward, which is allowed.
+    pub queue_receipt_pending_then_unknown: bool,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -1101,6 +1160,7 @@ impl FakeSubject {
             capabilities: served(),
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
+            queue_receipt_pending_then_unknown: false,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
         }
@@ -1116,6 +1176,7 @@ impl FakeSubject {
                 Arc::new(World {
                     defects: self.defects,
                     step_recovery: self.step_recovery,
+                    queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
                     groups: self
                         .capabilities
                         .iter()
@@ -1126,6 +1187,7 @@ impl FakeSubject {
                     invocations: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),
+                    transcript_calls: AtomicUsize::new(0),
                 })
             })
             .clone()
@@ -1143,6 +1205,12 @@ impl FakeSubject {
         } else {
             KillMechanism::FaultHook
         }
+    }
+
+    /// How many `session.read` and `session.head` requests the runner has
+    /// received, served or not.
+    pub fn transcript_calls(&self) -> usize {
+        self.world().transcript_calls.load(Ordering::SeqCst)
     }
 }
 
