@@ -109,6 +109,7 @@ shipping runner with this document.
 | `steer` | `session.send` with `delivery: "steer"` | §9 |
 | `queue` | `session.send` with `delivery: "queue"` | §9 |
 | `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
+| `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
 | `compaction` | `compaction.ready`, and the calls of §11.1 the runner makes | §11.1 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 
@@ -124,7 +125,9 @@ shipping runner with this document.
 - [pinned] A compaction provider requires `compaction` of any runner it
   serves. A session starter never pairs a plan's `compaction_item` with a
   runner that lacks it, and the runner refuses such a plan at admission
-  (§10.1), so a session never runs with a compaction owner nothing calls.
+  (§10.1) as `invalid_params {field: "plan.compaction_item"}`
+  (`SendRequest::check_compaction_item`), so a session never runs with a
+  compaction owner nothing calls.
 - [pinned] A session owner sends a mid-session change only to a runner that
   declares `session_change`. A runner without it gets no mid-session
   changes; its owner applies them at the next session instead.
@@ -443,9 +446,19 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   a code with another reason (`AbsentItem::check` also checks constructed
   items). Fetched items retain their separate `item` identifier above.
 
-### 10.1 Admission
+### 10.1 `plans`: admission
 
-- [pinned] A runner that admits sessions fetches the plan's items itself, with
+- [pinned] Core sends a top-level `plan` only when `role.describe` declares
+  `plans`. A runner without `plans` refuses any send carrying `plan` as
+  `invalid_params {field: "plan"}` and writes nothing
+  (`SendRequest::check_plan`). This group is independent of delivery modes.
+- [pinned] A runner declaring `plans` accepts a fetch plan on the session's
+  first `session.send`, freezes the fetched manifest, and answers
+  `session.baseline` with the plan's `composition_digest` and items. An
+  identical later repeat is a no-op for the plan: it does not fetch or freeze
+  again, but the send's prompt and `send_id` still follow §9. A different
+  later plan is refused `plan_drift {frozen?, sent}`.
+- [pinned] A runner declaring `plans` fetches the plan's items itself, with
   the composition, under one deadline, and admits the session only when every
   required item arrived, the staleness check passed and no tool names
   collide. The plan and composition are passed to providers verbatim.

@@ -97,8 +97,11 @@ pub struct SendRequest {
     /// The runner records it and does not act on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<Value>,
-    /// The session's fetch plan, on the session's first send only, carried
-    /// verbatim.
+    /// The session's fetch plan, carried verbatim when the runner declares
+    /// `plans`. The first send establishes the session's plan and freezes its
+    /// fetched manifest. An identical later repeat does not fetch again;
+    /// a different plan is refused as `plan_drift` so an ordinary send cannot
+    /// replace the session's frozen manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Map<String, Value>>,
     /// The runner's own send parameters, kept as received.
@@ -156,6 +159,21 @@ impl SendRequest {
             Ok(delivery)
         } else {
             Err(delivery)
+        }
+    }
+
+    /// Refuse a plan-bearing send with `invalid_params {field: "plan"}`
+    /// unless the runner's module-level capabilities declare `plans`.
+    /// A request without a plan passes, regardless of the declaration.
+    pub fn check_plan<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        if self.plan.is_some()
+            && !declared
+                .iter()
+                .any(|name| name.as_ref() == crate::capabilities::PLANS)
+        {
+            Err("plan")
+        } else {
+            Ok(())
         }
     }
 
@@ -292,7 +310,7 @@ mod tests {
         let file = vectors::load("send.json");
         for case in vectors::cases(&file, "delivery_checks") {
             let name = case["name"].as_str().unwrap();
-            let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            let request: SendRequest = vectors::round_trip(name, &case["request"]);
             let declared: Vec<&str> = case["declares"]
                 .as_array()
                 .unwrap()
@@ -320,7 +338,7 @@ mod tests {
         let file = vectors::load("send.json");
         for case in vectors::cases(&file, "compaction_item_checks") {
             let name = case["name"].as_str().unwrap();
-            let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            let request: SendRequest = vectors::round_trip(name, &case["request"]);
             let declared: Vec<&str> = case["declares"]
                 .as_array()
                 .unwrap()
@@ -341,6 +359,54 @@ mod tests {
                     );
                 }
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_plan_is_refused_without_the_plans_group() {
+        let file = vectors::load("plans.json");
+        for case in vectors::cases(&file, "admission_checks") {
+            let name = case["name"].as_str().unwrap();
+            let request: SendRequest = vectors::round_trip(name, &case["request"]);
+            if let Some(reply) = case.get("reply") {
+                vectors::round_trip::<SendReply>(name, reply);
+            }
+            let declared: Vec<&str> = case["declares"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c.as_str().unwrap())
+                .collect();
+            match (request.check_plan(&declared), case.get("refusal")) {
+                (Ok(()), None) => {}
+                (Err(field), Some(refusal)) => {
+                    assert_eq!(refusal["code"], errors::INVALID_PARAMS, "{name}");
+                    assert_eq!(
+                        errors::refused_field(errors::INVALID_PARAMS, refusal.get("detail")),
+                        Some(field),
+                        "{name}"
+                    );
+                }
+                (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn frozen_plan_vectors_round_trip() {
+        // Round-trip first/later send requests, baseline replies and drift
+        // details. This wire crate has no runner fetch/freeze implementation,
+        // so these vectors do not test comparing plans across sends.
+        let file = vectors::load("plans.json");
+        for case in vectors::cases(&file, "frozen_cases") {
+            let name = case["name"].as_str().unwrap();
+            vectors::round_trip::<SendRequest>(name, &case["first_send"]);
+            vectors::round_trip::<SendRequest>(name, &case["later_send"]);
+            vectors::round_trip::<crate::baseline::BaselineReply>(name, &case["baseline"]);
+            if let Some(refusal) = case.get("refusal") {
+                assert_eq!(refusal["code"], errors::PLAN_DRIFT, "{name}");
+                vectors::round_trip::<errors::PlanDriftDetail>(name, &refusal["detail"]);
             }
         }
     }

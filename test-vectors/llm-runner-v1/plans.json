@@ -1,0 +1,292 @@
+{
+  "admission_checks": [
+    {
+      "name": "first send with plan admitted by plans runner",
+      "declares": [
+        "plans",
+        "queue"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "launch-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "reply": {
+        "state": "active",
+        "run_id": "run-1",
+        "baseline": {
+          "items": [
+            {
+              "provider": "aft",
+              "item": "tools",
+              "item_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+              "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
+            }
+          ],
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "tool_names": [
+            "read"
+          ],
+          "accepted_generation": 0,
+          "applied_generation": 0,
+          "session_capabilities": {
+            "mid_session_appends": false
+          }
+        }
+      }
+    },
+    {
+      "name": "plan refused without plans even with compaction",
+      "declares": [
+        "queue",
+        "compaction"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "launch-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "plan"
+        }
+      }
+    },
+    {
+      "name": "empty plan still requires plans",
+      "declares": [
+        "queue"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "empty-1",
+        "plan": {}
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "plan"
+        }
+      }
+    },
+    {
+      "name": "plan-less send needs no plans group",
+      "declares": [
+        "queue"
+      ],
+      "request": {
+        "prompt": "start",
+        "send_id": "plain-1"
+      }
+    }
+  ],
+  "frozen_cases": [
+    {
+      "name": "identical later plan is a plan no-op",
+      "declares": [
+        "plans",
+        "queue"
+      ],
+      "first_send": {
+        "prompt": "start",
+        "send_id": "launch-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "later_send": {
+        "prompt": "continue",
+        "send_id": "launch-2",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "frozen_identity": "plan-a",
+      "sent_identity": "plan-a",
+      "plan_effect": "no-op",
+      "writes": "prompt only",
+      "baseline": {
+        "state": "ready",
+        "baseline": {
+          "items": [
+            {
+              "provider": "aft",
+              "item": "tools",
+              "item_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+              "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
+            }
+          ],
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "tool_names": [
+            "read"
+          ],
+          "accepted_generation": 0,
+          "applied_generation": 0,
+          "session_capabilities": {
+            "mid_session_appends": false
+          }
+        }
+      }
+    },
+    {
+      "name": "different later plan refused plan_drift",
+      "declares": [
+        "plans",
+        "queue"
+      ],
+      "first_send": {
+        "prompt": "start",
+        "send_id": "launch-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "later_send": {
+        "prompt": "continue",
+        "send_id": "launch-2",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "other",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "frozen_identity": "plan-a",
+      "sent_identity": "plan-b",
+      "writes": "nothing",
+      "refusal": {
+        "code": "plan_drift",
+        "detail": {
+          "frozen": "plan-a",
+          "sent": "plan-b"
+        }
+      },
+      "baseline": {
+        "state": "ready",
+        "baseline": {
+          "items": [
+            {
+              "provider": "aft",
+              "item": "tools",
+              "item_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+              "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
+            }
+          ],
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "tool_names": [
+            "read"
+          ],
+          "accepted_generation": 0,
+          "applied_generation": 0,
+          "session_capabilities": {
+            "mid_session_appends": false
+          }
+        }
+      }
+    }
+  ]
+}

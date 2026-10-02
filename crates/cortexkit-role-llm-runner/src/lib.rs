@@ -107,6 +107,11 @@ pub mod capabilities {
     /// `steer` and `queue`, so a runner that cannot abort a model stream can
     /// still declare those two.
     pub const INTERRUPT: &str = "interrupt";
+    /// Accept a fetch plan on a session's first `session.send`, freeze the
+    /// fetched manifest, and report its composition digest and items through
+    /// `session.baseline`. Identical later plans do not fetch again; different
+    /// plans are refused to preserve the session's frozen manifest.
+    pub const PLANS: &str = "plans";
     /// The compaction interface: the runner calls the session's compaction
     /// provider (Setup, the per-step status, the request fence, durable
     /// `WAIT` and its timeout, `REFUSE`) and serves `compaction.ready`. A
@@ -134,6 +139,7 @@ pub mod capabilities {
         (STEER, &[ops::SESSION_SEND]),
         (QUEUE, &[ops::SESSION_SEND]),
         (INTERRUPT, &[ops::SESSION_SEND]),
+        (PLANS, &[ops::SESSION_SEND]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -245,6 +251,7 @@ pub(crate) mod vectors {
         "errors.json",
         "fence.json",
         "head.json",
+        "plans.json",
         "read-pages.json",
         "read-requests.json",
         "role-describe.json",

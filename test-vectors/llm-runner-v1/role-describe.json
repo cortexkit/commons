@@ -13,7 +13,8 @@
         "ordered_hook_phases",
         "interrupt",
         "compaction",
-        "session_change"
+        "session_change",
+        "plans"
       ],
       "answer": {
         "majors": [
@@ -47,7 +48,8 @@
           "ordered_hook_phases",
           "interrupt",
           "compaction",
-          "session_change"
+          "session_change",
+          "plans"
         ],
         "session_capabilities_from": "admission",
         "max_bytes": {
@@ -150,6 +152,30 @@
         ],
         "session_capabilities_from": "admission"
       }
+    },
+    {
+      "name": "plans declared without compaction or delivery groups",
+      "declares": [
+        "plans"
+      ],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.send"
+            ]
+          }
+        ],
+        "implementation_version": "0.1.0",
+        "capabilities": [
+          "plans"
+        ],
+        "session_capabilities_from": "admission"
+      }
     }
   ],
   "canonical": [
@@ -195,6 +221,27 @@
           "default": 4194304,
           "maximum": 16777216
         }
+      }
+    },
+    {
+      "name": "plans declaration round trips",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.send"
+            ]
+          }
+        ],
+        "implementation_version": "0.1.0",
+        "capabilities": [
+          "plans"
+        ],
+        "session_capabilities_from": "admission"
       }
     }
   ],
@@ -434,6 +481,27 @@
         ],
         "session_capabilities_from": "admission"
       }
+    },
+    {
+      "name": "plans without session.send",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline"
+            ]
+          }
+        ],
+        "implementation_version": "0.1.0",
+        "capabilities": [
+          "plans"
+        ],
+        "session_capabilities_from": "admission"
+      },
+      "problem": "group_incomplete"
     }
   ]
 }
