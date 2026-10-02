@@ -84,8 +84,14 @@ to them. Nothing here names a particular implementation.
     value `true`; any other value is not a declaration. The runner freezes
     them with the tools.
   - `system_text`, when requested, is `{text, item_digest, preflight_digest,
-    composition_digest}`, from the same configuration resolution as the
-    catalog in the same reply.
+    composition_digest, tool_names}`, from the same configuration resolution
+    as the catalog in the same reply. `tool_names` lists, sorted and without
+    duplicates, the model-facing names of the tools the text was composed
+    for; it is required whenever `text` is present. A runner compares it with
+    the names of the tools it fetched from the same provider and refuses the
+    plan as `plan_stale` with a `text_tool_names` difference (`missing`,
+    `unexpected`) when they differ, so text written for one tool set is
+    never served beside another.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,

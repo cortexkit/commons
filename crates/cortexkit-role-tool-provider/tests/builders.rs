@@ -37,7 +37,8 @@ fn catalog_builders_preserve_wire_members() {
             .with_description("description")])
         .with_system_text(
             text.with_text("text")
-                .with_composition_digest("composition"),
+                .with_composition_digest("composition")
+                .with_tool_names(["tool", "other", "tool"]),
         )
         .with_capabilities(Map::from_iter([("late_results".into(), json!(true))]));
     let expected = json!({
@@ -46,7 +47,8 @@ fn catalog_builders_preserve_wire_members() {
             "input_schema": {"type": "object"}, "result_ops": ["append"],
             "capabilities": ["code.outline/v1"], "description": "description"}],
         "system_text": {"item_digest": "item", "preflight_digest": "preflight",
-            "text": "text", "composition_digest": "composition"},
+            "text": "text", "composition_digest": "composition",
+            "tool_names": ["other", "tool"]},
         "capabilities": {"late_results": true}
     });
     assert_eq!(serde_json::to_value(&answer).unwrap(), expected);

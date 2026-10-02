@@ -282,6 +282,12 @@ pub struct SystemTextAnswer {
     pub preflight_digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_digest: Option<String>,
+    /// The model-facing names of the tools the text was composed for, sorted.
+    /// A runner compares them with the tools it fetched for the same
+    /// provider and refuses the plan as stale (`text_tool_names`) when they
+    /// differ. Required whenever `text` is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_names: Option<Vec<String>>,
 }
 
 impl SystemTextAnswer {
@@ -303,6 +309,20 @@ impl SystemTextAnswer {
     /// Name the composition the text was resolved against.
     pub fn with_composition_digest(mut self, composition_digest: impl Into<String>) -> Self {
         self.composition_digest = Some(composition_digest.into());
+        self
+    }
+
+    /// Set the tool names the text was composed for. They are stored sorted
+    /// and deduplicated, so the same set always serializes to the same bytes.
+    pub fn with_tool_names<I, S>(mut self, tool_names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut names: Vec<String> = tool_names.into_iter().map(Into::into).collect();
+        names.sort();
+        names.dedup();
+        self.tool_names = Some(names);
         self
     }
 }
