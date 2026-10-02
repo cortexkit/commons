@@ -421,7 +421,9 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] A re-send's `delivered` moves forward only: from absent or
   `pending` to `step`, `turn` or `unknown`. Those three are final: once one
   first appears, every later answer to the same `send_id` carries it
-  unchanged, `ref` included.
+  unchanged, `ref` included. Absent to `pending` is not a move on a
+  `confirm` runner, where absent already means `pending`; a `guaranteed`
+  runner never answers `pending` at all.
 
 ## 10. `session.baseline` and the admission reply
 
