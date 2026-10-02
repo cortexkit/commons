@@ -114,10 +114,12 @@ to them. Nothing here names a particular implementation.
     | `code.callgraph/v1` | answers caller, callee and impact questions about code |
     | `code.diagnostics/v1` | returns compiler or linter diagnostics |
 
-    Any other tag must carry a non-empty `<namespace>:` prefix. The crate lists
-    these as `DEFINED_CAPABILITY_TAGS` and checks a tag with
-    `check_capability_tag`; the conformance suite refuses a catalog with any
-    other unprefixed tag.
+    Any other tag is `<namespace>:<name>/v<N>`: a namespace of lowercase letters
+    and digits in `-`-separated words, a name of `.`-separated words of
+    lowercase letters, digits and `_`, and a version with no leading zero
+    (`acme:code.callgraph/v1`). The crate lists the defined tags as
+    `DEFINED_CAPABILITY_TAGS` and checks a tag with `check_capability_tag`;
+    the conformance suite refuses a catalog with any tag that fails it.
   - `input_schema` is the argument schema; `description` its description.
 - The answer is a pure function of its inputs (the plan item's preset and
   params, the composition, user and project configuration, host facts), so

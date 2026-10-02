@@ -82,8 +82,8 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
 
 /// Why a capability tag is not acceptable in a catalog.
 ///
-/// `#[non_exhaustive]` so a later check (for example on the tag's own shape)
-/// can add a variant without breaking callers that match on this.
+/// `#[non_exhaustive]` so a later check can add a variant without breaking
+/// callers that match on this.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CapabilityTagProblem {
@@ -91,6 +91,13 @@ pub enum CapabilityTagProblem {
     UndefinedUnprefixed,
     /// The tag has a `:` but nothing before it.
     EmptyNamespace,
+    /// The namespace is not lowercase letters and digits in `-`-separated
+    /// words.
+    MalformedNamespace,
+    /// The part after the namespace is not `<name>/v<N>`: a name of
+    /// `.`-separated words of lowercase letters, digits and `_`, then `/v` and
+    /// a version with no leading zero.
+    MalformedName,
 }
 
 impl std::fmt::Display for CapabilityTagProblem {
@@ -101,15 +108,53 @@ impl std::fmt::Display for CapabilityTagProblem {
                 "an unprefixed tag must be one this role defines (DEFINED_CAPABILITY_TAGS); prefix it with a namespace"
             ),
             Self::EmptyNamespace => write!(f, "the namespace before ':' is empty"),
+            Self::MalformedNamespace => write!(
+                f,
+                "the namespace must be lowercase letters and digits in '-'-separated words"
+            ),
+            Self::MalformedName => write!(
+                f,
+                "after the namespace a tag must be <name>/v<N>, for example code.callgraph/v1"
+            ),
         }
     }
 }
 
-/// Check one capability tag: either one of [`DEFINED_CAPABILITY_TAGS`], or a
-/// tag with a non-empty `<namespace>:` prefix, which anyone may define.
+/// True for `<name>/v<N>`: `.`-separated words of `[a-z0-9_]`, then `/v` and
+/// a positive version with no leading zero.
+fn is_tag_name(text: &str) -> bool {
+    let Some((name, version)) = text.rsplit_once("/v") else {
+        return false;
+    };
+    let word = |w: &str| {
+        !w.is_empty()
+            && w.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    };
+    let version_ok = !version.is_empty()
+        && !version.starts_with('0')
+        && version.bytes().all(|b| b.is_ascii_digit());
+    version_ok && name.split('.').all(word)
+}
+
+/// True for lowercase letters and digits in `-`-separated words.
+fn is_namespace(text: &str) -> bool {
+    text.split('-').all(|w| {
+        !w.is_empty()
+            && w.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    })
+}
+
+/// Check one capability tag: either one of [`DEFINED_CAPABILITY_TAGS`], or
+/// `<namespace>:<name>/v<N>`, which anyone may define.
 pub fn check_capability_tag(tag: &str) -> Result<(), CapabilityTagProblem> {
     match tag.split_once(':') {
         Some(("", _)) => Err(CapabilityTagProblem::EmptyNamespace),
+        Some((namespace, _)) if !is_namespace(namespace) => {
+            Err(CapabilityTagProblem::MalformedNamespace)
+        }
+        Some((_, name)) if !is_tag_name(name) => Err(CapabilityTagProblem::MalformedName),
         Some(_) => Ok(()),
         None if DEFINED_CAPABILITY_TAGS.contains(&tag) => Ok(()),
         None => Err(CapabilityTagProblem::UndefinedUnprefixed),
@@ -151,6 +196,61 @@ mod capability_tag_tests {
             check_capability_tag(":code.read/v1"),
             Err(CapabilityTagProblem::EmptyNamespace)
         );
+    }
+
+    #[test]
+    fn every_defined_tag_has_the_name_shape() {
+        for tag in DEFINED_CAPABILITY_TAGS {
+            assert!(is_tag_name(tag), "{tag}");
+        }
+    }
+
+    #[test]
+    fn known_namespaced_tags_have_the_shape() {
+        for tag in [
+            "aft:code.ast_grep/v1",
+            "aft:git.conflicts/v1",
+            "magic-context:context.reduce/v1",
+            "fake:effect/v1",
+            "acme:code.callgraph/v12",
+        ] {
+            assert_eq!(check_capability_tag(tag), Ok(()), "{tag}");
+        }
+    }
+
+    #[test]
+    fn a_namespaced_tag_without_a_name_and_version_is_refused() {
+        for tag in [
+            "acme:",
+            "acme:code.read",
+            "acme:code.read/v",
+            "acme:code.read/v0",
+            "acme:code.read/v01",
+            "acme:Code.read/v1",
+            "acme:code..read/v1",
+            "acme:code.read/v1/extra",
+        ] {
+            assert_eq!(
+                check_capability_tag(tag),
+                Err(CapabilityTagProblem::MalformedName),
+                "{tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_namespace_is_refused() {
+        for tag in [
+            "Acme:code.read/v1",
+            "ac_me:code.read/v1",
+            "acme-:code.read/v1",
+        ] {
+            assert_eq!(
+                check_capability_tag(tag),
+                Err(CapabilityTagProblem::MalformedNamespace),
+                "{tag}"
+            );
+        }
     }
 }
 
