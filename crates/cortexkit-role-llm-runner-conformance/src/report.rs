@@ -190,7 +190,12 @@ pub const CASES: &[CaseSpec] = &[
     case(
         "send_id_retry_same_answer",
         &[],
-        "on a runner that declares queue or steer, and without reading the transcript: a send retried twice with the same send_id and payload names the run_id and submission_id the send was answered with, and its delivered receipt moves only forward (absent or pending to step, turn or unknown, which are final, ref included); once the send's run has ended, the two retries are the same answer apart from delivered",
+        "on a runner that declares queue or steer, and without reading the transcript or waiting: a send retried twice at once with the same send_id and payload names the run_id and submission_id the send was answered with, and its delivered receipt moves only forward (absent or pending to step, turn or unknown, which are final, ref included); the send's state may still move between the retries, so they are not compared whole",
+    ),
+    case(
+        "send_id_retry_settled_same_answer",
+        &[RunOps],
+        "on a runner that declares queue or steer, and without reading the transcript: once the send's run has ended, seen through run.result, a send retried twice with the same send_id and payload gets the same answer twice apart from delivered, names the run_id and submission_id the send was answered with, and its delivered receipt moves only forward; inapplicable when the send's reply names no run_id",
     ),
     case(
         "send_id_retry_written_once",
@@ -305,8 +310,8 @@ pub const NARROWINGS: &[&str] = &[
     "baseline_matches_admission_reply is inapplicable to a runner whose session capabilities come from session.baseline, which has no admission reply",
     "undeclared_delivery_refused is inapplicable to a runner that declares every delivery mode",
     "the suite fails a run with no kill at all, because §14 fails every run in which no kill ended a real process",
-    "each send_id case is split in two: send_id_retry_same_answer, send_id_reuse_refused_naming_field and delivery_change_refused check only the reply, never read the transcript, and run on a runner that declares queue or steer (their first send is steer when queue is not declared); send_id_retry_written_once, send_id_reuse_writes_nothing and delivery_change_writes_nothing check what was written and are inapplicable without transcript_reads",
-    "send_id_retry_same_answer requires the two retries to be the same answer (apart from delivered) only once it has seen the send's run end, through run.result, which needs run_ops and a reply naming its run; before that a send's state may move on between retries",
+    "each send_id case is split in two: send_id_retry_same_answer, send_id_retry_settled_same_answer, send_id_reuse_refused_naming_field and delivery_change_refused check only the reply, never read the transcript, and run on a runner that declares queue or steer (their first send is steer when queue is not declared); send_id_retry_written_once, send_id_reuse_writes_nothing and delivery_change_writes_nothing check what was written and are inapplicable without transcript_reads",
+    "send_id_retry_same_answer never waits, so it does not compare its two retries whole: before the send's run ends its state may move on between them; send_id_retry_settled_same_answer makes that comparison after seeing the run end through run.result, so it requires run_ops (skipped without it) and is inapplicable when the send's reply names no run_id",
     "a delivered receipt may also move from absent to pending, because on a confirm runner an absent receipt already means pending (§9)",
 ];
 

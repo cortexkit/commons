@@ -28,6 +28,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -115,6 +116,10 @@ pub struct Defects {
     /// a retry of the first send, writing nothing, instead of refused
     /// `send_id_reuse`.
     pub reuse_accepted: bool,
+    /// Once a queued send's run has ended, its second retry is answered
+    /// `active` while the first was answered `finished`: two retries that
+    /// differ in state after nothing could have moved.
+    pub retry_state_moves_after_end: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -142,6 +147,8 @@ struct World {
     /// Every `session.read` and `session.head` request received, served or
     /// not.
     transcript_calls: AtomicUsize,
+    /// Every `run.result` request received, served or not.
+    run_result_calls: AtomicUsize,
 }
 
 impl World {
@@ -693,7 +700,16 @@ impl Module {
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
             ops::SESSION_SEND => self.send(stamp, session, params),
-            ops::RUN_RESULT => Ok(self.run_result(session, params)),
+            ops::RUN_RESULT => {
+                self.world.run_result_calls.fetch_add(1, Ordering::SeqCst);
+                if self.world.serves(groups::RUN_OPS) {
+                    Ok(self.run_result(session, params))
+                } else {
+                    // A runner that does not declare run_ops does not
+                    // serve its ops.
+                    Ok(refuse("unknown_method", Some(json!({ "method": method }))))
+                }
+            }
             other => Ok(refuse("unknown_method", Some(json!({ "method": other })))),
         };
         reply.map_err(|Killed| RouteFailure::new("the module was killed"))
@@ -740,7 +756,12 @@ impl Module {
         let run = sessions[session]
             .run(&send.run_id)
             .expect("a send's run exists");
-        let mut reply = if run.state == "active" {
+        // The defect answers a run that has ended as still active, on the
+        // second retry only, so the first and second retries differ.
+        let state_moved = self.world.defects.retry_state_moves_after_end
+            && send.delivery == groups::QUEUE
+            && send.resend_count == 2;
+        let mut reply = if run.state == "active" || state_moved {
             SendReply::new("active").with_run_id(&run.run_id)
         } else {
             SendReply::new("finished")
@@ -1121,6 +1142,10 @@ pub struct FakeSubject {
     /// Answer a queued send `delivered: pending` and its retries
     /// `delivered: unknown`: a receipt moving forward, which is allowed.
     pub queue_receipt_pending_then_unknown: bool,
+    /// How long `pause` waits between the suite's polls. `None` only yields,
+    /// so the suite's poll bound passes in no time; a duration makes that
+    /// bound real time, as on a runner that polls a live process.
+    pub pause_for: Option<Duration>,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -1161,6 +1186,7 @@ impl FakeSubject {
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
+            pause_for: None,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
         }
@@ -1188,6 +1214,7 @@ impl FakeSubject {
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),
                     transcript_calls: AtomicUsize::new(0),
+                    run_result_calls: AtomicUsize::new(0),
                 })
             })
             .clone()
@@ -1211,6 +1238,12 @@ impl FakeSubject {
     /// received, served or not.
     pub fn transcript_calls(&self) -> usize {
         self.world().transcript_calls.load(Ordering::SeqCst)
+    }
+
+    /// How many `run.result` requests the runner has received, served or
+    /// not.
+    pub fn run_result_calls(&self) -> usize {
+        self.world().run_result_calls.load(Ordering::SeqCst)
     }
 }
 
@@ -1367,6 +1400,9 @@ impl LlmRunnerSubject for FakeSubject {
     }
 
     async fn pause(&self) {
-        tokio::task::yield_now().await;
+        match self.pause_for {
+            None => tokio::task::yield_now().await,
+            Some(pause) => tokio::time::sleep(pause).await,
+        }
     }
 }

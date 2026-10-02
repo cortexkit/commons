@@ -8,6 +8,7 @@ use cortexkit_role_llm_runner_conformance::{
     SuiteVerdict, CASES,
 };
 use fake::{Defects, FakeSubject, StepRecovery};
+use std::time::Duration;
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -43,8 +44,16 @@ fn assert_others_passed(report: &SuiteReport, failing: &[&str]) {
 /// answers.
 const REPLY_HALVES: &[&str] = &[
     "send_id_retry_same_answer",
+    "send_id_retry_settled_same_answer",
     "send_id_reuse_refused_naming_field",
     "delivery_change_refused",
+];
+
+/// The cases that retry a send and check the replies: the unsettled one and
+/// the one that waits for the run to end first.
+const RETRY_REPLY_CASES: &[&str] = &[
+    "send_id_retry_same_answer",
+    "send_id_retry_settled_same_answer",
 ];
 
 /// The halves of the `send_id` cases that read what the send wrote.
@@ -378,7 +387,9 @@ async fn a_retry_naming_another_submission_fails_the_retry_reply_half() {
     .await;
     let reason = failed(&report, "send_id_retry_same_answer");
     assert!(reason.contains("submission_id"), "{reason}");
-    assert_others_passed(&report, &["send_id_retry_same_answer"]);
+    let reason = failed(&report, "send_id_retry_settled_same_answer");
+    assert!(reason.contains("submission_id"), "{reason}");
+    assert_others_passed(&report, RETRY_REPLY_CASES);
 }
 
 #[tokio::test]
@@ -388,12 +399,14 @@ async fn a_retry_moving_delivered_back_from_step_to_pending_fails_the_retry_repl
         ..Defects::default()
     }))
     .await;
-    let reason = failed(&report, "send_id_retry_same_answer");
-    assert!(
-        reason.contains("delivered changed from step to pending"),
-        "{reason}"
-    );
-    assert_others_passed(&report, &["send_id_retry_same_answer"]);
+    for case in RETRY_REPLY_CASES {
+        let reason = failed(&report, case);
+        assert!(
+            reason.contains("delivered changed from step to pending"),
+            "{case}: {reason}"
+        );
+    }
+    assert_others_passed(&report, RETRY_REPLY_CASES);
 }
 
 #[tokio::test]
@@ -403,13 +416,67 @@ async fn a_retry_changing_unknown_to_step_fails_the_retry_reply_half() {
         ..Defects::default()
     }))
     .await;
-    let reason = failed(&report, "send_id_retry_same_answer");
-    assert!(
-        reason.contains("delivered changed from unknown to step"),
-        "{reason}"
+    for case in RETRY_REPLY_CASES {
+        let reason = failed(&report, case);
+        assert!(
+            reason.contains("delivered changed from unknown to step"),
+            "{case}: {reason}"
+        );
+        assert!(reason.contains("unknown is final"), "{case}: {reason}");
+    }
+    assert_others_passed(&report, RETRY_REPLY_CASES);
+}
+
+#[tokio::test]
+async fn retries_differing_in_state_after_the_run_ended_fail_only_the_settled_retry_case() {
+    let report = run(&FakeSubject::new(Defects {
+        retry_state_moves_after_end: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "send_id_retry_settled_same_answer");
+    assert!(reason.contains("after its run ended"), "{reason}");
+    // The unsettled case cannot tell this from a state still moving, so it
+    // passes, as does every other case.
+    assert_others_passed(&report, &["send_id_retry_settled_same_answer"]);
+}
+
+#[tokio::test]
+async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.claim_process_kill = true;
+    subject.capabilities.remove(&Capability::RunOps);
+    // Each poll pauses half a second, so a case that waited out the suite's
+    // poll bound would take 400 polls, over three minutes. The timeout is
+    // far under that, so a case that waits on a run it cannot observe fails
+    // this test by name instead of passing slowly or hanging it.
+    subject.pause_for = Some(Duration::from_millis(500));
+    let dir = tempfile::tempdir().unwrap();
+    let report = tokio::time::timeout(Duration::from_secs(60), run_suite(&subject, dir.path()))
+        .await
+        .expect("the suite did not finish within 60 seconds on a runner without run_ops")
+        .unwrap();
+    assert_passed(&report, "send_id_retry_same_answer");
+    assert_eq!(
+        report.outcome("send_id_retry_settled_same_answer"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::RunOps]
+        }),
+        "{}",
+        report.render()
     );
-    assert!(reason.contains("unknown is final"), "{reason}");
-    assert_others_passed(&report, &["send_id_retry_same_answer"]);
+    // The fake refuses run.result here, as a runner that does not declare
+    // run_ops would; none should have been asked.
+    assert_eq!(subject.run_result_calls(), 0, "{}", report.render());
+    match &report.verdict {
+        SuiteVerdict::ConformingForDeclaredCapabilities { skipped, .. } => {
+            assert_eq!(skipped, &vec![Capability::RunOps], "{}", report.render());
+        }
+        other => panic!(
+            "expected conforming for declared capabilities, got {other:?}\n{}",
+            report.render()
+        ),
+    }
 }
 
 #[tokio::test]

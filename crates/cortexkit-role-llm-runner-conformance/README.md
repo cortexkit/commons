@@ -54,6 +54,7 @@ from `session.baseline` has no admission reply to compare.
 | `indeterminate_until_closed` | `dispatch_attribution`, `queue`, `transcript_reads`, `hold_tool_calls` |
 | `subscribe_from_head_no_gap_no_duplicate` | `streaming`, `queue`, `transcript_reads` |
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field` | `queue` or `steer`; never reads the transcript (inapplicable without either mode) |
+| `send_id_retry_settled_same_answer` | `run_ops` (skipped without it), and `queue` or `steer`; never reads the transcript, waits for the send's run through `run.result` (inapplicable without either mode, or when the send's reply names no `run_id`) |
 | `delivery_change_refused` | `queue` or `steer`, and `steer` or `interrupt` as the other mode; never reads the transcript |
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing` | `queue`, and `transcript_reads` (inapplicable without it) |
 | `delivery_change_writes_nothing` | `queue`, `steer` or `interrupt` as the other mode, and `transcript_reads` (inapplicable without it) |
@@ -101,11 +102,14 @@ every report prints them. In short:
 - Each `send_id` case has a reply half, which checks only what
   `session.send` answers and never reads the transcript, and a
   written-once half, which reads what the send wrote and is inapplicable
-  without `transcript_reads`. The retry's reply half requires the two
-  retries to be the same answer only once it has seen the run end through
-  `run.result`; before that, a send's state may move on. A `delivered`
-  receipt may move from absent to `pending`, since on a `confirm` runner
-  absent already means `pending`.
+  without `transcript_reads`. The retry's reply half never waits, so it
+  checks only the ids and the `delivered` rule: before the run ends, a
+  send's state may move on between retries. Comparing the two retries
+  whole is its own case, `send_id_retry_settled_same_answer`, which waits
+  for the run to end through `run.result` and so is skipped without
+  `run_ops`, and is inapplicable when the send's reply names no `run_id`.
+  A `delivered` receipt may move from absent to `pending`, since on a
+  `confirm` runner absent already means `pending`.
 
 ## Not yet implemented
 
