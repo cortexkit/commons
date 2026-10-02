@@ -21,6 +21,93 @@ use serde_json::{Map, Value};
 
 use crate::baseline::Baseline;
 
+/// Steer delivery receipt states.
+pub mod delivered_as {
+    /// Delivered: added to the running turn at a step boundary.
+    pub const STEP: &str = "step";
+    /// Delivered: started or carried by a turn (`ref` is the `run_id`).
+    pub const TURN: &str = "turn";
+    /// Accepted, not yet delivered, still deliverable.
+    pub const PENDING: &str = "pending";
+    /// Accepted, but delivery cannot be confirmed; the owner records
+    /// `outcome_unknown` and never re-sends.
+    pub const UNKNOWN: &str = "unknown";
+}
+
+/// A steer delivery state, classified.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeliveredAs {
+    Step,
+    Turn,
+    Pending,
+    Unknown,
+    Other(String),
+}
+
+impl DeliveredAs {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            delivered_as::STEP => Self::Step,
+            delivered_as::TURN => Self::Turn,
+            delivered_as::PENDING => Self::Pending,
+            delivered_as::UNKNOWN => Self::Unknown,
+            other => Self::Other(other.to_owned()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Step => delivered_as::STEP,
+            Self::Turn => delivered_as::TURN,
+            Self::Pending => delivered_as::PENDING,
+            Self::Unknown => delivered_as::UNKNOWN,
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+/// A steer delivery receipt.
+///
+/// An unknown `as` value decodes as itself rather than failing.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Delivered {
+    /// One of [`delivered_as`]; any other value decodes as a plain string.
+    #[serde(rename = "as")]
+    pub r#as: String,
+    /// An opaque string: a stored row id, or the run id when `as` is `turn`.
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+}
+
+/// Type alias for [`Delivered`].
+pub type SteerReceipt = Delivered;
+/// Type alias for [`Delivered`].
+pub type SteerDelivery = Delivered;
+
+impl Delivered {
+    pub fn new(r#as: impl Into<String>) -> Self {
+        Self {
+            r#as: r#as.into(),
+            r#ref: None,
+        }
+    }
+
+    pub fn with_ref(mut self, r#ref: impl Into<String>) -> Self {
+        self.r#ref = Some(r#ref.into());
+        self
+    }
+
+    pub fn r#as(&self) -> DeliveredAs {
+        DeliveredAs::parse(&self.r#as)
+    }
+
+    /// Whether the steer was delivered (`step` or `turn`).
+    pub fn is_delivered(&self) -> bool {
+        matches!(self.r#as(), DeliveredAs::Step | DeliveredAs::Turn)
+    }
+}
+
 /// The `field` a refusal names for an unknown delivery mode, or for a
 /// `send_id` reused with another mode.
 pub const DELIVERY_FIELD: &str = "delivery";
@@ -223,6 +310,9 @@ pub struct SendReply {
     /// same `send_id` gets the same facts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<Baseline>,
+    /// Steer delivery receipt, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<Delivered>,
 }
 
 impl SendReply {
@@ -233,6 +323,7 @@ impl SendReply {
             submission_id: None,
             reason: None,
             baseline: None,
+            delivered: None,
         }
     }
 
@@ -253,6 +344,11 @@ impl SendReply {
 
     pub fn with_baseline(mut self, baseline: Baseline) -> Self {
         self.baseline = Some(baseline);
+        self
+    }
+
+    pub fn with_delivered(mut self, delivered: Delivered) -> Self {
+        self.delivered = Some(delivered);
         self
     }
 }
@@ -424,5 +520,54 @@ mod tests {
         assert_eq!(request.runner_params["model"]["id"], "m");
         assert_eq!(serde_json::to_value(&request).unwrap(), raw);
         assert_eq!(SendRequest::new("hi", "s-2").delivery(), Delivery::Queue);
+    }
+
+    #[test]
+    fn steer_delivery_receipt_vectors_decode_and_round_trip() {
+        let file = vectors::load("send.json");
+        let mut tested_as = std::collections::BTreeSet::new();
+        let mut tested_with_ref = 0;
+        let mut tested_without_ref = 0;
+        for case in vectors::cases(&file, "replies") {
+            let name = case["name"].as_str().unwrap();
+            let reply: SendReply = vectors::round_trip(name, &case["reply"]);
+            if let Some(delivered) = &reply.delivered {
+                tested_as.insert(delivered.r#as.clone());
+                if delivered.r#ref.is_some() {
+                    tested_with_ref += 1;
+                } else {
+                    tested_without_ref += 1;
+                }
+            }
+        }
+        assert!(tested_as.contains(delivered_as::STEP));
+        assert!(tested_as.contains(delivered_as::TURN));
+        assert!(tested_as.contains(delivered_as::PENDING));
+        assert!(tested_as.contains(delivered_as::UNKNOWN));
+        assert!(tested_as.contains("future_delivery"));
+        assert_eq!(tested_with_ref, 5);
+        assert_eq!(tested_without_ref, 4);
+    }
+
+    #[test]
+    fn open_decoding_of_unknown_as_preserves_value() {
+        let raw = serde_json::json!({
+            "state": "active",
+            "delivered": {
+                "as": "custom_extension",
+                "ref": "ext-99"
+            }
+        });
+        let reply: SendReply = serde_json::from_value(raw.clone()).unwrap();
+        let delivered = reply.delivered.as_ref().unwrap();
+        assert_eq!(delivered.r#as, "custom_extension");
+        assert_eq!(delivered.r#ref.as_deref(), Some("ext-99"));
+        assert_eq!(
+            delivered.r#as(),
+            DeliveredAs::Other("custom_extension".into())
+        );
+        assert!(!delivered.is_delivered());
+        let encoded = serde_json::to_value(&reply).unwrap();
+        assert_eq!(encoded, raw);
     }
 }

@@ -139,6 +139,112 @@
           }
         }
       }
+    },
+    {
+      "name": "steer delivered as step without ref",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "step"
+        }
+      }
+    },
+    {
+      "name": "steer delivered as step with ref",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "step",
+          "ref": "row-42"
+        }
+      }
+    },
+    {
+      "name": "steer delivered as turn without ref",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "turn"
+        }
+      }
+    },
+    {
+      "name": "steer delivered as turn with ref",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "turn",
+          "ref": "run-7"
+        }
+      }
+    },
+    {
+      "name": "steer pending without ref",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "pending"
+        }
+      }
+    },
+    {
+      "name": "steer pending with ref",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "pending",
+          "ref": "hold-1"
+        }
+      }
+    },
+    {
+      "name": "steer unknown without ref",
+      "admitted": false,
+      "reply": {
+        "state": "finished",
+        "run_id": "run-7",
+        "reason": "error",
+        "delivered": {
+          "as": "unknown"
+        }
+      }
+    },
+    {
+      "name": "steer unknown with ref",
+      "admitted": false,
+      "reply": {
+        "state": "finished",
+        "run_id": "run-7",
+        "reason": "error",
+        "delivered": {
+          "as": "unknown",
+          "ref": "cut-run-7"
+        }
+      }
+    },
+    {
+      "name": "steer unknown as value decoding open",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "future_delivery",
+          "ref": "opaque-future-id"
+        }
+      }
     }
   ],
   "refusals": [

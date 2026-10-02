@@ -14,6 +14,17 @@ use serde_json::Value;
 
 use crate::{capabilities, PROVIDES, REQUIRED_OPS};
 
+/// Steer delivery receipt policy as declared in `role.describe`.
+pub mod steer_receipt {
+    /// On a guaranteed runner, a durably accepted steer is delivered:
+    /// `delivered` may be absent, and must never be `pending` or `unknown`.
+    /// The default when `steer_receipt` is absent.
+    pub const GUARANTEED: &str = "guaranteed";
+    /// On a confirm runner, an absent `delivered` means `pending`, never
+    /// delivered.
+    pub const CONFIRM: &str = "confirm";
+}
+
 /// The `role.describe` answer: every major of the role the module serves,
 /// each with its own ops and stability, plus the module-level capabilities.
 ///
@@ -48,6 +59,10 @@ pub struct RoleDescribe {
     /// `transcript_reads`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<MaxBytes>,
+    /// Steer delivery receipt policy: `guaranteed` or `confirm`
+    /// ([`steer_receipt`]). Absent means [`steer_receipt::GUARANTEED`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steer_receipt: Option<String>,
 }
 
 /// A runner's `session.read` byte cap, in bytes.
@@ -114,6 +129,19 @@ impl RoleDescribe {
     pub fn with_session_capabilities_from(mut self, source: impl Into<String>) -> Self {
         self.session_capabilities_from = Some(source.into());
         self
+    }
+
+    /// Say what steer delivery receipt policy the runner follows.
+    pub fn with_steer_receipt(mut self, steer_receipt: impl Into<String>) -> Self {
+        self.steer_receipt = Some(steer_receipt.into());
+        self
+    }
+
+    /// The steer delivery receipt policy, with absence read as [`steer_receipt::GUARANTEED`].
+    pub fn steer_receipt(&self) -> &str {
+        self.steer_receipt
+            .as_deref()
+            .unwrap_or(steer_receipt::GUARANTEED)
     }
 
     /// The entry for `version` (for example `llm-runner/v1`), if served.
@@ -335,5 +363,39 @@ mod tests {
             describe.missing(&[capabilities::STEER, capabilities::TRANSCRIPT_READS]),
             vec![capabilities::TRANSCRIPT_READS]
         );
+    }
+
+    #[test]
+    fn steer_receipt_vectors_round_trip_and_defaults() {
+        let file = vectors::load("role-describe.json");
+        let mut seen_guaranteed = false;
+        let mut seen_confirm = false;
+        let mut seen_absent = false;
+        for case in vectors::cases(&file, "canonical") {
+            let name = case["name"].as_str().unwrap();
+            let describe: RoleDescribe = vectors::round_trip(name, &case["answer"]);
+            match describe.steer_receipt.as_deref() {
+                Some("guaranteed") => seen_guaranteed = true,
+                Some("confirm") => seen_confirm = true,
+                None => seen_absent = true,
+                _ => {}
+            }
+        }
+        assert!(seen_guaranteed);
+        assert!(seen_confirm);
+        assert!(seen_absent);
+
+        let default_describe = RoleDescribe::new(vec![], "1.0");
+        assert_eq!(default_describe.steer_receipt, None);
+        assert_eq!(default_describe.steer_receipt(), steer_receipt::GUARANTEED);
+
+        let confirm_describe = default_describe
+            .clone()
+            .with_steer_receipt(steer_receipt::CONFIRM);
+        assert_eq!(
+            confirm_describe.steer_receipt.as_deref(),
+            Some(steer_receipt::CONFIRM)
+        );
+        assert_eq!(confirm_describe.steer_receipt(), steer_receipt::CONFIRM);
     }
 }
