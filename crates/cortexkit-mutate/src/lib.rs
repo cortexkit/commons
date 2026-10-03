@@ -306,7 +306,10 @@ impl Saved {
         })
     }
     fn restore(&mut self) -> Result<()> {
-        let changed_lock = read_optional(&self.lock)? != self.lock_bytes;
+        // A listed lockfile is restored and verified with the other edit targets.
+        // Only an unlisted lockfile change is an unexpected side effect of a row.
+        let changed_lock =
+            !self.files.contains_key(&self.lock) && read_optional(&self.lock)? != self.lock_bytes;
         let mut errors = Vec::new();
         for (path, bytes) in &self.files {
             if let Err(e) = fs::write(path, bytes).and_then(|()| {
