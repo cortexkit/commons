@@ -4,7 +4,7 @@ A standalone, unpublished runner for checked-in mutation proofs. Install a revie
 immutable revision (replace `<sha>` with a **full commit SHA**):
 
 ```sh
-cargo install --git https://github.com/cortexkit/commons --rev <sha> cortexkit-mutate
+cargo install --locked --git https://github.com/cortexkit/commons --rev <sha> cortexkit-mutate
 ```
 
 Run from anywhere inside the repository. Paths in the catalogue are relative to
@@ -90,8 +90,11 @@ nightly replay catches regressions from those otherwise unselected changes.
 
 Row changes are compared as parsed TOML fields (comments/formatting alone are
 not changes to the proof). `--only` intersects this selection. Shards are 1-based
-`i/n`, assigned in sorted-ID order **after** filtering. Separate CI jobs need
-separate checkouts: sharding is not permission to mutate one tree concurrently.
+`i/n`, assigned in sorted-ID order **after** filtering. Within a shard, rows
+execute grouped by package and then by edited file, so a package's rows share
+one stretch of rebuilds; console lines and the report stay in sorted-ID order.
+Separate CI jobs need separate checkouts: sharding is not permission to mutate
+one tree concurrently.
 An empty selection succeeds. Unknown IDs and invalid shards are errors.
 
 ```sh
@@ -106,8 +109,10 @@ selection across the **whole package** (not the workspace). If broader tests
 fail, it diagnoses omitted covering tests; otherwise it cannot distinguish a
 real coverage gap from semantic equivalence and suggests inspecting the mutant
 and supplying a justified `equivalent` reason. A proof inside a function says
-nothing about callers reaching it: every CAUGHT proof reminds the author to add
-another row removing the call site.
+nothing about callers reaching it: when a CAUGHT row mutates a function body,
+`prove` names that function and suggests a second row removing a call to it. A
+row that itself removes a call site, or that mutates something outside every
+function body (a constant, a type, an attribute), prints no hint.
 
 ### `explore`: when nobody knows the guarding tests yet
 
@@ -244,6 +249,9 @@ on:
   pull_request:
   schedule:
     - cron: '0 3 * * *'
+concurrency:
+  group: mutations-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   mutations:
     runs-on: ubuntu-latest
@@ -255,7 +263,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install --git https://github.com/cortexkit/commons --rev <sha> cortexkit-mutate
+      - run: cargo install --locked --git https://github.com/cortexkit/commons --rev <sha> cortexkit-mutate
       - run: ck-mutate check
       - if: github.event_name == 'pull_request'
         run: ck-mutate run --diff '${{ github.event.pull_request.base.sha }}' --shard ${{ matrix.shard }}/4 --report mutations.json
@@ -267,6 +275,8 @@ jobs:
           name: mutations-${{ matrix.shard }}
           path: mutations.json
 ```
+
+Keep `${{ github.event_name }}` in the group: a group keyed on `${{ github.ref }}` alone with `cancel-in-progress: true` (common in a repository's main CI workflow) puts the nightly run in the default branch's group, so any push to that branch cancels the hours-long scheduled run.
 
 The cortexkit/commons repository's continuous integration runs this runner's fixture controls on pushes and PRs touching this crate or its workflow, on Linux,
 macOS and Windows, including actual nextest replay. Unix signals have dedicated

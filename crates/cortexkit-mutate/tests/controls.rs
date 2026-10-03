@@ -538,7 +538,121 @@ fn cli_report_shard_equivalent_and_prove_append() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("removing its call site"));
+    // The proved row mutates inside `guarded`, so the hint names `guarded`.
+    assert!(String::from_utf8_lossy(&out.stdout)
+        .contains("Add a second row removing a call to `guarded`."));
+    assert_eq!(
+        load(&f.root().join("mutations.toml"))
+            .unwrap()
+            .control
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn run_reports_in_sorted_id_order_whatever_the_execution_order() {
+    let f = Fixture::new();
+    let lib = format!("{}\npub mod other;\n", include_str!("fixture/src/lib.rs"));
+    fs::write(f.root().join("src/lib.rs"), lib).unwrap();
+    fs::write(
+        f.root().join("src/other.rs"),
+        "pub fn other_flag() -> bool { true }\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn other_flag_holds() {\n        assert!(super::other_flag());\n    }\n}\n",
+    )
+    .unwrap();
+    // `a-other` sorts first by ID, but its file sorts after `src/lib.rs`, so it
+    // executes second.
+    let mut other = f.control();
+    other.id = "a-other".into();
+    other.file = Some("src/other.rs".into());
+    other.test_file = "src/other.rs".into();
+    change(
+        &mut other,
+        "{ true }",
+        "{ false }",
+        "other::tests::other_flag_holds",
+    );
+    let catalogue = Catalogue {
+        control: vec![f.control(), other],
+    };
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&catalogue).unwrap(),
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "src/other.rs"]);
+    f.commit();
+    let out = f.cli(&["run", "--all", "--report", "order.json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "a-other: CAUGHT\nguard: CAUGHT\n"
+    );
+    let json = report_json(&f, "order.json");
+    assert_eq!(json[0]["id"], "a-other");
+    assert_eq!(json[1]["id"], "guard");
+    // Each row rewrites its file's original bytes when it finishes, so the
+    // later modification time belongs to the row that executed last.
+    let modified = |name: &str| {
+        fs::metadata(f.root().join(name))
+            .unwrap()
+            .modified()
+            .unwrap()
+    };
+    assert!(modified("src/other.rs") > modified("src/lib.rs"));
+}
+
+#[test]
+fn prove_call_site_removal_prints_no_call_site_hint() {
+    let f = Fixture::new();
+    let caller_code = format!(
+        "{}\npub fn caller_hook() -> bool {{ guarded(1) }}\n",
+        include_str!("fixture/src/lib.rs")
+    );
+    fs::write(f.root().join("src/lib.rs"), caller_code).unwrap();
+    fs::create_dir_all(f.root().join("tests")).unwrap();
+    fs::write(
+        f.root().join("tests/caller.rs"),
+        "#[test]\nfn caller_checks() { assert!(mutation_fixture::caller_hook()); }\n",
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "src/lib.rs", "tests/caller.rs"]);
+    f.commit();
+    let out = f.cli(&[
+        "prove",
+        "--id",
+        "caller-reaches-guard",
+        "--guards",
+        "caller reaches guard",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "{ guarded(1) }",
+        "--new",
+        "{ false }",
+        "--test-file",
+        "tests/caller.rs",
+        "--package",
+        "mutation-fixture",
+        "--target=--test caller",
+        "--expect-red",
+        "caller_checks",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The row itself removes the call site, so `prove` has nothing to add: its
+    // stdout is the report line alone, with no hint of any wording.
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "caller-reaches-guard: CAUGHT\n"
+    );
     assert_eq!(
         load(&f.root().join("mutations.toml"))
             .unwrap()

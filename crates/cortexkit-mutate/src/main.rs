@@ -198,16 +198,22 @@ fn run() -> Result<bool> {
                 })
                 .collect();
             controls.sort_by(|a, b| a.id.cmp(&b.id));
-            let mut rows = Vec::new();
-            for (i, c) in controls.into_iter().enumerate() {
-                if i % count != index {
-                    continue;
-                }
-                rows.push(run_row(&root, c, allow_dirty, &stop, false)?);
+            let shard: Vec<&Control> = controls
+                .into_iter()
+                .enumerate()
+                .filter(|(i, _)| i % count == index)
+                .map(|(_, c)| c)
+                .collect();
+            // Rows execute grouped by package to save rebuilds, but each report
+            // lands in its sorted-ID slot, so output order never depends on it.
+            let mut slots: Vec<Option<Report>> = shard.iter().map(|_| None).collect();
+            for i in execution_order(&shard) {
+                slots[i] = Some(run_row(&root, shard[i], allow_dirty, &stop, false)?);
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
             }
+            let rows: Vec<Report> = slots.into_iter().flatten().collect();
             write_report(report, &rows)?;
             Ok(!stop.load(Ordering::SeqCst) && rows.iter().all(Report::passes))
         }
@@ -241,7 +247,15 @@ fn run() -> Result<bool> {
             let mut rows = vec![first];
             if caught {
                 append_control(&cli.catalogue, &c)?;
-                println!("A mutation inside a function proves nothing about callers reaching it. Add a second row removing its call site.");
+                // The proved file is restored by now, so the hint reads its
+                // unmutated text. `prove` always takes exactly one edit.
+                let hint = c.edits()?.first().and_then(|edit| {
+                    let text = fs::read_to_string(root.join(&edit.file)).ok()?;
+                    call_site_hint(&text, edit)
+                });
+                if let Some(hint) = hint {
+                    println!("{hint}");
+                }
             } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
                 let broader = run_row(&root, &c, p.allow_dirty, &stop, true)?;
                 if !broader.red.is_empty() {

@@ -948,6 +948,263 @@ pub fn select_diff(
     Ok(selected)
 }
 
+/// The order `run` executes a shard's rows in, as indices into `rows`: grouped
+/// by package, then by the first edited file, keeping the given order within a
+/// group. Building the mutant dominates a row's time. When rows alternate
+/// between packages, every row on a package that depends on another one
+/// recompiles that dependency, because the previous row restored (rewrote) its
+/// source; grouped, the dependency is recompiled once per group instead. The
+/// order is internal: `run` still reports rows in their sorted-ID order.
+pub fn execution_order(rows: &[&Control]) -> Vec<usize> {
+    let first_file = |c: &Control| {
+        c.file
+            .clone()
+            .or_else(|| c.edits.first().map(|e| e.file.clone()))
+            .unwrap_or_default()
+    };
+    let mut order: Vec<usize> = (0..rows.len()).collect();
+    order.sort_by_cached_key(|&i| (rows[i].package.clone(), first_file(rows[i]), i));
+    order
+}
+
+/// One token of the small Rust lexer behind the `prove` hint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Tok<'a> {
+    Ident(&'a str),
+    Punct(u8),
+}
+
+/// Skip a string body starting just after its opening quote; returns the index
+/// just past the closing quote (or the end of the text if it never closes).
+fn skip_string(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'"' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    b.len()
+}
+
+/// Identifiers and punctuation with their byte offsets. Comments and string,
+/// raw-string and char literals are skipped so that braces and parentheses
+/// inside them never count. This is not a full Rust lexer: it only has to be
+/// good enough to find enclosing function bodies and call sites in source that
+/// already compiles.
+fn tokens(text: &str) -> Vec<(usize, Tok<'_>)> {
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == b'/' && b.get(i + 1) == Some(&b'/') {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if c == b'/' && b.get(i + 1) == Some(&b'*') {
+            let mut depth = 0usize;
+            while i < b.len() {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    depth += 1;
+                    i += 2;
+                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else if c == b'"' {
+            i = skip_string(b, i + 1);
+        } else if c == b'\'' {
+            // A char literal ('x', '\n', '\'') or a lifetime ('a).
+            if b.get(i + 1) == Some(&b'\\') {
+                i += 3;
+                while i < b.len() && b[i] != b'\'' {
+                    i += 1;
+                }
+                i += 1;
+            } else {
+                let len = text[i + 1..].chars().next().map_or(0, char::len_utf8);
+                i += if len > 0 && b.get(i + 1 + len) == Some(&b'\'') {
+                    2 + len
+                } else {
+                    1
+                };
+            }
+        } else if c.is_ascii_alphabetic() || c == b'_' || c >= 0x80 {
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] >= 0x80) {
+                i += 1;
+            }
+            let word = &text[start..i];
+            let mut hashes = 0;
+            while matches!(word, "r" | "br" | "cr") && b.get(i + hashes) == Some(&b'#') {
+                hashes += 1;
+            }
+            if matches!(word, "r" | "br" | "cr") && b.get(i + hashes) == Some(&b'"') {
+                let mut j = i + hashes + 1;
+                i = b.len();
+                while j < b.len() {
+                    if b[j] == b'"'
+                        && b.len() > j + hashes
+                        && b[j + 1..=j + hashes].iter().all(|&x| x == b'#')
+                    {
+                        i = j + 1 + hashes;
+                        break;
+                    }
+                    j += 1;
+                }
+            } else if matches!(word, "b" | "c") && b.get(i) == Some(&b'"') {
+                i = skip_string(b, i + 1);
+            } else {
+                out.push((start, Tok::Ident(word)));
+            }
+        } else if c.is_ascii_digit() {
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+        } else {
+            if !c.is_ascii_whitespace() {
+                out.push((i, Tok::Punct(c)));
+            }
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The innermost function whose body is open at byte `pos` of `text`.
+fn enclosing_fn(text: &str, pos: usize) -> Option<&str> {
+    // One entry per open brace: the function name when it opened a body.
+    let mut open: Vec<Option<&str>> = Vec::new();
+    // A `fn NAME` seen but whose body has not opened yet, and the parenthesis
+    // and bracket depth inside its signature (`;` there is not a declaration end).
+    let mut pending: Option<&str> = None;
+    let mut nesting = 0usize;
+    let toks = tokens(text);
+    let mut k = 0;
+    while k < toks.len() && toks[k].0 < pos {
+        match toks[k].1 {
+            Tok::Ident("fn") => {
+                if let Some((_, Tok::Ident(name))) = toks.get(k + 1) {
+                    pending = Some(name);
+                    nesting = 0;
+                    k += 1;
+                }
+            }
+            Tok::Punct(b'(' | b'[') => nesting += 1,
+            Tok::Punct(b')' | b']') => nesting = nesting.saturating_sub(1),
+            Tok::Punct(b';') if nesting == 0 => pending = None,
+            Tok::Punct(b'{') => open.push(if nesting == 0 { pending.take() } else { None }),
+            Tok::Punct(b'}') => {
+                open.pop();
+            }
+            _ => {}
+        }
+        k += 1;
+    }
+    open.into_iter().rev().flatten().next()
+}
+
+/// The first function the anchor text itself defines (`fn NAME`), when the row
+/// rewrites a whole function rather than a line inside one.
+fn defined_fn(text: &str) -> Option<&str> {
+    tokens(text)
+        .windows(2)
+        .find_map(|w| match (w[0].1, w[1].1) {
+            (Tok::Ident("fn"), Tok::Ident(name)) => Some(name),
+            _ => None,
+        })
+}
+
+/// Function and method calls in `text`, counted by callee name: an identifier
+/// followed by `(`, directly or through a turbofish. Macros are not calls;
+/// capitalised names (`Some(..)`, `Err(..)`, `Point(..)`) are constructors.
+fn calls(text: &str) -> BTreeMap<&str, usize> {
+    const KEYWORDS: &[&str] = &[
+        "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "fn", "for",
+        "if", "impl", "in", "let", "loop", "match", "move", "mut", "pub", "ref", "return", "self",
+        "static", "super", "unsafe", "where", "while", "yield",
+    ];
+    let toks = tokens(text);
+    let mut found = BTreeMap::new();
+    for (k, &(_, tok)) in toks.iter().enumerate() {
+        let Tok::Ident(name) = tok else { continue };
+        if KEYWORDS.contains(&name)
+            || name.starts_with(|c: char| c.is_ascii_uppercase())
+            || (k > 0 && toks[k - 1].1 == Tok::Ident("fn"))
+        {
+            continue;
+        }
+        let mut next = k + 1;
+        let turbofish = [Tok::Punct(b':'), Tok::Punct(b':'), Tok::Punct(b'<')];
+        if toks
+            .get(next..next + 3)
+            .is_some_and(|t| t.iter().map(|(_, tok)| *tok).eq(turbofish.iter().copied()))
+        {
+            let mut depth = 0usize;
+            next += 2;
+            while let Some((_, tok)) = toks.get(next) {
+                next += 1;
+                match tok {
+                    Tok::Punct(b'<') => depth += 1,
+                    Tok::Punct(b'>') => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if toks.get(next).map(|(_, tok)| *tok) == Some(Tok::Punct(b'(')) {
+            *found.entry(name).or_insert(0) += 1;
+        }
+    }
+    found
+}
+
+/// Whether an edit removes a call site: some call in `old` loses an occurrence
+/// in `new` and no call is added in its place. Swapping one call for another
+/// (`to_ascii_uppercase()` for `to_ascii_lowercase()`) is a body mutation.
+fn removes_call(edit: &Edit) -> bool {
+    let old = calls(&edit.old);
+    let new = calls(&edit.new);
+    let fewer = |a: &BTreeMap<&str, usize>, b: &BTreeMap<&str, usize>| {
+        a.iter()
+            .any(|(name, n)| b.get(name).copied().unwrap_or(0) < *n)
+    };
+    fewer(&old, &new) && !fewer(&new, &old)
+}
+
+/// What `prove` suggests after a CAUGHT row, given the unmutated text of the
+/// edited file. A mutation inside a function body proves the function's tests
+/// notice it, not that any caller still reaches the function, so the hint names
+/// that function and asks for a row removing a call to it. A row that already
+/// removes a call site, or that mutates something outside every function body
+/// (a constant, a type, an attribute), gets no hint: there is no call site of
+/// it to remove.
+pub fn call_site_hint(file_text: &str, edit: &Edit) -> Option<String> {
+    if removes_call(edit) {
+        return None;
+    }
+    let pos = file_text.find(&edit.old)?;
+    let name = defined_fn(&edit.old).or_else(|| enclosing_fn(file_text, pos))?;
+    // Nothing in the program calls `main`; there is no call site to remove.
+    if name == "main" {
+        return None;
+    }
+    Some(format!(
+        "This row mutates the body of `{name}`, which proves nothing about callers reaching it. Add a second row removing a call to `{name}`."
+    ))
+}
+
 pub fn signal_flag() -> Result<Arc<AtomicBool>> {
     let flag = Arc::new(AtomicBool::new(false));
     let handler = flag.clone();
@@ -1026,5 +1283,145 @@ mod restoration_tests {
         });
         assert!(caught.is_err());
         assert_eq!(fs::read(file).unwrap(), b"original\r\nbytes\n");
+    }
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    const SOURCE: &str = r#"const MAX_HOPS: u32 = 40;
+pub struct Names { room: String }
+/// Doc comment with a brace { that must not count.
+pub fn guarded(value: i32) -> bool {
+    let _ = "a string with } and fn fake() {";
+    let _ = '}';
+    value > 0
+}
+impl Names {
+    fn derive(account: &str) -> Self {
+        let upper = account.to_ascii_uppercase();
+        Self { room: format!("CK_{upper}_ROOM") }
+    }
+}
+pub fn caller() -> bool {
+    guarded(1) && check::<u8>(2)
+}
+fn check<T>(_: i32) -> bool { true }
+fn main() { let _ = caller() || 1 > 0; }
+"#;
+
+    fn edit(old: &str, new: &str) -> Edit {
+        Edit {
+            file: "src/lib.rs".into(),
+            old: old.into(),
+            new: new.into(),
+        }
+    }
+
+    #[test]
+    fn body_mutation_names_the_enclosing_function() {
+        let hint = call_site_hint(SOURCE, &edit("value > 0", "value >= 0")).unwrap();
+        assert!(hint.contains("removing a call to `guarded`"), "{hint}");
+    }
+
+    #[test]
+    fn method_body_mutation_and_call_swap_name_the_method() {
+        let hint = call_site_hint(
+            SOURCE,
+            &edit(
+                "account.to_ascii_uppercase()",
+                "account.to_ascii_lowercase()",
+            ),
+        )
+        .unwrap();
+        assert!(hint.contains("`derive`"), "{hint}");
+        let hint = call_site_hint(SOURCE, &edit("_ROOM\")", "_MUTATED_ROOM\")")).unwrap();
+        assert!(hint.contains("`derive`"), "{hint}");
+    }
+
+    #[test]
+    fn whole_function_rewrite_names_the_rewritten_function() {
+        let old = "fn check<T>(_: i32) -> bool { true }";
+        let hint =
+            call_site_hint(SOURCE, &edit(old, "fn check<T>(_: i32) -> bool { false }")).unwrap();
+        assert!(hint.contains("`check`"), "{hint}");
+    }
+
+    #[test]
+    fn call_site_removal_gets_no_hint() {
+        assert_eq!(call_site_hint(SOURCE, &edit("guarded(1)", "true")), None);
+        assert_eq!(
+            call_site_hint(SOURCE, &edit("check::<u8>(2)", "true")),
+            None
+        );
+    }
+
+    #[test]
+    fn mutation_outside_any_function_body_gets_no_hint() {
+        assert_eq!(
+            call_site_hint(SOURCE, &edit("MAX_HOPS: u32 = 40", "MAX_HOPS: u32 = 0")),
+            None
+        );
+        assert_eq!(
+            call_site_hint(SOURCE, &edit("room: String", "room: Box<str>")),
+            None
+        );
+    }
+
+    #[test]
+    fn main_has_no_call_site_to_remove() {
+        assert_eq!(call_site_hint(SOURCE, &edit("1 > 0", "1 < 0")), None);
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn row(id: &str, package: &str, file: &str) -> Control {
+        Control {
+            id: id.into(),
+            guards: "g".into(),
+            file: Some(file.into()),
+            old: Some("a".into()),
+            new: Some("b".into()),
+            edits: vec![],
+            test_file: file.into(),
+            runner: "cargo".into(),
+            package: package.into(),
+            target: String::new(),
+            expect_red: vec!["t".into()],
+            only: false,
+            equivalent: None,
+            timeout_s: 1,
+            build_timeout_s: 1,
+        }
+    }
+
+    #[test]
+    fn rows_execute_grouped_by_package_then_file_stably() {
+        let rows = [
+            row("a", "pkg-b", "b/src/lib.rs"),
+            row("b", "pkg-a", "a/src/z.rs"),
+            row("c", "pkg-b", "b/src/lib.rs"),
+            row("d", "pkg-a", "a/src/lib.rs"),
+            row("e", "pkg-a", "a/src/z.rs"),
+        ];
+        let mut multi = row("f", "pkg-a", "unused");
+        multi.file = None;
+        multi.old = None;
+        multi.new = None;
+        multi.edits = vec![Edit {
+            file: "a/src/lib.rs".into(),
+            old: "a".into(),
+            new: "b".into(),
+        }];
+        let refs: Vec<&Control> = rows.iter().chain([&multi]).collect();
+        let ids: Vec<&str> = execution_order(&refs)
+            .into_iter()
+            .map(|i| refs[i].id.as_str())
+            .collect();
+        assert_eq!(ids, ["d", "f", "b", "e", "a", "c"]);
     }
 }

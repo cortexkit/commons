@@ -1,6 +1,5 @@
 /target
 **/*.rs.bk
-Cargo.lock
 .DS_Store
 
 # Agent working state (context packages, prompts, drafts) -- never source.
