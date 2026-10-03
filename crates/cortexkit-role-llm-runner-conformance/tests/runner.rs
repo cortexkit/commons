@@ -321,7 +321,9 @@ async fn a_guaranteed_runner_answering_pending_fails() {
     assert_passed(&report, "resend_steer_delivered_stable");
 }
 
-/// Prove that the held-turn branch applied, and pin its entire failure set.
+/// Run the suite against a fake with one held-turn steer defect, prove that
+/// the defect changed exactly one answer, and require that it fails the
+/// guaranteed-steer check and nothing else.
 async fn held_steer_break(defects: Defects, because: &str) {
     let subject = FakeSubject::new(defects);
     let report = run(&subject).await;
@@ -399,8 +401,9 @@ async fn a_guaranteed_runner_with_an_absent_first_steer_receipt_passes() {
 async fn a_confirm_runner_reports_the_guaranteed_case_as_inapplicable() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.steer_receipt_confirm = true;
-    // Even without a hold-capable harness, the reason must be the runner's
-    // declared receipt policy, not a passed idle-session probe.
+    // With no way to hold a turn either, the case must still be inapplicable
+    // because the runner declares confirmation receipts, never passed by a
+    // steer into an idle session.
     subject.capabilities.remove(&Capability::HoldToolCalls);
     let report = run(&subject).await;
     assert!(matches!(

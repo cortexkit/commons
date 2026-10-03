@@ -101,13 +101,17 @@ pub struct Defects {
     pub claim_unserved_group: bool,
     /// A guaranteed runner falsely answers pending for a steer send.
     pub guaranteed_steer_pending: bool,
-    /// Only a steer into a held running turn is falsely answered pending.
+    /// Answer `pending` to a steer sent into a running turn held by a tool
+    /// call, though a guaranteed runner must answer `step` or `turn`.
     pub held_steer_pending: bool,
-    /// Only the receipt path for a re-send into a held turn answers pending.
+    /// Answer `pending` only to the re-send of a steer into a held turn; the
+    /// first answer stays correct.
     pub held_steer_retry_pending: bool,
-    /// The first re-send into a held turn names a different delivery.
+    /// Return a different delivery receipt on the re-send of a steer into a
+    /// held turn than on its first answer.
     pub held_steer_retry_unstable: bool,
-    /// A steer ends the held turn before answering, making the probe idle.
+    /// End the held turn before answering a steer into it, so the steer is
+    /// answered while no run is in progress.
     pub held_steer_ends_run: bool,
     /// A re-send of a delivered steer changes its receipt.
     pub resend_steer_unstable: bool,
@@ -149,7 +153,8 @@ struct World {
     queue_receipt_pending_then_unknown: bool,
     steer_receipt_confirm: bool,
     omit_first_steer_receipt: bool,
-    /// Counts replies where a held-turn steer defect actually applied.
+    /// Counts answers that one of the held-turn steer defects above changed,
+    /// so a test can prove its defect actually took effect.
     held_steer_break_answers: AtomicUsize,
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
@@ -889,8 +894,9 @@ impl Module {
                 if delivery != groups::STEER || !self.world.serves(groups::STEER) {
                     return Ok(refuse(errors::TRANSIENT, None));
                 }
-                // Steers into an active run use that run's receipt path;
-                // they must not manufacture a new turn as an idle send does.
+                // A steer that arrives during a run is delivered into that run
+                // and answered with its receipt; unlike a send to an idle
+                // session, it must not start a turn of its own.
                 self.commit(
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
@@ -1200,7 +1206,9 @@ pub struct FakeSubject {
     /// Answer a queued send `delivered: pending` and its retries
     /// `delivered: unknown`: a receipt moving forward, which is allowed.
     pub queue_receipt_pending_then_unknown: bool,
-    /// Declare confirmation receipts instead of guaranteed delivery.
+    /// Declare `steer_receipt: confirm` (a steer's receipt may be `pending` or
+    /// `unknown` until delivery is confirmed) instead of guaranteed delivery,
+    /// where every steer receipt is `step` or `turn`.
     pub steer_receipt_confirm: bool,
     /// Exercise the contract's optional receipt on a steer's first answer.
     pub omit_first_steer_receipt: bool,

@@ -1591,9 +1591,10 @@ where
                 "the suite cannot hold a running turn without hold_tool_calls".into(),
             ));
         }
-        // Hold a tool call just as the indeterminate delivery check does.
-        // Joining the send with the probe also supports runners whose first
-        // send waits for its run to end before replying.
+        // Keep the turn running by holding its tool call, the same way the
+        // check for sends with an unknown delivery outcome does. The send and
+        // the probe run together, so a runner whose first send only replies
+        // once its run ends is supported too.
         let mut held = self.mint.call("held_steer_call");
         held.hold = true;
         let (done, _) = self.mint.text("done");
@@ -1666,8 +1667,9 @@ where
                     .delivered
                     .as_ref()
                     .ok_or("a guaranteed runner omitted delivered on re-send")?;
-                // The first receipt is optional; once supplied, its delivery
-                // (including the opaque ref) must be final on the re-send.
+                // The first answer may omit its delivery receipt. If it
+                // supplies one, the re-send must return the same receipt,
+                // opaque reference included.
                 if let Some(first) = &replies[0].delivered {
                     if first != retry {
                         return Err(format!(
@@ -1678,8 +1680,9 @@ where
                 Ok(())
             }
             .await;
-            // Always release the call, including when a receipt or the
-            // running-turn guard failed, so the suite leaves no stalled run.
+            // Always release the held tool call, even when a receipt check or
+            // the check that the turn is still running failed, so the suite
+            // never leaves a run stalled.
             let released = self
                 .subject
                 .release_tool_call(&held.arguments)

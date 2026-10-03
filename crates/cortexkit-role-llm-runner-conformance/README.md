@@ -59,7 +59,7 @@ from `session.baseline` has no admission reply to compare.
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing` | `queue`, and `transcript_reads` (inapplicable without it) |
 | `delivery_change_writes_nothing` | `queue`, `steer` or `interrupt` as the other mode, and `transcript_reads` (inapplicable without it) |
 | `unknown_delivery_refused` | `queue`, `transcript_reads` |
-| `guaranteed_steer_never_pending_or_unknown` | `queue`, `transcript_reads`; inapplicable without `steer`, with `steer_receipt: confirm`, or without `hold_tool_calls`; steers and re-sends while a tool call holds the running turn |
+| `guaranteed_steer_never_pending_or_unknown` | `queue`, `transcript_reads`; inapplicable without `steer`, when the runner declares `steer_receipt: confirm` (its steer receipts may be `pending` or `unknown`), or without `hold_tool_calls`; sends a steer, and its re-send with the same `send_id`, into a turn kept running by a held tool call |
 | `resend_steer_delivered_stable` | `queue`, `transcript_reads`; inapplicable without `steer` |
 | `undeclared_delivery_refused` | `queue`, `transcript_reads`, and `steer` or `interrupt` left undeclared |
 | `crash_at_Admitted`, `crash_at_SendRecorded`, `crash_at_StepRecorded`, `crash_at_ToolResultRecorded`, `crash_at_Terminal` | `queue`, `transcript_reads`, the kill point |
