@@ -1,0 +1,68 @@
+{
+  "about": "invalid_params refusals whose detail.field is the narrowest path that applies. A map key is joined with a dot and an array index is bracketed. params names the request as a whole, and only when no narrower path applies (the body is not JSON or not an object, or it is over max_request_bytes). unknown_question_type: a request question whose type the runner does not know is refused naming that question's key, because the runner can neither validate nor map it; a reply still decodes such a type open. narrower_path: one image deep in the request is refused, and the refusal names that image rather than the item's images or params.",
+  "refusals": [
+    {
+      "name": "unknown_question_type",
+      "request": {
+        "batch_id": "vec-field-unknown-type",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          },
+          "priority": {
+            "type": "rank",
+            "instructions": "Rank this request among today's tickets."
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "unknown question type rank; expected noul, choice or score",
+        "detail": {
+          "class": "permanent",
+          "field": "questions.priority.type"
+        }
+      }
+    },
+    {
+      "name": "narrower_path",
+      "request": {
+        "batch_id": "vec-field-narrower",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "The export button does nothing.",
+            "images": [
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+              "https://example.com/screenshot.png"
+            ]
+          }
+        ]
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "an image string must be a data: URL; remote URLs are refused",
+        "detail": {
+          "class": "permanent",
+          "field": "items[1].images[1]"
+        }
+      }
+    }
+  ]
+}

@@ -63,6 +63,7 @@ async fn an_unpriced_module_gets_not_applicable_never_passed() {
         "cost_usd_stable_on_replay",
         "looser_max_cost_does_not_raise_ceiling",
         "tighter_max_cost_stops_crossing_items",
+        "tightened_ceiling_recorded_across_resends",
     ];
     for name in not_applicable {
         assert!(
@@ -165,6 +166,9 @@ async fn reasking_answered_items_fails_the_retry_check() {
             "cost_usd_stable_on_replay",
             "reuse_refused_naming_field",
             "reordered_object_state_is_replay",
+            "auth_failure_stops_the_call_unstored",
+            "model_unavailable_stops_the_call_unstored",
+            "rate_limit_stops_the_rest_of_the_call",
         ],
         "",
     )
@@ -208,6 +212,8 @@ async fn replaying_stored_transient_errors_fails_the_stored_error_check() {
             "stored_permanent_error_replayed_transient_retried",
             "looser_max_cost_does_not_raise_ceiling",
             "tighter_max_cost_stops_crossing_items",
+            "tightened_ceiling_recorded_across_resends",
+            "rate_limit_stops_the_rest_of_the_call",
         ],
         "",
     )
@@ -246,7 +252,10 @@ async fn a_ceiling_from_the_latest_call_fails_the_looser_check() {
             ceiling_from_latest_call: true,
             ..Defects::default()
         },
-        &["looser_max_cost_does_not_raise_ceiling"],
+        &[
+            "looser_max_cost_does_not_raise_ceiling",
+            "tightened_ceiling_recorded_across_resends",
+        ],
         "raised by the looser value",
     )
     .await;
@@ -259,7 +268,10 @@ async fn a_ceiling_from_the_first_call_fails_the_tighter_check() {
             ceiling_from_first_call_only: true,
             ..Defects::default()
         },
-        &["tighter_max_cost_stops_crossing_items"],
+        &[
+            "tighter_max_cost_stops_crossing_items",
+            "tightened_ceiling_recorded_across_resends",
+        ],
         "not tightened by the lower value",
     )
     .await;
@@ -396,6 +408,98 @@ async fn zero_filled_usage_fails_the_usage_check() {
         },
         &["unreported_usage_stays_absent"],
         "reported no usage, but its usage reads",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn not_recording_a_tightened_ceiling_fails_the_three_call_check() {
+    breaks(
+        Defects {
+            tightened_ceiling_not_recorded: true,
+            ..Defects::default()
+        },
+        &["tightened_ceiling_recorded_across_resends"],
+        "item 1 was answered, so the ceiling the second call lowered was loosened again",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn forwarding_an_unknown_question_type_fails_the_unknown_type_check() {
+    breaks(
+        Defects {
+            unknown_question_type_forwarded: true,
+            ..Defects::default()
+        },
+        &["unknown_question_type_refused_naming_field"],
+        "a request with a question of type rank: expected a refusal",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sending_on_after_a_401_fails_the_auth_check() {
+    breaks(
+        Defects {
+            continue_after_auth_failure: true,
+            ..Defects::default()
+        },
+        &["auth_failure_stops_the_call_unstored"],
+        "item 2 was answered, expected auth_failed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn storing_auth_failed_fails_the_auth_check() {
+    breaks(
+        Defects {
+            store_auth_failure: true,
+            ..Defects::default()
+        },
+        &["auth_failure_stops_the_call_unstored"],
+        "item 1 failed auth_failed (permanent): the provider answered 401 after retries: \
+         the item auth_failed left unanswered was not asked again",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn answering_a_401_on_the_first_call_per_item_fails_the_first_call_check() {
+    breaks(
+        Defects {
+            first_call_auth_failure_not_refused: true,
+            ..Defects::default()
+        },
+        &["auth_failure_on_first_call_refused"],
+        "first provider call the stand-in answers 401: expected a refusal",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn storing_model_unavailable_fails_the_404_check() {
+    breaks(
+        Defects {
+            store_model_unavailable: true,
+            ..Defects::default()
+        },
+        &["model_unavailable_stops_the_call_unstored"],
+        "the item model_unavailable left unanswered was not asked again",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sending_on_after_a_rate_limit_fails_the_rate_limit_check() {
+    breaks(
+        Defects {
+            continue_after_rate_limit: true,
+            ..Defects::default()
+        },
+        &["rate_limit_stops_the_rest_of_the_call"],
+        "item 2 was answered, expected rate_limited",
     )
     .await;
 }

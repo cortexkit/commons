@@ -1,5 +1,5 @@
 {
-  "about": "One per-item error per code in the contract's table. Item 0 is answered and item 1 failed, so each reply also shows that one failing item does not fail the batch. provider_status is the provider's HTTP status that led to the error, where a provider call was made; neither provider documents an error body, so none is shown, and the error object is the runner's own. Neither provider documents a content-refusal status, so provider_refused has none. cost_exceeded is decided before the call, so it has none either; its batch is priced and its ceiling is 0.01 USD, already spent by item 0. The answer and usage numbers are illustrative.",
+  "about": "One per-item error per code in the contract's table. Item 0 is answered and item 1 failed, so each reply also shows that one failing item does not fail the batch. provider_status is the provider's HTTP status that led to the error, where a provider call was made; neither provider documents an error body, so none is shown, and the error object is the runner's own. Neither provider documents a content-refusal status, so provider_refused has none. cost_exceeded is decided before the call, so it has none either; its batch is priced and its ceiling is 0.01 USD, already spent by item 0. auth_failed (a 401 or 403) and model_unavailable (a 404) stop the call: item 2 is not sent and carries the same code, and neither error is stored, so a re-send asks the provider again for items 1 and 2. The answer and usage numbers are illustrative.",
   "vectors": [
     {
       "name": "rate_limited",
@@ -265,6 +265,134 @@
           "output_tokens": 9
         },
         "cost_usd": 0.01
+      }
+    },
+    {
+      "name": "auth_failed",
+      "provider_status": 401,
+      "request": {
+        "batch_id": "vec-item-auth-failed",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          },
+          {
+            "state": "The export button does nothing."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-auth-failed",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "auth_failed",
+              "class": "permanent",
+              "message": "the provider refused the module's credentials (401)"
+            }
+          },
+          {
+            "index": 2,
+            "error": {
+              "code": "auth_failed",
+              "class": "permanent",
+              "message": "not sent: the provider refused the module's credentials earlier in this call"
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      }
+    },
+    {
+      "name": "model_unavailable",
+      "provider_status": 404,
+      "request": {
+        "batch_id": "vec-item-model-unavailable",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          },
+          {
+            "state": "The export button does nothing."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-model-unavailable",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "model_unavailable",
+              "class": "permanent",
+              "message": "the provider does not serve the model (404)"
+            }
+          },
+          {
+            "index": 2,
+            "error": {
+              "code": "model_unavailable",
+              "class": "permanent",
+              "message": "not sent: the provider did not serve the model earlier in this call"
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
       }
     }
   ]

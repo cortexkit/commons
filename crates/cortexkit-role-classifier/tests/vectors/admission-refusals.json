@@ -1,5 +1,5 @@
 {
-  "about": "One admission refusal per code in the contract's table. Each refuses the whole request with an ERROR frame whose body is refusal ({code, message, detail}); detail.class carries the code's class, and the other detail members are the table's. An admission refusal writes nothing and calls no provider. batch_id_reuse assumes a recorded batch vec-refuse-reuse whose item 0 differs; replay-batch-id-reuse.json shows both calls. batch_in_progress assumes another call holds vec-refuse-busy.",
+  "about": "One admission refusal per code in the contract's table. Each refuses the whole request with an ERROR frame whose body is refusal ({code, message, detail}); detail.class carries the code's class, and the other detail members are the table's. An admission refusal writes nothing and calls no provider. batch_id_reuse assumes a recorded batch vec-refuse-reuse whose item 0 differs; replay-batch-id-reuse.json shows both calls. batch_in_progress assumes another call holds vec-refuse-busy. auth_failed and model_unavailable assume the call's first provider call (item 0) was answered 401 and 404: a 401 or 403, or a 404, met on the first provider call refuses the whole call at admission, so item 1 is never sent and nothing is recorded.",
   "refusals": [
     {
       "name": "invalid_params",
@@ -186,6 +186,63 @@
         "detail": {
           "class": "transient",
           "retry_after_ms": 1000
+        }
+      }
+    },
+    {
+      "name": "auth_failed",
+      "request": {
+        "batch_id": "vec-refuse-auth",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "auth_failed",
+        "message": "the provider refused the module's credentials",
+        "detail": {
+          "class": "permanent"
+        }
+      }
+    },
+    {
+      "name": "model_unavailable",
+      "request": {
+        "batch_id": "vec-refuse-model-unavailable",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "model_unavailable",
+        "message": "the provider does not serve cloudflare/clef",
+        "detail": {
+          "class": "permanent",
+          "model": "cloudflare/clef"
         }
       }
     }

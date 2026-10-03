@@ -43,13 +43,19 @@ module does", naming them; only a run where every check ran and passed is
 | `cost_usd_stable_on_replay` | no served model is priced |
 | `looser_max_cost_does_not_raise_ceiling` | no served model is priced |
 | `tighter_max_cost_stops_crossing_items` | no served model is priced |
+| `tightened_ceiling_recorded_across_resends` | no served model is priced |
 | `reuse_refused_naming_field` | — |
 | `reordered_object_state_is_replay` | — |
 | `validation_refusals_reach_no_provider` | — |
 | `null_state_refused_naming_field` | — |
+| `unknown_question_type_refused_naming_field` | — |
 | `answers_in_request_order` | — |
 | `provider_numbers_byte_for_byte` | — |
 | `one_failing_item_does_not_fail_batch` | — |
+| `auth_failure_stops_the_call_unstored` | — |
+| `auth_failure_on_first_call_refused` | — |
+| `model_unavailable_stops_the_call_unstored` | — |
+| `rate_limit_stops_the_rest_of_the_call` | — |
 | `unreported_usage_stays_absent` | — |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`

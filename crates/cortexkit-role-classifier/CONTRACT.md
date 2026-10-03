@@ -9,16 +9,15 @@ the sibling `cortexkit-role-classifier-conformance` crate holds its suite
 It is written from the role owner's draft and the owner's rulings on the
 points that draft left open (stored errors on a re-send, the
 batch spend ceiling, concurrent calls, the meaning of `noul`, the type of
-`state`, and truncation). The provider shapes are from the providers'
-documentation (§10).
+`state`, and truncation), and on the readings an earlier version of this
+crate chose where the draft was silent (the class on admission refusals,
+the `batch_id_reuse` field order, the `detail.field` paths, the provider
+status mapping, unknown question types, and recording a tightened
+ceiling). The provider shapes are from the providers' documentation
+(§10).
 
-Every rule is marked:
-
-- **[pinned]**: the role states it. A module must do it, and a caller may
-  rely on it.
-- **[crate]**: the draft is silent, and this crate writes one reading down
-  so the types and vectors have something to pin. The owner may change it;
-  each is listed in §12.
+Every rule is marked **[pinned]**: the role states it. A module must do
+it, and a caller may rely on it. No reading is left open (§12).
 
 ## 1. Role identity
 
@@ -111,11 +110,17 @@ with the providers' own field names (`question` module):
 - [pinned] Images: a `data:` URL string, or `{content_type, base64}` with
   `content_type` one of `image/png`, `image/jpeg`, `image/webp`. At most 4
   MiB and 16 megapixels each, 8 MiB in total. No remote URLs.
-- [crate] Question type decodes open: an unknown type is kept as its string
-  and refused `invalid_params` naming `questions.<id>.type`.
-- [crate] The role's question id (`[a-z0-9_-]`, 1-64) is narrower than
-  clef's (letters, digits, `_`, `.` and `-`, up to 100), so every role id is
-  a valid clef id.
+- [pinned] Unknown question types split by direction. In a request, a
+  question whose `type` is not one of the three is refused
+  `invalid_params` with `detail.field` `questions.<id>.type`, naming that
+  question's key: the module can neither validate nor map a type it does
+  not know. The type is checked before the rest of the question, which
+  depends on it. The types may still model an open question type for
+  decoding (`QuestionType::Other`); the request validator refuses it
+  (`check_question`). In a reply, the type decodes open (§5).
+- The role's question id (`[a-z0-9_-]`, 1-64) is narrower than clef's
+  (letters, digits, `_`, `.` and `-`, up to 100), so every role id is a
+  valid clef id.
 
 ## 5. Reply and answers
 
@@ -150,8 +155,10 @@ with the providers' own field names (`question` module):
   provider's spelling. A module that decodes and re-encodes a provider
   answer through binary floating point breaks this; forward the answer
   object's text.
-- [crate] `Answer` keeps a member the provider adds that this crate does not
-  name (`Answer::extra`), so a new provider field passes through.
+- [pinned] A reply decodes open: an answer of a type this crate does not
+  name keeps its type string, and a member the provider adds that this
+  crate does not name is kept as given (`Answer::extra`), so a new provider
+  field passes through.
 
 ## 6. Pinned rules
 
@@ -168,9 +175,10 @@ with the providers' own field names (`question` module):
   (`BatchIdentity`). The key order of an object `state`, whitespace, and
   number spellings JSON treats as equal (`1.0` and `1`, `1e30` and `1E+30`)
   can't turn a retry into `batch_id_reuse`.
-- [crate] `detail.field` of `batch_id_reuse` is `model`, `questions`,
-  `items` (a different item count) or `items[i]` (the first differing
-  item), checked in that order (`BatchIdentity::first_difference`).
+- [pinned] `detail.field` of `batch_id_reuse` names the first field that
+  differs: `model`, `questions`, `items` (a different item count) or
+  `items[i]` (the first differing item), checked in that order
+  (`BatchIdentity::first_difference`).
 
 ### 6.2 Single flight per `batch_id`
 
@@ -190,6 +198,12 @@ with the providers' own field names (`question` module):
 - [pinned] A stored transient item error (`rate_limited`,
   `provider_error`) is retried, and its new outcome (answer or error)
   replaces the stored one.
+- [pinned] The one exception to storing item errors: `auth_failed` and
+  `model_unavailable` (§8) are never stored. They say nothing about the
+  item, so the item stays unanswered, and a re-send (after a re-login or a
+  catalog fix) calls the provider for it again (`ItemError::is_stored`).
+  The items a rate limit kept from being sent in a call (§8) are not
+  stored either, so a re-send retries them.
 - [pinned] A stored answer is never re-asked.
 - [pinned] An item error of an unknown class is treated as permanent, so it
   is returned as stored (`ItemError::is_retried_on_resend`).
@@ -202,6 +216,13 @@ with the providers' own field names (`question` module):
   different value is not `batch_id_reuse`.
 - [pinned] The effective ceiling is the lower of the recorded one and the
   re-send's (`effective_ceiling`): a caller can tighten it, never loosen it.
+- [pinned] A tightened ceiling is recorded. A re-send's lower
+  `max_cost_usd` becomes the batch's recorded ceiling, durably, before that
+  call sends anything, so the recorded ceiling after any call is
+  `effective_ceiling(recorded, sent)`. Without this, a third re-send
+  carrying the original higher value would loosen it again. A refusal at
+  the call's first provider call (§7) does not undo it: the ceiling was
+  recorded before anything was sent, and a ceiling never loosens.
 - [pinned] Before each provider call the module checks recorded spend plus
   that call's estimate. An item that would cross the ceiling gets the
   per-item error `cost_exceeded` (permanent; a re-send with a higher value
@@ -219,20 +240,30 @@ with the providers' own field names (`question` module):
 ### 6.6 Never all-or-nothing after admission
 
 - [pinned] Each item gets `answers` or `error`, never both. A whole-batch
-  refusal happens only at admission, and writes nothing.
+  refusal happens only at admission, and writes nothing. A 401, 403 or 404
+  on the call's first provider call counts as admission (§7, §8).
 
 ### 6.7 Validation before any provider call
 
 - [pinned] Checked against the catalog row before anything is written or
-  sent: question count, question ids, choice options 2-255, score levels
-  2-10, `state` kinds, images, `max_items`, `max_request_bytes`
+  sent: question count, question ids, question types, choice options 2-255,
+  score levels 2-10, `state` kinds, images, `max_items`,
+  `max_request_bytes`
   (`parse_request`, `check_request_bytes`, `check_request`).
-- [crate] `detail.field` paths: `batch_id`, `model`, `questions`,
+- [pinned] `detail.field` paths: `batch_id`, `model`, `questions`,
   `questions.<id>`, `questions.<id>.type`, `questions.<id>.instructions`,
   `questions.<id>.criteria`, `items`, `items[i]`, `items[i].state`,
   `items[i].images`, `items[i].images[j]`, `max_cost_usd`, and `params` for
-  the request as a whole (malformed JSON, or over `max_request_bytes`).
-  `detail.limit` is the bound broken, where there is one.
+  the request as a whole. A map key is joined with a dot and an array index
+  is bracketed; a dot cannot be ambiguous, because a question id cannot
+  contain one (§3).
+- [pinned] `params` is used only when no narrower path applies: the body
+  is not JSON or not an object, or it is over `max_request_bytes`. When a
+  narrower path applies, the refusal uses it, even where the problem keeps
+  the whole request from decoding: a malformed image names
+  `items[i].images[j]`, and an object missing `batch_id` names `batch_id`
+  (`parse_request`, `tests/vectors/field-paths.json`).
+- [pinned] `detail.limit` is the bound broken, where there is one.
 
 ### 6.8 Model pinned
 
@@ -265,8 +296,9 @@ not list is kept as sent.
 
 Admission refusals, which write nothing. [pinned] An admission refusal is an
 `ERROR` frame whose body is `{code, message, detail}` (`Refusal`).
-[crate] `detail.class` carries the code's class, so a caller that meets an
-unknown code still knows whether to retry.
+[pinned] Every refusal carries `detail.class`, the code's class, in the
+same shape, so a caller that meets an unknown code still knows whether to
+retry.
 
 | Code | When | Detail | Class |
 |---|---|---|---|
@@ -277,16 +309,26 @@ unknown code still knows whether to retry.
 | `cost_exceeded` | estimate over `max_cost_usd` | `estimate_usd`, `max_cost_usd` | permanent |
 | `account_walled` | the account is at its limit | `resets_at_ms?` | transient |
 | `batch_in_progress` | another call holds this `batch_id` | `retry_after_ms` | transient |
+| `auth_failed` | the call's first provider call answered 401 or 403 | — | permanent |
+| `model_unavailable` | the call's first provider call answered 404 | `model` | permanent |
+
+- [pinned] `auth_failed` and `model_unavailable` are decided by the first
+  provider call the call makes, so they come after validation and the
+  spend guard. The call sends no further item, records no item outcome,
+  and for a batch's first call records no batch, so the refusal writes
+  nothing (a ceiling the call tightened stays recorded, §6.4).
 
 Per-item errors (`ItemError`):
 
 | Code | When | Class |
 |---|---|---|
-| `rate_limited` | provider 429 or 529 after retries; `retry_after_ms` when given | transient |
-| `provider_error` | provider 5xx or a transport failure after retries | transient |
-| `provider_refused` | the provider refused the content | permanent |
-| `invalid_item` | the provider rejected this item's input (4xx) | permanent |
+| `rate_limited` | provider 429 or 529 after retries, or not sent because an earlier item in the call ended `rate_limited`; `retry_after_ms` when given | transient |
+| `provider_error` | provider 5xx or 408, or a transport failure, after retries | transient |
+| `provider_refused` | the provider refused the content (no status maps here yet, §8) | permanent |
+| `invalid_item` | the provider rejected this item's input (400, 413, 422, any other 4xx not listed in §8) | permanent |
 | `cost_exceeded` | answering this item would cross the batch ceiling | permanent |
+| `auth_failed` | provider 401 or 403, or not sent because an earlier item in the call met one; never stored | permanent |
+| `model_unavailable` | provider 404, or not sent because an earlier item in the call met one; never stored | permanent |
 
 - [pinned] `class` is one of the shared classes, and the set is fixed for
   `classifier/v1`: `transient` or `permanent`. A new class means a new role
@@ -295,17 +337,39 @@ Per-item errors (`ItemError`):
 
 ## 8. Provider status mapping
 
-- [crate] Neither provider documents an error body, so the module maps a
+- [pinned] Neither provider documents an error body, so the module maps a
   provider's HTTP status, once its own retries are spent
   (`item_code_for_status`):
-  - 429 (clef's codes 3036 account-limited and 3040 out-of-capacity;
-    TypeSafe's rate limit) and 529 (TypeSafe's Overloaded): `rate_limited`;
-  - 408 (clef's timeout) and every 5xx: `provider_error`;
-  - every other 4xx (clef's 400, 403, 404 and 413; TypeSafe's 401 and 422):
-    `invalid_item`.
-- [crate] Neither provider documents a content-refusal status, so nothing
-  maps to `provider_refused` yet; it is reserved for a provider that reports
-  one.
+
+  | Status | Code | Class | Stops the call | Stored |
+  |---|---|---|---|---|
+  | 401, 403 (TypeSafe's 401, clef's 403) | `auth_failed` | permanent | yes | never |
+  | 404 (clef's 404) | `model_unavailable` | permanent | yes | never |
+  | 429 (clef's codes 3036 account-limited and 3040 out-of-capacity; TypeSafe's rate limit), 529 (TypeSafe's Overloaded) | `rate_limited` | transient | yes | the item that met it, as transient |
+  | 408 (clef's timeout), every 5xx | `provider_error` | transient | no | as transient |
+  | 400, 413, 422, and every other 4xx | `invalid_item` | permanent | no | as permanent |
+
+- [pinned] 401, 403 and 404 are never `invalid_item`: they say nothing
+  about the item, and a caller reading `invalid_item` drops the item as
+  bad.
+- [pinned] `auth_failed` and `model_unavailable` stop the call. No further
+  item is sent to the provider in that call; items already answered stay
+  recorded; every item left unanswered carries that code. Neither is
+  stored (§6.3), so a re-send after a re-login or a catalog fix calls the
+  provider again for exactly those items. If the status comes on the
+  call's first provider call, the whole call is refused at admission with
+  the same code instead (§7).
+- [pinned] A rate limit stops the rest of the call too. Once an item ends
+  `rate_limited` after its retries, the items after it that would need a
+  provider call are not sent in that call: they get `rate_limited` without
+  a provider call. They are transient and not stored, so a re-send retries
+  them, as it retries the stored `rate_limited` of the item that met the
+  limit.
+- [pinned] An item that needs no provider call (a stored answer, a stored
+  permanent error) is returned as stored whatever stopped the call.
+- [pinned] Nothing maps to `provider_refused`: neither provider documents a
+  content-refusal status, so the code is reserved for a provider that
+  reports one.
 
 ## 9. Provider shapes
 
@@ -354,7 +418,11 @@ verbatim.
     the `classify.run` request and reply that wrap them;
   - `state-object.json`, `state-array.json`: structured `state`;
   - `admission-refusals.json`: one refusal per admission code;
-  - `item-errors.json`: one per-item error per code;
+  - `item-errors.json`: one per-item error per code, with `auth_failed`
+    and `model_unavailable` showing the item the stop left unsent;
+  - `field-paths.json`: an unknown question type refused naming
+    `questions.<id>.type`, and a refusal naming the narrowest path that
+    applies rather than `params`;
   - `replay-retry.json`: a retry returning the stored answers with the same
     `cost_usd`;
   - `replay-batch-id-reuse.json`: a reuse refused naming the field;
@@ -364,16 +432,11 @@ verbatim.
   live module against a call-counting stand-in provider; its `README.md`
   lists the checks.
 
-## 12. Readings this crate chose ([crate])
+## 12. Open readings
 
-The owner may change any of these; each is one type or function:
-
-1. `detail.class` on admission refusals (§7).
-2. The `batch_id_reuse` field names and their order (§6.1).
-3. The `detail.field` paths, including `params` for the request as a whole
-   (§6.7).
-4. The status mapping, including 401 and 403 as `invalid_item` (§8).
-5. Open question types and `Answer::extra` (§4, §5).
-6. A tightened ceiling on a re-send applies to that call; whether it is also
-   recorded for later re-sends is not stated by the draft, and this crate's
-   `effective_ceiling` takes the recorded and sent values only.
+None remain. The owner ruled on each reading an earlier version of this
+crate had chosen where the draft was silent, and each ruling is a pinned
+rule in its section: `detail.class` on admission refusals (§7), the
+`batch_id_reuse` field names and order (§6.1), the `detail.field` paths and
+the limit on `params` (§6.7), the provider status mapping (§8), unknown
+question types (§4, §5), and recording a tightened ceiling (§6.4).

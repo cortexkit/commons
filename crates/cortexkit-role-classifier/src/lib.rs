@@ -24,7 +24,9 @@
 //! choice options, probabilities) are [`IndexMap`]s, so a decoded and
 //! re-encoded object keeps its order. Every enumeration a consumer decodes
 //! (question type, error class) decodes open: an unknown value is kept as a
-//! string rather than refused.
+//! string rather than refused. Decoding is not validating: the request
+//! validators still refuse an unknown question type, which a runner can
+//! neither check nor map.
 
 #![forbid(unsafe_code)]
 

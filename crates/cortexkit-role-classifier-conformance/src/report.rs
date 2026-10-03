@@ -42,6 +42,10 @@ pub const CHECKS: &[CheckSpec] = &[
         "a re-send with a max_cost_usd below the batch's recorded spend is not batch_id_reuse, and the item left unanswered gets cost_exceeded (as an item error or an admission refusal) without a stand-in call",
     ),
     check(
+        "tightened_ceiling_recorded_across_resends",
+        "three calls of one batch carry a high max_cost_usd, then a lower one, then the original high one again; both items fail transiently (stand-in 503) on the first two, and on the third item 0 is answered at a cost over the lower ceiling: item 1 gets cost_exceeded without a stand-in call, because the lower ceiling was recorded",
+    ),
+    check(
         "reuse_refused_naming_field",
         "re-sends of a recorded batch_id with a changed item, an added item, changed questions or another model are refused batch_id_reuse, class permanent, naming items[i], items, questions and model; they call nothing, and the original body still replays",
     ),
@@ -58,6 +62,10 @@ pub const CHECKS: &[CheckSpec] = &[
         "an item with a null state is refused invalid_params naming items[1].state, calls nothing, and writes nothing",
     ),
     check(
+        "unknown_question_type_refused_naming_field",
+        "a request with a question of an unknown type (rank) is refused invalid_params naming questions.<id>.type with the question's key, calls nothing, and writes nothing",
+    ),
+    check(
         "answers_in_request_order",
         "five items come back in request order, each at its own index with its own scripted answer",
     ),
@@ -68,6 +76,22 @@ pub const CHECKS: &[CheckSpec] = &[
     check(
         "one_failing_item_does_not_fail_batch",
         "a batch whose middle item the stand-in rejects (400) is answered: the other items carry their answers and the middle one a permanent item error",
+    ),
+    check(
+        "auth_failure_stops_the_call_unstored",
+        "in a batch of four whose item 1 the stand-in answers 401 after item 0 was answered, items 1 to 3 carry auth_failed, class permanent, and items 2 and 3 are never sent; once the stand-in accepts, a re-send keeps item 0's answer without a call and asks the stand-in again for exactly items 1 to 3",
+    ),
+    check(
+        "auth_failure_on_first_call_refused",
+        "a call whose first provider call the stand-in answers 401 is refused auth_failed at admission, class permanent, and sends no further item; once the stand-in accepts, the same body is admitted and both items are asked, so nothing was recorded",
+    ),
+    check(
+        "model_unavailable_stops_the_call_unstored",
+        "a stand-in 404 behaves as a 401 does, with model_unavailable: mid-batch it stops the call and is not stored, so a re-send asks again for exactly the unanswered items; on the first provider call it refuses the call at admission naming the model, and records nothing",
+    ),
+    check(
+        "rate_limit_stops_the_rest_of_the_call",
+        "in a batch of four whose item 1 the stand-in answers 429 after item 0 was answered, items 1 to 3 carry rate_limited, class transient, and items 2 and 3 are never sent; once the stand-in accepts, a re-send keeps item 0's answer without a call and asks again for items 1 to 3",
     ),
     check(
         "unreported_usage_stays_absent",
@@ -81,8 +105,9 @@ pub const NARROWINGS: &[&str] = &[
     "The suite checks single flight with one held call; it cannot cut a module mid-batch, so a re-send after a crash is checked only as a re-send after a transient error.",
     "The ceiling checks accept cost_exceeded as an item error or as an admission refusal: the contract does not say whether a re-send whose recorded spend already meets the ceiling is admitted. What they require is that the unanswered item is not called and the re-send is not batch_id_reuse.",
     "The ceiling checks make an item's spend cross the ceiling by the usage the stand-in reports, computed at role.describe's price; a module that prices by something other than reported usage may need a larger margin than the suite gives.",
-    "The 4xx a stand-in answers is mapped to invalid_item by the contract; the suite checks only that the item's error is permanent, not its code, because neither provider documents a content refusal.",
-    "max_request_bytes is checked only for its code: the contract names no detail.field for the request as a whole beyond params, which the role crate uses.",
+    "The 400 a stand-in answers is mapped to invalid_item by the contract; the suite checks only that the item's error is permanent, not its code.",
+    "auth_failed is checked with a 401 only; the contract maps 403 the same way.",
+    "A stand-in 429 is answered at once and every time, so the suite cannot tell a module's own retries apart; it checks only that the item ends rate_limited and that the items after it are not sent.",
     "Images are checked only for count and support, not for byte or pixel limits.",
 ];
 
