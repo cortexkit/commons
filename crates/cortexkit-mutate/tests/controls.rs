@@ -374,6 +374,63 @@ fn dirty_target_refused_without_overwriting() {
     assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
 }
 #[test]
+fn cargo_lock_listed_edit_is_caught_and_restores() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root().join("dependency/src")).unwrap();
+    fs::write(
+        f.root().join("dependency/Cargo.toml"),
+        "[package]\nname = \"lock-fixture-dep\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        f.root().join("dependency/src/lib.rs"),
+        "pub fn guarded(value: i32) -> bool { value >= 0 }\n",
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "dependency"]);
+    f.commit();
+
+    let manifest_path = f.root().join("Cargo.toml");
+    let lock_path = f.root().join("Cargo.lock");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    let lock = fs::read_to_string(&lock_path).unwrap();
+    let mutated_manifest =
+        format!("{manifest}\n[dependencies]\nlock-fixture-dep = {{ path = \"dependency\" }}\n");
+    fs::write(&manifest_path, &mutated_manifest).unwrap();
+    // Resolve the real dependency graph before replay, so --locked can build it.
+    cmd(f.root(), "cargo", &["generate-lockfile", "--offline"]);
+    let mutated_lock = fs::read_to_string(&lock_path).unwrap();
+    assert_ne!(lock, mutated_lock);
+    fs::write(&manifest_path, &manifest).unwrap();
+    fs::write(&lock_path, &lock).unwrap();
+
+    let mut c = f.control();
+    c.file = None;
+    c.old = None;
+    c.new = None;
+    c.edits = vec![
+        Edit {
+            file: "Cargo.toml".into(),
+            old: manifest.clone(),
+            new: mutated_manifest,
+        },
+        Edit {
+            file: "Cargo.lock".into(),
+            old: lock,
+            new: mutated_lock,
+        },
+        Edit {
+            file: "src/lib.rs".into(),
+            old: "value > 0".into(),
+            new: "lock_fixture_dep::guarded(value)".into(),
+        },
+    ];
+    let r = f.run(&c);
+    assert_eq!(r.outcome, Outcome::Caught, "{:?}", r.reason);
+    assert_eq!(r.red, ["tests::guard_rejects_zero"]);
+    assert_eq!(manifest.as_bytes(), fs::read(&manifest_path).unwrap());
+}
+#[test]
 fn cargo_lock_change_fails_row_and_restores() {
     let f = Fixture::new();
     let mut c = f.control();
@@ -385,7 +442,7 @@ fn cargo_lock_change_fails_row_and_restores() {
     );
     let r = f.run(&c);
     assert_eq!(r.outcome, Outcome::Error);
-    assert!(r.reason.unwrap().contains("Cargo.lock changed"));
+    assert!(r.reason.unwrap().contains("Cargo.lock changed during row"));
 }
 #[test]
 fn multiline_anchor_is_replaced_exactly_once() {

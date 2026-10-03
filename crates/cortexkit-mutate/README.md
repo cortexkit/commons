@@ -55,6 +55,10 @@ edits = [
 ]
 ```
 
+When a manifest edit changes dependency resolution, list `Cargo.lock` in `edits`
+with Cargo's resolved lockfile so `--locked` builds succeed and the lockfile is
+restored and verified like any other edit target.
+
 TOML multiline strings work for multiline anchors. Each sequential edit must
 replace **exactly one** non-overlapping occurrence. The replacement operation's
 count is the anchor check; there is no separate grep or first-match fallback.
@@ -217,13 +221,14 @@ missing file; subsequent rows still run. Every existing target is compared **byt
 HEAD**, including staged changes, before any mutation. `--allow-dirty` opts in
 explicitly, and restoration still uses saved local bytes, not HEAD or the index.
 
-Every path restores saved source and verifies its bytes. Root `Cargo.lock` is
-compared before/after; a change fails the row and its original bytes/existence
-are restored too. RAII restoration covers unwinding panics. SIGINT and SIGTERM
-set an interruption flag; the process group is killed, reaped, and restoration
-finishes before exit. Timeouts kill the whole Unix group, not just Cargo. On
-Windows a Ctrl-C handler triggers restoration and `taskkill /T /F` kills the
-child tree. Windows does **not** offer Unix SIGTERM semantics; closing a console,
+Every path restores saved source and verifies its bytes. Unless it is an edit
+target, root `Cargo.lock` is compared before/after; a change fails the row and its
+original bytes/existence are restored too. RAII restoration covers unwinding
+panics. SIGINT and SIGTERM set an interruption flag; the process group is killed,
+reaped, and restoration finishes before exit. Timeouts kill the whole Unix group,
+not just Cargo. On Windows a Ctrl-C handler triggers restoration and
+`taskkill /T /F` kills the child tree. Windows does **not** offer Unix SIGTERM
+semantics; closing a console,
 TerminateProcess, power loss, SIGKILL, aborting panics, or OS failure cannot be
 covered by in-process restoration. Detached processes that escape a Unix process
 group are not covered. Run proofs in disposable CI checkouts, not production.
