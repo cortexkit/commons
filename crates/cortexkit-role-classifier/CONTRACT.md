@@ -310,14 +310,20 @@ retry.
 | `cost_exceeded` | estimate over `max_cost_usd` | `estimate_usd`, `max_cost_usd` | permanent |
 | `account_walled` | the account is at its limit | `resets_at_ms?` | transient |
 | `batch_in_progress` | another call holds this `batch_id` | `retry_after_ms` | transient |
-| `auth_failed` | the call's first provider call answered 401 or 403 | — | permanent |
+| `auth_failed` | the call's first provider call answered 401 or 403 | `credential?` | permanent |
 | `model_unavailable` | the call's first provider call answered 404 | `model` | permanent |
 
 - [pinned] `auth_failed` and `model_unavailable` are decided by the first
   provider call the call makes, so they come after validation and the
   spend guard. The call sends no further item, records no item outcome,
   and for a batch's first call records no batch, so the refusal writes
-  nothing (a ceiling the call tightened stays recorded, §6.4).
+  nothing (a ceiling the call tightened stays recorded, §6.4). Answers an
+  earlier call stored stay stored and come back on the next re-send; a
+  re-send whose items are all already answered calls no provider, so it
+  cannot meet this refusal.
+- [pinned] `auth_failed` carries `credential`, the id of the credential the
+  runner presented (for example `apikey:cloudflare`), when the runner knows
+  it. It is always an id, never a token or key.
 
 Per-item errors (`ItemError`):
 

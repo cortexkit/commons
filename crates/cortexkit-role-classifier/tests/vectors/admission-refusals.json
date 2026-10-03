@@ -213,7 +213,8 @@
         "code": "auth_failed",
         "message": "the provider refused the module's credentials",
         "detail": {
-          "class": "permanent"
+          "class": "permanent",
+          "credential": "apikey:typesafe"
         }
       }
     },

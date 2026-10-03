@@ -317,6 +317,11 @@ pub struct RefusalDetail {
     pub resets_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<u64>,
+    /// On `auth_failed`, the id of the credential the runner presented (for
+    /// example `apikey:cloudflare`), when the runner knows it, so an operator
+    /// can tell which login to fix. Always an id, never the secret itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
 }
 
 impl RefusalDetail {
@@ -331,6 +336,7 @@ impl RefusalDetail {
             max_cost_usd: None,
             resets_at_ms: None,
             retry_after_ms: None,
+            credential: None,
         }
     }
 
@@ -371,6 +377,11 @@ impl RefusalDetail {
 
     pub fn with_retry_after_ms(mut self, retry_after_ms: u64) -> Self {
         self.retry_after_ms = Some(retry_after_ms);
+        self
+    }
+
+    pub fn with_credential(mut self, credential: impl Into<String>) -> Self {
+        self.credential = Some(credential.into());
         self
     }
 }

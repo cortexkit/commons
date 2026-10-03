@@ -353,7 +353,11 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
                 refusal.with_detail(detail)
             }
             errors::BATCH_IN_PROGRESS => Refusal::batch_in_progress(1000),
-            errors::AUTH_FAILED => Refusal::auth_failed(),
+            errors::AUTH_FAILED => {
+                let refusal = Refusal::auth_failed();
+                let detail = (*refusal.detail).clone().with_credential("apikey:typesafe");
+                refusal.with_detail(detail)
+            }
             errors::MODEL_UNAVAILABLE => {
                 assert!(describe.model(&vector.request.model).is_some());
                 Refusal::model_unavailable(&vector.request.model)
