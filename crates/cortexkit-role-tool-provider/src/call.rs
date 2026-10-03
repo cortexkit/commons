@@ -346,6 +346,7 @@ mod tests {
             progress_token: None,
             call_key: Some("k:7".into()),
             schema_pin: Some(wire_pin.clone()),
+            preset: None,
             origin: None,
         };
 

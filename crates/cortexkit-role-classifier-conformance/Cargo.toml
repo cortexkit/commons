@@ -24,7 +24,7 @@ futures-util = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2"
 serde_json = { version = "1", features = ["raw_value"] }
-subc-protocol = "0.28"
+subc-protocol = "0.29"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }
