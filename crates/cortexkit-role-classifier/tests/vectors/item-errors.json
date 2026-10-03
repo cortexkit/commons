@@ -1,0 +1,271 @@
+{
+  "about": "One per-item error per code in the contract's table. Item 0 is answered and item 1 failed, so each reply also shows that one failing item does not fail the batch. provider_status is the provider's HTTP status that led to the error, where a provider call was made; neither provider documents an error body, so none is shown, and the error object is the runner's own. Neither provider documents a content-refusal status, so provider_refused has none. cost_exceeded is decided before the call, so it has none either; its batch is priced and its ceiling is 0.01 USD, already spent by item 0. The answer and usage numbers are illustrative.",
+  "vectors": [
+    {
+      "name": "rate_limited",
+      "provider_status": 529,
+      "request": {
+        "batch_id": "vec-item-rate-limited",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-rate-limited",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "rate_limited",
+              "class": "transient",
+              "message": "the provider answered 529 after retries",
+              "retry_after_ms": 2000
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      }
+    },
+    {
+      "name": "provider_error",
+      "provider_status": 503,
+      "request": {
+        "batch_id": "vec-item-provider-error",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-provider-error",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "provider_error",
+              "class": "transient",
+              "message": "the provider answered 503 after retries"
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      }
+    },
+    {
+      "name": "provider_refused",
+      "request": {
+        "batch_id": "vec-item-provider-refused",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-provider-refused",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "provider_refused",
+              "class": "permanent",
+              "message": "the provider refused the content"
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      }
+    },
+    {
+      "name": "invalid_item",
+      "provider_status": 422,
+      "request": {
+        "batch_id": "vec-item-invalid-item",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-invalid-item",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "invalid_item",
+              "class": "permanent",
+              "message": "the provider rejected the item's input (422)"
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      }
+    },
+    {
+      "name": "cost_exceeded",
+      "request": {
+        "batch_id": "vec-item-cost-exceeded",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": "Is the API down for everyone?"
+          }
+        ],
+        "max_cost_usd": 0.01
+      },
+      "reply": {
+        "batch_id": "vec-item-cost-exceeded",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "cost_exceeded",
+              "class": "permanent",
+              "message": "answering this item would cross the batch's ceiling"
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        },
+        "cost_usd": 0.01
+      }
+    }
+  ]
+}

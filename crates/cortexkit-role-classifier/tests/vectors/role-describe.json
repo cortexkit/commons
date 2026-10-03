@@ -1,0 +1,37 @@
+{
+  "about": "role.describe of a runner serving two models: clef, which takes up to 4 images per item, and TypeSafe's jev-latest, which is text only (images: null). clef's max_questions (64) is Cloudflare's documented limit; every other limit, context and price here is illustrative.",
+  "describe": {
+    "role": "classifier/v1",
+    "limits": {
+      "max_items": 100,
+      "max_request_bytes": 13631488
+    },
+    "models": [
+      {
+        "model": "cloudflare/clef",
+        "max_questions": 64,
+        "max_items": 100,
+        "context_tokens": 8192,
+        "images": {
+          "max": 4
+        },
+        "price": {
+          "input_per_mtok_usd": 2.0,
+          "output_per_mtok_usd": 10.0
+        },
+        "egress_host": "api.cloudflare.com"
+      },
+      {
+        "model": "typesafe/jev-latest",
+        "max_questions": 32,
+        "max_items": 50,
+        "context_tokens": 4096,
+        "images": null,
+        "price": {
+          "input_per_mtok_usd": 1.5
+        },
+        "egress_host": "api.typesafe.ai"
+      }
+    ]
+  }
+}

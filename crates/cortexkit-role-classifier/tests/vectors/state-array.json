@@ -1,0 +1,99 @@
+{
+  "about": "An item whose state is an array, forwarded to the provider verbatim. The answer and usage numbers are illustrative, in the documented shape. The runner in this vector serves the model unpriced, so the reply carries no cost_usd.",
+  "vectors": [
+    {
+      "provider": "typesafe/jev-latest",
+      "provider_request": {
+        "model": "jev-latest",
+        "state": [
+          "Customer: I was charged twice for my last invoice.",
+          "Agent: Sorry about that, I am looking into it.",
+          "Customer: It has been a week already."
+        ],
+        "questions": {
+          "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this request?",
+            "criteria": {
+              "billing": "Payments, invoices, and refunds",
+              "technical": "Outages, errors, and configuration",
+              "sales": "Plans and upgrades"
+            }
+          }
+        }
+      },
+      "provider_response": {
+        "model": "jev-latest",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.94,
+              "technical": 0.05,
+              "sales": 0.01
+            },
+            "confidence": 0.89
+          }
+        },
+        "usage": {
+          "input_tokens": 341,
+          "output_tokens": 20
+        }
+      },
+      "request": {
+        "batch_id": "vec-state-array",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this request?",
+            "criteria": {
+              "billing": "Payments, invoices, and refunds",
+              "technical": "Outages, errors, and configuration",
+              "sales": "Plans and upgrades"
+            }
+          }
+        },
+        "items": [
+          {
+            "state": [
+              "Customer: I was charged twice for my last invoice.",
+              "Agent: Sorry about that, I am looking into it.",
+              "Customer: It has been a week already."
+            ]
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-state-array",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "team": {
+                "type": "choice",
+                "choice": "billing",
+                "probabilities": {
+                  "billing": 0.94,
+                  "technical": 0.05,
+                  "sales": 0.01
+                },
+                "confidence": 0.89
+              }
+            },
+            "usage": {
+              "input_tokens": 341,
+              "output_tokens": 20
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 341,
+          "output_tokens": 20
+        }
+      }
+    }
+  ]
+}

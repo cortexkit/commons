@@ -1,0 +1,67 @@
+{
+  "about": "The providers' own examples, verbatim from their documentation (CONTRACT.md cites the pages). clef_request is Cloudflare's example request for @cf/cloudflare/clef; typesafe_answers are TypeSafe's example answers for jev-latest, one per question type, and typesafe_usage its example usage. The answers are keyed by question type here only to name them; in a response they are keyed by question id.",
+  "clef_request": {
+    "model": "clef",
+    "state": "Checkout has been failing for every customer for the last hour.",
+    "questions": {
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is this support request urgent?"
+      },
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this request?",
+        "criteria": {
+          "billing": "Payments, invoices, and refunds",
+          "technical": "Outages, errors, and configuration",
+          "sales": "Plans and upgrades"
+        }
+      },
+      "severity": {
+        "type": "score",
+        "instructions": "How severe is the customer impact?",
+        "criteria": [
+          "No impact",
+          "Minor",
+          "Major",
+          "Critical"
+        ]
+      }
+    }
+  },
+  "typesafe_answers": {
+    "noul": {
+      "type": "noul",
+      "noul": 0.95
+    },
+    "choice": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+        "billing": 0.88,
+        "technical": 0.12,
+        "sales": 0.0
+      },
+      "confidence": 0.81
+    },
+    "score": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+        "0": "Calm",
+        "1": "Frustrated",
+        "2": "Very angry"
+      },
+      "probabilities": {
+        "0": 0.0,
+        "1": 0.95,
+        "2": 0.05
+      },
+      "confidence": 0.92
+    }
+  },
+  "typesafe_usage": {
+    "input_tokens": 307,
+    "output_tokens": 20
+  }
+}
