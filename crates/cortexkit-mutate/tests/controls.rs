@@ -416,7 +416,7 @@ fn cargo_lock_listed_edit_is_caught_and_restores() {
         },
         Edit {
             file: "Cargo.lock".into(),
-            old: lock,
+            old: lock.clone(),
             new: mutated_lock,
         },
         Edit {
@@ -429,6 +429,7 @@ fn cargo_lock_listed_edit_is_caught_and_restores() {
     assert_eq!(r.outcome, Outcome::Caught, "{:?}", r.reason);
     assert_eq!(r.red, ["tests::guard_rejects_zero"]);
     assert_eq!(manifest.as_bytes(), fs::read(&manifest_path).unwrap());
+    assert_eq!(lock.as_bytes(), fs::read(&lock_path).unwrap());
 }
 #[test]
 fn cargo_lock_change_fails_row_and_restores() {
