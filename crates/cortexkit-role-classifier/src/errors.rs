@@ -333,7 +333,8 @@ pub struct Refusal {
     /// string.
     pub code: String,
     pub message: String,
-    pub detail: RefusalDetail,
+    /// Boxed so a `Result<_, Refusal>` stays small.
+    pub detail: Box<RefusalDetail>,
 }
 
 impl Refusal {
@@ -345,26 +346,26 @@ impl Refusal {
         Self {
             code,
             message: message.into(),
-            detail: RefusalDetail::new(class),
+            detail: Box::new(RefusalDetail::new(class)),
         }
     }
 
     pub fn with_detail(mut self, detail: RefusalDetail) -> Self {
-        self.detail = detail;
+        self.detail = Box::new(detail);
         self
     }
 
     /// `invalid_params` naming `field`.
     pub fn invalid_params(field: impl Into<String>, message: impl Into<String>) -> Self {
         let refusal = Self::new(INVALID_PARAMS, message);
-        let detail = refusal.detail.clone().with_field(field);
+        let detail = (*refusal.detail).clone().with_field(field);
         refusal.with_detail(detail)
     }
 
     /// `invalid_params` naming `field` and the `limit` it exceeded.
     pub fn over_limit(field: impl Into<String>, limit: u64, message: impl Into<String>) -> Self {
         let refusal = Self::invalid_params(field, message);
-        let detail = refusal.detail.clone().with_limit(limit);
+        let detail = (*refusal.detail).clone().with_limit(limit);
         refusal.with_detail(detail)
     }
 
@@ -375,14 +376,14 @@ impl Refusal {
             BATCH_ID_REUSE,
             format!("batch_id names a recorded batch whose {field} differs"),
         );
-        let detail = refusal.detail.clone().with_field(field);
+        let detail = (*refusal.detail).clone().with_field(field);
         refusal.with_detail(detail)
     }
 
     pub fn model_unknown(model: impl Into<String>) -> Self {
         let model = model.into();
         let refusal = Self::new(MODEL_UNKNOWN, format!("{model} is not in the catalog"));
-        let detail = refusal.detail.clone().with_model(model);
+        let detail = (*refusal.detail).clone().with_model(model);
         refusal.with_detail(detail)
     }
 
@@ -392,7 +393,7 @@ impl Refusal {
             MODEL_NOT_CLASSIFIER,
             format!("{model} is a {kind}, not a classifier"),
         );
-        let detail = refusal.detail.clone().with_model(model).with_kind(kind);
+        let detail = (*refusal.detail).clone().with_model(model).with_kind(kind);
         refusal.with_detail(detail)
     }
 
@@ -401,8 +402,7 @@ impl Refusal {
             COST_EXCEEDED,
             format!("estimated cost {estimate_usd} USD is over max_cost_usd {max_cost_usd}"),
         );
-        let detail = refusal
-            .detail
+        let detail = (*refusal.detail)
             .clone()
             .with_estimate_usd(estimate_usd)
             .with_max_cost_usd(max_cost_usd);
@@ -415,7 +415,9 @@ impl Refusal {
 
     pub fn batch_in_progress(retry_after_ms: u64) -> Self {
         let refusal = Self::new(BATCH_IN_PROGRESS, "another call holds this batch_id");
-        let detail = refusal.detail.clone().with_retry_after_ms(retry_after_ms);
+        let detail = (*refusal.detail)
+            .clone()
+            .with_retry_after_ms(retry_after_ms);
         refusal.with_detail(detail)
     }
 

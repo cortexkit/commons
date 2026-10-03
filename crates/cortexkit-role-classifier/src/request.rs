@@ -124,12 +124,12 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
         ("questions", "an object"),
         ("items", "an array"),
     ] {
-        let ok = match (params.get(field), what) {
-            (Some(Value::String(_)), "a string") => true,
-            (Some(Value::Object(_)), "an object") => true,
-            (Some(Value::Array(_)), "an array") => true,
-            _ => false,
-        };
+        let ok = matches!(
+            (params.get(field), what),
+            (Some(Value::String(_)), "a string")
+                | (Some(Value::Object(_)), "an object")
+                | (Some(Value::Array(_)), "an array")
+        );
         if !ok {
             return Err(malformed(field.to_owned(), &format!("{field} is {what}")));
         }

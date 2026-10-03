@@ -346,7 +346,9 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
             }
             errors::ACCOUNT_WALLED => {
                 let refusal = Refusal::account_walled();
-                let detail = refusal.detail.clone().with_resets_at_ms(1_767_225_600_000);
+                let detail = (*refusal.detail)
+                    .clone()
+                    .with_resets_at_ms(1_767_225_600_000);
                 refusal.with_detail(detail)
             }
             errors::BATCH_IN_PROGRESS => Refusal::batch_in_progress(1000),
