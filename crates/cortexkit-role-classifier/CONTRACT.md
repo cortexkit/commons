@@ -317,7 +317,8 @@ retry.
   provider call the call makes, so they come after validation and the
   spend guard. The call sends no further item, records no item outcome,
   and for a batch's first call records no batch, so the refusal writes
-  nothing (a ceiling the call tightened stays recorded, §6.4). Answers an
+  nothing, except that a lower `max_cost_usd` the call sent stays the
+  batch's recorded spend ceiling (§6.4). Answers an
   earlier call stored stay stored and come back on the next re-send; a
   re-send whose items are all already answered calls no provider, so it
   cannot meet this refusal.
