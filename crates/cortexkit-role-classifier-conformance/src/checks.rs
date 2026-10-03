@@ -347,7 +347,8 @@ where
         }
     }
 
-    /// Item `i` failed with `code` and the class the contract gives it.
+    /// Checks that the reply's item at index `i` is an error with `code`, and
+    /// with the class the contract gives that code.
     fn expect_item_code(
         what: &str,
         reply: &ClassifyReply,

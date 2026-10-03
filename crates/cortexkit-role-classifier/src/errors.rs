@@ -259,9 +259,13 @@ impl ItemError {
     /// Whether a runner records this error as the item's outcome. Every
     /// error is, except `auth_failed` and `model_unavailable`: they say
     /// nothing about the item, so the item stays unanswered and a re-send
-    /// (after a re-login or a catalog fix) asks the provider again. The
-    /// items a rate limit kept from being sent are left unrecorded too,
-    /// but that is decided by the call, not by the code.
+    /// (after a re-login or a catalog fix) asks the provider again.
+    ///
+    /// This answers for an item the provider actually answered with this
+    /// error. A `rate_limited` item is stored like any transient error; the
+    /// items after it that a rate limit stopped the call from sending carry
+    /// `rate_limited` in the reply but are never recorded, which is the
+    /// runner's rule for unsent items and not something this code decides.
     pub fn is_stored(&self) -> bool {
         !matches!(self.code.as_str(), AUTH_FAILED | MODEL_UNAVAILABLE)
     }

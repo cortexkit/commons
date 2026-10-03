@@ -17,7 +17,8 @@ ceiling). The provider shapes are from the providers' documentation
 (§10).
 
 Every rule is marked **[pinned]**: the role states it. A module must do
-it, and a caller may rely on it. No reading is left open (§12).
+it, and a caller may rely on it. Every behaviour this document covers is
+specified; §12 lists none left to interpretation.
 
 ## 1. Role identity
 
@@ -434,9 +435,12 @@ verbatim.
 
 ## 12. Open readings
 
-None remain. The owner ruled on each reading an earlier version of this
-crate had chosen where the draft was silent, and each ruling is a pinned
-rule in its section: `detail.class` on admission refusals (§7), the
-`batch_id_reuse` field names and order (§6.1), the `detail.field` paths and
-the limit on `params` (§6.7), the provider status mapping (§8), unknown
-question types (§4, §5), and recording a tightened ceiling (§6.4).
+None. The points most likely to be read more than one way are each a
+pinned rule in their section: every admission refusal carries
+`detail.class` (§7); `batch_id_reuse` names the first differing field in
+the order model, questions, items, `items[i]` (§6.1); `detail.field` is
+`params` only when no narrower path applies (§6.7); 401 and 403 map to
+`auth_failed` and 404 to `model_unavailable`, never `invalid_item` (§8); an
+unknown question type is refused in a request and kept in a reply (§4,
+§5); and a lower `max_cost_usd` on a re-send becomes the recorded
+ceiling (§6.4).
