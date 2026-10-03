@@ -1,0 +1,133 @@
+{
+  "about": "One noul question, per provider. provider_request and provider_response are the provider's own shapes (CONTRACT.md cites the documentation); request and reply are the classify.run request and reply that wrap them. The clef request is Cloudflare's documented example cut to its noul question; the TypeSafe answer and usage are TypeSafe's documented examples. The clef answer and usage numbers are illustrative, in the documented shape. The runner in these vectors serves both models unpriced, so the replies carry no cost_usd.",
+  "vectors": [
+    {
+      "provider": "cloudflare/clef",
+      "provider_request": {
+        "model": "clef",
+        "state": "Checkout has been failing for every customer for the last hour.",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        }
+      },
+      "provider_response": {
+        "model": "clef",
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.97
+          }
+        },
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      },
+      "request": {
+        "batch_id": "vec-noul-clef",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-noul-clef",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            },
+            "usage": {
+              "input_tokens": 152,
+              "output_tokens": 9
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      }
+    },
+    {
+      "provider": "typesafe/jev-latest",
+      "provider_request": {
+        "model": "jev-latest",
+        "state": "Checkout has been failing for every customer for the last hour.",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        }
+      },
+      "provider_response": {
+        "model": "jev-latest",
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.95
+          }
+        },
+        "usage": {
+          "input_tokens": 307,
+          "output_tokens": 20
+        }
+      },
+      "request": {
+        "batch_id": "vec-noul-typesafe",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-noul-typesafe",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.95
+              }
+            },
+            "usage": {
+              "input_tokens": 307,
+              "output_tokens": 20
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 307,
+          "output_tokens": 20
+        }
+      }
+    }
+  ]
+}

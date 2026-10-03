@@ -1,0 +1,83 @@
+{
+  "about": "The same batch_id with a different body: item 1's state differs. The second call is refused batch_id_reuse with detail.field naming the first differing field, items[1]; it writes nothing and calls no provider. The answer and usage numbers are illustrative; the runner serves the model unpriced.",
+  "request": {
+    "batch_id": "vec-replay-reuse",
+    "model": "cloudflare/clef",
+    "questions": {
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is this support request urgent?"
+      }
+    },
+    "items": [
+      {
+        "state": "Checkout has been failing for every customer for the last hour."
+      },
+      {
+        "state": "I was charged twice for my last invoice."
+      }
+    ]
+  },
+  "reply": {
+    "batch_id": "vec-replay-reuse",
+    "model": "cloudflare/clef",
+    "items": [
+      {
+        "index": 0,
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.97
+          }
+        },
+        "usage": {
+          "input_tokens": 152,
+          "output_tokens": 9
+        }
+      },
+      {
+        "index": 1,
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.41
+          }
+        },
+        "usage": {
+          "input_tokens": 148,
+          "output_tokens": 9
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 300,
+      "output_tokens": 18
+    }
+  },
+  "reuse_request": {
+    "batch_id": "vec-replay-reuse",
+    "model": "cloudflare/clef",
+    "questions": {
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is this support request urgent?"
+      }
+    },
+    "items": [
+      {
+        "state": "Checkout has been failing for every customer for the last hour."
+      },
+      {
+        "state": "I was charged three times for my last invoice."
+      }
+    ]
+  },
+  "refusal": {
+    "code": "batch_id_reuse",
+    "message": "batch_id names a recorded batch whose items[1] differs",
+    "detail": {
+      "class": "permanent",
+      "field": "items[1]"
+    }
+  }
+}

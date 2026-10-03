@@ -1,0 +1,177 @@
+{
+  "about": "One choice question, per provider. provider_request and provider_response are the provider's own shapes (CONTRACT.md cites the documentation); request and reply are the classify.run request and reply that wrap them. The clef request is Cloudflare's documented example cut to its choice question; the TypeSafe answer and usage are TypeSafe's documented examples. The clef answer and usage numbers are illustrative, in the documented shape. The runner in these vectors serves both models unpriced, so the replies carry no cost_usd.",
+  "vectors": [
+    {
+      "provider": "cloudflare/clef",
+      "provider_request": {
+        "model": "clef",
+        "state": "Checkout has been failing for every customer for the last hour.",
+        "questions": {
+          "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this request?",
+            "criteria": {
+              "billing": "Payments, invoices, and refunds",
+              "technical": "Outages, errors, and configuration",
+              "sales": "Plans and upgrades"
+            }
+          }
+        }
+      },
+      "provider_response": {
+        "model": "clef",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "technical",
+            "probabilities": {
+              "billing": 0.03,
+              "technical": 0.96,
+              "sales": 0.01
+            },
+            "confidence": 0.93
+          }
+        },
+        "usage": {
+          "input_tokens": 171,
+          "output_tokens": 12
+        }
+      },
+      "request": {
+        "batch_id": "vec-choice-clef",
+        "model": "cloudflare/clef",
+        "questions": {
+          "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this request?",
+            "criteria": {
+              "billing": "Payments, invoices, and refunds",
+              "technical": "Outages, errors, and configuration",
+              "sales": "Plans and upgrades"
+            }
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-choice-clef",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "team": {
+                "type": "choice",
+                "choice": "technical",
+                "probabilities": {
+                  "billing": 0.03,
+                  "technical": 0.96,
+                  "sales": 0.01
+                },
+                "confidence": 0.93
+              }
+            },
+            "usage": {
+              "input_tokens": 171,
+              "output_tokens": 12
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 171,
+          "output_tokens": 12
+        }
+      }
+    },
+    {
+      "provider": "typesafe/jev-latest",
+      "provider_request": {
+        "model": "jev-latest",
+        "state": "I was charged twice for my last invoice.",
+        "questions": {
+          "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this request?",
+            "criteria": {
+              "billing": "Payments, invoices, and refunds",
+              "technical": "Outages, errors, and configuration",
+              "sales": "Plans and upgrades"
+            }
+          }
+        }
+      },
+      "provider_response": {
+        "model": "jev-latest",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.88,
+              "technical": 0.12,
+              "sales": 0.0
+            },
+            "confidence": 0.81
+          }
+        },
+        "usage": {
+          "input_tokens": 307,
+          "output_tokens": 20
+        }
+      },
+      "request": {
+        "batch_id": "vec-choice-typesafe",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "team": {
+            "type": "choice",
+            "instructions": "Which team should handle this request?",
+            "criteria": {
+              "billing": "Payments, invoices, and refunds",
+              "technical": "Outages, errors, and configuration",
+              "sales": "Plans and upgrades"
+            }
+          }
+        },
+        "items": [
+          {
+            "state": "I was charged twice for my last invoice."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-choice-typesafe",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "team": {
+                "type": "choice",
+                "choice": "billing",
+                "probabilities": {
+                  "billing": 0.88,
+                  "technical": 0.12,
+                  "sales": 0.0
+                },
+                "confidence": 0.81
+              }
+            },
+            "usage": {
+              "input_tokens": 307,
+              "output_tokens": 20
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 307,
+          "output_tokens": 20
+        }
+      }
+    }
+  ]
+}

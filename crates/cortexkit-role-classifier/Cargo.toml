@@ -1,0 +1,29 @@
+# cortexkit-role-classifier — the wire contract of the `classifier/v1` role:
+# role.describe, classify.run, the providers' shared question and answer
+# shapes, the batch body identity, error codes and their classes, request
+# validators, and CONTRACT.md, which says what is pinned. Pure serde plus
+# small checks; no transport, no runtime.
+#
+# A DRAFT for design review: not published until the role's owner (BROCA)
+# and its consumers have reviewed CONTRACT.md. The conformance suite lives in
+# the sibling `-conformance` crate, so a runner's production build never
+# pulls in the suite.
+[package]
+name = "cortexkit-role-classifier"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit classifier/v1 role: role.describe, classify.run, question and answer shapes, batch identity and error codes."
+publish = false
+
+[dependencies]
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_jcs = "0.2"
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+subc-protocol = "0.28"

@@ -1,0 +1,77 @@
+{
+  "about": "An item whose state is an object, forwarded to the provider verbatim. Body identity hashes each item as RFC 8785 (JCS) canonical JSON, so a re-send with this object's keys in another order is a replay, not batch_id_reuse. The answer and usage numbers are illustrative, in the documented shape. The runner in this vector serves the model unpriced, so the reply carries no cost_usd.",
+  "vectors": [
+    {
+      "provider": "cloudflare/clef",
+      "provider_request": {
+        "model": "clef",
+        "state": {
+          "customer": "Acme Corp",
+          "message": "Checkout has been failing for every customer for the last hour.",
+          "plan": "enterprise"
+        },
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        }
+      },
+      "provider_response": {
+        "model": "clef",
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.98
+          }
+        },
+        "usage": {
+          "input_tokens": 168,
+          "output_tokens": 9
+        }
+      },
+      "request": {
+        "batch_id": "vec-state-object",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": {
+              "customer": "Acme Corp",
+              "message": "Checkout has been failing for every customer for the last hour.",
+              "plan": "enterprise"
+            }
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-state-object",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.98
+              }
+            },
+            "usage": {
+              "input_tokens": 168,
+              "output_tokens": 9
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 168,
+          "output_tokens": 9
+        }
+      }
+    }
+  ]
+}

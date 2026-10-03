@@ -1,0 +1,193 @@
+{
+  "about": "One admission refusal per code in the contract's table. Each refuses the whole request with an ERROR frame whose body is refusal ({code, message, detail}); detail.class carries the code's class, and the other detail members are the table's. An admission refusal writes nothing and calls no provider. batch_id_reuse assumes a recorded batch vec-refuse-reuse whose item 0 differs; replay-batch-id-reuse.json shows both calls. batch_in_progress assumes another call holds vec-refuse-busy.",
+  "refusals": [
+    {
+      "name": "invalid_params",
+      "request": {
+        "batch_id": "vec-refuse-invalid",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          },
+          {
+            "state": null
+          }
+        ]
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "state is a string, an object or an array",
+        "detail": {
+          "class": "permanent",
+          "field": "items[1].state"
+        }
+      }
+    },
+    {
+      "name": "batch_id_reuse",
+      "request": {
+        "batch_id": "vec-refuse-reuse",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "The export button does nothing."
+          }
+        ]
+      },
+      "refusal": {
+        "code": "batch_id_reuse",
+        "message": "batch_id names a recorded batch whose items[0] differs",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0]"
+        }
+      }
+    },
+    {
+      "name": "model_unknown",
+      "request": {
+        "batch_id": "vec-refuse-unknown",
+        "model": "acme/nope",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "refusal": {
+        "code": "model_unknown",
+        "message": "acme/nope is not in the catalog",
+        "detail": {
+          "class": "permanent",
+          "model": "acme/nope"
+        }
+      }
+    },
+    {
+      "name": "model_not_classifier",
+      "request": {
+        "batch_id": "vec-refuse-not-classifier",
+        "model": "openai/gpt-4o-mini",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "refusal": {
+        "code": "model_not_classifier",
+        "message": "openai/gpt-4o-mini is a chat, not a classifier",
+        "detail": {
+          "class": "permanent",
+          "model": "openai/gpt-4o-mini",
+          "kind": "chat"
+        }
+      }
+    },
+    {
+      "name": "cost_exceeded",
+      "request": {
+        "batch_id": "vec-refuse-cost",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ],
+        "max_cost_usd": 0.25
+      },
+      "refusal": {
+        "code": "cost_exceeded",
+        "message": "estimated cost 0.42 USD is over max_cost_usd 0.25",
+        "detail": {
+          "class": "permanent",
+          "estimate_usd": 0.42,
+          "max_cost_usd": 0.25
+        }
+      }
+    },
+    {
+      "name": "account_walled",
+      "request": {
+        "batch_id": "vec-refuse-walled",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "refusal": {
+        "code": "account_walled",
+        "message": "the provider account is at its limit",
+        "detail": {
+          "class": "transient",
+          "resets_at_ms": 1767225600000
+        }
+      }
+    },
+    {
+      "name": "batch_in_progress",
+      "request": {
+        "batch_id": "vec-refuse-busy",
+        "model": "cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "refusal": {
+        "code": "batch_in_progress",
+        "message": "another call holds this batch_id",
+        "detail": {
+          "class": "transient",
+          "retry_after_ms": 1000
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+# cortexkit-role-classifier-conformance — the `classifier/v1` conformance
+# suite. It drives a LIVE classifier module over its real management route,
+# with a stand-in provider the module's own CI wires in: the suite scripts
+# what the stand-in answers for each item, counts the stand-in's calls per
+# item, and checks every reply against the role crate's wire types. A module
+# adds this crate as a dev-dependency; it is a separate crate so a module's
+# production build never compiles the suite.
+#
+# Not published while the role crate itself is a draft.
+[package]
+name = "cortexkit-role-classifier-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Conformance suite for the CortexKit classifier/v1 role: drives a live classifier module against a call-counting stand-in provider and checks its wire replies."
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+cortexkit-role-classifier = { version = "0.1.0", path = "../cortexkit-role-classifier" }
+futures-util = { version = "0.3", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_jcs = "0.2"
+serde_json = { version = "1", features = ["raw_value"] }
+subc-protocol = "0.28"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "time"] }

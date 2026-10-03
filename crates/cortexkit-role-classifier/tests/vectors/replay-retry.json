@@ -1,0 +1,179 @@
+{
+  "about": "A retry: the same batch_id with the same body, after the first call answered every item. The retry calls no provider and returns the stored answers, and cost_usd, the batch's cumulative cost, is identical on both replies, so a caller that sets the batch's charge to it is charged once. The price is illustrative: 2 USD per million input tokens and 10 per million output tokens, so each item costs 0.0025 USD.",
+  "price": {
+    "input_per_mtok_usd": 2.0,
+    "output_per_mtok_usd": 10.0
+  },
+  "request": {
+    "batch_id": "vec-replay-retry",
+    "model": "cloudflare/clef",
+    "questions": {
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is this support request urgent?"
+      },
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this request?",
+        "criteria": {
+          "billing": "Payments, invoices, and refunds",
+          "technical": "Outages, errors, and configuration",
+          "sales": "Plans and upgrades"
+        }
+      }
+    },
+    "items": [
+      {
+        "state": "Checkout has been failing for every customer for the last hour."
+      },
+      {
+        "state": "I was charged twice for my last invoice."
+      }
+    ],
+    "max_cost_usd": 0.5
+  },
+  "first_reply": {
+    "batch_id": "vec-replay-retry",
+    "model": "cloudflare/clef",
+    "items": [
+      {
+        "index": 0,
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.97
+          },
+          "team": {
+            "type": "choice",
+            "choice": "technical",
+            "probabilities": {
+              "billing": 0.03,
+              "technical": 0.96,
+              "sales": 0.01
+            },
+            "confidence": 0.93
+          }
+        },
+        "usage": {
+          "input_tokens": 1000,
+          "output_tokens": 50
+        }
+      },
+      {
+        "index": 1,
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.41
+          },
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.88,
+              "technical": 0.12,
+              "sales": 0.0
+            },
+            "confidence": 0.81
+          }
+        },
+        "usage": {
+          "input_tokens": 1000,
+          "output_tokens": 50
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 2000,
+      "output_tokens": 100
+    },
+    "cost_usd": 0.005
+  },
+  "first_provider_calls": 2,
+  "retry_request": {
+    "batch_id": "vec-replay-retry",
+    "model": "cloudflare/clef",
+    "questions": {
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is this support request urgent?"
+      },
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this request?",
+        "criteria": {
+          "billing": "Payments, invoices, and refunds",
+          "technical": "Outages, errors, and configuration",
+          "sales": "Plans and upgrades"
+        }
+      }
+    },
+    "items": [
+      {
+        "state": "Checkout has been failing for every customer for the last hour."
+      },
+      {
+        "state": "I was charged twice for my last invoice."
+      }
+    ],
+    "max_cost_usd": 0.5
+  },
+  "retry_reply": {
+    "batch_id": "vec-replay-retry",
+    "model": "cloudflare/clef",
+    "items": [
+      {
+        "index": 0,
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.97
+          },
+          "team": {
+            "type": "choice",
+            "choice": "technical",
+            "probabilities": {
+              "billing": 0.03,
+              "technical": 0.96,
+              "sales": 0.01
+            },
+            "confidence": 0.93
+          }
+        },
+        "usage": {
+          "input_tokens": 1000,
+          "output_tokens": 50
+        }
+      },
+      {
+        "index": 1,
+        "answers": {
+          "urgent": {
+            "type": "noul",
+            "noul": 0.41
+          },
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.88,
+              "technical": 0.12,
+              "sales": 0.0
+            },
+            "confidence": 0.81
+          }
+        },
+        "usage": {
+          "input_tokens": 1000,
+          "output_tokens": 50
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 2000,
+      "output_tokens": 100
+    },
+    "cost_usd": 0.005
+  },
+  "retry_provider_calls": 0
+}

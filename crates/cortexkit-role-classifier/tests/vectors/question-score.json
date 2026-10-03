@@ -1,0 +1,203 @@
+{
+  "about": "One score question, per provider. provider_request and provider_response are the provider's own shapes (CONTRACT.md cites the documentation); request and reply are the classify.run request and reply that wrap them. criteria lists the levels lowest first, indexed from 0; the answer's legend and probabilities are keyed by that index, and score can land between levels. The clef request is Cloudflare's documented example cut to its score question; the TypeSafe answer and usage are TypeSafe's documented examples, and the TypeSafe question is written to match that answer's legend. The clef answer and usage numbers are illustrative, in the documented shape. The runner in these vectors serves both models unpriced, so the replies carry no cost_usd.",
+  "vectors": [
+    {
+      "provider": "cloudflare/clef",
+      "provider_request": {
+        "model": "clef",
+        "state": "Checkout has been failing for every customer for the last hour.",
+        "questions": {
+          "severity": {
+            "type": "score",
+            "instructions": "How severe is the customer impact?",
+            "criteria": [
+              "No impact",
+              "Minor",
+              "Major",
+              "Critical"
+            ]
+          }
+        }
+      },
+      "provider_response": {
+        "model": "clef",
+        "answers": {
+          "severity": {
+            "type": "score",
+            "score": 2.6,
+            "legend": {
+              "0": "No impact",
+              "1": "Minor",
+              "2": "Major",
+              "3": "Critical"
+            },
+            "probabilities": {
+              "0": 0.0,
+              "1": 0.02,
+              "2": 0.36,
+              "3": 0.62
+            },
+            "confidence": 0.7
+          }
+        },
+        "usage": {
+          "input_tokens": 166,
+          "output_tokens": 14
+        }
+      },
+      "request": {
+        "batch_id": "vec-score-clef",
+        "model": "cloudflare/clef",
+        "questions": {
+          "severity": {
+            "type": "score",
+            "instructions": "How severe is the customer impact?",
+            "criteria": [
+              "No impact",
+              "Minor",
+              "Major",
+              "Critical"
+            ]
+          }
+        },
+        "items": [
+          {
+            "state": "Checkout has been failing for every customer for the last hour."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-score-clef",
+        "model": "cloudflare/clef",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "severity": {
+                "type": "score",
+                "score": 2.6,
+                "legend": {
+                  "0": "No impact",
+                  "1": "Minor",
+                  "2": "Major",
+                  "3": "Critical"
+                },
+                "probabilities": {
+                  "0": 0.0,
+                  "1": 0.02,
+                  "2": 0.36,
+                  "3": 0.62
+                },
+                "confidence": 0.7
+              }
+            },
+            "usage": {
+              "input_tokens": 166,
+              "output_tokens": 14
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 166,
+          "output_tokens": 14
+        }
+      }
+    },
+    {
+      "provider": "typesafe/jev-latest",
+      "provider_request": {
+        "model": "jev-latest",
+        "state": "This is the third time this month I have had to ask about the same refund.",
+        "questions": {
+          "mood": {
+            "type": "score",
+            "instructions": "How upset is the customer?",
+            "criteria": [
+              "Calm",
+              "Frustrated",
+              "Very angry"
+            ]
+          }
+        }
+      },
+      "provider_response": {
+        "model": "jev-latest",
+        "answers": {
+          "mood": {
+            "type": "score",
+            "score": 1.05,
+            "legend": {
+              "0": "Calm",
+              "1": "Frustrated",
+              "2": "Very angry"
+            },
+            "probabilities": {
+              "0": 0.0,
+              "1": 0.95,
+              "2": 0.05
+            },
+            "confidence": 0.92
+          }
+        },
+        "usage": {
+          "input_tokens": 307,
+          "output_tokens": 20
+        }
+      },
+      "request": {
+        "batch_id": "vec-score-typesafe",
+        "model": "typesafe/jev-latest",
+        "questions": {
+          "mood": {
+            "type": "score",
+            "instructions": "How upset is the customer?",
+            "criteria": [
+              "Calm",
+              "Frustrated",
+              "Very angry"
+            ]
+          }
+        },
+        "items": [
+          {
+            "state": "This is the third time this month I have had to ask about the same refund."
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-score-typesafe",
+        "model": "typesafe/jev-latest",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "mood": {
+                "type": "score",
+                "score": 1.05,
+                "legend": {
+                  "0": "Calm",
+                  "1": "Frustrated",
+                  "2": "Very angry"
+                },
+                "probabilities": {
+                  "0": 0.0,
+                  "1": 0.95,
+                  "2": 0.05
+                },
+                "confidence": 0.92
+              }
+            },
+            "usage": {
+              "input_tokens": 307,
+              "output_tokens": 20
+            }
+          }
+        ],
+        "usage": {
+          "input_tokens": 307,
+          "output_tokens": 20
+        }
+      }
+    }
+  ]
+}
