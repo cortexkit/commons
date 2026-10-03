@@ -5,8 +5,11 @@
 //! contract and fails one that breaks it. The property it models:
 //!
 //! > A module that admits a batch after validating it completely, records
-//! > its body identity and spend ceiling, answers its items in order one
-//! > provider call at a time, records each item's outcome, and on a re-send
+//! > its body identity and spend ceiling (tightened by any lower re-send),
+//! > answers its items in order one provider call at a time, records each
+//! > item's outcome, stops the call at an auth failure, a missing model or a
+//! > rate limit (refusing the whole call when the first provider call meets
+//! > a 401, 403 or 404, and never storing the first two), and on a re-send
 //! > replays stored answers and permanent errors, retries transient errors,
 //! > and stops any item whose call would cross the effective ceiling.
 //!
@@ -102,6 +105,27 @@ pub struct Defects {
     pub fail_whole_batch_on_4xx: bool,
     /// Usage the provider did not report is written as 0.
     pub usage_zero_filled: bool,
+    /// After an item meets a 401 or 403, the call goes on sending the
+    /// items after it.
+    pub continue_after_auth_failure: bool,
+    /// `auth_failed` is stored as a permanent error, so a re-send replays
+    /// it instead of asking the provider again.
+    pub store_auth_failure: bool,
+    /// A 401 or 403 on the call's first provider call becomes a per-item
+    /// error instead of refusing the call at admission.
+    pub first_call_auth_failure_not_refused: bool,
+    /// `model_unavailable` is stored as a permanent error, so a re-send
+    /// replays it instead of asking the provider again.
+    pub store_model_unavailable: bool,
+    /// After an item ends rate_limited, the call goes on sending the items
+    /// after it.
+    pub continue_after_rate_limit: bool,
+    /// A request question of an unknown type is forwarded as if it were a
+    /// noul question instead of being refused.
+    pub unknown_question_type_forwarded: bool,
+    /// A re-send's lower ceiling applies to that call only: the batch keeps
+    /// the ceiling recorded at first admission.
+    pub tightened_ceiling_not_recorded: bool,
 }
 
 /// The stand-in provider: scripts, call counts and held calls, shared by
@@ -148,6 +172,11 @@ enum Stored {
     },
     Failed(ItemError),
 }
+
+/// What a call's provider calls came to: each item's outcome as the reply
+/// gives it, whether this call answered it, and each item's outcome as the
+/// batch records it (an error that is never stored leaves what was there).
+type CallOutcomes = (Vec<Stored>, Vec<bool>, Vec<Option<Stored>>);
 
 struct Batch {
     identity: BatchIdentity,
@@ -287,6 +316,13 @@ impl FakeModule {
                 }
             }
         }
+        if self.defects.unknown_question_type_forwarded {
+            for question in checked.questions.values_mut() {
+                if matches!(question.kind, QuestionType::Other(_)) {
+                    question.kind = QuestionType::Noul;
+                }
+            }
+        }
         let too_many_levels = request.questions.values().any(|question| {
             matches!(&question.criteria, Some(Criteria::Levels(levels)) if question.kind == QuestionType::Score && levels.len() > SCORE_MAX_LEVELS)
         });
@@ -320,7 +356,7 @@ impl FakeModule {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }
-        let ceiling = {
+        let (ceiling, new_batch) = {
             let mut batches = self.batches.lock().unwrap();
             match batches.get_mut(&request.batch_id) {
                 Some(batch) => {
@@ -341,13 +377,21 @@ impl FakeModule {
                         }
                     }
                     batch.in_flight = true;
-                    if self.defects.ceiling_from_latest_call {
+                    let working = if self.defects.ceiling_from_latest_call {
                         sent_ceiling
                     } else if self.defects.ceiling_from_first_call_only {
                         batch.ceiling
                     } else {
                         effective_ceiling(batch.ceiling, sent_ceiling)
+                    };
+                    // The tightened ceiling is recorded before anything is
+                    // sent, so a later re-send cannot loosen it.
+                    if !self.defects.tightened_ceiling_not_recorded
+                        && !self.defects.ceiling_from_first_call_only
+                    {
+                        batch.ceiling = effective_ceiling(batch.ceiling, sent_ceiling);
                     }
+                    (working, false)
                 }
                 None => {
                     if let Some(max) = sent_ceiling {
@@ -373,27 +417,43 @@ impl FakeModule {
                             in_flight: true,
                         },
                     );
-                    sent_ceiling
+                    (sent_ceiling, true)
                 }
             }
         };
-        let outcomes = self.answer_items(&request, &model, ceiling).await;
-        let reply = self.reply(&request, &model, &outcomes.0, &outcomes.1);
+        let (outcomes, answered_now, record) =
+            match self.answer_items(&request, &model, ceiling).await {
+                Ok(answered) => answered,
+                Err(refusal) => {
+                    // Refused at the call's first provider call: nothing
+                    // about the items is written, and a batch this call
+                    // created is not recorded at all.
+                    let mut batches = self.batches.lock().unwrap();
+                    if new_batch {
+                        batches.remove(&request.batch_id);
+                    } else if let Some(batch) = batches.get_mut(&request.batch_id) {
+                        batch.in_flight = false;
+                    }
+                    return refused(refusal);
+                }
+            };
+        let reply = self.reply(&request, &model, &outcomes, &answered_now);
         let mut batches = self.batches.lock().unwrap();
         let batch = batches.get_mut(&request.batch_id).unwrap();
         batch.in_flight = false;
-        batch.outcomes = outcomes.0.into_iter().map(Some).collect();
+        batch.outcomes = record;
         reply
     }
 
-    /// Every item's outcome after this call, and which items this call
-    /// answered.
+    /// Every item's outcome as this call replies with it, which items this
+    /// call answered, and every item's outcome as the batch records it. An
+    /// error is a refusal at the call's first provider call.
     async fn answer_items(
         &self,
         request: &ClassifyRequest,
         model: &ModelEntry,
         ceiling: Option<f64>,
-    ) -> (Vec<Stored>, Vec<bool>) {
+    ) -> Result<CallOutcomes, Refusal> {
         let stored = self.batches.lock().unwrap()[&request.batch_id]
             .outcomes
             .clone();
@@ -407,6 +467,11 @@ impl FakeModule {
         let (input_rate, output_rate) = self.rates(model);
         let mut outcomes = Vec::new();
         let mut answered_now = Vec::new();
+        let mut record = Vec::new();
+        // Set once an item ends with an error that stops the call: every
+        // later item that would need a provider call gets this instead.
+        let mut stopped: Option<ItemError> = None;
+        let mut provider_calls = 0usize;
         for (item, stored) in request.items.iter().zip(stored) {
             let ask = match &stored {
                 None => true,
@@ -420,20 +485,31 @@ impl FakeModule {
                 }
             };
             if !ask {
-                outcomes.push(stored.unwrap());
+                outcomes.push(stored.clone().unwrap());
                 answered_now.push(false);
+                record.push(stored);
+                continue;
+            }
+            if let Some(stop) = &stopped {
+                // Not sent, and not recorded: a re-send asks again.
+                outcomes.push(Stored::Failed(stop.clone()));
+                answered_now.push(false);
+                record.push(stored);
                 continue;
             }
             if let Some(ceiling) = ceiling {
                 if spend + self.estimate(&item.state, model) > ceiling {
-                    outcomes.push(Stored::Failed(ItemError::for_code(
+                    let outcome = Stored::Failed(ItemError::for_code(
                         errors::COST_EXCEEDED,
                         "answering this item would cross the batch's ceiling",
-                    )));
+                    ));
+                    outcomes.push(outcome.clone());
                     answered_now.push(false);
+                    record.push(Some(outcome));
                     continue;
                 }
             }
+            provider_calls += 1;
             let outcome = match self.stand_in.call(&item.state).await {
                 Scripted::Answer(body) => {
                     let answer: ProviderAnswer = serde_json::from_str(&body).unwrap();
@@ -463,10 +539,41 @@ impl FakeModule {
                     Stored::Failed(error)
                 }
             };
-            answered_now.push(matches!(outcome, Stored::Answered { .. }));
+            let Stored::Failed(error) = &outcome else {
+                answered_now.push(true);
+                record.push(Some(outcome.clone()));
+                outcomes.push(outcome);
+                continue;
+            };
+            let code = error.code.as_str();
+            if provider_calls == 1
+                && !(code == errors::AUTH_FAILED
+                    && self.defects.first_call_auth_failure_not_refused)
+            {
+                if code == errors::AUTH_FAILED {
+                    return Err(Refusal::auth_failed());
+                }
+                if code == errors::MODEL_UNAVAILABLE {
+                    return Err(Refusal::model_unavailable(&request.model));
+                }
+            }
+            let stops = error.stops_the_call()
+                && !(code == errors::AUTH_FAILED && self.defects.continue_after_auth_failure)
+                && !(code == errors::RATE_LIMITED && self.defects.continue_after_rate_limit);
+            if stops {
+                stopped = Some(ItemError::for_code(
+                    code,
+                    format!("not sent: an earlier item in this call ended {code}"),
+                ));
+            }
+            let kept = error.is_stored()
+                || (code == errors::AUTH_FAILED && self.defects.store_auth_failure)
+                || (code == errors::MODEL_UNAVAILABLE && self.defects.store_model_unavailable);
+            answered_now.push(false);
+            record.push(if kept { Some(outcome.clone()) } else { stored });
             outcomes.push(outcome);
         }
-        (outcomes, answered_now)
+        Ok((outcomes, answered_now, record))
     }
 
     fn reply(

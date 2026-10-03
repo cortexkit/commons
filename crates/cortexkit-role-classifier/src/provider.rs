@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    errors::{INVALID_ITEM, PROVIDER_ERROR, RATE_LIMITED},
+    errors::{AUTH_FAILED, INVALID_ITEM, MODEL_UNAVAILABLE, PROVIDER_ERROR, RATE_LIMITED},
     question::{Image, Question},
     reply::{Answer, Usage},
 };
@@ -124,16 +124,24 @@ impl ProviderResponse {
 /// own retries are spent. Neither provider documents an error body, so the
 /// status is all the mapping reads:
 ///
+/// - 401 and 403 (TypeSafe's 401, clef's 403): `auth_failed`;
+/// - 404 (clef's 404): `model_unavailable`;
 /// - 429 (clef's 3036 account-limited and 3040 out-of-capacity, TypeSafe's
 ///   rate limit) and 529 (TypeSafe's Overloaded): `rate_limited`;
 /// - 408 (clef's timeout) and every 5xx: `provider_error`;
-/// - every other 4xx (clef's 400, 403, 404 and 413; TypeSafe's 401 and
-///   422): `invalid_item`.
+/// - every other 4xx (clef's 400 and 413; TypeSafe's 422): `invalid_item`.
+///
+/// 401, 403 and 404 say nothing about the item, so they are never
+/// `invalid_item`, which a caller reads as "drop this item". `auth_failed`,
+/// `model_unavailable` and `rate_limited` stop the call (see
+/// [`ItemError::stops_the_call`](crate::errors::ItemError::stops_the_call)).
 ///
 /// `None` for a status that is not an error. Neither provider documents a
 /// content-refusal status, so nothing here maps to `provider_refused`.
 pub fn item_code_for_status(status: u16) -> Option<&'static str> {
     match status {
+        401 | 403 => Some(AUTH_FAILED),
+        404 => Some(MODEL_UNAVAILABLE),
         429 | 529 => Some(RATE_LIMITED),
         408 | 500..=599 => Some(PROVIDER_ERROR),
         400..=499 => Some(INVALID_ITEM),
@@ -153,9 +161,13 @@ mod tests {
         for status in [408, 500, 502, 503] {
             assert_eq!(item_code_for_status(status), Some(PROVIDER_ERROR));
         }
-        for status in [400, 401, 403, 404, 413, 422] {
+        for status in [400, 413, 422, 409] {
             assert_eq!(item_code_for_status(status), Some(INVALID_ITEM));
         }
+        for status in [401, 403] {
+            assert_eq!(item_code_for_status(status), Some(AUTH_FAILED));
+        }
+        assert_eq!(item_code_for_status(404), Some(MODEL_UNAVAILABLE));
         assert_eq!(item_code_for_status(200), None);
     }
 }

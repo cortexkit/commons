@@ -40,8 +40,9 @@ pub struct ClassifyRequest {
     pub questions: IndexMap<String, Question>,
     /// The items, answered in this order.
     pub items: Vec<Item>,
-    /// The batch's spend ceiling. Not part of the body identity; see
-    /// [`effective_ceiling`].
+    /// The batch's spend ceiling. Not part of the body identity; a lower
+    /// value on a re-send becomes the batch's recorded ceiling (see
+    /// [`effective_ceiling`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cost_usd: Option<Number>,
 }
@@ -111,6 +112,11 @@ pub fn is_state(state: &Value) -> bool {
 /// Decode a `classify.run` request from its JSON text, refusing a malformed
 /// one `invalid_params` naming the first malformed field. Decoding from the
 /// text keeps the order of the questions and of each choice's options.
+///
+/// The refusal names `params` only when no narrower path applies: the text
+/// is not JSON, or not an object. A problem deep inside an otherwise
+/// well-formed request names its own path (`items[2].images[0]`, say),
+/// never `params`.
 pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
     let value: Value = serde_json::from_str(text)
         .map_err(|e| Refusal::invalid_params("params", format!("not JSON: {e}")))?;
@@ -197,11 +203,14 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
             }
         }
     }
+    // Every member was checked above, so this decode does not fail for any
+    // reason a narrower path could name; `params` covers what is left.
     serde_json::from_str(text).map_err(|e| Refusal::invalid_params("params", e.to_string()))
 }
 
 /// Check the request body's size against the module's limit. The refusal
-/// names `params` and the limit.
+/// names `params` and the limit: the size belongs to the request as a
+/// whole, so no narrower path applies.
 pub fn check_request_bytes(len: usize, limits: &Limits) -> Result<(), Refusal> {
     if len as u64 > limits.max_request_bytes {
         Err(Refusal::over_limit(
@@ -303,10 +312,16 @@ pub fn check_request(request: &ClassifyRequest, model: &ModelEntry) -> Result<()
     Ok(())
 }
 
-/// The ceiling a call works under: the lower of the ceiling recorded at the
-/// batch's first admission and the one this call carries. A caller can
-/// tighten a batch's ceiling on a re-send, never loosen it. `None` when
-/// neither names one.
+/// The ceiling a call works under, and the batch's recorded ceiling from
+/// then on: the lower of the ceiling recorded so far and the one this call
+/// carries. `None` when neither names one.
+///
+/// The recorded ceiling is not fixed at first admission. A runner records
+/// this value durably before the call sends anything, so after any call the
+/// recorded ceiling is `effective_ceiling(recorded, sent)`. That is what
+/// makes a tightening stick: a later re-send carrying the original, higher
+/// value works under the lower one, and a caller can tighten a batch's
+/// ceiling but never loosen it.
 pub fn effective_ceiling(recorded: Option<f64>, sent: Option<f64>) -> Option<f64> {
     match (recorded, sent) {
         (Some(recorded), Some(sent)) => Some(recorded.min(sent)),
@@ -458,5 +473,57 @@ mod tests {
         assert_eq!(effective_ceiling(None, Some(0.5)), Some(0.5));
         assert_eq!(effective_ceiling(Some(1.0), None), Some(1.0));
         assert_eq!(effective_ceiling(None, None), None);
+    }
+
+    #[test]
+    fn a_tightened_ceiling_is_recorded_across_resends() {
+        // High, then lower, then the original high again: each call records
+        // its effective ceiling, so the third works under the lower value.
+        let mut recorded = None;
+        let mut worked_under = Vec::new();
+        for sent in [5.0, 1.0, 5.0] {
+            recorded = effective_ceiling(recorded, Some(sent));
+            worked_under.push(recorded);
+        }
+        assert_eq!(worked_under, [Some(5.0), Some(1.0), Some(1.0)]);
+    }
+
+    #[test]
+    fn params_is_named_only_when_no_narrower_path_applies() {
+        for whole in ["", "not json", "[]", "null", "7"] {
+            assert_eq!(
+                parse_request(whole).unwrap_err().field(),
+                Some("params"),
+                "{whole:?}"
+            );
+        }
+        // An empty object misses its first required member, which is a
+        // narrower path than the request as a whole.
+        assert_eq!(parse_request("{}").unwrap_err().field(), Some("batch_id"));
+        // A malformed image deep in the request keeps the whole text from
+        // decoding, and the refusal still names the one image.
+        let refusal = parse_request(
+            r#"{"batch_id":"b","model":"m","questions":{"q":{"type":"noul","instructions":"i"}},"items":[{"state":"s"},{"state":"t","images":["data:image/png;base64,AAAA",5]}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(refusal.field(), Some("items[1].images[1]"));
+        let refusal = parse_request(
+            r#"{"batch_id":"b","model":"m","questions":{"q":{"type":"noul","instructions":"i","criteria":"yes"}},"items":[{"state":"s"}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(refusal.field(), Some("questions.q.criteria"));
+    }
+
+    #[test]
+    fn an_unknown_question_type_in_a_request_is_refused_naming_its_key() {
+        let mut request = request(vec![Item::new("s")]);
+        request.questions.insert(
+            "priority".into(),
+            Question::new(crate::question::QuestionType::parse("rank"), "How urgent?"),
+        );
+        assert_eq!(
+            field(check_request(&request, &model())),
+            "questions.priority.type"
+        );
     }
 }

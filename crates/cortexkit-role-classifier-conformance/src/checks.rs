@@ -174,13 +174,24 @@ where
             "cost_usd_stable_on_replay" => self.cost_stable().await,
             "looser_max_cost_does_not_raise_ceiling" => self.ceiling(LOOSE_CEILING_USD).await,
             "tighter_max_cost_stops_crossing_items" => self.ceiling(CEILING_USD).await,
+            "tightened_ceiling_recorded_across_resends" => self.ceiling_recorded().await,
             "reuse_refused_naming_field" => self.reuse().await,
             "reordered_object_state_is_replay" => self.reordered_state().await,
             "validation_refusals_reach_no_provider" => self.validation().await,
             "null_state_refused_naming_field" => self.null_state().await,
+            "unknown_question_type_refused_naming_field" => self.unknown_type().await,
             "answers_in_request_order" => self.request_order().await,
             "provider_numbers_byte_for_byte" => self.numbers().await,
             "one_failing_item_does_not_fail_batch" => self.one_failing_item().await,
+            "auth_failure_stops_the_call_unstored" => {
+                self.stopping_status(401, errors::AUTH_FAILED, "auth").await
+            }
+            "auth_failure_on_first_call_refused" => self.auth_first_call().await,
+            "model_unavailable_stops_the_call_unstored" => self.model_unavailable().await,
+            "rate_limit_stops_the_rest_of_the_call" => {
+                self.stopping_status(429, errors::RATE_LIMITED, "limit")
+                    .await
+            }
             "unreported_usage_stays_absent" => self.unreported_usage().await,
             other => Err(format!("the suite has no check named {other}")),
         }
@@ -334,6 +345,39 @@ where
                 "{what}: the stand-in was called {calls} times for the item, expected {expected}"
             ))
         }
+    }
+
+    /// Item `i` failed with `code` and the class the contract gives it.
+    fn expect_item_code(
+        what: &str,
+        reply: &ClassifyReply,
+        i: usize,
+        code: &str,
+    ) -> Result<(), String> {
+        let item = reply
+            .items
+            .get(i)
+            .ok_or_else(|| format!("{what}: the reply has no item {i}"))?;
+        let error = match (&item.answers, &item.error) {
+            (None, Some(error)) => error,
+            (Some(_), _) => return Err(format!("{what}: item {i} was answered, expected {code}")),
+            (None, None) => return Err(format!("{what}: item {i} has neither answers nor error")),
+        };
+        if error.code != code {
+            return Err(format!(
+                "{what}: item {i} failed {}, expected {code}",
+                error.code
+            ));
+        }
+        if let Some(class) = errors::item_class(code) {
+            if error.class != class {
+                return Err(format!(
+                    "{what}: item {i}'s {code} has class {}, expected {class}",
+                    error.class
+                ));
+            }
+        }
+        Ok(())
     }
 
     // ---- checks ---------------------------------------------------------
@@ -1041,7 +1085,7 @@ where
                 body: params(&batch, &model.model, &question, items(&[&state]), None),
                 batch,
                 code: errors::INVALID_PARAMS,
-                field: None,
+                field: Some("params".into()),
                 keys: vec![state_key(&Value::String(state))],
                 follow_up: true,
                 model: None,
@@ -1260,6 +1304,236 @@ where
             _ => return Err("item 1 carries answers for the provider's 400".into()),
         }
         self.expect_calls("item 2", &kc, 1).await?;
+        Ok(Ending::Passed)
+    }
+
+    /// Four items; the stand-in answers item 0 and answers item 1 with
+    /// `status`, whose `code` stops the call. Items 2 and 3 must not be
+    /// sent and must carry `code`; item 0 keeps its answer. Once the
+    /// stand-in accepts, a re-send must ask again for exactly items 1 to 3:
+    /// the code left them unanswered, never stored as a permanent error.
+    async fn stopping_status(&self, status: u16, code: &str, label: &str) -> Check {
+        let model = self.main_model()?;
+        let markers: Vec<(String, String)> = (0..4)
+            .map(|i| self.marker(&format!("{label}-{i}")))
+            .collect();
+        let keys: Vec<&str> = markers.iter().map(|(_, key)| key.as_str()).collect();
+        let states: Vec<&str> = markers.iter().map(|(state, _)| state.as_str()).collect();
+        self.script_answer(keys[0], noul_body("0.61", None)).await;
+        self.subject.script(keys[1], Scripted::status(status)).await;
+        self.script_answer(keys[2], noul_body("0.63", None)).await;
+        self.script_answer(keys[3], noul_body("0.64", None)).await;
+        let batch = self.mint(label);
+        let body = params(&batch, &model.model, &noul_question(), items(&states), None);
+        let what = format!("a batch whose item 1 the stand-in answers {status}");
+        let (_, first) = Self::reply_of(&what, self.send(&body).await?)?;
+        let first_a = Self::answers(&what, &first, 0)?;
+        for i in 1..4 {
+            Self::expect_item_code(&what, &first, i, code)?;
+        }
+        self.expect_calls(&format!("item 0, before the {status}"), keys[0], 1)
+            .await?;
+        for (i, key) in keys.iter().enumerate().skip(2) {
+            self.expect_calls(&format!("item {i}, after item 1 met {status}"), key, 0)
+                .await
+                .map_err(|e| format!("{e}: the call went on sending after {code}"))?;
+        }
+        let failed_calls = self.calls(keys[1]).await;
+        self.script_answer(keys[1], noul_body("0.62", None)).await;
+        let what = "the re-send after the stand-in accepts";
+        let (_, again) = Self::reply_of(what, self.send(&body).await?)?;
+        if Self::answers(what, &again, 0)? != first_a {
+            return Err(format!(
+                "{what}: item 0's answer differs from the stored one"
+            ));
+        }
+        for i in 1..4 {
+            Self::answers(what, &again, i)
+                .map_err(|e| format!("{e}: the item {code} left unanswered was not asked again"))?;
+        }
+        self.expect_calls("item 0, answered before the stop", keys[0], 1)
+            .await?;
+        self.expect_calls("item 1, on the re-send", keys[1], failed_calls + 1)
+            .await?;
+        for (i, key) in keys.iter().enumerate().skip(2) {
+            self.expect_calls(&format!("item {i}, on the re-send"), key, 1)
+                .await?;
+        }
+        Ok(Ending::Passed)
+    }
+
+    /// Two items; the stand-in answers the first provider call with
+    /// `status`. The whole call must be refused `code` at admission, item 1
+    /// must not be sent, and nothing may be recorded: once the stand-in
+    /// accepts, the same body is admitted and both items are asked.
+    async fn first_call_refused(
+        &self,
+        status: u16,
+        code: &str,
+        label: &str,
+    ) -> Result<Refusal, String> {
+        let model = self.main_model()?;
+        let (a, ka) = self.marker(&format!("{label}-0"));
+        let (b, kb) = self.marker(&format!("{label}-1"));
+        self.subject.script(&ka, Scripted::status(status)).await;
+        self.script_answer(&kb, noul_body("0.66", None)).await;
+        let batch = self.mint(label);
+        let body = params(
+            &batch,
+            &model.model,
+            &noul_question(),
+            items(&[&a, &b]),
+            None,
+        );
+        let what = format!("a call whose first provider call the stand-in answers {status}");
+        let refusal = Self::refusal_of(&what, self.send(&body).await?)?;
+        Self::expect_refusal(&what, &refusal, code, None)?;
+        self.expect_calls("item 1, after the refused first call", &kb, 0)
+            .await?;
+        let failed_calls = self.calls(&ka).await;
+        self.script_answer(&ka, noul_body("0.65", None)).await;
+        let what = "the re-send after the stand-in accepts";
+        let (_, again) = Self::reply_of(what, self.send(&body).await?)
+            .map_err(|e| format!("{e}: the refused call was recorded"))?;
+        Self::answers(what, &again, 0)?;
+        Self::answers(what, &again, 1)?;
+        self.expect_calls("item 0, on the re-send", &ka, failed_calls + 1)
+            .await?;
+        self.expect_calls("item 1, on the re-send", &kb, 1).await?;
+        Ok(refusal)
+    }
+
+    async fn auth_first_call(&self) -> Check {
+        self.first_call_refused(401, errors::AUTH_FAILED, "auth-first")
+            .await?;
+        Ok(Ending::Passed)
+    }
+
+    async fn model_unavailable(&self) -> Check {
+        self.stopping_status(404, errors::MODEL_UNAVAILABLE, "missing")
+            .await?;
+        let model = self.main_model()?;
+        let refusal = self
+            .first_call_refused(404, errors::MODEL_UNAVAILABLE, "missing-first")
+            .await?;
+        if refusal.detail.model.as_deref() != Some(model.model.as_str()) {
+            return Err(format!(
+                "model_unavailable names model {:?}, expected {}",
+                refusal.detail.model, model.model
+            ));
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn unknown_type(&self) -> Check {
+        let model = self.main_model()?;
+        let (a, ka) = self.marker("unknown-type");
+        self.script_answer(&ka, noul_body("0.5", None)).await;
+        let questions = json!({
+            "q": {"type": "noul", "instructions": "Is this item flagged?"},
+            "ranked": {"type": "rank", "instructions": "Rank this item among the others."},
+        });
+        let batch = self.mint("unknown-type");
+        let body = params(&batch, &model.model, &questions, items(&[&a]), None);
+        let what = "a request with a question of type rank";
+        let refusal = Self::refusal_of(what, self.send(&body).await?)?;
+        Self::expect_refusal(
+            what,
+            &refusal,
+            errors::INVALID_PARAMS,
+            Some("questions.ranked.type"),
+        )?;
+        self.expect_calls(what, &ka, 0)
+            .await
+            .map_err(|e| format!("{e}: the refusal reached the provider"))?;
+        let (state, key) = self.marker("unknown-type-follow-up");
+        self.script_answer(&key, noul_body("0.5", None)).await;
+        let valid = params(
+            &batch,
+            &model.model,
+            &noul_question(),
+            items(&[&state]),
+            None,
+        );
+        Self::reply_of(
+            "a valid body with the refused batch_id",
+            self.send(&valid).await?,
+        )
+        .map_err(|e| format!("{e}: the refused request was recorded"))?;
+        Ok(Ending::Passed)
+    }
+
+    /// High, then lower, then the original high again. Both items fail
+    /// transiently on the first two calls, so nothing is spent and nothing
+    /// is stored permanently. On the third, item 0 is answered at a cost of
+    /// [`ITEM_SPEND_USD`], over the [`CEILING_USD`] the second call
+    /// carried; if that lower ceiling was recorded, item 1 must get
+    /// `cost_exceeded` and no call.
+    async fn ceiling_recorded(&self) -> Check {
+        let Some(model) = self.priced_model() else {
+            return Ok(Ending::NotApplicable(
+                "the module serves no priced model, so nothing it answers has a cost to bound"
+                    .into(),
+            ));
+        };
+        let Some(usage) = Self::usage_costing(model, ITEM_SPEND_USD) else {
+            return Ok(Ending::NotApplicable(format!(
+                "{} has no non-zero price, so no usage crosses a ceiling",
+                model.model
+            )));
+        };
+        let (a, ka) = self.marker("recorded-0-spends");
+        let (x, kx) = self.marker("recorded-1-crosses");
+        self.subject.script(&ka, Scripted::status(503)).await;
+        self.subject.script(&kx, Scripted::status(503)).await;
+        let batch = self.mint("recorded");
+        let body = |max: f64| {
+            params(
+                &batch,
+                &model.model,
+                &noul_question(),
+                items(&[&a, &x]),
+                Some(max),
+            )
+        };
+        for (n, max) in [(1, LOOSE_CEILING_USD), (2, CEILING_USD)] {
+            let what = format!("call {n}, with max_cost_usd {max}");
+            let (_, reply) = Self::reply_of(&what, self.send(&body(max)).await?)?;
+            for i in 0..2 {
+                if reply.items.get(i).is_none_or(|item| item.error.is_none()) {
+                    return Err(format!(
+                        "{what}: item {i} carries no error for the stand-in's 503"
+                    ));
+                }
+            }
+        }
+        let crossing_calls = self.calls(&kx).await;
+        self.script_answer(&ka, noul_body("0.73", Some(&usage)))
+            .await;
+        self.script_answer(&kx, noul_body("0.74", None)).await;
+        let what = format!(
+            "the third call, carrying the first call's max_cost_usd {LOOSE_CEILING_USD} after the second lowered it to {CEILING_USD}"
+        );
+        let (_, third) = Self::reply_of(&what, self.send(&body(LOOSE_CEILING_USD)).await?)?;
+        Self::answers(&what, &third, 0)?;
+        let item = third.items.get(1).ok_or(format!("{what}: no item 1"))?;
+        match (&item.answers, &item.error) {
+            (Some(_), _) => {
+                return Err(format!(
+                    "{what}: item 1 was answered, so the ceiling the second call lowered was loosened again"
+                ))
+            }
+            (None, Some(error)) if error.code == errors::COST_EXCEEDED => {}
+            (None, Some(error)) => {
+                return Err(format!(
+                    "{what}: item 1 failed {}, expected cost_exceeded",
+                    error.code
+                ))
+            }
+            (None, None) => return Err(format!("{what}: item 1 is empty")),
+        }
+        self.expect_calls(&format!("{what}, item 1"), &kx, crossing_calls)
+            .await?;
         Ok(Ending::Passed)
     }
 

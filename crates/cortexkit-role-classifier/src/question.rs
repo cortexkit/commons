@@ -38,7 +38,11 @@ pub const QUESTION_ID_MAX_LEN: usize = 64;
 pub const NOUL_CRITERIA_KEYS: [&str; 2] = ["true", "false"];
 
 /// A question type. Decodes open: a value other than [`types`] is kept in
-/// [`QuestionType::Other`], and the validators refuse it naming the field.
+/// [`QuestionType::Other`]. The open variant is for decoding a reply, where
+/// a provider's new type passes through as given; in a request,
+/// [`check_question`] refuses it `invalid_params` naming
+/// `questions.<id>.type`, because a runner can neither validate nor map a
+/// type it does not know.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum QuestionType {
     Noul,
@@ -160,8 +164,10 @@ pub fn is_question_id(id: &str) -> bool {
 }
 
 /// Check one question against the role's limits. A refusal names
-/// `questions.<id>` (the id), `questions.<id>.type`,
-/// `questions.<id>.instructions` or `questions.<id>.criteria`.
+/// `questions.<id>` (the id), `questions.<id>.type` (a type this crate does
+/// not name, checked before anything else about the question, since the
+/// rest depends on the type), `questions.<id>.instructions` or
+/// `questions.<id>.criteria`.
 pub fn check_question(id: &str, question: &Question) -> Result<(), Refusal> {
     let at = |member: &str| format!("questions.{id}.{member}");
     if !is_question_id(id) {
@@ -169,6 +175,15 @@ pub fn check_question(id: &str, question: &Question) -> Result<(), Refusal> {
             format!("questions.{id}"),
             "a question id is 1-64 characters of [a-z0-9_-]",
         ));
+    }
+    let unknown_type = |name: &str| {
+        Refusal::invalid_params(
+            at("type"),
+            format!("unknown question type {name}; expected noul, choice or score"),
+        )
+    };
+    if let QuestionType::Other(name) = &question.kind {
+        return Err(unknown_type(name));
     }
     let instructions_ok = match &question.instructions {
         Value::String(text) => !text.is_empty(),
@@ -217,10 +232,7 @@ pub fn check_question(id: &str, question: &Question) -> Result<(), Refusal> {
             at("criteria"),
             "score criteria is an array of level descriptions, lowest first",
         )),
-        (QuestionType::Other(name), _) => Err(Refusal::invalid_params(
-            at("type"),
-            format!("unknown question type {name}; expected noul, choice or score"),
-        )),
+        (QuestionType::Other(name), _) => Err(unknown_type(name)),
     }
 }
 
@@ -376,6 +388,11 @@ mod tests {
         assert_eq!(refusal.field(), Some("questions.q.instructions"));
         let refusal =
             check_question("q", &Question::new(QuestionType::parse("rank"), "i")).unwrap_err();
+        assert_eq!(refusal.field(), Some("questions.q.type"));
+        // The type is refused before the instructions, which mean nothing
+        // for a type the runner does not know.
+        let refusal =
+            check_question("q", &Question::new(QuestionType::parse("rank"), "")).unwrap_err();
         assert_eq!(refusal.field(), Some("questions.q.type"));
         assert!(check_question("q", &Question::noul(json!({"ask": "is it?"}))).is_ok());
         assert!(is_question_id(&"a".repeat(64)));

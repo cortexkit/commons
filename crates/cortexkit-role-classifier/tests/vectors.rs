@@ -23,6 +23,7 @@ use serde_json::Number;
 /// new file cannot land without a test reading it.
 const FILES: &[&str] = &[
     "admission-refusals.json",
+    "field-paths.json",
     "item-errors.json",
     "provider-examples.json",
     "question-choice.json",
@@ -352,6 +353,11 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
                 refusal.with_detail(detail)
             }
             errors::BATCH_IN_PROGRESS => Refusal::batch_in_progress(1000),
+            errors::AUTH_FAILED => Refusal::auth_failed(),
+            errors::MODEL_UNAVAILABLE => {
+                assert!(describe.model(&vector.request.model).is_some());
+                Refusal::model_unavailable(&vector.request.model)
+            }
             other => panic!("unexpected refusal {other}"),
         };
         assert_eq!(&built, refusal, "{}", vector.name);
@@ -376,6 +382,24 @@ fn one_item_error_per_code_beside_an_answered_item() {
         );
         if let Some(status) = vector.provider_status {
             assert_eq!(item_code_for_status(status), Some(name.as_str()), "{name}");
+        }
+        // A code that stops the call leaves every later item unsent,
+        // carrying the same code; other codes leave the batch going.
+        for later in &vector.reply.items[2..] {
+            let later_error = later.error.as_ref().unwrap();
+            assert!(error.stops_the_call(), "{name}: an item after the error");
+            assert_eq!(later_error.code, error.code, "{name}");
+            assert_eq!(later_error.class, error.class, "{name}");
+            assert_eq!(later.usage, None, "{name}: an unsent item reports no usage");
+        }
+        if matches!(
+            name.as_str(),
+            errors::AUTH_FAILED | errors::MODEL_UNAVAILABLE
+        ) {
+            assert!(!error.is_stored(), "{name}");
+            assert!(vector.reply.items.len() > 2, "{name}: shows the stop");
+        } else {
+            assert!(error.is_stored(), "{name}");
         }
         let mut built = ItemError::for_code(name, error.message.clone());
         if let Some(ms) = error.retry_after_ms {
@@ -437,4 +461,33 @@ fn a_reuse_is_refused_naming_the_differing_field() {
         .unwrap();
     assert_eq!(file.refusal, Refusal::batch_id_reuse(field));
     assert_eq!(file.refusal.field(), Some("items[1]"));
+}
+
+#[test]
+fn refusals_name_the_narrowest_field_that_applies() {
+    let file: AdmissionRefusals = exact("field-paths.json");
+    let names: Vec<&str> = file.refusals.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["unknown_question_type", "narrower_path"]);
+    let describe = describe();
+    for vector in &file.refusals {
+        let name = &vector.name;
+        let model = describe.model(&vector.request.model).unwrap();
+        let built = check_request(&vector.request, model).unwrap_err();
+        assert_eq!(&built, &vector.refusal, "{name}");
+        assert_eq!(built.code, errors::INVALID_PARAMS, "{name}");
+        let expected = match name.as_str() {
+            "unknown_question_type" => {
+                // The request decoded: the type is kept open for decoding,
+                // and only the validator refuses it.
+                assert_eq!(
+                    vector.request.questions["priority"].kind,
+                    QuestionType::Other("rank".into())
+                );
+                "questions.priority.type"
+            }
+            "narrower_path" => "items[1].images[1]",
+            other => panic!("unexpected vector {other}"),
+        };
+        assert_eq!(built.field(), Some(expected), "{name}");
+    }
 }

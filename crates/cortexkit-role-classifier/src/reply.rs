@@ -21,7 +21,9 @@ use crate::{errors::ItemError, question::QuestionType, request::ClassifyRequest}
 ///
 /// Numbers are [`Number`]s, so an integer stays an integer, and a member
 /// the provider adds that this crate does not name is kept in
-/// [`Answer::extra`]. The runner never rounds, rescales or renames them.
+/// [`Answer::extra`]. A reply decodes open: an answer of a type this crate
+/// does not name keeps its type string, and every member is kept as given.
+/// The runner never rounds, rescales or renames them.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Answer {

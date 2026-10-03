@@ -48,6 +48,22 @@ pub const ACCOUNT_WALLED: &str = "account_walled";
 /// re-send. Transient. Nothing was written or dispatched.
 pub const BATCH_IN_PROGRESS: &str = "batch_in_progress";
 
+/// The provider refused the module's credentials (HTTP 401 or 403).
+/// Permanent. As an admission refusal: the call's first provider call met
+/// it, so the whole call is refused and nothing is written. As a per-item
+/// error: it stopped the call, and every item the call left unanswered
+/// carries it. Never stored, so a re-send after a re-login asks the
+/// provider again.
+pub const AUTH_FAILED: &str = "auth_failed";
+
+/// The provider does not serve the model (HTTP 404). Permanent. As an
+/// admission refusal, `detail.model` names the model; the call's first
+/// provider call met it, so the whole call is refused and nothing is
+/// written. As a per-item error: it stopped the call, and every item the
+/// call left unanswered carries it. Never stored, so a re-send after a
+/// catalog fix asks the provider again.
+pub const MODEL_UNAVAILABLE: &str = "model_unavailable";
+
 /// Every admission refusal code, in the contract's table order.
 pub const ADMISSION_CODES: &[&str] = &[
     INVALID_PARAMS,
@@ -57,12 +73,16 @@ pub const ADMISSION_CODES: &[&str] = &[
     COST_EXCEEDED,
     ACCOUNT_WALLED,
     BATCH_IN_PROGRESS,
+    AUTH_FAILED,
+    MODEL_UNAVAILABLE,
 ];
 
 // ---- per-item errors ------------------------------------------------------
 
 /// The provider answered 429 or 529 after the runner's own retries.
-/// `retry_after_ms` when the provider gave one. Transient.
+/// `retry_after_ms` when the provider gave one. Transient. It stops the
+/// call: the items after it that would need a provider call are not sent,
+/// and carry `rate_limited` too, unstored, so a re-send retries them.
 pub const RATE_LIMITED: &str = "rate_limited";
 
 /// The provider answered 5xx, or the transport failed, after the runner's
@@ -72,26 +92,29 @@ pub const PROVIDER_ERROR: &str = "provider_error";
 /// The provider refused the content. Permanent.
 pub const PROVIDER_REFUSED: &str = "provider_refused";
 
-/// The provider rejected this item's input (4xx). Permanent.
+/// The provider rejected this item's input (400, 413, 422, or another 4xx
+/// the contract does not map elsewhere). Permanent.
 pub const INVALID_ITEM: &str = "invalid_item";
 
-/// Every per-item error code, in the contract's table order. `cost_exceeded`
-/// is both an admission refusal and a per-item error.
+/// Every per-item error code, in the contract's table order.
+/// `cost_exceeded`, `auth_failed` and `model_unavailable` are both
+/// admission refusals and per-item errors.
 pub const ITEM_CODES: &[&str] = &[
     RATE_LIMITED,
     PROVIDER_ERROR,
     PROVIDER_REFUSED,
     INVALID_ITEM,
     COST_EXCEEDED,
+    AUTH_FAILED,
+    MODEL_UNAVAILABLE,
 ];
 
 /// The class of an admission refusal code this crate lists, `None` for any
 /// other code.
 pub fn admission_class(code: &str) -> Option<ErrorClass> {
     match code {
-        INVALID_PARAMS | BATCH_ID_REUSE | MODEL_UNKNOWN | MODEL_NOT_CLASSIFIER | COST_EXCEEDED => {
-            Some(ErrorClass::Permanent)
-        }
+        INVALID_PARAMS | BATCH_ID_REUSE | MODEL_UNKNOWN | MODEL_NOT_CLASSIFIER | COST_EXCEEDED
+        | AUTH_FAILED | MODEL_UNAVAILABLE => Some(ErrorClass::Permanent),
         ACCOUNT_WALLED | BATCH_IN_PROGRESS => Some(ErrorClass::Transient),
         _ => None,
     }
@@ -102,7 +125,9 @@ pub fn admission_class(code: &str) -> Option<ErrorClass> {
 pub fn item_class(code: &str) -> Option<ErrorClass> {
     match code {
         RATE_LIMITED | PROVIDER_ERROR => Some(ErrorClass::Transient),
-        PROVIDER_REFUSED | INVALID_ITEM | COST_EXCEEDED => Some(ErrorClass::Permanent),
+        PROVIDER_REFUSED | INVALID_ITEM | COST_EXCEEDED | AUTH_FAILED | MODEL_UNAVAILABLE => {
+            Some(ErrorClass::Permanent)
+        }
         _ => None,
     }
 }
@@ -230,6 +255,27 @@ impl ItemError {
     pub fn is_retried_on_resend(&self) -> bool {
         self.class.is_transient()
     }
+
+    /// Whether a runner records this error as the item's outcome. Every
+    /// error is, except `auth_failed` and `model_unavailable`: they say
+    /// nothing about the item, so the item stays unanswered and a re-send
+    /// (after a re-login or a catalog fix) asks the provider again. The
+    /// items a rate limit kept from being sent are left unrecorded too,
+    /// but that is decided by the call, not by the code.
+    pub fn is_stored(&self) -> bool {
+        !matches!(self.code.as_str(), AUTH_FAILED | MODEL_UNAVAILABLE)
+    }
+
+    /// Whether this error, once an item ends with it, stops the call: no
+    /// further item is sent to the provider in that call, and every item
+    /// the call leaves unanswered carries the same code. True for
+    /// `auth_failed`, `model_unavailable` and `rate_limited`.
+    pub fn stops_the_call(&self) -> bool {
+        matches!(
+            self.code.as_str(),
+            AUTH_FAILED | MODEL_UNAVAILABLE | RATE_LIMITED
+        )
+    }
 }
 
 // ---- admission refusal ----------------------------------------------------
@@ -241,12 +287,14 @@ impl ItemError {
 #[non_exhaustive]
 pub struct RefusalDetail {
     pub class: ErrorClass,
-    /// The offending or differing request field, as a path:
-    /// `batch_id`, `model`, `questions`, `questions.<id>`,
-    /// `questions.<id>.type`, `questions.<id>.instructions`,
-    /// `questions.<id>.criteria`, `items`, `items[i]`, `items[i].state`,
-    /// `items[i].images`, `items[i].images[j]`, `max_cost_usd`, or `params`
-    /// for the request as a whole.
+    /// The offending or differing request field, as a path (a map key
+    /// joined with a dot, an array index in brackets): `batch_id`,
+    /// `model`, `questions`, `questions.<id>`, `questions.<id>.type`,
+    /// `questions.<id>.instructions`, `questions.<id>.criteria`, `items`,
+    /// `items[i]`, `items[i].state`, `items[i].images`,
+    /// `items[i].images[j]`, `max_cost_usd`, or `params` for the request
+    /// as a whole. `params` is used only when none of the narrower paths
+    /// applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
     /// The limit the field exceeded, where one applies.
@@ -413,6 +461,22 @@ impl Refusal {
         Self::new(ACCOUNT_WALLED, "the provider account is at its limit")
     }
 
+    /// The call's first provider call met a 401 or 403.
+    pub fn auth_failed() -> Self {
+        Self::new(AUTH_FAILED, "the provider refused the module's credentials")
+    }
+
+    /// The call's first provider call met a 404 for `model`.
+    pub fn model_unavailable(model: impl Into<String>) -> Self {
+        let model = model.into();
+        let refusal = Self::new(
+            MODEL_UNAVAILABLE,
+            format!("the provider does not serve {model}"),
+        );
+        let detail = (*refusal.detail).clone().with_model(model);
+        refusal.with_detail(detail)
+    }
+
     pub fn batch_in_progress(retry_after_ms: u64) -> Self {
         let refusal = Self::new(BATCH_IN_PROGRESS, "another call holds this batch_id");
         let detail = (*refusal.detail)
@@ -460,6 +524,10 @@ mod tests {
         assert_eq!(item_class(PROVIDER_REFUSED), Some(ErrorClass::Permanent));
         assert_eq!(item_class(INVALID_ITEM), Some(ErrorClass::Permanent));
         assert_eq!(item_class(COST_EXCEEDED), Some(ErrorClass::Permanent));
+        for code in [AUTH_FAILED, MODEL_UNAVAILABLE] {
+            assert_eq!(item_class(code), Some(ErrorClass::Permanent), "{code}");
+            assert_eq!(admission_class(code), Some(ErrorClass::Permanent), "{code}");
+        }
         assert_eq!(admission_class("nope"), None);
     }
 
@@ -493,6 +561,32 @@ mod tests {
                 "{code}"
             );
         }
+    }
+
+    #[test]
+    fn auth_and_model_failures_are_never_stored_and_stop_the_call() {
+        for code in [AUTH_FAILED, MODEL_UNAVAILABLE] {
+            let error = ItemError::for_code(code, "m");
+            assert!(!error.is_stored(), "{code}");
+            assert!(error.stops_the_call(), "{code}");
+        }
+        assert!(ItemError::for_code(RATE_LIMITED, "m").stops_the_call());
+        for code in [
+            PROVIDER_ERROR,
+            PROVIDER_REFUSED,
+            INVALID_ITEM,
+            COST_EXCEEDED,
+        ] {
+            let error = ItemError::for_code(code, "m");
+            assert!(error.is_stored(), "{code}");
+            assert!(!error.stops_the_call(), "{code}");
+        }
+        assert!(ItemError::for_code(RATE_LIMITED, "m").is_stored());
+        assert_eq!(
+            Refusal::model_unavailable("m").detail.model.as_deref(),
+            Some("m")
+        );
+        assert_eq!(Refusal::auth_failed().detail.class, ErrorClass::Permanent);
     }
 
     #[test]
