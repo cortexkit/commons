@@ -101,6 +101,14 @@ pub struct Defects {
     pub claim_unserved_group: bool,
     /// A guaranteed runner falsely answers pending for a steer send.
     pub guaranteed_steer_pending: bool,
+    /// Only a steer into a held running turn is falsely answered pending.
+    pub held_steer_pending: bool,
+    /// Only the receipt path for a re-send into a held turn answers pending.
+    pub held_steer_retry_pending: bool,
+    /// The first re-send into a held turn names a different delivery.
+    pub held_steer_retry_unstable: bool,
+    /// A steer ends the held turn before answering, making the probe idle.
+    pub held_steer_ends_run: bool,
     /// A re-send of a delivered steer changes its receipt.
     pub resend_steer_unstable: bool,
     /// Every answer to a send names a submission_id of its own, so a retry
@@ -139,6 +147,10 @@ struct World {
     defects: Defects,
     step_recovery: StepRecovery,
     queue_receipt_pending_then_unknown: bool,
+    steer_receipt_confirm: bool,
+    omit_first_steer_receipt: bool,
+    /// Counts replies where a held-turn steer defect actually applied.
+    held_steer_break_answers: AtomicUsize,
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
     invocations: Mutex<BTreeMap<String, usize>>,
@@ -207,6 +219,7 @@ struct SendRec {
     prompt: String,
     delivery: String,
     run_id: String,
+    steered_into_running: bool,
     admitted: bool,
     resend_count: usize,
 }
@@ -460,7 +473,7 @@ impl Module {
         };
         sess.events.push(kind.clone());
         match kind.as_str() {
-            "send" => {
+            "send" | "steer" => {
                 let run_id = text("run_id");
                 sess.push(
                     json!({ "role": "user", "text": text("prompt") }),
@@ -473,16 +486,19 @@ impl Module {
                         prompt: text("prompt"),
                         delivery: text("delivery"),
                         run_id: run_id.clone(),
+                        steered_into_running: kind == "steer",
                         admitted: record["admitted"] == json!(true),
                         resend_count: 0,
                     },
                 );
-                sess.runs.push(RunRec {
-                    run_id,
-                    state: "active".into(),
-                    final_ordinal: None,
-                    final_text: None,
-                });
+                if kind == "send" {
+                    sess.runs.push(RunRec {
+                        run_id,
+                        state: "active".into(),
+                        final_ordinal: None,
+                        final_text: None,
+                    });
+                }
             }
             "step" => {
                 let run_id = text("run_id");
@@ -728,12 +744,15 @@ impl Module {
                 }
             }
         }
-        respond(
+        let mut describe =
             RoleDescribe::new(vec![Major::new(PROVIDES, served, "alpha")], "fake-runner-1")
                 .with_capabilities(capabilities)
                 .with_session_capabilities_from(groups::source::ADMISSION)
-                .with_max_bytes(DEFAULT_MAX_BYTES, MAXIMUM_MAX_BYTES),
-        )
+                .with_max_bytes(DEFAULT_MAX_BYTES, MAXIMUM_MAX_BYTES);
+        if self.world.steer_receipt_confirm {
+            describe = describe.with_steer_receipt("confirm");
+        }
+        respond(describe)
     }
 
     fn baseline(&self, stamp: &RouteStamp, session: &str, params: &Value) -> Reply {
@@ -797,13 +816,31 @@ impl Module {
             }
         }
         if send.delivery == groups::STEER {
-            if self.world.defects.guaranteed_steer_pending {
+            let held_turn = send.steered_into_running
+                && run.state == "active"
+                && sessions[session]
+                    .calls
+                    .values()
+                    .any(|call| call.run_id == run.run_id && call.intent && !call.result);
+            let held_pending = held_turn
+                && ((defects.held_steer_pending && send.resend_count == 0)
+                    || (defects.held_steer_retry_pending && send.resend_count > 0));
+            let held_unstable =
+                held_turn && defects.held_steer_retry_unstable && send.resend_count > 0;
+            if held_pending || held_unstable {
+                self.world
+                    .held_steer_break_answers
+                    .fetch_add(1, Ordering::SeqCst);
+            }
+            if held_pending || self.world.defects.guaranteed_steer_pending {
                 reply = reply.with_delivered(Delivered::new(delivered_as::PENDING));
-            } else if send.resend_count > 1 && self.world.defects.resend_steer_unstable {
+            } else if held_unstable
+                || (send.resend_count > 1 && self.world.defects.resend_steer_unstable)
+            {
                 reply = reply.with_delivered(
                     Delivered::new(delivered_as::TURN).with_ref(format!("{}-unstable", run.run_id)),
                 );
-            } else {
+            } else if !self.world.omit_first_steer_receipt || send.resend_count > 0 {
                 reply =
                     reply.with_delivered(Delivered::new(delivered_as::TURN).with_ref(&run.run_id));
             }
@@ -848,8 +885,29 @@ impl Module {
                 drop(sessions);
                 return Ok(self.send_reply(session, &send));
             }
-            if sess.runs.iter().any(|run| run.state == "active") {
-                return Ok(refuse(errors::TRANSIENT, None));
+            if let Some(run) = sess.runs.iter().find(|run| run.state == "active") {
+                if delivery != groups::STEER || !self.world.serves(groups::STEER) {
+                    return Ok(refuse(errors::TRANSIENT, None));
+                }
+                // Steers into an active run use that run's receipt path;
+                // they must not manufacture a new turn as an idle send does.
+                self.commit(
+                    session,
+                    json!({ "kind": "steer", "send_id": request.send_id,
+                            "prompt": request.prompt, "delivery": delivery,
+                            "run_id": run.run_id, "admitted": false }),
+                )?;
+                if self.world.defects.held_steer_ends_run {
+                    self.world
+                        .held_steer_break_answers
+                        .fetch_add(1, Ordering::SeqCst);
+                    self.commit(
+                        session,
+                        json!({ "kind": "terminal", "run_id": run.run_id, "state": "interrupted" }),
+                    )?;
+                }
+                let send = self.sessions.lock().unwrap()[session].sends[&request.send_id].clone();
+                return Ok(self.send_reply(session, &send));
             }
         }
         if let Err(mode) = request.check_delivery(&self.world.groups) {
@@ -1142,6 +1200,10 @@ pub struct FakeSubject {
     /// Answer a queued send `delivered: pending` and its retries
     /// `delivered: unknown`: a receipt moving forward, which is allowed.
     pub queue_receipt_pending_then_unknown: bool,
+    /// Declare confirmation receipts instead of guaranteed delivery.
+    pub steer_receipt_confirm: bool,
+    /// Exercise the contract's optional receipt on a steer's first answer.
+    pub omit_first_steer_receipt: bool,
     /// How long `pause` waits between the suite's polls. `None` only yields,
     /// so the suite's poll bound passes in no time; a duration makes that
     /// bound real time, as on a runner that polls a live process.
@@ -1186,6 +1248,8 @@ impl FakeSubject {
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
+            steer_receipt_confirm: false,
+            omit_first_steer_receipt: false,
             pause_for: None,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
@@ -1203,6 +1267,9 @@ impl FakeSubject {
                     defects: self.defects,
                     step_recovery: self.step_recovery,
                     queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
+                    steer_receipt_confirm: self.steer_receipt_confirm,
+                    omit_first_steer_receipt: self.omit_first_steer_receipt,
+                    held_steer_break_answers: AtomicUsize::new(0),
                     groups: self
                         .capabilities
                         .iter()
@@ -1244,6 +1311,10 @@ impl FakeSubject {
     /// not.
     pub fn run_result_calls(&self) -> usize {
         self.world().run_result_calls.load(Ordering::SeqCst)
+    }
+
+    pub fn held_steer_break_answers(&self) -> usize {
+        self.world().held_steer_break_answers.load(Ordering::SeqCst)
     }
 }
 

@@ -241,7 +241,7 @@ pub const CASES: &[CaseSpec] = &[
     case(
         "guaranteed_steer_never_pending_or_unknown",
         SENDS,
-        "a guaranteed runner never answers pending or unknown for a steer send or re-send",
+        "on a guaranteed runner with hold_tool_calls, a steer and its same-send_id re-send are answered while the held turn is still active, naming that run; any first receipt and the required re-send receipt are step or turn and name the same delivery",
     ),
     case(
         "resend_steer_delivered_stable",

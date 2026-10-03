@@ -321,6 +321,105 @@ async fn a_guaranteed_runner_answering_pending_fails() {
     assert_passed(&report, "resend_steer_delivered_stable");
 }
 
+/// Prove that the held-turn branch applied, and pin its entire failure set.
+async fn held_steer_break(defects: Defects, because: &str) {
+    let subject = FakeSubject::new(defects);
+    let report = run(&subject).await;
+    assert_eq!(
+        subject.held_steer_break_answers(),
+        1,
+        "the held-turn break did not apply exactly once\n{}",
+        report.render()
+    );
+    let case = "guaranteed_steer_never_pending_or_unknown";
+    let reason = failed(&report, case);
+    assert!(reason.contains(because), "{reason}");
+    assert_others_passed(&report, &[case]);
+    eprintln!("held-turn break applied once; only {case} failed: {reason}");
+}
+
+#[tokio::test]
+async fn a_guaranteed_runner_answering_pending_into_a_held_turn_fails_only_the_guaranteed_case() {
+    held_steer_break(
+        Defects {
+            held_steer_pending: true,
+            ..Defects::default()
+        },
+        "pending on session.send steer",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_guaranteed_runner_answering_pending_on_a_held_turn_resend_fails_only_the_guaranteed_case(
+) {
+    held_steer_break(
+        Defects {
+            held_steer_retry_pending: true,
+            ..Defects::default()
+        },
+        "pending on session.send steer re-send",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_changed_held_turn_resend_receipt_fails_only_the_guaranteed_case() {
+    held_steer_break(
+        Defects {
+            held_steer_retry_unstable: true,
+            ..Defects::default()
+        },
+        "re-send delivered changed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_steer_answered_after_the_held_turn_ends_fails_only_the_guaranteed_case() {
+    held_steer_break(
+        Defects {
+            held_steer_ends_run: true,
+            ..Defects::default()
+        },
+        "without the held run",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_guaranteed_runner_with_an_absent_first_steer_receipt_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.omit_first_steer_receipt = true;
+    let report = run(&subject).await;
+    assert_others_passed(&report, &[]);
+}
+
+#[tokio::test]
+async fn a_confirm_runner_reports_the_guaranteed_case_as_inapplicable() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.steer_receipt_confirm = true;
+    // Even without a hold-capable harness, the reason must be the runner's
+    // declared receipt policy, not a passed idle-session probe.
+    subject.capabilities.remove(&Capability::HoldToolCalls);
+    let report = run(&subject).await;
+    assert!(matches!(
+        report.outcome("guaranteed_steer_never_pending_or_unknown"),
+        Some(CaseOutcome::Inapplicable { reason }) if reason.contains("steer_receipt: confirm")
+    ));
+}
+
+#[tokio::test]
+async fn without_held_calls_the_guaranteed_case_is_inapplicable_never_an_idle_pass() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::HoldToolCalls);
+    let report = run(&subject).await;
+    assert!(matches!(
+        report.outcome("guaranteed_steer_never_pending_or_unknown"),
+        Some(CaseOutcome::Inapplicable { reason }) if reason.contains("hold_tool_calls")
+    ));
+}
+
 #[tokio::test]
 async fn an_unstable_resend_steer_receipt_fails() {
     let report = run(&FakeSubject::new(Defects {

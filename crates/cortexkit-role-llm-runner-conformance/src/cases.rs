@@ -10,7 +10,7 @@ use cortexkit_role_llm_runner::{
     errors, ops,
     read::{HeadMeta, ReadMessage, ReadPage, ReadRequest, ToolCallAttribution},
     run::{join_text_parts, states as run_states},
-    send::{delivered_as, Delivered, DeliveredAs, SendReply, DELIVERY_FIELD},
+    send::{Delivered, DeliveredAs, SendReply, DELIVERY_FIELD},
     subscribe::{kinds, SubscribeEvent, SubscribeFrom, SubscribeRequest},
     PROVIDES,
 };
@@ -1586,37 +1586,111 @@ where
                 "the runner declares steer_receipt: confirm".into(),
             ));
         }
-        let (session, _, _) = self.sent_session("steer-guaranteed").await?;
-        let steer_id = self.mint.next("steer");
+        if !self.declares(Capability::HoldToolCalls) {
+            return Ok(Ending::Inapplicable(
+                "the suite cannot hold a running turn without hold_tool_calls".into(),
+            ));
+        }
+        // Hold a tool call just as the indeterminate delivery check does.
+        // Joining the send with the probe also supports runners whose first
+        // send waits for its run to end before replying.
+        let mut held = self.mint.call("held_steer_call");
+        held.hold = true;
+        let (done, _) = self.mint.text("done");
+        let mut session = self
+            .open(
+                "steer-guaranteed",
+                Script {
+                    turns: vec![
+                        ScriptedTurn {
+                            parts: vec![ScriptedPart::ToolCall(held.clone())],
+                        },
+                        ScriptedTurn { parts: vec![done] },
+                    ],
+                },
+            )
+            .await?;
+        let send_id = self.mint.next("send");
         let prompt = self.mint.next("prompt");
-        let reply_raw = expect_ok(
-            "session.send steer",
-            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
-                .await?,
-        )?;
-        let reply: SendReply = decode("session.send steer", reply_raw)?;
-        if let Some(delivered) = &reply.delivered {
-            if delivered.r#as == delivered_as::PENDING || delivered.r#as == delivered_as::UNKNOWN {
-                return Err(format!(
-                    "a guaranteed runner answered delivered.as: {}",
-                    delivered.r#as
-                ));
+        session.first = Some((send_id.clone(), prompt.clone()));
+        let probe = async {
+            let observed = async {
+                self.subject
+                    .await_tool_call(&held.arguments)
+                    .await
+                    .map_err(|e| format!("the tool provider never held the call: {e}"))?;
+                let running = head(&session.route)
+                    .await?
+                    .last_run_state
+                    .ok_or("the held turn has no run state")?;
+                if running.state != run_states::ACTIVE {
+                    return Err(format!("the held turn is {}, not active", running.state));
+                }
+                let steer_id = self.mint.next("steer");
+                let steer_prompt = self.mint.next("prompt");
+                let mut replies = Vec::new();
+                for what in ["session.send steer", "session.send steer re-send"] {
+                    let reply: SendReply = decode(
+                        what,
+                        expect_ok(
+                            what,
+                            self.send_raw(&session, &steer_prompt, &steer_id, Some(groups::STEER))
+                                .await?,
+                        )?,
+                    )?;
+                    let after = head(&session.route).await?.last_run_state;
+                    if !matches!(&after, Some(run) if run.run_id == running.run_id && run.state == run_states::ACTIVE)
+                    {
+                        return Err(format!(
+                            "{what} was answered without the held run {} still in progress: {after:?}",
+                            running.run_id
+                        ));
+                    }
+                    if reply.run_id.as_deref() != Some(running.run_id.as_str()) {
+                        return Err(format!(
+                            "{what} names run {:?}, not the held running turn {}",
+                            reply.run_id, running.run_id
+                        ));
+                    }
+                    if let Some(delivered) = &reply.delivered {
+                        if !delivered.is_delivered() {
+                            return Err(format!(
+                                "a guaranteed runner answered delivered.as: {} on {what}",
+                                delivered.r#as
+                            ));
+                        }
+                    }
+                    replies.push(reply);
+                }
+                let retry = replies[1]
+                    .delivered
+                    .as_ref()
+                    .ok_or("a guaranteed runner omitted delivered on re-send")?;
+                // The first receipt is optional; once supplied, its delivery
+                // (including the opaque ref) must be final on the re-send.
+                if let Some(first) = &replies[0].delivered {
+                    if first != retry {
+                        return Err(format!(
+                            "re-send delivered changed from {first:?} to {retry:?}"
+                        ));
+                    }
+                }
+                Ok(())
             }
-        }
-        let retry_raw = expect_ok(
-            "session.send steer retry",
-            self.send_raw(&session, &prompt, &steer_id, Some(groups::STEER))
-                .await?,
-        )?;
-        let retry: SendReply = decode("session.send steer retry", retry_raw)?;
-        if let Some(delivered) = &retry.delivered {
-            if delivered.r#as == delivered_as::PENDING || delivered.r#as == delivered_as::UNKNOWN {
-                return Err(format!(
-                    "a guaranteed runner answered delivered.as: {} on re-send",
-                    delivered.r#as
-                ));
-            }
-        }
+            .await;
+            // Always release the call, including when a receipt or the
+            // running-turn guard failed, so the suite leaves no stalled run.
+            let released = self
+                .subject
+                .release_tool_call(&held.arguments)
+                .await
+                .map_err(|e| format!("releasing the held call: {e}"));
+            observed.and(released)
+        };
+        let (sent, probed) = join(self.send_raw(&session, &prompt, &send_id, None), probe).await;
+        let reply: SendReply = decode("session.send", expect_ok("session.send", sent?)?)?;
+        wait_run_end(self.subject, &session.route, self.declared, None, &reply).await?;
+        probed?;
         Ok(Ending::Passed)
     }
 
@@ -1831,6 +1905,7 @@ fn distinct_keys(what: &str, keys: &[Option<String>]) -> Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cortexkit_role_llm_runner::send::delivered_as;
 
     fn receipt(r#as: &str) -> Option<Delivered> {
         Some(Delivered::new(r#as))
