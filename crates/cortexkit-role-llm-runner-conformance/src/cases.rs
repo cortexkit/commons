@@ -1614,6 +1614,8 @@ where
         let send_id = self.mint.next("send");
         let prompt = self.mint.next("prompt");
         session.first = Some((send_id.clone(), prompt.clone()));
+        let steer_id = self.mint.next("steer");
+        let steer_prompt = self.mint.next("prompt");
         let probe = async {
             let observed = async {
                 self.subject
@@ -1627,8 +1629,6 @@ where
                 if running.state != run_states::ACTIVE {
                     return Err(format!("the held turn is {}, not active", running.state));
                 }
-                let steer_id = self.mint.next("steer");
-                let steer_prompt = self.mint.next("prompt");
                 let mut replies = Vec::new();
                 for what in ["session.send steer", "session.send steer re-send"] {
                     let reply: SendReply = decode(
@@ -1663,21 +1663,17 @@ where
                     }
                     replies.push(reply);
                 }
-                let retry = replies[1]
-                    .delivered
-                    .as_ref()
-                    .ok_or("a guaranteed runner omitted delivered on re-send")?;
-                // The first answer may omit its delivery receipt. If it
-                // supplies one, the re-send must return the same receipt,
-                // opaque reference included.
-                if let Some(first) = &replies[0].delivered {
+                // Nothing can render the steer while its tool call is held.
+                // Either answer may omit the receipt, but receipts already
+                // supplied are final, opaque reference included.
+                if let (Some(first), Some(retry)) = (&replies[0].delivered, &replies[1].delivered) {
                     if first != retry {
                         return Err(format!(
                             "re-send delivered changed from {first:?} to {retry:?}"
                         ));
                     }
                 }
-                Ok(())
+                Ok((replies, running.run_id))
             }
             .await;
             // Always release the held tool call, even when a receipt check or
@@ -1688,12 +1684,64 @@ where
                 .release_tool_call(&held.arguments)
                 .await
                 .map_err(|e| format!("releasing the held call: {e}"));
-            observed.and(released)
+            let observed = observed?;
+            released?;
+            Ok::<_, String>(observed)
         };
         let (sent, probed) = join(self.send_raw(&session, &prompt, &send_id, None), probe).await;
         let reply: SendReply = decode("session.send", expect_ok("session.send", sent?)?)?;
         wait_run_end(self.subject, &session.route, self.declared, None, &reply).await?;
-        probed?;
+        let (held_replies, held_run_id) = probed?;
+        let what = "session.send steer final re-send";
+        let final_reply: SendReply = decode(
+            what,
+            expect_ok(
+                what,
+                self.send_raw(&session, &steer_prompt, &steer_id, Some(groups::STEER))
+                    .await?,
+            )?,
+        )?;
+        let final_receipt = final_reply
+            .delivered
+            .as_ref()
+            .ok_or("a guaranteed runner omitted delivered on final re-send after the run ended")?;
+        if !final_receipt.is_delivered() {
+            return Err(format!(
+                "a guaranteed runner answered delivered.as: {} on {what}",
+                final_receipt.r#as
+            ));
+        }
+        for earlier in held_replies
+            .iter()
+            .filter_map(|reply| reply.delivered.as_ref())
+        {
+            if earlier != final_receipt {
+                return Err(format!(
+                    "final re-send delivered changed from {earlier:?} to {final_receipt:?}"
+                ));
+            }
+        }
+        // A turn receipt names a run the suite observed, not necessarily the
+        // held run: the runner may render the steer in a later episode. Step
+        // references are opaque stored row ids, not necessarily transcript mids.
+        let latest = head(&session.route).await?.last_run_state;
+        for receipt in held_replies
+            .iter()
+            .filter_map(|reply| reply.delivered.as_ref())
+            .chain(std::iter::once(final_receipt))
+        {
+            if receipt.r#as() == DeliveredAs::Turn {
+                if let Some(reference) = &receipt.r#ref {
+                    if reference != &held_run_id
+                        && !matches!(&latest, Some(run) if &run.run_id == reference)
+                    {
+                        return Err(format!(
+                            "delivered turn ref {reference:?} names no observed run: held {held_run_id}, latest {latest:?}"
+                        ));
+                    }
+                }
+            }
+        }
         Ok(Ending::Passed)
     }
 

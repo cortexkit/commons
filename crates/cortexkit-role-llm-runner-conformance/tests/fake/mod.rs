@@ -102,7 +102,7 @@ pub struct Defects {
     /// A guaranteed runner falsely answers pending for a steer send.
     pub guaranteed_steer_pending: bool,
     /// Answer `pending` to a steer sent into a running turn held by a tool
-    /// call, though a guaranteed runner must answer `step` or `turn`.
+    /// call, though a guaranteed runner must never answer `pending`.
     pub held_steer_pending: bool,
     /// Answer `pending` only to the re-send of a steer into a held turn; the
     /// first answer stays correct.
@@ -113,6 +113,10 @@ pub struct Defects {
     /// End the held turn before answering a steer into it, so the steer is
     /// answered while no run is in progress.
     pub held_steer_ends_run: bool,
+    /// Omit the receipt on the final re-send after the held run ends.
+    pub held_steer_final_absent: bool,
+    /// Supply a receipt during the hold, then change its reference after release.
+    pub held_steer_after_release_unstable: bool,
     /// A re-send of a delivered steer changes its receipt.
     pub resend_steer_unstable: bool,
     /// Every answer to a send names a submission_id of its own, so a retry
@@ -153,7 +157,9 @@ struct World {
     queue_receipt_pending_then_unknown: bool,
     steer_receipt_confirm: bool,
     omit_first_steer_receipt: bool,
-    /// Counts answers that one of the held-turn steer defects above changed,
+    early_held_steer_receipt: Option<Delivered>,
+    held_steer_receipts: Mutex<Vec<Option<Delivered>>>,
+    /// Counts invalid answers produced by the held-turn steer defects,
     /// so a test can prove its defect actually took effect.
     held_steer_break_answers: AtomicUsize,
     groups: Vec<String>,
@@ -224,6 +230,7 @@ struct SendRec {
     prompt: String,
     delivery: String,
     run_id: String,
+    row_id: String,
     steered_into_running: bool,
     admitted: bool,
     resend_count: usize,
@@ -480,7 +487,7 @@ impl Module {
         match kind.as_str() {
             "send" | "steer" => {
                 let run_id = text("run_id");
-                sess.push(
+                let ordinal = sess.push(
                     json!({ "role": "user", "text": text("prompt") }),
                     &run_id,
                     Vec::new(),
@@ -491,6 +498,7 @@ impl Module {
                         prompt: text("prompt"),
                         delivery: text("delivery"),
                         run_id: run_id.clone(),
+                        row_id: sess.messages[ordinal as usize].mid.clone(),
                         steered_into_running: kind == "steer",
                         admitted: record["admitted"] == json!(true),
                         resend_count: 0,
@@ -832,22 +840,61 @@ impl Module {
                     || (defects.held_steer_retry_pending && send.resend_count > 0));
             let held_unstable =
                 held_turn && defects.held_steer_retry_unstable && send.resend_count > 0;
-            if held_pending || held_unstable {
+            let after_release = send.steered_into_running && run.state != "active";
+            let final_absent = after_release && defects.held_steer_final_absent;
+            let final_unstable = after_release && defects.held_steer_after_release_unstable;
+            if held_pending || held_unstable || final_absent || final_unstable {
                 self.world
                     .held_steer_break_answers
                     .fetch_add(1, Ordering::SeqCst);
             }
             if held_pending || self.world.defects.guaranteed_steer_pending {
                 reply = reply.with_delivered(Delivered::new(delivered_as::PENDING));
-            } else if held_unstable
-                || (send.resend_count > 1 && self.world.defects.resend_steer_unstable)
+            } else if final_absent {
+                // Deliberately leave the settled re-send without a receipt.
+            } else if held_unstable || final_unstable {
+                reply = reply.with_delivered(
+                    Delivered::new(delivered_as::STEP)
+                        .with_ref(format!("{}-unstable", send.row_id)),
+                );
+            } else if held_turn {
+                // A real guaranteed runner cannot yet know which step or turn
+                // will render the steer. The unstable-receipt fixtures seed
+                // a receipt early so the check must compare its reference.
+                if defects.held_steer_retry_unstable || defects.held_steer_after_release_unstable {
+                    reply = reply
+                        .with_delivered(Delivered::new(delivered_as::STEP).with_ref(&send.row_id));
+                } else if let Some(receipt) = &self.world.early_held_steer_receipt {
+                    reply = reply.with_delivered(receipt.clone());
+                }
+            } else if let Some(receipt) = self
+                .world
+                .early_held_steer_receipt
+                .as_ref()
+                .filter(|_| send.steered_into_running)
+            {
+                reply = reply.with_delivered(receipt.clone());
+            } else if !send.steered_into_running
+                && send.resend_count > 1
+                && self.world.defects.resend_steer_unstable
             {
                 reply = reply.with_delivered(
                     Delivered::new(delivered_as::TURN).with_ref(format!("{}-unstable", run.run_id)),
                 );
             } else if !self.world.omit_first_steer_receipt || send.resend_count > 0 {
-                reply =
-                    reply.with_delivered(Delivered::new(delivered_as::TURN).with_ref(&run.run_id));
+                let receipt = if send.steered_into_running {
+                    Delivered::new(delivered_as::STEP).with_ref(&send.row_id)
+                } else {
+                    Delivered::new(delivered_as::TURN).with_ref(&run.run_id)
+                };
+                reply = reply.with_delivered(receipt);
+            }
+            if send.steered_into_running {
+                self.world
+                    .held_steer_receipts
+                    .lock()
+                    .unwrap()
+                    .push(reply.delivered.clone());
             }
         }
         respond(reply)
@@ -894,9 +941,9 @@ impl Module {
                 if delivery != groups::STEER || !self.world.serves(groups::STEER) {
                     return Ok(refuse(errors::TRANSIENT, None));
                 }
-                // A steer that arrives during a run is delivered into that run
-                // and answered with its receipt; unlike a send to an idle
-                // session, it must not start a turn of its own.
+                // A steer accepted during a run waits for a step boundary.
+                // Unlike a send to an idle session, accepting it must not
+                // start a turn of its own or claim it has already rendered.
                 self.commit(
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
@@ -1212,6 +1259,8 @@ pub struct FakeSubject {
     pub steer_receipt_confirm: bool,
     /// Exercise the contract's optional receipt on a steer's first answer.
     pub omit_first_steer_receipt: bool,
+    /// Supply a final receipt even during the hold, preserving it after release.
+    pub early_held_steer_receipt: Option<Delivered>,
     /// How long `pause` waits between the suite's polls. `None` only yields,
     /// so the suite's poll bound passes in no time; a duration makes that
     /// bound real time, as on a runner that polls a live process.
@@ -1258,6 +1307,7 @@ impl FakeSubject {
             queue_receipt_pending_then_unknown: false,
             steer_receipt_confirm: false,
             omit_first_steer_receipt: false,
+            early_held_steer_receipt: None,
             pause_for: None,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
@@ -1277,6 +1327,8 @@ impl FakeSubject {
                     queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
                     steer_receipt_confirm: self.steer_receipt_confirm,
                     omit_first_steer_receipt: self.omit_first_steer_receipt,
+                    early_held_steer_receipt: self.early_held_steer_receipt.clone(),
+                    held_steer_receipts: Mutex::new(Vec::new()),
                     held_steer_break_answers: AtomicUsize::new(0),
                     groups: self
                         .capabilities
@@ -1323,6 +1375,10 @@ impl FakeSubject {
 
     pub fn held_steer_break_answers(&self) -> usize {
         self.world().held_steer_break_answers.load(Ordering::SeqCst)
+    }
+
+    pub fn held_steer_receipts(&self) -> Vec<Option<Delivered>> {
+        self.world().held_steer_receipts.lock().unwrap().clone()
     }
 }
 

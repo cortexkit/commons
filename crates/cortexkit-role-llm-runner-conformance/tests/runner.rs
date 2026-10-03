@@ -3,6 +3,7 @@
 
 mod fake;
 
+use cortexkit_role_llm_runner::send::{delivered_as, Delivered};
 use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
@@ -322,7 +323,7 @@ async fn a_guaranteed_runner_answering_pending_fails() {
 }
 
 /// Run the suite against a fake with one held-turn steer defect, prove that
-/// the defect changed exactly one answer, and require that it fails the
+/// the defect produced exactly one invalid answer, and require that it fails the
 /// guaranteed-steer check and nothing else.
 async fn held_steer_break(defects: Defects, because: &str) {
     let subject = FakeSubject::new(defects);
@@ -390,11 +391,62 @@ async fn a_steer_answered_after_the_held_turn_ends_fails_only_the_guaranteed_cas
 }
 
 #[tokio::test]
+async fn an_absent_final_held_turn_receipt_fails_only_the_guaranteed_case() {
+    held_steer_break(
+        Defects {
+            held_steer_final_absent: true,
+            ..Defects::default()
+        },
+        "omitted delivered on final re-send after the run ended",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_held_turn_receipt_changed_after_release_fails_only_the_guaranteed_case() {
+    held_steer_break(
+        Defects {
+            held_steer_after_release_unstable: true,
+            ..Defects::default()
+        },
+        "final re-send delivered changed",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn a_guaranteed_runner_with_an_absent_first_steer_receipt_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.omit_first_steer_receipt = true;
     let report = run(&subject).await;
     assert_others_passed(&report, &[]);
+}
+
+#[tokio::test]
+async fn a_guaranteed_runner_defers_held_turn_receipts_until_release() {
+    let subject = FakeSubject::new(Defects::default());
+    let report = run(&subject).await;
+    assert_others_passed(&report, &[]);
+    let receipts = subject.held_steer_receipts();
+    assert_eq!(receipts.len(), 3);
+    assert_eq!(&receipts[..2], &[None, None]);
+    assert!(receipts[2].as_ref().unwrap().is_delivered());
+}
+
+#[tokio::test]
+async fn a_guaranteed_runner_preserves_optional_early_receipts_and_opaque_step_refs() {
+    for receipt in [
+        Delivered::new(delivered_as::STEP),
+        Delivered::new(delivered_as::STEP).with_ref("opaque-stored-row-not-a-mid"),
+        Delivered::new(delivered_as::TURN),
+        Delivered::new(delivered_as::TURN).with_ref("run-1"),
+    ] {
+        let mut subject = FakeSubject::new(Defects::default());
+        subject.early_held_steer_receipt = Some(receipt.clone());
+        let report = run(&subject).await;
+        assert_others_passed(&report, &[]);
+        assert_eq!(subject.held_steer_receipts(), vec![Some(receipt); 3]);
+    }
 }
 
 #[tokio::test]

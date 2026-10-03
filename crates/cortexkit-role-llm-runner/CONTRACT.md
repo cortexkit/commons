@@ -404,8 +404,9 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
     unknown string survives as itself and does not fail the decode;
   - `ref` is an opaque string: a stored row id, or the run id when `as` is
     `turn`;
-  - it is set on a re-send of the same `send_id` (the existing idempotent path),
-    and may be set on the first reply;
+  - it is set on a re-send of the same `send_id` once the steer is delivered
+    or known `unknown`, and may be set on the first reply; on a `guaranteed`
+    runner it may be absent until the steer is rendered;
   - `step` / `turn`: delivered;
   - `pending`: accepted, not yet delivered, still deliverable;
   - `unknown`: accepted, but delivery cannot be confirmed; the owner records
