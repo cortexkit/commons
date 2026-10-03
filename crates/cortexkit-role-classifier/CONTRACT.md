@@ -334,9 +334,12 @@ compatible" (`provider` module).
   <https://developers.cloudflare.com/workers-ai/models/clef/>
 - Cloudflare Workers AI, errors:
   <https://developers.cloudflare.com/workers-ai/platform/errors/>
-- TypeSafe, classification endpoint: `POST
-  https://api.typesafe.ai/v1/systemone` (`jev-latest`), as documented by
-  TypeSafe at <https://api.typesafe.ai>.
+- Cloudflare Workers AI, clef-flash model page:
+  <https://developers.cloudflare.com/workers-ai/models/clef-flash/>
+- TypeSafe, Jev API reference (request and answer shapes, `jev-latest`):
+  <https://jevtypesafeai.com/docs>; the endpoint is `POST
+  https://api.typesafe.ai/v1/systemone`
+  (<https://www.jevtypesafeai.com/how-to-use>).
 
 `tests/vectors/provider-examples.json` holds the providers' examples
 verbatim.
