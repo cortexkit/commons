@@ -4,7 +4,7 @@
 //! one hosted classifier model for each item, and returns the provider's
 //! answers untouched. It claims the role by listing [`PROVIDES`] in its
 //! manifest's `capabilities.provides` and answers every op in
-//! [`REQUIRED_OPS`]. BROCA owns the role.
+//! [`REQUIRED_OPS`].
 //!
 //! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document:
 //! it marks every rule pinned, and says where each provider shape comes

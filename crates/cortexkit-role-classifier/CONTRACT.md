@@ -1,13 +1,13 @@
 # `classifier/v1`: role contract (draft)
 
-Owner: **BROCA**. Stability: **alpha, draft**. Nothing ships against it until
-ALF and Ufuk approve it. This document is the role definition; the Rust types
+Stability: **alpha, draft**. Nothing ships against it until the role's owner
+and its consumers approve it. This document is the role definition; the Rust types
 in this crate are its wire shapes, `tests/vectors/` holds its vectors, and
 the sibling `cortexkit-role-classifier-conformance` crate holds its suite
 (§11).
 
-It is written from BROCA's draft (`classifier-v1-contract.md`) and BROCA's
-rulings on the points the draft left open (stored errors on a re-send, the
+It is written from the role owner's draft and the owner's rulings on the
+points that draft left open (stored errors on a re-send, the
 batch spend ceiling, concurrent calls, the meaning of `noul`, the type of
 `state`, and truncation). The provider shapes are from the providers'
 documentation (§10).
