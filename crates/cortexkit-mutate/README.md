@@ -220,8 +220,9 @@ succeed. Only the first two count as catches:
 | UNREACHABLE | Explicitly recorded with a reason explaining why no production caller exists. Listed separately, never counted as caught. |
 | ERROR | Invalid/incomplete runner output, interruption, or restoration/lockfile integrity error. |
 
-**Current policy:** CAUGHT_BROADLY warns, succeeds, and still records a proof;
-it will become a failure once catalogues are cleaned. There is no numeric
+**Current policy:** CAUGHT_BROADLY warns, succeeds, and still records a proof.
+A later release will make it a failing outcome, after the catalogues that use
+this runner have rewritten or dispositioned their broad rows. There is no numeric
 threshold or configuration knob. Collateral confined to the expected tests'
 target(s) is reported without changing CAUGHT. `only = true` still rejects any
 extra red test as WRONG_TEST before broad-catch grading, including in `--broad`.

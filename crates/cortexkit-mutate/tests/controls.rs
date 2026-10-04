@@ -1075,8 +1075,8 @@ fn prove_call_site_removal_prints_no_call_site_hint() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    // The row itself removes the call site, so `prove` has nothing to add: its
-    // stdout is the report line alone, with no call-site hint of any wording.
+    // The mutation itself removes the call site, so `prove` has no call-site
+    // hint to print: its stdout must be the report line and nothing else.
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         "caller-reaches-guard: CAUGHT (breadth not observed; use run --broad to audit)\n"
