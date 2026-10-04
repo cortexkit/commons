@@ -475,6 +475,9 @@ pub struct Report {
     pub red: Vec<String>,
     pub green: Vec<String>,
     pub collateral: Collateral,
+    /// True only after an opt-in broad audit produced complete test results.
+    /// A normal replay reports collateral but does not observe package breadth.
+    pub breadth_observed: bool,
     pub build_ms: u128,
     pub test_ms: u128,
     pub build_tail: String,
@@ -493,6 +496,7 @@ impl Report {
                 count: 0,
                 targets: vec![],
             },
+            breadth_observed: false,
             build_ms: 0,
             test_ms: 0,
             build_tail: String::new(),
@@ -520,6 +524,9 @@ struct Output {
 enum Scope {
     /// The row's package and target selector, graded against `expect_red`.
     Row,
+    /// Opt-in audit: all package test targets plus the row's explicit targets,
+    /// graded against `expect_red`, including cross-target collateral.
+    Broad,
     /// The row's whole package without target selection, graded against
     /// `expect_red` (the second replay `prove` makes for a survivor).
     Package,
@@ -540,6 +547,16 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
         Scope::Row => {
             cmd.args(["-p", &c.package]);
             cmd.args(c.targets()?);
+        }
+        Scope::Broad => {
+            cmd.args(["-p", &c.package]);
+            let targets = c.targets()?;
+            // Keep explicitly selected examples or benches too: their expected
+            // tests need not be included by Cargo's `--tests` selector.
+            if !targets.contains(&"--tests") {
+                cmd.arg("--tests");
+            }
+            cmd.args(targets);
         }
         Scope::Package | Scope::Explore { workspace: false } => {
             cmd.args(["-p", &c.package]);
@@ -888,6 +905,17 @@ pub fn run_row(
     replay(root, c, allow_dirty, stop, scope)
 }
 
+/// Audit one catalogue row across every test target in its package, retaining
+/// any explicitly selected targets. Only this opt-in replay grades broad catches.
+pub fn run_broad_row(
+    root: &Path,
+    c: &Control,
+    allow_dirty: bool,
+    stop: &AtomicBool,
+) -> Result<Report> {
+    replay(root, c, allow_dirty, stop, Scope::Broad)
+}
+
 /// Apply one mutant and run every test in its package (or the workspace),
 /// reporting which tests went red. `c.expect_red` and `c.target` are ignored.
 /// A thin entry point to the same `replay` path `run_row` uses.
@@ -979,11 +1007,12 @@ fn replay(
             // Explore has no expected tests: every red name becomes expect_red
             // when recorded, so none is collateral to that discovery.
             Scope::Explore { .. } => explore_grade(&results.red, &results.green),
-            Scope::Row | Scope::Package => {
+            Scope::Row | Scope::Package | Scope::Broad => {
                 let (extra, broad) = collateral(c, &results)?;
                 report.collateral = extra;
+                report.breadth_observed = scope == Scope::Broad;
                 let outcome = grade(c, &results.red, &results.green);
-                if outcome == Outcome::Caught && broad {
+                if outcome == Outcome::Caught && broad && report.breadth_observed {
                     Outcome::CaughtBroadly
                 } else {
                     outcome
@@ -1410,6 +1439,39 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
         green: green.into_iter().collect(),
         targets,
     })
+}
+
+#[cfg(test)]
+mod broad_command_tests {
+    use super::*;
+
+    #[test]
+    fn broad_commands_select_package_tests_and_preserve_explicit_targets() {
+        let mut c =
+            toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
+                .unwrap()
+                .control
+                .remove(0);
+        for runner in ["cargo", "nextest"] {
+            c.runner = runner.into();
+            for target in ["--lib", "--tests", "--example contract", "--bench contract"] {
+                c.target = target.into();
+                // Both the separate build and execution must select all test
+                // targets, rather than compile them and then run only the row.
+                for mode in ["build", "run"] {
+                    let cmd = command(&c, mode, Scope::Broad).unwrap();
+                    let args: Vec<_> = cmd.get_args().map(|s| s.to_str().unwrap()).collect();
+                    assert!(args.windows(2).any(|w| w == ["-p", "mutation-fixture"]));
+                    assert_eq!(args.iter().filter(|a| **a == "--tests").count(), 1);
+                    let targets = c.targets().unwrap();
+                    assert!(args.windows(targets.len()).any(|w| w == targets));
+                }
+            }
+            c.target = "--lib".into();
+            let row = command(&c, "build", Scope::Row).unwrap();
+            assert!(!row.get_args().any(|a| a == "--tests"));
+        }
+    }
 }
 
 #[cfg(test)]

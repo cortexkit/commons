@@ -29,6 +29,9 @@ enum Action {
         shard: Option<String>,
         #[arg(long)]
         only: Option<String>,
+        /// Expensive audit: run every package test target and grade broad catches.
+        #[arg(long)]
+        broad: bool,
         #[arg(long)]
         allow_dirty: bool,
         #[arg(long)]
@@ -119,7 +122,7 @@ struct Proof {
 fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
     for row in rows {
         println!(
-            "{}: {}{}{}",
+            "{}: {}{}{}{}",
             row.id,
             serde_json::to_value(&row.outcome)
                 .map_err(|e| e.to_string())?
@@ -141,7 +144,12 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
             },
             row.reason
                 .as_ref()
-                .map_or(String::new(), |r| format!(" ({r})"))
+                .map_or(String::new(), |r| format!(" ({r})")),
+            if row.outcome.is_caught() && !row.breadth_observed {
+                " (breadth not observed; use run --broad to audit)"
+            } else {
+                ""
+            }
         );
     }
     let broad = rows
@@ -198,6 +206,7 @@ fn run() -> Result<bool> {
             diff,
             shard,
             only,
+            broad,
             allow_dirty,
             report,
         } => {
@@ -253,7 +262,11 @@ fn run() -> Result<bool> {
             // lands in its sorted-ID slot, so output order never depends on it.
             let mut slots: Vec<Option<Report>> = shard.iter().map(|_| None).collect();
             for i in execution_order(&shard) {
-                slots[i] = Some(run_row(&root, shard[i], allow_dirty, &stop, false)?);
+                slots[i] = Some(if broad {
+                    run_broad_row(&root, shard[i], allow_dirty, &stop)?
+                } else {
+                    run_row(&root, shard[i], allow_dirty, &stop, false)?
+                });
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }

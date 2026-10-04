@@ -180,9 +180,7 @@ fn caught_all_failed_is_not_empty_and_restores() {
     assert!(!r.red.contains(&"result:".into()));
 }
 
-#[test]
-fn collateral_different_target_warns_and_records_broad_proof() {
-    let f = Fixture::new();
+fn add_collateral_targets(f: &Fixture) {
     fs::create_dir(f.root().join("tests")).unwrap();
     for (target, tests) in [("capacity", 2), ("readers", 1)] {
         let source: String = (0..tests)
@@ -196,6 +194,153 @@ fn collateral_different_target_warns_and_records_broad_proof() {
     }
     cmd(f.root(), "git", &["add", "tests"]);
     f.commit();
+}
+
+fn collateral_run_fixture(target: &str, runner: &str) -> Fixture {
+    let f = Fixture::new();
+    add_collateral_targets(&f);
+    let mut c = f.control();
+    c.target = target.into();
+    c.runner = runner.into();
+    c.only = false;
+    c.new = Some("{ panic!(\"mutated\") }".into());
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    f
+}
+
+fn collateral_cli(f: &Fixture, broad: bool) -> (serde_json::Value, String) {
+    let mut args = vec!["run", "--all", "--report", "collateral.json"];
+    if broad {
+        args.push("--broad");
+    }
+    let out = f.cli(&args);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(f.root().join("src/lib.rs")).unwrap(),
+        include_str!("fixture/src/lib.rs")
+    );
+    assert!(git(f.root(), &["diff", "--exit-code"]).unwrap().is_empty());
+    (report_json(f, "collateral.json"), stdout)
+}
+
+#[test]
+fn breadth_cross_target_catch_is_caught_broadly() {
+    let f = collateral_run_fixture("--lib", "cargo");
+    let (rows, stdout) = collateral_cli(&f, true);
+    assert_eq!(rows[0]["outcome"], "CAUGHT_BROADLY");
+    assert_eq!(rows[0]["breadth_observed"], true);
+    assert_eq!(rows[0]["collateral"]["count"], 4);
+    assert_eq!(
+        rows[0]["collateral"]["targets"].as_array().unwrap().len(),
+        3
+    );
+    assert_eq!(
+        rows[0]["red"],
+        serde_json::json!([
+            "capacity_0",
+            "capacity_1",
+            "readers_0",
+            "tests::guard_accepts_positive",
+            "tests::guard_rejects_zero"
+        ])
+    );
+    assert!(
+        stdout.contains("guard: CAUGHT_BROADLY (warning; collateral: 4"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 CAUGHT_BROADLY (warning)"), "{stdout}");
+    assert!(!stdout.contains("breadth not observed"), "{stdout}");
+}
+
+#[test]
+fn breadth_normal_cross_target_proof_is_caught_without_observation() {
+    let f = collateral_run_fixture("--lib", "cargo");
+    let (rows, stdout) = collateral_cli(&f, false);
+    assert_eq!(rows[0]["outcome"], "CAUGHT");
+    assert_eq!(rows[0]["breadth_observed"], false);
+    assert_eq!(rows[0]["collateral"]["count"], 1);
+    assert_eq!(
+        rows[0]["collateral"]["targets"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        rows[0]["red"],
+        serde_json::json!(["tests::guard_accepts_positive", "tests::guard_rejects_zero"])
+    );
+    assert!(stdout.contains("breadth not observed"), "{stdout}");
+    assert!(!stdout.contains("CAUGHT_BROADLY"), "{stdout}");
+
+    // Even a normal selector that covers multiple binaries has not opted in to
+    // the breadth audit. Its collateral is evidence, not a broad-catch grade.
+    let f = collateral_run_fixture("--tests", "cargo");
+    let (rows, _) = collateral_cli(&f, false);
+    assert_eq!(rows[0]["outcome"], "CAUGHT");
+    assert_eq!(rows[0]["breadth_observed"], false);
+    assert_eq!(rows[0]["collateral"]["count"], 4);
+}
+
+#[test]
+fn breadth_same_target_collateral_is_caught() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.only = false;
+    c.new = Some("{ panic!(\"mutated\") }".into());
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    let (rows, stdout) = collateral_cli(&f, true);
+    assert_eq!(rows[0]["outcome"], "CAUGHT");
+    assert_eq!(rows[0]["breadth_observed"], true);
+    assert_eq!(rows[0]["collateral"]["count"], 1);
+    assert_eq!(
+        rows[0]["collateral"]["targets"].as_array().unwrap().len(),
+        1
+    );
+    assert!(!stdout.contains("CAUGHT_BROADLY"), "{stdout}");
+}
+
+#[test]
+fn nextest_broad_replay_observes_cross_target_collateral_when_installed() {
+    let installed = Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !installed {
+        assert!(
+            std::env::var_os("CK_MUTATE_REQUIRE_NEXTEST").is_none(),
+            "CI must install nextest"
+        );
+        eprintln!("nextest unavailable: skipping actual nextest broad replay");
+        return;
+    }
+    let f = collateral_run_fixture("--lib", "nextest");
+    let (rows, _) = collateral_cli(&f, true);
+    assert_eq!(rows[0]["outcome"], "CAUGHT_BROADLY");
+    assert_eq!(rows[0]["breadth_observed"], true);
+    assert_eq!(rows[0]["collateral"]["count"], 4);
+    assert_eq!(
+        rows[0]["collateral"]["targets"].as_array().unwrap().len(),
+        3
+    );
+}
+
+#[test]
+fn prove_reports_cross_target_collateral_without_broad_grading() {
+    let f = Fixture::new();
+    add_collateral_targets(&f);
     let out = f.cli(&[
         "prove",
         "--id",
@@ -224,7 +369,8 @@ fn collateral_different_target_warns_and_records_broad_proof() {
         String::from_utf8_lossy(&out.stderr)
     );
     let rows = report_json(&f, "broad.json");
-    assert_eq!(rows[0]["outcome"], "CAUGHT_BROADLY");
+    assert_eq!(rows[0]["outcome"], "CAUGHT");
+    assert_eq!(rows[0]["breadth_observed"], false);
     assert_eq!(rows[0]["collateral"]["count"], 4);
     let targets: Vec<_> = rows[0]["collateral"]["targets"]
         .as_array()
@@ -237,18 +383,20 @@ fn collateral_different_target_warns_and_records_broad_proof() {
     assert!(targets[1].starts_with("mutation_fixture-"), "{targets:?}");
     assert!(targets[2].starts_with("readers-"), "{targets:?}");
     assert!(
-        stdout.contains("broad: CAUGHT_BROADLY (warning; collateral: 4 tests in targets:"),
+        stdout.contains("broad: CAUGHT (collateral: 4 tests in targets:"),
         "{stdout}"
     );
-    assert!(stdout.contains("1 CAUGHT_BROADLY (warning)"), "{stdout}");
+    assert!(stdout.contains("breadth not observed"), "{stdout}");
+    assert!(!stdout.contains("CAUGHT_BROADLY"), "{stdout}");
     let catalogue = load(&f.root().join("mutations.toml")).unwrap();
     let control = catalogue
         .control
         .iter()
         .find(|c| c.id == "broad")
-        .expect("warning still records the proof");
+        .expect("collateral still records the proof");
     let row = f.run(control);
-    assert_eq!(row.outcome, Outcome::CaughtBroadly);
+    assert_eq!(row.outcome, Outcome::Caught);
+    assert!(!row.breadth_observed);
     assert!(row.passes());
     assert!(row.outcome.is_caught());
     assert_eq!(
@@ -869,7 +1017,8 @@ fn run_reports_in_sorted_id_order_whatever_the_execution_order() {
     );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "a-other: CAUGHT\nguard: CAUGHT\n"
+        "a-other: CAUGHT (breadth not observed; use run --broad to audit)\n\
+         guard: CAUGHT (breadth not observed; use run --broad to audit)\n"
     );
     let json = report_json(&f, "order.json");
     assert_eq!(json[0]["id"], "a-other");
@@ -927,10 +1076,10 @@ fn prove_call_site_removal_prints_no_call_site_hint() {
         String::from_utf8_lossy(&out.stderr)
     );
     // The row itself removes the call site, so `prove` has nothing to add: its
-    // stdout is the report line alone, with no hint of any wording.
+    // stdout is the report line alone, with no call-site hint of any wording.
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "caller-reaches-guard: CAUGHT\n"
+        "caller-reaches-guard: CAUGHT (breadth not observed; use run --broad to audit)\n"
     );
     assert_eq!(
         load(&f.root().join("mutations.toml"))
@@ -1517,7 +1666,7 @@ fn explore_edits_accept_toml_and_json() {
 /// `explore` and `run` must not grow separate mutation paths. The library makes
 /// this structural: `Saved` (target and Cargo.lock bytes), `execute` (the
 /// build/test child) and `command` are private, and the only public functions
-/// reaching them are `run_row` and `explore_row`, each a one-line call into the
+/// reaching them are the row replay entry points, each a thin call into the
 /// private `replay`. This test pins that shape in the source, then checks both
 /// entry points produce identical per-test results for one mutant.
 #[test]
@@ -1546,7 +1695,11 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         assert_eq!(lib.matches(needle).count(), 1, "{needle} must occur once");
         assert!(replay.contains(needle), "{needle} must live in replay");
     }
-    for entry in ["pub fn run_row(", "pub fn explore_row("] {
+    for entry in [
+        "pub fn run_row(",
+        "pub fn run_broad_row(",
+        "pub fn explore_row(",
+    ] {
         let entry_body = body(lib, entry);
         assert!(
             entry_body.contains("replay(root, c, allow_dirty, stop, "),

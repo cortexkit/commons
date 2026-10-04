@@ -87,12 +87,26 @@ ck-mutate check
 ck-mutate --catalogue other.toml run --all --report mutations.json
 ck-mutate run --diff origin/master --report mutations.json
 ck-mutate run --all --shard 1/4
+ck-mutate run --all --broad --report nightly-audit.json
 ck-mutate run --only flow-list-agent-sees-only-own
 ```
 
 `check` validates fields, files, anchors, and `expect_red` names via
 `cargo test ... -- --list` or nextest's JSON list mode. It makes no source edit;
 list mode may compile test binaries. Missing full names are reported explicitly.
+
+`run --broad` is the **expensive audit pass**, intended for nightly or on-demand
+use. Each mutant runs every test target of its row's package (`-p PACKAGE --tests`,
+or the nextest equivalent), not the workspace. Explicit row targets are retained
+as well, so selected examples or benches still run. The separate build uses the
+same widened selection. It works with `--all`, `--diff`, `--only`, and sharding.
+Only this opt-in pass grades CAUGHT_BROADLY from cross-target collateral.
+
+Normal runs keep the row's original target selection and cost. They still report
+collateral in whichever targets ran, but never grade CAUGHT_BROADLY, even if the
+row itself selects multiple targets. Their report records `breadth_observed: false`
+and catches print "breadth not observed"; absence of a warning is not evidence
+that other package targets are unaffected.
 
 `run --diff <base>` compares **committed** `<base>` to `HEAD`. A source edit file,
 any `edits[].file`, `test_file`, or a changed/new catalogue row selects that row.
@@ -116,7 +130,8 @@ ck-mutate prove --id rejects-zero --guards 'zero is rejected' \
   --expect-red tests::rejects_zero --only --report proof.json
 ```
 
-`prove` appends a row on CAUGHT or CAUGHT_BROADLY. A SURVIVED replay is repeated without target
+`prove` appends a row on CAUGHT. It reports collateral but does not audit breadth;
+replay the recorded row with `run --broad` for that audit. A SURVIVED replay is repeated without target
 selection across the **whole package** (not the workspace). If broader tests
 fail, it diagnoses omitted covering tests; otherwise it cannot distinguish a
 real coverage gap from semantic equivalence and suggests inspecting the mutant
@@ -194,7 +209,7 @@ succeed. Only the first two count as catches:
 | Outcome | Meaning |
 | --- | --- |
 | CAUGHT | Every expected test failed; with `only`, no other test failed. |
-| CAUGHT_BROADLY | Every expected test failed, but a collateral red test belongs to a target outside all expected-test targets. A warning, not a failing row. |
+| CAUGHT_BROADLY | In a `run --broad` audit, every expected test failed, but a collateral red test belongs to a target outside all expected-test targets. A warning, not a failing row. |
 | SURVIVED | An expected test passed, with no unrelated failure. |
 | WRONG_TEST | An expected test passed while another failed, or `only` forbids an extra failure. |
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |
@@ -209,7 +224,7 @@ succeed. Only the first two count as catches:
 it will become a failure once catalogues are cleaned. There is no numeric
 threshold or configuration knob. Collateral confined to the expected tests'
 target(s) is reported without changing CAUGHT. `only = true` still rejects any
-extra red test as WRONG_TEST before broad-catch grading.
+extra red test as WRONG_TEST before broad-catch grading, including in `--broad`.
 
 The JSON array holds each ID, outcome, `timed_out_phase` (`"build"`, `"test"`,
 or null when the row did not time out), red and green full test names, build/test
@@ -217,6 +232,10 @@ milliseconds, reasons, and up to 8,000 characters of each output tail. Summary
 lines are uppercase outcomes. Exit status is nonzero on any failing row or hard
 preflight error. A dirty-target refusal is a preflight error (no mutation/report
 row); normal row failures are included in the report.
+
+Every row includes `breadth_observed`: true only when an opt-in broad audit
+finished and its complete per-test results were parsed. Normal replays, `prove`,
+`explore`, explicit dispositions, and incomplete audits report false.
 
 Every row also includes `collateral: { "count": N, "targets": [...] }`. For proof
 replays, it counts every red test not named in `expect_red` and lists their sorted,
@@ -230,7 +249,7 @@ Console output includes collateral on catches with extra reds, a warning summary
 for CAUGHT_BROADLY, and a separate list and count of UNREACHABLE rows.
 
 These formats have no explicit version field: 0.2 retains the unversioned TOML
-`[[control]]` schema and JSON array, adding `collateral` to report rows and the
+`[[control]]` schema and JSON array, adding `collateral` and `breadth_observed` to report rows and the
 optional `unreachable` reason to controls. Existing 0.1 catalogues/proofs remain
 readable unchanged. Older runners rejecting new `unreachable` rows is expected.
 
@@ -312,7 +331,7 @@ jobs:
       - if: github.event_name == 'pull_request'
         run: ck-mutate run --diff '${{ github.event.pull_request.base.sha }}' --shard ${{ matrix.shard }}/4 --report mutations.json
       - if: github.event_name == 'schedule'
-        run: ck-mutate run --all --shard ${{ matrix.shard }}/4 --report mutations.json
+        run: ck-mutate run --all --broad --shard ${{ matrix.shard }}/4 --report mutations.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
