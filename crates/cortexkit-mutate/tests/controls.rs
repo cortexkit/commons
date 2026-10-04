@@ -93,6 +93,7 @@ impl Fixture {
             expect_red: vec!["tests::guard_rejects_zero".into()],
             only: true,
             equivalent: None,
+            unreachable: None,
             timeout_s: 30,
             build_timeout_s: default_build_timeout(),
         }
@@ -177,6 +178,226 @@ fn caught_all_failed_is_not_empty_and_restores() {
     assert_eq!(r.outcome, Outcome::Caught);
     assert_eq!(r.red.len(), 2);
     assert!(!r.red.contains(&"result:".into()));
+}
+
+#[test]
+fn collateral_different_target_warns_and_records_broad_proof() {
+    let f = Fixture::new();
+    fs::create_dir(f.root().join("tests")).unwrap();
+    for (target, tests) in [("capacity", 2), ("readers", 1)] {
+        let source: String = (0..tests)
+            .map(|i| {
+                format!(
+                    "#[test]\nfn {target}_{i}() {{ assert!(!mutation_fixture::guarded(0)); }}\n"
+                )
+            })
+            .collect();
+        fs::write(f.root().join(format!("tests/{target}.rs")), source).unwrap();
+    }
+    cmd(f.root(), "git", &["add", "tests"]);
+    f.commit();
+    let out = f.cli(&[
+        "prove",
+        "--id",
+        "broad",
+        "--guards",
+        "zero is rejected",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "{ panic!(\"mutated\") }",
+        "--test-file",
+        "test_contract.rs",
+        "--package",
+        "mutation-fixture",
+        "--expect-red",
+        "tests::guard_rejects_zero",
+        "--report",
+        "broad.json",
+    ]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows = report_json(&f, "broad.json");
+    assert_eq!(rows[0]["outcome"], "CAUGHT_BROADLY");
+    assert_eq!(rows[0]["collateral"]["count"], 4);
+    let targets: Vec<_> = rows[0]["collateral"]["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(targets.len(), 3, "two capacity tests share a single target");
+    assert!(targets[0].starts_with("capacity-"), "{targets:?}");
+    assert!(targets[1].starts_with("mutation_fixture-"), "{targets:?}");
+    assert!(targets[2].starts_with("readers-"), "{targets:?}");
+    assert!(
+        stdout.contains("broad: CAUGHT_BROADLY (warning; collateral: 4 tests in targets:"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 CAUGHT_BROADLY (warning)"), "{stdout}");
+    let catalogue = load(&f.root().join("mutations.toml")).unwrap();
+    let control = catalogue
+        .control
+        .iter()
+        .find(|c| c.id == "broad")
+        .expect("warning still records the proof");
+    let row = f.run(control);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly);
+    assert!(row.passes());
+    assert!(row.outcome.is_caught());
+    assert_eq!(
+        fs::read_to_string(f.root().join("src/lib.rs")).unwrap(),
+        include_str!("fixture/src/lib.rs")
+    );
+}
+
+#[test]
+fn collateral_same_target_is_caught_with_count() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.only = false;
+    c.new = Some("{ panic!(\"mutated\") }".into());
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Caught);
+    assert_eq!(row.collateral.count, 1);
+    assert_eq!(row.collateral.targets.len(), 1);
+    assert!(row.collateral.targets[0].starts_with("mutation_fixture-"));
+    let json = serde_json::to_value(&row).unwrap();
+    assert_eq!(json["collateral"]["count"], 1);
+    assert_eq!(json["collateral"]["targets"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn collateral_none_reports_zero_and_empty_targets() {
+    let f = Fixture::new();
+    let row = f.run(&f.control());
+    assert_eq!(row.outcome, Outcome::Caught);
+    assert_eq!(row.collateral.count, 0);
+    assert!(row.collateral.targets.is_empty());
+    assert_eq!(
+        serde_json::to_value(&row).unwrap()["collateral"],
+        serde_json::json!({"count": 0, "targets": []})
+    );
+}
+
+#[test]
+fn unreachable_requires_reason_is_recorded_and_listed_separately() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.unreachable = Some(" \n".into());
+    assert!(validate(
+        f.root(),
+        &Catalogue {
+            control: vec![c.clone()]
+        }
+    )
+    .is_err());
+    assert!(
+        explore_row(f.root(), &c, false, &AtomicBool::new(false), false)
+            .unwrap_err()
+            .contains("non-empty reason")
+    );
+    let reason = "guarded has no production caller; its only references are unit tests";
+    c.unreachable = Some(reason.into());
+    validate(
+        f.root(),
+        &Catalogue {
+            control: vec![c.clone()],
+        },
+    )
+    .unwrap();
+    for row in [f.run(&c), f.explore(&c, false)] {
+        assert_eq!(row.outcome, Outcome::Unreachable);
+        assert!(
+            !row.outcome.is_caught(),
+            "UNREACHABLE is not proof of a catch"
+        );
+        assert!(row.passes(), "a justified recorded disposition succeeds");
+        assert_eq!(row.reason.as_deref(), Some(reason));
+        assert!(row.red.is_empty() && row.green.is_empty());
+        assert_eq!(row.build_ms, 0);
+        assert_eq!(row.test_ms, 0);
+    }
+    c.equivalent = Some("redundant condition".into());
+    assert!(validate(f.root(), &Catalogue { control: vec![c] }).is_err());
+    let out = f.cli(&explore_args(
+        "value > 0",
+        "value >= 0",
+        &[
+            "--unreachable",
+            reason,
+            "--append",
+            "--id",
+            "dead-guard",
+            "--guards",
+            "zero rejected",
+            "--test-file",
+            "src/lib.rs",
+            "--report",
+            "unreachable.json",
+        ],
+    ));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("0 CAUGHT, 0 CAUGHT_BROADLY (warning), 0 EQUIVALENT, 1 UNREACHABLE"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("UNREACHABLE rows (1):\n  dead-guard: {reason}")),
+        "{stdout}"
+    );
+    let rows = report_json(&f, "unreachable.json");
+    assert_eq!(rows[0]["outcome"], "UNREACHABLE");
+    assert_eq!(rows[0]["reason"], reason);
+    let catalogue = load(&f.root().join("mutations.toml")).unwrap();
+    let appended = catalogue
+        .control
+        .iter()
+        .find(|c| c.id == "dead-guard")
+        .unwrap();
+    assert_eq!(appended.unreachable.as_deref(), Some(reason));
+    assert!(appended.expect_red.is_empty());
+    assert!(f.cli(&["check"]).status.success());
+    let run = f.cli(&["run", "--only", "dead-guard"]);
+    assert!(run.status.success());
+    assert!(String::from_utf8_lossy(&run.stdout).contains("UNREACHABLE rows (1):\n  dead-guard:"));
+}
+
+#[test]
+fn previous_format_catalogue_proof_remains_readable() {
+    let f = Fixture::new();
+    fs::write(
+        f.root().join("mutations.toml"),
+        include_str!("fixture/mutations-v0.1.toml"),
+    )
+    .unwrap();
+    let catalogue = load(&f.root().join("mutations.toml"))
+        .expect("unversioned 0.1 proof catalogue must still load");
+    validate(f.root(), &catalogue).unwrap();
+    assert_eq!(catalogue.control.len(), 1);
+    let c = &catalogue.control[0];
+    assert!(c.unreachable.is_none());
+    assert!(c.equivalent.is_none());
+    assert_eq!(c.timeout_s, 600);
+    assert_eq!(c.build_timeout_s, 1800);
+    assert_eq!(f.run(c).outcome, Outcome::Caught);
+    let mut next = c.clone();
+    next.id = "new-proof".into();
+    append_control(&f.root().join("mutations.toml"), &next).unwrap();
+    let reloaded = load(&f.root().join("mutations.toml")).unwrap();
+    assert_eq!(reloaded.control.len(), 2);
+    assert_eq!(reloaded.control[0], *c);
 }
 #[test]
 fn survived_vacuous_test_restores() {
@@ -1320,7 +1541,7 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "replaced(root, &edits)",
         "command(c, \"build\", scope)",
         "command(c, \"run\", scope)",
-        "parse_tests(&tests.text",
+        "parse_test_results(&tests.text",
     ] {
         assert_eq!(lib.matches(needle).count(), 1, "{needle} must occur once");
         assert!(replay.contains(needle), "{needle} must live in replay");

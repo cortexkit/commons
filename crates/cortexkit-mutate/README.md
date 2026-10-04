@@ -30,6 +30,7 @@ only = true
 # timeout_s = 600
 # build_timeout_s = 1800
 # equivalent = "Explain why this mutant computes exactly the same result"
+# unreachable = "Explain why the mutated code has no production caller"
 ```
 
 The two deadlines are separate. `timeout_s` (default 600) bounds only the test
@@ -45,6 +46,13 @@ to all package tests; it is a whitespace-separated Cargo target selector, not
 shell syntax or an arbitrary command/name filter. Selectors include `--lib`,
 `--test name`, `--bin name`, `--example name`, `--bench name`, `--tests`, `--bins`,
 `--examples`, and `--all-targets`. Quoted paths and shell expansion are not supported.
+
+`equivalent` and `unreachable` are mutually exclusive recorded dispositions,
+not runner detections. Each takes a non-empty reason string. An `unreachable`
+reason must explain why no production caller exists (for example, all references
+are unit tests); the runner does not infer dead code or verify a call graph.
+UNREACHABLE rows may use `expect_red = []`: no guarding tests are claimed.
+Their other row fields and edit anchors are still validated by `check`.
 
 For a multi-file break, use `edits` **instead of** `file`/`old`/`new`:
 
@@ -108,7 +116,7 @@ ck-mutate prove --id rejects-zero --guards 'zero is rejected' \
   --expect-red tests::rejects_zero --only --report proof.json
 ```
 
-`prove` appends a row only on CAUGHT. A SURVIVED replay is repeated without target
+`prove` appends a row on CAUGHT or CAUGHT_BROADLY. A SURVIVED replay is repeated without target
 selection across the **whole package** (not the workspace). If broader tests
 fail, it diagnoses omitted covering tests; otherwise it cannot distinguish a
 real coverage gap from semantic equivalence and suggests inspecting the mutant
@@ -127,6 +135,10 @@ ck-mutate explore --package my-package --workspace --edits edits.toml
 ck-mutate explore --package my-package --file src/lib.rs \
   --old 'value > 0' --new 'value >= 0' \
   --append --id rejects-zero --guards 'zero is rejected' --test-file src/lib.rs
+ck-mutate explore --package my-package --file src/lib.rs \
+  --old 'value > 0' --new 'value >= 0' \
+  --unreachable 'This helper is referenced only by unit tests; no production caller exists' \
+  --append --id unused-guard --guards 'zero is rejected' --test-file src/lib.rs
 ```
 
 Use `prove` when you already know which test should catch a mutant: it runs
@@ -144,8 +156,9 @@ per-test results, never the command's exit status:
 | CAUGHT | At least one test went red. Every red test is listed by exact full name. |
 | SURVIVED | Tests ran and none went red. Prints the survivor diagnosis below. |
 | NO_TESTS_RAN | Passed plus failed is zero. |
+| UNREACHABLE | A person supplied `--unreachable REASON`; records the reason without executing a mutant. Not a catch. |
 
-Explore exits 0 only on CAUGHT, 1 on any other outcome, and 2 on a preflight
+Explore exits 0 on CAUGHT or a reasoned UNREACHABLE, 1 on other outcomes, and 2 on a preflight
 error such as a dirty target.
 
 ANCHOR_MISSING, DID_NOT_COMPILE, TIMED_OUT and ERROR mean exactly what they mean
@@ -164,21 +177,24 @@ holding it (relative to the Git root, like `--catalogue`). `--report` writes the
 across test binaries fail closed as ERROR, as they do for `run`. That happens more
 often with `--workspace`.
 
-`--append` requires `--id`, `--guards` and `--test-file`, and acts only on
-CAUGHT. It checks the id, guards and test file before the run. After a catch it
+`--append` requires `--id`, `--guards` and `--test-file`, and acts on
+CAUGHT or an explicitly assigned UNREACHABLE disposition. It checks the id, guards and test file before the run. After a catch it
 builds a row for the whole package (no `target`, `only = false`) that names every
 red test as `expect_red`. It validates that row with `check` and then appends it
-with the same writer `prove` uses. On any other outcome nothing is appended. With
+with the same writer `prove` uses. UNREACHABLE appends its reason and an empty
+`expect_red`; no test run occurs. On other outcomes nothing is appended. With
 `--workspace`, red tests outside `--package` cannot be named in the row: `check`
 rejects it and nothing is written.
 
 ## Outcomes and evidence
 
-Only CAUGHT or an explicitly skipped EQUIVALENT row succeeds:
+CAUGHT, CAUGHT_BROADLY, and explicitly recorded EQUIVALENT or UNREACHABLE rows
+succeed. Only the first two count as catches:
 
 | Outcome | Meaning |
 | --- | --- |
 | CAUGHT | Every expected test failed; with `only`, no other test failed. |
+| CAUGHT_BROADLY | Every expected test failed, but a collateral red test belongs to a target outside all expected-test targets. A warning, not a failing row. |
 | SURVIVED | An expected test passed, with no unrelated failure. |
 | WRONG_TEST | An expected test passed while another failed, or `only` forbids an extra failure. |
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |
@@ -186,7 +202,14 @@ Only CAUGHT or an explicitly skipped EQUIVALENT row succeeds:
 | DID_NOT_COMPILE | The separate build command exited nonzero. |
 | TIMED_OUT | The build exceeded `build_timeout_s`, or the test run exceeded `timeout_s`. `timed_out_phase` is `"build"` or `"test"`, and the reason names the deadline. |
 | EQUIVALENT | Explicitly skipped with the catalogue's reason. |
+| UNREACHABLE | Explicitly recorded with a reason explaining why no production caller exists. Listed separately, never counted as caught. |
 | ERROR | Invalid/incomplete runner output, interruption, or restoration/lockfile integrity error. |
+
+**Current policy:** CAUGHT_BROADLY warns, succeeds, and still records a proof;
+it will become a failure once catalogues are cleaned. There is no numeric
+threshold or configuration knob. Collateral confined to the expected tests'
+target(s) is reported without changing CAUGHT. `only = true` still rejects any
+extra red test as WRONG_TEST before broad-catch grading.
 
 The JSON array holds each ID, outcome, `timed_out_phase` (`"build"`, `"test"`,
 or null when the row did not time out), red and green full test names, build/test
@@ -194,6 +217,22 @@ milliseconds, reasons, and up to 8,000 characters of each output tail. Summary
 lines are uppercase outcomes. Exit status is nonzero on any failing row or hard
 preflight error. A dirty-target refusal is a preflight error (no mutation/report
 row); normal row failures are included in the report.
+
+Every row also includes `collateral: { "count": N, "targets": [...] }`. For proof
+replays, it counts every red test not named in `expect_red` and lists their sorted,
+de-duplicated targets, including same-target failures. With no collateral it is
+`{ "count": 0, "targets": [] }`. Explore discovers its expected names from all
+red tests, so its collateral is empty. Cargo target identities are executable
+file names from `Running ... (<binary>)` headers (including Cargo's hash suffix);
+doctests use `doc:<crate>`. Human nextest uses its binary token; JSON nextest uses
+the `crate::binary` prefix. Attribution is retained by the same per-test parser.
+Console output includes collateral on catches with extra reds, a warning summary
+for CAUGHT_BROADLY, and a separate list and count of UNREACHABLE rows.
+
+These formats have no explicit version field: 0.2 retains the unversioned TOML
+`[[control]]` schema and JSON array, adding `collateral` to report rows and the
+optional `unreachable` reason to controls. Existing 0.1 catalogues/proofs remain
+readable unchanged. Older runners rejecting new `unreachable` rows is expected.
 
 Builds are separate: Cargo uses `cargo test -p PACKAGE TARGET --no-run --locked`;
 nextest uses `cargo nextest run ... --no-run --locked`. Only build exit status

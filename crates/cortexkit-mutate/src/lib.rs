@@ -44,6 +44,8 @@ pub struct Control {
     #[serde(default)]
     pub only: bool,
     pub equivalent: Option<String>,
+    /// A person's explanation of why the mutated code has no production caller.
+    pub unreachable: Option<String>,
     /// Bounds the test run only; the build has its own deadline below.
     #[serde(default = "default_timeout")]
     pub timeout_s: u64,
@@ -61,6 +63,34 @@ pub fn default_build_timeout() -> u64 {
 }
 
 impl Control {
+    fn recorded_disposition(&self) -> Result<Option<(Outcome, &str)>> {
+        if self.equivalent.is_some() && self.unreachable.is_some() {
+            return Err(format!(
+                "{}: equivalent and unreachable are exclusive",
+                self.id
+            ));
+        }
+        let disposition = self
+            .equivalent
+            .as_deref()
+            .map(|r| (Outcome::Equivalent, r))
+            .or_else(|| {
+                self.unreachable
+                    .as_deref()
+                    .map(|r| (Outcome::Unreachable, r))
+            });
+        if disposition
+            .as_ref()
+            .is_some_and(|(_, reason)| reason.trim().is_empty())
+        {
+            return Err(format!(
+                "{}: recorded disposition requires a non-empty reason",
+                self.id
+            ));
+        }
+        Ok(disposition)
+    }
+
     pub fn edits(&self) -> Result<Vec<Edit>> {
         match (&self.file, &self.old, &self.new, self.edits.is_empty()) {
             (Some(file), Some(old), Some(new), true) => Ok(vec![Edit {
@@ -155,7 +185,7 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
             return Err(format!("invalid or duplicate id: {}", c.id));
         }
         if c.guards.trim().is_empty()
-            || c.expect_red.is_empty()
+            || (c.expect_red.is_empty() && c.unreachable.is_none())
             || c.expect_red.iter().any(|n| n.trim().is_empty())
             || c.equivalent.as_ref().is_some_and(|s| s.trim().is_empty())
         {
@@ -172,6 +202,7 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
 /// Catalogue validation and `explore` share it; `explore` has no catalogue
 /// fields (id, guards, test file, expected names) until it appends a row.
 pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
+    c.recorded_disposition()?;
     if c.package.trim().is_empty()
         || !matches!(c.runner.as_str(), "cargo" | "nextest")
         || c.timeout_s == 0
@@ -403,6 +434,7 @@ fn replaced(root: &Path, edits: &[Edit]) -> Result<BTreeMap<PathBuf, String>> {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Outcome {
     Caught,
+    CaughtBroadly,
     Survived,
     WrongTest,
     NoTestsRan,
@@ -410,7 +442,13 @@ pub enum Outcome {
     DidNotCompile,
     TimedOut,
     Equivalent,
+    Unreachable,
     Error,
+}
+impl Outcome {
+    pub fn is_caught(&self) -> bool {
+        matches!(self, Self::Caught | Self::CaughtBroadly)
+    }
 }
 /// Which deadline a TIMED_OUT row hit.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -423,6 +461,12 @@ pub enum Phase {
 }
 
 #[derive(Debug, Serialize)]
+pub struct Collateral {
+    pub count: usize,
+    pub targets: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Report {
     pub id: String,
     pub outcome: Outcome,
@@ -430,6 +474,7 @@ pub struct Report {
     pub timed_out_phase: Option<Phase>,
     pub red: Vec<String>,
     pub green: Vec<String>,
+    pub collateral: Collateral,
     pub build_ms: u128,
     pub test_ms: u128,
     pub build_tail: String,
@@ -444,6 +489,10 @@ impl Report {
             timed_out_phase: None,
             red: vec![],
             green: vec![],
+            collateral: Collateral {
+                count: 0,
+                targets: vec![],
+            },
             build_ms: 0,
             test_ms: 0,
             build_tail: String::new(),
@@ -452,7 +501,8 @@ impl Report {
         }
     }
     pub fn passes(&self) -> bool {
-        matches!(self.outcome, Outcome::Caught | Outcome::Equivalent)
+        self.outcome.is_caught()
+            || matches!(self.outcome, Outcome::Equivalent | Outcome::Unreachable)
     }
 }
 
@@ -540,9 +590,10 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
     let git_dir = git(root, &["rev-parse", "--git-dir"])?;
     let dir = root.join(String::from_utf8_lossy(&git_dir).trim());
     let stdout = dir.join("ck-mutate.stdout");
-    let stderr = dir.join("ck-mutate.stderr");
     let out_file = File::create(&stdout).map_err(|e| e.to_string())?;
-    let err_file = File::create(&stderr).map_err(|e| e.to_string())?;
+    // Cargo prints binary headers on stderr and test events on stdout. Sharing
+    // the file offset preserves their order, so events keep their binary identity.
+    let err_file = out_file.try_clone().map_err(|e| e.to_string())?;
     cmd.current_dir(root)
         .env("CARGO_TERM_COLOR", "never")
         .stdout(Stdio::from(out_file))
@@ -570,13 +621,8 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
         thread::sleep(Duration::from_millis(20));
     };
     drop(child);
-    let text = format!(
-        "{}\n{}",
-        fs::read_to_string(&stdout).map_err(|e| e.to_string())?,
-        fs::read_to_string(&stderr).map_err(|e| e.to_string())?
-    );
+    let text = fs::read_to_string(&stdout).map_err(|e| e.to_string())?;
     let _ = fs::remove_file(stdout);
-    let _ = fs::remove_file(stderr);
     Ok(Output {
         success,
         timeout: timed_out,
@@ -613,18 +659,53 @@ fn tail(text: &str) -> String {
 }
 
 pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>)> {
+    let results = parse_test_results(text, runner)?;
+    Ok((results.red, results.green))
+}
+
+#[derive(Debug)]
+struct TestResults {
+    red: Vec<String>,
+    green: Vec<String>,
+    targets: BTreeMap<String, String>,
+}
+
+fn attribute(targets: &mut BTreeMap<String, String>, name: &str, target: &str) -> Result<()> {
+    if targets.get(name).is_some_and(|old| old != target) {
+        return Err(format!("ambiguous test name across test binaries: {name}"));
+    }
+    targets.insert(name.to_owned(), target.to_owned());
+    Ok(())
+}
+
+fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     if runner == "nextest" && text.lines().any(|l| l.starts_with("{\"type\":\"suite\"")) {
         return parse_nextest_json(text);
     }
     let mut red = BTreeSet::new();
     let mut green = BTreeSet::new();
+    let mut targets = BTreeMap::new();
+    let mut cargo_target = String::new();
     let mut summary_total = 0;
     let mut observed_summary = false;
     let mut nextest_total = None;
     for line in text.lines() {
         let line = line.trim();
         if runner == "cargo" {
-            if let Some(rest) = line.strip_prefix("test result:") {
+            if let Some(rest) = line.strip_prefix("Running ") {
+                let (_, binary) = rest
+                    .rsplit_once(" (")
+                    .ok_or("cargo header missing binary")?;
+                cargo_target = binary
+                    .strip_suffix(')')
+                    .ok_or("invalid cargo binary header")?
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .ok_or("empty cargo binary")?
+                    .to_owned();
+            } else if let Some(target) = line.strip_prefix("Doc-tests ") {
+                cargo_target = format!("doc:{target}");
+            } else if let Some(rest) = line.strip_prefix("test result:") {
                 observed_summary = true;
                 for key in ["passed", "failed", "ignored", "measured", "filtered"] {
                     let words: Vec<_> = rest.split_whitespace().collect();
@@ -644,9 +725,11 @@ pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>
                 if let Some((name, status)) = rest.rsplit_once(" ... ") {
                     match status {
                         "ok" => {
+                            attribute(&mut targets, name, &cargo_target)?;
                             green.insert(name.to_owned());
                         }
                         "FAILED" => {
+                            attribute(&mut targets, name, &cargo_target)?;
                             red.insert(name.to_owned());
                         }
                         status if status == "ignored" || status.starts_with("ignored,") => {}
@@ -671,6 +754,10 @@ pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>
             }
             if matches!(words.first(), Some(&"PASS") | Some(&"FAIL")) {
                 let name = words.last().ok_or("empty nextest status")?.to_string();
+                let target = words
+                    .get(words.len().checked_sub(2).ok_or("missing nextest binary")?)
+                    .ok_or("missing nextest binary")?;
+                attribute(&mut targets, &name, target)?;
                 if words[0] == "PASS" {
                     green.insert(name);
                 } else {
@@ -684,14 +771,55 @@ pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>
     }
     if runner == "nextest" && nextest_total != Some(red.len() + green.len()) {
         if red.is_empty() && green.is_empty() && text.contains("no tests to run") {
-            return Ok((vec![], vec![]));
+            return Ok(TestResults {
+                red: vec![],
+                green: vec![],
+                targets,
+            });
         }
         return Err("nextest summary missing or counts disagree with per-test output".into());
     }
     if !red.is_disjoint(&green) {
         return Err("ambiguous test name across test binaries".into());
     }
-    Ok((red.into_iter().collect(), green.into_iter().collect()))
+    Ok(TestResults {
+        red: red.into_iter().collect(),
+        green: green.into_iter().collect(),
+        targets,
+    })
+}
+
+fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, bool)> {
+    // A catch must be attributable; names-only snippets remain supported by the
+    // public parser, but cannot establish whether a real replay caught broadly.
+    if results.targets.values().any(String::is_empty) {
+        return Err("test output missing binary attribution".into());
+    }
+    let expected_targets: BTreeSet<_> = c
+        .expect_red
+        .iter()
+        .filter_map(|name| results.targets.get(name))
+        .collect();
+    let extra: Vec<_> = results
+        .red
+        .iter()
+        .filter(|name| !c.expect_red.contains(name))
+        .collect();
+    let targets: BTreeSet<_> = extra
+        .iter()
+        .filter_map(|name| results.targets.get(*name))
+        .cloned()
+        .collect();
+    let broad = targets
+        .iter()
+        .any(|target| !expected_targets.contains(target));
+    Ok((
+        Collateral {
+            count: extra.len(),
+            targets: targets.into_iter().collect(),
+        },
+        broad,
+    ))
 }
 
 pub fn grade(c: &Control, red: &[String], green: &[String]) -> Outcome {
@@ -784,9 +912,9 @@ fn replay(
     scope: Scope,
 ) -> Result<Report> {
     let mut report = Report::new(c);
-    if let Some(reason) = &c.equivalent {
-        report.outcome = Outcome::Equivalent;
-        report.reason = Some(reason.clone());
+    if let Some((outcome, reason)) = c.recorded_disposition()? {
+        report.outcome = outcome;
+        report.reason = Some(reason.to_owned());
         return Ok(report);
     }
     let edits = c.edits()?;
@@ -846,13 +974,24 @@ fn replay(
             report.reason = Some(format!("test run exceeded timeout_s = {}", c.timeout_s));
             return Ok(());
         }
-        let (red, green) = parse_tests(&tests.text, &c.runner)?;
+        let results = parse_test_results(&tests.text, &c.runner)?;
         report.outcome = match scope {
-            Scope::Explore { .. } => explore_grade(&red, &green),
-            Scope::Row | Scope::Package => grade(c, &red, &green),
+            // Explore has no expected tests: every red name becomes expect_red
+            // when recorded, so none is collateral to that discovery.
+            Scope::Explore { .. } => explore_grade(&results.red, &results.green),
+            Scope::Row | Scope::Package => {
+                let (extra, broad) = collateral(c, &results)?;
+                report.collateral = extra;
+                let outcome = grade(c, &results.red, &results.green);
+                if outcome == Outcome::Caught && broad {
+                    Outcome::CaughtBroadly
+                } else {
+                    outcome
+                }
+            }
         };
-        report.red = red;
-        report.green = green;
+        report.red = results.red;
+        report.green = results.green;
         Ok(())
     })();
     let restoration = saved.restore();
@@ -873,6 +1012,10 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
     validate(root, catalogue)?;
     for c in &catalogue.control {
         replaced(root, &c.edits()?)?;
+        // A recorded unreachable row has no guarding test names to discover.
+        if c.unreachable.is_some() {
+            continue;
+        }
         // List mode compiles the test binaries, so the build deadline bounds it.
         let output = execute(
             root,
@@ -1218,9 +1361,10 @@ pub fn signal_flag() -> Result<Arc<AtomicBool>> {
     Ok(flag)
 }
 
-fn parse_nextest_json(text: &str) -> Result<(Vec<String>, Vec<String>)> {
+fn parse_nextest_json(text: &str) -> Result<TestResults> {
     let mut red = BTreeSet::new();
     let mut green = BTreeSet::new();
+    let mut targets = BTreeMap::new();
     let mut total = 0u64;
     let mut summaries = 0;
     for line in text.lines().filter(|l| l.starts_with('{')) {
@@ -1233,11 +1377,11 @@ fn parse_nextest_json(text: &str) -> Result<(Vec<String>, Vec<String>)> {
             let qualified = event["name"].as_str().ok_or("nextest event missing name")?;
             // Nextest prefixes libtest names with crate::binary$; the suffix is
             // the exact libtest path used by catalogue rows and list mode.
-            let name = qualified
+            let (target, name) = qualified
                 .split_once('$')
-                .ok_or("nextest name missing binary prefix")?
-                .1
-                .to_owned();
+                .ok_or("nextest name missing binary prefix")?;
+            attribute(&mut targets, name, target)?;
+            let name = name.to_owned();
             if red.contains(&name) || green.contains(&name) {
                 return Err(format!("ambiguous or repeated test name: {name}"));
             }
@@ -1261,7 +1405,66 @@ fn parse_nextest_json(text: &str) -> Result<(Vec<String>, Vec<String>)> {
     if summaries == 0 || total as usize != red.len() + green.len() {
         return Err("nextest summary missing or inconsistent".into());
     }
-    Ok((red.into_iter().collect(), green.into_iter().collect()))
+    Ok(TestResults {
+        red: red.into_iter().collect(),
+        green: green.into_iter().collect(),
+        targets,
+    })
+}
+
+#[cfg(test)]
+mod target_parser_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_parser_attributes_each_test_to_running_binary() {
+        let results = parse_test_results(
+            "Running unittests src/lib.rs (target/debug/deps/fixture-abc123)\n\
+             test tests::guard ... FAILED\n\
+             test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;\n\
+             Running tests/capacity.rs (C:\\repo\\target\\debug\\deps\\capacity-def456.exe)\n\
+             test capacity_contract ... FAILED\n\
+             test accepts ... ok\n\
+             test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;",
+            "cargo",
+        )
+        .unwrap();
+        assert_eq!(results.targets["tests::guard"], "fixture-abc123");
+        assert_eq!(results.targets["capacity_contract"], "capacity-def456.exe");
+        assert_eq!(results.targets["accepts"], "capacity-def456.exe");
+    }
+
+    #[test]
+    fn nextest_human_parser_attributes_each_test_to_binary_token() {
+        let results = parse_test_results(
+            "FAIL [ 0.001s] fixture tests::guard\n\
+             FAIL [ 0.001s] fixture::capacity capacity_contract\n\
+             PASS [ 0.001s] fixture::capacity accepts\n\
+             FAIL [ 0.001s] fixture::capacity capacity_contract\n\
+             Summary [ 0.01s] 3 tests run: 1 passed, 2 failed",
+            "nextest",
+        )
+        .unwrap();
+        assert_eq!(results.targets["tests::guard"], "fixture");
+        assert_eq!(results.targets["capacity_contract"], "fixture::capacity");
+        assert_eq!(results.targets["accepts"], "fixture::capacity");
+    }
+
+    #[test]
+    fn nextest_json_parser_attributes_each_test_to_qualified_prefix() {
+        let results = parse_test_results(
+            r#"{"type":"suite","event":"started"}
+{"type":"test","event":"failed","name":"fixture::fixture$tests::guard"}
+{"type":"test","event":"failed","name":"fixture::capacity$capacity_contract"}
+{"type":"test","event":"ok","name":"fixture::capacity$accepts"}
+{"type":"suite","event":"failed","passed":1,"failed":2}"#,
+            "nextest",
+        )
+        .unwrap();
+        assert_eq!(results.targets["tests::guard"], "fixture::fixture");
+        assert_eq!(results.targets["capacity_contract"], "fixture::capacity");
+        assert_eq!(results.targets["accepts"], "fixture::capacity");
+    }
 }
 
 #[cfg(test)]
@@ -1397,6 +1600,7 @@ mod order_tests {
             expect_red: vec!["t".into()],
             only: false,
             equivalent: None,
+            unreachable: None,
             timeout_s: 1,
             build_timeout_s: 1,
         }

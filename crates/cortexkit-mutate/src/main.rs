@@ -64,7 +64,10 @@ struct Exploration {
     /// Bounds the mutant's build; --timeout-s bounds only the test run.
     #[arg(long, default_value_t = default_build_timeout())]
     build_timeout_s: u64,
-    /// On CAUGHT only, append a row naming the red tests as expect_red.
+    /// Record why this code has no production caller, without running a mutant.
+    #[arg(long, value_name = "REASON")]
+    unreachable: Option<String>,
+    /// Append a caught proof, or an explicitly reasoned UNREACHABLE row.
     #[arg(long, requires_all = ["id", "guards", "test_file"])]
     append: bool,
     #[arg(long)]
@@ -116,16 +119,58 @@ struct Proof {
 fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
     for row in rows {
         println!(
-            "{}: {}{}",
+            "{}: {}{}{}",
             row.id,
             serde_json::to_value(&row.outcome)
                 .map_err(|e| e.to_string())?
                 .as_str()
                 .ok_or("invalid outcome")?,
+            if row.outcome.is_caught() && row.collateral.count > 0 {
+                format!(
+                    " ({}collateral: {} tests in targets: {})",
+                    if row.outcome == Outcome::CaughtBroadly {
+                        "warning; "
+                    } else {
+                        ""
+                    },
+                    row.collateral.count,
+                    row.collateral.targets.join(", ")
+                )
+            } else {
+                String::new()
+            },
             row.reason
                 .as_ref()
                 .map_or(String::new(), |r| format!(" ({r})"))
         );
+    }
+    let broad = rows
+        .iter()
+        .filter(|r| r.outcome == Outcome::CaughtBroadly)
+        .count();
+    let unreachable: Vec<_> = rows
+        .iter()
+        .filter(|r| r.outcome == Outcome::Unreachable)
+        .collect();
+    if broad > 0 || !unreachable.is_empty() {
+        println!(
+            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} UNREACHABLE",
+            rows.iter().filter(|r| r.outcome == Outcome::Caught).count(),
+            rows.iter()
+                .filter(|r| r.outcome == Outcome::Equivalent)
+                .count(),
+            unreachable.len()
+        );
+    }
+    if !unreachable.is_empty() {
+        println!("UNREACHABLE rows ({}):", unreachable.len());
+        for row in unreachable {
+            println!(
+                "  {}: {}",
+                row.id,
+                row.reason.as_deref().unwrap_or_default()
+            );
+        }
     }
     if let Some(path) = path {
         fs::write(
@@ -232,6 +277,7 @@ fn run() -> Result<bool> {
                 expect_red: p.expect_red,
                 only: p.only,
                 equivalent: None,
+                unreachable: None,
                 timeout_s: p.timeout_s,
                 build_timeout_s: p.build_timeout_s,
             };
@@ -243,7 +289,7 @@ fn run() -> Result<bool> {
             catalogue.control.push(c.clone());
             validate(&root, &catalogue)?;
             let first = run_row(&root, &c, p.allow_dirty, &stop, false)?;
-            let caught = first.outcome == Outcome::Caught;
+            let caught = first.outcome.is_caught();
             let mut rows = vec![first];
             if caught {
                 append_control(&cli.catalogue, &c)?;
@@ -308,6 +354,7 @@ fn explore(
         expect_red: vec![],
         only: false,
         equivalent: None,
+        unreachable: x.unreachable,
         timeout_s: x.timeout_s,
         build_timeout_s: x.build_timeout_s,
     };
@@ -327,7 +374,8 @@ fn explore(
         validate(root, &Catalogue { control: candidate })?;
     }
     let row = explore_row(root, &c, x.allow_dirty, stop, x.workspace)?;
-    let caught = row.outcome == Outcome::Caught;
+    let caught = row.outcome.is_caught();
+    let recorded = caught || row.outcome == Outcome::Unreachable;
     if caught {
         println!("Red tests ({}):", row.red.len());
         for name in &row.red {
@@ -340,10 +388,10 @@ fn explore(
     let red = row.red.clone();
     write_report(x.report, &[row])?;
     if !x.append {
-        return Ok(caught);
+        return Ok(recorded);
     }
-    if !caught || stop.load(Ordering::SeqCst) {
-        println!("--append: nothing appended; only CAUGHT appends (outcome {outcome:?})");
+    if !recorded || stop.load(Ordering::SeqCst) {
+        println!("--append: nothing appended; only caught proofs or UNREACHABLE appends (outcome {outcome:?})");
         return Ok(false);
     }
     c.expect_red = red;

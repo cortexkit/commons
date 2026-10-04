@@ -1,0 +1,13 @@
+# Unversioned proof row written for ck-mutate 0.1, before unreachable/collateral.
+[[control]]
+id = "guard"
+guards = "zero is rejected"
+file = "src/lib.rs"
+old = "value > 0"
+new = "value >= 0"
+test_file = "test_contract.rs"
+runner = "cargo"
+package = "mutation-fixture"
+target = "--lib"
+expect_red = ["tests::guard_rejects_zero"]
+only = true
