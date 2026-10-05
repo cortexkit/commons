@@ -1,0 +1,3 @@
+# Canonical vectors and their digests are compared as bytes, without newline conversion.
+test-vectors/exec-remote-v1/**/*.jcs -text
+test-vectors/exec-remote-v1/**/*.sha256 -text
