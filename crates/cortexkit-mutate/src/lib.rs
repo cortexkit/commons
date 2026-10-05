@@ -47,9 +47,12 @@ pub struct Control {
     pub equivalent: Option<String>,
     /// A person's explanation of why the mutated code has no production caller.
     pub unreachable: Option<String>,
-    /// A reviewed explanation of why multiple test targets guard this property.
+    /// A person's explanation of why tests in several targets legitimately fail
+    /// for this mutant: they assert the same shared property on purpose.
     pub hub: Option<String>,
-    /// Stable cross-target collateral names approved by the reviewer of a broad catch.
+    /// The test targets, other than the expected tests' own, that a reviewer
+    /// approved to fail alongside them in a `run --broad` replay. Stable names,
+    /// without Cargo's executable hash.
     pub hub_targets: Option<Vec<String>>,
     /// Bounds the test run only; the build has its own deadline below.
     #[serde(default = "default_timeout")]
