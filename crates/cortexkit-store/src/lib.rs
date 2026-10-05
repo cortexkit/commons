@@ -137,6 +137,20 @@ mod sqlite_backend {
     use cortexkit_lease::{protect_file, FileLeaseStore, LeaseHandle};
     use rusqlite::Connection;
 
+    /// Decides whether `open_sqlite` creates and narrows the store's directory:
+    /// only when the store's file sits in a directory of its own.
+    ///
+    /// Not for an in-memory database or a SQLite URI, whose "parent" is not a
+    /// directory on disk, and not for a bare file name or a path with no
+    /// parent: their directory is the process's working directory, which
+    /// belongs to whoever started the process, so changing its mode would
+    /// reach far beyond the store.
+    pub(crate) fn owns_store_dir(path: &str, parent: &Path) -> bool {
+        let memory_or_uri = path == ":memory:" || path.is_empty() || path.starts_with("file:");
+        let no_own_dir = parent.as_os_str().is_empty() || parent == Path::new(".");
+        !(memory_or_uri || no_own_dir)
+    }
+
     /// Creates the store's directory owner-only (0700) and tightens it if it
     /// already exists with group or world access.
     ///
@@ -359,7 +373,11 @@ mod sqlite_backend {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        create_private_dir(&parent).map_err(StoreError::Io)?;
+        if owns_store_dir(&path, &parent) {
+            create_private_dir(&parent).map_err(StoreError::Io)?;
+        } else {
+            std::fs::create_dir_all(&parent).map_err(StoreError::Io)?;
+        }
 
         // Acquire the single-writer lease first, co-located with the database file
         // so the lease identity follows the database path by construction.
@@ -697,6 +715,72 @@ mod tests {
             result.err()
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An in-memory store opens: it has no directory, and the directory step
+    /// must not try to inspect or change one.
+    #[test]
+    fn an_in_memory_store_opens() {
+        // An in-memory store's lease lands in the working directory, because its
+        // path has no parent, so remove the lease this test creates.
+        let leases = || -> std::collections::BTreeSet<std::path::PathBuf> {
+            std::fs::read_dir(".")
+                .map(|dir| {
+                    dir.flatten()
+                        .map(|entry| entry.path())
+                        .filter(|path| path.extension().is_some_and(|ext| ext == "lease"))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let before = leases();
+        let store = open_sqlite(&StorageDescriptor {
+            module_id: "test-module".into(),
+            storage_namespace: "memory".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: ":memory:".into(),
+            },
+        });
+        let error = store.as_ref().err().map(ToString::to_string);
+        drop(store);
+        for lease in leases().difference(&before) {
+            let _ = std::fs::remove_file(lease);
+        }
+        assert!(
+            error.is_none(),
+            "an in-memory store failed to open: {error:?}"
+        );
+    }
+
+    /// Only a store with a directory of its own gets it narrowed; the working
+    /// directory behind a bare file name, an in-memory database and a URI are
+    /// never touched.
+    #[test]
+    fn only_a_real_store_directory_is_narrowed() {
+        use sqlite_backend::owns_store_dir;
+        use std::path::Path;
+        let parent = |p: &str| {
+            Path::new(p)
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default()
+        };
+        assert!(!owns_store_dir(":memory:", &parent(":memory:")));
+        assert!(!owns_store_dir("store.db", &parent("store.db")));
+        assert!(!owns_store_dir("./store.db", &parent("./store.db")));
+        assert!(!owns_store_dir(
+            "file:/x/store.db?mode=rwc",
+            &parent("file:/x/store.db?mode=rwc")
+        ));
+        assert!(owns_store_dir(
+            "/data/module/store.db",
+            &parent("/data/module/store.db")
+        ));
+        assert!(owns_store_dir(
+            "data/module/store.db",
+            &parent("data/module/store.db")
+        ));
     }
 
     /// When the store directory is a symlink, the store still opens and the
