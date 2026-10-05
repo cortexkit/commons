@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.1.1**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.0**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for

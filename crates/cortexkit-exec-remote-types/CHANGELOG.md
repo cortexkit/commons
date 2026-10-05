@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1
+## 0.2.0
 
 - Every enum in a caller reply or stream record now preserves unrecognised tags
   in a documented catch-all: `StreamRecord`, `Killed`, `Ran`, `OutputStream`,
@@ -12,8 +12,10 @@
 - Known tags with malformed or missing required fields remain decode errors;
   known wire shapes are unchanged. Six new crate-local vector pairs pin unknown
   tags and their canonical round-trips.
-- `Killed`, `Ran`, `OutputStream`, and `RebuildResult` are still `Clone`, but no
-  longer `Copy` because their catch-alls own a `String`.
+- Breaking: `Killed`, `Ran`, `OutputStream`, and `RebuildResult` are still
+  `Clone`, but no longer `Copy`, because their catch-alls own a `String`. Code
+  that copied these values must clone them. 0.1.0 is yanked: it decoded these
+  six enums strictly, so a new server-side value would fail a caller's decode.
 
 ## 0.1.0
 
