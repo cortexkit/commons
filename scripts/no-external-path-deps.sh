@@ -35,13 +35,13 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as metadata_file:
     metadata = json.load(metadata_file)
 packages = metadata["packages"]
+path_packages = [package for package in packages if package.get("source") is None]
+print(f"Examined {len(packages)} packages; {len(path_packages)} path packages.")
 if not packages:
-    print("Cargo metadata examined zero packages.", file=sys.stderr)
+    print("The check examined zero packages.", file=sys.stderr)
     sys.exit(1)
 
 workspace_root = os.path.realpath(metadata["workspace_root"])
-path_packages = [package for package in packages if package.get("source") is None]
-print(f"Examined {len(packages)} packages; {len(path_packages)} path packages.")
 offenders = []
 
 for package in path_packages:
