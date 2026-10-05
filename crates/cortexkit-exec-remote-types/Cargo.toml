@@ -1,4 +1,4 @@
-# Caller-facing exec.remote/v1 values, shared by clients and executors.
+# Caller-facing exec-remote/v1 values, shared by clients and executors.
 # Transport framing and runner-only transfer control stay with the executor.
 [package]
 name = "cortexkit-exec-remote-types"
@@ -7,7 +7,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Caller-facing types and golden vectors for the CortexKit exec.remote/v1 capability."
+description = "Caller-facing types and golden vectors for the CortexKit exec-remote/v1 capability."
 readme = "README.md"
 publish = true
 include = ["Cargo.toml", "README.md", "src/**", "tests/**", "test-vectors/**"]
@@ -15,9 +15,9 @@ include = ["Cargo.toml", "README.md", "src/**", "tests/**", "test-vectors/**"]
 [dependencies]
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 uuid = { version = "1", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
+serde_json = "1"
 serde_json_canonicalizer = "0.3"
 sha2 = "0.10"

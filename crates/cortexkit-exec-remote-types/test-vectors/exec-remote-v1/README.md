@@ -1,4 +1,4 @@
-# exec.remote/v1 caller vectors
+# exec-remote/v1 caller vectors
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are copied byte for byte
 from prefrontal's `motor-protocol` at commit `64fbc5dcf`, except for the two

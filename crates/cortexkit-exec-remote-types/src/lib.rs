@@ -1,4 +1,4 @@
-//! Caller-facing types for the `exec.remote/v1` capability.
+//! Caller-facing types for the `exec-remote/v1` capability.
 //!
 //! [`RunRequest`] starts a run; [`StreamRecord`] carries both run and attach
 //! replies. Prepare, drop, cancel and status replies are ordinary JSON objects.
