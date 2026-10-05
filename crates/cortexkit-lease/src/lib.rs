@@ -84,6 +84,54 @@ pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Creates a module's data directory owner-only (0700) and tightens it if it
+/// already exists with group or world access. `cortexkit-store` applies it to
+/// every store's directory on open; a module that cannot open its store through
+/// `cortexkit-store` calls it itself, beside `protect_file` for the files.
+///
+/// The files are 0600 (`protect_file`), but a directory created under the
+/// default umask is 0755, and so is every missing parent `create_dir_all`
+/// makes. Another account can then list the directory and read any file a
+/// module leaves in it with a loose mode (backups, catalogs, logs), even though
+/// the database itself is protected. Call it on every open, like
+/// `protect_file`, because a directory made by an older build keeps its mode.
+///
+/// Only `dir` itself is tightened when it already exists; the directories
+/// above it belong to whoever created them. A `dir` that is a symlink is left
+/// alone rather than followed, for the same reason `protect_file` refuses
+/// symlinks.
+pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        // Narrowing an existing directory is a second layer: the files inside
+        // are already 0600. So a failure here (a directory owned by another
+        // account, a read-only mount) is reported on stderr, which the
+        // supervisor captures, and the caller carries on. Creation above is
+        // different: without the directory there is nothing to open.
+        let metadata = std::fs::symlink_metadata(dir)?;
+        if metadata.is_dir() && metadata.permissions().mode() & 0o077 != 0 {
+            let mode = metadata.permissions().mode() & 0o700;
+            if let Err(error) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))
+            {
+                eprintln!(
+                    "cortexkit-lease: {} is group or world accessible and could not be made owner-only: {error}",
+                    dir.display()
+                );
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
 /// Identifies the thing being single-writer-guarded, namespaced so distinct
 /// modules cannot collide on a shared lease root.
 ///
@@ -475,6 +523,59 @@ mod tests {
             fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
         ));
         assert!(protect_file(&missing).is_ok());
+    }
+
+    /// A missing directory is created 0700 with its missing parents; an
+    /// existing 0755 one is narrowed to 0700; a symlink to a directory is left
+    /// alone, and so is its target.
+    #[cfg(unix)]
+    #[test]
+    fn create_private_dir_creates_and_narrows_but_never_follows_a_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &std::path::Path| {
+            std::fs::symlink_metadata(p)
+                .expect("stat")
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        let root = std::env::temp_dir().join(format!(
+            "cortexkit-lease-privdir-{}-{}",
+            std::process::id(),
+            fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
+        ));
+
+        let fresh = root.join("a").join("store");
+        create_private_dir(&fresh).expect("create");
+        assert_eq!(
+            mode(&fresh),
+            0o700,
+            "a created directory must be owner-only"
+        );
+
+        let wide = root.join("wide");
+        std::fs::create_dir_all(&wide).expect("mkdir");
+        std::fs::set_permissions(&wide, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        create_private_dir(&wide).expect("narrow");
+        assert_eq!(
+            mode(&wide),
+            0o700,
+            "an existing wide directory must be narrowed"
+        );
+
+        let target = root.join("target");
+        std::fs::create_dir_all(&target).expect("mkdir");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        create_private_dir(&link).expect("a symlinked directory is not an error");
+        assert_eq!(
+            mode(&target),
+            0o755,
+            "a symlink's target must not be changed"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

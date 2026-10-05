@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-lease"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fs2",
 ]
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-store"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cortexkit-lease",
  "cortexkit-store-types",

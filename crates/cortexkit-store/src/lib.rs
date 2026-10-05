@@ -151,53 +151,6 @@ mod sqlite_backend {
         !(memory_or_uri || no_own_dir)
     }
 
-    /// Creates the store's directory owner-only (0700) and tightens it if it
-    /// already exists with group or world access.
-    ///
-    /// The store files are 0600, but a directory created under the default umask
-    /// is 0755, and so is every missing parent `create_dir_all` makes. Another
-    /// account can then list the directory and read any file a module leaves in
-    /// it with a loose mode (backups, catalogs, logs), even though the database
-    /// itself is protected. Applied on open, like the file modes, because a
-    /// directory made by an older build keeps its mode.
-    ///
-    /// Only the store's own directory is tightened when it already exists; the
-    /// directories above it belong to whoever created them. A store directory
-    /// that is a symlink is left alone rather than followed, for the same reason
-    /// `protect_file` refuses symlinks.
-    pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(dir)?;
-            // Narrowing an existing directory is a second layer: the store files
-            // are already 0600. So a failure here (a directory owned by another
-            // account, a read-only mount) is reported on stderr, which the
-            // supervisor captures, and the store still opens. Creation above is
-            // different: without the directory there is no store.
-            let metadata = std::fs::symlink_metadata(dir)?;
-            if metadata.is_dir() && metadata.permissions().mode() & 0o077 != 0 {
-                let mode = metadata.permissions().mode() & 0o700;
-                if let Err(error) =
-                    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))
-                {
-                    eprintln!(
-                        "cortexkit-store: {} is group or world accessible and could not be made owner-only: {error}",
-                        dir.display()
-                    );
-                }
-            }
-            Ok(())
-        }
-        #[cfg(not(unix))]
-        {
-            std::fs::create_dir_all(dir)
-        }
-    }
-
     /// A lease-guarded, migrated sqlite store. Holds the single-writer lease for
     /// its lifetime and serializes connection access behind a mutex (sqlite is
     /// single-connection here; the module runs its domain queries via
@@ -374,7 +327,7 @@ mod sqlite_backend {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         if owns_store_dir(&path, &parent) {
-            create_private_dir(&parent).map_err(StoreError::Io)?;
+            cortexkit_lease::create_private_dir(&parent).map_err(StoreError::Io)?;
         } else {
             std::fs::create_dir_all(&parent).map_err(StoreError::Io)?;
         }
@@ -702,7 +655,7 @@ mod tests {
                 .success()
         };
         assert!(flag("uchg"), "could not set the immutable flag");
-        let result = sqlite_backend::create_private_dir(&module_dir);
+        let result = cortexkit_lease::create_private_dir(&module_dir);
         let narrowed = dir_mode(&module_dir);
         assert!(flag("nouchg"), "could not clear the immutable flag");
         assert_eq!(
