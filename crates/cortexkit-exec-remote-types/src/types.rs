@@ -132,7 +132,8 @@ impl PrepareRequest {
     }
 }
 
-/// Before-start refusal reasons. Unknown tags retain the before-start guarantee.
+/// Why the executor refused a command before starting it. Every reason,
+/// including an unrecognised one, means the command did not start.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 #[serde(from = "String", into = "String")]
@@ -147,7 +148,8 @@ pub enum RefusalReason {
     TreeHashMismatch,
     BundleRejected,
     WorkspaceSetupFailed,
-    /// An unrecognised refusal tag; the command still did not start.
+    /// A refusal tag this version does not recognise. The refused command
+    /// still did not start.
     Unknown(String),
 }
 
@@ -570,7 +572,8 @@ pub enum RebuildResult {
 #[non_exhaustive]
 pub struct RunningJob {
     pub job_id: Uuid,
-    /// Includes base:<repository root> pseudo-keys for base rebuilds.
+    /// The job's workspace key. A base rebuild reports `base:` followed by the
+    /// repository root instead of a workspace key.
     pub workspace_key: String,
     pub weight: u32,
 }

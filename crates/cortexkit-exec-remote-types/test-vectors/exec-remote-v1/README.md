@@ -1,8 +1,9 @@
 # exec-remote/v1 caller vectors
 
-The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are copied byte for byte
-from prefrontal's `motor-protocol` at commit `64fbc5dcf`, except for the two
-`crate-local-*` cases documented below. The following encoding and shape rules
+The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
+golden cases for what a caller receives, copied byte for byte so both sides
+pin the same bytes. The two `crate-local-*` cases documented below exist only
+here. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
 
 ## Encoding
@@ -60,5 +61,4 @@ These two outcome pairs extend the original corpus, for a total of 22 outcomes:
   assume the command did not run, and never re-run it locally.
 
 Unknown tags in these two enums round-trip their raw tag; known tags with
-malformed or missing fields still fail. The original motor-protocol codec
-rejects unknown enum tags. Other enums retain that strict behaviour here.
+malformed or missing fields still fail. Every other enum rejects unknown tags.

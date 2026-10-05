@@ -53,10 +53,10 @@ tags and prepare outcome kinds, still reject unknown tags, as does invalid
 base64. Non-exhaustiveness is a Rust API compatibility rule, not permission to
 treat malformed known records as future variants.
 
-The caller shapes and copied vectors originate in prefrontal's `motor-protocol`
-at commit `64fbc5dcf`. That codec rejects unknown enum tags; the two catch-alls
-above deliberately extend decoding while preserving all its known wire shapes.
-The executor's runner frames (`Run`, `Prepare`, `Frame`, bundle manifests,
+These are the caller-side shapes of the executor's protocol. The executor's own
+codec rejects unknown enum tags; the two catch-alls above deliberately extend
+decoding for callers while preserving every known wire shape. The executor's
+runner frames (`Run`, `Prepare`, `Frame`, bundle manifests,
 repository candidates, sibling snapshots, wire `Refusal`, withdrawal outcomes,
 heartbeats and `prepare_accepted`) are not part of this crate. `StatusRequest`
 makes the no-arguments caller operation explicit; the runner codec represents it
@@ -64,8 +64,10 @@ as the unit `Frame::Status` variant instead.
 
 ## Golden vectors
 
-`test-vectors/exec-remote-v1/` contains byte-for-byte copies of the `.jcs` and
-`.sha256` pairs from the pinned caller corpus:
+`test-vectors/exec-remote-v1/` holds the golden cases a caller decodes: each is
+a canonical JSON `.jcs` file with a `.sha256` of its bytes. They are copied byte
+for byte from the executor's own test corpus, so caller and executor pin the
+same bytes:
 
 - **20 outcomes**: complete `{request, stream}` cases covering every known
   outcome/refusal reason, both kills, pipeline status, lost running/queued jobs,
