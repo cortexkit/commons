@@ -137,6 +137,41 @@ mod sqlite_backend {
     use cortexkit_lease::{protect_file, FileLeaseStore, LeaseHandle};
     use rusqlite::Connection;
 
+    /// Creates the store's directory owner-only (0700) and tightens it if it
+    /// already exists with group or world access.
+    ///
+    /// The store files are 0600, but a directory created under the default umask
+    /// is 0755, and so is every missing parent `create_dir_all` makes. Another
+    /// account can then list the directory and read any file a module leaves in
+    /// it with a loose mode (backups, catalogs, logs), even though the database
+    /// itself is protected. Applied on open, like the file modes, because a
+    /// directory made by an older build keeps its mode.
+    ///
+    /// Only the store's own directory is tightened when it already exists; the
+    /// directories above it belong to whoever created them. A store directory
+    /// that is a symlink is left alone rather than followed, for the same reason
+    /// `protect_file` refuses symlinks.
+    pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)?;
+            let metadata = std::fs::symlink_metadata(dir)?;
+            if metadata.is_dir() && metadata.permissions().mode() & 0o077 != 0 {
+                let mode = metadata.permissions().mode() & 0o700;
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))?;
+            }
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::create_dir_all(dir)
+        }
+    }
+
     /// A lease-guarded, migrated sqlite store. Holds the single-writer lease for
     /// its lifetime and serializes connection access behind a mutex (sqlite is
     /// single-connection here; the module runs its domain queries via
@@ -312,7 +347,7 @@ mod sqlite_backend {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        std::fs::create_dir_all(&parent).map_err(StoreError::Io)?;
+        create_private_dir(&parent).map_err(StoreError::Io)?;
 
         // Acquire the single-writer lease first, co-located with the database file
         // so the lease identity follows the database path by construction.
@@ -541,6 +576,96 @@ mod tests {
             "the WAL stayed group/world readable while the database looked correct"
         );
 
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    fn dir_mode(dir: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::symlink_metadata(dir)
+            .unwrap_or_else(|error| panic!("stat {}: {error}", dir.display()))
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[cfg(unix)]
+    fn descriptor_at(db: &std::path::Path) -> StorageDescriptor {
+        StorageDescriptor {
+            module_id: "test-module".into(),
+            storage_namespace: "main".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: db.to_string_lossy().into_owned(),
+            },
+        }
+    }
+
+    /// Every directory the first open creates is owner-only, not only the
+    /// store's own: a missing `data/module` pair made by `create_dir_all` would
+    /// leave `data` at 0755.
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_store_creates_its_directories_owner_only() {
+        let (root, _) = tmp();
+        let module_dir = root.join("data").join("module");
+        let store = open_sqlite(&descriptor_at(&module_dir.join("store.db"))).expect("open");
+        assert_eq!(
+            dir_mode(&root.join("data")),
+            0o700,
+            "a created parent was left group/world accessible"
+        );
+        assert_eq!(
+            dir_mode(&module_dir),
+            0o700,
+            "the store directory was created group/world accessible"
+        );
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A store directory an older build left at 0755 is tightened on open, and
+    /// the directory above it, which the store does not own, is not touched.
+    #[cfg(unix)]
+    #[test]
+    fn reopening_tightens_the_store_directory_but_not_its_parent() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, _) = tmp();
+        let module_dir = root.join("module");
+        std::fs::create_dir_all(&module_dir).expect("mkdir");
+        for dir in [&root, &module_dir] {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
+        let store = open_sqlite(&descriptor_at(&module_dir.join("store.db"))).expect("open");
+        assert_eq!(
+            dir_mode(&module_dir),
+            0o700,
+            "an existing 0755 store directory stayed open"
+        );
+        assert_eq!(
+            dir_mode(&root),
+            0o755,
+            "a directory above the store was changed"
+        );
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A store directory that is a symlink is neither followed nor refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_store_directory_is_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, _) = tmp();
+        let target = root.join("target");
+        std::fs::create_dir_all(&target).expect("mkdir");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let store =
+            open_sqlite(&descriptor_at(&link.join("store.db"))).expect("open through a symlink");
+        assert_eq!(dir_mode(&target), 0o755, "the symlink's target was changed");
         drop(store);
         let _ = std::fs::remove_dir_all(&root);
     }
