@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- `--old` and `--new` accept values starting with `-` or `--`, such as a
+  shell flag or a SQL comment, without the `--old=` form.
+
 ## 0.3.0
 
 - Add `runner = "command"` catalogue rows and `prove --command` for argv-based

@@ -52,9 +52,9 @@ struct Exploration {
     workspace: bool,
     #[arg(long, required_unless_present = "edits", conflicts_with = "edits", requires_all = ["old", "new"])]
     file: Option<String>,
-    #[arg(long, requires = "file")]
+    #[arg(long, requires = "file", allow_hyphen_values = true)]
     old: Option<String>,
-    #[arg(long, requires = "file")]
+    #[arg(long, requires = "file", allow_hyphen_values = true)]
     new: Option<String>,
     /// Inline TOML or JSON edits (or a path to a file holding them), instead of
     /// --file/--old/--new.
@@ -93,9 +93,9 @@ struct Proof {
     guards: String,
     #[arg(long)]
     file: String,
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     old: String,
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     new: String,
     #[arg(long)]
     test_file: String,
@@ -446,5 +446,62 @@ fn main() {
             eprintln!("ck-mutate: {e}");
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    // Mutation text is source code, which often starts with `--` (a flag in a
+    // shell script, a SQL comment). It must parse as the value, not as an
+    // unknown option.
+    #[test]
+    fn old_and_new_accept_values_starting_with_hyphens() {
+        let cli = Cli::try_parse_from([
+            "ck-mutate",
+            "prove",
+            "--id",
+            "r",
+            "--guards",
+            "g",
+            "--file",
+            "f.sh",
+            "--old",
+            "--data-dir \"$d\"",
+            "--new",
+            "-- disabled",
+            "--test-file",
+            "t",
+            "--package",
+            "p",
+            "--expect-red",
+            "t1",
+        ])
+        .unwrap_or_else(|e| panic!("{e}"));
+        let Action::Prove(p) = cli.command else {
+            panic!("expected prove")
+        };
+        assert_eq!(p.old, "--data-dir \"$d\"");
+        assert_eq!(p.new, "-- disabled");
+
+        let cli = Cli::try_parse_from([
+            "ck-mutate",
+            "explore",
+            "--package",
+            "p",
+            "--file",
+            "f.sh",
+            "--old",
+            "--data-dir",
+            "--new",
+            "-x",
+        ])
+        .unwrap_or_else(|e| panic!("{e}"));
+        let Action::Explore(x) = cli.command else {
+            panic!("expected explore")
+        };
+        assert_eq!(x.old.as_deref(), Some("--data-dir"));
+        assert_eq!(x.new.as_deref(), Some("-x"));
     }
 }
