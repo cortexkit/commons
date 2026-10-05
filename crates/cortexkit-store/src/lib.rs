@@ -652,7 +652,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A store directory that is a symlink is neither followed nor refused.
+    /// When the store directory is a symlink, the store still opens and the
+    /// symlink's target keeps its mode: permissions are never set through a link.
     #[cfg(unix)]
     #[test]
     fn a_symlinked_store_directory_is_left_alone() {
