@@ -159,10 +159,22 @@ mod sqlite_backend {
                 .recursive(true)
                 .mode(0o700)
                 .create(dir)?;
+            // Narrowing an existing directory is a second layer: the store files
+            // are already 0600. So a failure here (a directory owned by another
+            // account, a read-only mount) is reported on stderr, which the
+            // supervisor captures, and the store still opens. Creation above is
+            // different: without the directory there is no store.
             let metadata = std::fs::symlink_metadata(dir)?;
             if metadata.is_dir() && metadata.permissions().mode() & 0o077 != 0 {
                 let mode = metadata.permissions().mode() & 0o700;
-                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))?;
+                if let Err(error) =
+                    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))
+                {
+                    eprintln!(
+                        "cortexkit-store: {} is group or world accessible and could not be made owner-only: {error}",
+                        dir.display()
+                    );
+                }
             }
             Ok(())
         }
@@ -649,6 +661,41 @@ mod tests {
             "a directory above the store was changed"
         );
         drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A store directory whose mode can't be changed (here, one carrying the
+    /// user-immutable flag, which refuses chmod) is reported, not treated as a
+    /// failure: the files inside are owner-only regardless.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_directory_that_cannot_be_narrowed_is_not_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, _) = tmp();
+        let module_dir = root.join("module");
+        std::fs::create_dir_all(&module_dir).expect("mkdir");
+        std::fs::set_permissions(&module_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+        let flag = |op: &str| {
+            std::process::Command::new("chflags")
+                .args([op, module_dir.to_str().expect("utf-8 path")])
+                .status()
+                .expect("chflags")
+                .success()
+        };
+        assert!(flag("uchg"), "could not set the immutable flag");
+        let result = sqlite_backend::create_private_dir(&module_dir);
+        let narrowed = dir_mode(&module_dir);
+        assert!(flag("nouchg"), "could not clear the immutable flag");
+        assert_eq!(
+            narrowed, 0o755,
+            "the immutable flag did not block the chmod, so this test proves nothing"
+        );
+        assert!(
+            result.is_ok(),
+            "a failed narrowing was returned as an error: {:?}",
+            result.err()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
