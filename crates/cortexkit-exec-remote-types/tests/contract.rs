@@ -783,6 +783,13 @@ fn constructors_and_setters_preserve_caller_wire_shapes() {
         json!({"job_id": job_id(), "queue_position": 1})
     );
     assert_eq!(
+        serde_json::to_value(
+            Accepted::new(job_id(), 1).with_env_not_forwarded(vec!["AWS_SECRET_ACCESS_KEY".into()])
+        )
+        .unwrap(),
+        json!({"job_id": job_id(), "queue_position": 1, "env_not_forwarded": ["AWS_SECRET_ACCESS_KEY"]})
+    );
+    assert_eq!(
         serde_json::to_value(CancelReply::new(job_id())).unwrap(),
         json!({"job_id": job_id()})
     );
@@ -804,5 +811,22 @@ fn constructors_and_setters_preserve_caller_wire_shapes() {
     assert_eq!(
         serde_json::to_value(status).unwrap(),
         json!({"queue_depth": 1, "running_jobs": [{"job_id": job_id(), "workspace_key": "base:/repo", "weight": 16}], "server_reachable": true, "repositories": [], "rustc_version": "rustc 1.99.0"})
+    );
+}
+
+/// An accepted reply from a runner that predates `env_not_forwarded` decodes
+/// as "not reported", and one that carries the list round-trips unchanged.
+#[test]
+fn accepted_env_not_forwarded_is_optional_and_round_trips() {
+    let old: Accepted =
+        serde_json::from_value(json!({"job_id": job_id(), "queue_position": 3})).unwrap();
+    assert_eq!(old.env_not_forwarded, None);
+    let new =
+        Accepted::new(job_id(), 3).with_env_not_forwarded(vec!["TOKEN".into(), "HOME".into()]);
+    let back: Accepted = serde_json::from_value(serde_json::to_value(&new).unwrap()).unwrap();
+    assert_eq!(back, new);
+    assert_eq!(
+        back.env_not_forwarded.as_deref(),
+        Some(&["TOKEN".to_string(), "HOME".to_string()][..])
     );
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- `Accepted`, the first record of an `exec.run` stream, gains an optional
+  `env_not_forwarded` list: the names, never the values, of caller-supplied
+  environment variables the runner did not forward. Set it with
+  `Accepted::with_env_not_forwarded`. It is omitted when absent, and replies from
+  older runners decode as absent, which means "not reported".
+
 ## 0.2.0
 
 - Every enum in a caller reply or stream record now preserves unrecognised tags

@@ -504,6 +504,12 @@ impl Output {
 pub struct Accepted {
     pub job_id: Uuid,
     pub queue_position: u32,
+    /// Names of caller-supplied environment variables the runner did not
+    /// forward to the command. Names only, never values. Absent when the runner
+    /// reports nothing, including every runner older than this field, so an
+    /// absent list means "not reported", not "everything was forwarded".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_not_forwarded: Option<Vec<String>>,
 }
 
 impl Accepted {
@@ -511,7 +517,14 @@ impl Accepted {
         Self {
             job_id,
             queue_position,
+            env_not_forwarded: None,
         }
+    }
+
+    /// Report which caller environment variable names were not forwarded.
+    pub fn with_env_not_forwarded(mut self, names: Vec<String>) -> Self {
+        self.env_not_forwarded = Some(names);
+        self
     }
 }
 
