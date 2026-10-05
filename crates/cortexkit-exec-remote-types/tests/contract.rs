@@ -26,7 +26,14 @@ const COPIED_OUTCOMES: &[&str] = &[
     "bundle_rejected",
     "workspace_setup_failed",
 ];
-const LOCAL_OUTCOMES: &[&str] = &["crate-local-unknown-refusal", "crate-local-unknown-outcome"];
+const LOCAL_OUTCOMES: &[&str] = &[
+    "crate-local-unknown-refusal",
+    "crate-local-unknown-outcome",
+    "crate-local-unknown-stream-record",
+    "crate-local-unknown-killed",
+    "crate-local-unknown-ran",
+    "crate-local-unknown-output-stream",
+];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
     "prepare-unreachable",
@@ -42,6 +49,10 @@ const COPIED_REPLIES: &[&str] = &[
     "status-unreachable",
     "status-cold",
     "cancel",
+];
+const LOCAL_REPLIES: &[&str] = &[
+    "crate-local-unknown-prepare-outcome",
+    "crate-local-unknown-rebuild-result",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,7 +70,12 @@ fn cases() -> Vec<(&'static str, &'static str)> {
         .iter()
         .chain(LOCAL_OUTCOMES)
         .map(|name| ("outcomes", *name))
-        .chain(COPIED_REPLIES.iter().map(|name| ("replies", *name)))
+        .chain(
+            COPIED_REPLIES
+                .iter()
+                .chain(LOCAL_REPLIES)
+                .map(|name| ("replies", *name)),
+        )
         .collect()
 }
 
@@ -77,11 +93,11 @@ fn round_trip<T: DeserializeOwned + Serialize>(bytes: &[u8]) -> Vec<u8> {
 }
 
 fn canonical_reply(name: &str, bytes: &[u8]) -> Vec<u8> {
-    if name.starts_with("prepare-") {
+    if name.starts_with("prepare-") || name == "crate-local-unknown-prepare-outcome" {
         round_trip::<PrepareReply>(bytes)
     } else if name.starts_with("drop-") {
         round_trip::<DropReply>(bytes)
-    } else if name.starts_with("status") {
+    } else if name.starts_with("status") || name == "crate-local-unknown-rebuild-result" {
         round_trip::<StatusReply>(bytes)
     } else {
         assert_eq!(name, "cancel", "every reply must have a declared type");
@@ -100,7 +116,14 @@ fn golden_vector_inventory_is_complete() {
                 .copied()
                 .collect::<Vec<_>>(),
         ),
-        ("replies", COPIED_REPLIES.to_vec()),
+        (
+            "replies",
+            COPIED_REPLIES
+                .iter()
+                .chain(LOCAL_REPLIES)
+                .copied()
+                .collect::<Vec<_>>(),
+        ),
     ] {
         let expected: BTreeSet<_> = names
             .iter()
@@ -114,7 +137,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(cases().len(), 36);
+    assert_eq!(LOCAL_OUTCOMES.len(), 6);
+    assert_eq!(LOCAL_REPLIES.len(), 2);
+    assert_eq!(cases().len(), 42);
 }
 
 #[test]
@@ -301,9 +326,6 @@ fn known_outcome_tags_with_malformed_fields_do_not_become_unknown() {
         serde_json::from_str::<Outcome>(r#"{"type":"exit","type":"future_outcome","code":0}"#)
             .is_err()
     );
-    assert!(
-        serde_json::from_value::<PrepareOutcome>(json!({"type": "refused_before_start"})).is_err()
-    );
 }
 
 #[test]
@@ -355,13 +377,298 @@ fn known_outcome_tags_keep_their_semantic_variants() {
 }
 
 #[test]
-fn other_enum_tags_remain_strict() {
-    assert!(serde_json::from_value::<StreamRecord>(json!({"type": "future_record"})).is_err());
-    assert!(serde_json::from_value::<PrepareOutcome>(json!({"type": "future_prepare"})).is_err());
-    assert!(serde_json::from_value::<Killed>(json!("future_kill")).is_err());
-    assert!(serde_json::from_value::<Ran>(json!("local")).is_err());
-    assert!(serde_json::from_value::<OutputStream>(json!("future_stream")).is_err());
-    assert!(serde_json::from_value::<RebuildResult>(json!("future_result")).is_err());
+fn unknown_stream_record_retains_sequence_and_round_trips() {
+    let raw = value("outcomes", "crate-local-unknown-stream-record")["stream"][0].clone();
+    let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(
+        record,
+        StreamRecord::Unknown {
+            kind: "future_record".into(),
+            seq: Some(7),
+        }
+    );
+    assert_eq!(serde_json::to_value(record).unwrap(), raw);
+
+    for seq in [None, Some(0), Some(u64::MAX)] {
+        let mut raw = json!({"type": "future_record"});
+        if let Some(seq) = seq {
+            raw["seq"] = json!(seq);
+        }
+        let mut extended = raw.clone();
+        extended["future_field"] = json!({"opaque": true});
+        let decoded: StreamRecord = serde_json::from_value(extended).unwrap();
+        assert_eq!(
+            decoded,
+            StreamRecord::Unknown {
+                kind: "future_record".into(),
+                seq,
+            }
+        );
+        assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
+    }
+
+    let case: OutcomeCase =
+        serde_json::from_value(value("outcomes", "crate-local-unknown-stream-record")).unwrap();
+    assert!(matches!(case.stream[1], StreamRecord::Terminal(_)));
+}
+
+#[test]
+fn unknown_stream_record_with_non_u64_sequence_is_rejected() {
+    for seq in [
+        json!(null),
+        json!(-1),
+        json!(1.5),
+        json!("7"),
+        json!(true),
+        json!([]),
+        json!({}),
+    ] {
+        assert!(
+            serde_json::from_value::<StreamRecord>(json!({"type": "future_record", "seq": seq}))
+                .is_err(),
+            "{seq}"
+        );
+    }
+    assert!(serde_json::from_str::<StreamRecord>(
+        r#"{"type":"future_record","seq":18446744073709551616}"#
+    )
+    .is_err());
+}
+
+#[test]
+fn unknown_killed_tag_is_retained_and_round_trips() {
+    let raw = value("outcomes", "crate-local-unknown-killed")["stream"][0].clone();
+    let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+    let StreamRecord::Terminal(terminal) = &record else {
+        panic!("expected terminal")
+    };
+    assert_eq!(terminal.killed, Some(Killed::Unknown("future_kill".into())));
+    assert_eq!(serde_json::to_value(record).unwrap(), raw);
+}
+
+#[test]
+fn unknown_ran_tag_is_not_none_and_round_trips() {
+    let raw = value("outcomes", "crate-local-unknown-ran")["stream"][0].clone();
+    let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+    let StreamRecord::Terminal(terminal) = &record else {
+        panic!("expected terminal")
+    };
+    assert_eq!(terminal.ran, Some(Ran::Unknown("future_location".into())));
+    assert_ne!(terminal.ran, Some(Ran::None));
+    assert_eq!(serde_json::to_value(record).unwrap(), raw);
+}
+
+#[test]
+fn unknown_output_stream_delivers_bytes_and_sequence_and_round_trips() {
+    let raw = value("outcomes", "crate-local-unknown-output-stream")["stream"][0].clone();
+    let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+    let StreamRecord::Output(output) = &record else {
+        panic!("expected output")
+    };
+    assert_eq!(output.stream, OutputStream::Unknown("future_stream".into()));
+    assert_eq!(output.seq, 7);
+    assert_eq!(output.bytes.0, vec![0xe2]);
+    assert_eq!(serde_json::to_value(record).unwrap(), raw);
+}
+
+#[test]
+fn unknown_prepare_outcome_is_not_prepared_and_round_trips() {
+    let raw = value("replies", "crate-local-unknown-prepare-outcome");
+    let reply: PrepareReply = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(
+        reply.outcome,
+        PrepareOutcome::Unknown {
+            kind: "future_prepare".into()
+        }
+    );
+    assert_ne!(reply.outcome, PrepareOutcome::Prepared);
+    assert_eq!(serde_json::to_value(reply).unwrap(), raw);
+    let extended: PrepareOutcome =
+        serde_json::from_value(json!({"type": "future_prepare", "future_field": {"opaque": true}}))
+            .unwrap();
+    assert_eq!(
+        serde_json::to_value(extended).unwrap(),
+        json!({"type": "future_prepare"})
+    );
+}
+
+#[test]
+fn unknown_rebuild_result_is_retained_and_round_trips() {
+    let raw = value("replies", "crate-local-unknown-rebuild-result");
+    let reply: StatusReply = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(
+        reply.repositories[0].last_rebuild_result,
+        Some(RebuildResult::Unknown("future_result".into()))
+    );
+    assert_eq!(serde_json::to_value(reply).unwrap(), raw);
+}
+
+#[test]
+fn known_stream_record_tags_with_malformed_fields_do_not_become_unknown() {
+    for malformed in [
+        json!({"type": "accepted"}),
+        json!({"type": "accepted", "job_id": "not-a-uuid", "queue_position": 1}),
+        json!({"type": "accepted", "job_id": job_id(), "queue_position": -1}),
+        json!({"type": "output"}),
+        json!({"type": "output", "seq": 7, "stream": "stdout"}),
+        json!({"type": "output", "seq": "7", "stream": "stdout", "bytes": "4g=="}),
+        json!({"type": "output", "seq": 7, "stream": 1, "bytes": "4g=="}),
+        json!({"type": "output", "seq": 7, "stream": "stdout", "bytes": "not base64!"}),
+        json!({"type": "terminal"}),
+        json!({"type": 1}),
+        json!({"seq": 7}),
+        json!([]),
+    ] {
+        assert!(
+            serde_json::from_value::<StreamRecord>(malformed.clone()).is_err(),
+            "{malformed}"
+        );
+    }
+    let terminal = value("outcomes", "crate-local-unknown-outcome")["stream"][0].clone();
+    for field in [
+        "job_id",
+        "outcome",
+        "wall_ms",
+        "queue_wait_ms",
+        "bundle_bytes",
+    ] {
+        let mut malformed = terminal.clone();
+        malformed.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<StreamRecord>(malformed).is_err(),
+            "missing {field}"
+        );
+    }
+    assert!(serde_json::from_str::<StreamRecord>(
+        r#"{"type":"output","seq":7,"seq":8,"stream":"stdout","bytes":"4g=="}"#
+    )
+    .is_err());
+    assert!(serde_json::from_str::<StreamRecord>(
+        r#"{"type":"output","type":"future_record","seq":7,"stream":"stdout","bytes":"4g=="}"#
+    )
+    .is_err());
+}
+
+#[test]
+fn known_prepare_outcome_tags_with_malformed_fields_do_not_become_unknown() {
+    for malformed in [
+        json!({"type": "refused_before_start"}),
+        json!({"type": "refused_before_start", "reason": null}),
+        json!({"type": "refused_before_start", "reason": 1}),
+        json!({"type": "refused_before_start", "reason": {"type": "future_refusal"}}),
+        json!({"type": 1}),
+        json!({}),
+        json!([]),
+    ] {
+        assert!(
+            serde_json::from_value::<PrepareOutcome>(malformed.clone()).is_err(),
+            "{malformed}"
+        );
+    }
+    assert!(serde_json::from_str::<PrepareOutcome>(
+        r#"{"type":"refused_before_start","reason":"unreachable","reason":"runner_full"}"#
+    )
+    .is_err());
+    assert!(serde_json::from_str::<PrepareOutcome>(
+        r#"{"type":"prepared","type":"future_prepare"}"#
+    )
+    .is_err());
+}
+
+fn string_tags_reject_malformed_shapes<T: DeserializeOwned>(tags: &[&str]) {
+    // String enums have no fields: objects or arrays carrying even a known tag
+    // are malformed, not a future variant.
+    for &tag in tags {
+        for malformed in [
+            json!({"type": tag}),
+            json!({tag: {"future_field": true}}),
+            json!([tag]),
+        ] {
+            assert!(
+                serde_json::from_value::<T>(malformed.clone()).is_err(),
+                "{malformed}"
+            );
+        }
+    }
+    for malformed in [json!(null), json!(7), json!(true)] {
+        assert!(
+            serde_json::from_value::<T>(malformed.clone()).is_err(),
+            "{malformed}"
+        );
+    }
+}
+
+#[test]
+fn known_killed_tags_with_malformed_fields_are_rejected() {
+    string_tags_reject_malformed_shapes::<Killed>(&["deadline", "cancel"]);
+}
+
+#[test]
+fn known_ran_tags_with_malformed_fields_are_rejected() {
+    string_tags_reject_malformed_shapes::<Ran>(&["remote", "none"]);
+}
+
+#[test]
+fn known_output_stream_tags_with_malformed_fields_are_rejected() {
+    string_tags_reject_malformed_shapes::<OutputStream>(&["stdout", "stderr"]);
+}
+
+#[test]
+fn known_rebuild_result_tags_with_malformed_fields_are_rejected() {
+    string_tags_reject_malformed_shapes::<RebuildResult>(&["building", "ok", "failed"]);
+}
+
+#[test]
+fn known_caller_tags_keep_their_semantic_variants() {
+    for (tag, expected) in [("deadline", Killed::Deadline), ("cancel", Killed::Cancel)] {
+        assert_eq!(
+            serde_json::from_value::<Killed>(json!(tag)).unwrap(),
+            expected
+        );
+    }
+    for (tag, expected) in [("remote", Ran::Remote), ("none", Ran::None)] {
+        assert_eq!(serde_json::from_value::<Ran>(json!(tag)).unwrap(), expected);
+    }
+    for (tag, expected) in [
+        ("stdout", OutputStream::Stdout),
+        ("stderr", OutputStream::Stderr),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<OutputStream>(json!(tag)).unwrap(),
+            expected
+        );
+    }
+    for (tag, expected) in [
+        ("building", RebuildResult::Building),
+        ("ok", RebuildResult::Ok),
+        ("failed", RebuildResult::Failed),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<RebuildResult>(json!(tag)).unwrap(),
+            expected
+        );
+    }
+    assert_eq!(
+        serde_json::from_value::<PrepareOutcome>(json!({"type": "prepared"})).unwrap(),
+        PrepareOutcome::Prepared
+    );
+    assert_eq!(
+        serde_json::from_value::<PrepareOutcome>(
+            json!({"type": "refused_before_start", "reason": "unreachable"})
+        )
+        .unwrap(),
+        PrepareOutcome::RefusedBeforeStart {
+            reason: RefusalReason::Unreachable
+        }
+    );
+    let case: OutcomeCase = serde_json::from_value(value("outcomes", "exit")).unwrap();
+    assert!(matches!(case.stream[0], StreamRecord::Accepted(_)));
+    assert!(matches!(case.stream[1], StreamRecord::Terminal(_)));
+    let output: StreamRecord = serde_json::from_value(
+        json!({"type": "output", "seq": 7, "stream": "stdout", "bytes": "4g=="}),
+    )
+    .unwrap();
+    assert!(matches!(output, StreamRecord::Output(_)));
 }
 
 #[test]

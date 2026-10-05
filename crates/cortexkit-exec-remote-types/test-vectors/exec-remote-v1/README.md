@@ -2,7 +2,7 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The two `crate-local-*` cases documented below exist only
+pin the same bytes. The eight `crate-local-*` cases documented below exist only
 here. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
 
@@ -51,14 +51,40 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These two outcome pairs extend the original corpus, for a total of 22 outcomes:
+These six outcome pairs and two reply pairs extend the original corpus, for a
+total of 26 outcomes and 16 replies:
 
-- `crate-local-unknown-refusal`: `refused_before_start` with reason
+- `outcomes/crate-local-unknown-refusal`: `refused_before_start` with reason
   `future_refusal`, decoded as `RefusalReason::Unknown` while retaining the
   guarantee that the command did not start.
-- `crate-local-unknown-outcome`: type `future_outcome`, decoded as
+- `outcomes/crate-local-unknown-outcome`: type `future_outcome`, decoded as
   `Outcome::Unknown`. Callers grade it exactly like `outcome_unknown`: never
   assume the command did not run, and never re-run it locally.
 
-Unknown tags in these two enums round-trip their raw tag; known tags with
-malformed or missing fields still fail. Every other enum rejects unknown tags.
+- `outcomes/crate-local-unknown-stream-record`: type `future_record` with seq 7,
+  decoded as `StreamRecord::Unknown { kind, seq }`, followed by a known terminal.
+  Skip it and keep reading; count its seq toward the resume cursor
+  (`AttachRequest::from_seq`); never treat it as terminal. If the stream ends
+  without a known terminal record, get the job's outcome from `exec.status` or
+  `exec.attach` rather than waiting forever, and grade it outcome-unknown until
+  one arrives.
+- `outcomes/crate-local-unknown-killed`: reason `future_kill`, decoded as
+  `Killed::Unknown`. The command was killed for an unrecognised reason.
+- `outcomes/crate-local-unknown-ran`: location `future_location`, decoded as
+  `Ran::Unknown`. Never treat it as `Ran::None`: the command may have run. Grade
+  it like `outcome_unknown` for re-run decisions; never re-run it locally.
+- `outcomes/crate-local-unknown-output-stream`: label `future_stream`, decoded as
+  `OutputStream::Unknown`. Deliver the chunk's bytes and seq despite the unknown
+  stream label.
+- `replies/crate-local-unknown-prepare-outcome`: type `future_prepare`, decoded as
+  `PrepareOutcome::Unknown`. Never treat the workspace as prepared or run against
+  it on that basis.
+- `replies/crate-local-unknown-rebuild-result`: status `future_result`, decoded as
+  `RebuildResult::Unknown`. Informational only.
+
+Every enum a caller receives decodes unknown tags into a catch-all with a stated
+grading. Each catch-all round-trips its raw tag; unknown stream records also
+retain and round-trip `seq` when present. A present non-`u64` seq (including null)
+is a decode error. Other unknown fields are ignored. Known tags with malformed or
+missing required fields still fail, and string enums still reject non-string
+wire shapes.

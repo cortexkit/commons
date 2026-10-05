@@ -1,0 +1,1 @@
+{"request":{"command":"true","cwd":"/workspace/task","env":{},"repository_root":"/src/repo","siblings":[],"workspace_key":"/workspace/task"},"stream":[{"bundle_bytes":0,"job_id":"0192a64a-1234-7000-8000-000000000001","outcome":{"type":"outcome_unknown"},"queue_wait_ms":0,"ran":"future_location","tree_hash":null,"type":"terminal","wall_ms":0,"workspace_changes":null}]}

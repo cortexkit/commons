@@ -295,21 +295,67 @@ impl<'de> Deserialize<'de> for Outcome {
 }
 
 /// Why the executor killed a running command.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+#[serde(from = "String", into = "String")]
 pub enum Killed {
     Deadline,
     Cancel,
+    /// The command was killed for a reason this version does not recognise.
+    Unknown(String),
+}
+
+impl From<String> for Killed {
+    fn from(reason: String) -> Self {
+        match reason.as_str() {
+            "deadline" => Self::Deadline,
+            "cancel" => Self::Cancel,
+            _ => Self::Unknown(reason),
+        }
+    }
+}
+
+impl From<Killed> for String {
+    fn from(reason: Killed) -> Self {
+        match reason {
+            Killed::Deadline => "deadline".into(),
+            Killed::Cancel => "cancel".into(),
+            Killed::Unknown(reason) => reason,
+        }
+    }
 }
 
 /// Execution location; `None` is the wire string `"none"`, not a JSON null.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+#[serde(from = "String", into = "String")]
 pub enum Ran {
     Remote,
     None,
+    /// An execution location this version does not recognise. Never treat it as
+    /// `None`: the command may have run. Grade it like `outcome_unknown` for
+    /// re-run decisions; never re-run it locally.
+    Unknown(String),
+}
+
+impl From<String> for Ran {
+    fn from(location: String) -> Self {
+        match location.as_str() {
+            "remote" => Self::Remote,
+            "none" => Self::None,
+            _ => Self::Unknown(location),
+        }
+    }
+}
+
+impl From<Ran> for String {
+    fn from(location: Ran) -> Self {
+        match location {
+            Ran::Remote => "remote".into(),
+            Ran::None => "none".into(),
+            Ran::Unknown(location) => location,
+        }
+    }
 }
 
 /// The last record on an `exec.run` or `exec.attach` reply stream.
@@ -392,12 +438,35 @@ impl TerminalRecord {
 }
 
 /// The output file descriptor a chunk came from.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+#[serde(from = "String", into = "String")]
 pub enum OutputStream {
     Stdout,
     Stderr,
+    /// Only the stream label is unrecognised. Callers still deliver the chunk's
+    /// bytes and sequence number.
+    Unknown(String),
+}
+
+impl From<String> for OutputStream {
+    fn from(stream: String) -> Self {
+        match stream.as_str() {
+            "stdout" => Self::Stdout,
+            "stderr" => Self::Stderr,
+            _ => Self::Unknown(stream),
+        }
+    }
+}
+
+impl From<OutputStream> for String {
+    fn from(stream: OutputStream) -> Self {
+        match stream {
+            OutputStream::Stdout => "stdout".into(),
+            OutputStream::Stderr => "stderr".into(),
+            OutputStream::Unknown(stream) => stream,
+        }
+    }
 }
 
 /// A raw output chunk with its replay sequence number.
@@ -447,12 +516,80 @@ impl Accepted {
 }
 
 /// `workspace.prepare`'s outcome, not a runner transfer-control frame.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum PrepareOutcome {
     Prepared,
+    RefusedBeforeStart {
+        reason: RefusalReason,
+    },
+    /// An unrecognised prepare outcome. Never treat the workspace as prepared,
+    /// and do not run against it on that basis. Only the tag is retained;
+    /// unknown fields are ignored.
+    Unknown {
+        kind: String,
+    },
+}
+
+/// Decode known tags separately so malformed known replies cannot become unknown.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownPrepareOutcome {
+    Prepared,
     RefusedBeforeStart { reason: RefusalReason },
+}
+
+#[derive(Deserialize)]
+struct PrepareOutcomeTag {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PrepareOutcomeInput {
+    Known(KnownPrepareOutcome),
+    Tag(PrepareOutcomeTag),
+}
+
+impl Serialize for PrepareOutcome {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let known = match self {
+            Self::Prepared => KnownPrepareOutcome::Prepared,
+            Self::RefusedBeforeStart { reason } => KnownPrepareOutcome::RefusedBeforeStart {
+                reason: reason.clone(),
+            },
+            Self::Unknown { kind } => {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("type", kind)?;
+                return map.end();
+            }
+        };
+        known.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PrepareOutcome {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let known = match PrepareOutcomeInput::deserialize(deserializer)? {
+            PrepareOutcomeInput::Known(known) => known,
+            PrepareOutcomeInput::Tag(PrepareOutcomeTag { kind }) => {
+                if matches!(kind.as_str(), "prepared" | "refused_before_start") {
+                    return Err(serde::de::Error::custom(format!(
+                        "malformed fields for known prepare outcome tag {kind}"
+                    )));
+                }
+                return Ok(Self::Unknown { kind });
+            }
+        };
+        Ok(match known {
+            KnownPrepareOutcome::Prepared => Self::Prepared,
+            KnownPrepareOutcome::RefusedBeforeStart { reason } => {
+                Self::RefusedBeforeStart { reason }
+            }
+        })
+    }
 }
 
 /// A `workspace.prepare` reply.
@@ -558,13 +695,37 @@ impl StatusRequest {
 }
 
 /// The state of a repository's latest base rebuild.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+#[serde(from = "String", into = "String")]
 pub enum RebuildResult {
     Building,
     Ok,
     Failed,
+    /// An unrecognised rebuild result. This status is informational only.
+    Unknown(String),
+}
+
+impl From<String> for RebuildResult {
+    fn from(result: String) -> Self {
+        match result.as_str() {
+            "building" => Self::Building,
+            "ok" => Self::Ok,
+            "failed" => Self::Failed,
+            _ => Self::Unknown(result),
+        }
+    }
+}
+
+impl From<RebuildResult> for String {
+    fn from(result: RebuildResult) -> Self {
+        match result {
+            RebuildResult::Building => "building".into(),
+            RebuildResult::Ok => "ok".into(),
+            RebuildResult::Failed => "failed".into(),
+            RebuildResult::Unknown(result) => result,
+        }
+    }
 }
 
 /// A running command or base rebuild in an `exec.status` reply.
@@ -658,11 +819,95 @@ impl StatusReply {
 
 /// StreamData payloads exposed to `exec.run` and `exec.attach` callers, without
 /// SSH heartbeats or transfer-control frames. Fields live inline beside `type`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamRecord {
     Accepted(Accepted),
     Output(Output),
     Terminal(TerminalRecord),
+    /// An unrecognised record. Skip it and keep reading, counting its sequence
+    /// number toward the resume cursor when present. Never treat it as terminal.
+    /// If the stream ends without a known terminal record, get the job's outcome
+    /// from `exec.status` or `exec.attach` rather than waiting forever, and grade
+    /// it outcome-unknown until one arrives. Only the tag and sequence number
+    /// are retained; other unknown fields are ignored.
+    Unknown {
+        kind: String,
+        seq: Option<u64>,
+    },
+}
+
+/// Decode known tags separately so malformed known records cannot become unknown.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownStreamRecord {
+    Accepted(Accepted),
+    Output(Output),
+    Terminal(TerminalRecord),
+}
+
+#[derive(Deserialize)]
+struct StreamRecordTag {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default, deserialize_with = "StreamRecordTag::deserialize_seq")]
+    seq: Option<u64>,
+}
+
+impl StreamRecordTag {
+    fn deserialize_seq<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<u64>, D::Error> {
+        // An absent sequence is allowed, but a present one must be an integer,
+        // not null, so callers can safely advance their replay cursor.
+        u64::deserialize(deserializer).map(Some)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StreamRecordInput {
+    Known(KnownStreamRecord),
+    Tag(StreamRecordTag),
+}
+
+impl Serialize for StreamRecord {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let known = match self {
+            Self::Accepted(accepted) => KnownStreamRecord::Accepted(accepted.clone()),
+            Self::Output(output) => KnownStreamRecord::Output(output.clone()),
+            Self::Terminal(terminal) => KnownStreamRecord::Terminal(terminal.clone()),
+            Self::Unknown { kind, seq } => {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(Some(1 + usize::from(seq.is_some())))?;
+                map.serialize_entry("type", kind)?;
+                if let Some(seq) = seq {
+                    map.serialize_entry("seq", seq)?;
+                }
+                return map.end();
+            }
+        };
+        known.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamRecord {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let known = match StreamRecordInput::deserialize(deserializer)? {
+            StreamRecordInput::Known(known) => known,
+            StreamRecordInput::Tag(StreamRecordTag { kind, seq }) => {
+                if matches!(kind.as_str(), "accepted" | "output" | "terminal") {
+                    return Err(serde::de::Error::custom(format!(
+                        "malformed fields for known stream record tag {kind}"
+                    )));
+                }
+                return Ok(Self::Unknown { kind, seq });
+            }
+        };
+        Ok(match known {
+            KnownStreamRecord::Accepted(accepted) => Self::Accepted(accepted),
+            KnownStreamRecord::Output(output) => Self::Output(output),
+            KnownStreamRecord::Terminal(terminal) => Self::Terminal(terminal),
+        })
+    }
 }

@@ -5,8 +5,10 @@
 //! Output is raw bytes encoded as padded base64, not UTF-8 text. Terminal
 //! availability fields always serialize, including explicit nulls.
 //!
-//! Unknown object fields are ignored. Unknown refusal reasons retain their tag;
-//! unknown terminal outcomes are graded like outcome-unknown, never as proof
+//! Unknown object fields are ignored. Every enum received by a caller preserves
+//! unknown tags in a catch-all with documented grading. Unknown stream records
+//! retain their sequence number for replay cursors, but are never terminal.
+//! Unknown terminal outcomes are graded like outcome-unknown, never as proof
 //! that the command did not run. These types do not implement transport framing,
 //! execution policy, UUID generation or executor-to-runner transfer control.
 

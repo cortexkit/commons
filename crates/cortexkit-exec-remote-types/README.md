@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.1.0**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.1.1**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -17,8 +17,8 @@ sibling path-dependency consumers.
 | `workspace.prepare` | `PrepareRequest` | `PrepareReply` |
 | `workspace.drop` | `DropRequest` | `DropReply` |
 
-`StreamRecord` is internally tagged by `type`: `accepted`, `output`, or
-`terminal`, with the record's fields inline beside the discriminator. `Output`
+`StreamRecord` is internally tagged by `type`: known records are `accepted`,
+`output`, or `terminal`, with fields inline beside the discriminator. `Output`
 retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
 character, so decoding never converts its payload to a string.
@@ -38,23 +38,40 @@ UUID generation, version and retention policy belong to the executor.
 
 ## Additive decoding and outcome safety
 
-Unknown object fields are ignored. Unknown refusal reason tags decode as
-`RefusalReason::Unknown(String)`, retaining the raw tag. Inside
-`refused_before_start` this still guarantees the command did not start.
-Unknown terminal outcome tags decode as `Outcome::Unknown { kind: String }`.
-Callers grade an unknown outcome exactly like `outcome_unknown`: **never assume
-the command did not run, and never re-run it locally**. An expired history is
-also not a refusal and must never trigger resubmission.
+Unknown object fields are ignored. **Every enum a caller receives decodes unknown
+tags into a catch-all with a stated grading:**
 
-Each catch-all re-serializes the same tag. Unknown fields are ignored, not
-retained. Only an unrecognised tag enters a catch-all: known tags with missing or
-malformed required fields remain errors. Other enums, including stream record
-tags and prepare outcome kinds, still reject unknown tags, as does invalid
-base64. Non-exhaustiveness is a Rust API compatibility rule, not permission to
-treat malformed known records as future variants.
+| Enum | Catch-all | Caller grading |
+|---|---|---|
+| `RefusalReason` | `Unknown(String)` | Inside `refused_before_start`, the command still did not start. |
+| `Outcome` | `Unknown { kind: String }` | Grade like `outcome_unknown`: never assume the command did not run, and never re-run it locally. |
+| `StreamRecord` | `Unknown { kind: String, seq: Option<u64> }` | Skip and keep reading; count its seq toward the resume cursor; never treat it as terminal. |
+| `Killed` | `Unknown(String)` | The command was killed for a reason this version does not recognise. |
+| `Ran` | `Unknown(String)` | Never treat as `Ran::None`: the command may have run. Grade like `outcome_unknown` for re-run decisions; never re-run it locally. |
+| `OutputStream` | `Unknown(String)` | Deliver the chunk's bytes and seq; only the stream label is unknown. |
+| `PrepareOutcome` | `Unknown { kind: String }` | Never treat the workspace as prepared or run against it on that basis. |
+| `RebuildResult` | `Unknown(String)` | Informational only. |
+
+For an unknown stream record, **skip it and keep reading; count its seq toward
+the resume cursor (`AttachRequest::from_seq`); never treat it as terminal**. If
+the stream ends without a known terminal record, get the job's outcome from
+`exec.status` or `exec.attach` rather than waiting forever, and grade it
+outcome-unknown until one arrives. Advancing past a skipped sequence prevents
+reattach from replaying from before it forever or reporting a false gap. A
+present `seq` must be a `u64`; a non-`u64` value, including null, is a decode error.
+An expired history is also not a refusal and must never trigger resubmission.
+
+Each catch-all re-serializes the same raw tag. Unknown stream records also
+re-serialize `seq` when present; other unknown fields are ignored, not retained.
+Only an unrecognised tag enters a catch-all: known tags with missing or malformed
+required fields remain errors, as does invalid base64. String enums still
+require strings, not objects or arrays carrying a tag. Non-exhaustiveness is a
+Rust API compatibility rule, not permission to treat malformed known records as
+future variants. The string-owning catch-alls mean `Killed`, `Ran`, `OutputStream`,
+and `RebuildResult` implement `Clone`, not `Copy`.
 
 These are the caller-side shapes of the executor's protocol. The executor's own
-codec rejects unknown enum tags; the two catch-alls above deliberately extend
+codec rejects unknown enum tags; the catch-alls above deliberately extend
 decoding for callers while preserving every known wire shape. The executor's
 runner frames (`Run`, `Prepare`, `Frame`, bundle manifests,
 repository candidates, sibling snapshots, wire `Refusal`, withdrawal outcomes,
@@ -76,14 +93,26 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Two **crate-local additions** are listed separately from the copied cases:
+Eight **crate-local additions** are listed separately from the copied cases:
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.
 - `outcomes/crate-local-unknown-outcome`: the raw `future_outcome` terminal kind,
   without claiming a before-start guarantee.
+- `outcomes/crate-local-unknown-stream-record`: `future_record` with seq 7,
+  skipped while advancing the resume cursor, followed by a known terminal.
+- `outcomes/crate-local-unknown-killed`: a killed command with the unknown
+  `future_kill` reason.
+- `outcomes/crate-local-unknown-ran`: the `future_location` execution location,
+  never a guarantee that the command did not run.
+- `outcomes/crate-local-unknown-output-stream`: `future_stream`, retaining the
+  chunk's raw bytes and seq.
+- `replies/crate-local-unknown-prepare-outcome`: `future_prepare`, never proof
+  that the workspace is prepared.
+- `replies/crate-local-unknown-rebuild-result`: the informational `future_result`
+  rebuild status.
 
-Totals: **22 outcome pairs and 14 reply pairs**. Runner `frames/` and pretty
+Totals: **26 outcome pairs and 16 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent
@@ -95,5 +124,5 @@ RFC 8785 canonical bytes. The vectors and tests are included in the package.
 cargo fmt --all --check
 cargo clippy -p cortexkit-exec-remote-types --all-targets --locked -- -D warnings
 cargo test -p cortexkit-exec-remote-types --locked
-cargo package -p cortexkit-exec-remote-types --locked --allow-dirty --no-verify
+cargo package -p cortexkit-exec-remote-types --locked --list
 ```
