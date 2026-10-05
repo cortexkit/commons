@@ -5,9 +5,12 @@
 - Add reviewed HUB dispositions using `hub = "reason"` and `hub_targets = [...]`.
   Refuse missing reasons, reasons shorter than 20 trimmed characters, missing or
   empty targets, and combinations with EQUIVALENT or UNREACHABLE at load.
-- Under `run --broad`, count a catch as HUB only when every collateral target is
-  in the recorded set. Smaller sets remain HUB; new targets grade CAUGHT_BROADLY
-  and are named for review. Expected tests must still fail and `only` still holds.
+- Under `run --broad`, count a catch as HUB only when every collateral target
+  outside all expected-test targets is in the recorded set. `hub_targets` lists
+  only these other targets, the ones that made the catch broad. Smaller sets
+  remain HUB; new other targets grade CAUGHT_BROADLY and are named for review.
+  Same-target failures need no approval and remain in the full collateral report.
+  Expected tests must still fail and `only` still holds.
   Normal runs ignore HUB. Report a separate HUB count and listing with reasons.
 - Refuse HUB in the shared append writer: it must be written by a person after
   reviewing a broad catch, never by `prove` or `explore --append`.

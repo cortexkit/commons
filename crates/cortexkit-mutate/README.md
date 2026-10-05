@@ -67,22 +67,26 @@ trimming**, and `hub_targets` must be present and nonempty. Supplying targets
 without a reason is refused at load, with the row's id.
 
 HUB does **not** skip a mutant. Only under `run --broad`, after all expected tests
-fail (and `only` is satisfied), the runner compares the observed collateral target
-set to `hub_targets`. The same set or a subset grades HUB and counts as caught,
-with its own summary count and a listing of reviewed reasons. Any collateral
-target outside the recorded set grades CAUGHT_BROADLY and the reason names those
-new targets for review. The comparison includes same-target collateral as well as
-cross-target collateral. A plain run ignores HUB and grades the row normally,
+fail (and `only` is satisfied), the runner compares only collateral targets outside
+every expected-test target to `hub_targets`. This list approves the **other targets**
+that made the catch broad; it need not include the expected tests' own targets.
+The same cross-target set or a subset grades HUB and counts as caught, with its own
+summary count and a listing of reviewed reasons. Any cross-target collateral outside
+the recorded set grades CAUGHT_BROADLY and the reason names those new targets for
+review. Same-target collateral, including newly failing tests, never needs HUB
+approval and remains in the report's full `collateral.targets` list.
+A plain run ignores HUB and grades the row normally,
 because it cannot observe package breadth. Command rows cannot observe breadth
 and therefore never grade HUB.
 
 Copy **stable target names** from a broad report's `collateral.targets`, not Cargo
 executable hashes: for example, `encoder_e2e`, not `encoder_e2e-3f9a1c0123456789`.
 Nextest uses its binary id (the binary token for human output, `crate::binary` for
-JSON output). Every reported collateral target must be in the reviewed list to
-retain HUB. A smaller observed set needs no catalogue change; a new target needs
-another review. Write HUB by hand after reviewing a broad catch: neither `prove`
-nor `explore --append` may create it, and the shared append writer refuses HUB.
+JSON output). Include only targets outside every expected-test target in the
+reviewed list. A smaller observed cross-target set needs no catalogue change; a
+new other target needs another review. Write HUB by hand after reviewing a broad
+catch: neither `prove` nor `explore --append` may create it, and the shared append
+writer refuses HUB.
 
 For a multi-file break, use `edits` **instead of** `file`/`old`/`new`:
 
@@ -300,7 +304,7 @@ succeed. The first three count as catches:
 | --- | --- |
 | CAUGHT | Every expected test failed; with `only`, no other test failed. |
 | CAUGHT_BROADLY | In a `run --broad` audit, every expected test failed, but a collateral red test belongs to a target outside all expected-test targets. A warning, not a failing row. |
-| HUB | In a `run --broad` audit, every expected test failed and every collateral target is in the row's reviewed `hub_targets`. Counts as caught, with the recorded reason. |
+| HUB | In a `run --broad` audit, every expected test failed and every collateral target outside the expected tests' own targets is in the row's reviewed `hub_targets`. Same-target collateral needs no approval. Counts as caught, with the recorded reason. |
 | SURVIVED | An expected test passed, with no unrelated failure. |
 | WRONG_TEST | An expected test passed while another failed, or `only` forbids an extra failure. |
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |

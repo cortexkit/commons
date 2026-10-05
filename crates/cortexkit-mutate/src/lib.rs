@@ -49,7 +49,7 @@ pub struct Control {
     pub unreachable: Option<String>,
     /// A reviewed explanation of why multiple test targets guard this property.
     pub hub: Option<String>,
-    /// Stable collateral target names approved by the reviewer of a broad catch.
+    /// Stable cross-target collateral names approved by the reviewer of a broad catch.
     pub hub_targets: Option<Vec<String>>,
     /// Bounds the test run only; the build has its own deadline below.
     #[serde(default = "default_timeout")]
@@ -1014,7 +1014,7 @@ fn stable_target<'a>(runner: &str, target: &'a str) -> &'a str {
     }
 }
 
-fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, bool)> {
+fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, Vec<String>)> {
     // A catch must be attributable; names-only snippets remain supported by the
     // public parser, but cannot establish whether a real replay caught broadly.
     if results.targets.values().any(String::is_empty) {
@@ -1036,15 +1036,19 @@ fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, bool)> 
         .filter_map(|name| results.targets.get(*name))
         .map(|target| stable_target(&c.runner, target).to_owned())
         .collect();
-    let broad = targets
+    // The report includes all collateral, but breadth grading and HUB approval
+    // concern only targets outside every expected test's own target.
+    let cross_targets = targets
         .iter()
-        .any(|target| !expected_targets.contains(target.as_str()));
+        .filter(|target| !expected_targets.contains(target.as_str()))
+        .cloned()
+        .collect();
     Ok((
         Collateral {
             count: extra.len(),
             targets: targets.into_iter().collect(),
         },
-        broad,
+        cross_targets,
     ))
 }
 
@@ -1232,22 +1236,21 @@ fn replay(
             // when recorded, so none is collateral to that discovery.
             Scope::Explore { .. } => explore_grade(&results.red, &results.green),
             Scope::Row | Scope::Package | Scope::Broad => {
-                let (extra, broad) = collateral(c, &results)?;
+                let (extra, cross_targets) = collateral(c, &results)?;
                 report.collateral = extra;
                 report.breadth_observed = scope == Scope::Broad;
                 let outcome = grade(c, &results.red, &results.green);
                 if outcome == Outcome::Caught && report.breadth_observed {
                     if let Some(reason) = &c.hub {
                         let approved = c.hub_targets.as_deref().unwrap_or_default();
-                        let new_targets: Vec<_> = report
-                            .collateral
-                            .targets
+                        let new_targets: Vec<_> = cross_targets
                             .iter()
                             .filter(|target| !approved.contains(target))
                             .cloned()
                             .collect();
-                        // A reviewed hub permits only the recorded target set;
-                        // fewer collateral targets are fine, new ones need review.
+                        // A reviewed hub permits only the recorded cross-target
+                        // set. Same-target failures never require HUB approval;
+                        // fewer other targets are fine, new ones need review.
                         if new_targets.is_empty() {
                             report.reason = Some(reason.clone());
                             Outcome::Hub
@@ -1258,7 +1261,7 @@ fn replay(
                             ));
                             Outcome::CaughtBroadly
                         }
-                    } else if broad {
+                    } else if !cross_targets.is_empty() {
                         Outcome::CaughtBroadly
                     } else {
                         outcome
@@ -1749,10 +1752,10 @@ mod target_parser_tests {
                 "cargo",
             )
             .unwrap();
-            let (extra, broad) = collateral(&c, &results).unwrap();
+            let (extra, cross_targets) = collateral(&c, &results).unwrap();
             assert_eq!(extra.targets, ["encoder_e2e", "fixture"]);
             assert_eq!(extra.count, 2);
-            assert!(broad);
+            assert_eq!(cross_targets, ["encoder_e2e"]);
         }
         assert_eq!(stable_target("cargo", "doc:fixture"), "doc:fixture");
         assert_eq!(stable_target("cargo", "my-target"), "my-target");

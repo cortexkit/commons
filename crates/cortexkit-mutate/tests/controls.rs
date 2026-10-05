@@ -906,7 +906,7 @@ fn hub_run_fixture(targets: &[&str]) -> Fixture {
 
 #[test]
 fn hub_broad_equal_targets_counts_as_hub() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let f = hub_run_fixture(&["capacity", "readers"]);
     let (rows, stdout) = collateral_cli(&f, true);
     assert_eq!(rows[0]["outcome"], "HUB");
     assert_eq!(rows[0]["reason"], HUB_REASON);
@@ -922,15 +922,52 @@ fn hub_broad_equal_targets_counts_as_hub() {
 
 #[test]
 fn hub_broad_subset_targets_counts_as_hub() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers", "other_contract"]);
+    let f = hub_run_fixture(&["capacity", "readers", "other_contract"]);
     let (rows, _) = collateral_cli(&f, true);
     assert_eq!(rows[0]["outcome"], "HUB");
     assert_eq!(rows[0]["reason"], HUB_REASON);
 }
 
 #[test]
+fn hub_broad_new_same_target_failure_still_counts_as_hub() {
+    let f = hub_run_fixture(&["capacity", "readers"]);
+    let (before, _) = collateral_cli(&f, true);
+    assert_eq!(before[0]["collateral"]["count"], 4);
+
+    let source = format!(
+        "{}\n#[test]\nfn additional_same_target_rejects_zero() {{ assert!(!guarded(0)); }}\n",
+        include_str!("fixture/src/lib.rs")
+    );
+    fs::write(f.root().join("src/lib.rs"), &source).unwrap();
+    f.commit();
+    let lock = fs::read(f.root().join("Cargo.lock")).unwrap();
+    let c = load(&f.root().join("mutations.toml"))
+        .unwrap()
+        .control
+        .remove(0);
+    let row = run_broad_row(f.root(), &c, false, &AtomicBool::new(false)).unwrap();
+    assert_eq!(row.outcome, Outcome::Hub);
+    assert!(row.passes());
+    assert_eq!(row.reason.as_deref(), Some(HUB_REASON));
+    assert!(row
+        .red
+        .contains(&"additional_same_target_rejects_zero".into()));
+    assert_eq!(row.collateral.count, 5);
+    assert_eq!(
+        row.collateral.targets,
+        ["capacity", "mutation_fixture", "readers"]
+    );
+    assert_eq!(
+        fs::read_to_string(f.root().join("src/lib.rs")).unwrap(),
+        source
+    );
+    assert_eq!(fs::read(f.root().join("Cargo.lock")).unwrap(), lock);
+    assert!(git(f.root(), &["diff", "--exit-code"]).unwrap().is_empty());
+}
+
+#[test]
 fn hub_summary_counts_and_lists_reviewed_reasons() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let f = hub_run_fixture(&["capacity", "readers"]);
     let (_, stdout) = collateral_cli(&f, true);
     assert!(
         stdout.contains(
@@ -946,7 +983,7 @@ fn hub_summary_counts_and_lists_reviewed_reasons() {
 
 #[test]
 fn hub_broad_new_target_is_caught_broadly_and_named() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture"]);
+    let f = hub_run_fixture(&["capacity"]);
     let (rows, stdout) = collateral_cli(&f, true);
     assert_eq!(rows[0]["outcome"], "CAUGHT_BROADLY");
     assert_eq!(
@@ -962,7 +999,7 @@ fn hub_broad_new_target_is_caught_broadly_and_named() {
 
 #[test]
 fn hub_is_ignored_without_broad() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let f = hub_run_fixture(&["capacity", "readers"]);
     let (rows, stdout) = collateral_cli(&f, false);
     assert_eq!(rows[0]["outcome"], "CAUGHT");
     assert_eq!(rows[0]["breadth_observed"], false);
@@ -973,7 +1010,7 @@ fn hub_is_ignored_without_broad() {
 
 #[test]
 fn hub_broad_requires_expected_tests_to_fail() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let f = hub_run_fixture(&["capacity", "readers"]);
     let mut c = load(&f.root().join("mutations.toml"))
         .unwrap()
         .control
@@ -993,7 +1030,7 @@ fn hub_broad_requires_expected_tests_to_fail() {
 
 #[test]
 fn hub_append_refuses_without_writing() {
-    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let f = hub_run_fixture(&["capacity", "readers"]);
     let path = f.root().join("mutations.toml");
     let c = load(&path).unwrap().control.remove(0);
     let before = fs::read(&path).unwrap();
