@@ -9,7 +9,9 @@ import time
 mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
 test_id = sys.argv[1]
 assert len(sys.argv) == 2
-with Path(".git/command-log").open("a") as log:
+# Write \n explicitly: text mode on Windows would translate it to \r\n, and the
+# tests compare this log byte for byte.
+with Path(".git/command-log").open("a", newline="\n") as log:
     log.write(f"{'mutant' if mutated else 'baseline'} {test_id}\n")
 
 if test_id == "always_red":
