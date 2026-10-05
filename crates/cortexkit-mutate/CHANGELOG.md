@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+- Add reviewed HUB dispositions using `hub = "reason"` and `hub_targets = [...]`.
+  Refuse missing reasons, reasons shorter than 20 trimmed characters, missing or
+  empty targets, and combinations with EQUIVALENT or UNREACHABLE at load.
+- Under `run --broad`, count a catch as HUB only when every collateral target is
+  in the recorded set. Smaller sets remain HUB; new targets grade CAUGHT_BROADLY
+  and are named for review. Expected tests must still fail and `only` still holds.
+  Normal runs ignore HUB. Report a separate HUB count and listing with reasons.
+- Refuse HUB in the shared append writer: it must be written by a person after
+  reviewing a broad catch, never by `prove` or `explore --append`.
+- Report stable Cargo collateral target names without executable hashes or the
+  Windows `.exe` suffix, so reviewed target sets survive rebuilds. Keep nextest's
+  binary ids. Older runners reject the new catalogue fields.
+
 ## 0.3.1
 
 - `--old` and `--new` accept values starting with `-` or `--`, such as a

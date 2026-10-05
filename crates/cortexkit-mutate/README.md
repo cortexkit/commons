@@ -31,6 +31,8 @@ only = true
 # build_timeout_s = 1800
 # equivalent = "Explain why this mutant computes exactly the same result"
 # unreachable = "Explain why the mutated code has no production caller"
+# hub = "Explain why multiple test targets intentionally guard this property"
+# hub_targets = ["capacity_contract", "encoder_e2e"]
 ```
 
 The two deadlines are separate. `timeout_s` (default 600) bounds only the test
@@ -54,6 +56,33 @@ reason must explain why no production caller exists (for example, all references
 are unit tests); the runner does not infer dead code or verify a call graph.
 UNREACHABLE rows may use `expect_red = []`: no guarding tests are claimed.
 Their other row fields and edit anchors are still validated by `check`.
+
+### HUB: reviewed cross-target catches
+
+Use `hub = "reason"` with `hub_targets = ["target_name", ...]` when a broad
+catch is legitimate: several test targets intentionally assert the same property,
+and narrowing the mutant would assert less. HUB, EQUIVALENT, and UNREACHABLE are
+mutually exclusive. A HUB reason must contain **at least 20 characters after
+trimming**, and `hub_targets` must be present and nonempty. Supplying targets
+without a reason is refused at load, with the row's id.
+
+HUB does **not** skip a mutant. Only under `run --broad`, after all expected tests
+fail (and `only` is satisfied), the runner compares the observed collateral target
+set to `hub_targets`. The same set or a subset grades HUB and counts as caught,
+with its own summary count and a listing of reviewed reasons. Any collateral
+target outside the recorded set grades CAUGHT_BROADLY and the reason names those
+new targets for review. The comparison includes same-target collateral as well as
+cross-target collateral. A plain run ignores HUB and grades the row normally,
+because it cannot observe package breadth. Command rows cannot observe breadth
+and therefore never grade HUB.
+
+Copy **stable target names** from a broad report's `collateral.targets`, not Cargo
+executable hashes: for example, `encoder_e2e`, not `encoder_e2e-3f9a1c0123456789`.
+Nextest uses its binary id (the binary token for human output, `crate::binary` for
+JSON output). Every reported collateral target must be in the reviewed list to
+retain HUB. A smaller observed set needs no catalogue change; a new target needs
+another review. Write HUB by hand after reviewing a broad catch: neither `prove`
+nor `explore --append` may create it, and the shared append writer refuses HUB.
 
 For a multi-file break, use `edits` **instead of** `file`/`old`/`new`:
 
@@ -264,13 +293,14 @@ rejects it and nothing is written.
 
 ## Outcomes and evidence
 
-CAUGHT, CAUGHT_BROADLY, and explicitly recorded EQUIVALENT or UNREACHABLE rows
-succeed. Only the first two count as catches:
+CAUGHT, CAUGHT_BROADLY, HUB, and explicitly recorded EQUIVALENT or UNREACHABLE rows
+succeed. The first three count as catches:
 
 | Outcome | Meaning |
 | --- | --- |
 | CAUGHT | Every expected test failed; with `only`, no other test failed. |
 | CAUGHT_BROADLY | In a `run --broad` audit, every expected test failed, but a collateral red test belongs to a target outside all expected-test targets. A warning, not a failing row. |
+| HUB | In a `run --broad` audit, every expected test failed and every collateral target is in the row's reviewed `hub_targets`. Counts as caught, with the recorded reason. |
 | SURVIVED | An expected test passed, with no unrelated failure. |
 | WRONG_TEST | An expected test passed while another failed, or `only` forbids an extra failure. |
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |
@@ -303,17 +333,18 @@ Every row also includes `collateral: { "count": N, "targets": [...] }`. For proo
 replays, it counts every red test not named in `expect_red` and lists their sorted,
 de-duplicated targets, including same-target failures. With no collateral it is
 `{ "count": 0, "targets": [] }`. Explore discovers its expected names from all
-red tests, so its collateral is empty. Cargo target identities are executable
-file names from `Running ... (<binary>)` headers (including Cargo's hash suffix);
+red tests, so its collateral is empty. Cargo target identities are stable executable
+names from `Running ... (<binary>)` headers, without the hash suffix or Windows `.exe`;
 doctests use `doc:<crate>`. Human nextest uses its binary token; JSON nextest uses
 the `crate::binary` prefix. Attribution is retained by the same per-test parser.
 Console output includes collateral on catches with extra reds, a warning summary
-for CAUGHT_BROADLY, and a separate list and count of UNREACHABLE rows.
+for CAUGHT_BROADLY, and separate lists and counts of UNREACHABLE and HUB rows.
 
-These formats have no explicit version field: 0.2 retains the unversioned TOML
-`[[control]]` schema and JSON array, adding `collateral` and `breadth_observed` to report rows and the
-optional `unreachable` reason to controls. Existing 0.1 catalogues/proofs remain
-readable unchanged. Older runners rejecting new `unreachable` rows is expected.
+These formats have no explicit version field: 0.4 retains the unversioned TOML
+`[[control]]` schema and JSON array, adding optional `hub` and `hub_targets` fields
+to controls and the HUB outcome to reports. Existing catalogues remain readable
+unchanged. Older runners rejecting new HUB rows is expected. Since 0.4,
+`collateral.targets` uses stable Cargo names rather than hash-suffixed executables.
 
 For Cargo/nextest, builds are separate: Cargo uses `cargo test -p PACKAGE TARGET --no-run --locked`;
 nextest uses `cargo nextest run ... --no-run --locked`. Only build exit status

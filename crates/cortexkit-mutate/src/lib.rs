@@ -47,6 +47,10 @@ pub struct Control {
     pub equivalent: Option<String>,
     /// A person's explanation of why the mutated code has no production caller.
     pub unreachable: Option<String>,
+    /// A reviewed explanation of why multiple test targets guard this property.
+    pub hub: Option<String>,
+    /// Stable collateral target names approved by the reviewer of a broad catch.
+    pub hub_targets: Option<Vec<String>>,
     /// Bounds the test run only; the build has its own deadline below.
     #[serde(default = "default_timeout")]
     pub timeout_s: u64,
@@ -132,7 +136,36 @@ impl Control {
         Ok(())
     }
 
+    fn validate_hub(&self) -> Result<()> {
+        if self.hub.is_none() && self.hub_targets.is_none() {
+            return Ok(());
+        }
+        if self.equivalent.is_some() || self.unreachable.is_some() {
+            return Err(format!(
+                "{}: hub, equivalent and unreachable are exclusive",
+                self.id
+            ));
+        }
+        let reason = self
+            .hub
+            .as_deref()
+            .ok_or_else(|| format!("{}: HUB requires a hub reason", self.id))?;
+        if reason.trim().chars().count() < 20 {
+            return Err(format!(
+                "{}: HUB reason must be at least 20 characters after trimming",
+                self.id
+            ));
+        }
+        if self.hub_targets.as_ref().is_none_or(|targets| {
+            targets.is_empty() || targets.iter().any(|target| target.trim().is_empty())
+        }) {
+            return Err(format!("{}: HUB requires non-empty hub_targets", self.id));
+        }
+        Ok(())
+    }
+
     fn recorded_disposition(&self) -> Result<Option<(Outcome, &str)>> {
+        self.validate_hub()?;
         if self.equivalent.is_some() && self.unreachable.is_some() {
             return Err(format!(
                 "{}: equivalent and unreachable are exclusive",
@@ -226,6 +259,7 @@ pub fn load(path: &Path) -> Result<Catalogue> {
                 .to_owned();
             let c: Control = row.try_into().map_err(|e| format!("{id}: {e}"))?;
             c.validate_runner()?;
+            c.validate_hub()?;
             Ok(c)
         })
         .collect::<Result<Vec<_>>>()?;
@@ -316,6 +350,14 @@ pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
 /// `prove` and `explore --append` both write rows through this function.
 pub fn append_control(path: &Path, c: &Control) -> Result<()> {
     use std::io::Write;
+    // HUB records a person's review of an observed broad catch, not a discovery
+    // that prove or explore may assign automatically.
+    if c.hub.is_some() || c.hub_targets.is_some() {
+        return Err(format!(
+            "{}: cannot append HUB; review a broad catch and edit the catalogue manually",
+            c.id
+        ));
+    }
     let row = toml::to_string(&Catalogue {
         control: vec![c.clone()],
     })
@@ -529,11 +571,12 @@ pub enum Outcome {
     TimedOut,
     Equivalent,
     Unreachable,
+    Hub,
     Error,
 }
 impl Outcome {
     pub fn is_caught(&self) -> bool {
-        matches!(self, Self::Caught | Self::CaughtBroadly)
+        matches!(self, Self::Caught | Self::CaughtBroadly | Self::Hub)
     }
 }
 /// Which deadline expired (command rows report timeouts as ERROR).
@@ -956,6 +999,21 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     })
 }
 
+fn stable_target<'a>(runner: &str, target: &'a str) -> &'a str {
+    if runner != "cargo" || target.starts_with("doc:") {
+        return target;
+    }
+    let binary = target.strip_suffix(".exe").unwrap_or(target);
+    // Cargo's executable hash changes on rebuild. Catalogue approvals must use
+    // the test target's stable name, including on Windows.
+    match binary.rsplit_once('-') {
+        Some((name, hash)) if hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            name
+        }
+        _ => binary,
+    }
+}
+
 fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, bool)> {
     // A catch must be attributable; names-only snippets remain supported by the
     // public parser, but cannot establish whether a real replay caught broadly.
@@ -966,6 +1024,7 @@ fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, bool)> 
         .expect_red
         .iter()
         .filter_map(|name| results.targets.get(name))
+        .map(|target| stable_target(&c.runner, target))
         .collect();
     let extra: Vec<_> = results
         .red
@@ -975,11 +1034,11 @@ fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, bool)> 
     let targets: BTreeSet<_> = extra
         .iter()
         .filter_map(|name| results.targets.get(*name))
-        .cloned()
+        .map(|target| stable_target(&c.runner, target).to_owned())
         .collect();
     let broad = targets
         .iter()
-        .any(|target| !expected_targets.contains(target));
+        .any(|target| !expected_targets.contains(target.as_str()));
     Ok((
         Collateral {
             count: extra.len(),
@@ -1177,8 +1236,33 @@ fn replay(
                 report.collateral = extra;
                 report.breadth_observed = scope == Scope::Broad;
                 let outcome = grade(c, &results.red, &results.green);
-                if outcome == Outcome::Caught && broad && report.breadth_observed {
-                    Outcome::CaughtBroadly
+                if outcome == Outcome::Caught && report.breadth_observed {
+                    if let Some(reason) = &c.hub {
+                        let approved = c.hub_targets.as_deref().unwrap_or_default();
+                        let new_targets: Vec<_> = report
+                            .collateral
+                            .targets
+                            .iter()
+                            .filter(|target| !approved.contains(target))
+                            .cloned()
+                            .collect();
+                        // A reviewed hub permits only the recorded target set;
+                        // fewer collateral targets are fine, new ones need review.
+                        if new_targets.is_empty() {
+                            report.reason = Some(reason.clone());
+                            Outcome::Hub
+                        } else {
+                            report.reason = Some(format!(
+                                "HUB collateral outside hub_targets: {}",
+                                new_targets.join(", ")
+                            ));
+                            Outcome::CaughtBroadly
+                        }
+                    } else if broad {
+                        Outcome::CaughtBroadly
+                    } else {
+                        outcome
+                    }
                 } else {
                     outcome
                 }
@@ -1644,6 +1728,41 @@ mod target_parser_tests {
     use super::*;
 
     #[test]
+    fn hub_cargo_target_names_are_stable_across_rebuilds() {
+        let mut c =
+            toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
+                .unwrap()
+                .control
+                .remove(0);
+        c.expect_red = vec!["guard".into()];
+        for hash in ["0123456789abcdef", "fedcba9876543210"] {
+            let results = parse_test_results(
+                &format!(
+                    "Running unittests src/lib.rs (target/debug/deps/fixture-{hash})\n\
+                     test guard ... FAILED\n\
+                     test same_target ... FAILED\n\
+                     test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out;\n\
+                     Running tests/encoder.rs (C:\\repo\\target\\debug\\deps\\encoder_e2e-{hash}.exe)\n\
+                     test encoder_contract ... FAILED\n\
+                     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;"
+                ),
+                "cargo",
+            )
+            .unwrap();
+            let (extra, broad) = collateral(&c, &results).unwrap();
+            assert_eq!(extra.targets, ["encoder_e2e", "fixture"]);
+            assert_eq!(extra.count, 2);
+            assert!(broad);
+        }
+        assert_eq!(stable_target("cargo", "doc:fixture"), "doc:fixture");
+        assert_eq!(stable_target("cargo", "my-target"), "my-target");
+        assert_eq!(
+            stable_target("nextest", "crate::encoder_e2e"),
+            "crate::encoder_e2e"
+        );
+    }
+
+    #[test]
     fn cargo_parser_attributes_each_test_to_running_binary() {
         let results = parse_test_results(
             "Running unittests src/lib.rs (target/debug/deps/fixture-abc123)\n\
@@ -1829,6 +1948,8 @@ mod order_tests {
             only: false,
             equivalent: None,
             unreachable: None,
+            hub: None,
+            hub_targets: None,
             timeout_s: 1,
             build_timeout_s: 1,
         }

@@ -95,6 +95,8 @@ impl Fixture {
             only: true,
             equivalent: None,
             unreachable: None,
+            hub: None,
+            hub_targets: None,
             timeout_s: 30,
             build_timeout_s: default_build_timeout(),
         }
@@ -227,6 +229,8 @@ impl CommandFixture {
             only: false,
             equivalent: None,
             unreachable: None,
+            hub: None,
+            hub_targets: None,
             timeout_s: 5,
             build_timeout_s: default_build_timeout(),
         }
@@ -803,6 +807,204 @@ fn breadth_same_target_collateral_is_caught() {
     assert!(!stdout.contains("CAUGHT_BROADLY"), "{stdout}");
 }
 
+fn hub_load(fields: &str) -> std::result::Result<Catalogue, String> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mutations.toml");
+    fs::write(
+        &path,
+        format!(
+            "{}\n{fields}\n",
+            include_str!("fixture/mutations-v0.1.toml")
+        ),
+    )
+    .unwrap();
+    load(&path)
+}
+
+#[test]
+fn hub_load_refuses_missing_reason_naming_row() {
+    let error = hub_load("hub_targets = [\"capacity\"]").err().unwrap();
+    assert!(
+        error.contains("guard: HUB requires a hub reason"),
+        "{error}"
+    );
+}
+
+#[test]
+fn hub_load_refuses_short_trimmed_reason_naming_row() {
+    let error = hub_load("hub = '   nineteen characters   '\nhub_targets = ['capacity']")
+        .err()
+        .unwrap();
+    assert!(
+        error.contains("guard: HUB reason must be at least 20 characters after trimming"),
+        "{error}"
+    );
+    let error = hub_load("hub = ' '\nhub_targets = ['capacity']")
+        .err()
+        .unwrap();
+    assert!(error.contains("guard: HUB reason"), "{error}");
+    let catalogue =
+        hub_load("hub = '  twenty characters!!!  '\nhub_targets = ['capacity']").unwrap();
+    assert_eq!(
+        catalogue.control[0].hub.as_deref(),
+        Some("  twenty characters!!!  ")
+    );
+}
+
+#[test]
+fn hub_load_refuses_empty_targets_naming_row() {
+    let error = hub_load("hub = 'Multiple targets guard this shared property'\nhub_targets = []")
+        .err()
+        .unwrap();
+    assert!(
+        error.contains("guard: HUB requires non-empty hub_targets"),
+        "{error}"
+    );
+}
+
+#[test]
+fn hub_load_refuses_missing_targets_naming_row() {
+    let error = hub_load("hub = 'Multiple targets guard this shared property'")
+        .err()
+        .unwrap();
+    assert!(
+        error.contains("guard: HUB requires non-empty hub_targets"),
+        "{error}"
+    );
+}
+
+#[test]
+fn hub_load_refuses_other_recorded_dispositions() {
+    for other in ["equivalent", "unreachable"] {
+        let error = hub_load(&format!(
+            "hub = 'Multiple targets guard this shared property'\nhub_targets = ['capacity']\n{other} = 'Reviewed explanation'"
+        ))
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("guard: hub, equivalent and unreachable are exclusive"),
+            "{error}"
+        );
+    }
+}
+
+const HUB_REASON: &str = "Unit and integration tests deliberately guard the same zero refusal";
+
+fn hub_run_fixture(targets: &[&str]) -> Fixture {
+    let f = collateral_run_fixture("--lib", "cargo");
+    let mut catalogue = load(&f.root().join("mutations.toml")).unwrap();
+    catalogue.control[0].hub = Some(HUB_REASON.into());
+    catalogue.control[0].hub_targets = Some(targets.iter().map(|t| (*t).into()).collect());
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&catalogue).unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    f
+}
+
+#[test]
+fn hub_broad_equal_targets_counts_as_hub() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let (rows, stdout) = collateral_cli(&f, true);
+    assert_eq!(rows[0]["outcome"], "HUB");
+    assert_eq!(rows[0]["reason"], HUB_REASON);
+    assert_eq!(rows[0]["breadth_observed"], true);
+    assert_eq!(rows[0]["collateral"]["count"], 4);
+    assert_eq!(
+        rows[0]["collateral"]["targets"],
+        serde_json::json!(["capacity", "mutation_fixture", "readers"])
+    );
+    assert!(stdout.contains("guard: HUB (collateral: 4"), "{stdout}");
+    assert!(stdout.contains("0 CAUGHT_BROADLY (warning)"), "{stdout}");
+}
+
+#[test]
+fn hub_broad_subset_targets_counts_as_hub() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers", "other_contract"]);
+    let (rows, _) = collateral_cli(&f, true);
+    assert_eq!(rows[0]["outcome"], "HUB");
+    assert_eq!(rows[0]["reason"], HUB_REASON);
+}
+
+#[test]
+fn hub_summary_counts_and_lists_reviewed_reasons() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let (_, stdout) = collateral_cli(&f, true);
+    assert!(
+        stdout.contains(
+            "Summary: 0 CAUGHT, 0 CAUGHT_BROADLY (warning), 0 EQUIVALENT, 0 UNREACHABLE, 1 HUB"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("HUB rows (1):\n  guard: {HUB_REASON}")),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn hub_broad_new_target_is_caught_broadly_and_named() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture"]);
+    let (rows, stdout) = collateral_cli(&f, true);
+    assert_eq!(rows[0]["outcome"], "CAUGHT_BROADLY");
+    assert_eq!(
+        rows[0]["reason"],
+        "HUB collateral outside hub_targets: readers"
+    );
+    assert!(
+        stdout.contains("HUB collateral outside hub_targets: readers"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("HUB rows ("), "{stdout}");
+}
+
+#[test]
+fn hub_is_ignored_without_broad() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let (rows, stdout) = collateral_cli(&f, false);
+    assert_eq!(rows[0]["outcome"], "CAUGHT");
+    assert_eq!(rows[0]["breadth_observed"], false);
+    assert!(rows[0]["reason"].is_null());
+    assert!(stdout.contains("breadth not observed"), "{stdout}");
+    assert!(!stdout.contains("HUB"), "{stdout}");
+}
+
+#[test]
+fn hub_broad_requires_expected_tests_to_fail() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let mut c = load(&f.root().join("mutations.toml"))
+        .unwrap()
+        .control
+        .remove(0);
+    c.new = Some("value >= 0".into());
+    c.expect_red = vec!["tests::guard_accepts_positive".into()];
+    let row = run_broad_row(f.root(), &c, false, &AtomicBool::new(false)).unwrap();
+    assert_eq!(row.outcome, Outcome::WrongTest);
+    assert!(!row.outcome.is_caught());
+    assert!(!row.passes());
+    assert!(row.reason.is_none());
+    assert_eq!(
+        fs::read_to_string(f.root().join("src/lib.rs")).unwrap(),
+        include_str!("fixture/src/lib.rs")
+    );
+}
+
+#[test]
+fn hub_append_refuses_without_writing() {
+    let f = hub_run_fixture(&["capacity", "mutation_fixture", "readers"]);
+    let path = f.root().join("mutations.toml");
+    let c = load(&path).unwrap().control.remove(0);
+    let before = fs::read(&path).unwrap();
+    let error = append_control(&path, &c).unwrap_err();
+    assert!(error.contains("guard: cannot append HUB"), "{error}");
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let absent = f.root().join("new-catalogue.toml");
+    assert!(append_control(&absent, &c).is_err());
+    assert!(!absent.exists());
+}
+
 #[test]
 fn nextest_broad_replay_observes_cross_target_collateral_when_installed() {
     let installed = Command::new("cargo")
@@ -870,9 +1072,7 @@ fn prove_reports_cross_target_collateral_without_broad_grading() {
         .map(|v| v.as_str().unwrap())
         .collect();
     assert_eq!(targets.len(), 3, "two capacity tests share a single target");
-    assert!(targets[0].starts_with("capacity-"), "{targets:?}");
-    assert!(targets[1].starts_with("mutation_fixture-"), "{targets:?}");
-    assert!(targets[2].starts_with("readers-"), "{targets:?}");
+    assert_eq!(targets, ["capacity", "mutation_fixture", "readers"]);
     assert!(
         stdout.contains("broad: CAUGHT (collateral: 4 tests in targets:"),
         "{stdout}"
@@ -906,7 +1106,7 @@ fn collateral_same_target_is_caught_with_count() {
     assert_eq!(row.outcome, Outcome::Caught);
     assert_eq!(row.collateral.count, 1);
     assert_eq!(row.collateral.targets.len(), 1);
-    assert!(row.collateral.targets[0].starts_with("mutation_fixture-"));
+    assert_eq!(row.collateral.targets[0], "mutation_fixture");
     let json = serde_json::to_value(&row).unwrap();
     assert_eq!(json["collateral"]["count"], 1);
     assert_eq!(json["collateral"]["targets"].as_array().unwrap().len(), 1);

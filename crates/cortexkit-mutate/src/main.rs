@@ -164,19 +164,31 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         .iter()
         .filter(|r| r.outcome == Outcome::Unreachable)
         .collect();
-    if broad > 0 || !unreachable.is_empty() {
+    let hubs: Vec<_> = rows.iter().filter(|r| r.outcome == Outcome::Hub).collect();
+    if broad > 0 || !unreachable.is_empty() || !hubs.is_empty() {
         println!(
-            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} UNREACHABLE",
+            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} UNREACHABLE, {} HUB",
             rows.iter().filter(|r| r.outcome == Outcome::Caught).count(),
             rows.iter()
                 .filter(|r| r.outcome == Outcome::Equivalent)
                 .count(),
-            unreachable.len()
+            unreachable.len(),
+            hubs.len()
         );
     }
     if !unreachable.is_empty() {
         println!("UNREACHABLE rows ({}):", unreachable.len());
         for row in unreachable {
+            println!(
+                "  {}: {}",
+                row.id,
+                row.reason.as_deref().unwrap_or_default()
+            );
+        }
+    }
+    if !hubs.is_empty() {
+        println!("HUB rows ({}):", hubs.len());
+        for row in hubs {
             println!(
                 "  {}: {}",
                 row.id,
@@ -303,6 +315,8 @@ fn run() -> Result<bool> {
                 only: p.only,
                 equivalent: None,
                 unreachable: None,
+                hub: None,
+                hub_targets: None,
                 timeout_s: p.timeout_s,
                 build_timeout_s: p.build_timeout_s,
             };
@@ -386,6 +400,8 @@ fn explore(
         only: false,
         equivalent: None,
         unreachable: x.unreachable,
+        hub: None,
+        hub_targets: None,
         timeout_s: x.timeout_s,
         build_timeout_s: x.build_timeout_s,
     };
