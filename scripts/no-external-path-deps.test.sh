@@ -176,7 +176,10 @@ PY
   echo "PASS: unreadable manifest is a check error (exit $status, not violation exit 3)"
 fi
 
-if CARGO_NET_OFFLINE=true bash "$checker" "$repo_root/Cargo.toml"; then
+# The real workspace has registry dependencies, and a fresh CI runner has no
+# cached index for them, so this case may use the network. The scratch
+# workspaces above have none and stay offline.
+if bash "$checker" "$repo_root/Cargo.toml"; then
   echo "PASS: commons workspace has no external path dependencies"
 else
   status=$?
