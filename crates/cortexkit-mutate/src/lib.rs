@@ -37,9 +37,10 @@ pub struct Control {
     pub edits: Vec<Edit>,
     pub test_file: String,
     pub runner: String,
-    pub package: String,
-    #[serde(default)]
-    pub target: String,
+    pub package: Option<String>,
+    pub target: Option<String>,
+    /// An argv template, not a shell string; substitutes one expected test id.
+    pub command: Option<Vec<String>>,
     pub expect_red: Vec<String>,
     #[serde(default)]
     pub only: bool,
@@ -63,6 +64,74 @@ pub fn default_build_timeout() -> u64 {
 }
 
 impl Control {
+    fn validate_runner(&self) -> Result<()> {
+        let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
+        match self.runner.as_str() {
+            "command" => {
+                if self.package.is_some() {
+                    return Err(invalid("package", "must be absent for runner = command"));
+                }
+                if self.target.is_some() {
+                    return Err(invalid("target", "must be absent for runner = command"));
+                }
+                if self.only {
+                    return Err(invalid("only", "cannot be true for runner = command"));
+                }
+                let argv = self
+                    .command
+                    .as_ref()
+                    .ok_or_else(|| invalid("command", "is required"))?;
+                if argv.first().is_none_or(|s| s.trim().is_empty())
+                    || argv.iter().any(|s| s.contains('\0'))
+                {
+                    return Err(invalid(
+                        "command",
+                        "requires a nonempty program and NUL-free argv",
+                    ));
+                }
+                if argv
+                    .iter()
+                    .map(|s| s.matches("{test}").count())
+                    .sum::<usize>()
+                    != 1
+                {
+                    return Err(invalid("command", "must contain {test} exactly once"));
+                }
+                if !argv.iter().any(|s| s == "{test}") {
+                    return Err(invalid(
+                        "command",
+                        "requires {test} as a complete argv element",
+                    ));
+                }
+                if self.expect_red.is_empty() && self.unreachable.is_none() {
+                    return Err(invalid("expect_red", "must name at least one test"));
+                }
+                for id in &self.expect_red {
+                    if id.is_empty() || id.chars().any(|c| c.is_whitespace() || c.is_control()) {
+                        return Err(invalid("expect_red", &format!("invalid test id {id:?}: ids must be nonempty without whitespace or control characters")));
+                    }
+                }
+            }
+            "cargo" | "nextest" => {
+                if self.command.is_some() {
+                    return Err(invalid("command", "must be absent for cargo/nextest rows"));
+                }
+                if self.package.as_ref().is_none_or(|s| s.trim().is_empty()) {
+                    return Err(invalid("package", "is required and must be nonempty"));
+                }
+                self.targets()?;
+            }
+            _ => return Err(invalid("runner", "must be cargo, nextest, or command")),
+        }
+        if self.timeout_s == 0 {
+            return Err(invalid("timeout_s", "must be positive"));
+        }
+        if self.runner != "command" && self.build_timeout_s == 0 {
+            return Err(invalid("build_timeout_s", "must be positive"));
+        }
+        Ok(())
+    }
+
     fn recorded_disposition(&self) -> Result<Option<(Outcome, &str)>> {
         if self.equivalent.is_some() && self.unreachable.is_some() {
             return Err(format!(
@@ -106,7 +175,8 @@ impl Control {
         }
     }
     fn targets(&self) -> Result<Vec<&str>> {
-        let words: Vec<_> = self.target.split_whitespace().collect();
+        let target = self.target.as_deref().unwrap_or_default();
+        let words: Vec<_> = target.split_whitespace().collect();
         let mut i = 0;
         while i < words.len() {
             match words[i] {
@@ -119,7 +189,7 @@ impl Control {
                 _ => {
                     return Err(format!(
                         "{}: invalid cargo target selector {}",
-                        self.id, self.target
+                        self.id, target
                     ))
                 }
             }
@@ -136,7 +206,30 @@ pub struct Catalogue {
 }
 
 pub fn load(path: &Path) -> Result<Catalogue> {
-    toml::from_str(&fs::read_to_string(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    // Deserialize each row separately so malformed fields still name its id.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Rows {
+        #[serde(default)]
+        control: Vec<toml::Value>,
+    }
+    let rows: Rows = toml::from_str(&fs::read_to_string(path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let control = rows
+        .control
+        .into_iter()
+        .map(|row| {
+            let id = row
+                .get("id")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("<missing id>")
+                .to_owned();
+            let c: Control = row.try_into().map_err(|e| format!("{id}: {e}"))?;
+            c.validate_runner()?;
+            Ok(c)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Catalogue { control })
 }
 
 fn target_io_error(name: &str, error: std::io::Error) -> String {
@@ -203,14 +296,7 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
 /// fields (id, guards, test file, expected names) until it appends a row.
 pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
     c.recorded_disposition()?;
-    if c.package.trim().is_empty()
-        || !matches!(c.runner.as_str(), "cargo" | "nextest")
-        || c.timeout_s == 0
-        || c.build_timeout_s == 0
-    {
-        return Err(format!("{}: invalid required field", c.id));
-    }
-    c.targets()?;
+    c.validate_runner()?;
     for edit in c.edits()? {
         // Deleted edit targets are row outcomes, not catalogue-wide errors.
         // Check mode still rejects them when it verifies the anchors.
@@ -450,7 +536,7 @@ impl Outcome {
         matches!(self, Self::Caught | Self::CaughtBroadly)
     }
 }
-/// Which deadline a TIMED_OUT row hit.
+/// Which deadline expired (command rows report timeouts as ERROR).
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Phase {
@@ -470,7 +556,7 @@ pub struct Collateral {
 pub struct Report {
     pub id: String,
     pub outcome: Outcome,
-    /// Set only on TIMED_OUT: the phase whose deadline expired.
+    /// The phase whose deadline expired, including command-row ERROR timeouts.
     pub timed_out_phase: Option<Phase>,
     pub red: Vec<String>,
     pub green: Vec<String>,
@@ -512,6 +598,7 @@ impl Report {
 
 struct Output {
     success: bool,
+    code: Option<i32>,
     timeout: bool,
     interrupted: bool,
     text: String,
@@ -536,6 +623,7 @@ enum Scope {
 }
 
 fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
+    let package = c.package.as_deref().unwrap_or_default();
     let mut cmd = Command::new("cargo");
     if c.runner == "nextest" {
         cmd.args(["nextest", if mode == "list" { "list" } else { "run" }]);
@@ -545,11 +633,11 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
     cmd.arg("--locked");
     match scope {
         Scope::Row => {
-            cmd.args(["-p", &c.package]);
+            cmd.args(["-p", package]);
             cmd.args(c.targets()?);
         }
         Scope::Broad => {
-            cmd.args(["-p", &c.package]);
+            cmd.args(["-p", package]);
             let targets = c.targets()?;
             // Keep explicitly selected examples or benches too: their expected
             // tests need not be included by Cargo's `--tests` selector.
@@ -559,7 +647,7 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
             cmd.args(targets);
         }
         Scope::Package | Scope::Explore { workspace: false } => {
-            cmd.args(["-p", &c.package]);
+            cmd.args(["-p", package]);
         }
         Scope::Explore { workspace: true } => {
             cmd.arg("--workspace");
@@ -624,16 +712,16 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
     let mut child = RunningChild(cmd.spawn().map_err(|e| e.to_string())?);
     let mut timed_out = false;
     let mut interrupted = false;
-    let success = loop {
+    let status = loop {
         if stop.load(Ordering::SeqCst) || start.elapsed() >= Duration::from_secs(timeout) {
             interrupted = stop.load(Ordering::SeqCst);
             timed_out = !interrupted;
             kill_tree(&mut child.0);
             let _ = child.0.wait();
-            break false;
+            break None;
         }
         if let Some(status) = child.0.try_wait().map_err(|e| e.to_string())? {
-            break status.success();
+            break Some(status);
         }
         thread::sleep(Duration::from_millis(20));
     };
@@ -641,7 +729,8 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
     let text = fs::read_to_string(&stdout).map_err(|e| e.to_string())?;
     let _ = fs::remove_file(stdout);
     Ok(Output {
-        success,
+        success: status.is_some_and(|s| s.success()),
+        code: status.and_then(|s| s.code()),
         timeout: timed_out,
         interrupted,
         text,
@@ -673,6 +762,67 @@ fn kill_tree(child: &mut std::process::Child) {
 fn tail(text: &str) -> String {
     let start = text.char_indices().rev().nth(7999).map_or(0, |(i, _)| i);
     text[start..].to_owned()
+}
+
+// Both baseline and mutant commands use the same child supervisor as Cargo.
+// A failing baseline or a broken process is not evidence that a test caught a mutant.
+fn command_tests(
+    root: &Path,
+    c: &Control,
+    stop: &AtomicBool,
+    report: &mut Report,
+    baseline: bool,
+) -> Result<()> {
+    let argv = c.command.as_ref().ok_or("command is required")?;
+    for id in &c.expect_red {
+        let label = if baseline {
+            "baseline was not green"
+        } else {
+            "mutated command"
+        };
+        let error = |reason: String| format!("{}: {id}: {label}: {reason}", c.id);
+        let args: Vec<_> = argv
+            .iter()
+            .map(|arg| if arg == "{test}" { id } else { arg })
+            .collect();
+        let mut cmd = Command::new(args[0]);
+        cmd.args(&args[1..]);
+        let output = execute(root, cmd, c.timeout_s, stop)
+            .map_err(|e| error(format!("spawn/execution failed: {e}")))?;
+        report.test_ms += output.ms;
+        report.test_tail = tail(&format!(
+            "{}\n{label}: {id}\n{}",
+            report.test_tail, output.text
+        ));
+        if output.interrupted {
+            return Err(error("interrupted".into()));
+        }
+        if output.timeout {
+            report.timed_out_phase = Some(Phase::Test);
+            return Err(error(format!(
+                "test command exceeded timeout_s = {}",
+                c.timeout_s
+            )));
+        }
+        let code = output
+            .code
+            .ok_or_else(|| error("process died by signal (no exit code)".into()))?;
+        if matches!(code, 126 | 127) {
+            return Err(error(format!(
+                "exit {code}: program not executable or not found"
+            )));
+        }
+        if baseline {
+            if code != 0 {
+                return Err(error(format!("exit {code}")));
+            }
+        } else if code == 0 {
+            report.green.push(id.clone());
+        } else {
+            report.red.push(id.clone());
+        }
+    }
+    Ok(())
 }
 
 pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>)> {
@@ -940,6 +1090,13 @@ fn replay(
     scope: Scope,
 ) -> Result<Report> {
     let mut report = Report::new(c);
+    if c.runner == "command" && matches!(scope, Scope::Explore { .. }) {
+        return Err(format!(
+            "{}: explore refuses command rows: only expect_red ids can be observed",
+            c.id
+        ));
+    }
+    c.validate_runner()?;
     if let Some((outcome, reason)) = c.recorded_disposition()? {
         report.outcome = outcome;
         report.reason = Some(reason.to_owned());
@@ -968,8 +1125,16 @@ fn replay(
         if stop.load(Ordering::SeqCst) {
             return Err("interrupted".into());
         }
+        if c.runner == "command" {
+            command_tests(root, c, stop, &mut report, true)?;
+        }
         for (path, text) in files {
             fs::write(path, text).map_err(|e| e.to_string())?;
+        }
+        if c.runner == "command" {
+            command_tests(root, c, stop, &mut report, false)?;
+            report.outcome = grade(c, &report.red, &report.green);
+            return Ok(());
         }
         let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
         report.build_ms = build.ms;
@@ -1026,7 +1191,6 @@ fn replay(
     let restoration = saved.restore();
     if let Err(e) = work {
         report.outcome = Outcome::Error;
-        report.timed_out_phase = None;
         report.reason = Some(e);
     }
     if let Err(e) = restoration {
@@ -1041,8 +1205,9 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
     validate(root, catalogue)?;
     for c in &catalogue.control {
         replaced(root, &c.edits()?)?;
-        // A recorded unreachable row has no guarding test names to discover.
-        if c.unreachable.is_some() {
+        // Unreachable rows have no names to discover. Command rows have no list
+        // protocol: replay verifies their expected ids with a fresh baseline.
+        if c.unreachable.is_some() || c.runner == "command" {
             continue;
         }
         // List mode compiles the test binaries, so the build deadline bounds it.
@@ -1455,7 +1620,7 @@ mod broad_command_tests {
         for runner in ["cargo", "nextest"] {
             c.runner = runner.into();
             for target in ["--lib", "--tests", "--example contract", "--bench contract"] {
-                c.target = target.into();
+                c.target = Some(target.into());
                 // Both the separate build and execution must select all test
                 // targets, rather than compile them and then run only the row.
                 for mode in ["build", "run"] {
@@ -1467,7 +1632,7 @@ mod broad_command_tests {
                     assert!(args.windows(targets.len()).any(|w| w == targets));
                 }
             }
-            c.target = "--lib".into();
+            c.target = Some("--lib".into());
             let row = command(&c, "build", Scope::Row).unwrap();
             assert!(!row.get_args().any(|a| a == "--tests"));
         }
@@ -1657,8 +1822,9 @@ mod order_tests {
             edits: vec![],
             test_file: file.into(),
             runner: "cargo".into(),
-            package: package.into(),
-            target: String::new(),
+            package: Some(package.into()),
+            target: None,
+            command: None,
             expect_red: vec!["t".into()],
             only: false,
             equivalent: None,

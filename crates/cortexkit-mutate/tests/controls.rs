@@ -88,8 +88,9 @@ impl Fixture {
             edits: vec![],
             test_file: "test_contract.rs".into(),
             runner: "cargo".into(),
-            package: "mutation-fixture".into(),
-            target: "--lib".into(),
+            package: Some("mutation-fixture".into()),
+            target: Some("--lib".into()),
+            command: None,
             expect_red: vec!["tests::guard_rejects_zero".into()],
             only: true,
             equivalent: None,
@@ -163,6 +164,496 @@ fn change(c: &mut Control, old: &str, new: &str, expected: &str) {
     c.new = Some(new.into());
     c.expect_red = vec![expected.into()];
 }
+
+const COMMAND_GUARD: &str = "script.tests.flows_rig.RigChecks.test_guard";
+const COMMAND_OTHER: &str = "script.tests.flows_rig.RigChecks.test_other";
+const COMMAND_VACUOUS: &str = "script.tests.flows_rig.RigChecks.test_vacuous";
+
+fn python_available() -> bool {
+    match Command::new("python3").arg("--version").output() {
+        Ok(out) => {
+            assert!(out.status.success(), "python3 exists but --version failed");
+            true
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            assert!(
+                std::env::var_os("CK_MUTATE_REQUIRE_PYTHON").is_none(),
+                "CK_MUTATE_REQUIRE_PYTHON is set but python3 is absent"
+            );
+            eprintln!("skipping command invocation fixture: python3 is absent");
+            false
+        }
+        Err(e) => panic!("python3 could not execute: {e}"),
+    }
+}
+
+struct CommandFixture {
+    dir: TempDir,
+}
+impl CommandFixture {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("guard.py"), b"ENABLED = True\n").unwrap();
+        fs::write(root.join("rig.py"), include_str!("fixture/command.py")).unwrap();
+        cmd(root, "git", &["init", "-q"]);
+        cmd(
+            root,
+            "git",
+            &["config", "user.email", "fixture@example.invalid"],
+        );
+        cmd(root, "git", &["config", "user.name", "Command fixture"]);
+        cmd(root, "git", &["add", "guard.py", "rig.py"]);
+        cmd(root, "git", &["commit", "-qm", "fixture"]);
+        Self { dir }
+    }
+    fn root(&self) -> &Path {
+        self.dir.path()
+    }
+    fn control(&self) -> Control {
+        Control {
+            id: "command-guard".into(),
+            guards: "the rig observes the guard".into(),
+            file: Some("guard.py".into()),
+            old: Some("ENABLED = True".into()),
+            new: Some("ENABLED = False".into()),
+            edits: vec![],
+            test_file: "rig.py".into(),
+            runner: "command".into(),
+            package: None,
+            target: None,
+            command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
+            expect_red: vec![COMMAND_GUARD.into()],
+            only: false,
+            equivalent: None,
+            unreachable: None,
+            timeout_s: 5,
+            build_timeout_s: default_build_timeout(),
+        }
+    }
+    fn snapshot(&self) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+        (
+            fs::read(self.root().join("guard.py")).unwrap(),
+            fs::read(self.root().join("rig.py")).unwrap(),
+            git(self.root(), &["rev-parse", "HEAD^{tree}"]).unwrap(),
+            git(self.root(), &["status", "--porcelain"]).unwrap(),
+        )
+    }
+    fn run(&self, c: &Control, broad: bool) -> Report {
+        let before = self.snapshot();
+        let _lock = TreeLock::acquire(self.root()).unwrap();
+        let stop = AtomicBool::new(false);
+        let report = if broad {
+            run_broad_row(self.root(), c, false, &stop)
+        } else {
+            run_row(self.root(), c, false, &stop, false)
+        }
+        .unwrap();
+        assert_eq!(before, self.snapshot(), "source and Git tree must restore");
+        git(self.root(), &["diff", "HEAD", "--exit-code"]).unwrap();
+        assert_eq!(report.build_ms, 0);
+        assert!(report.build_tail.is_empty());
+        assert_eq!(report.collateral.count, 0);
+        assert!(report.collateral.targets.is_empty());
+        assert!(!report.breadth_observed);
+        report
+    }
+    fn log(&self) -> String {
+        fs::read_to_string(self.root().join(".git/command-log")).unwrap()
+    }
+    fn load_error(&self, c: &Control, field: &str) {
+        let text = toml::to_string(&Catalogue {
+            control: vec![c.clone()],
+        })
+        .unwrap();
+        self.load_text_error(&text, field);
+    }
+    fn load_text_error(&self, text: &str, field: &str) {
+        let before = self.snapshot();
+        let path = self.root().join(".git/invalid.toml");
+        fs::write(&path, text).unwrap();
+        let error = load(&path)
+            .err()
+            .expect("malformed command row must fail at load");
+        assert!(
+            error.contains("command-guard") && error.contains(field),
+            "{error}"
+        );
+        assert_eq!(before, self.snapshot());
+    }
+    fn cli(&self, args: &[&str]) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+            .current_dir(self.root())
+            .args(args)
+            .output()
+            .unwrap()
+    }
+}
+
+#[test]
+fn command_caught_fresh_baseline_each_id_and_restores() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red.push(COMMAND_OTHER.into());
+    validate(
+        f.root(),
+        &Catalogue {
+            control: vec![c.clone()],
+        },
+    )
+    .unwrap();
+    for broad in [false, true] {
+        let row = f.run(&c, broad);
+        assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+        assert_eq!(row.red, [COMMAND_GUARD, COMMAND_OTHER]);
+        assert!(row.green.is_empty());
+    }
+    let one_run = format!("baseline {COMMAND_GUARD}\nbaseline {COMMAND_OTHER}\nmutant {COMMAND_GUARD}\nmutant {COMMAND_OTHER}\n");
+    assert_eq!(
+        f.log(),
+        one_run.repeat(2),
+        "baseline must run every id before mutation, on every replay"
+    );
+}
+
+#[test]
+fn command_survived_if_any_expected_id_green_and_restores() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red.push(COMMAND_VACUOUS.into());
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Survived, "{row:?}");
+    assert_eq!(row.red, [COMMAND_GUARD]);
+    assert_eq!(row.green, [COMMAND_VACUOUS]);
+}
+
+#[test]
+fn command_baseline_not_green_is_error_and_restores() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red.push("always_red".into());
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    let reason = row.reason.unwrap();
+    assert!(
+        reason.contains("always_red") && reason.contains("baseline was not green"),
+        "{reason}"
+    );
+    assert!(row.red.is_empty() && row.green.is_empty());
+    assert_eq!(
+        f.log(),
+        format!("baseline {COMMAND_GUARD}\nbaseline always_red\n")
+    );
+}
+
+#[test]
+fn command_invalid_process_is_error_not_red_and_restores() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    for id in ["exit127", "exit126"] {
+        let mut c = f.control();
+        c.expect_red = vec![id.into()];
+        let row = f.run(&c, false);
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        assert!(row.red.is_empty());
+        assert!(row.reason.unwrap().contains(&format!("exit {}", &id[4..])));
+    }
+    let mut c = f.control();
+    c.command.as_mut().unwrap()[0] = "./ck-mutate-program-that-does-not-exist".into();
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    assert!(row.red.is_empty());
+    assert!(row.reason.unwrap().contains("spawn/execution failed"));
+    #[cfg(unix)]
+    {
+        let mut c = f.control();
+        c.expect_red = vec!["signal".into()];
+        let row = f.run(&c, false);
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        assert!(row.red.is_empty());
+        assert!(row.reason.unwrap().contains("signal"));
+    }
+}
+
+#[test]
+fn command_timeout_is_test_phase_error_and_restores() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    for id in ["sleep_mutant", "sleep_baseline"] {
+        let mut c = f.control();
+        c.expect_red = vec![id.into()];
+        c.timeout_s = 1;
+        let start = Instant::now();
+        let row = f.run(&c, false);
+        assert!(start.elapsed() < Duration::from_secs(10));
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        assert_eq!(row.timed_out_phase, Some(Phase::Test));
+        assert!(row.red.is_empty());
+        let reason = row.reason.unwrap();
+        assert!(
+            reason.contains(id) && reason.contains("timeout_s = 1"),
+            "{reason}"
+        );
+    }
+}
+
+#[test]
+fn command_load_rejects_mixed_and_malformed_fields() {
+    let f = CommandFixture::new();
+    for field in ["package", "target"] {
+        let mut c = f.control();
+        if field == "package" {
+            c.package = Some(String::new());
+        } else {
+            c.target = Some(String::new());
+        }
+        f.load_error(&c, field);
+    }
+    for runner in ["cargo", "nextest"] {
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.package = Some("some-package".into());
+        f.load_error(&c, "command");
+    }
+    let mut c = f.control();
+    c.command = None;
+    f.load_error(&c, "command");
+    for argv in [vec![], vec!["", "{test}"]] {
+        c.command = Some(argv.into_iter().map(str::to_owned).collect());
+        f.load_error(&c, "command");
+    }
+    let text = toml::to_string(&Catalogue {
+        control: vec![f.control()],
+    })
+    .unwrap();
+    f.load_text_error(
+        &text.replace(
+            "command = [\"python3\", \"rig.py\", \"{test}\"]",
+            "command = \"python3 rig.py {test}\"",
+        ),
+        "command",
+    );
+    f.load_text_error(&format!("{text}\nunknown_field = true\n"), "unknown_field");
+}
+
+#[test]
+fn command_load_rejects_missing_placeholder() {
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.command.as_mut().unwrap()[2] = "a-test".into();
+    f.load_error(&c, "command");
+}
+
+#[test]
+fn command_load_rejects_repeated_placeholder() {
+    let f = CommandFixture::new();
+    for duplicate in ["{test}", "prefix{test}{test}"] {
+        let mut c = f.control();
+        if duplicate == "{test}" {
+            c.command.as_mut().unwrap().push(duplicate.into());
+        } else {
+            c.command.as_mut().unwrap()[2] = duplicate.into();
+        }
+        f.load_error(&c, "command");
+    }
+}
+
+#[test]
+fn command_load_rejects_only() {
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.only = true;
+    f.load_error(&c, "only");
+}
+
+#[test]
+fn command_load_rejects_invalid_ids_without_normalizing_dotted_ids() {
+    let f = CommandFixture::new();
+    for id in [
+        "",
+        "has space",
+        "has\ttab",
+        "has\nnewline",
+        "has\u{7f}control",
+    ] {
+        let mut c = f.control();
+        c.expect_red = vec![id.into()];
+        f.load_error(&c, "expect_red");
+    }
+    let c = f.control();
+    let path = f.root().join(".git/valid.toml");
+    fs::write(
+        &path,
+        toml::to_string(&Catalogue {
+            control: vec![c.clone()],
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let loaded = load(&path).unwrap();
+    assert_eq!(loaded.control[0], c);
+    // Check mode does not invent a Cargo or test-list invocation for command rows.
+    check(f.root(), &loaded, &AtomicBool::new(false)).unwrap();
+    assert!(!f.root().join(".git/command-log").exists());
+}
+
+#[test]
+fn command_explore_refuses_without_mutation() {
+    let f = CommandFixture::new();
+    let before = f.snapshot();
+    let c = f.control();
+    let error = explore_row(f.root(), &c, false, &AtomicBool::new(false), false).unwrap_err();
+    assert!(error.contains("explore refuses command rows"), "{error}");
+    let out = f.cli(&[
+        "explore",
+        "--runner",
+        "command",
+        "--package",
+        "unused",
+        "--file",
+        "guard.py",
+        "--old",
+        "ENABLED = True",
+        "--new",
+        "ENABLED = False",
+    ]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("explore refuses command rows"));
+    assert_eq!(before, f.snapshot());
+}
+
+#[test]
+fn command_prove_writes_canonical_row_and_restores() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let before = f.snapshot();
+    let out = f.cli(&[
+        "--catalogue",
+        ".git/proved.toml",
+        "prove",
+        "--id",
+        "command-guard",
+        "--guards",
+        "the rig observes the guard",
+        "--file",
+        "guard.py",
+        "--old",
+        "ENABLED = True",
+        "--new",
+        "ENABLED = False",
+        "--test-file",
+        "rig.py",
+        "--expect-red",
+        COMMAND_GUARD,
+        "--expect-red",
+        COMMAND_OTHER,
+        "--report",
+        ".git/proof.json",
+        "--command",
+        "python3",
+        "-u",
+        "rig.py",
+        "{test}",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let path = f.root().join(".git/proved.toml");
+    let cat = load(&path).unwrap();
+    assert_eq!(cat.control.len(), 1);
+    let c = &cat.control[0];
+    assert_eq!(c.runner, "command");
+    assert_eq!(
+        c.command.as_ref().unwrap(),
+        &["python3", "-u", "rig.py", "{test}"]
+    );
+    assert_eq!(c.expect_red, [COMMAND_GUARD, COMMAND_OTHER]);
+    assert_eq!(c.package, None);
+    assert_eq!(c.target, None);
+    let text = fs::read_to_string(path).unwrap();
+    assert!(!text.contains("package =") && !text.contains("target ="));
+    assert_eq!(text, format!("\n{}\n", toml::to_string(&cat).unwrap()));
+    assert_eq!(before, f.snapshot());
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/proof.json")).unwrap()).unwrap();
+    assert_eq!(report[0]["outcome"], "CAUGHT");
+    let broad = f.cli(&[
+        "--catalogue",
+        ".git/proved.toml",
+        "run",
+        "--all",
+        "--broad",
+        "--report",
+        ".git/broad.json",
+    ]);
+    assert!(
+        broad.status.success(),
+        "{}",
+        String::from_utf8_lossy(&broad.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/broad.json")).unwrap()).unwrap();
+    assert_eq!(report[0]["outcome"], "CAUGHT");
+    assert_eq!(report[0]["breadth_observed"], false);
+    assert_eq!(report[0]["collateral"]["count"], 0);
+    assert_eq!(before, f.snapshot());
+
+    let survivor = f.cli(&[
+        "--catalogue",
+        ".git/survivor.toml",
+        "prove",
+        "--id",
+        "command-guard",
+        "--guards",
+        "the rig observes the guard",
+        "--file",
+        "guard.py",
+        "--old",
+        "ENABLED = True",
+        "--new",
+        "ENABLED = False",
+        "--test-file",
+        "rig.py",
+        "--expect-red",
+        COMMAND_VACUOUS,
+        "--report",
+        ".git/survivor.json",
+        "--command",
+        "python3",
+        "rig.py",
+        "{test}",
+    ]);
+    assert!(!survivor.status.success());
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/survivor.json")).unwrap()).unwrap();
+    assert_eq!(
+        report.as_array().unwrap().len(),
+        1,
+        "command survivors cannot replay a broader package"
+    );
+    assert_eq!(report[0]["outcome"], "SURVIVED");
+    assert!(!f.root().join(".git/survivor.toml").exists());
+    assert_eq!(before, f.snapshot());
+}
+
 #[test]
 fn caught_all_failed_is_not_empty_and_restores() {
     let f = Fixture::new();
@@ -200,7 +691,7 @@ fn collateral_run_fixture(target: &str, runner: &str) -> Fixture {
     let f = Fixture::new();
     add_collateral_targets(&f);
     let mut c = f.control();
-    c.target = target.into();
+    c.target = Some(target.into());
     c.runner = runner.into();
     c.only = false;
     c.new = Some("{ panic!(\"mutated\") }".into());
@@ -1206,7 +1697,7 @@ fn zero_tests_actual_binary_restores() {
     cmd(f.root(), "git", &["add", "tests/empty.rs"]);
     f.commit();
     let mut c = f.control();
-    c.target = "--test empty".into();
+    c.target = Some("--test empty".into());
     assert_eq!(f.run(&c).outcome, Outcome::NoTestsRan);
 }
 
@@ -1222,7 +1713,7 @@ fn all_tests_red_zero_green_actual_binary_restores() {
     cmd(f.root(), "git", &["add", "tests/guard.rs"]);
     f.commit();
     let mut c = f.control();
-    c.target = "--test guard".into();
+    c.target = Some("--test guard".into());
     c.expect_red = vec!["rejects_zero".into()];
     let r = f.run(&c);
     assert_eq!(r.outcome, Outcome::Caught);
@@ -1542,8 +2033,8 @@ fn explore_append_writes_row_check_accepts_and_run_grades_caught() {
         .find(|c| c.id == "zero-explored")
         .unwrap();
     assert_eq!(row.expect_red, ["tests::guard_rejects_zero"]);
-    assert_eq!(row.package, FIXTURE_PACKAGE);
-    assert_eq!(row.target, "");
+    assert_eq!(row.package.as_deref(), Some(FIXTURE_PACKAGE));
+    assert_eq!(row.target, None);
     assert_eq!(row.test_file, "src/lib.rs");
     let checked = f.cli(&["check"]);
     assert!(
@@ -1663,7 +2154,7 @@ fn explore_edits_accept_toml_and_json() {
     assert!(parse_edits("[{ file = \"src/lib.rs\", typo = 1 }]").is_err());
 }
 
-/// `explore` and `run` must not grow separate mutation paths. The library makes
+/// `explore`, Cargo and command rows must not grow separate mutation paths. The library makes
 /// this structural: `Saved` (target and Cargo.lock bytes), `execute` (the
 /// build/test child) and `command` are private, and the only public functions
 /// reaching them are the row replay entry points, each a thin call into the
@@ -1691,9 +2182,30 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "command(c, \"build\", scope)",
         "command(c, \"run\", scope)",
         "parse_test_results(&tests.text",
+        "command_tests(root, c, stop, &mut report, true)",
+        "command_tests(root, c, stop, &mut report, false)",
     ] {
         assert_eq!(lib.matches(needle).count(), 1, "{needle} must occur once");
         assert!(replay.contains(needle), "{needle} must live in replay");
+    }
+    let baseline = replay
+        .find("command_tests(root, c, stop, &mut report, true)")
+        .unwrap();
+    let mutation = replay.find("fs::write(path, text)").unwrap();
+    let mutant = replay
+        .find("command_tests(root, c, stop, &mut report, false)")
+        .unwrap();
+    assert!(
+        baseline < mutation && mutation < mutant,
+        "command baselines must precede the shared mutation and mutant tests must follow it"
+    );
+    let command_tests = body(lib, "\nfn command_tests(");
+    assert!(command_tests.contains("execute(root, cmd, c.timeout_s, stop)"));
+    for forbidden in ["Saved", "replaced(", "fs::write(", "spawn("] {
+        assert!(
+            !command_tests.contains(forbidden),
+            "command tests must use the shared mutation and child supervisor: {forbidden}"
+        );
     }
     for entry in [
         "pub fn run_row(",
@@ -1724,6 +2236,7 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "\nfn execute(",
         "\nfn command(",
         "\nfn replay(",
+        "\nfn command_tests(",
     ] {
         assert!(lib.contains(private), "{private} must stay private");
     }
@@ -1739,7 +2252,7 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
 
     let f = Fixture::new();
     let mut c = f.control();
-    c.target = String::new();
+    c.target = None;
     c.only = false;
     c.new = Some("{ panic!(\"mutated\") }".into());
     c.expect_red = vec![

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Add `runner = "command"` catalogue rows and `prove --command` for argv-based
+  test runners outside Cargo/libtest and nextest. Each expected id runs unchanged
+  as one argument, first on a fresh green baseline and then on the mutant.
+- Refuse mixed runner fields, malformed argv templates, and `only = true` on
+  command rows at load. Existing cargo/nextest catalogues remain readable.
+- Command process failures, reserved exit codes 126/127, signals, and timeouts
+  are ERROR, never catches. Reuse the shared replay/restoration and per-test
+  timeout machinery, with no build phase, collateral, breadth audit, or explore.
+
 ## 0.2.0
 
 - Report collateral red-test counts and sorted, unique binary/target identities

@@ -99,12 +99,16 @@ struct Proof {
     new: String,
     #[arg(long)]
     test_file: String,
-    #[arg(long, default_value = "cargo")]
-    runner: String,
     #[arg(long)]
-    package: String,
-    #[arg(long, default_value = "", allow_hyphen_values = true)]
-    target: String,
+    runner: Option<String>,
+    #[arg(long, required_unless_present = "command", conflicts_with = "command")]
+    package: Option<String>,
+    #[arg(long, allow_hyphen_values = true, conflicts_with = "command")]
+    target: Option<String>,
+    /// Command argv with one {test} element. Put this option last: all following
+    /// values (including flags) belong to the command, not to ck-mutate.
+    #[arg(long, num_args = 1.., allow_hyphen_values = true, conflicts_with = "only")]
+    command: Option<Vec<String>>,
     #[arg(long, required = true, num_args = 1..)]
     expect_red: Vec<String>,
     #[arg(long)]
@@ -284,9 +288,17 @@ fn run() -> Result<bool> {
                 new: Some(p.new),
                 edits: vec![],
                 test_file: p.test_file,
-                runner: p.runner,
+                runner: p.runner.unwrap_or_else(|| {
+                    if p.command.is_some() {
+                        "command"
+                    } else {
+                        "cargo"
+                    }
+                    .into()
+                }),
                 package: p.package,
                 target: p.target,
+                command: p.command,
                 expect_red: p.expect_red,
                 only: p.only,
                 equivalent: None,
@@ -315,6 +327,8 @@ fn run() -> Result<bool> {
                 if let Some(hint) = hint {
                     println!("{hint}");
                 }
+            } else if rows[0].outcome == Outcome::Survived && c.runner == "command" {
+                println!("An expected command test stayed green: inspect the guard or mutant equivalence. Command rows have no broader replay.");
             } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
                 let broader = run_row(&root, &c, p.allow_dirty, &stop, true)?;
                 if !broader.red.is_empty() {
@@ -341,6 +355,9 @@ fn explore(
     x: Exploration,
     stop: &std::sync::atomic::AtomicBool,
 ) -> Result<bool> {
+    if x.runner == "command" {
+        return Err("explore refuses command rows: only expect_red ids can be observed; use prove --command instead".into());
+    }
     let edits = match x.edits {
         Some(text) => {
             let path = std::path::Path::new(&text);
@@ -361,9 +378,10 @@ fn explore(
         edits,
         test_file: x.test_file.unwrap_or_default(),
         runner: x.runner,
-        package: x.package,
+        package: Some(x.package),
         // An appended row replays the whole package, as explore ran it.
-        target: String::new(),
+        target: None,
+        command: None,
         expect_red: vec![],
         only: false,
         equivalent: None,
@@ -395,7 +413,10 @@ fn explore(
             println!("  {name}");
         }
     } else if row.outcome == Outcome::Survived {
-        println!("{}", survivor_diagnosis(&c.package, x.workspace));
+        println!(
+            "{}",
+            survivor_diagnosis(c.package.as_deref().unwrap_or_default(), x.workspace)
+        );
     }
     let outcome = row.outcome.clone();
     let red = row.red.clone();

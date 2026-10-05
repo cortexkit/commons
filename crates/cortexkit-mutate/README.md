@@ -9,7 +9,7 @@ cargo install --locked --git https://github.com/cortexkit/commons --rev <sha> co
 
 Run from anywhere inside the repository. Paths in the catalogue are relative to
 its Git root, even when `--catalogue` overrides the default `mutations.toml`.
-The repository must already have a current `Cargo.lock`: every build, test and
+Cargo/nextest repositories must already have a current `Cargo.lock`: every build, test and
 list invocation uses `--locked`. The runner never stages or checks out files.
 
 ## Catalogue
@@ -40,8 +40,9 @@ therefore never read as a hung test, and a TIMED_OUT row says which deadline
 expired. `prove` and `explore` take `--timeout-s` and `--build-timeout-s` for the
 same two deadlines.
 
-IDs are unique nonempty `[a-z0-9-]+`. `guards`, `test_file`, `runner`, `package`
-and `expect_red` are required. `runner` is `cargo` or `nextest`. `target` defaults
+IDs are unique nonempty `[a-z0-9-]+`. `guards`, `test_file`, `runner`
+and `expect_red` are required. `runner` is `cargo`, `nextest`, or `command`.
+Cargo/nextest rows also require `package`. Their `target` defaults
 to all package tests; it is a whitespace-separated Cargo target selector, not
 shell syntax or an arbitrary command/name filter. Selectors include `--lib`,
 `--test name`, `--bin name`, `--example name`, `--bench name`, `--tests`, `--bins`,
@@ -75,10 +76,70 @@ Empty anchors and no-op edits are rejected. Source must be UTF-8, but saved and
 restored bytes preserve line endings exactly. Paths must be regular files within
 the repo; traversal, absolute paths and direct symlink targets are refused.
 
-**Names are exact full libtest paths.** `history::some_test` is not `some_test`.
+**Cargo/nextest names are exact full libtest paths.** `history::some_test` is not `some_test`.
 If a repo folds test binaries or changes module structure, update its rows.
 Names duplicated across binaries are ambiguous and fail closed rather than
 being silently combined. Ignored tests do not count as having run.
+
+## Command rows
+
+For Python, Bun, Xcode/Swift, or another runner with a per-test invocation, use
+an **argv array**, never a shell string:
+
+```toml
+[[control]]
+id = "rig-rejects-empty"
+guards = "the rig rejects an empty flow"
+file = "script/flows_rig.py"
+old = "if not flows:"
+new = "if False:"
+test_file = "script/tests/flows_rig.py"
+runner = "command"
+command = ["python3", "-m", "unittest", "{test}"]
+expect_red = ["script.tests.flows_rig.RigChecks.test_rejects_empty"]
+# timeout_s = 600
+```
+
+`{test}` must occur exactly once, as a complete argv element. For each expected
+id, it is replaced byte-for-byte with that id as **one argument**: dots, `::`,
+and other punctuation are not split or normalized. Ids must be nonempty and
+contain no whitespace or control characters. The command runs from the Git
+root, without shell expansion. `package` and `target` must be absent, even if
+empty; cargo/nextest rows must not carry `command`. `only = true` is refused
+because command rows cannot observe extra failing tests.
+
+**Every replay first runs every expected id on the unmutated tree.** Each must
+exit 0 before any mutant is applied. A non-green baseline is ERROR and names
+the id. There is no baseline cache: otherwise an always-failing command, a
+stale environment, or a pre-existing broken test could masquerade as a catch.
+On the mutant, every expected id exiting nonzero means CAUGHT; any exiting 0
+means SURVIVED. A spawn failure, exit 126/127 (not executable/not found), death
+by signal, interruption, or timeout is ERROR, **never red**, on either tree.
+The row's `timeout_s` applies separately to each baseline and mutant invocation.
+There is no build phase; command timeouts report `timed_out_phase: "test"`.
+
+Only the expected ids run. `collateral` is always `{ "count": 0, "targets": [] }`
+and `breadth_observed` is always false. **Command rows have no breadth audit:**
+`run --broad` runs them normally and cannot discover other tests, despite the
+generic console suggestion to audit breadth. `explore` refuses command rows.
+`check` validates their fields, files, and anchors, but has no test-list protocol
+to validate names; the fresh baseline during replay verifies the invocation.
+
+To prove and append the same row, put `--command` **last**. It consumes all
+remaining argv elements, including options belonging to the test runner. The
+runner defaults to `command` when `--command` is present (otherwise `cargo`):
+
+```sh
+ck-mutate prove --id rig-rejects-empty --guards 'the rig rejects an empty flow' \
+  --file script/flows_rig.py --old 'if not flows:' --new 'if False:' \
+  --test-file script/tests/flows_rig.py \
+  --expect-red script.tests.flows_rig.RigChecks.test_rejects_empty \
+  --report proof.json --command python3 -m unittest '{test}'
+```
+
+Repeat `--expect-red <id>` to name multiple expected tests. `prove` appends only
+on CAUGHT, in the same canonical TOML format as cargo rows; a command survivor
+has no unscoped second replay because there is no package-wide test discovery.
 
 ## Commands
 
@@ -254,9 +315,10 @@ These formats have no explicit version field: 0.2 retains the unversioned TOML
 optional `unreachable` reason to controls. Existing 0.1 catalogues/proofs remain
 readable unchanged. Older runners rejecting new `unreachable` rows is expected.
 
-Builds are separate: Cargo uses `cargo test -p PACKAGE TARGET --no-run --locked`;
+For Cargo/nextest, builds are separate: Cargo uses `cargo test -p PACKAGE TARGET --no-run --locked`;
 nextest uses `cargo nextest run ... --no-run --locked`. Only build exit status
-determines DID_NOT_COMPILE. Test exit status never determines catches.
+determines DID_NOT_COMPILE. Test exit status never determines Cargo/nextest catches.
+Command rows instead use the baseline-gated exit-status rules above.
 Cargo results use per-test `test NAME ... ok|FAILED|ignored` lines and require
 summary counts to agree; each summary count is located by its following word,
 not a column. All failures (`0 passed; 2 failed`) are a valid catch, not an empty
