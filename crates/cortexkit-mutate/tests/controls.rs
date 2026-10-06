@@ -972,7 +972,9 @@ fn expect_message_must_match_each_expected_test_not_another_tests_output() {
         c.old = None;
         c.new = None;
         c.expect_red.push("tests::waits".into());
-        c.expect_message = Some("src/lib.rs:23:".into());
+        // The panic location names the guarded assertion's line; Windows prints
+        // it with a backslash, so the pattern accepts either separator.
+        c.expect_message = Some(r"/src[\\/]lib\.rs:23:/".into());
         let row = f.run(&c);
         assert_eq!(row.outcome, Outcome::RedForAnotherReason, "{row:?}");
         assert!(row.reason.unwrap().contains("tests::waits"));
