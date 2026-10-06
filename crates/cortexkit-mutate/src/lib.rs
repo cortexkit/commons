@@ -603,6 +603,19 @@ pub fn infer_platforms(root: &Path, edits: &[Edit]) -> Option<Vec<String>> {
 
 fn visible_platform(text: &str, module: Option<&str>) -> Option<String> {
     let toks = tokens(text);
+    // A path attribute can redirect a mod declaration away from its conventional
+    // sibling file. Do not infer that file's gate from a potentially redirected
+    // declaration, even when another attribute sits between path and cfg.
+    if module.is_some()
+        && toks.windows(3).any(|slice| {
+            slice
+                .iter()
+                .map(|t| t.1)
+                .eq([Tok::Punct(b'#'), Tok::Punct(b'['), Tok::Ident("path")])
+        })
+    {
+        return None;
+    }
     let mut braces = 0usize;
     for (i, (_, tok)) in toks.iter().enumerate() {
         match tok {

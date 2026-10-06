@@ -628,6 +628,14 @@ fn platform_inference_accepts_direct_modules_but_does_not_guess_compound_or_item
         ),
         ("// #[cfg(target_os = \"macos\")]\nmod desktop;", None),
         (
+            "#[path = \"alternate.rs\"]\n#[cfg(target_os = \"macos\")]\nmod desktop;",
+            None,
+        ),
+        (
+            "#[cfg(target_os = \"macos\")]\n#[path = \"alternate.rs\"]\nmod desktop;",
+            None,
+        ),
+        (
             "#[cfg(any(target_os = \"macos\", target_os = \"linux\"))]\nmod desktop;",
             None,
         ),
