@@ -11,13 +11,24 @@
 //! are re-exported here so a provider builds exactly what the runner
 //! decodes. The runner accepts a ready only when the route's caller stamp
 //! equals the provider the session's plan names at
-//! `plan.compaction_item.provider` (a position that runner role still marks
-//! provisional), and refuses anyone else with
+//! `plan.compaction_item.provider`, and refuses anyone else with
 //! `not_session_compaction_provider`.
 
 pub use cortexkit_role_llm_runner::compaction::{
     plan_compaction_provider, CompactionReady, ReadyOutcome,
 };
+
+/// The draft empty acknowledgement of an accepted or ignored ready hint.
+/// Its encoding remains open in CONTRACT.md. Unknown fields are ignored.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct ReadyReply {}
+
+impl ReadyReply {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 #[cfg(test)]
 mod tests {

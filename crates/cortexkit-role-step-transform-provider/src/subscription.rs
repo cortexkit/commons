@@ -105,6 +105,7 @@ impl OnUnavailable {
 /// may carry a stricter value than the declaration (`refuse` for `pass`, a
 /// smaller budget), never a looser one.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Subscription {
     pub hook: Hook,
     /// Present on `pre_tool` only.
@@ -129,6 +130,7 @@ pub struct Subscription {
 /// within, plus what the runner does when the hook is unavailable and how
 /// long it may take.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct DeclaredSubscription {
     pub hook: Hook,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -147,6 +149,32 @@ pub struct DeclaredSubscription {
 }
 
 impl DeclaredSubscription {
+    pub fn new(hook: Hook, ops: Vec<Op>, budget_ms: u64) -> Self {
+        Self {
+            hook,
+            phase: None,
+            tools: None,
+            ops,
+            on_unavailable: None,
+            budget_ms,
+        }
+    }
+
+    pub fn with_phase(mut self, phase: Phase) -> Self {
+        self.phase = Some(phase);
+        self
+    }
+
+    pub fn with_tools(mut self, tools: Vec<String>) -> Self {
+        self.tools = Some(tools);
+        self
+    }
+
+    pub fn with_on_unavailable(mut self, policy: OnUnavailable) -> Self {
+        self.on_unavailable = Some(policy);
+        self
+    }
+
     /// The `on_unavailable` this subscription means in effect, and the value
     /// a plan composed from it freezes: `pass` on `post_assistant`,
     /// otherwise the declared value, `refuse` when none is declared.
@@ -194,6 +222,7 @@ pub enum LoosenedField {
 /// The `transform.declare` request: the plan item's preset and params and
 /// the session's composition, verbatim. Decoded leniently.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct DeclareRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
@@ -202,6 +231,26 @@ pub struct DeclareRequest {
     /// Absent on a preflight call, made before the composition exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Map<String, Value>>,
+}
+
+impl DeclareRequest {
+    pub fn new(params: Map<String, Value>) -> Self {
+        Self {
+            preset: None,
+            params,
+            composition: None,
+        }
+    }
+
+    pub fn with_preset(mut self, preset: impl Into<String>) -> Self {
+        self.preset = Some(preset.into());
+        self
+    }
+
+    pub fn with_composition(mut self, composition: Map<String, Value>) -> Self {
+        self.composition = Some(composition);
+        self
+    }
 }
 
 /// The `transform.declare` answer. A pure function of the request and the
@@ -416,6 +465,27 @@ fn check_policy(
 }
 
 impl Subscription {
+    pub fn new(hook: Hook, ops: Vec<Op>, on_unavailable: OnUnavailable, budget_ms: u64) -> Self {
+        Self {
+            hook,
+            phase: None,
+            tools: None,
+            ops,
+            on_unavailable,
+            budget_ms,
+        }
+    }
+
+    pub fn with_phase(mut self, phase: Phase) -> Self {
+        self.phase = Some(phase);
+        self
+    }
+
+    pub fn with_tools(mut self, tools: Vec<String>) -> Self {
+        self.tools = Some(tools);
+        self
+    }
+
     /// Check the planned subscription on its own: its shape and its frozen
     /// policy. Every problem found here is `invalid_params`.
     pub fn check(&self) -> Result<(), SubscriptionProblem> {

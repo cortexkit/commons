@@ -23,6 +23,24 @@
 
 #![forbid(unsafe_code)]
 
+/// The draft op envelope. The method names and envelope remain open in
+/// CONTRACT.md; the params type is the request of the named operation.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct OpRequest<T> {
+    pub method: String,
+    pub params: T,
+}
+
+impl<T> OpRequest<T> {
+    pub fn new(method: impl Into<String>, params: T) -> Self {
+        Self {
+            method: method.into(),
+            params,
+        }
+    }
+}
+
 pub mod answer;
 pub mod describe;
 pub mod errors;

@@ -12,7 +12,66 @@
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// An ERROR body. Codes remain open strings, including provider-defined ones.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ErrorBody {
+    pub code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
+}
+
+impl ErrorBody {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            detail: None,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: Value) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+}
+
+// Generate the enumeration and its inventory together so a new variant cannot
+// evade the contract-parity check by being left out of a hand-written list.
+macro_rules! known_codes {
+    ($($variant:ident => $code:path),+ $(,)?) => {
+        /// Named ERROR codes, runner provider codes and tool-result reasons.
+        /// This classification enum is not the open wire type of `code`.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum KnownCode { $($variant),+ }
+
+        impl KnownCode {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            pub fn as_str(self) -> &'static str {
+                match self { $(Self::$variant => $code),+ }
+            }
+        }
+    };
+}
+
+known_codes! {
+    InvalidParams => INVALID_PARAMS,
+    NotSubscribed => NOT_SUBSCRIBED,
+    Transient => TRANSIENT,
+    PlanStale => runner_codes::PLAN_STALE,
+    PreUserUnavailable => runner_codes::PRE_USER_UNAVAILABLE,
+    PreToolDenied => runner_codes::tool_result_reasons::PRE_TOOL_DENIED,
+    PreToolUnavailable => runner_codes::tool_result_reasons::PRE_TOOL_UNAVAILABLE,
+    PreToolDeclined => runner_codes::tool_result_reasons::PRE_TOOL_DECLINED,
+    PreToolExpired => runner_codes::tool_result_reasons::PRE_TOOL_EXPIRED,
+    PostToolUnavailable => runner_codes::tool_result_reasons::POST_TOOL_UNAVAILABLE,
+}
 
 /// A request field is malformed (an unknown preset or params value, say).
 /// `detail.field` names it. The malformed-request code of the runner and
@@ -51,14 +110,13 @@ pub mod runner_codes {
     use cortexkit_role_llm_runner::errors;
 
     /// The runner's malformed-request refusal. At admission it refuses a
-    /// plan whose step-transform subscription is malformed, covers tools or
-    /// ops the provider's declaration does not, or gives `replace` on
+    /// plan whose step-transform subscription is malformed or gives `replace` on
     /// `pre_user` or `post_assistant` to a provider that is not the
     /// reduction owner, with `detail.field` = [`PLAN_STEP_TRANSFORM_ITEMS`]
     /// (`subscription::InvalidSubscriptionDetail`).
     pub const INVALID_PARAMS: &str = errors::INVALID_PARAMS;
     /// `detail.field` of that admission refusal. The runner role does not
-    /// name it yet; see the contract's Appendix A.
+    /// name it yet; the provider contract defines the subscription detail.
     pub const PLAN_STEP_TRANSFORM_ITEMS: &str = "plan.step_transform_items";
     /// The runner's admission refusal for a plan its providers' current
     /// declarations no longer cover: a subscription whose hook or preset is
@@ -99,6 +157,73 @@ pub mod runner_codes {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    fn contract_codes() -> std::collections::BTreeSet<String> {
+        let contract = include_str!("../CONTRACT.md");
+        let errors = contract
+            .split("## 9. Error codes")
+            .nth(1)
+            .unwrap()
+            .split("## 10.")
+            .next()
+            .unwrap();
+        errors
+            .lines()
+            .filter_map(|line| line.strip_prefix("| "))
+            .flat_map(|row| {
+                row.split('|')
+                    .next()
+                    .unwrap()
+                    .split('`')
+                    .enumerate()
+                    .filter(|(index, _)| index % 2 == 1)
+                    .map(|(_, value)| value.split_whitespace().next().unwrap().to_owned())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn refusal_codes_match_contract() {
+        let documented = contract_codes();
+        assert!(!documented.is_empty(), "no refusal-code tables found");
+        let encoded: std::collections::BTreeSet<String> = KnownCode::ALL
+            .iter()
+            .map(|code| {
+                let wire = serde_json::to_value(code).unwrap();
+                assert_eq!(wire.as_str().unwrap(), code.as_str());
+                wire.as_str().unwrap().to_owned()
+            })
+            .collect();
+        assert_eq!(
+            encoded.len(),
+            KnownCode::ALL.len(),
+            "duplicate code variants"
+        );
+        assert_eq!(
+            documented, encoded,
+            "CONTRACT.md and Rust refusal variants differ"
+        );
+        for name in documented {
+            let code: KnownCode = vectors::round_trip(&name, &Value::String(name.clone()));
+            assert_eq!(code.as_str(), name);
+        }
+    }
+
+    #[test]
+    fn every_refusal_body_round_trips() {
+        for code in contract_codes().into_iter().chain(["acme:busy".to_owned()]) {
+            for detail in [
+                None,
+                Some(serde_json::json!({"hook": "pre_tool", "phase": "validate"})),
+            ] {
+                let mut expected = serde_json::json!({"code": code, "message": "unavailable"});
+                if let Some(value) = detail {
+                    expected["detail"] = value;
+                }
+                vectors::round_trip::<ErrorBody>(&code, &expected);
+            }
+        }
+    }
 
     #[test]
     fn codes_match_the_vectors() {

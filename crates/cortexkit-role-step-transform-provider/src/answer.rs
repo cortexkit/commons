@@ -59,6 +59,7 @@ impl Operation {
 /// how the ask is filed and answered; this role carries only what the hook
 /// decides.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ApprovalAsk {
     /// The question, shown on the card beside the tool, its target and a
     /// short form of the final input.
@@ -76,6 +77,30 @@ pub struct ApprovalAsk {
     /// What an answer arriving after the run moved on does: `execute`, or
     /// `notify_only` (nothing executes). Decoded open.
     pub late_execution: String,
+}
+
+impl ApprovalAsk {
+    pub fn new(
+        prompt: impl Into<String>,
+        expiry_ms: u64,
+        on_expiry: impl Into<String>,
+        material_damage: bool,
+        late_execution: impl Into<String>,
+    ) -> Self {
+        Self {
+            prompt: prompt.into(),
+            options: Vec::new(),
+            expiry_ms,
+            on_expiry: on_expiry.into(),
+            material_damage,
+            late_execution: late_execution.into(),
+        }
+    }
+
+    pub fn with_options(mut self, options: Vec<String>) -> Self {
+        self.options = options;
+        self
+    }
 }
 
 /// A hook's answer. Strict on `answer`: an unknown answer does not decode,

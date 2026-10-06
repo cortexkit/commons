@@ -47,6 +47,7 @@ pub struct Usage {
 
 /// The runner's size estimate of the request it is about to send.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Estimate {
     /// Estimated input tokens of the request about to be sent. An estimate:
     /// most runners have no tokenizer for most model families.
@@ -54,6 +55,20 @@ pub struct Estimate {
     /// The previous step's measured input tokens, when there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_input: Option<u64>,
+}
+
+impl Estimate {
+    pub fn new(request_tokens: u64) -> Self {
+        Self {
+            request_tokens,
+            previous_input: None,
+        }
+    }
+
+    pub fn with_previous_input(mut self, input: u64) -> Self {
+        self.previous_input = Some(input);
+        self
+    }
 }
 
 /// Set when this step's prefix is being rebuilt for another reason, so a
@@ -225,6 +240,46 @@ impl StepStatus {
             compaction_id: compaction_id.into(),
             version,
         });
+        self
+    }
+
+    pub fn with_model_details(
+        mut self,
+        variant: Option<String>,
+        context_window: Option<u64>,
+        output_limit: Option<u64>,
+    ) -> Self {
+        self.variant = variant;
+        self.context_window = context_window;
+        self.output_limit = output_limit;
+        self
+    }
+
+    pub fn with_previous(mut self, usage: Option<Usage>, code: Option<String>) -> Self {
+        self.previous_usage = usage;
+        self.previous_provider_code = code;
+        self
+    }
+
+    pub fn with_prefix_rebuilding(mut self, reason: impl Into<String>) -> Self {
+        self.prefix_rebuilding = Some(PrefixRebuild {
+            reason: reason.into(),
+        });
+        self
+    }
+
+    pub fn with_newest(mut self, newest: MessageRef) -> Self {
+        self.newest = Some(newest);
+        self
+    }
+
+    pub fn with_not_applied(mut self, reference: NotAppliedRef) -> Self {
+        self.last_not_applied = Some(reference);
+        self
+    }
+
+    pub fn with_more(mut self, more: bool) -> Self {
+        self.more = more;
         self
     }
 

@@ -85,6 +85,28 @@ impl SetupRequest {
         self.params = params;
         self
     }
+
+    pub fn with_lineage(mut self, lineage_id: impl Into<String>) -> Self {
+        self.lineage_id = Some(lineage_id.into());
+        self
+    }
+
+    pub fn with_model_details(
+        mut self,
+        variant: Option<String>,
+        context_window: Option<u64>,
+        output_limit: Option<u64>,
+    ) -> Self {
+        self.variant = variant;
+        self.context_window = context_window;
+        self.output_limit = output_limit;
+        self
+    }
+
+    pub fn with_newest(mut self, newest: MessageRef) -> Self {
+        self.newest = Some(newest);
+        self
+    }
 }
 
 /// The stability rank of one of the provider's own messages: `index` is the
@@ -103,6 +125,7 @@ pub struct StabilityRank {
 /// `default`. It also always calls on a prefix rebuild and after an
 /// execution error. With no `call_when` it calls on every step.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct CallWhen {
     /// The share of the context window, above 0 and at most 1.
     pub default: f64,
@@ -117,6 +140,24 @@ pub struct CallWhen {
 }
 
 impl CallWhen {
+    pub fn new(default: f64) -> Self {
+        Self {
+            default,
+            models: BTreeMap::new(),
+            unknown: Map::new(),
+        }
+    }
+
+    pub fn with_models(mut self, models: BTreeMap<String, f64>) -> Self {
+        self.models = models;
+        self
+    }
+
+    pub fn with_unknown_conditions(mut self, unknown: Map<String, Value>) -> Self {
+        self.unknown = unknown;
+        self
+    }
+
     pub fn has_unknown_conditions(&self) -> bool {
         !self.unknown.is_empty()
     }
@@ -216,5 +257,18 @@ mod tests {
             serde_json::from_value::<SetupRequest>(encoded).unwrap(),
             request
         );
+    }
+
+    #[test]
+    fn every_provider_refuse_answer_round_trips() {
+        for code in crate::errors::refuse_codes::ALL {
+            let retryable = crate::errors::refuse_codes::retryable(code).unwrap();
+            let answer = serde_json::json!({
+                "answer": "refuse", "request_id": "r0", "code": code,
+                "reason": "cannot compact", "retryable": retryable
+            });
+            vectors::round_trip::<SetupAnswer>(code, &answer);
+            vectors::round_trip::<crate::answer::StepAnswer>(code, &answer);
+        }
     }
 }

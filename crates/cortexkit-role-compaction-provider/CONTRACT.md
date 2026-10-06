@@ -1,26 +1,21 @@
 # `compaction-provider/v1` — role contract (draft)
 
-Stability: **alpha, draft**. Written by the role's owner (Magic Context) for
-review in the design room; nothing here ships until it signs off. This
-document is the role definition; the Rust types in this crate are its wire
+Stability: **alpha, draft**, unpublished. This document is the role
+definition; the Rust types in this crate are its wire
 shapes, `test-vectors/compaction-provider-v1/` at the repository root holds
 its vectors, and a separate `-conformance` crate will hold its suite (§17).
 
-Derives from the CK extensibility design r7.3, §3.1, §5, §7, §8 and §13.2,
-its owner corrections, and the rulings the design room settled on the
-compaction interface. `llm-runner/v1` §11.1 states what the runner owes on
-the same interface; this document states the provider's side. Appendix A
-lists where the two disagree today.
+`llm-runner/v1` states what the runner owes on the same interface; this
+document states the provider's side.
 
 Every item is marked:
 
-- **[pinned]**: the design or a settled ruling states it. A provider must do
+- **[pinned]**: a settled requirement. A provider must do
   it, and a runner may rely on it.
 - **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
   option down so the types and vectors have something to pin. Question `Qn`
-  under "Open questions" lists the options.
-- **[provisional]**: settled in substance, but its exact name or position
-  depends on a section another role has not written yet.
+  in `OPEN-QUESTIONS.md` lists the options. An open item's wire shape below
+  is the draft implemented by the Rust types, not a settled requirement.
 
 Names and types this role shares with `llm-runner/v1` (the `compaction`
 group, `compaction.ready`, the model view's `source`, the runner's codes)
@@ -28,9 +23,7 @@ are taken from that crate, which this crate depends on, so the two cannot
 drift apart.
 
 A compaction provider is any module that decides the shape of the history a
-runner sends to the model. Nothing here names a particular implementation;
-"Gaps in Magic Context today" at the end compares the one planned provider
-with this document.
+runner sends to the model.
 
 ## 1. Role identity and addressing
 
@@ -41,10 +34,11 @@ with this document.
   `compaction.step`.
 - [pinned] A runner refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it.
-- [open: Q1] Every op is a request `{method, params}` on a route the runner
-  opens to the provider under the session's scope: `method` is the op's
-  name and `params` its request. The runner keeps one route per provider
-  per session.
+- [pinned] Compaction routes are module-level and unscoped. Requests name
+  the opaque session handle; it is not an authorization credential.
+- [open: Q1] Every op is a request `{method, params}` (`OpRequest`):
+  `method` is the op's name and `params` its request. `role.describe` takes
+  an empty object (`DescribeRequest`).
 - [pinned] The provider sends one op the other way: `compaction.ready`
   (§10), which the runner serves.
 
@@ -88,12 +82,12 @@ with this document.
 - [pinned] The plan names the provider in its `compaction_item`, with the
   item's `preset` and `params`. The runner passes the preset, the params
   and the session's composition to Setup verbatim.
-- [provisional] The runner finds the session's compaction provider at
+- [pinned] The runner finds the session's compaction provider at
   `plan.compaction_item.provider` (`llm-runner/v1`'s
   `plan_compaction_provider`). That is what the
   `not_session_compaction_provider` check (§10) compares a route's stamp
-  against. The position is provisional until the runner role's fetch-plan
-  section defines `plan`.
+  against. The item is `{provider, preset, params}`; `provider` is a module
+  id, `preset` a string, and `params` an opaque object.
 
 ## 4. `compaction.setup`
 
@@ -110,11 +104,15 @@ with this document.
   recorded. So a provider answers Setup for a
   session it has seen before, and its answer is well formed whatever it
   answered last time (kill point `SetupRecorded`).
-- [pinned] The request (`SetupRequest`) carries `session`, `request_id`, the
-  item's `preset` and `params`, the `composition`, the first step's `model`
-  (with `variant`, `context_window` and `output_limit` when known), `newest`
-  when a message is already written, `lineage_id` when one exists, and
-  `now`.
+- [pinned] The request (`SetupRequest`) is `{session, request_id, preset?,
+  params, composition, model, variant?, context_window?, output_limit?,
+  newest?, lineage_id?, now}`. `model` is a string; `variant`,
+  `context_window` and `output_limit` are sibling fields, not a nested
+  model object. `params` defaults to `{}`; an absent `preset` selects the
+  provider's default. `composition` is an opaque object passed verbatim.
+  `newest` is `{ordinal, mid}` when a message is already written;
+  `lineage_id` is absent when no lineage exists. `now` is milliseconds
+  since the Unix epoch.
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
   initial, stability?, call_when?}` or `{answer: "refuse", request_id, code,
   reason, retryable}`.
@@ -128,7 +126,8 @@ with this document.
     less often. A main session of Magic Context declares `[{index: 0, rank:
     2}, {index: 1, rank: 1}]`; a subagent session declares nothing. The
     runner uses these as stability segments for cache breakpoints and change
-    policies. [open: Q13] the array shape.
+    policies. [open: Q13] The array shape uses unsigned 32-bit `index` and
+    `rank`, defaulting to an empty array and omitted when empty.
   - `call_when` (§5).
   - A `refuse` ends the run `error` with `code` as its `provider_code`.
 
@@ -336,14 +335,14 @@ The status (`StepStatus`) carries:
     for anything but the newest request it issued (`is_current`);
   - the runner accepts it only from the session's frozen compaction
     provider: the route's caller stamp must equal
-    `plan.compaction_item.provider` (§3, provisional). Any other caller,
+    `plan.compaction_item.provider` (§3). Any other caller,
     and any caller for a session without a compaction item, is refused
     `not_session_compaction_provider` (`CompactionReady::check`);
   - a ready for an older request, or before any request was issued, is
     ignored and is not an error;
   - it is a hint: the runner's bound is the backstop.
-- [open: Q1] The reply to an accepted or ignored ready is an empty object,
-  so a provider learns nothing from it.
+- [open: Q1] The reply to an accepted or ignored ready is an empty object
+  (`ReadyReply`), so a provider learns nothing from it.
 - [pinned] A provider sends `compaction.ready` only once the result its next
   answer will carry is durable in its own store, so a crash between the two
   loses nothing (kill point `WaitWorkDurable`). A provider that crashed with
@@ -421,8 +420,13 @@ role's ids show up in it.
 ## 14. Error codes
 
 Codes ride as the `code` of an `ERROR` frame's body `{code, message,
-detail?}`. They are open strings: a party that meets one it does not know
+detail?}` (`ErrorBody`). They are open strings: a party that meets one it does not know
 treats it as a terminal refusal of that one request.
+
+`KnownCode` enumerates the codes in §11 and §14 for classification; it does
+not close the wire vocabulary. `ErrorBody.code`, `SetupAnswer::Refuse.code`
+and `StepAnswer::Refuse.code` remain strings. `detail` is arbitrary JSON,
+omitted when absent; `message` is a required string.
 
 ### 14.1 Provider refusals (`errors`)
 
@@ -443,8 +447,8 @@ treats it as a terminal refusal of that one request.
 | `invalid_params {field: "plan.compaction_item"}` | admission, on a runner without the `compaction` group |
 | `not_session_compaction_provider` | a `compaction.ready` whose route caller is not `plan.compaction_item.provider`, or for a session without a compaction item |
 | `invalid_params {field}` | a malformed `compaction.ready` |
-| `compaction_unavailable` (a `provider_code`) | Setup failed or timed out with no answer (§4) |
-| `compaction_wait_exceeded` (a `provider_code`) | a wait reached the cap and the request could not be shown to fit |
+| `compaction_unavailable` | a run's `provider_code`: Setup failed or timed out with no answer (§4) |
+| `compaction_wait_exceeded` | a run's `provider_code`: a wait reached the cap and the request could not be shown to fit |
 
 ## 15. Decoding
 
@@ -454,7 +458,8 @@ treats it as a terminal refusal of that one request.
 - [pinned] **Strict on values**: `answer` in every answer, because a runner
   cannot act on an answer it does not understand. Values a runner may grow
   (`step_kind`, `prefix_rebuilding.reason`, `finish_reason`,
-  `last_not_applied.reason`, `provider_code`) are decoded open.
+  `last_not_applied.reason`, `provider_code`) are decoded open. The draft
+  `CallWhen` preserves unknown condition fields so callers can detect them.
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
@@ -539,9 +544,8 @@ if no kill ended a real process.
 
 ## Open questions
 
-Each open question lists the options seen and the draft's choice. A
-question keeps its number when it is settled and moves to "Settled
-questions" below, with the decision.
+The draft choices below remain unresolved. `OPEN-QUESTIONS.md` records
+options, recommendations and partial settlements for each number.
 
 - **Q1. The envelope and the ready reply.** (a) **draft:** `{method,
   params}`, as `llm-runner/v1` settled for its own ops, and an empty object
@@ -581,7 +585,7 @@ questions" below, with the decision.
   an insertion before `from_ordinal`; Setup's head is `[0, 0)` (§12). This
   role defines no source kind of its own: the earlier draft's `inserted`
   kind is dropped, and `EntrySource` is imported from the runner crate.
-- **Q11. Late answers.** Settled by the room: the fence is strict (§9). An
+- **Q11. Late answers.** The fence is strict (§9). An
   answer applies only if it names the newest issued request and arrives
   before that request's call deadline; any other answer, including one to
   the newest request that arrives after its timeout, is recorded and never
@@ -606,123 +610,8 @@ questions" below, with the decision.
   fails to decode; tail and range reads only; `after_mid` refused with
   `invalid_params {field: "view"}` (§12).
 
-## Appendix A. Cross-check with `llm-runner/v1`
+## Interoperability
 
-Checked against `llm-runner/v1` at commons commit 5262544. Paths are in this
-repository. Every field this contract shares with that role's §8, §11.1
-and §12.2 agrees: the `compaction` group and its admission refusal
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:452-455`,
-`crates/cortexkit-role-llm-runner/src/lib.rs:114`), `compaction.ready
-{session, request_id}` and its check
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:524-538`,
-`crates/cortexkit-role-llm-runner/src/compaction.rs:33-41`), the Setup,
-cursor and fence rules (`crates/cortexkit-role-llm-runner/CONTRACT.md:506-521`),
-the model view's `ModelPage` and its half-open `EntrySource`
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:281-330`,
-`crates/cortexkit-role-llm-runner/src/read.rs:261-350`), and the
-`provider_code`s `compaction_unavailable` and `compaction_wait_exceeded`
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:617-628`,
-`crates/cortexkit-role-llm-runner/src/errors.rs:175-191`). This crate takes
-those names and types from the runner crate rather than restating them.
-
-Resolved since the first draft (commons `ff1fe00`):
-
-- **Empty ranges in the model view.** The runner's replacement source is
-  now half-open, `[from_ordinal, to_ordinal)`, and an empty range is an
-  insertion (`crates/cortexkit-role-llm-runner/CONTRACT.md:295-300`,
-  `crates/cortexkit-role-llm-runner/src/read.rs:312-321`). Setup's head maps
-  to `[0, 0)` (Q10).
-- **A `provider_code` for a Setup that fails without an answer.** The
-  runner names `compaction_unavailable`
-  (`crates/cortexkit-role-llm-runner/src/errors.rs:176-177`), which this
-  crate re-exports (Q12).
-
-What remains:
-
-1. **The scope of `compaction_unavailable`.** The runner's table gives it
-   for "Setup or a compaction call" that failed or timed out with no answer
-   (`crates/cortexkit-role-llm-runner/CONTRACT.md:623`). In this role only
-   Setup ends a run that way: a step call that fails or times out is
-   recorded and the step goes on with the last applied CompactionMessage,
-   which always exists (§7). Wording only, unless the runner role means a
-   step call to end a run as well.
-2. **The plan's provider field is provisional on both sides.**
-   `crates/cortexkit-role-llm-runner/CONTRACT.md:456-459` marks
-   `plan.compaction_item.provider` provisional; this document §3 and §10
-   follow it and carry the same marker.
-3. **The fence's wording.** The runner role states the fence for a
-   CompactionMessage (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
-   and for `compaction.ready` (`:530-533`), and does not mention the call
-   deadline. This document states it for every answer, and adds that an
-   answer to the newest request arriving at or after its deadline is late
-   and never applied (§9), as the approved r7.3 erratum rules (item 5). No
-   disagreement; the runner role is narrower in what it spells out.
-4. **Not a divergence, a concern.** Versions and ordinals are `u64` on both
-   sides. JSON readers that use doubles (JavaScript) lose exactness above
-   2^53 − 1, so a TypeScript provider must read them as big integers. This
-   draft does not bound them, to match the runner role.
-
-Against the design itself (paths in the magic-context repository,
-`.cortexkit/alfonso/plans/`):
-
-5. **Late answers.** r7.3 §5.3 "Timeout"
-   (`ck-extensibility-design-r7.3.md:721`) let an answer that arrives after
-   its timeout, with a higher version, apply at the next step boundary. The
-   erratum that first adjusted this is superseded by an approved one
-   (`ck-extensibility-r7.3-errata.md:18`): a late answer never applies,
-   whatever its version. This document §9 states that rule, including an
-   answer to the newest request that arrives after its deadline, and
-   `llm-runner/v1` (`crates/cortexkit-role-llm-runner/CONTRACT.md:518-521`)
-   agrees for answers to older requests.
-6. **Range ends.** r7.3 §5.4 (`ck-extensibility-design-r7.3.md:725`) names
-   both ends by message id. This document uses half-open ordinals (Q3), as
-   the runner's model view does.
-## Appendix B. Gaps in Magic Context today
-
-Where `ck-mc` (`crates/mc-module` in the magic-context repository) differs
-from this document. None of this is a change request beyond the work the
-extensibility plan already schedules for Magic Context.
-
-1. **No role claim.** The manifest provides only a `ToolProvider` route
-   role and declares no capabilities
-   (`crates/mc-module/src/lib.rs:18288,18317-18323`), so nothing lists
-   `compaction-provider/v1`.
-2. **No role ops.** The request dispatch serves `transform`,
-   `historian.*`, `session.*`, `state_sync` and others; there is no
-   `role.describe`, `compaction.setup`, `compaction.step` or
-   `compaction.ready` client, and an unknown method is refused
-   (`crates/mc-module/src/lib.rs:13755-13788,13824`).
-3. **The whole array each pass, not a status after a cursor.** A
-   `transform` request carries `session_id`, `render_config` and every
-   message with its `mid` and `ordinal`
-   (`crates/mc-module/src/transform.rs:665-686,794`,
-   `crates/mc-module/src/ck_wire.rs:26-31`). The optional `tail_delta`
-   (`crates/mc-module/src/transform.rs:800`) is rebuilt against a prefix
-   ck-mc acknowledged, not against a runner-held cursor scoped to a
-   `lineage_id`.
-4. **A whole output array, not a range replacement.** The reply's
-   `ck_messages` is the full array, with m0 and m1 built into every pass
-   ahead of the tail, and an optional native suffix delta
-   (`crates/mc-module/src/transform.rs:1584-1591,1663-1678,3304-3320`).
-   There is no `compaction_id`, no version, no `request_id` and so no
-   fence.
-5. **No Setup.** The head is composed per pass
-   (`crates/mc-module/src/transform.rs:3304-3320`), not recorded once by the
-   runner before the first model call; stability ranks and `call_when` are
-   not declared anywhere.
-6. **No `wait` and no `compaction.ready`.** Historian completion is
-   reported to ck-mc itself through `historian.complete`
-   (`crates/mc-module/src/lib.rs:8039-8069`); the decision to fire is
-   internal (`crates/mc-module/src/boundary.rs:257-273`). Nothing answers a
-   runner with `wait` or tells it the work is done.
-7. **Session identity chooses some bytes.** Historian seed selection hashes
-   the session id (`crates/mc-module/src/historian_prompt.rs:252-256`), and
-   the subagent path is a request flag, `is_subagent`
-   (`crates/mc-module/src/transform.rs:684-686`), rather than a preset or
-   params value. The first is history content and allowed by §13; the
-   second must move into the compaction item's preset or params.
-8. **Durability across two files, with no kill-point hooks.** Writes that
-   touch both `store.db` and the host's `context.db` commit in steps with a
-   recovery pass (`crates/mc-store/src/context_writes.rs:1-17`). Fault
-   injection exists for some failures, but there is no hook that stops the
-   module at the points in §16.
+Versions and ordinals are unsigned 64-bit integers, not bounded to the
+exact-integer range of JSON readers that use doubles. Such readers must
+preserve integer precision rather than round ids, cursors or versions.

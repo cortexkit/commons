@@ -14,7 +14,66 @@
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// An ERROR body. Codes remain open strings, including provider-defined ones.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ErrorBody {
+    pub code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
+}
+
+impl ErrorBody {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            detail: None,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: Value) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+}
+
+// Generate the enumeration and its inventory together: adding a variant must
+// also expose it to the contract-parity check. Shared spellings stay tied to
+// the runner constants, while serde independently checks snake_case encoding.
+macro_rules! known_codes {
+    ($($variant:ident => $code:path),+ $(,)?) => {
+        /// Named ERROR codes, refusal-answer codes and runner provider codes.
+        /// This classification enum is not the open wire type of `code`.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum KnownCode { $($variant),+ }
+
+        impl KnownCode {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            pub fn as_str(self) -> &'static str {
+                match self { $(Self::$variant => $code),+ }
+            }
+        }
+    };
+}
+
+known_codes! {
+    InvalidParams => INVALID_PARAMS,
+    Transient => TRANSIENT,
+    WindowTooSmall => refuse_codes::WINDOW_TOO_SMALL,
+    ProviderBusy => refuse_codes::PROVIDER_BUSY,
+    Misconfigured => refuse_codes::MISCONFIGURED,
+    HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
+    NotSessionCompactionProvider => runner_codes::NOT_SESSION_COMPACTION_PROVIDER,
+    CompactionUnavailable => runner_codes::COMPACTION_UNAVAILABLE,
+    CompactionWaitExceeded => runner_codes::COMPACTION_WAIT_EXCEEDED,
+}
 
 /// A request field is malformed (an unknown preset or params value, say).
 /// `detail.field` names it. The malformed-request code of the runner and
@@ -111,6 +170,81 @@ pub mod runner_codes {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    fn contract_codes() -> std::collections::BTreeSet<String> {
+        let contract = include_str!("../CONTRACT.md");
+        let refuse = contract
+            .split("## 11. REFUSE")
+            .nth(1)
+            .unwrap()
+            .split("## 12.")
+            .next()
+            .unwrap();
+        let errors = contract
+            .split("## 14. Error codes")
+            .nth(1)
+            .unwrap()
+            .split("## 15.")
+            .next()
+            .unwrap();
+        [refuse, errors]
+            .into_iter()
+            .flat_map(|section| {
+                section
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("| "))
+                    .flat_map(|row| {
+                        row.split('|')
+                            .next()
+                            .unwrap()
+                            .split('`')
+                            .enumerate()
+                            .filter(|(index, _)| index % 2 == 1)
+                            .map(|(_, value)| value.split_whitespace().next().unwrap().to_owned())
+                    })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn refusal_codes_match_contract() {
+        let documented = contract_codes();
+        assert!(!documented.is_empty(), "no refusal-code tables found");
+        let encoded: std::collections::BTreeSet<String> = KnownCode::ALL
+            .iter()
+            .map(|code| {
+                let wire = serde_json::to_value(code).unwrap();
+                assert_eq!(wire.as_str().unwrap(), code.as_str());
+                wire.as_str().unwrap().to_owned()
+            })
+            .collect();
+        assert_eq!(
+            encoded.len(),
+            KnownCode::ALL.len(),
+            "duplicate code variants"
+        );
+        assert_eq!(
+            documented, encoded,
+            "CONTRACT.md and Rust refusal variants differ"
+        );
+        for name in documented {
+            let code: KnownCode = vectors::round_trip(&name, &Value::String(name.clone()));
+            assert_eq!(code.as_str(), name);
+        }
+    }
+
+    #[test]
+    fn every_refusal_body_round_trips() {
+        for code in contract_codes().into_iter().chain(["acme:busy".to_owned()]) {
+            for detail in [None, Some(serde_json::json!({"field": "preset"}))] {
+                let mut expected = serde_json::json!({"code": code, "message": "unavailable"});
+                if let Some(value) = detail {
+                    expected["detail"] = value;
+                }
+                vectors::round_trip::<ErrorBody>(&code, &expected);
+            }
+        }
+    }
 
     #[test]
     fn codes_match_the_vectors() {

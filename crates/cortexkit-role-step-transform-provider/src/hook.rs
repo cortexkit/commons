@@ -17,6 +17,7 @@ use crate::subscription::{Hook, Phase};
 
 /// The `transform.hook` request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct HookCall {
     /// The runner's opaque name for the session. A provider may key its own
     /// per-session state on it, and never uses it to choose what it returns.
@@ -33,6 +34,29 @@ pub struct HookCall {
     pub params: Map<String, Value>,
     #[serde(flatten)]
     pub subject: Subject,
+}
+
+impl HookCall {
+    pub fn new(session: impl Into<String>, subject: Subject) -> Self {
+        Self {
+            session: session.into(),
+            lineage_id: None,
+            preset: None,
+            params: Map::new(),
+            subject,
+        }
+    }
+
+    pub fn with_lineage(mut self, lineage_id: impl Into<String>) -> Self {
+        self.lineage_id = Some(lineage_id.into());
+        self
+    }
+
+    pub fn with_item(mut self, preset: Option<String>, params: Map<String, Value>) -> Self {
+        self.preset = preset;
+        self.params = params;
+        self
+    }
 }
 
 /// What the hook acts on, tagged by `hook`.

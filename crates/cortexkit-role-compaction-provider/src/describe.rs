@@ -11,6 +11,17 @@ use serde_json::Value;
 
 use crate::{PROVIDES, REQUIRED_OPS};
 
+/// Empty params for discovery. Unknown fields are ignored.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct DescribeRequest {}
+
+impl DescribeRequest {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// The `role.describe` answer: every major of the role the module serves,
 /// each with its own ops and stability, plus module-level capabilities and
 /// the runner groups the provider needs.

@@ -1,34 +1,28 @@
 # `step-transform-provider/v1` — role contract (draft)
 
-Stability: **alpha, draft**. Written by the role's owner (Magic Context) for
-review in the design room, with the runner's owner reviewing as the caller;
-nothing here ships until the room signs off. This document is the role
+Stability: **alpha, draft**, unpublished. This document is the role
 definition; the Rust types in this crate are its wire shapes,
 `test-vectors/step-transform-provider-v1/` at the repository root holds its
 vectors, and a separate `-conformance` crate will hold its suite (§12).
 
-Derives from the CK extensibility design r7.3, §3.8, §4.5, §6 and §8, its
-owner corrections, and the rulings the design room settled on hooks.
-`llm-runner/v1` §11.2 states what the runner owes at each hook call site;
-this document states the provider's side. Appendix A lists where the two
-disagree today.
+`llm-runner/v1` states what the runner owes at each hook call site;
+this document states the provider's side.
 
 Every item is marked:
 
-- **[pinned]**: the design or a settled ruling states it. A provider must do
+- **[pinned]**: a settled requirement. A provider must do
   it, and a runner may rely on it.
 - **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
   option down so the types and vectors have something to pin. Question `Qn`
-  under "Open questions" lists the options.
+  in `OPEN-QUESTIONS.md` lists the options. An open item's wire shape below
+  is the draft implemented by Rust, not a settled requirement.
 
 Codes this role shares with `llm-runner/v1` (the tool-result reasons,
 `pre_user_unavailable`, `invalid_params`) are taken from that crate, which
 this crate depends on, so the two cannot drift apart.
 
 A step-transform provider is any module that makes write-time changes to
-the newest message of a session. Nothing here names a particular
-implementation; "Gaps in Magic Context today" at the end compares the one
-planned provider with this document.
+the newest message of a session.
 
 ## 1. Role identity and addressing
 
@@ -36,12 +30,13 @@ planned provider with this document.
   `capabilities.provides` (`PROVIDES`). A module may serve several majors.
 - [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, the declaration
   op and the hook op. [open: Q2] their names, drafted as
-  `transform.declare` and `transform.hook`. [open: Q3] whether the
-  declaration is an op at all.
+  `transform.declare` and `transform.hook`.
 - [pinned] A runner refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it.
-- [open: Q1] Every op is a request `{method, params}` on a route the runner
-  opens to the provider under the session's scope.
+- [pinned] Step-transform routes are module-level and unscoped. The opaque
+  session handle in a hook call is a state key, not an authorization credential.
+- [open: Q1] Every op is a request `{method, params}` (`OpRequest`).
+  `role.describe` takes an empty object (`DescribeRequest`).
 
 ## 2. `role.describe`
 
@@ -91,11 +86,15 @@ planned provider with this document.
   [{hook, phase?, tools?, ops, on_unavailable, budget_ms}]`
   (`Subscription`), the shape prefrontal's `fetch-plan-v1` vectors carry.
   The runner calls only matching providers.
-- [pinned] The provider's declaration bounds what a plan may subscribe to.
-  [open: Q3] It is `transform.declare {preset?, params, composition?}`,
+- [pinned] The provider's per-preset/params declaration bounds what a plan
+  may subscribe to. It is read when composing the plan and checked again
+  at admission, not carried by build-level `role.describe` or HELLO.
+  [open: Q2] Its op is `transform.declare {preset?, params, composition?}`
+  (`DeclareRequest`),
   answered `{subscriptions: [{hook, phase?, tools?, ops, on_unavailable?,
   budget_ms}]}` (`Declaration`), fetched with the plan's other items at
-  admission.
+  admission. `params` defaults to `{}`; `preset` absent selects the default.
+  `composition` is an opaque object, absent before composition exists.
 - [pinned] Shape rules, for declared and planned subscriptions alike:
   `phase` on `pre_tool` and nowhere else; `tools` only on `pre_tool` and
   `post_tool`; at least one op on the hooks that answer with operations;
@@ -167,7 +166,7 @@ planned provider with this document.
   reduction owner alone; without one, nobody has it (`check_reduction`).
   Every other step transform is preserving: it may prepend or append.
 - [pinned] Preserving transforms run as a separate ordered list, in plan
-  order. [open: Q9] The reduction owner's hooks run first, so a later
+  order. [open: Q9] This draft runs the reduction owner's hooks first, so a later
   preserving prepend is never wiped by a replace (`hook_order`).
 - [pinned] `replace` on `post_tool` is a separate permission only the user
   tier grants, per provider and hook, as `{module, hook, tools}`. Neither
@@ -213,9 +212,15 @@ planned provider with this document.
   chain and any deny still wins, and the runner refuses at admission a
   session that subscribes a `mutate` hook and a `validate` or `approve` hook
   on the same tool.
+- [pinned] An approve hook passes or asks a human; it never denies directly.
 - [open: Q8] The `ask` is `{prompt, options?, expiry_ms, on_expiry,
   material_damage, late_execution}` (`ApprovalAsk`); the elicitation role
-  owns how it is filed and answered.
+  owns how it is filed and answered. `prompt` is a string, `options` an
+  array of strings omitted when empty, `expiry_ms` an unsigned 64-bit
+  duration in milliseconds, `material_damage` a boolean, and `on_expiry`
+  and `late_execution` open strings. The runner files the ask with the
+  final canonical arguments, target, schema pin and scope; none of those
+  authority fields is supplied by the hook answer.
 
 ## 7. `transform.hook`
 
@@ -223,7 +228,7 @@ planned provider with this document.
   name for the session), `lineage_id` (absent only on `pre_user` for the
   first message of a session nothing has been written to), the plan item's
   `preset` and `params` verbatim, and the subject, tagged by `hook`
-  (`Subject`):
+  (`Subject`), flattened into the request, not nested under `subject`:
   - `pre_user {text, mark?, delivery?}`: `mark` is the sender's mark on a
     steered or queued prompt, opaque; `delivery` is `queue`, `steer` or
     `interrupt` for an owner's prompt, decoded open;
@@ -231,6 +236,9 @@ planned provider with this document.
   - `pre_tool {step_id, phase, tool, tool_call_id, call_key?, input}`:
     `input` is the input that would execute, after every earlier mutate;
   - `post_tool {step_id, tool, tool_call_id, call_key?, text, is_error}`.
+- [pinned] `params` defaults to `{}`. `mark` is arbitrary JSON; every other
+  subject text/id field is a string, `input` arbitrary JSON, and `is_error`
+  a boolean. `preset` absent selects the default.
 - [pinned] `tool_call_id` is the model's id: display only, not unique.
   `call_key` is the runner's key (`llm-runner/v1` §11.3); it is usually
   absent on `pre_tool`, because it is minted from the dispatch intent,
@@ -269,8 +277,12 @@ planned provider with this document.
 ## 9. Error codes
 
 Codes ride as the `code` of an `ERROR` frame's body `{code, message,
-detail?}`. They are open strings: a party that meets one it does not know
+detail?}` (`ErrorBody`). They are open strings: a party that meets one it does not know
 treats it as a terminal refusal of that one request.
+
+`KnownCode` enumerates the refusal codes and tool-result reasons in §9 for
+classification only; `ErrorBody.code` stays an open string. `message` is a
+required string and `detail` arbitrary JSON, omitted when absent.
 
 ### 9.1 Provider refusals (`errors`)
 
@@ -289,7 +301,7 @@ treats it as a terminal refusal of that one request.
 
 | Code | Where |
 |---|---|
-| `invalid_params {field: "plan.step_transform_items", item, subscription, problem}` | admission, for a malformed subscription, tools or ops beyond the declaration, or a `replace` the provider may not have |
+| `invalid_params {field: "plan.step_transform_items", item, subscription, problem}` | admission, for a malformed subscription or a `replace` the provider may not have; tools or ops beyond the declaration are instead stale |
 | `plan_stale {differences}` | admission, for a subscription the current declaration no longer covers: `subscription_missing`, `preset_missing` or `subscription_loosened` (§4) |
 | `pre_user_unavailable` | a refusal of a steered or queued send, and a run's `provider_code` |
 | `pre_tool_denied`, `pre_tool_unavailable`, `pre_tool_declined`, `pre_tool_expired`, `post_tool_unavailable` | a tool call's error result |
@@ -304,6 +316,11 @@ treats it as a terminal refusal of that one request.
   not decode. On a request the provider refuses it `invalid_params`; on an
   answer the runner treats the hook as unavailable. Values a runner may grow
   (`delivery`, `on_expiry`, `late_execution`) are decoded open.
+- [pinned] Public structs that can grow optional fields are non-exhaustive,
+  constructed with `new` and `with_*` setters. Empty optional collections
+  are omitted unless the contract makes them required. Operation `replace`
+  carries string `value`; `prepend` and `append` carry string `text`, each
+  with optional string `note`.
 
 ## 11. Crash and durability guarantees
 
@@ -368,28 +385,21 @@ the vectors in this crate.
 
 ## Open questions
 
-Each open question lists the options seen and the draft's choice. A
-question keeps its number when it is settled and moves to "Settled
-questions" below, with the decision.
+The draft choices below remain unresolved. `OPEN-QUESTIONS.md` records
+options, recommendations and partial settlements for each number.
 
 - **Q1. The envelope.** (a) **draft:** `{method, params}`, as
   `llm-runner/v1` settled for its own ops; (b) `{name, arguments}`.
 - **Q2. Names.** **draft:** ops `transform.declare` and `transform.hook`;
   answers `pass`, `ops`, `mutate`, `deny`, `ask`; operations `prepend`,
   `append`, `replace`.
-- **Q3. Where the declaration lives.** (a) **draft:** an op answered per
-  preset and params, fetched at admission, because one provider's
-  subscriptions differ by preset (a head and a worker); (b) in
-  `role.describe`, which describes the build and cannot vary by preset;
-  (c) in the HELLO manifest, which the design uses for budgets and
-  `pre_tool`'s `on_unavailable`.
 - **Q6. Subject shape.** **draft:** text, with operations mapped onto
   several text blocks as §5 says.
 - **Q7. A disallowed answer.** (a) **draft:** the hook is unavailable for
   that call; (b) the answer is dropped and the hook treated as `pass`.
   (b) would let a broken enforcing hook fail open.
-- **Q8. Approve.** **draft:** `pass` or `ask`, never `deny`; the ask's
-  fields as §6 lists, decoded leniently.
+- **Q8. Approve.** Pass or a human question is settled; the draft ask's
+  encoding is still open, with fields as §6 lists, decoded leniently.
 - **Q9. Where the reduction owner runs.** (a) **draft:** first, so a replace
   never wipes another provider's prepend; (b) last.
 - **Q10. The user's `replace` grant on `post_tool`.** Not carried by this
@@ -398,6 +408,10 @@ questions" below, with the decision.
 - **Q12. `runner_groups`.** As in `compaction-provider/v1`.
 
 ## Settled questions
+
+- **Q3. Where the declaration lives.** Per preset and params, read for plan
+  composition and rechecked at admission. It is not build-level discovery
+  or HELLO. The exact declaration op name is still open under Q2 (§4).
 
 - **Q11. Tools or ops beyond the declaration.** Settled: `plan_stale` with
   `{kind: "subscription_loosened", provider, hook, phase, field}`, naming
@@ -425,112 +439,3 @@ questions" below, with the decision.
 - **Q16. Purity.** Settled: what a provider's fetch returns derives only
   from the composition, preset, params and config, never from scope, agent
   or session identity.
-
-## Appendix A. Cross-check with `llm-runner/v1` and the fetch plan
-
-### A.1 `llm-runner/v1`
-
-Checked against `llm-runner/v1` at commons commit 5262544; paths are in
-this repository. The runner role's hook section
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:542-556`) and its reasons
-(`crates/cortexkit-role-llm-runner/CONTRACT.md:617-642`,
-`crates/cortexkit-role-llm-runner/src/errors.rs:154-191`) agree with this
-document; the codes, `plan_stale` among them, are taken from that crate.
-What remains:
-
-1. **Hook names in prose.** The runner writes PreUser, PostAssistant,
-   PreTool and PostTool (`crates/cortexkit-role-llm-runner/CONTRACT.md:544-548`).
-   The wire names are snake_case (Q13). Prose only; no wire disagreement.
-2. **No admission refusal for step transforms.** The runner's admission
-   section (`crates/cortexkit-role-llm-runner/CONTRACT.md:439-465`) names
-   `plan_stale` only for fetched items that disagree with the composition,
-   and nothing for a subscription the declaration no longer covers, a
-   malformed subscription, a `replace` on `pre_user` or `post_assistant` by
-   a provider that is not the reduction owner, or a mutate plus validate or
-   approve on one tool without `ordered_hook_phases`. This document §4,
-   §5, §6 and Q11.
-3. **No reduction owner and no order rule.** The runner's §11.2 does not
-   say that the compaction provider is the only `replace` owner on
-   `pre_user` and `post_assistant`, or that it runs before the preserving
-   list. This document §5.
-4. **No rule for a disallowed answer.** The runner's §11.2 does not say what
-   happens to an answer this role refuses. This document §5 and Q7.
-
-### A.2 Prefrontal's `fetch-plan-v1` vectors
-
-Checked against prefrontal at `3e69ed9d4a048a458db54203bd93a1069598222e`,
-`test-vectors/fetch-plan-v1/`, including the README's "Digest migration
-(2026-10-02)". `test-vectors/step-transform-provider-v1/subscriptions.json`
-carries all eleven step-transform admission cases (`fetch_plan_v1`), each
-with the plan's subscriptions, preset, current declaration and expected answer
-copied from that revision. `fetch_plan_admission_vectors_agree` pins the full
-revision and checks that `check_item` gives the same refusal bytes or admits
-and freezes the subscriptions unchanged.
-
-Resolved since the first draft:
-
-- **`ops` on `pre_tool`.** Empty; a planned op there is malformed and refuses
-  `invalid_params` with `ops_on_pre_tool` (Q5).
-- **Frozen policy and budget.** The declaration supplies both; equal or
-  stricter subscriptions admit unchanged, looser ones are stale (Q4).
-- **Tools and ops bounds.** Wider planned bounds refuse `plan_stale` with
-  `subscription_loosened`, naming `tools` or `ops` (Q11).
-- **Phase attribution.** Every subscription difference includes `phase`,
-  including `null` on phase-less hooks. The two-phase plan's refusal names
-  only the loosened `validate` subscription, not `mutate`.
-- **Missing presets.** One `{kind: "preset_missing", provider, preset}` per
-  item, including the vector with two subscriptions.
-- **One difference encoding.** All `plan_stale` differences use an internal
-  `kind` tag and `provider`. Fetched-item kinds are `composition_digest`,
-  `tools`, `capabilities` and `text_tool_names`; `field` names only a
-  subscription field.
-- **Malformed plans.** Every malformed-plan refusal uses `invalid_params`,
-  including the fetch plan's own checks, not `invalid_request`.
-- **Digest migration.** Admission shape changes replace no existing plan or
-  composition digests. The two-phase plan adds new digests only.
-
-What still differs: nothing.
-
-### A.3 The design
-
-1. **Where `on_unavailable` and budgets live.** The design puts
-   `on_unavailable` on each `post_tool` and `pre_user` subscription and on
-   each `pre_tool` provider's manifest, and budgets in the manifest
-   (`magic-context/.cortexkit/alfonso/plans/ck-extensibility-design-r7.3.md:815-821`).
-   This document makes the declaration the source and freezes both on each
-   planned subscription (Q4).
-2. **Who owns `replace`.** The design gives `replace` on PostAssistant and
-   PreUser to the session's `context_management` owner
-   (`ck-extensibility-design-r7.3.md:793`). This document names that owner
-   the reduction owner, the session's compaction provider, as the room
-   settled.
-
-## Appendix B. Gaps in Magic Context today
-
-Where `ck-mc` (`crates/mc-module` in the magic-context repository) differs
-from this document. None of this is a change request beyond the work the
-extensibility plan already schedules for Magic Context.
-
-1. **No role claim and no role ops.** The manifest provides only a
-   `ToolProvider` route role (`crates/mc-module/src/lib.rs:18317-18323`),
-   and the dispatch has no `role.describe`, `transform.declare` or
-   `transform.hook` (`crates/mc-module/src/lib.rs:13755-13788`).
-2. **Edits are applied to the outgoing array on every pass, not returned
-   as operations once.** Tag prefixes, tag overlays and user hints are
-   written into blocks of the array the `transform` pass serves
-   (`crates/mc-module/src/transform.rs:9748,9812,9886`), and conditional
-   tagging is pinned as part of that output
-   (`crates/mc-module/src/tests/broca_contract.rs:286-302`). Under this role
-   each would be a `prepend` or `append` returned from a hook, applied once
-   by the runner and replayed from its record.
-3. **No declaration.** There are no subscriptions, no `on_unavailable` and
-   no budgets anywhere in the module.
-4. **Reasoning clearing is a history rewrite.** It runs while the native
-   array is built (`crates/mc-module/src/transform.rs:15247`).
-   `post_assistant` never touches reasoning, so under the roles this is the
-   compaction provider's replacement, not a hook.
-5. **A request flag instead of a preset.** The subagent path is
-   `is_subagent` on the request (`crates/mc-module/src/transform.rs:684-686`).
-   Under this role a subagent's behaviour comes from its plan item's preset
-   or params.
-6. **No kill-point hook.** Nothing stops the module at `HookStateRecorded`.
