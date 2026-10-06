@@ -7,6 +7,10 @@ says settled. The owner of this contract (Magic Context) must obtain the
 listed agreements before pinning an open item. Pinning means removing its
 `[open: Qn]` marker and freezing the wire spelling.
 
+Agreements name the owner of each affected contract: Broca is the CortexKit
+module that runs model sessions and owns `llm-runner/v1`; prefrontal owns the
+fetch-plan composer that writes each session's plan.
+
 References to numbered design sections below are to
 `ck-extensibility-design-r7.3.md`; its corrections are in
 `ck-extensibility-r7.3-errata.md`. Runner-contract sections refer to
@@ -37,7 +41,7 @@ or files in prefrontal's `test-vectors/fetch-plan-v1/`.
 | Q15 | A runner without the optional `compaction` group refuses a compaction plan item during admission, the plan check before accepting a session, with `invalid_params`; runner contract §3, §10.1 and fetch-plan README, Plan section. |
 | Q16 | Ready names the session and request; the runner verifies the module that opened the route and treats ready as a hint to ask again, not as compaction output. Runner contract §11.1; design §5.5. |
 | Q17 | Shared model-view page and source encodings: existing runner §4.2. |
-| Former provisional plan field | The plan names its compaction provider at `plan.compaction_item.provider`; fetch-plan README, Plan and Item sections, and `plans/pre-tool-two-phase.json` at prefrontal origin/main commit `473401d615547a8d5ad8c14b8e260a9c71c1ff4e`. The existing generic runner helper already reads that field; its prose still says provisional. No shared type change is needed. |
+| Former provisional plan field | The plan names its compaction provider at `plan.compaction_item.provider`; fetch-plan README, Plan and Item sections, and `plans/pre-tool-two-phase.json` at prefrontal origin/main commit `473401d615547a8d5ad8c14b8e260a9c71c1ff4e`. The existing generic runner helper already reads that field; the helper's doc comment in `cortexkit-role-llm-runner` still calls it provisional. No shared type change is needed. |
 
 ## Remaining interoperability wording
 

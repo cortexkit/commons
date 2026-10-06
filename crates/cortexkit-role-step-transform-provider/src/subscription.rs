@@ -269,8 +269,8 @@ pub struct Declaration {
 /// before accepting a session, CONTRACT.md §4)
 /// ([`SubscriptionProblem::admission_code`]): a plan that is malformed in
 /// itself, or breaks a rule no declaration can change, is `invalid_params`;
-/// a plan that the provider's current declaration no longer covers was
-/// composed against an older declaration, and is `plan_stale`.
+/// a plan that the provider's current declaration no longer covers is
+/// `plan_stale`, since recomposing against the current declaration can fix it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubscriptionProblem {
     /// `phase` on a hook other than `pre_tool`.
