@@ -93,11 +93,14 @@ impl Fixture {
             target: Some("--lib".into()),
             command: None,
             test_count_pattern: None,
+            catch_on: None,
+            output_normalize: vec![],
             expect_message: None,
             signal_is_catch: None,
             expect_red: vec!["tests::guard_rejects_zero".into()],
             only: true,
             equivalent: None,
+            equivalent_guard: None,
             unreachable: None,
             desk_only: None,
             hub: None,
@@ -232,11 +235,14 @@ impl CommandFixture {
             target: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
             test_count_pattern: Some("Ran {count} tests".into()),
+            catch_on: None,
+            output_normalize: vec![],
             expect_message: None,
             signal_is_catch: None,
             expect_red: vec![COMMAND_GUARD.into()],
             only: false,
             equivalent: None,
+            equivalent_guard: None,
             unreachable: None,
             desk_only: None,
             hub: None,
@@ -1289,8 +1295,13 @@ fn hub_load_refuses_missing_targets_naming_row() {
 #[test]
 fn hub_load_refuses_other_recorded_dispositions() {
     for other in ["equivalent", "unreachable"] {
+        let guard = if other == "equivalent" {
+            "\nequivalent_guard = 'The reviewed code fact'"
+        } else {
+            ""
+        };
         let error = hub_load(&format!(
-            "hub = 'Multiple targets guard this shared property'\nhub_targets = ['capacity']\n{other} = 'Reviewed explanation'"
+            "hub = 'Multiple targets guard this shared property'\nhub_targets = ['capacity']\n{other} = 'Reviewed explanation'{guard}"
         ))
         .err()
         .unwrap();
@@ -1384,7 +1395,7 @@ fn hub_summary_counts_and_lists_reviewed_reasons() {
     let (_, stdout) = collateral_cli(&f, true);
     assert!(
         stdout.contains(
-            "Summary: 0 CAUGHT, 0 CAUGHT_BROADLY (warning), 0 EQUIVALENT, 0 UNREACHABLE, 1 HUB"
+            "Summary: 0 CAUGHT, 0 CAUGHT_BROADLY (warning), 0 EQUIVALENT, 0 EQUIVALENT_CAUGHT, 0 UNREACHABLE, 1 HUB"
         ),
         "{stdout}"
     );
@@ -1731,7 +1742,7 @@ fn unreachable_requires_reason_is_recorded_and_listed_separately() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("0 CAUGHT, 0 CAUGHT_BROADLY (warning), 0 EQUIVALENT, 1 UNREACHABLE"),
+        stdout.contains("0 CAUGHT, 0 CAUGHT_BROADLY (warning), 0 EQUIVALENT, 0 EQUIVALENT_CAUGHT, 1 UNREACHABLE"),
         "{stdout}"
     );
     assert!(
@@ -2186,6 +2197,8 @@ fn cli_report_shard_equivalent_and_prove_append() {
     assert_eq!(json[0]["red"][0], "tests::guard_rejects_zero");
     let mut c = f.control();
     c.equivalent = Some("identity transformation of a redundant condition".into());
+    c.equivalent_guard = Some("guarded: strict comparison is unchanged by operand reversal".into());
+    c.new = Some("0 < value".into());
     assert_eq!(f.run(&c).outcome, Outcome::Equivalent);
     let out = f.cli(&[
         "prove",
@@ -2962,10 +2975,15 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "command_tests(root, c, stop, &mut report, true)",
         "command_tests(root, c, stop, &mut report, false)",
     ] {
-        let expected = if matches!(needle, "Saved::new(" | "saved.restore()") {
-            2
-        } else {
-            1
+        // Clean-tree Cargo baselines use their own build/run/parser; the session
+        // also constructs a build argv as the shared target-selection cache key.
+        let expected = match needle {
+            "Saved::new("
+            | "saved.restore()"
+            | "command(c, \"run\", scope)"
+            | "parse_test_results(&tests.text" => 2,
+            "command(c, \"build\", scope)" => 3,
+            _ => 1,
         };
         assert_eq!(lib.matches(needle).count(), expected, "{needle} count");
         assert_eq!(
@@ -3063,4 +3081,434 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
     assert_eq!(explored.outcome, Outcome::Caught);
     assert_eq!(ran.red, explored.red);
     assert_eq!(ran.green, explored.green);
+}
+
+fn replace_fixture_source(f: &Fixture, old: &str, new: &str) {
+    let path = f.root().join("src/lib.rs");
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(source.contains(old));
+    fs::write(path, source.replace(old, new)).unwrap();
+    f.commit();
+}
+
+#[test]
+fn expected_baseline_red_is_error_and_never_runs_mutant() {
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let f = Fixture::new();
+        replace_fixture_source(
+            &f,
+            "assert!(!super::guarded(0));",
+            "assert!(super::guarded(0));",
+        );
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.new =
+            Some("{ std::fs::write(\".git/mutant-ran\", \"yes\").unwrap(); value >= 0 }".into());
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        assert_eq!(
+            row.reason.as_deref(),
+            Some("baseline red: tests::guard_rejects_zero")
+        );
+        assert!(!f.root().join(".git/mutant-ran").exists());
+        assert_eq!(row.build_ms, 0);
+        assert_eq!(row.test_ms, 0);
+        assert!(row.baseline_test_ms > 0);
+    }
+}
+
+#[test]
+fn unrelated_baseline_red_is_excluded_from_wrong_test_and_broad_catches() {
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let f = Fixture::new();
+        replace_fixture_source(
+            &f,
+            "assert!(super::unrelated());",
+            "assert!(!super::unrelated());",
+        );
+        fs::create_dir_all(f.root().join("tests")).unwrap();
+        fs::write(
+            f.root().join("tests/prebroken.rs"),
+            "#[test] fn unrelated_test() { panic!(\"already broken\"); }",
+        )
+        .unwrap();
+        cmd(f.root(), "git", &["add", "tests"]);
+        f.commit();
+        let mut c = f.control();
+        c.runner = runner.into();
+        for broad in [false, true] {
+            let row = if broad {
+                run_broad_row(f.root(), &c, false, &AtomicBool::new(false)).unwrap()
+            } else {
+                f.run(&c)
+            };
+            assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+            assert_eq!(row.red, ["tests::guard_rejects_zero"]);
+            assert_eq!(row.collateral.count, 0);
+            assert!(row
+                .baseline_red
+                .values()
+                .flatten()
+                .any(|n| n == "tests::unrelated_test"));
+            if broad {
+                assert!(row
+                    .baseline_red
+                    .values()
+                    .flatten()
+                    .any(|n| n == "unrelated_test"));
+            }
+        }
+        c.new = Some("0 < value".into());
+        assert_eq!(f.run(&c).outcome, Outcome::Survived);
+        // Exercise the CLI's baselines-first phase and its non-silent summary.
+        c.new = Some("value >= 0".into());
+        fs::write(
+            f.root().join("mutations.toml"),
+            toml::to_string(&Catalogue {
+                control: vec![c],
+                ..Catalogue::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        f.commit();
+        let out = f.cli(&["run", "--all", "--broad", "--report", ".git/baseline.json"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("red at baseline (ignored):"), "{text}");
+        assert!(
+            text.contains("tests::unrelated_test") && text.contains("prebroken::unrelated_test"),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn cargo_baseline_is_shared_once_per_target_selection_and_times_each_phase() {
+    let f = Fixture::new();
+    replace_fixture_source(
+        &f,
+        "fn guard_rejects_zero() {",
+        r#"fn guard_rejects_zero() {
+        use std::io::Write;
+        writeln!(std::fs::OpenOptions::new().create(true).append(true).open(".git/test-runs").unwrap(), "run").unwrap();"#,
+    );
+    let first = f.control();
+    let mut second = first.clone();
+    second.id = "positive".into();
+    second.new = Some("value > 0 && value < 1".into());
+    second.expect_red = vec!["tests::guard_accepts_positive".into()];
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![first, second],
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    let out = f.cli(&["run", "--all", "--report", ".git/shared.json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/shared.json")).unwrap()).unwrap();
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/test-runs")).unwrap(),
+        "run\nrun\nrun\n"
+    );
+    assert!(rows[0]["baseline_build_ms"].as_u64().unwrap() > 0);
+    assert!(rows[0]["baseline_test_ms"].as_u64().unwrap() > 0);
+    assert_eq!(rows[1]["baseline_build_ms"], 0);
+    assert_eq!(rows[1]["baseline_test_ms"], 0);
+    eprintln!(
+        "MEASURED SHARED FIXTURE BASELINE COST: build={} ms test={} ms (two rows, one clean run)",
+        rows[0]["baseline_build_ms"], rows[0]["baseline_test_ms"]
+    );
+}
+
+#[test]
+fn equivalent_survivor_is_replayed_and_counted_separately() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.equivalent = Some("Reversing the operands preserves strict comparison".into());
+    c.equivalent_guard = Some("guarded: value > 0 equals 0 < value".into());
+    c.new = Some("0 < value".into());
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Equivalent, "{row:?}");
+    assert!(row.passes());
+    assert!(!row.outcome.is_caught());
+    assert!(row.build_ms > 0 && row.test_ms > 0);
+    assert!(row.green.contains(&"tests::guard_rejects_zero".into()));
+    let mut without_expectations = c.clone();
+    without_expectations.expect_red.clear();
+    assert_eq!(f.run(&without_expectations).outcome, Outcome::Equivalent);
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    assert!(f.cli(&["check"]).status.success());
+    let out = f.cli(&["run", "--all"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout)
+        .contains("0 CAUGHT, 0 CAUGHT_BROADLY (warning), 1 EQUIVALENT, 0 EQUIVALENT_CAUGHT"));
+}
+
+#[test]
+fn caught_equivalent_is_equivalent_caught_and_fails() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.equivalent = Some("Incorrect claim that zero cannot reach guarded".into());
+    c.equivalent_guard = Some("guarded: alleged positive-only caller".into());
+    for expected in ["tests::guard_rejects_zero", "tests::vacuous_test"] {
+        c.expect_red = vec![expected.into()];
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::EquivalentCaught, "{row:?}");
+        assert!(!row.passes());
+        assert!(!row.outcome.is_caught());
+    }
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    let out = f.cli(&["run", "--all"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("guard: EQUIVALENT_CAUGHT"));
+}
+
+fn output_control(f: &Fixture, probe: &str) -> Control {
+    fs::create_dir_all(f.root().join("src/bin")).unwrap();
+    fs::write(
+        f.root().join("src/bin/output.rs"),
+        format!(
+            r#"fn main() {{
+        let path = ".git/output-runs";
+        let n = std::fs::read_to_string(path).unwrap_or_default().parse::<usize>().unwrap_or(0) + 1;
+        std::fs::write(path, n.to_string()).unwrap();
+        eprintln!("stderr changes on every run: {{n}}");
+        {probe}
+    }}"#
+        ),
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "src/bin"]);
+    f.commit();
+    let mut c = f.control();
+    c.runner = "command".into();
+    c.package = None;
+    c.target = None;
+    c.only = false;
+    c.catch_on = Some("output_differs".into());
+    c.command = Some(
+        ["cargo", "run", "--quiet", "--locked", "--bin", "output"]
+            .map(str::to_owned)
+            .to_vec(),
+    );
+    c.expect_red.clear();
+    c
+}
+
+#[test]
+fn output_differs_catches_normalized_stdout_not_stderr() {
+    let f = Fixture::new();
+    let mut c = output_control(
+        &f,
+        "println!(\"guard={} timing={}\", mutation_fixture::guarded(0), n);",
+    );
+    c.output_normalize = vec![r" timing=\d+".into()];
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert!(row.passes());
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/output-runs")).unwrap(),
+        "3"
+    );
+    assert!(row.baseline_test_ms > 0);
+    assert!(row.test_ms > 0);
+}
+
+#[test]
+fn identical_command_output_survives() {
+    let f = Fixture::new();
+    let c = output_control(&f, "println!(\"constant output\");");
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Survived, "{row:?}");
+    assert!(!row.passes());
+}
+
+#[test]
+fn output_equality_keeps_nonzero_exit_and_timeout_rules() {
+    let f = Fixture::new();
+    let c = output_control(
+        &f,
+        r#"println!("constant output");
+        if mutation_fixture::guarded(0) { std::process::exit(23); }"#,
+    );
+    assert_eq!(f.run(&c).outcome, Outcome::Caught);
+    let f = Fixture::new();
+    let mut c = output_control(
+        &f,
+        r#"println!("constant output");
+        if mutation_fixture::guarded(0) { std::thread::sleep(std::time::Duration::from_secs(10)); }"#,
+    );
+    // Compile before setting the short per-invocation deadline, so the timeout
+    // proves a hung mutant, not an overloaded clean-tree compiler.
+    cmd(f.root(), "cargo", &["build", "--locked", "--bin", "output"]);
+    c.timeout_s = 2;
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    assert_eq!(row.timed_out_phase, Some(Phase::Test));
+}
+
+#[test]
+fn output_equality_prove_appends_and_replays_the_comparison() {
+    let f = Fixture::new();
+    output_control(&f, "println!(\"{}\", mutation_fixture::guarded(0));");
+    let out = f.cli(&[
+        "prove",
+        "--id",
+        "output-proof",
+        "--guards",
+        "stdout guards zero refusal",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value >= 0",
+        "--test-file",
+        "src/bin/output.rs",
+        "--catch-on",
+        "output_differs",
+        "--output-normalize",
+        "unused-timing=[0-9]+",
+        "--command",
+        "cargo",
+        "run",
+        "--quiet",
+        "--locked",
+        "--bin",
+        "output",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let cat = load(&f.root().join("mutations.toml")).unwrap();
+    let c = cat.control.iter().find(|c| c.id == "output-proof").unwrap();
+    assert_eq!(c.catch_on.as_deref(), Some("output_differs"));
+    assert!(c.expect_red.is_empty());
+    assert_eq!(c.output_normalize, ["unused-timing=[0-9]+"]);
+    assert!(f.cli(&["check"]).status.success());
+    assert!(f.cli(&["run", "--only", "output-proof"]).status.success());
+}
+
+#[test]
+fn nondeterministic_baseline_output_is_error_and_skips_mutant() {
+    let f = Fixture::new();
+    let c = output_control(
+        &f,
+        "println!(\"constant first line\\nchanging second line: {n}\");",
+    );
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    assert!(row
+        .reason
+        .as_deref()
+        .unwrap()
+        .contains("baseline output is not deterministic: line 2"));
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/output-runs")).unwrap(),
+        "2"
+    );
+    assert_eq!(row.test_ms, 0);
+}
+
+#[test]
+fn equivalent_and_output_equality_fields_validate_and_round_trip() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.equivalent = Some("The comparison is identical".into());
+    let cat = |c: Control| Catalogue {
+        control: vec![c],
+        ..Catalogue::default()
+    };
+    assert!(validate(f.root(), &cat(c.clone()))
+        .unwrap_err()
+        .contains("required together"));
+    c.equivalent_guard = Some("guarded: operand reversal".into());
+    validate(f.root(), &cat(c.clone())).unwrap();
+    for guard in [None, Some(" ".into())] {
+        let mut invalid = c.clone();
+        invalid.equivalent_guard = guard;
+        assert!(validate(f.root(), &cat(invalid)).is_err());
+    }
+    c.equivalent = None;
+    assert!(validate(f.root(), &cat(c)).is_err());
+    let mut output = output_control(&f, "println!(\"stable\");");
+    output.output_normalize = vec!["timing=[0-9]+".into()];
+    validate(f.root(), &cat(output.clone())).unwrap();
+    assert_eq!(
+        toml::from_str::<Catalogue>(&toml::to_string(&cat(output.clone())).unwrap())
+            .unwrap()
+            .control[0],
+        output
+    );
+    for (field, value) in [
+        ("expect_message", "unexpected"),
+        ("output_normalize", "["),
+        ("catch_on", "exit_nonzero"),
+    ] {
+        let mut invalid = output.clone();
+        match field {
+            "expect_message" => invalid.expect_message = Some(value.into()),
+            "output_normalize" => invalid.output_normalize = vec![value.into()],
+            _ => invalid.catch_on = Some(value.into()),
+        }
+        assert!(validate(f.root(), &cat(invalid))
+            .unwrap_err()
+            .contains(field));
+    }
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&cat(output.clone())).unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    assert!(f.cli(&["check"]).status.success());
+    output.expect_message = Some("not applicable".into());
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&cat(output)).unwrap(),
+    )
+    .unwrap();
+    let out = f.cli(&["check"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("expect_message"));
 }

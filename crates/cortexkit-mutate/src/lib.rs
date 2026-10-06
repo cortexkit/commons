@@ -43,6 +43,12 @@ pub struct Control {
     pub command: Option<Vec<String>>,
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
     pub test_count_pattern: Option<String>,
+    /// Compare command stdout rather than relying on a test's exit status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catch_on: Option<String>,
+    /// Regexes deleted from stdout before deterministic output comparison.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_normalize: Vec<String>,
     pub expect_red: Vec<String>,
     /// Substring or /regex/ required in each expected red test's own output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,6 +59,8 @@ pub struct Control {
     #[serde(default)]
     pub only: bool,
     pub equivalent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equivalent_guard: Option<String>,
     /// A person's explanation of why the mutated code has no production caller.
     pub unreachable: Option<String>,
     /// Why this proof requires a real desktop and cannot run in automation.
@@ -113,6 +121,45 @@ impl Control {
     fn validate_runner(&self) -> Result<()> {
         self.validate_platforms()?;
         let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
+        if self.equivalent.is_some() != self.equivalent_guard.is_some() {
+            return Err(invalid(
+                "equivalent/equivalent_guard",
+                "are required together",
+            ));
+        }
+        if self
+            .equivalent
+            .as_ref()
+            .is_some_and(|s| s.trim().is_empty())
+            || self
+                .equivalent_guard
+                .as_ref()
+                .is_some_and(|s| s.trim().is_empty())
+        {
+            return Err(invalid("equivalent/equivalent_guard", "must be nonempty"));
+        }
+        if let Some(catch_on) = &self.catch_on {
+            if self.runner != "command" || catch_on != "output_differs" {
+                return Err(invalid(
+                    "catch_on",
+                    "must be output_differs on a command row",
+                ));
+            }
+            if self.expect_message.is_some() {
+                return Err(invalid(
+                    "expect_message",
+                    "does not apply to output_differs",
+                ));
+            }
+        } else if !self.output_normalize.is_empty() {
+            return Err(invalid(
+                "output_normalize",
+                "requires catch_on = output_differs",
+            ));
+        }
+        for pattern in &self.output_normalize {
+            regex::Regex::new(pattern).map_err(|e| invalid("output_normalize", &e.to_string()))?;
+        }
         if self
             .signal_is_catch
             .as_ref()
@@ -146,31 +193,44 @@ impl Control {
                         "requires a nonempty program and NUL-free argv",
                     ));
                 }
-                if argv
-                    .iter()
-                    .map(|s| s.matches("{test}").count())
-                    .sum::<usize>()
-                    != 1
-                {
-                    return Err(invalid("command", "must contain {test} exactly once"));
-                }
-                if !argv.iter().any(|s| s == "{test}") {
-                    return Err(invalid(
-                        "command",
-                        "requires {test} as a complete argv element",
-                    ));
-                }
-                validate_count_pattern(self.test_count_pattern.as_deref())
-                    .map_err(|e| invalid("test_count_pattern", &e))?;
-                if self.expect_red.is_empty()
-                    && self.unreachable.is_none()
-                    && self.desk_only.is_none()
-                {
-                    return Err(invalid("expect_red", "must name at least one test"));
-                }
-                for id in &self.expect_red {
-                    if id.is_empty() || id.chars().any(|c| c.is_whitespace() || c.is_control()) {
-                        return Err(invalid("expect_red", &format!("invalid test id {id:?}: ids must be nonempty without whitespace or control characters")));
+                if self.catch_on.is_some() {
+                    if argv.iter().any(|s| s.contains("{test}")) {
+                        return Err(invalid("command", "output_differs does not use {test}"));
+                    }
+                    if self.test_count_pattern.is_some() || !self.expect_red.is_empty() {
+                        return Err(invalid(
+                            "catch_on",
+                            "output_differs requires expect_red = [] and no test_count_pattern",
+                        ));
+                    }
+                } else {
+                    if argv
+                        .iter()
+                        .map(|s| s.matches("{test}").count())
+                        .sum::<usize>()
+                        != 1
+                    {
+                        return Err(invalid("command", "must contain {test} exactly once"));
+                    }
+                    if !argv.iter().any(|s| s == "{test}") {
+                        return Err(invalid(
+                            "command",
+                            "requires {test} as a complete argv element",
+                        ));
+                    }
+                    validate_count_pattern(self.test_count_pattern.as_deref())
+                        .map_err(|e| invalid("test_count_pattern", &e))?;
+                    if self.expect_red.is_empty()
+                        && self.unreachable.is_none()
+                        && self.desk_only.is_none()
+                    {
+                        return Err(invalid("expect_red", "must name at least one test"));
+                    }
+                    for id in &self.expect_red {
+                        if id.is_empty() || id.chars().any(|c| c.is_whitespace() || c.is_control())
+                        {
+                            return Err(invalid("expect_red", &format!("invalid test id {id:?}: ids must be nonempty without whitespace or control characters")));
+                        }
                     }
                 }
             }
@@ -246,14 +306,9 @@ impl Control {
             ));
         }
         let disposition = self
-            .equivalent
+            .unreachable
             .as_deref()
-            .map(|r| (Outcome::Equivalent, r))
-            .or_else(|| {
-                self.unreachable
-                    .as_deref()
-                    .map(|r| (Outcome::Unreachable, r))
-            })
+            .map(|r| (Outcome::Unreachable, r))
             .or_else(|| self.desk_only.as_deref().map(|r| (Outcome::DeskOnly, r)));
         if disposition
             .as_ref()
@@ -490,7 +545,11 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
             return Err(format!("invalid or duplicate id: {}", c.id));
         }
         if c.guards.trim().is_empty()
-            || (c.expect_red.is_empty() && c.unreachable.is_none() && c.desk_only.is_none())
+            || (c.expect_red.is_empty()
+                && c.unreachable.is_none()
+                && c.desk_only.is_none()
+                && c.equivalent.is_none()
+                && c.catch_on.is_none())
             || c.expect_red.iter().any(|n| n.trim().is_empty())
             || c.equivalent.as_ref().is_some_and(|s| s.trim().is_empty())
         {
@@ -877,6 +936,7 @@ pub enum Outcome {
     DidNotCompile,
     TimedOut,
     Equivalent,
+    EquivalentCaught,
     Unreachable,
     Hub,
     SkippedPlatform,
@@ -900,13 +960,13 @@ pub enum Phase {
     Prebuild,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Collateral {
     pub count: usize,
     pub targets: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub id: String,
     pub outcome: Outcome,
@@ -920,6 +980,15 @@ pub struct Report {
     pub breadth_observed: bool,
     pub build_ms: u128,
     pub test_ms: u128,
+    /// Clean-tree costs, attributed once per shared target selection.
+    pub baseline_build_ms: u128,
+    pub baseline_test_ms: u128,
+    /// Stable target -> baseline-red test names, retained even when now green.
+    pub baseline_red: BTreeMap<String, Vec<String>>,
+    #[serde(skip)]
+    baseline_results: Option<TestResults>,
+    #[serde(skip)]
+    baseline_stdout: Option<String>,
     /// Per-mutant prerequisites, separate from the normal test-binary build.
     pub prebuild_ms: u128,
     pub prebuild_tail: String,
@@ -950,6 +1019,11 @@ impl Report {
             breadth_observed: false,
             build_ms: 0,
             test_ms: 0,
+            baseline_build_ms: 0,
+            baseline_test_ms: 0,
+            baseline_red: BTreeMap::new(),
+            baseline_results: None,
+            baseline_stdout: None,
             prebuild_ms: 0,
             prebuild_tail: String::new(),
             baseline_prebuild_ms: 0,
@@ -981,6 +1055,7 @@ struct Output {
     timeout: bool,
     interrupted: bool,
     text: String,
+    stdout: String,
     ms: u128,
 }
 /// Which tests one replay runs and how their per-test results are graded.
@@ -1069,7 +1144,17 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
     }
     Ok(cmd)
 }
-fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Result<Output> {
+fn execute(root: &Path, cmd: Command, timeout: u64, stop: &AtomicBool) -> Result<Output> {
+    execute_output(root, cmd, timeout, stop, false)
+}
+
+fn execute_output(
+    root: &Path,
+    mut cmd: Command,
+    timeout: u64,
+    stop: &AtomicBool,
+    separate_stdout: bool,
+) -> Result<Output> {
     // Regular files cannot deadlock on full pipes or descendants holding pipes open.
     let git_dir = git(root, &["rev-parse", "--git-dir"])?;
     let dir = root.join(String::from_utf8_lossy(&git_dir).trim());
@@ -1077,7 +1162,13 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
     let out_file = File::create(&stdout).map_err(|e| e.to_string())?;
     // Cargo prints binary headers on stderr and test events on stdout. Sharing
     // the file offset preserves their order, so events keep their binary identity.
-    let err_file = out_file.try_clone().map_err(|e| e.to_string())?;
+    let stderr = dir.join("ck-mutate.stderr");
+    let err_file = if separate_stdout {
+        File::create(&stderr)
+    } else {
+        out_file.try_clone()
+    }
+    .map_err(|e| e.to_string())?;
     cmd.current_dir(root)
         .env("CARGO_TERM_COLOR", "never")
         .stdout(Stdio::from(out_file))
@@ -1105,8 +1196,20 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
         thread::sleep(Duration::from_millis(20));
     };
     drop(child);
-    let text = fs::read_to_string(&stdout).map_err(|e| e.to_string())?;
+    let stdout_text = fs::read_to_string(&stdout).map_err(|e| e.to_string())?;
+    let text = if separate_stdout {
+        format!(
+            "{}{}",
+            stdout_text,
+            fs::read_to_string(&stderr).map_err(|e| e.to_string())?
+        )
+    } else {
+        stdout_text.clone()
+    };
     let _ = fs::remove_file(stdout);
+    if separate_stdout {
+        let _ = fs::remove_file(stderr);
+    }
     Ok(Output {
         success: status.is_some_and(|s| s.success()),
         code: status.and_then(|s| s.code()),
@@ -1114,6 +1217,7 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
         timeout: timed_out,
         interrupted,
         text,
+        stdout: stdout_text,
         ms: start.elapsed().as_millis(),
     })
 }
@@ -1257,6 +1361,9 @@ fn command_tests(
     report: &mut Report,
     baseline: bool,
 ) -> Result<()> {
+    if c.catch_on.is_some() {
+        return output_tests(root, c, stop, report, baseline);
+    }
     let argv = c.command.as_ref().ok_or("command is required")?;
     for id in &c.expect_red {
         // The error label states a verdict, so it is used only when the run fails;
@@ -1275,7 +1382,11 @@ fn command_tests(
         cmd.args(&args[1..]);
         let output = execute(root, cmd, c.timeout_s, stop)
             .map_err(|e| error(format!("spawn/execution failed: {e}")))?;
-        report.test_ms += output.ms;
+        if baseline {
+            report.baseline_test_ms += output.ms;
+        } else {
+            report.test_ms += output.ms;
+        }
         report.test_tail = tail(&format!(
             "{}\n{heading}: {id}\n{}",
             report.test_tail, output.text
@@ -1330,12 +1441,184 @@ fn command_tests(
     Ok(())
 }
 
+fn normalize_output(c: &Control, stdout: &str) -> Result<String> {
+    let mut normalized = stdout.to_owned();
+    for pattern in &c.output_normalize {
+        normalized = regex::Regex::new(pattern)
+            .map_err(|e| e.to_string())?
+            .replace_all(&normalized, "")
+            .into_owned();
+    }
+    Ok(normalized)
+}
+
+fn first_output_difference(left: &str, right: &str) -> String {
+    let a: Vec<_> = left.split('\n').collect();
+    let b: Vec<_> = right.split('\n').collect();
+    let i = (0..a.len().max(b.len()))
+        .find(|&i| a.get(i) != b.get(i))
+        .unwrap_or(0);
+    format!("line {}: {:?} != {:?}", i + 1, a.get(i), b.get(i))
+}
+
+fn output_tests(
+    root: &Path,
+    c: &Control,
+    stop: &AtomicBool,
+    report: &mut Report,
+    baseline: bool,
+) -> Result<()> {
+    let argv = c.command.as_ref().ok_or("command is required")?;
+    let mut first: Option<String> = None;
+    for _ in 0..if baseline { 2 } else { 1 } {
+        let mut cmd = Command::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        let output = execute_output(root, cmd, c.timeout_s, stop, true)?;
+        if baseline {
+            report.baseline_test_ms += output.ms;
+        } else {
+            report.test_ms += output.ms;
+        }
+        report.test_tail = tail(&format!(
+            "{}\n{} output:\n{}",
+            report.test_tail,
+            if baseline {
+                "baseline"
+            } else {
+                "mutated command"
+            },
+            output.text
+        ));
+        if output.interrupted {
+            return Err("interrupted".into());
+        }
+        if output.timeout {
+            report.timed_out_phase = Some(Phase::Test);
+            return Err(format!("test command exceeded timeout_s = {}", c.timeout_s));
+        }
+        let code = output.code.ok_or_else(|| {
+            format!(
+                "process died by {}",
+                output.signal.as_deref().unwrap_or("unknown signal")
+            )
+        })?;
+        if code == 126 || code == 127 {
+            return Err(format!(
+                "exit {code}: command not executable, refused to run, or not found"
+            ));
+        }
+        if baseline && code != 0 {
+            return Err(format!("baseline was not green: exit {code}"));
+        }
+        let normalized = normalize_output(c, &output.stdout)?;
+        if baseline {
+            if let Some(first) = &first {
+                if first != &normalized {
+                    return Err(format!(
+                        "baseline output is not deterministic: {}",
+                        first_output_difference(first, &normalized)
+                    ));
+                }
+            } else {
+                first = Some(normalized);
+            }
+        } else {
+            let clean = report
+                .baseline_stdout
+                .as_ref()
+                .ok_or("missing baseline stdout")?;
+            report.outcome = if code != 0 || clean != &normalized {
+                Outcome::Caught
+            } else {
+                Outcome::Survived
+            };
+        }
+    }
+    if baseline {
+        report.baseline_stdout = first;
+    }
+    Ok(())
+}
+
+fn cargo_baseline(
+    root: &Path,
+    c: &Control,
+    scope: Scope,
+    stop: &AtomicBool,
+    report: &mut Report,
+) -> Result<()> {
+    let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
+    report.baseline_build_ms += build.ms;
+    report.build_tail = tail(&build.text);
+    if build.timeout {
+        report.timed_out_phase = Some(Phase::Build);
+    }
+    if build.interrupted || build.timeout || !build.success {
+        return Err(format!("baseline build failed: {}", tail(&build.text)));
+    }
+    let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
+    report.baseline_test_ms += tests.ms;
+    report.test_tail = tail(&tests.text);
+    if tests.timeout {
+        report.timed_out_phase = Some(Phase::Test);
+    }
+    if tests.interrupted || tests.timeout || tests.code.is_none() {
+        return Err(format!("baseline test run failed: {}", tail(&tests.text)));
+    }
+    let results = parse_test_results(&tests.text, &c.runner)?;
+    if let Some((name, signal)) = results.signals.iter().next() {
+        return Err(format!("baseline {name}: test binary died by {signal}"));
+    }
+    if results.red.is_empty() && !tests.success {
+        return Err("baseline runner exited nonzero without a red test".into());
+    }
+    for name in &results.red {
+        report
+            .baseline_red
+            .entry(stable_target(&c.runner, &results.targets[name]).to_owned())
+            .or_default()
+            .push(results.names[name].clone());
+    }
+    report.baseline_results = Some(results);
+    Ok(())
+}
+
+fn validate_baseline(c: &Control, report: &mut Report) -> Result<()> {
+    if let Some(results) = &report.baseline_results {
+        let expected = resolve_expected(c, results)?;
+        let red: Vec<_> = expected
+            .iter()
+            .filter(|name| results.red.contains(name))
+            .cloned()
+            .collect();
+        if !red.is_empty() {
+            return Err(format!("baseline red: {}", red.join(", ")));
+        }
+        if results.red.len() + results.green.len() == 0
+            || expected.iter().any(|n| !results.green.contains(n))
+        {
+            report.outcome = Outcome::NoTestsRan;
+        }
+    }
+    Ok(())
+}
+
+fn exclude_baseline_red(c: &Control, report: &Report, results: &mut TestResults) {
+    results.red.retain(|name| {
+        let target = stable_target(&c.runner, &results.targets[name]);
+        !report
+            .baseline_red
+            .get(target)
+            .is_some_and(|names| names.contains(&results.names[name]))
+    });
+}
+
 pub fn parse_tests(text: &str, runner: &str) -> Result<(Vec<String>, Vec<String>)> {
     let results = parse_test_results(text, runner)?;
     Ok((results.red, results.green))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TestResults {
     red: Vec<String>,
     green: Vec<String>,
@@ -1813,7 +2096,7 @@ pub fn explore_row(
     )
 }
 
-/// One CLI replay session. Prepare prerequisites, collect every command baseline,
+/// One CLI replay session. Prepare prerequisites, collect every clean baseline,
 /// replay mutants, then finish by refreshing fixtures on the restored tree. A plain
 /// library run_row has no catalogue prerequisites; catalogue callers use a session.
 pub struct ReplaySession {
@@ -1845,12 +2128,7 @@ impl ReplaySession {
         let active: Vec<_> = rows
             .iter()
             .copied()
-            .filter(|c| {
-                c.matches_platform()
-                    && c.equivalent.is_none()
-                    && c.unreachable.is_none()
-                    && c.desk_only.is_none()
-            })
+            .filter(|c| c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none())
             .collect();
         if prebuild.is_empty() || active.is_empty() {
             return Ok(session);
@@ -1871,8 +2149,8 @@ impl ReplaySession {
         Ok(session)
     }
 
-    /// Collect command baselines and validate Cargo/nextest package identities
-    /// before the first mutant. Name listing does not run a green test baseline.
+    /// Collect baselines before the first mutant, sharing Cargo/nextest runs
+    /// across rows with the same runner, package and target selection.
     pub fn baselines(
         &mut self,
         root: &Path,
@@ -1880,21 +2158,98 @@ impl ReplaySession {
         allow_dirty: bool,
         stop: &AtomicBool,
     ) -> Result<()> {
+        self.baselines_scoped(root, rows, allow_dirty, stop, Scope::Row)
+    }
+
+    pub fn broad_baselines(
+        &mut self,
+        root: &Path,
+        rows: &[&Control],
+        allow_dirty: bool,
+        stop: &AtomicBool,
+    ) -> Result<()> {
+        self.baselines_scoped(root, rows, allow_dirty, stop, Scope::Broad)
+    }
+
+    /// Prove may diagnose a survivor with a package replay, so prepare that
+    /// wider baseline while fixtures are still clean, not after a mutant.
+    pub fn package_baselines(
+        &mut self,
+        root: &Path,
+        rows: &[&Control],
+        allow_dirty: bool,
+        stop: &AtomicBool,
+    ) -> Result<()> {
+        self.baselines_scoped(root, rows, allow_dirty, stop, Scope::Package)
+    }
+
+    fn baselines_scoped(
+        &mut self,
+        root: &Path,
+        rows: &[&Control],
+        allow_dirty: bool,
+        stop: &AtomicBool,
+        scope: Scope,
+    ) -> Result<()> {
         if self.fixtures_dirty {
             return Err("baselines must be collected before replaying mutants".into());
         }
+        let mut shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
+        let mut packages = BTreeMap::new();
         for c in rows {
-            let report = replay(
-                root,
-                c,
-                allow_dirty,
-                stop,
-                Scope::Row,
-                &[],
-                ReplayStage::Baseline,
-            )?;
-            if report.outcome == Outcome::Survived && c.runner != "command" {
-                self.validated_rows.insert(c.id.clone());
+            let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
+            let key = if active && c.runner != "command" {
+                command(c, "build", scope)?
+                    .get_args()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .collect()
+            } else {
+                vec![c.id.clone()]
+            };
+            let mut report = if let Some(report) = shared.get(&key) {
+                let mut report = report.clone();
+                report.id = c.id.clone();
+                report.baseline_build_ms = 0;
+                report.baseline_test_ms = 0;
+                report
+            } else {
+                let mut selection = (*c).clone();
+                // Baseline data is shared, but each row's expected reds are
+                // validated independently before its mutant can be applied.
+                if c.runner != "command" {
+                    selection.expect_red.clear();
+                }
+                let report = replay(
+                    root,
+                    &selection,
+                    allow_dirty,
+                    stop,
+                    scope,
+                    &[],
+                    ReplayStage::Baseline,
+                )?;
+                if report.outcome != Outcome::AnchorMissing {
+                    shared.insert(key, report.clone());
+                }
+                report
+            };
+            if active && report.outcome == Outcome::Survived && c.runner != "command" {
+                let package_key = (c.runner.clone(), c.package.clone());
+                let names = packages.entry(package_key).or_insert_with(|| {
+                    let start = Instant::now();
+                    let names = list_results(root, c, Scope::Package, stop);
+                    report.baseline_build_ms += start.elapsed().as_millis();
+                    names
+                });
+                let validation = names
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|names| resolve_expected(c, names).map(|_| ()))
+                    .and_then(|()| validate_baseline(c, &mut report));
+                if let Err(e) = validation {
+                    report.outcome = Outcome::Error;
+                    report.reason = Some(e);
+                }
             }
             self.row_baselines.insert(c.id.clone(), report);
             if stop.load(Ordering::SeqCst) {
@@ -1973,26 +2328,17 @@ impl ReplaySession {
         stop: &AtomicBool,
         scope: Scope,
     ) -> Result<Report> {
-        let active = c.matches_platform()
-            && c.equivalent.is_none()
-            && c.unreachable.is_none()
-            && c.desk_only.is_none();
-        let baseline = self.row_baselines.remove(&c.id).or_else(|| {
-            // Prove's optional package diagnosis reuses clean-tree name
-            // validation, not a second baseline after its first mutant.
-            self.validated_rows.contains(&c.id).then(|| {
-                let mut report = Report::new(c);
-                report.outcome = Outcome::Survived;
-                report
-            })
+        let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
+        let baseline = self.row_baselines.get(&c.id).cloned().map(|mut report| {
+            if !self.validated_rows.insert(c.id.clone()) {
+                report.baseline_build_ms = 0;
+                report.baseline_test_ms = 0;
+            }
+            report
         });
-        // Library clients that do not batch baselines retain the safe older
-        // refresh before an unprepared command row. CLI sessions always batch.
-        if active
-            && baseline.is_none()
-            && self.fixtures_dirty
-            && (c.runner == "command" || !c.expect_red.is_empty())
-        {
+        // An unprepared library replay needs clean fixtures for its baseline,
+        // including exploratory rows that do not yet name expected tests.
+        if active && baseline.is_none() && self.fixtures_dirty {
             self.finish(root, &mut [], allow_dirty)?;
         }
         let mut row = replay(
@@ -2158,13 +2504,26 @@ fn replay(
         if stop.load(Ordering::SeqCst) {
             return Err("interrupted".into());
         }
-        if c.runner == "command" && !baseline_ready {
-            command_tests(root, c, stop, &mut report, true)?;
-        } else if !baseline_ready && !c.expect_red.is_empty() {
-            let start = Instant::now();
-            let names = list_results(root, c, Scope::Package, stop)?;
-            report.build_ms += start.elapsed().as_millis();
-            resolve_expected(c, &names)?;
+        if !baseline_ready {
+            if c.runner == "command" {
+                command_tests(root, c, stop, &mut report, true)?;
+            } else {
+                if !c.expect_red.is_empty() && !matches!(scope, Scope::Explore { .. }) {
+                    let start = Instant::now();
+                    let names = list_results(root, c, Scope::Package, stop)?;
+                    report.baseline_build_ms += start.elapsed().as_millis();
+                    resolve_expected(c, &names)?;
+                }
+                cargo_baseline(root, c, scope, stop, &mut report)?;
+                let mut baseline_control = c.clone();
+                if matches!(scope, Scope::Explore { .. }) {
+                    baseline_control.expect_red.clear();
+                }
+                validate_baseline(&baseline_control, &mut report)?;
+                if report.outcome == Outcome::NoTestsRan {
+                    return Ok(());
+                }
+            }
         }
         if baseline_only {
             report.outcome = Outcome::Survived;
@@ -2186,7 +2545,7 @@ fn replay(
                 &mut report.timed_out_phase,
             )?;
             command_tests(root, c, stop, &mut report, false)?;
-            if report.outcome != Outcome::RedForAnotherReason {
+            if c.catch_on.is_none() && report.outcome != Outcome::RedForAnotherReason {
                 report.outcome = grade(c, &report.red, &report.green);
             }
             return Ok(());
@@ -2237,7 +2596,10 @@ fn replay(
                 c.expect_red.join(", ")
             ));
         }
-        let results = parse_test_results(&tests.text, &c.runner)?;
+        let mut results = parse_test_results(&tests.text, &c.runner)?;
+        // Compare stable binary/name pairs, not the display identity: broad
+        // runs may qualify a name that was unique in a narrow baseline.
+        exclude_baseline_red(c, &report, &mut results);
         if c.signal_is_catch.is_none() {
             if let Some((name, signal)) = results.signals.iter().next() {
                 return Err(format!("{name}: test binary died by {signal}"));
@@ -2299,6 +2661,25 @@ fn replay(
         report.green = results.green;
         Ok(())
     })();
+    if !baseline_only
+        && c.equivalent.is_some()
+        && (report.outcome == Outcome::Survived
+            || report.outcome == Outcome::Caught
+            || !report.red.is_empty())
+    {
+        report.outcome = if !report.red.is_empty()
+            || (c.catch_on.is_some() && report.outcome == Outcome::Caught)
+        {
+            Outcome::EquivalentCaught
+        } else {
+            Outcome::Equivalent
+        };
+        report.reason = Some(format!(
+            "{}; guard: {}",
+            c.equivalent.as_deref().unwrap(),
+            c.equivalent_guard.as_deref().unwrap()
+        ));
+    }
     let restoration = if baseline_only && saved.unchanged()? {
         saved.active = false;
         Ok(())
@@ -3101,11 +3482,14 @@ mod order_tests {
             target: None,
             command: None,
             test_count_pattern: None,
+            catch_on: None,
+            output_normalize: vec![],
             expect_message: None,
             signal_is_catch: None,
             expect_red: vec!["t".into()],
             only: false,
             equivalent: None,
+            equivalent_guard: None,
             unreachable: None,
             desk_only: None,
             hub: None,
@@ -3140,5 +3524,42 @@ mod order_tests {
             .map(|i| refs[i].id.as_str())
             .collect();
         assert_eq!(ids, ["d", "f", "b", "e", "a", "c"]);
+    }
+}
+
+#[cfg(test)]
+mod baseline_identity_tests {
+    use super::*;
+
+    #[test]
+    fn baseline_exclusion_matches_binary_and_name_with_either_path_separator() {
+        let c: Control = toml::from_str(
+            r#"
+id = "guard"
+guards = "a binary-specific baseline"
+file = "src/lib.rs"
+old = "true"
+new = "false"
+test_file = "src/lib.rs"
+runner = "cargo"
+package = "fixture"
+expect_red = ["other::same_name"]
+"#,
+        )
+        .unwrap();
+        let mut report = Report::new(&c);
+        report
+            .baseline_red
+            .insert("fixture".into(), vec!["same_name".into()]);
+        for (separator, extension) in [("/", ""), ("\\", ".exe")] {
+            let mut results = parse_test_results(&format!(
+                "Running unittests src{separator}lib.rs (target{separator}debug{separator}deps{separator}fixture-123abc123abc123a{extension})\n\
+                 test same_name ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;\n\
+                 Running tests{separator}other.rs (target{separator}debug{separator}deps{separator}other-456def456def456d{extension})\n\
+                 test same_name ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;"
+            ), "cargo").unwrap();
+            exclude_baseline_red(&c, &report, &mut results);
+            assert_eq!(results.red, ["other::same_name"]);
+        }
     }
 }

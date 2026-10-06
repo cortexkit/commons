@@ -118,12 +118,16 @@ struct Proof {
     target: Option<String>,
     /// Command argv with one {test} element. Put this option last: all following
     /// values (including flags) belong to the command, not to ck-mutate.
-    #[arg(long, num_args = 1.., allow_hyphen_values = true, conflicts_with = "only", requires = "test_count_pattern")]
+    #[arg(long, num_args = 1.., allow_hyphen_values = true, conflicts_with = "only")]
     command: Option<Vec<String>>,
     /// Literal runner-output pattern with one {count} decimal placeholder.
     #[arg(long)]
     test_count_pattern: Option<String>,
-    #[arg(long, required = true, num_args = 1..)]
+    #[arg(long, requires = "command")]
+    catch_on: Option<String>,
+    #[arg(long, requires = "catch_on")]
+    output_normalize: Vec<String>,
+    #[arg(long, required_unless_present = "catch_on", num_args = 1..)]
     expect_red: Vec<String>,
     /// Substring or /regex/ required in each expected failure's output.
     #[arg(long)]
@@ -193,13 +197,22 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         .iter()
         .filter(|r| r.outcome == Outcome::DeskOnly)
         .collect();
-    if broad > 0 || !unreachable.is_empty() || !hubs.is_empty() || skipped > 0 || !desk.is_empty() {
+    if broad > 0
+        || !unreachable.is_empty()
+        || !hubs.is_empty()
+        || skipped > 0
+        || !desk.is_empty()
+        || rows
+            .iter()
+            .any(|r| matches!(r.outcome, Outcome::Equivalent | Outcome::EquivalentCaught))
+    {
         println!(
-            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} UNREACHABLE, {} HUB, {skipped} SKIPPED_PLATFORM, {} DESK_ONLY",
+            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} EQUIVALENT_CAUGHT, {} UNREACHABLE, {} HUB, {skipped} SKIPPED_PLATFORM, {} DESK_ONLY",
             rows.iter().filter(|r| r.outcome == Outcome::Caught).count(),
             rows.iter()
                 .filter(|r| r.outcome == Outcome::Equivalent)
-                .count(),
+                 .count(),
+            rows.iter().filter(|r| r.outcome == Outcome::EquivalentCaught).count(),
             unreachable.len(),
             hubs.len(),
             desk.len()
@@ -235,6 +248,30 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
             );
         }
     }
+    let mut baseline_red: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        std::collections::BTreeMap::new();
+    for row in rows {
+        for (target, names) in &row.baseline_red {
+            baseline_red
+                .entry(target)
+                .or_default()
+                .extend(names.iter().map(String::as_str));
+        }
+    }
+    if !baseline_red.is_empty() {
+        println!("red at baseline (ignored):");
+        for (target, names) in baseline_red {
+            for name in names {
+                println!("  {target}::{name}");
+            }
+        }
+    }
+    eprintln!(
+        "Baseline timing: build {} ms, test {} ms, prebuild {} ms",
+        rows.iter().map(|r| r.baseline_build_ms).sum::<u128>(),
+        rows.iter().map(|r| r.baseline_test_ms).sum::<u128>(),
+        rows.iter().map(|r| r.baseline_prebuild_ms).sum::<u128>()
+    );
     if let Some(path) = path {
         fs::write(
             path,
@@ -319,7 +356,11 @@ fn run() -> Result<bool> {
             let mut session =
                 ReplaySession::prepare(&root, &catalogue.prebuild, &shard, allow_dirty, &stop)?;
             let work = (|| -> Result<()> {
-                session.baselines(&root, &shard, allow_dirty, &stop)?;
+                if broad {
+                    session.broad_baselines(&root, &shard, allow_dirty, &stop)?;
+                } else {
+                    session.baselines(&root, &shard, allow_dirty, &stop)?;
+                }
                 for i in execution_order(&shard) {
                     if stop.load(Ordering::SeqCst) {
                         break;
@@ -359,11 +400,14 @@ fn run() -> Result<bool> {
                 target: p.target,
                 command: p.command,
                 test_count_pattern: p.test_count_pattern,
+                catch_on: p.catch_on,
+                output_normalize: p.output_normalize,
                 expect_red: p.expect_red,
                 expect_message: p.expect_message,
                 signal_is_catch: p.signal_is_catch,
                 only: p.only,
                 equivalent: None,
+                equivalent_guard: None,
                 unreachable: None,
                 desk_only: p.desk_only,
                 hub: None,
@@ -381,7 +425,7 @@ fn run() -> Result<bool> {
             validate(&root, &catalogue)?;
             let mut session =
                 ReplaySession::prepare(&root, &catalogue.prebuild, &[&c], p.allow_dirty, &stop)?;
-            session.baselines(&root, &[&c], p.allow_dirty, &stop)?;
+            session.package_baselines(&root, &[&c], p.allow_dirty, &stop)?;
             let first = session.run_row(&root, &c, p.allow_dirty, &stop, false)?;
             let caught = first.outcome.is_caught();
             let recorded = caught || first.outcome == Outcome::DeskOnly;
@@ -462,11 +506,14 @@ fn explore(
         target: None,
         command: None,
         test_count_pattern: None,
+        catch_on: None,
+        output_normalize: vec![],
         expect_message: None,
         signal_is_catch: None,
         expect_red: vec![],
         only: false,
         equivalent: None,
+        equivalent_guard: None,
         unreachable: x.unreachable,
         desk_only: x.desk_only,
         hub: None,

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0
+
+- Collect Cargo/nextest clean-tree baselines before any mutant, sharing one
+  build/test run per runner/package/target selection. Broad runs baseline package
+  tests; prove prepares its package diagnosis baseline while fixtures are clean.
+  Expected tests already red grade ERROR (`baseline red: <tests>`) without
+  applying the mutant. Other baseline reds are recorded per target, named in the
+  session summary, and excluded from WRONG_TEST and broad/collateral grading.
+  Report baseline build/test/prebuild costs independently of mutant costs.
+- Replay equivalent rows instead of skipping them. Require both the semantic
+  `equivalent` explanation and `equivalent_guard` code fact. Surviving rows grade
+  EQUIVALENT, counted separately; any new catch grades EQUIVALENT_CAUGHT and fails
+  the claim. Existing equivalent rows must add a guard before replay/check.
+- Add command `catch_on = "output_differs"`, comparing stdout after optional
+  ordered regex deletions in `output_normalize`. Run the baseline twice and
+  refuse nondeterministic output, naming its first differing line. Different
+  mutant output catches, identical output survives; existing process-error and
+  nonzero-exit rules still apply. Reject `expect_message` on these rows. Prove
+  supports the new options without requiring a named test or test count.
+
 ## 0.6.0
 
 - Treat cargo/nextest test signal deaths as ERROR, naming the test and signal,

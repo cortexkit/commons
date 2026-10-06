@@ -726,7 +726,10 @@ fn new_catalogue_fields_validate_and_roundtrip() {
         let mut invalid = c.clone();
         invalid.desk_only = Some("requires physical input".into());
         match other {
-            "equivalent" => invalid.equivalent = Some("same result".into()),
+            "equivalent" => {
+                invalid.equivalent = Some("same result".into());
+                invalid.equivalent_guard = Some("guarded: the same comparison".into());
+            }
             "unreachable" => invalid.unreachable = Some("no caller".into()),
             _ => {
                 invalid.hub = Some("shared intentional guard across targets".into());

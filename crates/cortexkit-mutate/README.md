@@ -32,6 +32,7 @@ only = true
 # timeout_s = 600
 # build_timeout_s = 1800
 # equivalent = "Explain why this mutant computes exactly the same result"
+# equivalent_guard = "path::symbol or the code fact preserving behaviour"
 # unreachable = "Explain why the mutated code has no production caller"
 # hub = "Explain why multiple test targets intentionally guard this property"
 # hub_targets = ["capacity_contract", "encoder_e2e"]
@@ -101,8 +102,30 @@ the runner to retain the intended message for that test (Cargo's captured
 stdout is generally lost on abort). For Cargo, tests
 after the abort do not run; missing expected tests still prevent a catch.
 
-`equivalent` and `unreachable` are mutually exclusive recorded dispositions,
-not runner detections. Each takes a non-empty reason string. An `unreachable`
+### Equivalent mutants (0.7.0)
+
+Use `equivalent` only when inspection establishes that the edit **cannot change
+observable behaviour**, not merely because the current tests stay green. Record
+both a nonempty explanation and a nonempty `equivalent_guard`: a `path::symbol`
+or concrete code fact that makes the equivalence true. For example:
+
+```toml
+equivalent = "Reversing the comparison operands preserves strict ordering"
+equivalent_guard = "src/guard.rs::guarded: value > 0 is exactly 0 < value"
+```
+
+The row is **still replayed**, including its clean baseline, mutation, build and
+tests. A survivor grades **EQUIVALENT**, succeeds, and counts separately, never
+as a catch. If **any newly red test** catches it (including an unexpected test),
+it grades **EQUIVALENT_CAUGHT** and fails: remove the equivalence claim and make
+it a normal row. Baseline errors, crashes and build errors are not equivalence
+evidence. `check` requires the two fields together and validates their contents,
+but cannot prove their semantic claim. Cargo/nextest equivalent rows may use
+`expect_red = []` to replay the selected tests without claiming a particular catch.
+
+`equivalent`, `unreachable` and `desk_only` are mutually exclusive, and cannot
+be combined with HUB. `unreachable` is a recorded disposition, not a runner
+detection, and takes a nonempty reason string. An `unreachable`
 reason must explain why no production caller exists (for example, all references
 are unit tests); the runner does not infer dead code or verify a call graph.
 UNREACHABLE rows may use `expect_red = []`: no guarding tests are claimed.
@@ -201,12 +224,22 @@ lockfile mutation can change its output. Reusing a baseline binary could therefo
 hide a mutant. A mutated prerequisite failure is row **ERROR**, never CAUGHT or
 DID_NOT_COMPILE, because the guarding tests did not execute.
 
-As of 0.5.2, sessions collect **every selected command row's per-id baseline
-before the first mutant**. A failing baseline is that row's ERROR and skips its
-mutant; other baselines still run on clean fixtures. Cargo and nextest replays
-have no green baseline runs; package-wide name listing validates expected test
-identities on the clean tree before mutants. Their mutant build/test protocol is unchanged.
-No clean-tree test run can consume an earlier mutant's fixture.
+As of 0.7.0, sessions collect **all selected rows' baselines before the first
+mutant**. Command test rows run each expected id; output-equality rows run twice.
+Cargo/nextest build and run each selected target selection once, shared across
+rows with the same runner, package and selector. `run --broad` baselines include
+package tests plus explicit row targets. `prove` prepares the whole package
+baseline in advance for its possible survivor diagnosis. Package-wide name
+listing still validates expected test identities, including narrow rows.
+
+An expected test already red grades **ERROR** with `baseline red: <tests>` and
+its mutant is not run. Other baseline-red tests are recorded per stable target
+in `baseline_red` and excluded from mutant grading and collateral, including
+WRONG_TEST, CAUGHT_BROADLY and HUB. The report's `red` contains only newly red
+tests. Baseline reds remain visible even if they turn green under a mutant:
+the session summary names every one under **red at baseline (ignored)**. Never
+use these ignored failures as evidence of a catch. Baseline data is never cached
+between sessions. No clean-tree run can consume an earlier mutant's fixture.
 
 Source restoration between mutants does not rebuild fixtures: the next mutant
 refreshes its own prerequisites as above. After all mutants, the session runs
@@ -226,7 +259,7 @@ from `--catalogue` even without appending. Append preserves the existing root
 list and does not run it again for explore's name check. Standalone `check` runs
 preparation once before list-mode compilation. Library clients with catalogue
 prerequisites use `ReplaySession::prepare`, `baselines` for all selected rows
-(command runs or Cargo/nextest name validation), replay methods, then `finish`
+(or `broad_baselines` for a broad replay, `package_baselines` for a package diagnosis), replay methods, then `finish`
 (also on early errors); plain
 `run_row`/`explore_row` have no catalogue context.
 
@@ -238,6 +271,10 @@ other rows have zero/empty baseline fields. Output tails are bounded like other
 runner output. `restore_prebuild_ms` and `restore_prebuild_tail` separately record
 the final restored-tree refresh, attributed once to the last reported row.
 Report order is unchanged, regardless of the internal grouped execution order.
+`baseline_build_ms` and `baseline_test_ms` separate clean-tree compilation/name
+listing and tests from mutant `build_ms`/`test_ms`. Shared baseline costs are
+attributed only to the first row using that selection, not multiplied by the
+number of rows. Stderr prints the session's baseline build, test and prebuild totals.
 A prerequisite timeout uses
 `timed_out_phase: "prebuild"` and ERROR.
 
@@ -301,7 +338,9 @@ being silently combined. Ignored tests do not count as having run.
 ## Command rows
 
 For Python, Bun, Xcode/Swift, or another runner with a per-test invocation, use
-an **argv array**, never a shell string:
+an **argv array**, never a shell string. With `catch_on` absent, the named-test
+protocol below applies; `catch_on = "output_differs"` uses the output-equality
+protocol later in this section instead:
 
 ```toml
 [[control]]
@@ -361,7 +400,45 @@ generic console suggestion to audit breadth. `explore` refuses command rows.
 `check` validates their fields, files, and anchors, but has no test-list protocol
 to validate names; the fresh baseline during replay verifies the invocation.
 
-To prove and append the same row, put `--command` **last**. It consumes all
+### Output-equality command rows (0.7.0)
+
+Use `catch_on = "output_differs"` for a guard whose evidence is stable stdout
+rather than a failing named test, such as a search-quality benchmark:
+
+```toml
+[[control]]
+id = "search-quality-is-stable"
+guards = "the ranked search benchmark output is unchanged"
+file = "src/search.rs"
+old = "score.with_quality_boost()"
+new = "score"
+test_file = "scripts/search-quality.py"
+runner = "command"
+command = ["python3", "scripts/search-quality.py", "--fixed-seed", "42"]
+catch_on = "output_differs"
+output_normalize = ['(?m)^elapsed_ms=\d+\r?\n', 'timestamp=[^\r\n]*']
+expect_red = []
+```
+
+These rows run the argv once per invocation, with **no `{test}` placeholder**,
+no `test_count_pattern`, and `expect_red = []`. Optional `output_normalize`
+contains Rust regexes deleted, in order, from stdout before comparison; invalid
+regexes fail `check`. Use normalization only for genuinely irrelevant data;
+deleting the measured scores would make the proof vacuous. Stderr is retained
+for diagnostics but never compared.
+
+Both clean baseline invocations must exit 0 and produce identical normalized
+stdout. Otherwise the row is ERROR (`baseline output is not deterministic`,
+with the first differing line) and the mutant is skipped. Mutant stdout that
+differs is CAUGHT even on exit 0; identical stdout survives. An ordinary nonzero
+mutant exit still catches under the existing command exit rules; spawn errors,
+exit 126/127, signals (even with `signal_is_catch`), interruptions and timeouts
+are ERROR. `expect_message` does not apply and `check` refuses that combination.
+Each invocation has its own `timeout_s`. `prove` supports `--catch-on output_differs`
+and repeated `--output-normalize REGEX`, without `--expect-red` or
+`--test-count-pattern`; put `--command` last as usual.
+
+To prove and append a named-test row, put `--command` **last**. It consumes all
 remaining argv elements, including options belonging to the test runner. The
 runner defaults to `command` when `--command` is present (otherwise `cargo`):
 
@@ -518,11 +595,12 @@ succeed. The first three count as catches:
 | ANCHOR_MISSING | The replacement count was zero or greater than one. |
 | DID_NOT_COMPILE | The separate build command exited nonzero. |
 | TIMED_OUT | The build exceeded `build_timeout_s`, or the test run exceeded `timeout_s`. `timed_out_phase` is `"build"` or `"test"`, and the reason names the deadline. |
-| EQUIVALENT | Explicitly skipped with the catalogue's reason. |
+| EQUIVALENT | A replayed equivalent row survived. Recorded with its reason and guard; succeeds separately, not a catch. |
+| EQUIVALENT_CAUGHT | A newly red test or output comparison caught a claimed equivalent. Fails; turn the row into a normal proof. |
 | UNREACHABLE | Explicitly recorded with a reason explaining why no production caller exists. Listed separately, never counted as caught. |
 | SKIPPED_PLATFORM | Host target_os is not in platforms. Counted separately, not executed. |
 | DESK_ONLY | Explicit nonempty reason that this proof needs a real desktop; never automated or counted as caught. |
-| ERROR | Signal death without a reasoned `signal_is_catch`, invalid/incomplete runner output (including a Cargo binary without a summary or zero-test command rows), prerequisite failure, interruption, or restoration/lockfile integrity error. |
+| ERROR | An expected test red at baseline, nondeterministic baseline output, signal death without a reasoned `signal_is_catch`, invalid/incomplete runner output (including a Cargo binary without a summary or zero-test command rows), prerequisite failure, interruption, or restoration/lockfile integrity error. |
 
 **Current policy:** CAUGHT_BROADLY warns, succeeds, and still records a proof.
 A later release will make it a failing outcome, after the catalogues that use
@@ -543,7 +621,7 @@ finished and its complete per-test results were parsed. Normal replays, `prove`,
 `explore`, explicit dispositions, and incomplete audits report false.
 
 Every row also includes `collateral: { "count": N, "targets": [...] }`. For proof
-replays, it counts every red test not named in `expect_red` and lists their sorted,
+replays, it counts every newly red test not named in `expect_red` and lists their sorted,
 de-duplicated targets, including same-target failures. With no collateral it is
 `{ "count": 0, "targets": [] }`. Explore discovers its expected names from all
 red tests, so its collateral is empty. Cargo target identities are stable executable
@@ -553,7 +631,12 @@ the `crate::binary` prefix. Attribution is retained by the same per-test parser.
 Console output includes collateral on catches with extra reds, a warning summary
 for CAUGHT_BROADLY, and separate lists and counts of UNREACHABLE and HUB rows.
 
-These formats have no explicit version field: 0.6 adds optional `expect_message`
+These formats have no explicit version field: 0.7 requires `equivalent_guard`
+alongside existing `equivalent` claims, adds `catch_on`/`output_normalize` for
+command output comparisons, EQUIVALENT_CAUGHT, per-target `baseline_red`, and
+separate baseline build/test timing. Existing equivalent rows must supply their
+guard and are no longer skipped. Other existing rows remain readable.
+0.6 adds optional `expect_message`
 and `signal_is_catch` row fields and the RED_FOR_ANOTHER_REASON outcome; existing
 rows remain readable. 0.5 retained the unversioned TOML
 `[[control]]` schema and JSON array, adding `platforms`, `desk_only`, root `prebuild`,
