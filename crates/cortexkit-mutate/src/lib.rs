@@ -41,12 +41,16 @@ pub struct Control {
     pub target: Option<String>,
     /// An argv template, not a shell string; substitutes one expected test id.
     pub command: Option<Vec<String>>,
+    /// Literal output pattern with one {count} decimal placeholder, per invocation.
+    pub test_count_pattern: Option<String>,
     pub expect_red: Vec<String>,
     #[serde(default)]
     pub only: bool,
     pub equivalent: Option<String>,
     /// A person's explanation of why the mutated code has no production caller.
     pub unreachable: Option<String>,
+    /// Why this proof requires a real desktop and cannot run in automation.
+    pub desk_only: Option<String>,
     /// A person's explanation of why tests in several targets legitimately fail
     /// for this mutant: they assert the same shared property on purpose.
     pub hub: Option<String>,
@@ -54,6 +58,9 @@ pub struct Control {
     /// approved to fail alongside them in a `run --broad` replay. Stable names,
     /// without Cargo's executable hash.
     pub hub_targets: Option<Vec<String>>,
+    /// Rust target-OS names; absent means the row runs on every host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platforms: Option<Vec<String>>,
     /// Bounds the test run only; the build has its own deadline below.
     #[serde(default = "default_timeout")]
     pub timeout_s: u64,
@@ -71,7 +78,34 @@ pub fn default_build_timeout() -> u64 {
 }
 
 impl Control {
+    pub fn matches_platform(&self) -> bool {
+        self.platforms
+            .as_ref()
+            .is_none_or(|names| names.iter().any(|name| name == std::env::consts::OS))
+    }
+
+    fn validate_platforms(&self) -> Result<()> {
+        if let Some(names) = &self.platforms {
+            if names.is_empty() {
+                return Err(format!(
+                    "{}: platforms must be nonempty when present",
+                    self.id
+                ));
+            }
+            for name in names {
+                if !known_os(name) {
+                    return Err(format!(
+                        "{}: unknown target_os in platforms: {name:?}",
+                        self.id
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn validate_runner(&self) -> Result<()> {
+        self.validate_platforms()?;
         let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
         match self.runner.as_str() {
             "command" => {
@@ -110,7 +144,12 @@ impl Control {
                         "requires {test} as a complete argv element",
                     ));
                 }
-                if self.expect_red.is_empty() && self.unreachable.is_none() {
+                validate_count_pattern(self.test_count_pattern.as_deref())
+                    .map_err(|e| invalid("test_count_pattern", &e))?;
+                if self.expect_red.is_empty()
+                    && self.unreachable.is_none()
+                    && self.desk_only.is_none()
+                {
                     return Err(invalid("expect_red", "must name at least one test"));
                 }
                 for id in &self.expect_red {
@@ -120,6 +159,12 @@ impl Control {
                 }
             }
             "cargo" | "nextest" => {
+                if self.test_count_pattern.is_some() {
+                    return Err(invalid(
+                        "test_count_pattern",
+                        "must be absent for cargo/nextest rows",
+                    ));
+                }
                 if self.command.is_some() {
                     return Err(invalid("command", "must be absent for cargo/nextest rows"));
                 }
@@ -143,9 +188,9 @@ impl Control {
         if self.hub.is_none() && self.hub_targets.is_none() {
             return Ok(());
         }
-        if self.equivalent.is_some() || self.unreachable.is_some() {
+        if self.equivalent.is_some() || self.unreachable.is_some() || self.desk_only.is_some() {
             return Err(format!(
-                "{}: hub, equivalent and unreachable are exclusive",
+                "{}: hub, equivalent and unreachable are exclusive; desk_only is also exclusive",
                 self.id
             ));
         }
@@ -169,9 +214,18 @@ impl Control {
 
     fn recorded_disposition(&self) -> Result<Option<(Outcome, &str)>> {
         self.validate_hub()?;
-        if self.equivalent.is_some() && self.unreachable.is_some() {
+        if [
+            self.equivalent.is_some(),
+            self.unreachable.is_some(),
+            self.desk_only.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+            > 1
+        {
             return Err(format!(
-                "{}: equivalent and unreachable are exclusive",
+                "{}: equivalent, unreachable and desk_only are exclusive",
                 self.id
             ));
         }
@@ -183,7 +237,8 @@ impl Control {
                 self.unreachable
                     .as_deref()
                     .map(|r| (Outcome::Unreachable, r))
-            });
+            })
+            .or_else(|| self.desk_only.as_deref().map(|r| (Outcome::DeskOnly, r)));
         if disposition
             .as_ref()
             .is_some_and(|(_, reason)| reason.trim().is_empty())
@@ -234,9 +289,106 @@ impl Control {
     }
 }
 
+fn known_os(name: &str) -> bool {
+    matches!(
+        name,
+        "aix"
+            | "android"
+            | "cuda"
+            | "dragonfly"
+            | "emscripten"
+            | "espidf"
+            | "freebsd"
+            | "fuchsia"
+            | "haiku"
+            | "hermit"
+            | "horizon"
+            | "hurd"
+            | "illumos"
+            | "ios"
+            | "l4re"
+            | "linux"
+            | "macos"
+            | "netbsd"
+            | "none"
+            | "nto"
+            | "nuttx"
+            | "openbsd"
+            | "psp"
+            | "psx"
+            | "redox"
+            | "rtems"
+            | "solid_asp3"
+            | "solaris"
+            | "teeos"
+            | "trusty"
+            | "tvos"
+            | "uefi"
+            | "unknown"
+            | "vexos"
+            | "visionos"
+            | "vita"
+            | "vxworks"
+            | "wasi"
+            | "watchos"
+            | "windows"
+            | "xous"
+            | "zkvm"
+    )
+}
+
+/// A named, shell-free prerequisite run from the repository root. Rebuilding
+/// every prerequisite under every mutant avoids trusting stale fixture binaries.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Prebuild {
+    pub name: String,
+    pub command: Vec<String>,
+    #[serde(default = "default_build_timeout")]
+    pub timeout_s: u64,
+}
+
+fn validate_prebuild(steps: &[Prebuild]) -> Result<()> {
+    let mut names = BTreeSet::new();
+    for step in steps {
+        if step.name.trim().is_empty() || !names.insert(&step.name) {
+            return Err(format!(
+                "invalid or duplicate prebuild name: {:?}",
+                step.name
+            ));
+        }
+        if step.command.first().is_none_or(|arg| arg.trim().is_empty())
+            || step.command.iter().any(|arg| arg.contains('\0'))
+            || step.timeout_s == 0
+        {
+            return Err(format!(
+                "prebuild {:?}: requires a program, NUL-free argv and positive timeout_s",
+                step.name
+            ));
+        }
+        if Path::new(&step.command[0])
+            .file_stem()
+            .is_some_and(|p| p == "cargo")
+            && !step
+                .command
+                .iter()
+                .take_while(|arg| arg.as_str() != "--")
+                .any(|arg| arg == "--locked")
+        {
+            return Err(format!(
+                "prebuild {:?}: cargo commands require --locked",
+                step.name
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Catalogue {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prebuild: Vec<Prebuild>,
     #[serde(default)]
     pub control: Vec<Control>,
 }
@@ -246,6 +398,8 @@ pub fn load(path: &Path) -> Result<Catalogue> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Rows {
+        #[serde(default)]
+        prebuild: Vec<Prebuild>,
         #[serde(default)]
         control: Vec<toml::Value>,
     }
@@ -262,11 +416,15 @@ pub fn load(path: &Path) -> Result<Catalogue> {
                 .to_owned();
             let c: Control = row.try_into().map_err(|e| format!("{id}: {e}"))?;
             c.validate_runner()?;
-            c.validate_hub()?;
+            c.recorded_disposition()?;
             Ok(c)
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Catalogue { control })
+    validate_prebuild(&rows.prebuild)?;
+    Ok(Catalogue {
+        control,
+        prebuild: rows.prebuild,
+    })
 }
 
 fn target_io_error(name: &str, error: std::io::Error) -> String {
@@ -303,6 +461,7 @@ fn safe_path(root: &Path, name: &str) -> Result<PathBuf> {
 }
 
 pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
+    validate_prebuild(&catalogue.prebuild)?;
     let mut ids = BTreeSet::new();
     for c in &catalogue.control {
         if c.id.is_empty()
@@ -315,7 +474,7 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
             return Err(format!("invalid or duplicate id: {}", c.id));
         }
         if c.guards.trim().is_empty()
-            || (c.expect_red.is_empty() && c.unreachable.is_none())
+            || (c.expect_red.is_empty() && c.unreachable.is_none() && c.desk_only.is_none())
             || c.expect_red.iter().any(|n| n.trim().is_empty())
             || c.equivalent.as_ref().is_some_and(|s| s.trim().is_empty())
         {
@@ -363,6 +522,7 @@ pub fn append_control(path: &Path, c: &Control) -> Result<()> {
     }
     let row = toml::to_string(&Catalogue {
         control: vec![c.clone()],
+        ..Catalogue::default()
     })
     .map_err(|e| e.to_string())?;
     let mut file = OpenOptions::new()
@@ -391,6 +551,112 @@ pub fn parse_edits(text: &str) -> Result<Vec<Edit>> {
         .or_else(|_| toml::from_str::<Doc>(&format!("edits = {text}")))
         .map(|doc| doc.edits)
         .map_err(|e| format!("--edits is neither JSON nor TOML edits: {e}"))
+}
+
+/// Infer only literal, whole-file OS gates: an inner cfg attribute or a direct
+/// conventional `mod name;` declaration beside the file. Compound cfgs, macros,
+/// path attributes and gates on just one item need an author's platform field.
+pub fn infer_platforms(root: &Path, edits: &[Edit]) -> Option<Vec<String>> {
+    let mut platforms = BTreeSet::new();
+    for edit in edits {
+        let file = Path::new(&edit.file);
+        if file.extension()?.to_str()? != "rs" {
+            return None;
+        }
+        let text = fs::read_to_string(root.join(file)).ok()?;
+        let mut found = visible_platform(&text, None);
+        if found.is_none() {
+            let parent = file.parent()?;
+            let (directory, name) = if file.file_stem()? == "mod" {
+                (parent.parent()?, parent.file_name()?.to_str()?)
+            } else {
+                (parent, file.file_stem()?.to_str()?)
+            };
+            let candidates = [
+                directory.join("mod.rs"),
+                directory.join("lib.rs"),
+                directory.join("main.rs"),
+                directory.with_extension("rs"),
+            ];
+            for candidate in candidates {
+                if candidate == file {
+                    continue;
+                }
+                if let Ok(source) = fs::read_to_string(root.join(candidate)) {
+                    if let Some(os) = visible_platform(&source, Some(name)) {
+                        if found.as_ref().is_some_and(|previous| previous != &os) {
+                            return None;
+                        }
+                        found = Some(os);
+                    }
+                }
+            }
+        }
+        platforms.insert(found?);
+    }
+    if platforms.len() == 1 {
+        Some(platforms.into_iter().collect())
+    } else {
+        None
+    }
+}
+
+fn visible_platform(text: &str, module: Option<&str>) -> Option<String> {
+    let toks = tokens(text);
+    let mut braces = 0usize;
+    for (i, (_, tok)) in toks.iter().enumerate() {
+        match tok {
+            Tok::Punct(b'{') => braces += 1,
+            Tok::Punct(b'}') => braces = braces.saturating_sub(1),
+            _ => {}
+        }
+        if braces != 0 || *tok != Tok::Punct(b'#') {
+            continue;
+        }
+        let inner = toks.get(i + 1).is_some_and(|t| t.1 == Tok::Punct(b'!'));
+        let start = i + 1 + usize::from(inner);
+        let shape = [
+            Tok::Punct(b'['),
+            Tok::Ident("cfg"),
+            Tok::Punct(b'('),
+            Tok::Ident("target_os"),
+            Tok::Punct(b'='),
+            Tok::Punct(b')'),
+            Tok::Punct(b']'),
+        ];
+        if !toks
+            .get(start..start + shape.len())
+            .is_some_and(|slice| slice.iter().map(|t| t.1).eq(shape))
+        {
+            continue;
+        }
+        let literal = text[toks[start + 4].0 + 1..toks[start + 5].0].trim();
+        let os = literal.strip_prefix('"')?.strip_suffix('"')?;
+        if !known_os(os) {
+            continue;
+        }
+        if inner && module.is_none() {
+            return Some(os.to_owned());
+        }
+        if !inner {
+            let mut next = start + shape.len();
+            if toks.get(next).is_some_and(|t| t.1 == Tok::Ident("pub")) {
+                next += 1;
+            }
+            if let Some(name) = module {
+                if toks.get(next..next + 3).is_some_and(|slice| {
+                    slice.iter().map(|t| t.1).eq([
+                        Tok::Ident("mod"),
+                        Tok::Ident(name),
+                        Tok::Punct(b';'),
+                    ])
+                }) {
+                    return Some(os.to_owned());
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -575,6 +841,8 @@ pub enum Outcome {
     Equivalent,
     Unreachable,
     Hub,
+    SkippedPlatform,
+    DeskOnly,
     Error,
 }
 impl Outcome {
@@ -590,6 +858,8 @@ pub enum Phase {
     Build,
     /// The test run, bounded by `timeout_s`.
     Test,
+    /// A declared fixture prerequisite, bounded by that step's timeout_s.
+    Prebuild,
 }
 
 #[derive(Debug, Serialize)]
@@ -612,6 +882,17 @@ pub struct Report {
     pub breadth_observed: bool,
     pub build_ms: u128,
     pub test_ms: u128,
+    /// Per-mutant prerequisites, separate from the normal test-binary build.
+    pub prebuild_ms: u128,
+    pub prebuild_tail: String,
+    /// Session preparation is attributed only to the first executable row.
+    pub baseline_prebuild_ms: u128,
+    pub baseline_prebuild_tail: String,
+    /// Refresh on the restored tree before a later executable row begins.
+    pub restore_prebuild_ms: u128,
+    pub restore_prebuild_tail: String,
+    #[serde(skip)]
+    prebuild_ran: bool,
     pub build_tail: String,
     pub test_tail: String,
     pub reason: Option<String>,
@@ -631,6 +912,13 @@ impl Report {
             breadth_observed: false,
             build_ms: 0,
             test_ms: 0,
+            prebuild_ms: 0,
+            prebuild_tail: String::new(),
+            baseline_prebuild_ms: 0,
+            baseline_prebuild_tail: String::new(),
+            restore_prebuild_ms: 0,
+            restore_prebuild_tail: String::new(),
+            prebuild_ran: false,
             build_tail: String::new(),
             test_tail: String::new(),
             reason: None,
@@ -638,7 +926,13 @@ impl Report {
     }
     pub fn passes(&self) -> bool {
         self.outcome.is_caught()
-            || matches!(self.outcome, Outcome::Equivalent | Outcome::Unreachable)
+            || matches!(
+                self.outcome,
+                Outcome::Equivalent
+                    | Outcome::Unreachable
+                    | Outcome::SkippedPlatform
+                    | Outcome::DeskOnly
+            )
     }
 }
 
@@ -810,6 +1104,63 @@ fn tail(text: &str) -> String {
     text[start..].to_owned()
 }
 
+fn validate_count_pattern(pattern: Option<&str>) -> Result<(&str, &str)> {
+    let pattern = pattern.ok_or("is required for command rows")?;
+    if pattern.matches("{count}").count() != 1 || pattern.contains('\0') {
+        return Err("requires exactly one {count} placeholder and no NUL".into());
+    }
+    let (before, after) = pattern.split_once("{count}").unwrap();
+    if before.is_empty() || after.is_empty() {
+        return Err("requires nonempty literal text before and after {count}".into());
+    }
+    Ok((before, after))
+}
+
+fn command_test_count(text: &str, pattern: Option<&str>) -> Result<u64> {
+    let (before, after) = validate_count_pattern(pattern)?;
+    let mut counts = Vec::new();
+    for (start, _) in text.match_indices(before) {
+        let rest = &text[start + before.len()..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && rest[digits..].starts_with(after) {
+            counts.push(
+                rest[..digits]
+                    .parse::<u64>()
+                    .map_err(|e| format!("invalid test count: {e}"))?,
+            );
+        }
+    }
+    match counts.as_slice() {
+        [count] if *count > 0 => Ok(*count),
+        [0] => Err("command reported zero tests executed".into()),
+        [] => Err("test_count_pattern did not match an executed-test count".into()),
+        _ => Err("test_count_pattern matched multiple counts; execution is ambiguous".into()),
+    }
+}
+
+#[cfg(test)]
+mod count_tests {
+    use super::*;
+
+    #[test]
+    fn count_pattern_requires_one_unambiguous_nonzero_decimal_count() {
+        let pattern = Some("Ran {count} tests");
+        assert_eq!(
+            command_test_count("Ran 2 tests in 0.1s", pattern).unwrap(),
+            2
+        );
+        for text in [
+            "Ran 0 tests",
+            "Ran two tests",
+            "Ran 1 tests\nRan 2 tests",
+            "Ran 18446744073709551616 tests",
+            "",
+        ] {
+            assert!(command_test_count(text, pattern).is_err(), "{text}");
+        }
+    }
+}
+
 // Both baseline and mutant commands use the same child supervisor as Cargo.
 // A failing baseline or a broken process is not evidence that a test caught a mutant.
 fn command_tests(
@@ -858,6 +1209,7 @@ fn command_tests(
                 "exit {code}: program not executable or not found"
             )));
         }
+        command_test_count(&output.text, c.test_count_pattern.as_deref()).map_err(error)?;
         if baseline {
             if code != 0 {
                 return Err(error(format!("exit {code}")));
@@ -1118,7 +1470,7 @@ pub fn run_row(
     unscoped: bool,
 ) -> Result<Report> {
     let scope = if unscoped { Scope::Package } else { Scope::Row };
-    replay(root, c, allow_dirty, stop, scope)
+    replay(root, c, allow_dirty, stop, scope, &[])
 }
 
 /// Audit one catalogue row across every test target in its package, retaining
@@ -1129,7 +1481,7 @@ pub fn run_broad_row(
     allow_dirty: bool,
     stop: &AtomicBool,
 ) -> Result<Report> {
-    replay(root, c, allow_dirty, stop, Scope::Broad)
+    replay(root, c, allow_dirty, stop, Scope::Broad, &[])
 }
 
 /// Apply one mutant and run every test in its package (or the workspace),
@@ -1142,7 +1494,196 @@ pub fn explore_row(
     stop: &AtomicBool,
     workspace: bool,
 ) -> Result<Report> {
-    replay(root, c, allow_dirty, stop, Scope::Explore { workspace })
+    replay(
+        root,
+        c,
+        allow_dirty,
+        stop,
+        Scope::Explore { workspace },
+        &[],
+    )
+}
+
+/// One CLI replay session. Prepare once before any command baseline or mutation;
+/// every successful mutant build then refreshes the same prerequisites. A plain
+/// library run_row has no catalogue prerequisites; catalogue callers use a session.
+pub struct ReplaySession {
+    prebuild: Vec<Prebuild>,
+    baseline: Option<(u128, String)>,
+    fixtures_dirty: bool,
+}
+
+impl ReplaySession {
+    pub fn prepare(
+        root: &Path,
+        prebuild: &[Prebuild],
+        rows: &[&Control],
+        allow_dirty: bool,
+        stop: &AtomicBool,
+    ) -> Result<Self> {
+        validate_prebuild(prebuild)?;
+        let mut session = Self {
+            prebuild: prebuild.to_vec(),
+            baseline: None,
+            fixtures_dirty: false,
+        };
+        let active: Vec<_> = rows
+            .iter()
+            .copied()
+            .filter(|c| {
+                c.matches_platform()
+                    && c.equivalent.is_none()
+                    && c.unreachable.is_none()
+                    && c.desk_only.is_none()
+            })
+            .collect();
+        if prebuild.is_empty() || active.is_empty() {
+            return Ok(session);
+        }
+        let edits = active
+            .iter()
+            .map(|c| c.edits())
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .filter(|e| root.join(&e.file).exists())
+            .collect::<Vec<_>>();
+        let mut saved = Saved::new(root, &edits, allow_dirty)?;
+        let mut ms = 0;
+        let mut text = String::new();
+        let work = run_prebuild(root, prebuild, stop, &mut ms, &mut text, &mut None);
+        // Prerequisites may produce fixtures, never rewrite edit targets or the
+        // lockfile. Restore on failure, including a failing command's side effects.
+        let unchanged = saved
+            .files
+            .iter()
+            .all(|(path, bytes)| fs::read(path).ok().as_ref() == Some(bytes))
+            && read_optional(&saved.lock)? == saved.lock_bytes;
+        if unchanged {
+            saved.active = false;
+        } else {
+            let restoration = saved.restore();
+            return Err(format!(
+                "unmutated prebuild changed source or Cargo.lock ({:?}); {}; {}",
+                prebuild.iter().map(|step| &step.name).collect::<Vec<_>>(),
+                work.err().unwrap_or_default(),
+                restoration.err().unwrap_or_default()
+            ));
+        }
+        work.map_err(|e| format!("unmutated {e}; replay aborted before grading rows"))?;
+        session.baseline = Some((ms, tail(&text)));
+        Ok(session)
+    }
+
+    pub fn run_row(
+        &mut self,
+        root: &Path,
+        c: &Control,
+        allow_dirty: bool,
+        stop: &AtomicBool,
+        unscoped: bool,
+    ) -> Result<Report> {
+        self.replay(
+            root,
+            c,
+            allow_dirty,
+            stop,
+            if unscoped { Scope::Package } else { Scope::Row },
+        )
+    }
+
+    pub fn run_broad_row(
+        &mut self,
+        root: &Path,
+        c: &Control,
+        allow_dirty: bool,
+        stop: &AtomicBool,
+    ) -> Result<Report> {
+        self.replay(root, c, allow_dirty, stop, Scope::Broad)
+    }
+
+    pub fn explore_row(
+        &mut self,
+        root: &Path,
+        c: &Control,
+        allow_dirty: bool,
+        stop: &AtomicBool,
+        workspace: bool,
+    ) -> Result<Report> {
+        self.replay(root, c, allow_dirty, stop, Scope::Explore { workspace })
+    }
+
+    fn replay(
+        &mut self,
+        root: &Path,
+        c: &Control,
+        allow_dirty: bool,
+        stop: &AtomicBool,
+        scope: Scope,
+    ) -> Result<Report> {
+        let active = c.matches_platform()
+            && c.equivalent.is_none()
+            && c.unreachable.is_none()
+            && c.desk_only.is_none();
+        // Restoration rewrites source, not fixture outputs. A previous mutant's
+        // binary or generated file must not enter the next row's build/baseline.
+        let refreshed = if active && self.fixtures_dirty {
+            eprintln!("restore_prebuild before row {}", c.id);
+            let fresh = Self::prepare(root, &self.prebuild, &[c], allow_dirty, stop)
+                .map_err(|e| format!("restore prebuild before {}: {e}", c.id))?;
+            self.fixtures_dirty = false;
+            fresh.baseline
+        } else {
+            None
+        };
+        let mut row = replay(root, c, allow_dirty, stop, scope, &self.prebuild)?;
+        self.fixtures_dirty |= row.prebuild_ran;
+        if let Some((ms, text)) = refreshed {
+            row.restore_prebuild_ms = ms;
+            row.restore_prebuild_tail = text;
+        }
+        if active {
+            if let Some((ms, text)) = self.baseline.take() {
+                row.baseline_prebuild_ms = ms;
+                row.baseline_prebuild_tail = text;
+            }
+        }
+        Ok(row)
+    }
+}
+
+fn run_prebuild(
+    root: &Path,
+    steps: &[Prebuild],
+    stop: &AtomicBool,
+    ms: &mut u128,
+    text: &mut String,
+    phase: &mut Option<Phase>,
+) -> Result<()> {
+    for step in steps {
+        let label = format!("prebuild {:?}", step.name);
+        if stop.load(Ordering::SeqCst) {
+            return Err(format!("{label}: interrupted"));
+        }
+        let mut cmd = Command::new(&step.command[0]);
+        cmd.args(&step.command[1..]);
+        let output =
+            execute(root, cmd, step.timeout_s, stop).map_err(|e| format!("{label}: {e}"))?;
+        *ms += output.ms;
+        text.push_str(&format!("{label} ({} ms):\n{}\n", output.ms, output.text));
+        eprintln!("{label} ({} ms):\n{}", output.ms, output.text);
+        if output.timeout {
+            *phase = Some(Phase::Prebuild);
+            return Err(format!("{label}: exceeded timeout_s = {}", step.timeout_s));
+        }
+        if !output.success || output.interrupted {
+            return Err(format!(
+                "{label}: failed (exit {:?}, interrupted {})",
+                output.code, output.interrupted
+            ));
+        }
+    }
+    Ok(())
 }
 
 // The only code that mutates source: dirty-target refusal, exact-once anchors,
@@ -1154,8 +1695,25 @@ fn replay(
     allow_dirty: bool,
     stop: &AtomicBool,
     scope: Scope,
+    prebuild: &[Prebuild],
 ) -> Result<Report> {
     let mut report = Report::new(c);
+    c.validate_runner()?;
+    let disposition = c.recorded_disposition()?;
+    if let Some((Outcome::DeskOnly, reason)) = disposition {
+        report.outcome = Outcome::DeskOnly;
+        report.reason = Some(reason.to_owned());
+        return Ok(report);
+    }
+    if !c.matches_platform() {
+        report.outcome = Outcome::SkippedPlatform;
+        report.reason = Some(format!(
+            "host target_os = {}; platforms = {:?}",
+            std::env::consts::OS,
+            c.platforms.as_ref().unwrap()
+        ));
+        return Ok(report);
+    }
     if c.runner == "command" && matches!(scope, Scope::Explore { .. }) {
         return Err(format!(
             "{}: explore refuses command rows: only expect_red ids can be observed",
@@ -1198,6 +1756,15 @@ fn replay(
             fs::write(path, text).map_err(|e| e.to_string())?;
         }
         if c.runner == "command" {
+            report.prebuild_ran = !prebuild.is_empty();
+            run_prebuild(
+                root,
+                prebuild,
+                stop,
+                &mut report.prebuild_ms,
+                &mut report.prebuild_tail,
+                &mut report.timed_out_phase,
+            )?;
             command_tests(root, c, stop, &mut report, false)?;
             report.outcome = grade(c, &report.red, &report.green);
             return Ok(());
@@ -1221,6 +1788,15 @@ fn replay(
             report.outcome = Outcome::DidNotCompile;
             return Ok(());
         }
+        report.prebuild_ran = !prebuild.is_empty();
+        run_prebuild(
+            root,
+            prebuild,
+            stop,
+            &mut report.prebuild_ms,
+            &mut report.prebuild_tail,
+            &mut report.timed_out_phase,
+        )?;
         let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
         report.test_ms = tests.ms;
         report.test_tail = tail(&tests.text);
@@ -1288,16 +1864,23 @@ fn replay(
         report.timed_out_phase = None;
         report.reason = Some(e);
     }
+    report.prebuild_tail = tail(&report.prebuild_tail);
     Ok(report)
 }
 
 pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()> {
     validate(root, catalogue)?;
+    let rows: Vec<_> = catalogue.control.iter().collect();
+    let _session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
     for c in &catalogue.control {
         replaced(root, &c.edits()?)?;
         // Unreachable rows have no names to discover. Command rows have no list
         // protocol: replay verifies their expected ids with a fresh baseline.
-        if c.unreachable.is_some() || c.runner == "command" {
+        if !c.matches_platform()
+            || c.unreachable.is_some()
+            || c.desk_only.is_some()
+            || c.runner == "command"
+        {
             continue;
         }
         // List mode compiles the test binaries, so the build deadline bounds it.
@@ -1369,6 +1952,7 @@ pub fn select_diff(
     let mut selected = BTreeSet::new();
     for c in &catalogue.control {
         if paths.contains(c.test_file.as_str())
+            || old.prebuild != catalogue.prebuild
             || c.edits()?.iter().any(|e| paths.contains(e.file.as_str()))
             || !old.control.iter().any(|o| o == c)
         {
@@ -1950,12 +2534,15 @@ mod order_tests {
             package: Some(package.into()),
             target: None,
             command: None,
+            test_count_pattern: None,
             expect_red: vec!["t".into()],
             only: false,
             equivalent: None,
             unreachable: None,
+            desk_only: None,
             hub: None,
             hub_targets: None,
+            platforms: None,
             timeout_s: 1,
             build_timeout_s: 1,
         }

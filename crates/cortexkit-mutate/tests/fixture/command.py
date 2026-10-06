@@ -8,6 +8,10 @@ import time
 # current source and creates no cached bytecode in the fixture tree.
 mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
 test_id = sys.argv[1]
+zero_tests = test_id == "zero_baseline" or (mutated and test_id == "zero_mutant")
+print(f"Ran {0 if zero_tests else 1} tests", flush=True)
+if test_id in ("zero_baseline", "zero_mutant"):
+    sys.exit(3 if mutated else 0)
 assert len(sys.argv) == 2
 # Write \n explicitly: text mode on Windows would translate it to \r\n, and the
 # tests compare this log byte for byte.

@@ -47,6 +47,7 @@ impl Fixture {
         let f = Self { dir };
         let catalogue = Catalogue {
             control: vec![f.control()],
+            ..Catalogue::default()
         };
         fs::write(
             f.root().join("mutations.toml"),
@@ -91,12 +92,15 @@ impl Fixture {
             package: Some("mutation-fixture".into()),
             target: Some("--lib".into()),
             command: None,
+            test_count_pattern: None,
             expect_red: vec!["tests::guard_rejects_zero".into()],
             only: true,
             equivalent: None,
             unreachable: None,
+            desk_only: None,
             hub: None,
             hub_targets: None,
+            platforms: None,
             timeout_s: 30,
             build_timeout_s: default_build_timeout(),
         }
@@ -225,12 +229,15 @@ impl CommandFixture {
             package: None,
             target: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
+            test_count_pattern: Some("Ran {count} tests".into()),
             expect_red: vec![COMMAND_GUARD.into()],
             only: false,
             equivalent: None,
             unreachable: None,
+            desk_only: None,
             hub: None,
             hub_targets: None,
+            platforms: None,
             timeout_s: 5,
             build_timeout_s: default_build_timeout(),
         }
@@ -268,6 +275,7 @@ impl CommandFixture {
     fn load_error(&self, c: &Control, field: &str) {
         let text = toml::to_string(&Catalogue {
             control: vec![c.clone()],
+            ..Catalogue::default()
         })
         .unwrap();
         self.load_text_error(&text, field);
@@ -306,6 +314,7 @@ fn command_caught_fresh_baseline_each_id_and_restores() {
         f.root(),
         &Catalogue {
             control: vec![c.clone()],
+            ..Catalogue::default()
         },
     )
     .unwrap();
@@ -320,6 +329,126 @@ fn command_caught_fresh_baseline_each_id_and_restores() {
         f.log(),
         one_run.repeat(2),
         "baseline must run every id before mutation, on every replay"
+    );
+}
+
+#[test]
+fn command_zero_tests_on_baseline_or_mutant_is_error() {
+    assert!(
+        python_available(),
+        "Python is required to verify command-row counts"
+    );
+    let f = CommandFixture::new();
+    for id in ["zero_baseline", "zero_mutant"] {
+        let mut c = f.control();
+        c.expect_red = vec![id.into()];
+        let row = f.run(&c, false);
+        assert_eq!(row.outcome, Outcome::Error, "{id}: {row:?}");
+        assert!(
+            row.reason.as_ref().unwrap().contains("zero tests executed"),
+            "{row:?}"
+        );
+        assert!(row.red.is_empty() && row.green.is_empty());
+    }
+}
+
+#[test]
+fn command_count_pattern_is_required_and_missing_or_ambiguous_output_is_error() {
+    let f = CommandFixture::new();
+    for pattern in [
+        None,
+        Some("count only"),
+        Some("{count}"),
+        Some("Ran {count} tests {count}"),
+    ] {
+        let mut c = f.control();
+        c.test_count_pattern = pattern.map(str::to_owned);
+        f.load_error(&c, "test_count_pattern");
+    }
+    assert!(
+        python_available(),
+        "Python is required to verify command-row counts"
+    );
+    let mut c = f.control();
+    c.test_count_pattern = Some("Executed {count} tests".into());
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error);
+    assert!(row.reason.unwrap().contains("did not match"));
+    let script = f.root().join("rig.py");
+    let source = fs::read_to_string(&script).unwrap();
+    fs::write(&script, format!("print('Ran 1 tests')\n{source}")).unwrap();
+    cmd(f.root(), "git", &["add", "rig.py"]);
+    cmd(f.root(), "git", &["commit", "-qm", "ambiguous output"]);
+    let row = f.run(&f.control(), false);
+    assert_eq!(row.outcome, Outcome::Error);
+    assert!(row.reason.unwrap().contains("multiple counts"));
+}
+
+#[test]
+fn command_rows_respect_platform_desk_and_prebuild_before_baseline_and_mutant() {
+    assert!(
+        python_available(),
+        "Python is required to verify command-row prerequisites"
+    );
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.platforms = Some(vec![if std::env::consts::OS == "macos" {
+        "linux"
+    } else {
+        "macos"
+    }
+    .into()]);
+    assert_eq!(f.run(&c, true).outcome, Outcome::SkippedPlatform);
+    c.desk_only = Some("requires a physical desktop input session".into());
+    assert_eq!(f.run(&c, true).outcome, Outcome::DeskOnly);
+    assert!(!f.root().join(".git/command-log").exists());
+    let path = f.root().join("rig.py");
+    let source = fs::read_to_string(&path).unwrap();
+    // Every test invocation needs the prerequisite matching the current source.
+    fs::write(
+        &path,
+        source.replace(
+            "test_id = sys.argv[1]",
+            "assert Path('.git/fixture-output').read_text() == str(mutated)\ntest_id = sys.argv[1]",
+        ),
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "rig.py"]);
+    cmd(f.root(), "git", &["commit", "-qm", "fixture prerequisite"]);
+    let mut second = f.control();
+    second.id = "command-second".into();
+    let cat = Catalogue { control: vec![f.control(), second], prebuild: vec![Prebuild {
+        name: "command-fixture".into(),
+        command: vec!["python3".into(), "-c".into(), "from pathlib import Path; v = str(Path('guard.py').read_bytes() == b'ENABLED = False\\n'); Path('.git/fixture-output').write_text(v); f = Path('.git/prebuild-runs').open('a'); f.write(v + '\\n'); f.close(); print('fixture refreshed: ' + v)".into()],
+        timeout_s: 5,
+    }] };
+    let path = f.root().join(".git/catalogue.toml");
+    fs::write(&path, toml::to_string(&cat).unwrap()).unwrap();
+    let output = f.cli(&[
+        "--catalogue",
+        ".git/catalogue.toml",
+        "run",
+        "--all",
+        "--broad",
+        "--report",
+        ".git/report.json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/report.json")).unwrap()).unwrap();
+    assert_eq!(report[0]["outcome"], "CAUGHT");
+    assert_eq!(report[1]["outcome"], "CAUGHT");
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
+        "False\nTrue\nFalse\nTrue\n"
+    );
+    assert_eq!(
+        f.log(),
+        format!("baseline {COMMAND_GUARD}\nmutant {COMMAND_GUARD}\n").repeat(2)
     );
 }
 
@@ -441,6 +570,7 @@ fn command_load_rejects_mixed_and_malformed_fields() {
     }
     let text = toml::to_string(&Catalogue {
         control: vec![f.control()],
+        ..Catalogue::default()
     })
     .unwrap();
     f.load_text_error(
@@ -503,6 +633,7 @@ fn command_load_rejects_invalid_ids_without_normalizing_dotted_ids() {
         &path,
         toml::to_string(&Catalogue {
             control: vec![c.clone()],
+            ..Catalogue::default()
         })
         .unwrap(),
     )
@@ -568,6 +699,8 @@ fn command_prove_writes_canonical_row_and_restores() {
         COMMAND_OTHER,
         "--report",
         ".git/proof.json",
+        "--test-count-pattern",
+        "Ran {count} tests",
         "--command",
         "python3",
         "-u",
@@ -640,6 +773,8 @@ fn command_prove_writes_canonical_row_and_restores() {
         COMMAND_VACUOUS,
         "--report",
         ".git/survivor.json",
+        "--test-count-pattern",
+        "Ran {count} tests",
         "--command",
         "python3",
         "rig.py",
@@ -701,7 +836,11 @@ fn collateral_run_fixture(target: &str, runner: &str) -> Fixture {
     c.new = Some("{ panic!(\"mutated\") }".into());
     fs::write(
         f.root().join("mutations.toml"),
-        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
     )
     .unwrap();
     f.commit();
@@ -792,7 +931,11 @@ fn breadth_same_target_collateral_is_caught() {
     c.new = Some("{ panic!(\"mutated\") }".into());
     fs::write(
         f.root().join("mutations.toml"),
-        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
     )
     .unwrap();
     f.commit();
@@ -1170,7 +1313,8 @@ fn unreachable_requires_reason_is_recorded_and_listed_separately() {
     assert!(validate(
         f.root(),
         &Catalogue {
-            control: vec![c.clone()]
+            control: vec![c.clone()],
+            ..Catalogue::default()
         }
     )
     .is_err());
@@ -1185,6 +1329,7 @@ fn unreachable_requires_reason_is_recorded_and_listed_separately() {
         f.root(),
         &Catalogue {
             control: vec![c.clone()],
+            ..Catalogue::default()
         },
     )
     .unwrap();
@@ -1201,7 +1346,14 @@ fn unreachable_requires_reason_is_recorded_and_listed_separately() {
         assert_eq!(row.test_ms, 0);
     }
     c.equivalent = Some("redundant condition".into());
-    assert!(validate(f.root(), &Catalogue { control: vec![c] }).is_err());
+    assert!(validate(
+        f.root(),
+        &Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        }
+    )
+    .is_err());
     let out = f.cli(&explore_args(
         "value > 0",
         "value >= 0",
@@ -1571,6 +1723,7 @@ fn check_validates_names_anchors_and_fields_without_mutation() {
     c.expect_red = vec!["guard_rejects_zero".into()];
     let cat = Catalogue {
         control: vec![c.clone()],
+        ..Catalogue::default()
     };
     fs::write(
         f.root().join("mutations.toml"),
@@ -1581,9 +1734,17 @@ fn check_validates_names_anchors_and_fields_without_mutation() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("name no longer exists"));
     c.test_file = "missing.rs".into();
-    assert!(validate(f.root(), &Catalogue { control: vec![c] }).is_err());
+    assert!(validate(
+        f.root(),
+        &Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        }
+    )
+    .is_err());
     let duplicate = Catalogue {
         control: vec![f.control(), f.control()],
+        ..Catalogue::default()
     };
     assert!(validate(f.root(), &duplicate).is_err());
     assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
@@ -1601,6 +1762,7 @@ fn diff_selects_source_edits_test_file_and_changed_row() {
         }
         let cat = Catalogue {
             control: vec![c.clone()],
+            ..Catalogue::default()
         };
         fs::write(
             f.root().join("mutations.toml"),
@@ -1626,6 +1788,7 @@ fn diff_selects_source_edits_test_file_and_changed_row() {
                     f.root().join("mutations.toml"),
                     toml::to_string(&Catalogue {
                         control: vec![c.clone()],
+                        ..Catalogue::default()
                     })
                     .unwrap(),
                 )
@@ -1641,7 +1804,10 @@ fn diff_selects_source_edits_test_file_and_changed_row() {
         let selected = select_diff(
             f.root(),
             "mutations.toml",
-            &Catalogue { control: vec![c] },
+            &Catalogue {
+                control: vec![c],
+                ..Catalogue::default()
+            },
             base.trim(),
         )
         .unwrap();
@@ -1729,6 +1895,7 @@ fn run_reports_in_sorted_id_order_whatever_the_execution_order() {
     );
     let catalogue = Catalogue {
         control: vec![f.control(), other],
+        ..Catalogue::default()
     };
     fs::write(
         f.root().join("mutations.toml"),
@@ -1832,7 +1999,11 @@ fn signal_restores(signal: rustix::process::Signal, args: &[&str]) {
     );
     fs::write(
         f.root().join("mutations.toml"),
-        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
     )
     .unwrap();
     let before = fs::read(f.root().join("src/lib.rs")).unwrap();
@@ -1920,7 +2091,10 @@ fn nextest_machine_replay_and_check_when_installed() {
     let _lock = TreeLock::acquire(f.root()).unwrap();
     check(
         f.root(),
-        &Catalogue { control: vec![c] },
+        &Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        },
         &AtomicBool::new(false),
     )
     .unwrap();
@@ -2038,6 +2212,7 @@ fn deleted_target_reports_anchor_missing_and_next_cli_row_runs() {
         f.root().join("mutations.toml"),
         toml::to_string(&Catalogue {
             control: vec![deleted, caught],
+            ..Catalogue::default()
         })
         .unwrap(),
     )
@@ -2097,7 +2272,11 @@ fn nextest_check_and_run_agree_on_exact_test_names() {
     c.new = Some("{ panic!(\"guard removed\") }".into());
     fs::write(
         f.root().join("mutations.toml"),
-        toml::to_string(&Catalogue { control: vec![c] }).unwrap(),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
     )
     .unwrap();
     let before = fs::read(f.root().join("src/lib.rs")).unwrap();
@@ -2394,9 +2573,10 @@ fn explore_edits_accept_toml_and_json() {
 /// `explore`, Cargo and command rows must not grow separate mutation paths. The library makes
 /// this structural: `Saved` (target and Cargo.lock bytes), `execute` (the
 /// build/test child) and `command` are private, and the only public functions
-/// reaching them are the row replay entry points, each a thin call into the
-/// private `replay`. This test pins that shape in the source, then checks both
-/// entry points produce identical per-test results for one mutant.
+/// reaching mutation are thin calls into private `replay`. Session preparation
+/// also snapshots the unmutated tree to protect it from prerequisite side effects,
+/// but must never apply a mutant or grade tests. This test pins those boundaries,
+/// then checks both replay entry points produce identical per-test results.
 #[test]
 fn explore_and_run_share_one_execution_and_restoration_path() {
     let lib = include_str!("../src/lib.rs");
@@ -2408,10 +2588,16 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         let start = src
             .find(signature)
             .unwrap_or_else(|| panic!("missing {signature}"));
-        let end = src[start..].find("\n}\n").expect("function end") + start;
+        let closing = if signature.starts_with("    ") {
+            "\n    }\n"
+        } else {
+            "\n}\n"
+        };
+        let end = src[start..].find(closing).expect("function end") + start;
         &src[start..end]
     }
     let replay = body(lib, "\nfn replay(");
+    let prepare = body(lib, "    pub fn prepare(");
     for needle in [
         "Saved::new(",
         "saved.restore()",
@@ -2422,8 +2608,25 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "command_tests(root, c, stop, &mut report, true)",
         "command_tests(root, c, stop, &mut report, false)",
     ] {
-        assert_eq!(lib.matches(needle).count(), 1, "{needle} must occur once");
+        let expected = if matches!(needle, "Saved::new(" | "saved.restore()") {
+            2
+        } else {
+            1
+        };
+        assert_eq!(lib.matches(needle).count(), expected, "{needle} count");
+        assert_eq!(
+            replay.matches(needle).count(),
+            1,
+            "{needle} must occur once in replay"
+        );
         assert!(replay.contains(needle), "{needle} must live in replay");
+    }
+    assert!(prepare.contains("Saved::new(") && prepare.contains("saved.restore()"));
+    for forbidden in ["replaced(", "fs::write(", "command_tests(", "grade("] {
+        assert!(
+            !prepare.contains(forbidden),
+            "unmutated preparation must not mutate or grade: {forbidden}"
+        );
     }
     let baseline = replay
         .find("command_tests(root, c, stop, &mut report, true)")
@@ -2451,7 +2654,10 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
     ] {
         let entry_body = body(lib, entry);
         assert!(
-            entry_body.contains("replay(root, c, allow_dirty, stop, "),
+            entry_body
+                .split_whitespace()
+                .collect::<String>()
+                .contains("replay(root,c,allow_dirty,stop,"),
             "{entry} must delegate to replay"
         );
         for forbidden in [

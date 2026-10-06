@@ -47,6 +47,9 @@ enum Action {
 struct Exploration {
     #[arg(long)]
     package: String,
+    /// Restrict this row to Rust target-OS names (repeat for multiple OSes).
+    #[arg(long = "platform")]
+    platforms: Vec<String>,
     /// Run every test in the workspace instead of only the package.
     #[arg(long)]
     workspace: bool,
@@ -68,8 +71,11 @@ struct Exploration {
     #[arg(long, default_value_t = default_build_timeout())]
     build_timeout_s: u64,
     /// Record why this code has no production caller, without running a mutant.
-    #[arg(long, value_name = "REASON")]
+    #[arg(long, value_name = "REASON", conflicts_with = "desk_only")]
     unreachable: Option<String>,
+    /// Record a proof that requires a real desktop, without automated replay.
+    #[arg(long, value_name = "REASON")]
+    desk_only: Option<String>,
     /// Append a caught proof, or an explicitly reasoned UNREACHABLE row.
     #[arg(long, requires_all = ["id", "guards", "test_file"])]
     append: bool,
@@ -87,6 +93,11 @@ struct Exploration {
 }
 #[derive(Args)]
 struct Proof {
+    #[arg(long = "platform")]
+    platforms: Vec<String>,
+    /// Record why this proof requires a real desktop, without running a mutant.
+    #[arg(long, value_name = "REASON")]
+    desk_only: Option<String>,
     #[arg(long)]
     id: String,
     #[arg(long)]
@@ -107,8 +118,11 @@ struct Proof {
     target: Option<String>,
     /// Command argv with one {test} element. Put this option last: all following
     /// values (including flags) belong to the command, not to ck-mutate.
-    #[arg(long, num_args = 1.., allow_hyphen_values = true, conflicts_with = "only")]
+    #[arg(long, num_args = 1.., allow_hyphen_values = true, conflicts_with = "only", requires = "test_count_pattern")]
     command: Option<Vec<String>>,
+    /// Literal runner-output pattern with one {count} decimal placeholder.
+    #[arg(long)]
+    test_count_pattern: Option<String>,
     #[arg(long, required = true, num_args = 1..)]
     expect_red: Vec<String>,
     #[arg(long)]
@@ -165,15 +179,24 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         .filter(|r| r.outcome == Outcome::Unreachable)
         .collect();
     let hubs: Vec<_> = rows.iter().filter(|r| r.outcome == Outcome::Hub).collect();
-    if broad > 0 || !unreachable.is_empty() || !hubs.is_empty() {
+    let skipped = rows
+        .iter()
+        .filter(|r| r.outcome == Outcome::SkippedPlatform)
+        .count();
+    let desk: Vec<_> = rows
+        .iter()
+        .filter(|r| r.outcome == Outcome::DeskOnly)
+        .collect();
+    if broad > 0 || !unreachable.is_empty() || !hubs.is_empty() || skipped > 0 || !desk.is_empty() {
         println!(
-            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} UNREACHABLE, {} HUB",
+            "Summary: {} CAUGHT, {broad} CAUGHT_BROADLY (warning), {} EQUIVALENT, {} UNREACHABLE, {} HUB, {skipped} SKIPPED_PLATFORM, {} DESK_ONLY",
             rows.iter().filter(|r| r.outcome == Outcome::Caught).count(),
             rows.iter()
                 .filter(|r| r.outcome == Outcome::Equivalent)
                 .count(),
             unreachable.len(),
-            hubs.len()
+            hubs.len(),
+            desk.len()
         );
     }
     if !unreachable.is_empty() {
@@ -189,6 +212,16 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
     if !hubs.is_empty() {
         println!("HUB rows ({}):", hubs.len());
         for row in hubs {
+            println!(
+                "  {}: {}",
+                row.id,
+                row.reason.as_deref().unwrap_or_default()
+            );
+        }
+    }
+    if !desk.is_empty() {
+        println!("DESK_ONLY rows ({}):", desk.len());
+        for row in desk {
             println!(
                 "  {}: {}",
                 row.id,
@@ -277,11 +310,13 @@ fn run() -> Result<bool> {
             // Rows execute grouped by package to save rebuilds, but each report
             // lands in its sorted-ID slot, so output order never depends on it.
             let mut slots: Vec<Option<Report>> = shard.iter().map(|_| None).collect();
+            let mut session =
+                ReplaySession::prepare(&root, &catalogue.prebuild, &shard, allow_dirty, &stop)?;
             for i in execution_order(&shard) {
                 slots[i] = Some(if broad {
-                    run_broad_row(&root, shard[i], allow_dirty, &stop)?
+                    session.run_broad_row(&root, shard[i], allow_dirty, &stop)?
                 } else {
-                    run_row(&root, shard[i], allow_dirty, &stop, false)?
+                    session.run_row(&root, shard[i], allow_dirty, &stop, false)?
                 });
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -311,12 +346,15 @@ fn run() -> Result<bool> {
                 package: p.package,
                 target: p.target,
                 command: p.command,
+                test_count_pattern: p.test_count_pattern,
                 expect_red: p.expect_red,
                 only: p.only,
                 equivalent: None,
                 unreachable: None,
+                desk_only: p.desk_only,
                 hub: None,
                 hub_targets: None,
+                platforms: (!p.platforms.is_empty()).then_some(p.platforms),
                 timeout_s: p.timeout_s,
                 build_timeout_s: p.build_timeout_s,
             };
@@ -327,24 +365,29 @@ fn run() -> Result<bool> {
             };
             catalogue.control.push(c.clone());
             validate(&root, &catalogue)?;
-            let first = run_row(&root, &c, p.allow_dirty, &stop, false)?;
+            let mut session =
+                ReplaySession::prepare(&root, &catalogue.prebuild, &[&c], p.allow_dirty, &stop)?;
+            let first = session.run_row(&root, &c, p.allow_dirty, &stop, false)?;
             let caught = first.outcome.is_caught();
+            let recorded = caught || first.outcome == Outcome::DeskOnly;
             let mut rows = vec![first];
-            if caught {
+            if recorded {
                 append_control(&cli.catalogue, &c)?;
-                // The proved file is restored by now, so the hint reads its
-                // unmutated text. `prove` always takes exactly one edit.
-                let hint = c.edits()?.first().and_then(|edit| {
-                    let text = fs::read_to_string(root.join(&edit.file)).ok()?;
-                    call_site_hint(&text, edit)
-                });
-                if let Some(hint) = hint {
-                    println!("{hint}");
+                if caught {
+                    // The proved file is restored by now, so the hint reads its
+                    // unmutated text. `prove` always takes exactly one edit.
+                    let hint = c.edits()?.first().and_then(|edit| {
+                        let text = fs::read_to_string(root.join(&edit.file)).ok()?;
+                        call_site_hint(&text, edit)
+                    });
+                    if let Some(hint) = hint {
+                        println!("{hint}");
+                    }
                 }
             } else if rows[0].outcome == Outcome::Survived && c.runner == "command" {
                 println!("An expected command test stayed green: inspect the guard or mutant equivalence. Command rows have no broader replay.");
             } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
-                let broader = run_row(&root, &c, p.allow_dirty, &stop, true)?;
+                let broader = session.run_row(&root, &c, p.allow_dirty, &stop, true)?;
                 if !broader.red.is_empty() {
                     println!("Unscoped package tests caught the mutant: the original command scope omitted covering tests. Update target and expect_red.");
                 } else if broader.outcome == Outcome::Survived {
@@ -358,7 +401,7 @@ fn run() -> Result<bool> {
                 rows.push(broader);
             }
             write_report(p.report, &rows)?;
-            Ok(caught)
+            Ok(recorded || rows[0].outcome == Outcome::SkippedPlatform)
         }
         Action::Explore(x) => explore(&root, &cli.catalogue, x, &stop),
     }
@@ -396,21 +439,28 @@ fn explore(
         // An appended row replays the whole package, as explore ran it.
         target: None,
         command: None,
+        test_count_pattern: None,
         expect_red: vec![],
         only: false,
         equivalent: None,
         unreachable: x.unreachable,
+        desk_only: x.desk_only,
         hub: None,
         hub_targets: None,
+        platforms: (!x.platforms.is_empty()).then_some(x.platforms),
         timeout_s: x.timeout_s,
         build_timeout_s: x.build_timeout_s,
     };
     validate_mutant(root, &c)?;
-    let mut catalogue = Catalogue::default();
+    let mut catalogue = if catalogue_path.exists() {
+        load(catalogue_path)?
+    } else {
+        Catalogue::default()
+    };
+    if c.platforms.is_none() {
+        c.platforms = infer_platforms(root, &c.edits()?);
+    }
     if x.append {
-        if catalogue_path.exists() {
-            catalogue = load(catalogue_path)?;
-        }
         // Reject a bad id, guard text or test file before the (long) run. The
         // placeholder stands in for the red names, which only the run supplies.
         let mut candidate = catalogue.control.clone();
@@ -418,11 +468,20 @@ fn explore(
             expect_red: vec!["explore-pending".into()],
             ..c.clone()
         });
-        validate(root, &Catalogue { control: candidate })?;
+        validate(
+            root,
+            &Catalogue {
+                control: candidate,
+                prebuild: catalogue.prebuild.clone(),
+            },
+        )?;
     }
-    let row = explore_row(root, &c, x.allow_dirty, stop, x.workspace)?;
+    let mut session =
+        ReplaySession::prepare(root, &catalogue.prebuild, &[&c], x.allow_dirty, stop)?;
+    let row = session.explore_row(root, &c, x.allow_dirty, stop, x.workspace)?;
     let caught = row.outcome.is_caught();
-    let recorded = caught || row.outcome == Outcome::Unreachable;
+    let recorded = caught || matches!(row.outcome, Outcome::Unreachable | Outcome::DeskOnly);
+    let skipped = row.outcome == Outcome::SkippedPlatform;
     if caught {
         println!("Red tests ({}):", row.red.len());
         for name in &row.red {
@@ -438,16 +497,17 @@ fn explore(
     let red = row.red.clone();
     write_report(x.report, &[row])?;
     if !x.append {
-        return Ok(recorded);
+        return Ok(recorded || skipped);
     }
     if !recorded || stop.load(Ordering::SeqCst) {
-        println!("--append: nothing appended; only caught proofs or UNREACHABLE appends (outcome {outcome:?})");
-        return Ok(false);
+        println!("--append: nothing appended; only caught proofs or reasoned UNREACHABLE/DESK_ONLY rows append (outcome {outcome:?})");
+        return Ok(skipped);
     }
     c.expect_red = red;
     catalogue.control.push(c.clone());
     validate(root, &catalogue)?;
-    check(root, &Catalogue { control: vec![c.clone()] }, stop).map_err(|e| {
+    // Preparation already ran in this session; name checking must not run it again.
+    check(root, &Catalogue { control: vec![c.clone()], ..Catalogue::default() }, stop).map_err(|e| {
         format!("explore row failed check, nothing appended (with --workspace, red tests outside --package cannot be named in its row): {e}")
     })?;
     append_control(catalogue_path, &c)?;

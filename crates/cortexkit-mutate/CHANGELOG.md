@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0
+
+- Add per-row `platforms` using validated Rust target-OS names. Nonmatching hosts
+  report SKIPPED_PLATFORM with a separate count, never a catch, survivor or error.
+  Check still validates anchors but skips unavailable test-name discovery.
+- Add reasoned `desk_only` dispositions for real-desktop proofs (TCC,
+  Accessibility, physical input). DESK_ONLY takes precedence over platform
+  mismatch, skips automation and prerequisites, and has a separate count/listing.
+  It is exclusive with other recorded dispositions and HUB.
+- Add catalogue-root named argv `prebuild` steps. Run once before any baseline or
+  mutant, then conservatively rerun after each successful mutant build (after
+  editing command rows) because test-only builds cannot refresh every fixture
+  binary or infer arbitrary prerequisite dependencies. Unmutated failures abort
+  the session by name without grading; mutated failures are ERROR, never catches.
+  Log output and separate baseline/mutant prebuild timings, including timeouts.
+  Refresh prerequisites on the restored tree before the next executable row of
+  any kind, with separate restore timing; a refresh failure aborts the session.
+- Share both features across broad replay, command rows, prove, explore and check.
+  Explore preserves reliably visible literal whole-file cfg gates when appending;
+  ambiguous gates need an author-supplied platform. Diff selection includes rows
+  affected by changed root prerequisites. Existing lockfile restoration remains.
+- Require command rows to declare `test_count_pattern`, a literal pattern with
+  one decimal `{count}` placeholder. Baseline and mutant invocations must each
+  report exactly one nonzero executed count; missing/zero/ambiguous counts are
+  ERROR regardless of exit status. Existing command catalogues and prove commands
+  must add this field/option; Cargo and nextest count parsing is unchanged.
+
 ## 0.4.0
 
 - Add reviewed HUB dispositions using `hub = "reason"` and `hub_targets = [...]`.

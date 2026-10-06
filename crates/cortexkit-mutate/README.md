@@ -33,6 +33,8 @@ only = true
 # unreachable = "Explain why the mutated code has no production caller"
 # hub = "Explain why multiple test targets intentionally guard this property"
 # hub_targets = ["capacity_contract", "encoder_e2e"]
+# platforms = ["macos"]
+# desk_only = "TCC requires a real Mac with an interactive desktop session"
 ```
 
 The two deadlines are separate. `timeout_s` (default 600) bounds only the test
@@ -56,6 +58,124 @@ reason must explain why no production caller exists (for example, all references
 are unit tests); the runner does not infer dead code or verify a call graph.
 UNREACHABLE rows may use `expect_red = []`: no guarding tests are claimed.
 Their other row fields and edit anchors are still validated by `check`.
+
+### Platform gates and desktop-only proofs
+
+Use Rust **target-OS names**, not platform nicknames:
+
+```toml
+[[control]]
+id = "desktop-rejects-untrusted-input"
+guards = "the macOS input guard rejects untrusted events"
+file = "src/macos.rs"
+old = "event.is_trusted()"
+new = "true"
+test_file = "src/macos.rs"
+runner = "cargo"
+package = "desktop-guard"
+target = "--lib"
+expect_red = ["macos::tests::untrusted_input_is_rejected"]
+platforms = ["macos"]
+```
+
+An absent `platforms` runs everywhere. A present list must be nonempty and contain
+recognized Rust `target_os` values (for example `macos`, `linux`, `windows`, `ios`,
+`android` or `freebsd`; `darwin` and `MacOS` are rejected). Matching uses the OS of
+the runner's host, not a cross-compilation target. On another OS, replay reports
+**SKIPPED_PLATFORM**, succeeds, and counts the row separately: no mutation, build,
+test-name listing, command baseline or prerequisite is run for it. `check` still
+validates its fields, paths and anchors, but cannot verify names that do not exist
+on this host. Platform skips take precedence over EQUIVALENT and UNREACHABLE; HUB
+never grants caught credit to a skipped row.
+
+Some tests require more than the right OS: TCC, Accessibility or physical input
+may require a real interactive Mac. Record that human-only proof with a reason:
+
+```toml
+# Inside the same control table, instead of other recorded dispositions:
+desk_only = "TCC and physical input were verified on a real interactive Mac"
+```
+
+**DESK_ONLY** skips all automated execution, even on a matching host. It requires
+a nonempty reason, may have `expect_red = []`, is exclusive with `equivalent`,
+`unreachable` and `hub`, and is listed/counts separately, never as a catch or an
+error. DESK_ONLY takes precedence over a platform mismatch, so the report retains
+the reason automation cannot verify the proof. `platforms` describes the OS;
+`desk_only` describes the need for a person and hardware. Neither is evidence of
+an automated catch.
+
+`prove` and `explore` accept repeatable `--platform <target_os>` and
+`--desk-only REASON`. A platform skip never appends a proof; an explicit DESK_ONLY
+reason can be appended without executing a mutant, like UNREACHABLE in explore.
+`explore` also infers `platforms` for simple whole-file gates it can see:
+`#![cfg(target_os = "macos")]` in the edited Rust file, or an adjacent conventional
+`#[cfg(target_os = "macos")] mod macos;` declaration. All edited files must have
+the same detectable gate. It does **not** guess compound `cfg`, `cfg_attr`, macros,
+`#[path]`, gates on individual items, ancestor module gates or test-only gates.
+For those, supply `--platform` or add `platforms` by hand. An explicit CLI field
+overrides inference. `explore --append` preserves a detected gate in its row.
+
+### Declared fixture prerequisites
+
+Put an ordered `prebuild` list at the **catalogue root**, before any `[[control]]`:
+
+```toml
+prebuild = [
+  { name = "daemon-fixture-binaries", command = ["cargo", "build", "-p", "subc-daemon", "--bins", "--features", "test-support", "--locked"], timeout_s = 1800 },
+]
+
+[[control]]
+# ...the daemon's proof row...
+```
+
+Each step has a unique nonempty `name`, an argv-array `command` (no shell
+expansion), and a positive `timeout_s` (default 1800). Commands run from the Git
+root. Cargo prerequisites must explicitly include `--locked`. Use these steps
+only to build fixture artifacts; they must not change edit targets or Cargo.lock.
+The runner detects and restores such changes on the unmutated tree, and its
+normal byte/lockfile restoration still covers mutated-tree failures, including
+rows that deliberately edit Cargo.lock.
+
+Once per CLI session, after selection/sharding and before **any** baseline or
+mutation, all steps run on the unmutated tree. If a step fails, cannot spawn,
+is interrupted or times out, the **whole replay aborts** with ERROR and that
+step's name; no rows are graded. An empty selection or a selection containing
+only platform skips/recorded dispositions runs no prerequisites.
+
+The steps run **again after every successful mutant build, before its tests**.
+For command rows, which have no build phase, they run immediately after the
+edit and before mutant test commands. All steps rerun conservatively: the runner
+builds only selected test binaries with `--no-run`, which does not guarantee that
+fixture binaries (especially those built with different features) are refreshed.
+An arbitrary prerequisite command has no reliable dependency graph, and even a
+lockfile mutation can change its output. Reusing a baseline binary could therefore
+hide a mutant. A mutated prerequisite failure is row **ERROR**, never CAUGHT or
+DID_NOT_COMPILE, because the guarding tests did not execute.
+
+After such a mutated prerequisite run, source restoration alone leaves fixture
+outputs mutated. Before the **next executable row of any kind** starts, the
+session reruns prerequisites on the restored tree. This refresh precedes both
+the next build (which might embed a generated fixture) and any command baseline.
+A failing restored-tree refresh aborts the session by step name: later results
+would otherwise use an untrustworthy fixture. Recorded dispositions/platform
+skips do not need a refresh; it waits for the next executable row.
+
+`run --broad`, command rows, `prove` (including its survivor diagnosis), and
+`explore` all use the same session prerequisites. `prove` and `explore` read them
+from `--catalogue` even without appending. Append preserves the existing root
+list and does not run it again for explore's name check. Standalone `check` runs
+preparation once before list-mode compilation. Library clients with catalogue
+prerequisites use `ReplaySession::prepare` and its replay methods; plain
+`run_row`/`explore_row` have no catalogue context.
+
+Full prerequisite output, step names and elapsed milliseconds go to stderr logs.
+JSON rows add `prebuild_ms` and `prebuild_tail` for mutant preparation, separate
+from `build_ms` and `test_ms`. Session preparation is attributed **once**, to the
+first executable row, in `baseline_prebuild_ms` and `baseline_prebuild_tail`;
+other rows have zero/empty baseline fields. Output tails are bounded like other
+runner output. `restore_prebuild_ms` and `restore_prebuild_tail` separately record
+restored-tree refreshes before later rows. A prerequisite timeout uses
+`timed_out_phase: "prebuild"` and ERROR.
 
 ### HUB: reviewed cross-target catches
 
@@ -129,6 +249,7 @@ new = "if False:"
 test_file = "script/tests/flows_rig.py"
 runner = "command"
 command = ["python3", "-m", "unittest", "{test}"]
+test_count_pattern = "Ran {count} test"
 expect_red = ["script.tests.flows_rig.RigChecks.test_rejects_empty"]
 # timeout_s = 600
 ```
@@ -141,6 +262,19 @@ root, without shell expansion. `package` and `target` must be absent, even if
 empty; cargo/nextest rows must not carry `command`. `only = true` is refused
 because command rows cannot observe extra failing tests.
 
+Command rows must demonstrate that tests actually executed, on **both** the
+baseline and mutant. `test_count_pattern` is required: a literal output pattern
+with exactly one `{count}` placeholder for an unsigned decimal count, with
+nonempty literal text on both sides. It is **not a regex**. For Python unittest,
+`"Ran {count} test"` matches both `Ran 1 test` and `Ran 2 tests`; use the executed
+count in your runner's summary, not a discovered/planned/skipped-test count.
+Each invocation must produce exactly one matching count and it must be nonzero.
+Zero, missing, overflowing or ambiguous counts are ERROR, regardless of exit
+status. A runner without a count summary needs a wrapper that reports the number
+it actually executed. This prevents a zero-test success or unrelated nonzero
+exit from establishing a false pass/catch. Cargo/nextest already parse their
+per-test counts and cannot carry `test_count_pattern`.
+
 **Every replay first runs every expected id on the unmutated tree.** Each must
 exit 0 before any mutant is applied. A non-green baseline is ERROR and names
 the id. There is no baseline cache: otherwise an always-failing command, a
@@ -149,7 +283,8 @@ On the mutant, every expected id exiting nonzero means CAUGHT; any exiting 0
 means SURVIVED. A spawn failure, exit 126/127 (not executable/not found), death
 by signal, interruption, or timeout is ERROR, **never red**, on either tree.
 The row's `timeout_s` applies separately to each baseline and mutant invocation.
-There is no build phase; command timeouts report `timed_out_phase: "test"`.
+There is no normal build phase; command test timeouts report `timed_out_phase: "test"`.
+Declared prerequisites have their own build deadlines and timing fields.
 
 Only the expected ids run. `collateral` is always `{ "count": 0, "targets": [] }`
 and `breadth_observed` is always false. **Command rows have no breadth audit:**
@@ -167,6 +302,7 @@ ck-mutate prove --id rig-rejects-empty --guards 'the rig rejects an empty flow' 
   --file script/flows_rig.py --old 'if not flows:' --new 'if False:' \
   --test-file script/tests/flows_rig.py \
   --expect-red script.tests.flows_rig.RigChecks.test_rejects_empty \
+  --test-count-pattern 'Ran {count} test' \
   --report proof.json --command python3 -m unittest '{test}'
 ```
 
@@ -266,8 +402,10 @@ per-test results, never the command's exit status:
 | SURVIVED | Tests ran and none went red. Prints the survivor diagnosis below. |
 | NO_TESTS_RAN | Passed plus failed is zero. |
 | UNREACHABLE | A person supplied `--unreachable REASON`; records the reason without executing a mutant. Not a catch. |
+| SKIPPED_PLATFORM | The host OS is outside the row's explicit or reliably inferred platform list. No tests or prerequisites run for this row. |
+| DESK_ONLY | A person supplied `--desk-only REASON`; no automated replay is possible. Not a catch. |
 
-Explore exits 0 on CAUGHT or a reasoned UNREACHABLE, 1 on other outcomes, and 2 on a preflight
+Explore exits 0 on CAUGHT, SKIPPED_PLATFORM or a reasoned UNREACHABLE/DESK_ONLY, 1 on other outcomes, and 2 on a preflight
 error such as a dirty target.
 
 ANCHOR_MISSING, DID_NOT_COMPILE, TIMED_OUT and ERROR mean exactly what they mean
@@ -287,17 +425,17 @@ across test binaries fail closed as ERROR, as they do for `run`. That happens mo
 often with `--workspace`.
 
 `--append` requires `--id`, `--guards` and `--test-file`, and acts on
-CAUGHT or an explicitly assigned UNREACHABLE disposition. It checks the id, guards and test file before the run. After a catch it
+CAUGHT or an explicitly assigned UNREACHABLE/DESK_ONLY disposition. It checks the id, guards and test file before the run. After a catch it
 builds a row for the whole package (no `target`, `only = false`) that names every
 red test as `expect_red`. It validates that row with `check` and then appends it
-with the same writer `prove` uses. UNREACHABLE appends its reason and an empty
+with the same writer `prove` uses. UNREACHABLE/DESK_ONLY appends its reason and an empty
 `expect_red`; no test run occurs. On other outcomes nothing is appended. With
 `--workspace`, red tests outside `--package` cannot be named in the row: `check`
 rejects it and nothing is written.
 
 ## Outcomes and evidence
 
-CAUGHT, CAUGHT_BROADLY, HUB, and explicitly recorded EQUIVALENT or UNREACHABLE rows
+CAUGHT, CAUGHT_BROADLY, HUB, SKIPPED_PLATFORM and explicitly recorded EQUIVALENT, UNREACHABLE or DESK_ONLY rows
 succeed. The first three count as catches:
 
 | Outcome | Meaning |
@@ -313,7 +451,9 @@ succeed. The first three count as catches:
 | TIMED_OUT | The build exceeded `build_timeout_s`, or the test run exceeded `timeout_s`. `timed_out_phase` is `"build"` or `"test"`, and the reason names the deadline. |
 | EQUIVALENT | Explicitly skipped with the catalogue's reason. |
 | UNREACHABLE | Explicitly recorded with a reason explaining why no production caller exists. Listed separately, never counted as caught. |
-| ERROR | Invalid/incomplete runner output, interruption, or restoration/lockfile integrity error. |
+| SKIPPED_PLATFORM | Host target_os is not in platforms. Counted separately, not executed. |
+| DESK_ONLY | Explicit nonempty reason that this proof needs a real desktop; never automated or counted as caught. |
+| ERROR | Invalid/incomplete runner output (including zero-test command rows), prerequisite failure, interruption, or restoration/lockfile integrity error. |
 
 **Current policy:** CAUGHT_BROADLY warns, succeeds, and still records a proof.
 A later release will make it a failing outcome, after the catalogues that use
@@ -323,7 +463,7 @@ target(s) is reported without changing CAUGHT. `only = true` still rejects any
 extra red test as WRONG_TEST before broad-catch grading, including in `--broad`.
 
 The JSON array holds each ID, outcome, `timed_out_phase` (`"build"`, `"test"`,
-or null when the row did not time out), red and green full test names, build/test
+`"prebuild"`, or null when the row did not time out), red and green full test names, build/test/prebuild
 milliseconds, reasons, and up to 8,000 characters of each output tail. Summary
 lines are uppercase outcomes. Exit status is nonzero on any failing row or hard
 preflight error. A dirty-target refusal is a preflight error (no mutation/report
@@ -344,10 +484,11 @@ the `crate::binary` prefix. Attribution is retained by the same per-test parser.
 Console output includes collateral on catches with extra reds, a warning summary
 for CAUGHT_BROADLY, and separate lists and counts of UNREACHABLE and HUB rows.
 
-These formats have no explicit version field: 0.4 retains the unversioned TOML
-`[[control]]` schema and JSON array, adding optional `hub` and `hub_targets` fields
-to controls and the HUB outcome to reports. Existing catalogues remain readable
-unchanged. Older runners rejecting new HUB rows is expected. Since 0.4,
+These formats have no explicit version field: 0.5 retains the unversioned TOML
+`[[control]]` schema and JSON array, adding `platforms`, `desk_only`, root `prebuild`,
+the required command-row `test_count_pattern`, skip outcomes and preparation timing.
+Cargo/nextest catalogues remain readable unchanged; existing command catalogues
+must add an executed-count pattern. Older runners rejecting new fields is expected. Since 0.4,
 `collateral.targets` uses stable Cargo names rather than hash-suffixed executables.
 
 For Cargo/nextest, builds are separate: Cargo uses `cargo test -p PACKAGE TARGET --no-run --locked`;
