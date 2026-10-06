@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.2
+
+- Replay sessions now run prerequisites once on the clean tree, collect every
+  command row's per-id baseline, then replay all mutants with their existing
+  per-mutant prebuild. One final restored-tree prebuild leaves clean fixtures:
+  N executable mutants need N+2 prerequisite runs, not 2N. This order covers
+  `run` (including `--broad`, diff selection and shards), `prove` and `explore`.
+  Cargo/nextest replay still has no green baseline; `check` remains clean-tree
+  preparation followed by name listing, without mutants. Prove's conditional
+  package diagnosis also runs before the single final refresh.
+- Keep initial, mutant and final-restore prebuild timing separate. Final refresh
+  failures abort the session by step name. Interruptions and mutant timeouts
+  restore source bytes and run final fixture cleanup with its own deadlines,
+  even after an interrupted build or failed mutant prerequisite.
+- Clarify command exit 126 as `not executable, or the command refused to run`,
+  including wrappers that refuse a zero-test invocation; 127 remains not found.
+- Preserve `(binary, test name)` identities across Cargo and nextest results.
+  Names shared by multiple binaries are reported as `target::test_name`, not
+  rejected or merged. `expect_red` accepts qualified names; ambiguous plain
+  expectations fail validation with candidate names. Package name validation
+  runs on the clean tree before mutants, including narrow rows, and `check`
+  still verifies that the expected names exist within the selected target.
+
 ## 0.5.1
 
 - A command row's report shows a green baseline's output under `baseline output:`. The words "baseline was not green" now appear only when a baseline actually failed.

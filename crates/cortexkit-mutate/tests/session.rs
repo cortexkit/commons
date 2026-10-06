@@ -126,6 +126,25 @@ only = true
     fn report(&self) -> serde_json::Value {
         serde_json::from_slice(&fs::read(self.root().join(".git/report.json")).unwrap()).unwrap()
     }
+
+    fn slow_mutant_test(&self) {
+        let path = self.root().join("src/lib.rs");
+        let source = fs::read_to_string(&path).unwrap();
+        fs::write(
+            path,
+            source.replace(
+                "fn fixture_guard() {",
+                r#"fn fixture_guard() {
+            if std::fs::read_to_string("fixture-output").unwrap() == "true" {
+                std::fs::write(".git/mutant-running", "ready").unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+"#,
+            ),
+        )
+        .unwrap();
+        self.commit();
+    }
 }
 
 fn other_os() -> &'static str {
@@ -237,6 +256,11 @@ fn prebuild_refreshes_mutated_fixture_and_records_separate_timing() {
         assert_eq!(report[0]["outcome"], "CAUGHT", "{mode}: {report}");
         assert!(report[0]["prebuild_ms"].as_u64().unwrap() > 0);
         assert!(report[0]["baseline_prebuild_ms"].as_u64().unwrap() > 0);
+        assert!(report[0]["restore_prebuild_ms"].as_u64().unwrap() > 0);
+        assert!(report[0]["restore_prebuild_tail"]
+            .as_str()
+            .unwrap()
+            .contains("fixture binary refreshed: false"));
         assert!(report[0]["prebuild_tail"]
             .as_str()
             .unwrap()
@@ -247,12 +271,12 @@ fn prebuild_refreshes_mutated_fixture_and_records_separate_timing() {
             .contains("fixture binary refreshed: false"));
         assert_eq!(
             fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
-            "false\ntrue\n",
-            "baseline once, then mutated fixture rebuilt, including append's check"
+            "false\ntrue\nfalse\n",
+            "initial, mutant, final restore: N+2 = 3, including append's check"
         );
         assert_eq!(
             fs::read_to_string(f.root().join("fixture-output")).unwrap(),
-            "true"
+            "false"
         );
     }
 }
@@ -287,7 +311,7 @@ fn a_fixture_backed_catch_requires_the_declared_prebuild() {
     );
     assert_eq!(
         fs::read_to_string(f.root().join("fixture-output")).unwrap(),
-        "true"
+        "false"
     );
 }
 
@@ -311,28 +335,42 @@ fn failing_unmutated_prebuild_aborts_replay_by_step_name() {
 }
 
 #[test]
-fn restored_prebuild_prevents_stale_mutant_fixtures_in_the_next_row() {
+fn baselines_first_prevents_stale_mutant_fixtures_in_the_next_row() {
     let f = Fixture::new();
+    let base = String::from_utf8(git(f.root(), &["rev-parse", "HEAD"]).unwrap()).unwrap();
     let path = f.root().join("src/lib.rs");
-    let source = fs::read_to_string(&path).unwrap();
-    fs::write(
-        &path,
-        format!(
-            "{source}\n\
-        pub fn unrelated() -> bool {{ true }}\n\
-        #[cfg(test)] mod freshness {{\n\
-        #[test] fn unrelated_is_guarded() {{ assert!(super::unrelated()); }}\n\
-        }}\n"
-        ),
-    )
-    .unwrap();
+    assert!(fs::read_to_string(&path).unwrap().contains("value > 0"));
+    fs::write(f.root().join("src/bin/observer.rs"), r#"
+fn main() {
+    use std::io::Write;
+    let id = std::env::args().nth(1).unwrap();
+    let mutant = std::fs::read_to_string("src/lib.rs").unwrap().contains("value >= 0");
+    let fixture = std::fs::read_to_string("fixture-output").unwrap();
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(".git/observer-runs").unwrap();
+    writeln!(log, "{id}: {}: {fixture}", if mutant { "mutant" } else { "baseline" }).unwrap();
+    assert_eq!(fixture, mutant.to_string(), "a baseline must never use a mutant fixture");
+    println!("Ran 1 tests");
+    if mutant { std::process::exit(1); }
+}
+"#).unwrap();
     let mut first = f.row();
     first.id = "a-mutates-fixture".into();
-    let mut second = f.row();
+    first.runner = "command".into();
+    first.package = None;
+    first.target = None;
+    first.only = false;
+    first.command = Some(
+        [
+            "cargo", "run", "--bin", "observer", "--locked", "--", "{test}",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    );
+    first.test_count_pattern = Some("Ran {count} tests".into());
+    first.expect_red = vec!["first".into()];
+    let mut second = first.clone();
     second.id = "b-needs-clean-fixture".into();
-    second.old = Some("unrelated() -> bool { true }".into());
-    second.new = Some("unrelated() -> bool { false }".into());
-    second.expect_red = vec!["freshness::unrelated_is_guarded".into()];
+    second.expect_red = vec!["second".into()];
     fs::write(
         f.root().join("mutations.toml"),
         toml::to_string(&Catalogue {
@@ -342,39 +380,201 @@ fn restored_prebuild_prevents_stale_mutant_fixtures_in_the_next_row() {
         .unwrap(),
     )
     .unwrap();
-    // The next mutant's build consumes the fixture before its mutated prebuild
-    // gets a chance to refresh it. Source restoration cannot refresh this file.
-    fs::write(f.root().join("build.rs"), r#"
-fn main() {
-    println!("cargo:rerun-if-changed=src/lib.rs");
-    let source = std::fs::read_to_string("src/lib.rs").unwrap();
-    if source.contains("unrelated() -> bool { false }") {
-        assert_eq!(std::fs::read_to_string("fixture-output").unwrap(), "false", "build must not consume a previous mutant's fixture");
+    f.commit();
+    for selection in [
+        vec!["run", "--all"],
+        vec!["run", "--all", "--broad"],
+        vec!["run", "--diff", base.trim()],
+    ] {
+        let mut args = selection;
+        args.extend(["--report", ".git/report.json"]);
+        let output = f.cli(&args);
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report = f.report();
+        assert_eq!(report[0]["outcome"], "CAUGHT");
+        assert_eq!(
+            report[1]["outcome"], "CAUGHT",
+            "the next baseline must not consume the previous row's mutant fixture"
+        );
+        assert_eq!(report[0]["restore_prebuild_ms"], 0);
+        assert!(report[1]["restore_prebuild_ms"].as_u64().unwrap() > 0);
+        assert_eq!(report[1]["baseline_prebuild_ms"], 0);
+        assert_eq!(
+            fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
+            "false\ntrue\ntrue\nfalse\n",
+            "two rows require N+2 = 4 prebuilds"
+        );
+        assert_eq!(fs::read_to_string(f.root().join(".git/observer-runs")).unwrap(),
+        "first: baseline: false\nsecond: baseline: false\nfirst: mutant: true\nsecond: mutant: true\n");
+        assert_eq!(
+            fs::read_to_string(f.root().join("fixture-output")).unwrap(),
+            "false"
+        );
+        fs::remove_file(f.root().join(".git/prebuild-runs")).unwrap();
+        fs::remove_file(f.root().join(".git/observer-runs")).unwrap();
     }
 }
-"#).unwrap();
-    f.cmd("git", &["add", "build.rs"]);
-    f.commit();
+
+#[test]
+fn session_finishes_with_clean_fixture() {
+    let f = Fixture::new();
     let output = f.cli(&["run", "--all", "--report", ".git/report.json"]);
     assert!(
         output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(f.report()[0]["outcome"], "CAUGHT");
+    assert_eq!(
+        fs::read_to_string(f.root().join("fixture-output")).unwrap(),
+        "false",
+        "final cleanup must leave a fixture matching the clean source, not the last mutant"
+    );
+}
+
+#[test]
+fn prove_survivor_diagnosis_has_one_final_restore_and_check_has_no_mutants() {
+    let f = Fixture::new();
+    assert!(f.cli(&["check"]).status.success());
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
+        "false\n"
+    );
+    fs::remove_file(f.root().join(".git/prebuild-runs")).unwrap();
+    let output = f.cli(&[
+        "prove",
+        "--id",
+        "survivor",
+        "--guards",
+        "fixture rejects zero",
+        "--package",
+        "session-fixture",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value > 1",
+        "--test-file",
+        "src/lib.rs",
+        "--target=--lib",
+        "--expect-red",
+        "tests::fixture_guard",
+        "--report",
+        ".git/report.json",
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
         String::from_utf8_lossy(&output.stderr)
     );
     let report = f.report();
-    assert_eq!(report[0]["outcome"], "CAUGHT");
-    assert_eq!(
-        report[1]["outcome"], "CAUGHT",
-        "the next build must not consume the previous row's mutant fixture"
-    );
+    assert_eq!(report.as_array().unwrap().len(), 2);
+    assert_eq!(report[0]["outcome"], "SURVIVED");
+    assert_eq!(report[1]["outcome"], "SURVIVED");
     assert_eq!(report[0]["restore_prebuild_ms"], 0);
     assert!(report[1]["restore_prebuild_ms"].as_u64().unwrap() > 0);
-    assert_eq!(report[1]["baseline_prebuild_ms"], 0);
     assert_eq!(
         fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
-        "false\ntrue\nfalse\nfalse\n"
+        "false\nfalse\nfalse\nfalse\n",
+        "initial, two mutants, one final cleanup: N+2 = 4"
     );
+}
+
+#[test]
+fn timed_out_mutant_still_refreshes_clean_fixtures() {
+    let f = Fixture::new();
+    f.slow_mutant_test();
+    let mut c = f.row();
+    c.timeout_s = 1;
+    f.catalogue(c);
+    f.commit();
+    let output = f.cli(&["run", "--all", "--report", ".git/report.json"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(f.report()[0]["outcome"], "TIMED_OUT");
+    assert_eq!(f.report()[0]["timed_out_phase"], "test");
+    assert_eq!(
+        fs::read_to_string(f.root().join("fixture-output")).unwrap(),
+        "false"
+    );
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
+        "false\ntrue\nfalse\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn interrupted_mutant_still_refreshes_clean_fixtures() {
+    use std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    let f = Fixture::new();
+    f.slow_mutant_test();
+    let before = fs::read(f.root().join("src/lib.rs")).unwrap();
+    let lock = fs::read(f.root().join("Cargo.lock")).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+        .current_dir(f.root())
+        .args(["run", "--all", "--report", ".git/report.json"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    while !f.root().join(".git/mutant-running").exists() {
+        if start.elapsed() > Duration::from_secs(120) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("mutant never started");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_ne!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
+    assert_eq!(
+        fs::read_to_string(f.root().join("fixture-output")).unwrap(),
+        "true"
+    );
+    rustix::process::kill_process(
+        rustix::process::Pid::from_child(&child),
+        rustix::process::Signal::INT,
+    )
+    .unwrap();
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > Duration::from_secs(90) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("interrupted cleanup did not finish");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status.code(), Some(1));
+    assert_eq!(f.report()[0]["outcome"], "ERROR");
+    assert!(f.report()[0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("interrupted"));
+    assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
+    assert_eq!(lock, fs::read(f.root().join("Cargo.lock")).unwrap());
+    assert_eq!(
+        fs::read_to_string(f.root().join("fixture-output")).unwrap(),
+        "false"
+    );
+    assert_eq!(
+        fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
+        "false\ntrue\nfalse\n"
+    );
+    assert!(TreeLock::acquire(f.root()).is_ok());
 }
 
 #[test]
@@ -424,7 +624,7 @@ fn declared_prebuild_respects_a_listed_lockfile_edit_and_restores_it() {
 }
 
 #[test]
-fn failing_restored_prebuild_aborts_later_rows_by_name() {
+fn failing_final_restored_prebuild_fails_session_by_name() {
     let f = Fixture::new();
     fs::write(f.root().join("create-fail-restore"), "").unwrap();
     let mut second = f.row();
@@ -443,14 +643,14 @@ fn failing_restored_prebuild_aborts_later_rows_by_name() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("restore prebuild before later-row")
+        stderr.contains("final restore prebuild")
             && stderr.contains("prebuild \"fixture-binary\": failed"),
         "{stderr}"
     );
     assert!(!f.root().join(".git/report.json").exists());
     assert_eq!(
         fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
-        "false\ntrue\nfalse\n"
+        "false\ntrue\ntrue\nfalse\n"
     );
 }
 

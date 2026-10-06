@@ -724,6 +724,14 @@ struct Saved {
     active: bool,
 }
 impl Saved {
+    fn unchanged(&self) -> Result<bool> {
+        Ok(self
+            .files
+            .iter()
+            .all(|(path, bytes)| fs::read(path).ok().as_ref() == Some(bytes))
+            && read_optional(&self.lock)? == self.lock_bytes)
+    }
+
     fn new(root: &Path, edits: &[Edit], allow_dirty: bool) -> Result<Self> {
         let mut files = BTreeMap::new();
         for e in edits {
@@ -901,11 +909,11 @@ pub struct Report {
     /// Session preparation is attributed only to the first executable row.
     pub baseline_prebuild_ms: u128,
     pub baseline_prebuild_tail: String,
-    /// Refresh on the restored tree before a later executable row begins.
+    /// Final refresh on the restored tree, attributed to the last reported row.
     pub restore_prebuild_ms: u128,
     pub restore_prebuild_tail: String,
     #[serde(skip)]
-    prebuild_ran: bool,
+    restore_prebuild_needed: bool,
     pub build_tail: String,
     pub test_tail: String,
     pub reason: Option<String>,
@@ -931,7 +939,7 @@ impl Report {
             baseline_prebuild_tail: String::new(),
             restore_prebuild_ms: 0,
             restore_prebuild_tail: String::new(),
-            prebuild_ran: false,
+            restore_prebuild_needed: false,
             build_tail: String::new(),
             test_tail: String::new(),
             reason: None,
@@ -1219,10 +1227,13 @@ fn command_tests(
         let code = output
             .code
             .ok_or_else(|| error("process died by signal (no exit code)".into()))?;
-        if matches!(code, 126 | 127) {
-            return Err(error(format!(
-                "exit {code}: program not executable or not found"
-            )));
+        if code == 126 {
+            return Err(error(
+                "exit 126: not executable, or the command refused to run".into(),
+            ));
+        }
+        if code == 127 {
+            return Err(error("exit 127: program not found".into()));
         }
         command_test_count(&output.text, c.test_count_pattern.as_deref()).map_err(error)?;
         if baseline {
@@ -1248,23 +1259,117 @@ struct TestResults {
     red: Vec<String>,
     green: Vec<String>,
     targets: BTreeMap<String, String>,
+    names: BTreeMap<String, String>,
 }
 
-fn attribute(targets: &mut BTreeMap<String, String>, name: &str, target: &str) -> Result<()> {
-    if targets.get(name).is_some_and(|old| old != target) {
-        return Err(format!("ambiguous test name across test binaries: {name}"));
+// Keep binary identity until all output has been read. Two binaries can compile
+// the same test source, and their independent outcomes must never be collapsed.
+#[derive(Default)]
+struct TestEvents(BTreeMap<(String, String), bool>);
+
+impl TestEvents {
+    fn record(&mut self, target: &str, name: &str, failed: bool) -> Result<()> {
+        let key = (target.to_owned(), name.to_owned());
+        if self.0.get(&key).is_some_and(|old| *old != failed) {
+            return Err(format!("conflicting test results: {target}::{name}"));
+        }
+        self.0.insert(key, failed);
+        Ok(())
     }
-    targets.insert(name.to_owned(), target.to_owned());
-    Ok(())
+
+    fn finish(self, runner: &str) -> TestResults {
+        let mut counts = BTreeMap::new();
+        for (_, name) in self.0.keys() {
+            *counts.entry(name.clone()).or_insert(0) += 1;
+        }
+        let mut results = TestResults {
+            red: vec![],
+            green: vec![],
+            targets: BTreeMap::new(),
+            names: BTreeMap::new(),
+        };
+        for ((target, name), failed) in self.0 {
+            let identity = if counts[&name] > 1 {
+                format!("{}::{name}", stable_target(runner, &target))
+            } else {
+                name.clone()
+            };
+            results.targets.insert(identity.clone(), target);
+            results.names.insert(identity.clone(), name);
+            if failed {
+                results.red.push(identity);
+            } else {
+                results.green.push(identity);
+            }
+        }
+        results.red.sort();
+        results.green.sort();
+        results
+    }
+}
+
+fn resolve_expected(c: &Control, results: &TestResults) -> Result<Vec<String>> {
+    c.expect_red
+        .iter()
+        .map(|expected| {
+            let candidates: Vec<_> = results
+                .names
+                .iter()
+                .filter(|(_, name)| *name == expected)
+                .map(|(identity, _)| identity.clone())
+                .collect();
+            if candidates.len() > 1 {
+                return Err(format!(
+                    "{}: ambiguous expect_red name {expected}; choose a qualified name: {}",
+                    c.id,
+                    candidates.join(", ")
+                ));
+            }
+            if let Some(identity) = candidates.first() {
+                return Ok(identity.clone());
+            }
+            // A qualified expectation is also valid when a scoped run observes only
+            // that binary, in which case its report keeps the unique plain name.
+            Ok(results
+                .names
+                .iter()
+                .find(|(identity, name)| {
+                    format!(
+                        "{}::{name}",
+                        stable_target(&c.runner, &results.targets[*identity])
+                    ) == *expected
+                })
+                .map_or_else(|| expected.clone(), |(identity, _)| identity.clone()))
+        })
+        .collect()
+}
+
+fn cargo_binary_header(line: &str) -> Result<Option<String>> {
+    if let Some(rest) = line.strip_prefix("Running ") {
+        let (_, binary) = rest
+            .rsplit_once(" (")
+            .ok_or("cargo header missing binary")?;
+        Ok(Some(
+            binary
+                .strip_suffix(')')
+                .ok_or("invalid cargo binary header")?
+                .rsplit(['/', '\\'])
+                .next()
+                .ok_or("empty cargo binary")?
+                .to_owned(),
+        ))
+    } else {
+        Ok(line
+            .strip_prefix("Doc-tests ")
+            .map(|target| format!("doc:{target}")))
+    }
 }
 
 fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     if runner == "nextest" && text.lines().any(|l| l.starts_with("{\"type\":\"suite\"")) {
         return parse_nextest_json(text);
     }
-    let mut red = BTreeSet::new();
-    let mut green = BTreeSet::new();
-    let mut targets = BTreeMap::new();
+    let mut events = TestEvents::default();
     let mut cargo_target = String::new();
     let mut summary_total = 0;
     let mut observed_summary = false;
@@ -1272,19 +1377,8 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     for line in text.lines() {
         let line = line.trim();
         if runner == "cargo" {
-            if let Some(rest) = line.strip_prefix("Running ") {
-                let (_, binary) = rest
-                    .rsplit_once(" (")
-                    .ok_or("cargo header missing binary")?;
-                cargo_target = binary
-                    .strip_suffix(')')
-                    .ok_or("invalid cargo binary header")?
-                    .rsplit(['/', '\\'])
-                    .next()
-                    .ok_or("empty cargo binary")?
-                    .to_owned();
-            } else if let Some(target) = line.strip_prefix("Doc-tests ") {
-                cargo_target = format!("doc:{target}");
+            if let Some(target) = cargo_binary_header(line)? {
+                cargo_target = target;
             } else if let Some(rest) = line.strip_prefix("test result:") {
                 observed_summary = true;
                 for key in ["passed", "failed", "ignored", "measured", "filtered"] {
@@ -1305,12 +1399,10 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
                 if let Some((name, status)) = rest.rsplit_once(" ... ") {
                     match status {
                         "ok" => {
-                            attribute(&mut targets, name, &cargo_target)?;
-                            green.insert(name.to_owned());
+                            events.record(&cargo_target, name, false)?;
                         }
                         "FAILED" => {
-                            attribute(&mut targets, name, &cargo_target)?;
-                            red.insert(name.to_owned());
+                            events.record(&cargo_target, name, true)?;
                         }
                         status if status == "ignored" || status.starts_with("ignored,") => {}
                         _ => return Err(format!("unrecognized test status: {line}")),
@@ -1337,36 +1429,20 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
                 let target = words
                     .get(words.len().checked_sub(2).ok_or("missing nextest binary")?)
                     .ok_or("missing nextest binary")?;
-                attribute(&mut targets, &name, target)?;
-                if words[0] == "PASS" {
-                    green.insert(name);
-                } else {
-                    red.insert(name);
-                }
+                events.record(target, &name, words[0] == "FAIL")?;
             }
         }
     }
-    if runner == "cargo" && (!observed_summary || summary_total != red.len() + green.len()) {
+    if runner == "cargo" && (!observed_summary || summary_total != events.0.len()) {
         return Err("libtest summary missing or counts disagree with per-test output".into());
     }
-    if runner == "nextest" && nextest_total != Some(red.len() + green.len()) {
-        if red.is_empty() && green.is_empty() && text.contains("no tests to run") {
-            return Ok(TestResults {
-                red: vec![],
-                green: vec![],
-                targets,
-            });
+    if runner == "nextest" && nextest_total != Some(events.0.len()) {
+        if events.0.is_empty() && text.contains("no tests to run") {
+            return Ok(events.finish(runner));
         }
         return Err("nextest summary missing or counts disagree with per-test output".into());
     }
-    if !red.is_disjoint(&green) {
-        return Err("ambiguous test name across test binaries".into());
-    }
-    Ok(TestResults {
-        red: red.into_iter().collect(),
-        green: green.into_iter().collect(),
-        targets,
-    })
+    Ok(events.finish(runner))
 }
 
 fn stable_target<'a>(runner: &str, target: &'a str) -> &'a str {
@@ -1485,7 +1561,15 @@ pub fn run_row(
     unscoped: bool,
 ) -> Result<Report> {
     let scope = if unscoped { Scope::Package } else { Scope::Row };
-    replay(root, c, allow_dirty, stop, scope, &[])
+    replay(
+        root,
+        c,
+        allow_dirty,
+        stop,
+        scope,
+        &[],
+        ReplayStage::Mutant(None),
+    )
 }
 
 /// Audit one catalogue row across every test target in its package, retaining
@@ -1496,7 +1580,15 @@ pub fn run_broad_row(
     allow_dirty: bool,
     stop: &AtomicBool,
 ) -> Result<Report> {
-    replay(root, c, allow_dirty, stop, Scope::Broad, &[])
+    replay(
+        root,
+        c,
+        allow_dirty,
+        stop,
+        Scope::Broad,
+        &[],
+        ReplayStage::Mutant(None),
+    )
 }
 
 /// Apply one mutant and run every test in its package (or the workspace),
@@ -1516,15 +1608,19 @@ pub fn explore_row(
         stop,
         Scope::Explore { workspace },
         &[],
+        ReplayStage::Mutant(None),
     )
 }
 
-/// One CLI replay session. Prepare once before any command baseline or mutation;
-/// every successful mutant build then refreshes the same prerequisites. A plain
+/// One CLI replay session. Prepare prerequisites, collect every command baseline,
+/// replay mutants, then finish by refreshing fixtures on the restored tree. A plain
 /// library run_row has no catalogue prerequisites; catalogue callers use a session.
 pub struct ReplaySession {
     prebuild: Vec<Prebuild>,
     baseline: Option<(u128, String)>,
+    row_baselines: BTreeMap<String, Report>,
+    validated_rows: BTreeSet<String>,
+    clean_edits: Vec<Edit>,
     fixtures_dirty: bool,
 }
 
@@ -1540,6 +1636,9 @@ impl ReplaySession {
         let mut session = Self {
             prebuild: prebuild.to_vec(),
             baseline: None,
+            row_baselines: BTreeMap::new(),
+            validated_rows: BTreeSet::new(),
+            clean_edits: vec![],
             fixtures_dirty: false,
         };
         let active: Vec<_> = rows
@@ -1563,31 +1662,68 @@ impl ReplaySession {
             .flatten()
             .filter(|e| root.join(&e.file).exists())
             .collect::<Vec<_>>();
-        let mut saved = Saved::new(root, &edits, allow_dirty)?;
-        let mut ms = 0;
-        let mut text = String::new();
-        let work = run_prebuild(root, prebuild, stop, &mut ms, &mut text, &mut None);
-        // Prerequisites may produce fixtures, never rewrite edit targets or the
-        // lockfile. Restore on failure, including a failing command's side effects.
-        let unchanged = saved
-            .files
-            .iter()
-            .all(|(path, bytes)| fs::read(path).ok().as_ref() == Some(bytes))
-            && read_optional(&saved.lock)? == saved.lock_bytes;
-        if unchanged {
-            saved.active = false;
-        } else {
-            let restoration = saved.restore();
-            return Err(format!(
-                "unmutated prebuild changed source or Cargo.lock ({:?}); {}; {}",
-                prebuild.iter().map(|step| &step.name).collect::<Vec<_>>(),
-                work.err().unwrap_or_default(),
-                restoration.err().unwrap_or_default()
-            ));
-        }
-        work.map_err(|e| format!("unmutated {e}; replay aborted before grading rows"))?;
-        session.baseline = Some((ms, tail(&text)));
+        session.clean_edits = edits;
+        session.baseline = Some(
+            clean_prebuild(root, prebuild, &session.clean_edits, allow_dirty, stop)
+                .map_err(|e| format!("unmutated {e}; replay aborted before grading rows"))?,
+        );
         Ok(session)
+    }
+
+    /// Collect command baselines and validate Cargo/nextest package identities
+    /// before the first mutant. Name listing does not run a green test baseline.
+    pub fn baselines(
+        &mut self,
+        root: &Path,
+        rows: &[&Control],
+        allow_dirty: bool,
+        stop: &AtomicBool,
+    ) -> Result<()> {
+        if self.fixtures_dirty {
+            return Err("baselines must be collected before replaying mutants".into());
+        }
+        for c in rows {
+            let report = replay(
+                root,
+                c,
+                allow_dirty,
+                stop,
+                Scope::Row,
+                &[],
+                ReplayStage::Baseline,
+            )?;
+            if report.outcome == Outcome::Survived && c.runner != "command" {
+                self.validated_rows.insert(c.id.clone());
+            }
+            self.row_baselines.insert(c.id.clone(), report);
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore fixture outputs once after all mutants, even when Ctrl-C stopped
+    /// a mutant. Cleanup has its own deadlines and must ignore the latched stop.
+    pub fn finish(&mut self, root: &Path, rows: &mut [Report], allow_dirty: bool) -> Result<()> {
+        if !self.fixtures_dirty {
+            return Ok(());
+        }
+        eprintln!("final restore_prebuild");
+        let (ms, text) = clean_prebuild(
+            root,
+            &self.prebuild,
+            &self.clean_edits,
+            allow_dirty,
+            &AtomicBool::new(false),
+        )
+        .map_err(|e| format!("final restore {e}; tree fixtures are suspect"))?;
+        self.fixtures_dirty = false;
+        if let Some(row) = rows.last_mut() {
+            row.restore_prebuild_ms = ms;
+            row.restore_prebuild_tail = text;
+        }
+        Ok(())
     }
 
     pub fn run_row(
@@ -1640,23 +1776,34 @@ impl ReplaySession {
             && c.equivalent.is_none()
             && c.unreachable.is_none()
             && c.desk_only.is_none();
-        // Restoration rewrites source, not fixture outputs. A previous mutant's
-        // binary or generated file must not enter the next row's build/baseline.
-        let refreshed = if active && self.fixtures_dirty {
-            eprintln!("restore_prebuild before row {}", c.id);
-            let fresh = Self::prepare(root, &self.prebuild, &[c], allow_dirty, stop)
-                .map_err(|e| format!("restore prebuild before {}: {e}", c.id))?;
-            self.fixtures_dirty = false;
-            fresh.baseline
-        } else {
-            None
-        };
-        let mut row = replay(root, c, allow_dirty, stop, scope, &self.prebuild)?;
-        self.fixtures_dirty |= row.prebuild_ran;
-        if let Some((ms, text)) = refreshed {
-            row.restore_prebuild_ms = ms;
-            row.restore_prebuild_tail = text;
+        let baseline = self.row_baselines.remove(&c.id).or_else(|| {
+            // Prove's optional package diagnosis reuses clean-tree name
+            // validation, not a second baseline after its first mutant.
+            self.validated_rows.contains(&c.id).then(|| {
+                let mut report = Report::new(c);
+                report.outcome = Outcome::Survived;
+                report
+            })
+        });
+        // Library clients that do not batch baselines retain the safe older
+        // refresh before an unprepared command row. CLI sessions always batch.
+        if active
+            && baseline.is_none()
+            && self.fixtures_dirty
+            && (c.runner == "command" || !c.expect_red.is_empty())
+        {
+            self.finish(root, &mut [], allow_dirty)?;
         }
+        let mut row = replay(
+            root,
+            c,
+            allow_dirty,
+            stop,
+            scope,
+            &self.prebuild,
+            ReplayStage::Mutant(baseline.map(Box::new)),
+        )?;
+        self.fixtures_dirty |= row.restore_prebuild_needed;
         if active {
             if let Some((ms, text)) = self.baseline.take() {
                 row.baseline_prebuild_ms = ms;
@@ -1665,6 +1812,37 @@ impl ReplaySession {
         }
         Ok(row)
     }
+}
+
+// Prerequisites may produce fixtures, never rewrite edit targets or the lockfile.
+// Apply the same byte checks to both the initial and final clean-tree build.
+fn clean_prebuild(
+    root: &Path,
+    prebuild: &[Prebuild],
+    edits: &[Edit],
+    allow_dirty: bool,
+    stop: &AtomicBool,
+) -> Result<(u128, String)> {
+    let mut saved = Saved::new(root, edits, allow_dirty)?;
+    let mut ms = 0;
+    let mut text = String::new();
+    let work = run_prebuild(root, prebuild, stop, &mut ms, &mut text, &mut None);
+    // Prerequisites may produce fixtures, never rewrite edit targets or the
+    // lockfile. Restore on failure, including a failing command's side effects.
+    let unchanged = saved.unchanged()?;
+    if unchanged {
+        saved.active = false;
+    } else {
+        let restoration = saved.restore();
+        return Err(format!(
+            "prebuild changed source or Cargo.lock ({:?}); {}; {}",
+            prebuild.iter().map(|step| &step.name).collect::<Vec<_>>(),
+            work.err().unwrap_or_default(),
+            restoration.err().unwrap_or_default()
+        ));
+    }
+    work?;
+    Ok((ms, tail(&text)))
 }
 
 fn run_prebuild(
@@ -1701,6 +1879,11 @@ fn run_prebuild(
     Ok(())
 }
 
+enum ReplayStage {
+    Baseline,
+    Mutant(Option<Box<Report>>),
+}
+
 // The only code that mutates source: dirty-target refusal, exact-once anchors,
 // the separate build, the test run, per-test parsing and byte restoration of
 // targets and Cargo.lock all live here, for every command.
@@ -1711,8 +1894,18 @@ fn replay(
     stop: &AtomicBool,
     scope: Scope,
     prebuild: &[Prebuild],
+    stage: ReplayStage,
 ) -> Result<Report> {
-    let mut report = Report::new(c);
+    let (mut report, baseline_only, baseline_ready) = match stage {
+        ReplayStage::Baseline => (Report::new(c), true, false),
+        ReplayStage::Mutant(Some(report)) => {
+            if report.outcome != Outcome::Survived {
+                return Ok(*report);
+            }
+            (*report, false, true)
+        }
+        ReplayStage::Mutant(None) => (Report::new(c), false, false),
+    };
     c.validate_runner()?;
     let disposition = c.recorded_disposition()?;
     if let Some((Outcome::DeskOnly, reason)) = disposition {
@@ -1764,14 +1957,25 @@ fn replay(
         if stop.load(Ordering::SeqCst) {
             return Err("interrupted".into());
         }
-        if c.runner == "command" {
+        if c.runner == "command" && !baseline_ready {
             command_tests(root, c, stop, &mut report, true)?;
+        } else if !baseline_ready && !c.expect_red.is_empty() {
+            let start = Instant::now();
+            let names = list_results(root, c, Scope::Package, stop)?;
+            report.build_ms += start.elapsed().as_millis();
+            resolve_expected(c, &names)?;
         }
+        if baseline_only {
+            report.outcome = Outcome::Survived;
+            return Ok(());
+        }
+        // Even an interrupted or failed build may have rewritten fixtures before
+        // the declared mutant prebuild starts, so final cleanup is already owed.
+        report.restore_prebuild_needed = !prebuild.is_empty();
         for (path, text) in files {
             fs::write(path, text).map_err(|e| e.to_string())?;
         }
         if c.runner == "command" {
-            report.prebuild_ran = !prebuild.is_empty();
             run_prebuild(
                 root,
                 prebuild,
@@ -1785,7 +1989,7 @@ fn replay(
             return Ok(());
         }
         let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
-        report.build_ms = build.ms;
+        report.build_ms += build.ms;
         report.build_tail = tail(&build.text);
         if build.interrupted {
             return Err("interrupted".into());
@@ -1803,7 +2007,6 @@ fn replay(
             report.outcome = Outcome::DidNotCompile;
             return Ok(());
         }
-        report.prebuild_ran = !prebuild.is_empty();
         run_prebuild(
             root,
             prebuild,
@@ -1813,7 +2016,7 @@ fn replay(
             &mut report.timed_out_phase,
         )?;
         let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
-        report.test_ms = tests.ms;
+        report.test_ms += tests.ms;
         report.test_tail = tail(&tests.text);
         if tests.interrupted {
             return Err("interrupted".into());
@@ -1830,10 +2033,12 @@ fn replay(
             // when recorded, so none is collateral to that discovery.
             Scope::Explore { .. } => explore_grade(&results.red, &results.green),
             Scope::Row | Scope::Package | Scope::Broad => {
-                let (extra, cross_targets) = collateral(c, &results)?;
+                let mut grading = c.clone();
+                grading.expect_red = resolve_expected(c, &results)?;
+                let (extra, cross_targets) = collateral(&grading, &results)?;
                 report.collateral = extra;
                 report.breadth_observed = scope == Scope::Broad;
-                let outcome = grade(c, &results.red, &results.green);
+                let outcome = grade(&grading, &results.red, &results.green);
                 if outcome == Outcome::Caught && report.breadth_observed {
                     if let Some(reason) = &c.hub {
                         let approved = c.hub_targets.as_deref().unwrap_or_default();
@@ -1869,7 +2074,12 @@ fn replay(
         report.green = results.green;
         Ok(())
     })();
-    let restoration = saved.restore();
+    let restoration = if baseline_only && saved.unchanged()? {
+        saved.active = false;
+        Ok(())
+    } else {
+        saved.restore()
+    };
     if let Err(e) = work {
         report.outcome = Outcome::Error;
         report.reason = Some(e);
@@ -1881,6 +2091,48 @@ fn replay(
     }
     report.prebuild_tail = tail(&report.prebuild_tail);
     Ok(report)
+}
+
+fn list_results(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Result<TestResults> {
+    // List mode compiles the test binaries, so the build deadline bounds it.
+    let output = execute(root, command(c, "list", scope)?, c.build_timeout_s, stop)?;
+    if !output.success || output.timeout || output.interrupted {
+        return Err(format!("{}: list failed: {}", c.id, tail(&output.text)));
+    }
+    let mut events = TestEvents::default();
+    if c.runner == "cargo" {
+        let mut target = String::new();
+        for line in output.text.lines().map(str::trim) {
+            if let Some(binary) = cargo_binary_header(line)? {
+                target = binary;
+            } else if let Some(name) = line.strip_suffix(": test") {
+                events.record(&target, name, false)?;
+            }
+        }
+    } else {
+        let json: serde_json::Value = serde_json::from_str(
+            output
+                .text
+                .lines()
+                .find(|l| l.starts_with('{'))
+                .ok_or("missing nextest list JSON")?,
+        )
+        .map_err(|e| e.to_string())?;
+        let suites = json
+            .get("rust-suites")
+            .and_then(|v| v.as_object())
+            .ok_or("missing nextest rust-suites")?;
+        for (target, suite) in suites {
+            let cases = suite
+                .get("testcases")
+                .and_then(|v| v.as_object())
+                .ok_or("missing nextest testcases")?;
+            for name in cases.keys() {
+                events.record(target, name, false)?;
+            }
+        }
+    }
+    Ok(events.finish(&c.runner))
 }
 
 pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()> {
@@ -1898,45 +2150,16 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
         {
             continue;
         }
-        // List mode compiles the test binaries, so the build deadline bounds it.
-        let output = execute(
-            root,
-            command(c, "list", Scope::Row)?,
-            c.build_timeout_s,
-            stop,
-        )?;
-        if !output.success || output.timeout || output.interrupted {
-            return Err(format!("{}: list failed: {}", c.id, tail(&output.text)));
-        }
-        let names: BTreeSet<String> = if c.runner == "cargo" {
-            output
-                .text
-                .lines()
-                .filter_map(|l| l.strip_suffix(": test").map(str::to_owned))
-                .collect()
+        // Even a narrow row must qualify a name shared elsewhere in its package.
+        let package = list_results(root, c, Scope::Package, stop)?;
+        resolve_expected(c, &package)?;
+        let selected = if c.target.is_some() {
+            list_results(root, c, Scope::Row, stop)?
         } else {
-            let json: serde_json::Value = serde_json::from_str(
-                output
-                    .text
-                    .lines()
-                    .find(|l| l.starts_with('{'))
-                    .ok_or("missing nextest list JSON")?,
-            )
-            .map_err(|e| e.to_string())?;
-            json.get("rust-suites")
-                .and_then(|v| v.as_object())
-                .ok_or("missing nextest rust-suites")?
-                .values()
-                .flat_map(|s| {
-                    s.get("testcases")
-                        .and_then(|v| v.as_object())
-                        .into_iter()
-                        .flat_map(|m| m.keys().cloned())
-                })
-                .collect()
+            package
         };
-        for expected in &c.expect_red {
-            if !names.contains(expected) {
+        for expected in resolve_expected(c, &selected)? {
+            if !selected.names.contains_key(&expected) {
                 return Err(format!(
                     "{}: expect_red name no longer exists: {expected}",
                     c.id
@@ -2245,9 +2468,7 @@ pub fn signal_flag() -> Result<Arc<AtomicBool>> {
 }
 
 fn parse_nextest_json(text: &str) -> Result<TestResults> {
-    let mut red = BTreeSet::new();
-    let mut green = BTreeSet::new();
-    let mut targets = BTreeMap::new();
+    let mut events = TestEvents::default();
     let mut total = 0u64;
     let mut summaries = 0;
     for line in text.lines().filter(|l| l.starts_with('{')) {
@@ -2263,16 +2484,10 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
             let (target, name) = qualified
                 .split_once('$')
                 .ok_or("nextest name missing binary prefix")?;
-            attribute(&mut targets, name, target)?;
-            let name = name.to_owned();
-            if red.contains(&name) || green.contains(&name) {
-                return Err(format!("ambiguous or repeated test name: {name}"));
+            if events.0.contains_key(&(target.to_owned(), name.to_owned())) {
+                return Err(format!("repeated test name: {target}::{name}"));
             }
-            if status == "ok" {
-                green.insert(name);
-            } else {
-                red.insert(name);
-            }
+            events.record(target, name, status == "failed")?;
         } else if kind == "suite" && matches!(status, "ok" | "failed") {
             summaries += 1;
             total += event["passed"]
@@ -2285,14 +2500,10 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
             return Err(format!("unrecognized nextest event: {line}"));
         }
     }
-    if summaries == 0 || total as usize != red.len() + green.len() {
+    if summaries == 0 || total as usize != events.0.len() {
         return Err("nextest summary missing or inconsistent".into());
     }
-    Ok(TestResults {
-        red: red.into_iter().collect(),
-        green: green.into_iter().collect(),
-        targets,
-    })
+    Ok(events.finish("nextest"))
 }
 
 #[cfg(test)]
@@ -2365,6 +2576,19 @@ mod target_parser_tests {
             stable_target("nextest", "crate::encoder_e2e"),
             "crate::encoder_e2e"
         );
+    }
+
+    #[test]
+    fn repeated_names_are_qualified_in_nextest_human_and_json_results() {
+        for text in [
+            "FAIL [ 0.001s] fixture::one tests::shared\nPASS [ 0.001s] fixture::two tests::shared\nSummary [ 0.01s] 2 tests run: 1 passed, 1 failed",
+            "{\"type\":\"test\",\"event\":\"failed\",\"name\":\"fixture::one$tests::shared\"}\n{\"type\":\"test\",\"event\":\"ok\",\"name\":\"fixture::two$tests::shared\"}\n{\"type\":\"suite\",\"event\":\"failed\",\"passed\":1,\"failed\":1}",
+        ] {
+            let results = parse_test_results(text, "nextest").unwrap();
+            assert_eq!(results.red, ["fixture::one::tests::shared"]);
+            assert_eq!(results.green, ["fixture::two::tests::shared"]);
+            assert_eq!(results.targets.len(), 2);
+        }
     }
 
     #[test]

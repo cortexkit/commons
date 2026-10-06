@@ -448,11 +448,12 @@ fn command_rows_respect_platform_desk_and_prebuild_before_baseline_and_mutant() 
     assert_eq!(report[1]["outcome"], "CAUGHT");
     assert_eq!(
         fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
-        "False\nTrue\nFalse\nTrue\n"
+        "False\nTrue\nTrue\nFalse\n"
     );
     assert_eq!(
         f.log(),
-        format!("baseline {COMMAND_GUARD}\nmutant {COMMAND_GUARD}\n").repeat(2)
+        format!("baseline {COMMAND_GUARD}\n").repeat(2)
+            + &format!("mutant {COMMAND_GUARD}\n").repeat(2)
     );
 }
 
@@ -504,7 +505,15 @@ fn command_invalid_process_is_error_not_red_and_restores() {
         let row = f.run(&c, false);
         assert_eq!(row.outcome, Outcome::Error, "{row:?}");
         assert!(row.red.is_empty());
-        assert!(row.reason.unwrap().contains(&format!("exit {}", &id[4..])));
+        let reason = row.reason.unwrap();
+        assert!(
+            reason.contains(if id == "exit126" {
+                "exit 126: not executable, or the command refused to run"
+            } else {
+                "exit 127: program not found"
+            }),
+            "{reason}"
+        );
     }
     let mut c = f.control();
     c.command.as_mut().unwrap()[0] = "./ck-mutate-program-that-does-not-exist".into();
@@ -1294,6 +1303,89 @@ fn collateral_same_target_is_caught_with_count() {
     let json = serde_json::to_value(&row).unwrap();
     assert_eq!(json["collateral"]["count"], 1);
     assert_eq!(json["collateral"]["targets"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn shared_test_names_keep_each_binary_identity_and_require_qualified_expectations() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root().join("src/bin")).unwrap();
+    let source = r#"fn main() {}
+#[cfg(test)] mod tests {
+    #[test] fn shared() { assert!(!mutation_fixture::guarded(0)); }
+}
+"#;
+    for bin in ["one", "two"] {
+        fs::write(f.root().join(format!("src/bin/{bin}.rs")), source).unwrap();
+    }
+    cmd(f.root(), "git", &["add", "src/bin"]);
+    f.commit();
+    let mut c = f.control();
+    c.only = false;
+    c.target = None;
+    c.expect_red = vec!["one::tests::shared".into()];
+    let row = run_broad_row(f.root(), &c, false, &AtomicBool::new(false)).unwrap();
+    assert_eq!(row.outcome, Outcome::CaughtBroadly, "{row:?}");
+    assert!(row.red.contains(&"one::tests::shared".into()), "{row:?}");
+    assert!(row.red.contains(&"two::tests::shared".into()), "{row:?}");
+    assert_eq!(row.collateral.count, 2);
+    assert_eq!(row.collateral.targets, ["mutation_fixture", "two"]);
+    let package = run_row(f.root(), &c, false, &AtomicBool::new(false), true).unwrap();
+    assert_eq!(package.outcome, Outcome::Caught);
+    assert_eq!(package.red, row.red);
+    let explored = f.explore(&c, false);
+    assert_eq!(explored.red, row.red);
+
+    let cat = Catalogue {
+        control: vec![c.clone()],
+        ..Catalogue::default()
+    };
+    check(f.root(), &cat, &AtomicBool::new(false)).unwrap();
+    c.target = Some("--bin one".into());
+    assert_eq!(
+        f.run(&c).outcome,
+        Outcome::Caught,
+        "qualified ids work in narrow targets too"
+    );
+    c.expect_red = vec!["tests::shared".into()];
+    let cat = Catalogue {
+        control: vec![c.clone()],
+        ..Catalogue::default()
+    };
+    let error = check(f.root(), &cat, &AtomicBool::new(false)).unwrap_err();
+    assert!(
+        error.contains("ambiguous expect_red name tests::shared"),
+        "{error}"
+    );
+    assert!(
+        error.contains("one::tests::shared") && error.contains("two::tests::shared"),
+        "{error}"
+    );
+    let refused = f.run(&c);
+    assert_eq!(refused.outcome, Outcome::Error, "{refused:?}");
+    assert!(refused.reason.unwrap().contains("choose a qualified name"));
+    assert_eq!(
+        fs::read_to_string(f.root().join("src/lib.rs")).unwrap(),
+        include_str!("fixture/src/lib.rs")
+    );
+
+    // A sibling with the same name can stay green; qualification must preserve
+    // this independent result rather than letting the failing binary overwrite it.
+    fs::write(
+        f.root().join("src/bin/two.rs"),
+        source.replace(
+            "!mutation_fixture::guarded(0)",
+            "mutation_fixture::guarded(1)",
+        ),
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "src/bin/two.rs"]);
+    f.commit();
+    c.target = None;
+    c.expect_red = vec!["two::tests::shared".into()];
+    let mixed = f.run(&c);
+    assert_eq!(mixed.outcome, Outcome::WrongTest, "{mixed:?}");
+    assert!(mixed.red.contains(&"one::tests::shared".into()));
+    assert!(mixed.green.contains(&"two::tests::shared".into()));
 }
 
 #[test]
@@ -2602,6 +2694,7 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
     }
     let replay = body(lib, "\nfn replay(");
     let prepare = body(lib, "    pub fn prepare(");
+    let clean_prebuild = body(lib, "\nfn clean_prebuild(");
     for needle in [
         "Saved::new(",
         "saved.restore()",
@@ -2625,7 +2718,8 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         );
         assert!(replay.contains(needle), "{needle} must live in replay");
     }
-    assert!(prepare.contains("Saved::new(") && prepare.contains("saved.restore()"));
+    assert!(prepare.contains("clean_prebuild("));
+    assert!(clean_prebuild.contains("Saved::new(") && clean_prebuild.contains("saved.restore()"));
     for forbidden in ["replaced(", "fs::write(", "command_tests(", "grade("] {
         assert!(
             !prepare.contains(forbidden),

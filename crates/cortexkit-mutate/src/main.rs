@@ -312,17 +312,23 @@ fn run() -> Result<bool> {
             let mut slots: Vec<Option<Report>> = shard.iter().map(|_| None).collect();
             let mut session =
                 ReplaySession::prepare(&root, &catalogue.prebuild, &shard, allow_dirty, &stop)?;
-            for i in execution_order(&shard) {
-                slots[i] = Some(if broad {
-                    session.run_broad_row(&root, shard[i], allow_dirty, &stop)?
-                } else {
-                    session.run_row(&root, shard[i], allow_dirty, &stop, false)?
-                });
-                if stop.load(Ordering::SeqCst) {
-                    break;
+            let work = (|| -> Result<()> {
+                session.baselines(&root, &shard, allow_dirty, &stop)?;
+                for i in execution_order(&shard) {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    slots[i] = Some(if broad {
+                        session.run_broad_row(&root, shard[i], allow_dirty, &stop)?
+                    } else {
+                        session.run_row(&root, shard[i], allow_dirty, &stop, false)?
+                    });
                 }
-            }
-            let rows: Vec<Report> = slots.into_iter().flatten().collect();
+                Ok(())
+            })();
+            let mut rows: Vec<Report> = slots.into_iter().flatten().collect();
+            session.finish(&root, &mut rows, allow_dirty)?;
+            work?;
             write_report(report, &rows)?;
             Ok(!stop.load(Ordering::SeqCst) && rows.iter().all(Report::passes))
         }
@@ -367,11 +373,33 @@ fn run() -> Result<bool> {
             validate(&root, &catalogue)?;
             let mut session =
                 ReplaySession::prepare(&root, &catalogue.prebuild, &[&c], p.allow_dirty, &stop)?;
+            session.baselines(&root, &[&c], p.allow_dirty, &stop)?;
             let first = session.run_row(&root, &c, p.allow_dirty, &stop, false)?;
             let caught = first.outcome.is_caught();
             let recorded = caught || first.outcome == Outcome::DeskOnly;
             let mut rows = vec![first];
-            if recorded {
+            let work = (|| -> Result<()> {
+                if rows[0].outcome == Outcome::Survived && c.runner == "command" {
+                    println!("An expected command test stayed green: inspect the guard or mutant equivalence. Command rows have no broader replay.");
+                } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
+                    let broader = session.run_row(&root, &c, p.allow_dirty, &stop, true)?;
+                    if !broader.red.is_empty() {
+                        println!("Unscoped package tests caught the mutant: the original command scope omitted covering tests. Update target and expect_red.");
+                    } else if broader.outcome == Outcome::Survived {
+                        println!("No package test caught this mutant: a real coverage gap or an equivalent mutant. Inspect semantics; use equivalent = <reason> only when justified.");
+                    } else {
+                        println!(
+                            "Unscoped replay could not establish a cause: {:?}",
+                            broader.outcome
+                        );
+                    }
+                    rows.push(broader);
+                }
+                Ok(())
+            })();
+            session.finish(&root, &mut rows, p.allow_dirty)?;
+            work?;
+            if recorded && !stop.load(Ordering::SeqCst) {
                 append_control(&cli.catalogue, &c)?;
                 if caught {
                     // The proved file is restored by now, so the hint reads its
@@ -384,24 +412,10 @@ fn run() -> Result<bool> {
                         println!("{hint}");
                     }
                 }
-            } else if rows[0].outcome == Outcome::Survived && c.runner == "command" {
-                println!("An expected command test stayed green: inspect the guard or mutant equivalence. Command rows have no broader replay.");
-            } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
-                let broader = session.run_row(&root, &c, p.allow_dirty, &stop, true)?;
-                if !broader.red.is_empty() {
-                    println!("Unscoped package tests caught the mutant: the original command scope omitted covering tests. Update target and expect_red.");
-                } else if broader.outcome == Outcome::Survived {
-                    println!("No package test caught this mutant: a real coverage gap or an equivalent mutant. Inspect semantics; use equivalent = <reason> only when justified.");
-                } else {
-                    println!(
-                        "Unscoped replay could not establish a cause: {:?}",
-                        broader.outcome
-                    );
-                }
-                rows.push(broader);
             }
             write_report(p.report, &rows)?;
-            Ok(recorded || rows[0].outcome == Outcome::SkippedPlatform)
+            Ok(!stop.load(Ordering::SeqCst)
+                && (recorded || rows[0].outcome == Outcome::SkippedPlatform))
         }
         Action::Explore(x) => explore(&root, &cli.catalogue, x, &stop),
     }
@@ -479,6 +493,9 @@ fn explore(
     let mut session =
         ReplaySession::prepare(root, &catalogue.prebuild, &[&c], x.allow_dirty, stop)?;
     let row = session.explore_row(root, &c, x.allow_dirty, stop, x.workspace)?;
+    let mut rows = vec![row];
+    session.finish(root, &mut rows, x.allow_dirty)?;
+    let row = rows.remove(0);
     let caught = row.outcome.is_caught();
     let recorded = caught || matches!(row.outcome, Outcome::Unreachable | Outcome::DeskOnly);
     let skipped = row.outcome == Outcome::SkippedPlatform;

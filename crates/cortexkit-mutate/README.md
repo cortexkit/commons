@@ -58,6 +58,17 @@ shell syntax or an arbitrary command/name filter. Selectors include `--lib`,
 `--test name`, `--bin name`, `--example name`, `--bench name`, `--tests`, `--bins`,
 `--examples`, and `--all-targets`. Quoted paths and shell expansion are not supported.
 
+Cargo/nextest `expect_red` names may be plain when unique in the package. If two
+test binaries share a name, use `target::test_name`, for example
+`ck-under-test::tests::cgroup_placement_override_requires_exact_disabled_value`
+(using the stable target name the runner reports). Nextest retains its binary id,
+such as `package::binary::tests::x`. Ambiguous plain expectations are validation
+errors listing the qualified candidates, even for a narrowly selected target.
+Broad, package and explore results qualify repeated names and keep each binary's
+independent red/green result; they never discard a binary to resolve ambiguity.
+Unique names remain plain in reports, and qualified expectations still work in
+a scoped replay observing only that one binary.
+
 `equivalent` and `unreachable` are mutually exclusive recorded dispositions,
 not runner detections. Each takes a non-empty reason string. An `unreachable`
 reason must explain why no production caller exists (for example, all references
@@ -158,20 +169,33 @@ lockfile mutation can change its output. Reusing a baseline binary could therefo
 hide a mutant. A mutated prerequisite failure is row **ERROR**, never CAUGHT or
 DID_NOT_COMPILE, because the guarding tests did not execute.
 
-After such a mutated prerequisite run, source restoration alone leaves fixture
-outputs mutated. Before the **next executable row of any kind** starts, the
-session reruns prerequisites on the restored tree. This refresh precedes both
-the next build (which might embed a generated fixture) and any command baseline.
-A failing restored-tree refresh aborts the session by step name: later results
-would otherwise use an untrustworthy fixture. Recorded dispositions/platform
-skips do not need a refresh; it waits for the next executable row.
+As of 0.5.2, sessions collect **every selected command row's per-id baseline
+before the first mutant**. A failing baseline is that row's ERROR and skips its
+mutant; other baselines still run on clean fixtures. Cargo and nextest replays
+have no green baseline runs; package-wide name listing validates expected test
+identities on the clean tree before mutants. Their mutant build/test protocol is unchanged.
+No clean-tree test run can consume an earlier mutant's fixture.
+
+Source restoration between mutants does not rebuild fixtures: the next mutant
+refreshes its own prerequisites as above. After all mutants, the session runs
+prerequisites **once on the restored source**, leaving the developer's fixtures
+clean. N mutants that reach their prerequisite phase require **N+2** builds
+(initial, N mutated, final), instead of 2N. A failed or interrupted mutant build
+also requires final cleanup, since builds may produce artifacts before failing.
+A failing final refresh aborts the session by step name: the tree's fixtures
+are suspect. If no mutant is applied, the initial clean preparation is sufficient.
+Mutant builds must not rely on a previous row's generated fixture; prerequisites
+that generate compile-time inputs should handle refreshing those inputs within
+the build itself. Declared mutant prerequisites still run after `--no-run`.
 
 `run --broad`, command rows, `prove` (including its survivor diagnosis), and
 `explore` all use the same session prerequisites. `prove` and `explore` read them
 from `--catalogue` even without appending. Append preserves the existing root
 list and does not run it again for explore's name check. Standalone `check` runs
 preparation once before list-mode compilation. Library clients with catalogue
-prerequisites use `ReplaySession::prepare` and its replay methods; plain
+prerequisites use `ReplaySession::prepare`, `baselines` for all selected rows
+(command runs or Cargo/nextest name validation), replay methods, then `finish`
+(also on early errors); plain
 `run_row`/`explore_row` have no catalogue context.
 
 Full prerequisite output, step names and elapsed milliseconds go to stderr logs.
@@ -180,7 +204,9 @@ from `build_ms` and `test_ms`. Session preparation is attributed **once**, to th
 first executable row, in `baseline_prebuild_ms` and `baseline_prebuild_tail`;
 other rows have zero/empty baseline fields. Output tails are bounded like other
 runner output. `restore_prebuild_ms` and `restore_prebuild_tail` separately record
-restored-tree refreshes before later rows. A prerequisite timeout uses
+the final restored-tree refresh, attributed once to the last reported row.
+Report order is unchanged, regardless of the internal grouped execution order.
+A prerequisite timeout uses
 `timed_out_phase: "prebuild"` and ERROR.
 
 ### HUB: reviewed cross-target catches
@@ -282,11 +308,13 @@ exit from establishing a false pass/catch. Cargo/nextest already parse their
 per-test counts and cannot carry `test_count_pattern`.
 
 **Every replay first runs every expected id on the unmutated tree.** Each must
-exit 0 before any mutant is applied. A non-green baseline is ERROR and names
-the id. There is no baseline cache: otherwise an always-failing command, a
+exit 0 before any mutant in the session is applied. A non-green baseline is ERROR
+and names the id. Baselines are collected afresh each session, never cached across
+sessions: otherwise an always-failing command, a
 stale environment, or a pre-existing broken test could masquerade as a catch.
 On the mutant, every expected id exiting nonzero means CAUGHT; any exiting 0
-means SURVIVED. A spawn failure, exit 126/127 (not executable/not found), death
+means SURVIVED. A spawn failure, exit 126 (not executable, or the command refused
+to run), exit 127 (not found), death
 by signal, interruption, or timeout is ERROR, **never red**, on either tree.
 The row's `timeout_s` applies separately to each baseline and mutant invocation.
 There is no normal build phase; command test timeouts report `timed_out_phase: "test"`.
@@ -535,6 +563,10 @@ semantics; closing a console,
 TerminateProcess, power loss, SIGKILL, aborting panics, or OS failure cannot be
 covered by in-process restoration. Detached processes that escape a Unix process
 group are not covered. Run proofs in disposable CI checkouts, not production.
+
+After an interrupted mutant, the final restored-tree prebuild still runs: the
+latched interrupt does not cancel cleanup, but each prerequisite's own timeout
+still applies. A second interruption does not bypass those cleanup deadlines.
 
 **Never `git checkout` a target mid-run.** It removes the mutation before tests
 execute and fakes SURVIVED. Do not edit targets or their tests while a replay is
