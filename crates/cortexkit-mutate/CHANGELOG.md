@@ -15,7 +15,7 @@
   expected red test's own failure output (Cargo stdout blocks, nextest stdout,
   or the per-id command's combined output). Mismatches fail the row with the new
   RED_FOR_ANOTHER_REASON outcome and the first lines of the actual failure.
-  Rows without a pattern retain their ordinary failure grading.
+  Rows without a pattern grade as before: any red expected test is a catch.
 - `prove` accepts and appends `--expect-message` and `--signal-is-catch REASON`.
   Keep the unversioned catalogue/report format; older runners reject new fields.
 
