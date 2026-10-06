@@ -1185,10 +1185,12 @@ fn command_tests(
 ) -> Result<()> {
     let argv = c.command.as_ref().ok_or("command is required")?;
     for id in &c.expect_red {
-        let label = if baseline {
-            "baseline was not green"
+        // The error label states a verdict, so it is used only when the run fails;
+        // the output heading names the phase and stays neutral for green runs.
+        let (label, heading) = if baseline {
+            ("baseline was not green", "baseline output")
         } else {
-            "mutated command"
+            ("mutated command", "mutated command output")
         };
         let error = |reason: String| format!("{}: {id}: {label}: {reason}", c.id);
         let args: Vec<_> = argv
@@ -1201,7 +1203,7 @@ fn command_tests(
             .map_err(|e| error(format!("spawn/execution failed: {e}")))?;
         report.test_ms += output.ms;
         report.test_tail = tail(&format!(
-            "{}\n{label}: {id}\n{}",
+            "{}\n{heading}: {id}\n{}",
             report.test_tail, output.text
         ));
         if output.interrupted {

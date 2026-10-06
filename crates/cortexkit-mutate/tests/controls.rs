@@ -323,6 +323,10 @@ fn command_caught_fresh_baseline_each_id_and_restores() {
         assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
         assert_eq!(row.red, [COMMAND_GUARD, COMMAND_OTHER]);
         assert!(row.green.is_empty());
+        // A green baseline's output is shown under a neutral heading; the
+        // failure wording appears only when a baseline actually failed.
+        assert!(row.test_tail.contains("baseline output:"), "{row:?}");
+        assert!(!row.test_tail.contains("not green"), "{row:?}");
     }
     let one_run = format!("baseline {COMMAND_GUARD}\nbaseline {COMMAND_OTHER}\nmutant {COMMAND_GUARD}\nmutant {COMMAND_OTHER}\n");
     assert_eq!(

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- A command row's report shows a green baseline's output under `baseline output:`. The words "baseline was not green" now appear only when a baseline actually failed.
+- The README states that a command row's `timeout_s` bounds its whole command and that `build_timeout_s` does not apply to it; time a separate build with a prebuild step.
+
 ## 0.5.0
 
 - Add per-row `platforms` using validated Rust target-OS names. Nonmatching hosts

@@ -44,6 +44,12 @@ therefore never read as a hung test, and a TIMED_OUT row says which deadline
 expired. `prove` and `explore` take `--timeout-s` and `--build-timeout-s` for the
 same two deadlines.
 
+A `command` row has no separate build: its command builds and tests in one
+process (an `xcodebuild test` or a Swift package test, for example), so its
+`timeout_s` covers both, and `build_timeout_s` does not apply to it. To time or
+bound a build separately, declare it as a prebuild step, which has its own
+`timeout_s` and is reported as `prebuild_ms`.
+
 IDs are unique nonempty `[a-z0-9-]+`. `guards`, `test_file`, `runner`
 and `expect_red` are required. `runner` is `cargo`, `nextest`, or `command`.
 Cargo/nextest rows also require `package`. Their `target` defaults
