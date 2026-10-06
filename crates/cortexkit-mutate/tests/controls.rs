@@ -419,7 +419,7 @@ fn command_rows_respect_platform_desk_and_prebuild_before_baseline_and_mutant() 
     second.id = "command-second".into();
     let cat = Catalogue { control: vec![f.control(), second], prebuild: vec![Prebuild {
         name: "command-fixture".into(),
-        command: vec!["python3".into(), "-c".into(), "from pathlib import Path; v = str(Path('guard.py').read_bytes() == b'ENABLED = False\\n'); Path('.git/fixture-output').write_text(v); f = Path('.git/prebuild-runs').open('a'); f.write(v + '\\n'); f.close(); print('fixture refreshed: ' + v)".into()],
+        command: vec!["python3".into(), "-c".into(), "from pathlib import Path; v = str(Path('guard.py').read_bytes() == b'ENABLED = False\\n'); Path('.git/fixture-output').write_text(v); f = Path('.git/prebuild-runs').open('a', newline='\\n'); f.write(v + '\\n'); f.close(); print('fixture refreshed: ' + v)".into()],
         timeout_s: 5,
     }] };
     let path = f.root().join(".git/catalogue.toml");
