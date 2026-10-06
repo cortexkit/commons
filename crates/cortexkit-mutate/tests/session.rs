@@ -258,6 +258,40 @@ fn prebuild_refreshes_mutated_fixture_and_records_separate_timing() {
 }
 
 #[test]
+fn a_fixture_backed_catch_requires_the_declared_prebuild() {
+    let f = Fixture::new();
+    let path = f.root().join("src/lib.rs");
+    let source = fs::read_to_string(&path).unwrap();
+    // Without a real fixture this test intentionally observes no guard. This
+    // distinguishes a genuine binary-backed catch from an unrelated missing-file
+    // failure, rather than relying only on prerequisite timing/log assertions.
+    let source = source.replace(
+        "assert_eq!(std::fs::read_to_string(\"fixture-output\").expect(\"prebuild must produce the fixture\"), \"false\");",
+        "let Ok(fixture) = std::fs::read_to_string(\"fixture-output\") else { return; }; assert_eq!(fixture, \"false\");",
+    );
+    fs::write(&path, source).unwrap();
+    f.commit();
+    let without = run_row(f.root(), &f.row(), false, &AtomicBool::new(false), false).unwrap();
+    assert_eq!(without.outcome, Outcome::Survived);
+    assert!(!f.root().join("fixture-output").exists());
+    let output = f.cli(&["run", "--all", "--report", ".git/report.json"]);
+    let report = f.report();
+    assert_eq!(
+        report[0]["outcome"], "CAUGHT",
+        "only a refreshed fixture can demonstrate the catch"
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(f.root().join("fixture-output")).unwrap(),
+        "true"
+    );
+}
+
+#[test]
 fn failing_unmutated_prebuild_aborts_replay_by_step_name() {
     let f = Fixture::new();
     fs::write(f.root().join("fail-baseline"), "").unwrap();
