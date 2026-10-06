@@ -18,8 +18,11 @@
   Refresh prerequisites on the restored tree before the next executable row of
   any kind, with separate restore timing; a refresh failure aborts the session.
 - Share both features across broad replay, command rows, prove, explore and check.
-  Explore preserves reliably visible literal whole-file cfg gates when appending;
-  ambiguous gates need an author-supplied platform. Diff selection includes rows
+  When `explore --append` writes a row, it copies a single target OS into the
+  row's `platforms` only when the whole file is gated literally: an inner
+  `#![cfg(target_os = "...")]`, or a `#[cfg(target_os = "...")] mod name;` in the
+  conventional parent file. Compound cfgs, `#[path]`-redirected modules and
+  gates on single items are left for the author to add. Diff selection includes rows
   affected by changed root prerequisites. Existing lockfile restoration remains.
 - Require command rows to declare `test_count_pattern`, a literal pattern with
   one decimal `{count}` placeholder. Baseline and mutant invocations must each
