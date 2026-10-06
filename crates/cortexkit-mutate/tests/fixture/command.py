@@ -32,6 +32,8 @@ if test_id in (
     "script.tests.flows_rig.RigChecks.test_guard",
     "script.tests.flows_rig.RigChecks.test_other",
 ):
+    if mutated:
+        print(f"guard assertion failed: {test_id}", flush=True)
     sys.exit(3 if mutated else 0)
 if test_id in ("exit126", "exit127", "signal", "sleep_mutant"):
     sys.exit(0)

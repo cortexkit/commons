@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0
+
+- Treat cargo/nextest test signal deaths as ERROR, naming the test and signal,
+  rather than crediting an abort or segfault as an assertion catch. Cargo also
+  requires a summary from each completed binary. Nextest's human signal status
+  is correlated with its libtest-json test identity: current JSON alone encodes
+  aborts as `failed` with empty `stdout`. Check in actual runner-output fixtures
+  and exercise aborts and ordinary assertion failures through both runners.
+- Add optional `signal_is_catch = "reason"` for contracts whose intended failure
+  really is termination by signal. Empty reasons are rejected; the exception
+  does not bypass message/count/name checks or a command row's green baseline.
+- Add optional `expect_message`, a substring or `/regex/` required in every
+  expected red test's own failure output (Cargo stdout blocks, nextest stdout,
+  or the per-id command's combined output). Mismatches fail the row with the new
+  RED_FOR_ANOTHER_REASON outcome and the first lines of the actual failure.
+  Rows without a pattern retain their ordinary failure grading.
+- `prove` accepts and appends `--expect-message` and `--signal-is-catch REASON`.
+  Keep the unversioned catalogue/report format; older runners reject new fields.
+
 ## 0.5.2
 
 - Replay sessions now run prerequisites once on the clean tree, collect every

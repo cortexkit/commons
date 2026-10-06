@@ -125,6 +125,12 @@ struct Proof {
     test_count_pattern: Option<String>,
     #[arg(long, required = true, num_args = 1..)]
     expect_red: Vec<String>,
+    /// Substring or /regex/ required in each expected failure's output.
+    #[arg(long)]
+    expect_message: Option<String>,
+    /// Explain why an abort or other signal is the intended catch.
+    #[arg(long, value_name = "REASON")]
+    signal_is_catch: Option<String>,
     #[arg(long)]
     only: bool,
     #[arg(long, default_value_t = 600)]
@@ -354,6 +360,8 @@ fn run() -> Result<bool> {
                 command: p.command,
                 test_count_pattern: p.test_count_pattern,
                 expect_red: p.expect_red,
+                expect_message: p.expect_message,
+                signal_is_catch: p.signal_is_catch,
                 only: p.only,
                 equivalent: None,
                 unreachable: None,
@@ -454,6 +462,8 @@ fn explore(
         target: None,
         command: None,
         test_count_pattern: None,
+        expect_message: None,
+        signal_is_catch: None,
         expect_red: vec![],
         only: false,
         equivalent: None,

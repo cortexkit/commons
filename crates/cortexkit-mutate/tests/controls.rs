@@ -93,6 +93,8 @@ impl Fixture {
             target: Some("--lib".into()),
             command: None,
             test_count_pattern: None,
+            expect_message: None,
+            signal_is_catch: None,
             expect_red: vec!["tests::guard_rejects_zero".into()],
             only: true,
             equivalent: None,
@@ -230,6 +232,8 @@ impl CommandFixture {
             target: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
             test_count_pattern: Some("Ran {count} tests".into()),
+            expect_message: None,
+            signal_is_catch: None,
             expect_red: vec![COMMAND_GUARD.into()],
             only: false,
             equivalent: None,
@@ -821,6 +825,257 @@ fn caught_all_failed_is_not_empty_and_restores() {
     assert_eq!(r.outcome, Outcome::Caught);
     assert_eq!(r.red.len(), 2);
     assert!(!r.red.contains(&"result:".into()));
+}
+
+#[cfg(unix)]
+#[test]
+fn signal_abort_is_error_for_cargo_and_nextest() {
+    let f = Fixture::new();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let mut c = f.control();
+        c.runner = runner.into();
+        change(
+            &mut c,
+            "pub fn wait_hook() {}",
+            "pub fn wait_hook() { std::process::abort(); }",
+            "tests::waits",
+        );
+        let row = f.run(&c);
+        eprintln!("ACTUAL {runner} OUTPUT:\n{}", row.test_tail);
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        let reason = row.reason.as_deref().unwrap();
+        assert!(
+            reason.contains("SIGABRT") && reason.contains("tests::waits"),
+            "{reason}"
+        );
+        assert!(!row.passes());
+    }
+}
+
+fn runner_available(runner: &str) -> bool {
+    if runner != "nextest" {
+        return true;
+    }
+    let installed = Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(
+        installed || std::env::var_os("CK_MUTATE_REQUIRE_NEXTEST").is_none(),
+        "CI must install nextest"
+    );
+    installed
+}
+
+#[cfg(unix)]
+#[test]
+fn signal_abort_reason_allows_catch_for_cargo_and_nextest() {
+    let f = Fixture::new();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let mut c = f.control();
+        c.runner = runner.into();
+        change(
+            &mut c,
+            "pub fn wait_hook() {}",
+            "pub fn wait_hook() { std::process::abort(); }",
+            "tests::waits",
+        );
+        c.signal_is_catch = Some("This guard intentionally aborts on invalid input".into());
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+        assert_eq!(row.red, ["tests::waits"]);
+    }
+}
+
+#[test]
+fn assertion_message_literal_and_regex_are_caught_for_both_runners() {
+    let f = Fixture::new();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let mut c = f.control();
+        c.runner = runner.into();
+        for pattern in [
+            None,
+            Some("assertion failed: !super::guarded(0)"),
+            Some(r"/assertion failed: !super::guarded\(0\)/"),
+        ] {
+            c.expect_message = pattern.map(str::to_owned);
+            let row = f.run(&c);
+            assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+        }
+    }
+}
+
+#[test]
+fn different_message_is_red_for_another_reason_for_both_runners() {
+    let f = Fixture::new();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let mut c = f.control();
+        c.runner = runner.into();
+        change(
+            &mut c,
+            "pub fn wait_hook() {}",
+            "pub fn wait_hook() { panic!(\"wrong invariant\"); }",
+            "tests::waits",
+        );
+        c.expect_message = Some("required invariant".into());
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::RedForAnotherReason, "{row:?}");
+        assert!(!row.passes());
+        let reason = row.reason.unwrap();
+        assert!(
+            reason.contains("tests::waits") && reason.contains("wrong invariant"),
+            "{reason}"
+        );
+        assert_eq!(
+            serde_json::to_value(row.outcome).unwrap(),
+            "RED_FOR_ANOTHER_REASON"
+        );
+    }
+}
+
+#[test]
+fn expect_message_must_match_each_expected_test_not_another_tests_output() {
+    let f = Fixture::new();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.only = false;
+        c.edits = vec![
+            Edit {
+                file: "src/lib.rs".into(),
+                old: "value > 0".into(),
+                new: "value >= 0".into(),
+            },
+            Edit {
+                file: "src/lib.rs".into(),
+                old: "pub fn wait_hook() {}".into(),
+                new: "pub fn wait_hook() { panic!(\"assertion failed: !super::guarded(0)\"); }"
+                    .into(),
+            },
+        ];
+        c.file = None;
+        c.old = None;
+        c.new = None;
+        c.expect_red.push("tests::waits".into());
+        c.expect_message = Some("src/lib.rs:23:".into());
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::RedForAnotherReason, "{row:?}");
+        assert!(row.reason.unwrap().contains("tests::waits"));
+    }
+}
+
+#[test]
+fn command_expect_message_uses_each_ids_combined_output() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red = vec![COMMAND_GUARD.into(), COMMAND_OTHER.into()];
+    for pattern in ["guard assertion", r"/guard assert[a-z]+/"] {
+        c.expect_message = Some(pattern.into());
+        assert_eq!(f.run(&c, false).outcome, Outcome::Caught);
+    }
+    c.expect_message = Some(COMMAND_GUARD.into());
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::RedForAnotherReason, "{row:?}");
+    assert!(row.reason.unwrap().contains(COMMAND_OTHER));
+}
+
+#[cfg(unix)]
+#[test]
+fn command_signal_reason_allows_catch_but_not_a_failed_baseline() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red = vec!["signal".into()];
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error);
+    assert!(row.reason.unwrap().contains("signal 15"));
+    c.signal_is_catch = Some("The command deliberately terminates on invalid input".into());
+    assert_eq!(f.run(&c, false).outcome, Outcome::Caught);
+    c.expect_red = vec!["always_red".into()];
+    assert_eq!(f.run(&c, false).outcome, Outcome::Error);
+}
+
+#[test]
+fn message_and_signal_fields_validate_and_round_trip() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    for (message, signal, field) in [
+        (Some("/[/"), None, "expect_message"),
+        (Some(" "), None, "expect_message"),
+        (None, Some(" \n"), "signal_is_catch"),
+    ] {
+        c.expect_message = message.map(str::to_owned);
+        c.signal_is_catch = signal.map(str::to_owned);
+        assert!(validate_mutant(f.root(), &c).unwrap_err().contains(field));
+    }
+    c.expect_message = Some("/assertion failed/".into());
+    c.signal_is_catch = Some("Intentional abort guard".into());
+    append_control(&f.root().join("new.toml"), &c).unwrap();
+    assert_eq!(load(&f.root().join("new.toml")).unwrap().control, [c]);
+}
+
+#[test]
+fn prove_preserves_message_and_signal_options_in_the_catalogue() {
+    let f = Fixture::new();
+    let out = f.cli(&[
+        "prove",
+        "--id",
+        "assertion-identity",
+        "--guards",
+        "zero is rejected",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value >= 0",
+        "--test-file",
+        "test_contract.rs",
+        "--package",
+        "mutation-fixture",
+        "--target=--lib",
+        "--expect-red",
+        "tests::guard_rejects_zero",
+        "--expect-message",
+        "assertion failed: !super::guarded(0)",
+        "--signal-is-catch",
+        "An abort is an intentional invalid-input guard",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows = load(&f.root().join("mutations.toml")).unwrap().control;
+    let appended = rows.iter().find(|c| c.id == "assertion-identity").unwrap();
+    assert_eq!(
+        appended.expect_message.as_deref(),
+        Some("assertion failed: !super::guarded(0)")
+    );
+    assert_eq!(
+        appended.signal_is_catch.as_deref(),
+        Some("An abort is an intentional invalid-input guard")
+    );
 }
 
 fn add_collateral_targets(f: &Fixture) {

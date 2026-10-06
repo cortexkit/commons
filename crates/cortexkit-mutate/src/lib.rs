@@ -44,6 +44,12 @@ pub struct Control {
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
     pub test_count_pattern: Option<String>,
     pub expect_red: Vec<String>,
+    /// Substring or /regex/ required in each expected red test's own output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_message: Option<String>,
+    /// Why a signal death demonstrates this row's intended failure mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_is_catch: Option<String>,
     #[serde(default)]
     pub only: bool,
     pub equivalent: Option<String>,
@@ -107,6 +113,16 @@ impl Control {
     fn validate_runner(&self) -> Result<()> {
         self.validate_platforms()?;
         let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
+        if self
+            .signal_is_catch
+            .as_ref()
+            .is_some_and(|s| s.trim().is_empty())
+        {
+            return Err(invalid("signal_is_catch", "requires a nonempty reason"));
+        }
+        if let Some(pattern) = &self.expect_message {
+            message_matches(pattern, "").map_err(|e| invalid("expect_message", &e))?;
+        }
         match self.runner.as_str() {
             "command" => {
                 if self.package.is_some() {
@@ -855,6 +871,7 @@ pub enum Outcome {
     CaughtBroadly,
     Survived,
     WrongTest,
+    RedForAnotherReason,
     NoTestsRan,
     AnchorMissing,
     DidNotCompile,
@@ -960,6 +977,7 @@ impl Report {
 struct Output {
     success: bool,
     code: Option<i32>,
+    signal: Option<String>,
     timeout: bool,
     interrupted: bool,
     text: String,
@@ -1092,11 +1110,59 @@ fn execute(root: &Path, mut cmd: Command, timeout: u64, stop: &AtomicBool) -> Re
     Ok(Output {
         success: status.is_some_and(|s| s.success()),
         code: status.and_then(|s| s.code()),
+        signal: status.and_then(exit_signal),
         timeout: timed_out,
         interrupted,
         text,
         ms: start.elapsed().as_millis(),
     })
+}
+
+fn exit_signal(status: std::process::ExitStatus) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal().map(|number| {
+            format!(
+                "signal {number} ({:?})",
+                rustix::process::Signal::from_named_raw(number)
+            )
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        None
+    }
+}
+
+fn message_matches(pattern: &str, output: &str) -> Result<bool> {
+    if pattern.trim().is_empty() {
+        return Err("must be nonempty".into());
+    }
+    if let Some(regex) = pattern.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
+        if regex.is_empty() {
+            return Err("regex must be nonempty".into());
+        }
+        regex::Regex::new(regex)
+            .map(|regex| regex.is_match(output))
+            .map_err(|e| format!("invalid regex: {e}"))
+    } else {
+        Ok(output.contains(pattern))
+    }
+}
+
+fn wrong_message(c: &Control, id: &str, output: &str) -> Result<Option<String>> {
+    if let Some(pattern) = &c.expect_message {
+        if !message_matches(pattern, output)? {
+            let first_lines = output.lines().take(8).collect::<Vec<_>>().join("\n");
+            return Ok(Some(format!(
+                "{id}: failure output did not match expect_message = {pattern:?}; actual failure:\n{}",
+                if first_lines.is_empty() { "<no failure output>" } else { &first_lines }
+            )));
+        }
+    }
+    Ok(None)
 }
 struct RunningChild(std::process::Child);
 impl Drop for RunningChild {
@@ -1224,9 +1290,20 @@ fn command_tests(
                 c.timeout_s
             )));
         }
-        let code = output
-            .code
-            .ok_or_else(|| error("process died by signal (no exit code)".into()))?;
+        let code = match output.code {
+            Some(code) => code,
+            None => {
+                let signal = output
+                    .signal
+                    .as_deref()
+                    .unwrap_or("unknown signal (no exit code)");
+                if baseline || c.signal_is_catch.is_none() {
+                    return Err(error(format!("process died by {signal}")));
+                }
+                // The opt-in does not waive the executed-test count or message proof.
+                1
+            }
+        };
         if code == 126 {
             return Err(error(
                 "exit 126: not executable, or the command refused to run".into(),
@@ -1244,6 +1321,10 @@ fn command_tests(
             report.green.push(id.clone());
         } else {
             report.red.push(id.clone());
+            if let Some(reason) = wrong_message(c, id, &output.text)? {
+                report.outcome = Outcome::RedForAnotherReason;
+                report.reason.get_or_insert(reason);
+            }
         }
     }
     Ok(())
@@ -1260,20 +1341,29 @@ struct TestResults {
     green: Vec<String>,
     targets: BTreeMap<String, String>,
     names: BTreeMap<String, String>,
+    failure_output: BTreeMap<String, String>,
+    signals: BTreeMap<String, String>,
 }
 
 // Keep binary identity until all output has been read. Two binaries can compile
 // the same test source, and their independent outcomes must never be collapsed.
 #[derive(Default)]
-struct TestEvents(BTreeMap<(String, String), bool>);
+struct TestEvents(BTreeMap<(String, String), TestEvent>);
+
+#[derive(Default)]
+struct TestEvent {
+    failed: bool,
+    output: String,
+    signal: Option<String>,
+}
 
 impl TestEvents {
     fn record(&mut self, target: &str, name: &str, failed: bool) -> Result<()> {
         let key = (target.to_owned(), name.to_owned());
-        if self.0.get(&key).is_some_and(|old| *old != failed) {
+        if self.0.get(&key).is_some_and(|old| old.failed != failed) {
             return Err(format!("conflicting test results: {target}::{name}"));
         }
-        self.0.insert(key, failed);
+        self.0.entry(key).or_default().failed = failed;
         Ok(())
     }
 
@@ -1287,8 +1377,10 @@ impl TestEvents {
             green: vec![],
             targets: BTreeMap::new(),
             names: BTreeMap::new(),
+            failure_output: BTreeMap::new(),
+            signals: BTreeMap::new(),
         };
-        for ((target, name), failed) in self.0 {
+        for ((target, name), event) in self.0 {
             let identity = if counts[&name] > 1 {
                 format!("{}::{name}", stable_target(runner, &target))
             } else {
@@ -1296,7 +1388,13 @@ impl TestEvents {
             };
             results.targets.insert(identity.clone(), target);
             results.names.insert(identity.clone(), name);
-            if failed {
+            results
+                .failure_output
+                .insert(identity.clone(), event.output);
+            if let Some(signal) = event.signal {
+                results.signals.insert(identity.clone(), signal);
+            }
+            if event.failed {
                 results.red.push(identity);
             } else {
                 results.green.push(identity);
@@ -1371,15 +1469,44 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     }
     let mut events = TestEvents::default();
     let mut cargo_target = String::new();
+    let mut cargo_started = BTreeSet::new();
+    let mut cargo_complete = BTreeSet::new();
+    let mut cargo_signaled = BTreeSet::new();
+    let mut pending = None;
+    let mut failure_block: Option<(String, String)> = None;
     let mut summary_total = 0;
+    let mut cargo_counts = BTreeMap::<String, usize>::new();
     let mut observed_summary = false;
     let mut nextest_total = None;
     for line in text.lines() {
+        let raw_line = line;
         let line = line.trim();
         if runner == "cargo" {
+            if let Some(name) = line
+                .strip_prefix("---- ")
+                .and_then(|s| s.strip_suffix(" stdout ----"))
+            {
+                failure_block = Some((cargo_target.clone(), name.to_owned()));
+                continue;
+            }
+            if line == "failures:" || line.starts_with("test result:") {
+                failure_block = None;
+            }
+            if let Some(key) = &failure_block {
+                let event = events
+                    .0
+                    .get_mut(key)
+                    .ok_or("failure output without test result")?;
+                event.output.push_str(raw_line);
+                event.output.push('\n');
+                continue;
+            }
             if let Some(target) = cargo_binary_header(line)? {
                 cargo_target = target;
+                cargo_started.insert(cargo_target.clone());
+                pending = None;
             } else if let Some(rest) = line.strip_prefix("test result:") {
+                cargo_complete.insert(cargo_target.clone());
                 observed_summary = true;
                 for key in ["passed", "failed", "ignored", "measured", "filtered"] {
                     let words: Vec<_> = rest.split_whitespace().collect();
@@ -1393,10 +1520,16 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
                         .ok_or_else(|| format!("invalid libtest count: {line}"))?;
                     if key == "passed" || key == "failed" {
                         summary_total += count;
+                        *cargo_counts.entry(cargo_target.clone()).or_default() += count;
                     }
                 }
             } else if let Some(rest) = line.strip_prefix("test ") {
+                if let Some(name) = rest.strip_suffix(" ...") {
+                    pending = Some(name.to_owned());
+                    continue;
+                }
                 if let Some((name, status)) = rest.rsplit_once(" ... ") {
+                    pending = None;
                     match status {
                         "ok" => {
                             events.record(&cargo_target, name, false)?;
@@ -1405,8 +1538,25 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
                             events.record(&cargo_target, name, true)?;
                         }
                         status if status == "ignored" || status.starts_with("ignored,") => {}
+                        status if status.is_empty() || status.starts_with("error:") => {
+                            pending = Some(name.to_owned());
+                        }
                         _ => return Err(format!("unrecognized test status: {line}")),
                     }
+                }
+            } else if line.starts_with("process didn't exit successfully:") {
+                if let Some((_, signal)) = line.rsplit_once(" (signal: ") {
+                    let signal = signal.trim_end_matches(')').to_owned();
+                    let name = pending.take().ok_or_else(|| format!(
+                        "{cargo_target}: test binary died by signal {signal} (no running test identified)"
+                    ))?;
+                    events.record(&cargo_target, &name, true)?;
+                    events
+                        .0
+                        .get_mut(&(cargo_target.clone(), name))
+                        .unwrap()
+                        .signal = Some(format!("signal {signal}"));
+                    cargo_signaled.insert(cargo_target.clone());
                 }
             }
         } else {
@@ -1424,17 +1574,54 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
                         .ok_or("invalid nextest test count")?,
                 );
             }
-            if matches!(words.first(), Some(&"PASS") | Some(&"FAIL")) {
-                let name = words.last().ok_or("empty nextest status")?.to_string();
-                let target = words
-                    .get(words.len().checked_sub(2).ok_or("missing nextest binary")?)
-                    .ok_or("missing nextest binary")?;
-                events.record(target, &name, words[0] == "FAIL")?;
+            if let Some((status, target, name)) = nextest_status(line) {
+                events.record(target, name, status != "PASS")?;
+                let key = (target.to_owned(), name.to_owned());
+                if status.starts_with("SIG") {
+                    events.0.get_mut(&key).unwrap().signal = Some(status.to_owned());
+                }
+                failure_block = (status != "PASS").then_some(key);
+            } else if let Some(key) = &failure_block {
+                // Older nextest emits failure output beneath the status, with
+                // stdout/stderr or combined-output headings rather than JSON.
+                if line.starts_with("Summary") || line.starts_with('─') {
+                    failure_block = None;
+                } else {
+                    let event = events.0.get_mut(key).unwrap();
+                    event.output.push_str(raw_line);
+                    event.output.push('\n');
+                }
             }
         }
     }
-    if runner == "cargo" && (!observed_summary || summary_total != events.0.len()) {
-        return Err("libtest summary missing or counts disagree with per-test output".into());
+    if runner == "cargo" {
+        for target in cargo_started.difference(&cargo_complete) {
+            if !cargo_signaled.contains(target) {
+                return Err(format!("{target}: libtest binary ended without a summary; running test: {} (signal unknown)", pending.as_deref().unwrap_or("<not reported>")));
+            }
+        }
+        for (target, count) in cargo_counts {
+            let observed = events
+                .0
+                .keys()
+                .filter(|(binary, _)| *binary == target)
+                .count();
+            if count != observed {
+                return Err(format!(
+                    "{target}: libtest summary counts disagree with per-test output"
+                ));
+            }
+        }
+        let aborted_count = events
+            .0
+            .keys()
+            .filter(|(target, _)| cargo_signaled.contains(target))
+            .count();
+        if (!observed_summary && cargo_signaled.is_empty())
+            || summary_total + aborted_count != events.0.len()
+        {
+            return Err("libtest summary missing or counts disagree with per-test output".into());
+        }
     }
     if runner == "nextest" && nextest_total != Some(events.0.len()) {
         if events.0.is_empty() && text.contains("no tests to run") {
@@ -1443,6 +1630,18 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
         return Err("nextest summary missing or counts disagree with per-test output".into());
     }
     Ok(events.finish(runner))
+}
+
+fn nextest_status(line: &str) -> Option<(&str, &str, &str)> {
+    let words: Vec<_> = line.split_whitespace().collect();
+    let status = *words.first()?;
+    if !matches!(status, "PASS" | "FAIL") && !status.starts_with("SIG") {
+        return None;
+    }
+    if !words.get(1)?.starts_with('[') || words.len() < 4 {
+        return None;
+    }
+    Some((status, words[words.len() - 2], words[words.len() - 1]))
 }
 
 fn stable_target<'a>(runner: &str, target: &'a str) -> &'a str {
@@ -1498,6 +1697,8 @@ fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, Vec<Str
     ))
 }
 
+/// Name-only grading. Replay additionally verifies signals and per-test messages
+/// against the original runner output before crediting a catch.
 pub fn grade(c: &Control, red: &[String], green: &[String]) -> Outcome {
     if red.len() + green.len() == 0
         || c.expect_red
@@ -1985,7 +2186,9 @@ fn replay(
                 &mut report.timed_out_phase,
             )?;
             command_tests(root, c, stop, &mut report, false)?;
-            report.outcome = grade(c, &report.red, &report.green);
+            if report.outcome != Outcome::RedForAnotherReason {
+                report.outcome = grade(c, &report.red, &report.green);
+            }
             return Ok(());
         }
         let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
@@ -2027,7 +2230,19 @@ fn replay(
             report.reason = Some(format!("test run exceeded timeout_s = {}", c.timeout_s));
             return Ok(());
         }
+        if tests.code.is_none() {
+            return Err(format!(
+                "test runner died by {}; expected tests: {}",
+                tests.signal.as_deref().unwrap_or("unknown signal"),
+                c.expect_red.join(", ")
+            ));
+        }
         let results = parse_test_results(&tests.text, &c.runner)?;
+        if c.signal_is_catch.is_none() {
+            if let Some((name, signal)) = results.signals.iter().next() {
+                return Err(format!("{name}: test binary died by {signal}"));
+            }
+        }
         report.outcome = match scope {
             // Explore has no expected tests: every red name becomes expect_red
             // when recorded, so none is collateral to that discovery.
@@ -2038,7 +2253,17 @@ fn replay(
                 let (extra, cross_targets) = collateral(&grading, &results)?;
                 report.collateral = extra;
                 report.breadth_observed = scope == Scope::Broad;
-                let outcome = grade(&grading, &results.red, &results.green);
+                let mut outcome = grade(&grading, &results.red, &results.green);
+                for name in &grading.expect_red {
+                    if results.red.contains(name) {
+                        if let Some(reason) = wrong_message(c, name, &results.failure_output[name])?
+                        {
+                            outcome = Outcome::RedForAnotherReason;
+                            report.reason = Some(reason);
+                            break;
+                        }
+                    }
+                }
                 if outcome == Outcome::Caught && report.breadth_observed {
                     if let Some(reason) = &c.hub {
                         let approved = c.hub_targets.as_deref().unwrap_or_default();
@@ -2488,6 +2713,11 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
                 return Err(format!("repeated test name: {target}::{name}"));
             }
             events.record(target, name, status == "failed")?;
+            events
+                .0
+                .get_mut(&(target.to_owned(), name.to_owned()))
+                .unwrap()
+                .output = event["stdout"].as_str().unwrap_or_default().to_owned();
         } else if kind == "suite" && matches!(status, "ok" | "failed") {
             summaries += 1;
             total += event["passed"]
@@ -2502,6 +2732,39 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
     }
     if summaries == 0 || total as usize != events.0.len() {
         return Err("nextest summary missing or inconsistent".into());
+    }
+    // Current nextest libtest-json marks an abort as just `failed` with empty
+    // stdout. Its simultaneous human status is the authoritative signal name.
+    // Match both binary and test, never a signal-looking word in panic output.
+    for (signal, human_target, name) in text
+        .lines()
+        .filter_map(|line| nextest_status(line.trim()))
+        .filter(|(status, _, _)| status.starts_with("SIG"))
+    {
+        let keys: Vec<_> = events
+            .0
+            .keys()
+            .filter(|(target, test)| {
+                test == name
+                    && (target == human_target
+                        || target.split_once("::").is_some_and(|(package, binary)| {
+                            package == human_target && binary == package.replace('-', "_")
+                        }))
+            })
+            .cloned()
+            .collect();
+        if keys.len() != 1 {
+            return Err(format!(
+                "{human_target}::{name}: {signal} status missing unambiguous JSON test attribution"
+            ));
+        }
+        let event = events.0.get_mut(&keys[0]).unwrap();
+        if !event.failed {
+            return Err(format!(
+                "{human_target}::{name}: {signal} disagrees with green JSON result"
+            ));
+        }
+        event.signal = Some(signal.to_owned());
     }
     Ok(events.finish("nextest"))
 }
@@ -2542,6 +2805,70 @@ mod broad_command_tests {
 #[cfg(test)]
 mod target_parser_tests {
     use super::*;
+
+    #[test]
+    fn recorded_abort_outputs_identify_the_test_and_signal() {
+        for (runner, text) in [
+            ("cargo", include_str!("../tests/fixture/cargo-abort.txt")),
+            (
+                "nextest",
+                include_str!("../tests/fixture/nextest-abort.txt"),
+            ),
+        ] {
+            let results = parse_test_results(text, runner).unwrap();
+            assert_eq!(results.red, ["tests::waits"]);
+            assert!(results.signals["tests::waits"].contains("SIGABRT"));
+            let segfault = parse_test_results(&text.replace("SIGABRT", "SIGSEGV"), runner).unwrap();
+            assert!(segfault.signals["tests::waits"].contains("SIGSEGV"));
+        }
+    }
+
+    #[test]
+    fn cargo_missing_binary_summary_is_not_hidden_by_another_summary() {
+        let incomplete = "Running tests/one.rs (target/debug/deps/one-0123456789abcdef)\ntest first ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;\nRunning tests/two.rs (target/debug/deps/two-0123456789abcdef)\ntest second ... ";
+        let error = parse_test_results(incomplete, "cargo").unwrap_err();
+        assert!(
+            error.contains("two-")
+                && error.contains("second")
+                && error.contains("without a summary"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn cargo_summary_counts_cannot_cancel_out_between_binaries() {
+        let output = "Running tests/one.rs (target/debug/deps/one-0123456789abcdef)\ntest first ... ok\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;\nRunning tests/two.rs (target/debug/deps/two-0123456789abcdef)\ntest second ... ok\ntest third ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;";
+        assert!(parse_test_results(output, "cargo")
+            .unwrap_err()
+            .contains("counts disagree"));
+    }
+
+    #[test]
+    fn nextest_human_fallback_preserves_signal_and_failure_output() {
+        let results = parse_test_results("SIGABRT [ 0.01s] fixture tests::abort\n  output ───\n (test aborted with signal 6: SIGABRT)\nFAIL [ 0.01s] fixture tests::panic\n  output ───\nthread panicked: required assertion\nSummary [ 0.02s] 2 tests run: 0 passed, 2 failed", "nextest").unwrap();
+        assert_eq!(results.signals["tests::abort"], "SIGABRT");
+        assert!(results.failure_output["tests::panic"].contains("required assertion"));
+        assert!(!results.failure_output["tests::abort"].contains("required assertion"));
+    }
+
+    #[test]
+    fn repeated_test_names_keep_their_own_failure_messages() {
+        let results = parse_test_results(r#"{"type":"test","event":"failed","name":"fixture::one$tests::shared","stdout":"first assertion"}
+{"type":"test","event":"failed","name":"fixture::two$tests::shared","stdout":"second assertion"}
+{"type":"suite","event":"failed","passed":0,"failed":2}"#, "nextest").unwrap();
+        assert_eq!(
+            results.failure_output["fixture::one::tests::shared"],
+            "first assertion"
+        );
+        assert_eq!(
+            results.failure_output["fixture::two::tests::shared"],
+            "second assertion"
+        );
+        let cargo = parse_test_results("Running tests/one.rs (target/debug/deps/one-0123456789abcdef)\ntest shared ... FAILED\nfailures:\n---- shared stdout ----\nfirst assertion\nfailures:\n shared\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;\nRunning tests/two.rs (target/debug/deps/two-0123456789abcdef)\ntest shared ... FAILED\nfailures:\n---- shared stdout ----\nsecond assertion\nfailures:\n shared\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;", "cargo").unwrap();
+        assert!(cargo.failure_output["one::shared"].contains("first assertion"));
+        assert!(!cargo.failure_output["one::shared"].contains("second assertion"));
+        assert!(cargo.failure_output["two::shared"].contains("second assertion"));
+    }
 
     #[test]
     fn hub_cargo_target_names_are_stable_across_rebuilds() {
@@ -2774,6 +3101,8 @@ mod order_tests {
             target: None,
             command: None,
             test_count_pattern: None,
+            expect_message: None,
+            signal_is_catch: None,
             expect_red: vec!["t".into()],
             only: false,
             equivalent: None,

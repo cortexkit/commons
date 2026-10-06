@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/mutation_fixture-6056abe4b3bc9cc0)
+
+running 7 tests
+test tests::daemon_contract ... ignored, needs a daemon
+test tests::guard_accepts_positive ... ok
+test tests::guard_rejects_zero ... ok
+test tests::lock_integrity ... ok
+test tests::unrelated_test ... ok
+test tests::vacuous_test ... ok
+test tests::waits ... error: test failed, to rerun pass `-p mutation-fixture --lib`
+
+Caused by:
+  process didn't exit successfully: `/fixture/target/debug/deps/mutation_fixture-6056abe4b3bc9cc0 --test-threads=1` (signal: 6, SIGABRT: process abort signal)
+error: 1 target failed:
+    `-p mutation-fixture --lib`

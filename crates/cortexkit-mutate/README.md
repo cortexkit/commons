@@ -26,6 +26,8 @@ runner = "cargo"
 package = "basal-module"
 target = "--test list_contract"
 expect_red = ["list_agent_cannot_see_another_agents_flow"]
+# expect_message = "assertion failed: own_flows_only" # or "/own.*flows/"
+# signal_is_catch = "This guard intentionally aborts on invalid input"
 only = true
 # timeout_s = 600
 # build_timeout_s = 1800
@@ -68,6 +70,36 @@ Broad, package and explore results qualify repeated names and keep each binary's
 independent red/green result; they never discard a binary to resolve ambiguity.
 Unique names remain plain in reports, and qualified expectations still work in
 a scoped replay observing only that one binary.
+
+### Failure identity and signal deaths (0.6.0)
+
+An optional `expect_message` requires a **case-sensitive substring**, or a Rust
+regex enclosed in `/.../`, in the failure output of **each expected red test**.
+For example, `expect_message = "capacity exceeded"` or
+`expect_message = '/capacity \d+ exceeded/'`. Invalid regexes and empty patterns
+are refused. Matching another test's output, a build error, or the command row's
+green baseline is not proof. A red test with missing or different output grades
+**RED_FOR_ANOTHER_REASON**, fails the row, and reports that test's first eight
+failure-output lines. Without this field, ordinary failures grade as before.
+`prove` accepts `--expect-message` and preserves it in the appended row.
+
+A test that aborts, segfaults or dies from another signal is **ERROR**, not a
+catch; a normal assertion failure or unwinding panic is still red. Cargo's
+signal exit diagnostic names the signal, and a binary missing its libtest
+summary also fails closed, even if another binary printed a valid summary.
+Nextest's signal status names the individual test. The report names the affected
+test and signal (or reports that the signal/test identity is unavailable).
+
+Use `signal_is_catch = "reason"` **only when termination by signal is itself the
+intended contract**, such as a deliberate `std::process::abort()` guard. The
+reason must be nonempty; `prove` accepts `--signal-is-catch REASON`. This opt-in
+permits an identified test's signal death to count as red, not an unrelated
+crash of Cargo/nextest itself. It does not waive expected-test identities,
+executed-count checks, `expect_message`, or a green command baseline. An abort
+usually has no failure output, so pairing it with `expect_message` requires
+the runner to retain the intended message for that test (Cargo's captured
+stdout is generally lost on abort). For Cargo, tests
+after the abort do not run; missing expected tests still prevent a catch.
 
 `equivalent` and `unreachable` are mutually exclusive recorded dispositions,
 not runner detections. Each takes a non-empty reason string. An `unreachable`
@@ -312,10 +344,12 @@ exit 0 before any mutant in the session is applied. A non-green baseline is ERRO
 and names the id. Baselines are collected afresh each session, never cached across
 sessions: otherwise an always-failing command, a
 stale environment, or a pre-existing broken test could masquerade as a catch.
-On the mutant, every expected id exiting nonzero means CAUGHT; any exiting 0
-means SURVIVED. A spawn failure, exit 126 (not executable, or the command refused
+On the mutant, every expected id exiting nonzero means CAUGHT (subject to
+`expect_message`); any exiting 0 means SURVIVED. A spawn failure, exit 126 (not executable, or the command refused
 to run), exit 127 (not found), death
-by signal, interruption, or timeout is ERROR, **never red**, on either tree.
+by signal, interruption, or timeout is ERROR, **never red**, on either tree,
+except an explicitly reasoned `signal_is_catch` on the mutant. For command rows,
+`expect_message` matches that id's combined stdout/stderr, not another invocation.
 The row's `timeout_s` applies separately to each baseline and mutant invocation.
 There is no normal build phase; command test timeouts report `timed_out_phase: "test"`.
 Declared prerequisites have their own build deadlines and timing fields.
@@ -479,6 +513,7 @@ succeed. The first three count as catches:
 | HUB | In a `run --broad` audit, every expected test failed and every collateral target outside the expected tests' own targets is in the row's reviewed `hub_targets`. Same-target collateral needs no approval. Counts as caught, with the recorded reason. |
 | SURVIVED | An expected test passed, with no unrelated failure. |
 | WRONG_TEST | An expected test passed while another failed, or `only` forbids an extra failure. |
+| RED_FOR_ANOTHER_REASON | An expected test went red, but its own failure output did not match `expect_message`. Not a catch; reports the first lines of that failure. |
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |
 | ANCHOR_MISSING | The replacement count was zero or greater than one. |
 | DID_NOT_COMPILE | The separate build command exited nonzero. |
@@ -487,7 +522,7 @@ succeed. The first three count as catches:
 | UNREACHABLE | Explicitly recorded with a reason explaining why no production caller exists. Listed separately, never counted as caught. |
 | SKIPPED_PLATFORM | Host target_os is not in platforms. Counted separately, not executed. |
 | DESK_ONLY | Explicit nonempty reason that this proof needs a real desktop; never automated or counted as caught. |
-| ERROR | Invalid/incomplete runner output (including zero-test command rows), prerequisite failure, interruption, or restoration/lockfile integrity error. |
+| ERROR | Signal death without a reasoned `signal_is_catch`, invalid/incomplete runner output (including a Cargo binary without a summary or zero-test command rows), prerequisite failure, interruption, or restoration/lockfile integrity error. |
 
 **Current policy:** CAUGHT_BROADLY warns, succeeds, and still records a proof.
 A later release will make it a failing outcome, after the catalogues that use
@@ -518,7 +553,9 @@ the `crate::binary` prefix. Attribution is retained by the same per-test parser.
 Console output includes collateral on catches with extra reds, a warning summary
 for CAUGHT_BROADLY, and separate lists and counts of UNREACHABLE and HUB rows.
 
-These formats have no explicit version field: 0.5 retains the unversioned TOML
+These formats have no explicit version field: 0.6 adds optional `expect_message`
+and `signal_is_catch` row fields and the RED_FOR_ANOTHER_REASON outcome; existing
+rows remain readable. 0.5 retained the unversioned TOML
 `[[control]]` schema and JSON array, adding `platforms`, `desk_only`, root `prebuild`,
 the required command-row `test_count_pattern`, skip outcomes and preparation timing.
 Cargo/nextest catalogues remain readable unchanged; existing command catalogues
@@ -528,19 +565,32 @@ must add an executed-count pattern. Older runners rejecting new fields is expect
 For Cargo/nextest, builds are separate: Cargo uses `cargo test -p PACKAGE TARGET --no-run --locked`;
 nextest uses `cargo nextest run ... --no-run --locked`. Only build exit status
 determines DID_NOT_COMPILE. Test exit status never determines Cargo/nextest catches.
+Signal deaths veto catches unless explicitly accepted as described above.
 Command rows instead use the baseline-gated exit-status rules above.
 Cargo results use per-test `test NAME ... ok|FAILED|ignored` lines and require
-summary counts to agree; each summary count is located by its following word,
+each binary's summary counts to agree; each summary count is located by its following word,
 not a column. All failures (`0 passed; 2 failed`) are a valid catch, not an empty
 run. `test result:` is never a test named `result:`. Both runners disable
 fail-fast so later binaries are not omitted.
+
+Cargo captures each `---- NAME stdout ----` failure block; nextest JSON captures
+the test event's `stdout`. These are the per-test sources for `expect_message`.
 
 For nextest, the runner probes `run --help` for `libtest-json` and uses that
 machine-readable event stream when available (enabling its experimental feature).
 Nextest's `crate::binary$` prefix is removed to retain the exact libtest path.
 It checks terminal suite counts and disables retries to avoid conflating failed
 attempts with final results. Older nextest versions use color-free `PASS`/`FAIL`
-status lines with all statuses enabled; unknown formats cannot establish a catch.
+status lines with all statuses enabled (and their failure-output blocks);
+unknown formats cannot establish a catch. Nextest 0.9.138 emits an abort as
+`{"type":"test","event":"failed",...,"stdout":""}` in libtest-json, **not**
+as a dedicated JSON signal event. Its simultaneous human status supplies
+`SIGABRT [ ... ] ... BINARY TEST`, matched to the JSON binary/test identity.
+The captured Cargo/nextest abort runs are checked in as
+`tests/fixture/cargo-abort.txt` (only the temporary root is normalized) and
+`tests/fixture/nextest-abort.txt`. Cargo 1.99.0 emitted
+`(signal: 6, SIGABRT: process abort signal)` without a summary; nextest emitted
+`SIGABRT [   0.010s] (5/6) mutation-fixture tests::waits`.
 List mode always uses nextest JSON. Current nextest is exercised in CI.
 
 ## Safety and traps
@@ -629,5 +679,5 @@ No internal workspace crates or async runtime are used. `clap` provides strict C
 and help; `serde` derives the catalogue/report schema; `toml` reads/writes the
 catalogue; `serde_json` writes evidence and reads nextest events; `fs2` supplies
 portable advisory locks; `ctrlc` supplies Unix interruption/termination and
-Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `tempfile` is
+Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `regex` matches the optional per-test assertion pattern. `tempfile` is
 only a dev dependency, isolating real Git/Cargo fixture repos for tests.
