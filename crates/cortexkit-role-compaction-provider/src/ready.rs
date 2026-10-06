@@ -1,5 +1,5 @@
-//! `compaction.ready`: the provider's signal, after a `wait`, that its work
-//! is done.
+//! `compaction.ready`: a provider tells the runner that the work behind its
+//! `wait` answer is ready for the runner to request again.
 //!
 //! The runner serves this op; the provider sends it. On receiving it for
 //! the newest request it issued, the runner calls `compaction.step` again
@@ -9,10 +9,14 @@
 //!
 //! The request type and the runner's check belong to `llm-runner/v1`, and
 //! are re-exported here so a provider builds exactly what the runner
-//! decodes. The runner accepts a ready only when the route's caller stamp
-//! equals the provider the session's plan names at
-//! `plan.compaction_item.provider`, and refuses anyone else with
-//! `not_session_compaction_provider`.
+//! decodes. Before considering a ready hint, the runner compares the route's
+//! caller stamp (the daemon-verified module that opened the route) with the
+//! session's configured provider at `plan.compaction_item.provider`. It refuses
+//! a different module, or a session with no compaction provider, with
+//! `not_session_compaction_provider`: an unrelated module must not wake the
+//! session's compaction wait. A matching provider wakes the wait only when the
+//! hint names the newest issued request; older hints are ignored. CONTRACT.md
+//! §10 defines these checks.
 
 pub use cortexkit_role_llm_runner::compaction::{
     plan_compaction_provider, CompactionReady, ReadyOutcome,

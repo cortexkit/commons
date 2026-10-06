@@ -85,7 +85,8 @@ pub const REQUIRED_OPS: &[&str] = &[
 
 /// The `llm-runner/v1` capability group a runner declares when it can host
 /// a compaction provider. A runner without it cannot be paired with a
-/// compaction item, and refuses such a plan at admission. Taken from the
+/// compaction item, and refuses such a plan at admission (the plan check
+/// before accepting a session, CONTRACT.md §3). Taken from the
 /// runner role's crate so the two spellings cannot drift apart.
 pub const RUNNER_GROUP: &str = cortexkit_role_llm_runner::capabilities::COMPACTION;
 

@@ -142,11 +142,13 @@ pub mod refuse_codes {
 pub mod runner_codes {
     use cortexkit_role_llm_runner::{compaction, errors};
 
-    /// The runner's malformed-request refusal. At admission, a runner that
+    /// The runner's malformed-request refusal. At admission (the plan check
+    /// before accepting a session, CONTRACT.md §3), a runner that
     /// does not declare the `compaction` group refuses a plan naming a
     /// compaction item with `detail.field` = [`PLAN_COMPACTION_ITEM`].
     pub const INVALID_PARAMS: &str = errors::INVALID_PARAMS;
-    /// `detail.field` of that admission refusal: `plan.compaction_item`.
+    /// `detail.field` of the plan refusal defined in CONTRACT.md §3:
+    /// `plan.compaction_item`. It identifies the item the runner cannot serve.
     pub const PLAN_COMPACTION_ITEM: &str = compaction::PLAN_COMPACTION_ITEM_FIELD;
     /// A `compaction.ready` whose route caller is not the provider at
     /// `plan.compaction_item.provider`, or for a session without one.

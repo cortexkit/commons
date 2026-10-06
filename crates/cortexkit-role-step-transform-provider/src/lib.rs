@@ -63,7 +63,8 @@ pub mod ops {
     /// Required.
     pub const ROLE_DESCRIBE: &str = "role.describe";
     /// The subscriptions a plan item may choose from, for the item's preset
-    /// and params. Fetched at admission with the plan's other items.
+    /// and params. Fetched with the plan's other items during admission,
+    /// the plan check before accepting a session (CONTRACT.md §4).
     /// Required.
     pub const TRANSFORM_DECLARE: &str = "transform.declare";
     /// One hook call. Required.

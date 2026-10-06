@@ -7,12 +7,14 @@
 //! The declaration is the source: whoever composes the plan copies each
 //! subscription's `on_unavailable` and `budget_ms` from it into the plan,
 //! where they are frozen. A plan item's subscriptions choose within the
-//! declaration's bounds. At admission the runner checks the frozen plan
+//! declaration's bounds. Admission is the plan check before the runner accepts
+//! a session (CONTRACT.md §4). The runner checks the frozen plan
 //! against the provider's current declaration: an equal or stricter
 //! subscription admits, and a looser one, or one whose hook or preset the
 //! provider no longer declares, refuses the plan as stale.
 //!
-//! The session has at most one reduction owner, its compaction provider.
+//! The session has at most one reduction owner, its compaction provider: the
+//! only party allowed to remove or rewrite history (CONTRACT.md §5).
 //! Only the reduction owner may `replace` on `pre_user` and
 //! `post_assistant`. Every other step transform is preserving: it may
 //! prepend or append. The reduction owner's hooks run first; the preserving
@@ -263,7 +265,8 @@ pub struct Declaration {
 
 /// Why a subscription, declared or planned, is malformed or out of bounds.
 ///
-/// Two kinds, refused with different codes at admission
+/// Two kinds, refused with different codes at admission (the plan check
+/// before accepting a session, CONTRACT.md §4)
 /// ([`SubscriptionProblem::admission_code`]): a plan that is malformed in
 /// itself, or breaks a rule no declaration can change, is `invalid_params`;
 /// a plan that the provider's current declaration no longer covers was
@@ -294,7 +297,7 @@ pub enum SubscriptionProblem {
     /// field.
     SubscriptionLoosened(LoosenedField),
     /// `replace` on `pre_user` or `post_assistant` by a provider that is not
-    /// the session's reduction owner.
+    /// the session's reduction owner, its compaction provider (CONTRACT.md §5).
     ReplaceNotReductionOwner,
 }
 
@@ -324,7 +327,8 @@ impl SubscriptionProblem {
         }
     }
 
-    /// The code the runner refuses a plan with at admission for this
+    /// The code the runner refuses a plan with at admission, the plan check
+    /// before accepting a session (CONTRACT.md §4), for this
     /// problem: `plan_stale` for a subscription the current declaration no
     /// longer covers (missing, its preset missing, or loosened),
     /// `invalid_params` for everything else.
@@ -400,7 +404,8 @@ pub enum StaleDifference {
     },
 }
 
-/// The `detail` of an `invalid_params` admission refusal for one planned
+/// The `detail` of an `invalid_params` refusal during the plan check before
+/// accepting a session (admission, CONTRACT.md §4), for one planned
 /// subscription: `{field: "plan.step_transform_items", item, subscription,
 /// problem}`, where `item` and `subscription` are indices into the plan's
 /// `step_transform_items` and that item's `subscriptions`.
@@ -580,7 +585,8 @@ fn tools_cover(declared: Option<&Vec<String>>, planned: Option<&Vec<String>>) ->
 
 /// Check the reduction rule for one planned subscription of `provider`:
 /// `replace` on `pre_user` or `post_assistant` belongs to the session's
-/// reduction owner alone, and without one it is refused. `replace` on
+/// reduction owner (its compaction provider, CONTRACT.md §5) alone, and
+/// without one it is refused. `replace` on
 /// `post_tool` is a separate user-tier grant, which this role does not
 /// carry and the runner checks on its own.
 pub fn check_reduction(
@@ -596,7 +602,8 @@ pub fn check_reduction(
 }
 
 /// The order in which the runner calls the plan's step-transform items on a
-/// hook: the reduction owner first, if it is among them, then every other
+/// hook: the reduction owner (the session's compaction provider, CONTRACT.md
+/// §5) first, if it is among them, then every other
 /// item in plan order. Returns indices into `providers`.
 pub fn hook_order(providers: &[&str], reduction_owner: Option<&str>) -> Vec<usize> {
     let owner = reduction_owner.and_then(|owner| providers.iter().position(|p| *p == owner));
@@ -606,7 +613,8 @@ pub fn hook_order(providers: &[&str], reduction_owner: Option<&str>) -> Vec<usiz
         .collect()
 }
 
-/// Why the runner refuses a plan at admission over one step-transform item.
+/// Why the runner refuses a step-transform item during admission, the plan
+/// check before accepting a session (CONTRACT.md §4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ItemRefusal {
     /// `invalid_params`, with the detail of the first malformed or

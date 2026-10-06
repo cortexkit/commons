@@ -109,19 +109,27 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
 pub mod runner_codes {
     use cortexkit_role_llm_runner::errors;
 
-    /// The runner's malformed-request refusal. At admission it refuses a
-    /// plan whose step-transform subscription is malformed or gives `replace` on
-    /// `pre_user` or `post_assistant` to a provider that is not the
-    /// reduction owner, with `detail.field` = [`PLAN_STEP_TRANSFORM_ITEMS`]
-    /// (`subscription::InvalidSubscriptionDetail`).
+    /// The runner's refusal of a malformed session plan. Admission is the
+    /// plan check before the runner accepts the session (CONTRACT.md §4).
+    /// It refuses malformed step-transform subscriptions and a `replace` on
+    /// `pre_user` or `post_assistant` assigned to anyone but the reduction
+    /// owner: the session's compaction provider, which alone may remove or
+    /// rewrite history (CONTRACT.md §5). This prevents another transform
+    /// from erasing content it may only prepend or append to. The detail
+    /// names [`PLAN_STEP_TRANSFORM_ITEMS`] as its `field` and identifies the
+    /// invalid subscription (`subscription::InvalidSubscriptionDetail`).
     pub const INVALID_PARAMS: &str = errors::INVALID_PARAMS;
-    /// `detail.field` of that admission refusal. The runner role does not
-    /// name it yet; the provider contract defines the subscription detail.
+    /// The `detail.field` value that locates an invalid subscription in the
+    /// proposed plan's step-transform list. CONTRACT.md §4 defines the
+    /// accompanying item index, subscription index and problem, so the
+    /// session starter can identify which subscription to correct.
     pub const PLAN_STEP_TRANSFORM_ITEMS: &str = "plan.step_transform_items";
-    /// The runner's admission refusal for a plan its providers' current
-    /// declarations no longer cover: a subscription whose hook or preset is
-    /// gone, or whose frozen `on_unavailable` or `budget_ms` is looser than
-    /// declared (`subscription::StaleDifference`).
+    /// The runner refuses this at admission, the plan check before accepting
+    /// a session (CONTRACT.md §4), when a provider's current declaration no
+    /// longer covers the plan: a hook or preset is gone, or planned tools,
+    /// operations, availability policy or budget exceed the declared bounds.
+    /// The starter must rebuild the plan from the current declaration;
+    /// `subscription::StaleDifference` names what no longer fits.
     pub const PLAN_STALE: &str = errors::PLAN_STALE;
     /// A user turn's `pre_user` hook was unavailable under `refuse`: the run
     /// ends `error` with this `provider_code`, and a steered or queued send

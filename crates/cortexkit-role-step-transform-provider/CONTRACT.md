@@ -13,7 +13,7 @@ Every item is marked:
 - **[pinned]**: a settled requirement. A provider must do
   it, and a runner may rely on it.
 - **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
-  option down so the types and vectors have something to pin. Question `Qn`
+  option down so the types and vectors can encode a concrete choice. Question `Qn`
   in `OPEN-QUESTIONS.md` lists the options. An open item's wire shape below
   is the draft implemented by Rust, not a settled requirement.
 
@@ -29,14 +29,15 @@ the newest message of a session.
 - [pinned] A provider lists `step-transform-provider/v1` in its manifest's
   `capabilities.provides` (`PROVIDES`). A module may serve several majors.
 - [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, the declaration
-  op and the hook op. [open: Q2] their names, drafted as
-  `transform.declare` and `transform.hook`.
+  op and the hook op. [open: Q2] Their names are drafted as
+  `transform.declare` and `transform.hook`; these wire names are not yet settled.
 - [pinned] A runner refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it.
 - [pinned] Step-transform routes are module-level and unscoped. The opaque
   session handle in a hook call is a state key, not an authorization credential.
-- [open: Q1] Every op is a request `{method, params}` (`OpRequest`).
-  `role.describe` takes an empty object (`DescribeRequest`).
+- [open: Q1] This draft uses `{method, params}` (`OpRequest`) for every op,
+  with empty params for `role.describe` (`DescribeRequest`); the envelope
+  spelling is not yet settled. `method` is the op's name and `params` its request.
 
 ## 2. `role.describe`
 
@@ -47,7 +48,9 @@ the newest message of a session.
   `alpha`, `beta` or `stable`, read as `alpha` when absent. This draft is
   `alpha`.
 - [pinned] The answer describes the provider build, never a session.
-- [open: Q12] `runner_groups` lists the `llm-runner/v1` groups the provider
+- [open: Q12] This draft puts `runner_groups` in `role.describe`; whether
+  runner requirements belong there or in the starter's configuration is
+  undecided. The list names the `llm-runner/v1` groups the provider
   needs from the runner, `transcript_reads` for a provider that reads
   history beyond what its hooks see.
 
@@ -81,6 +84,9 @@ the newest message of a session.
 
 ## 4. Subscriptions and the declaration
 
+Admission is the runner's check of a proposed session plan before it accepts
+the session and freezes that plan for use.
+
 - [pinned] The plan's `step_transform_items` name the step-transform
   providers in order, each with its preset, params and `subscriptions:
   [{hook, phase?, tools?, ops, on_unavailable, budget_ms}]`
@@ -89,9 +95,10 @@ the newest message of a session.
 - [pinned] The provider's per-preset/params declaration bounds what a plan
   may subscribe to. It is read when composing the plan and checked again
   at admission, not carried by build-level `role.describe` or HELLO.
-  [open: Q2] Its op is `transform.declare {preset?, params, composition?}`
-  (`DeclareRequest`),
-  answered `{subscriptions: [{hook, phase?, tools?, ops, on_unavailable?,
+  [open: Q2] The declaration op is drafted as
+  `transform.declare {preset?, params, composition?}` (`DeclareRequest`);
+  its name is not yet settled. Its answer is
+  `{subscriptions: [{hook, phase?, tools?, ops, on_unavailable?,
   budget_ms}]}` (`Declaration`), fetched with the plan's other items at
   admission. `params` defaults to `{}`; `preset` absent selects the default.
   `composition` is an opaque object, absent before composition exists.
@@ -166,19 +173,27 @@ the newest message of a session.
   reduction owner alone; without one, nobody has it (`check_reduction`).
   Every other step transform is preserving: it may prepend or append.
 - [pinned] Preserving transforms run as a separate ordered list, in plan
-  order. [open: Q9] This draft runs the reduction owner's hooks first, so a later
-  preserving prepend is never wiped by a replace (`hook_order`).
+  order. [open: Q9] This draft runs the reduction owner's hooks before the
+  preserving list, so a later preserving prepend is never wiped by a replace
+  (`hook_order`); whether the runner should put the owner first or follow
+  the plan's exact order is undecided.
 - [pinned] `replace` on `post_tool` is a separate permission only the user
   tier grants, per provider and hook, as `{module, hook, tools}`. Neither
   project configuration nor the provider can grant it, and no provider has
-  it by default. [open: Q10] how the grant reaches the runner.
+  it by default. [open: Q10] This draft carries no post_tool `replace` grant
+  in provider requests or answers and leaves its check to the runner;
+  whether the starter sends the user-tier grant in the plan or the runner
+  reads user-tier policy itself is undecided.
 - [pinned] A tool's catalog entry declares the operations it accepts on its
   result (`result_ops` in `tool-provider/v1`, all three by default). An
   operation the tool does not accept is refused.
 - [pinned] An operation that is not allowed is refused before anything is
   applied or recorded (`check_answer`), never detected afterwards.
-  [open: Q7] The runner then treats the hook as unavailable for that call.
-- [open: Q6] How operations map onto a subject with several text blocks:
+  [open: Q7] This draft treats a disallowed answer as an unavailable hook
+  for that call; whether to use the unavailable policy or drop the answer
+  as `pass` is undecided.
+- [open: Q6] This draft maps operations onto several text blocks as follows,
+  but the block mapping is not yet settled:
   `prepend` goes before the first text block's text, `append` after the last
   one's, and `replace` writes one text block in place of all of them.
 
@@ -213,9 +228,11 @@ the newest message of a session.
   session that subscribes a `mutate` hook and a `validate` or `approve` hook
   on the same tool.
 - [pinned] An approve hook passes or asks a human; it never denies directly.
-- [open: Q8] The `ask` is `{prompt, options?, expiry_ms, on_expiry,
+- [open: Q8] This draft encodes the approve hook's `ask` as
+  `{prompt, options?, expiry_ms, on_expiry,
   material_damage, late_execution}` (`ApprovalAsk`); the elicitation role
-  owns how it is filed and answered. `prompt` is a string, `options` an
+  owns how it is filed and answered, but the exact hook-to-runner field names
+  and option encoding are not yet settled. `prompt` is a string, `options` an
   array of strings omitted when empty, `expiry_ms` an unsigned 64-bit
   duration in milliseconds, `material_damage` a boolean, and `on_expiry`
   and `late_execution` open strings. The runner files the ask with the
@@ -243,10 +260,13 @@ the newest message of a session.
   `call_key` is the runner's key (`llm-runner/v1` §11.3); it is usually
   absent on `pre_tool`, because it is minted from the dispatch intent,
   written after the hook, and present on `post_tool`.
-- [open: Q6] Subjects are text in v1.
+- [open: Q6] This draft carries user, assistant and tool-result text as flat
+  strings; whether multi-block subjects should instead carry per-block text
+  is undecided. Tool-call input remains arbitrary JSON.
 - [pinned] The answer (`HookAnswer`) is `{answer: "pass"}`, `{answer:
   "ops", ops}`, `{answer: "mutate", input, note?}`, `{answer: "deny",
-  text}` or `{answer: "ask", ask}`. [open: Q2] the spellings.
+  text}` or `{answer: "ask", ask}`. [open: Q2] This draft spells the answers
+  `pass`, `ops`, `mutate`, `deny` and `ask`; these wire spellings are not yet settled.
 - [pinned] A hook that times out (after the frozen `budget_ms`, capped by
   the runner), fails, or answers something it may not is unavailable for
   that call, and the frozen plan subscription's `on_unavailable` (§4)
@@ -385,14 +405,17 @@ the vectors in this crate.
 
 ## Open questions
 
-The draft choices below remain unresolved. `OPEN-QUESTIONS.md` records
-options, recommendations and partial settlements for each number.
+Unresolved topics are the op envelope, declaration and hook op names, answer
+spellings, flat-text subjects and multi-block mapping, handling disallowed
+answers, the approve-ask encoding, reduction-owner order, transport of user-tier
+post_tool `replace` grants, and discovery of runner requirements. The draft
+choices are listed below; `OPEN-QUESTIONS.md` adds recommendations and partial settlements.
 
 - **Q1. The envelope.** (a) **draft:** `{method, params}`, as
   `llm-runner/v1` settled for its own ops; (b) `{name, arguments}`.
 - **Q2. Names.** **draft:** ops `transform.declare` and `transform.hook`;
-  answers `pass`, `ops`, `mutate`, `deny`, `ask`; operations `prepend`,
-  `append`, `replace`.
+  answers `pass`, `ops`, `mutate`, `deny`, `ask`. Operation names `prepend`,
+  `append`, `replace` are settled; the op and answer names remain undecided.
 - **Q6. Subject shape.** **draft:** text, with operations mapped onto
   several text blocks as §5 says.
 - **Q7. A disallowed answer.** (a) **draft:** the hook is unavailable for
@@ -405,7 +428,10 @@ options, recommendations and partial settlements for each number.
 - **Q10. The user's `replace` grant on `post_tool`.** Not carried by this
   role. Options: (a) the plan carries `grants: [{module, hook, tools}]`
   from the starter; (b) the runner reads the user tier itself.
-- **Q12. `runner_groups`.** As in `compaction-provider/v1`.
+- **Q12. `runner_groups`.** **draft:** requirements on the runner are listed
+  in `role.describe.runner_groups`, including `transcript_reads` for a
+  provider without an independent history reader. Whether discovery or the
+  starter's configuration should carry those requirements is undecided.
 
 ## Settled questions
 
