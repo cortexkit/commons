@@ -53,6 +53,15 @@ pub struct Control {
     pub ignored: Option<IgnoredSelection>,
     /// An argv template, not a shell string; substitutes one expected test id.
     pub command: Option<Vec<String>>,
+    /// Package-wide argv run only during a breadth audit, after named tests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broad_command: Option<Vec<String>>,
+    /// Repository-relative JUnit XML output; removed before the audit command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broad_report: Option<String>,
+    /// Maps JUnit testcase attributes to exact catalogue ids.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broad_id: Option<String>,
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
     pub test_count_pattern: Option<String>,
     /// Compare command stdout rather than relying on a test's exit status.
@@ -82,7 +91,7 @@ pub struct Control {
     pub hub: Option<String>,
     /// The test targets, other than the expected tests' own, that a reviewer
     /// approved to fail alongside them in a `run --broad` replay. Stable names,
-    /// without Cargo's executable hash.
+    /// without Cargo's executable hash; JUnit classname values for command rows.
     pub hub_targets: Option<Vec<String>>,
     /// Rust target-OS names; absent means the row runs on every host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +181,43 @@ impl Control {
     fn validate_runner(&self) -> Result<()> {
         self.validate_platforms()?;
         let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
+        let broad_fields = [
+            self.broad_command.is_some(),
+            self.broad_report.is_some(),
+            self.broad_id.is_some(),
+        ];
+        if broad_fields.iter().any(|present| *present) {
+            if self.runner != "command" || broad_fields.iter().any(|present| !*present) {
+                return Err(invalid(
+                    "broad_command/broad_report/broad_id",
+                    "are required together on command rows only",
+                ));
+            }
+            let argv = self.broad_command.as_ref().unwrap();
+            if argv.first().is_none_or(|s| s.trim().is_empty())
+                || argv
+                    .iter()
+                    .any(|s| s.contains('\0') || s.contains("{test}"))
+            {
+                return Err(invalid(
+                    "broad_command",
+                    "requires a nonempty program, NUL-free argv and no {test}",
+                ));
+            }
+            let template = self.broad_id.as_deref().unwrap();
+            let literals = template.replace("{classname}", "").replace("{name}", "");
+            if !template.contains("{name}")
+                || literals.contains(['{', '}'])
+                || template.chars().any(char::is_control)
+            {
+                return Err(invalid(
+                    "broad_id",
+                    "requires {name} and permits only {classname} and {name} placeholders",
+                ));
+            }
+            repository_relative(self.broad_report.as_deref().unwrap())
+                .map_err(|e| invalid("broad_report", &e))?;
+        }
         if self.equivalent.is_some() != self.equivalent_guard.is_some() {
             return Err(invalid(
                 "equivalent/equivalent_guard",
@@ -288,10 +334,7 @@ impl Control {
                         return Err(invalid("expect_red", "must name at least one test"));
                     }
                     for id in &self.expect_red {
-                        if id.is_empty() || id.chars().any(|c| c.is_whitespace() || c.is_control())
-                        {
-                            return Err(invalid("expect_red", &format!("invalid test id {id:?}: ids must be nonempty without whitespace or control characters")));
-                        }
+                        validate_command_id(id).map_err(|e| invalid("expect_red", &e))?;
                     }
                 }
             }
@@ -602,14 +645,7 @@ fn target_io_error(name: &str, error: std::io::Error) -> String {
 }
 
 fn safe_path(root: &Path, name: &str) -> Result<PathBuf> {
-    let path = Path::new(name);
-    if path.as_os_str().is_empty()
-        || path
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
-    {
-        return Err(format!("not a repository-relative path: {name}"));
-    }
+    let path = repository_relative(name)?;
     let full = root.join(path);
     let resolved = full.canonicalize().map_err(|e| target_io_error(name, e))?;
     if !resolved.starts_with(root.canonicalize().map_err(|e| e.to_string())?) || !resolved.is_file()
@@ -624,6 +660,43 @@ fn safe_path(root: &Path, name: &str) -> Result<PathBuf> {
         return Err(format!("symlink target refused: {name}"));
     }
     Ok(full)
+}
+
+fn repository_relative(name: &str) -> Result<&Path> {
+    let path = Path::new(name);
+    if path.as_os_str().is_empty()
+        || path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(format!("not a repository-relative path: {name}"));
+    }
+    Ok(path)
+}
+
+// Unlike edit targets, reports need not exist yet. Refuse symlinks in every
+// component so neither stale-file deletion nor a new output can escape the tree.
+fn report_path(root: &Path, name: &str) -> Result<PathBuf> {
+    let mut full = root.canonicalize().map_err(|e| e.to_string())?;
+    for component in repository_relative(name)?.components() {
+        full.push(component);
+        match fs::symlink_metadata(&full) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!("symlink broad_report refused: {name}"));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("broad_report {name}: {e}")),
+        }
+    }
+    Ok(full)
+}
+
+fn validate_command_id(id: &str) -> Result<()> {
+    if id.is_empty() || id.trim() != id || id.chars().any(char::is_control) {
+        return Err(format!("invalid test id {id:?}: ids must be nonempty without leading/trailing whitespace or control characters (including NUL)"));
+    }
+    Ok(())
 }
 
 pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
@@ -663,6 +736,9 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
 pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
     c.recorded_disposition()?;
     c.validate_runner()?;
+    if let Some(name) = &c.broad_report {
+        report_path(root, name)?;
+    }
     for edit in c.edits()? {
         // Deleted edit targets are row outcomes, not catalogue-wide errors.
         // Check mode still rejects them when it verifies the anchors.
@@ -1609,6 +1685,342 @@ fn command_tests(
     Ok(())
 }
 
+fn command_breadth(
+    root: &Path,
+    c: &Control,
+    stop: &AtomicBool,
+    report: &mut Report,
+    baseline: bool,
+) -> Result<()> {
+    let name = c
+        .broad_report
+        .as_deref()
+        .ok_or("broad_report is required")?;
+    let audit = (|| -> Result<()> {
+        let path = report_path(root, name)?;
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot delete stale report: {e}")),
+        }
+        let argv = c
+            .broad_command
+            .as_ref()
+            .ok_or("broad_command is required")?;
+        let mut cmd = Command::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        let output = execute(root, cmd, c.timeout_s, stop)?;
+        if baseline {
+            report.baseline_test_ms += output.ms;
+        } else {
+            report.test_ms += output.ms;
+        }
+        report.test_tail = tail(&format!(
+            "{}\nbreadth output:\n{}",
+            report.test_tail, output.text
+        ));
+        if output.timeout {
+            report.timed_out_phase = Some(Phase::Test);
+            return Err(format!(
+                "broad command exceeded timeout_s = {}",
+                c.timeout_s
+            ));
+        }
+        if output.interrupted {
+            return Err("broad command interrupted".into());
+        }
+        if output.code.is_none() || matches!(output.code, Some(126 | 127)) {
+            return Err(format!(
+                "broad command failed to run: exit {:?}, signal {:?}",
+                output.code, output.signal
+            ));
+        }
+        // Recheck after execution: a report writer must not replace an output
+        // directory or file with a link to somewhere outside the repository.
+        let path = report_path(root, name)?;
+        let xml = fs::read_to_string(&path).map_err(|e| format!("cannot read report: {e}"))?;
+        let mut results =
+            junit_results(&xml, c.broad_id.as_deref().ok_or("broad_id is required")?)?;
+        if output.code != Some(0) && results.red.is_empty() {
+            return Err(format!(
+                "broad command exited {:?} without failed testcases",
+                output.code
+            ));
+        }
+        if baseline {
+            report.baseline_failures.extend(results.failures());
+            for id in &results.red {
+                report
+                    .baseline_red
+                    .entry(results.targets[id].clone())
+                    .or_default()
+                    .push(id.clone());
+            }
+            report.baseline_results = Some(results);
+            return Ok(());
+        }
+        validate_command_broad_ids(c, &results)?;
+        // Keep diagnostics for every mutant failure, even those already red on
+        // the clean tree. Only newly red tests establish mutant collateral.
+        for (id, output) in results.failures() {
+            if !c.expect_red.contains(&id) {
+                report.failures.insert(id, output);
+            }
+        }
+        exclude_baseline_red(c, report, &mut results);
+        let (extra, cross_targets) = collateral(c, &results)?;
+        report.collateral = extra;
+        for id in results.red {
+            if !c.expect_red.contains(&id) {
+                report.unexpected_red.insert(id.clone());
+                report.red.push(id);
+            }
+        }
+        report.green.extend(
+            results
+                .green
+                .into_iter()
+                .filter(|id| !c.expect_red.contains(id)),
+        );
+        report.breadth_observed = true;
+        report.outcome = breadth_outcome(c, report, &cross_targets);
+        Ok(())
+    })();
+    audit.map_err(|e| format!("{}: broad_report {name}: {e}", c.id))
+}
+
+fn validate_command_broad_ids(c: &Control, results: &TestResults) -> Result<()> {
+    for id in &c.expect_red {
+        if !results.targets.contains_key(id) {
+            return Err(format!(
+                "expected test id {id:?} missing from report; check broad_id"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_command_broad_baseline(c: &Control, report: &Report) -> Result<()> {
+    if let Some(results) = &report.baseline_results {
+        validate_command_broad_ids(c, results)?;
+        for id in &c.expect_red {
+            if !results.green.contains(id) {
+                return Err(format!(
+                    "{}: broad_report {}: baseline test {id:?} was not green",
+                    c.id,
+                    c.broad_report.as_deref().unwrap_or_default()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct JunitNode {
+    tag: String,
+    attributes: BTreeMap<String, String>,
+    children: Vec<JunitNode>,
+    text: String,
+}
+
+// A real XML reader handles quoted attributes, entities, CDATA and nested suites.
+// Build a small tree so only direct failure/error children mark a testcase red.
+fn junit_document(xml: &str) -> Result<JunitNode> {
+    use quick_xml::{events::Event, Reader, XmlVersion};
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().expand_empty_elements = true;
+    reader.config_mut().check_comments = true;
+    let mut stack: Vec<JunitNode> = Vec::new();
+    let mut document = None;
+    let mut version = XmlVersion::default();
+    loop {
+        match reader.read_event().map_err(|e| e.to_string())? {
+            Event::Start(element) => {
+                if stack.len() >= 128 || (stack.is_empty() && document.is_some()) {
+                    return Err("invalid XML document structure".into());
+                }
+                let mut node = JunitNode {
+                    tag: element.name().as_ref().to_owned(),
+                    ..JunitNode::default()
+                };
+                for attribute in element.attributes() {
+                    let attribute = attribute.map_err(|e| e.to_string())?;
+                    let key = attribute.key.as_ref().to_owned();
+                    let value = attribute
+                        .normalized_value(version)
+                        .map_err(|e| e.to_string())?;
+                    node.attributes.insert(key, value.into_owned());
+                }
+                stack.push(node);
+            }
+            Event::End(_) => {
+                let node = stack.pop().ok_or("unexpected closing tag")?;
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else {
+                    document = Some(node);
+                }
+            }
+            Event::Text(text) => {
+                let text = text.xml_content(version);
+                if let Some(node) = stack.last_mut() {
+                    node.text.push_str(&text);
+                } else if !text.trim().is_empty() {
+                    return Err("text outside XML root".into());
+                }
+            }
+            Event::CData(text) => {
+                stack
+                    .last_mut()
+                    .ok_or("CDATA outside XML root")?
+                    .text
+                    .push_str(&text.xml_content(version));
+            }
+            Event::GeneralRef(reference) => {
+                let entity = format!("&{};", reference.as_ref());
+                let text = quick_xml::escape::unescape(&entity).map_err(|e| e.to_string())?;
+                stack
+                    .last_mut()
+                    .ok_or("entity outside XML root")?
+                    .text
+                    .push_str(&text);
+            }
+            Event::DocType(_) => return Err("JUnit report must not contain a DOCTYPE".into()),
+            Event::Decl(declaration) => {
+                if !stack.is_empty() || document.is_some() {
+                    return Err("XML declaration after root".into());
+                }
+                version = declaration.xml_version().map_err(|e| e.to_string())?;
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if !stack.is_empty() {
+        return Err("unclosed XML element".into());
+    }
+    let document = document.ok_or("empty XML document")?;
+    if !matches!(document.tag.as_str(), "testsuites" | "testsuite") {
+        return Err("JUnit root must be testsuites or testsuite".into());
+    }
+    Ok(document)
+}
+
+fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
+    fn collect(node: &JunitNode, template: &str, results: &mut TestResults) -> Result<()> {
+        for child in &node.children {
+            if child.tag == "testsuite" {
+                collect(child, template, results)?;
+            } else if child.tag == "testcase" && node.tag == "testsuite" {
+                let name = child
+                    .attributes
+                    .get("name")
+                    .ok_or("testcase missing name")?;
+                let classname = child
+                    .attributes
+                    .get("classname")
+                    .ok_or("testcase missing classname")?;
+                // Replace placeholders in the template, never in attribute values:
+                // a literal {name} in a class name must survive byte-for-byte.
+                let id = template
+                    .split("{classname}")
+                    .map(|part| part.replace("{name}", name))
+                    .collect::<Vec<_>>()
+                    .join(classname);
+                validate_command_id(&id)?;
+                if results
+                    .targets
+                    .insert(id.clone(), classname.clone())
+                    .is_some()
+                {
+                    return Err(format!(
+                        "duplicate JUnit id {id:?}; use a more specific broad_id"
+                    ));
+                }
+                results.names.insert(id.clone(), id.clone());
+                let failures: Vec<_> = child
+                    .children
+                    .iter()
+                    .filter(|node| matches!(node.tag.as_str(), "failure" | "error"))
+                    .collect();
+                if !failures.is_empty() {
+                    let output = failures
+                        .iter()
+                        .map(|failure| {
+                            format!(
+                                "{}\n{}",
+                                failure.attributes.get("message").map_or("", String::as_str),
+                                failure.text
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    results.failure_output.insert(id.clone(), output);
+                    results.red.push(id);
+                } else if !child.children.iter().any(|node| node.tag == "skipped") {
+                    results.green.push(id);
+                }
+            }
+        }
+        Ok(())
+    }
+    let document = junit_document(xml)?;
+    let mut results = TestResults {
+        red: vec![],
+        green: vec![],
+        targets: BTreeMap::new(),
+        names: BTreeMap::new(),
+        failure_output: BTreeMap::new(),
+        signals: BTreeMap::new(),
+    };
+    collect(&document, template, &mut results)?;
+    if results.targets.is_empty() {
+        return Err("JUnit report contains zero testcases".into());
+    }
+    Ok(results)
+}
+
+#[cfg(test)]
+mod junit_tests {
+    use super::*;
+
+    #[test]
+    fn templates_preserve_decoded_names_and_classnames_without_recursive_substitution() {
+        let xml = r#"<testsuites><testsuite><testsuite>
+            <testcase classname="routes.{name}" name="scoped route &amp; café"><failure message="why &amp; how">trace &lt;here&gt;</failure></testcase>
+            <testcase classname="" name="top level name"/>
+            </testsuite></testsuite></testsuites>"#;
+        let results = junit_results(xml, "{classname}.{name}").unwrap();
+        assert_eq!(results.red, ["routes.{name}.scoped route & café"]);
+        assert_eq!(results.targets[&results.red[0]], "routes.{name}");
+        assert_eq!(
+            results.failure_output[&results.red[0]],
+            "why & how\ntrace <here>"
+        );
+        assert_eq!(results.green, [".top level name"]);
+        let results = junit_results(xml, "{name}").unwrap();
+        assert_eq!(results.red, ["scoped route & café"]);
+        assert_eq!(results.green, ["top level name"]);
+    }
+
+    #[test]
+    fn malformed_or_ambiguous_junit_never_establishes_breadth() {
+        for xml in [
+            "", "garbage", "<testsuite>", "<testsuite><testcase></testsuite>",
+            "<testsuite/><testsuite/>", "<testsuite/>trailing garbage",
+            "<testsuite><testcase classname='a' name='b'/><testcase classname='c' name='b'/></testsuite>",
+            "<testsuite><testcase classname='a' name='&bogus;'/></testsuite>",
+            "<testsuite><testcase name='missing class'/></testsuite>",
+            "<!DOCTYPE testsuite><testsuite/>",
+        ] {
+            assert!(junit_results(xml, "{name}").is_err(), "{xml}");
+        }
+        let xml = "<testsuite><testcase classname='a' name='b'><system-out><failure>not a failure child</failure></system-out></testcase></testsuite>";
+        assert!(junit_results(xml, "{name}").unwrap().red.is_empty());
+    }
+}
+
 fn normalize_output(c: &Control, stdout: &str) -> Result<String> {
     let mut normalized = stdout.to_owned();
     for pattern in &c.output_normalize {
@@ -2123,7 +2535,7 @@ fn stable_target<'a>(runner: &str, target: &'a str) -> &'a str {
 fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, Vec<String>)> {
     // A catch must be attributable; names-only snippets remain supported by the
     // public parser, but cannot establish whether a real replay caught broadly.
-    if results.targets.values().any(String::is_empty) {
+    if c.runner != "command" && results.targets.values().any(String::is_empty) {
         return Err("test output missing binary attribution".into());
     }
     let expected_targets: BTreeSet<_> = c
@@ -2156,6 +2568,36 @@ fn collateral(c: &Control, results: &TestResults) -> Result<(Collateral, Vec<Str
         },
         cross_targets,
     ))
+}
+
+fn breadth_outcome(c: &Control, report: &mut Report, cross_targets: &[String]) -> Outcome {
+    if report.outcome != Outcome::Caught || !report.breadth_observed {
+        return report.outcome.clone();
+    }
+    if let Some(reason) = &c.hub {
+        let approved = c.hub_targets.as_deref().unwrap_or_default();
+        let new_targets: Vec<_> = cross_targets
+            .iter()
+            .filter(|target| !approved.contains(target))
+            .cloned()
+            .collect();
+        // Same-target failures do not require HUB approval. Fewer cross-target
+        // failures are fine, but new targets need another person's review.
+        if new_targets.is_empty() {
+            report.reason = Some(reason.clone());
+            Outcome::Hub
+        } else {
+            report.reason = Some(format!(
+                "HUB collateral outside hub_targets: {}",
+                new_targets.join(", ")
+            ));
+            Outcome::CaughtBroadly
+        }
+    } else if !cross_targets.is_empty() {
+        Outcome::CaughtBroadly
+    } else {
+        report.outcome.clone()
+    }
 }
 
 /// Name-only grading. Replay additionally verifies signals and per-test messages
@@ -2373,6 +2815,7 @@ impl ReplaySession {
             return Err("baselines must be collected before replaying mutants".into());
         }
         let mut shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
+        let mut command_broad_shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
         let mut listings = BTreeMap::new();
         for c in rows {
             let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
@@ -2400,7 +2843,15 @@ impl ReplaySession {
                 report.line_endings = None;
                 report
             } else {
+                c.validate_runner()?;
                 let mut selection = (*c).clone();
+                // Named baselines remain per row. JUnit package baselines below
+                // are independent and shared by their argv/output selection.
+                if c.runner == "command" {
+                    selection.broad_command = None;
+                    selection.broad_report = None;
+                    selection.broad_id = None;
+                }
                 // Baseline data is shared, but each row's expected reds are
                 // validated independently before its mutant can be applied.
                 if c.runner != "command" {
@@ -2420,6 +2871,44 @@ impl ReplaySession {
                 }
                 report
             };
+            if active && c.runner == "command" && scope == Scope::Broad && c.broad_command.is_some()
+            {
+                let mut key = c.broad_command.clone().unwrap();
+                key.extend([
+                    c.broad_report.clone().unwrap(),
+                    c.broad_id.clone().unwrap(),
+                    c.timeout_s.to_string(),
+                ]);
+                let broad = if let Some(broad) = command_broad_shared.get(&key) {
+                    let mut broad = broad.clone();
+                    broad.baseline_test_ms = 0;
+                    broad
+                } else {
+                    let mut broad = Report::new(c);
+                    broad.outcome = Outcome::Survived;
+                    if let Err(e) = command_breadth(root, c, stop, &mut broad, true) {
+                        broad.outcome = Outcome::Error;
+                        broad.reason = Some(e);
+                    }
+                    command_broad_shared.insert(key, broad.clone());
+                    broad
+                };
+                report.baseline_test_ms += broad.baseline_test_ms;
+                report.baseline_failures.extend(broad.baseline_failures);
+                report.baseline_red = broad.baseline_red;
+                report.baseline_results = broad.baseline_results;
+                report.test_tail = tail(&format!("{}\n{}", report.test_tail, broad.test_tail));
+                if broad.outcome == Outcome::Error {
+                    report.outcome = broad.outcome;
+                    report.reason = broad.reason;
+                    report.timed_out_phase = broad.timed_out_phase;
+                } else if report.outcome == Outcome::Survived {
+                    if let Err(e) = validate_command_broad_baseline(c, &report) {
+                        report.outcome = Outcome::Error;
+                        report.reason = Some(e);
+                    }
+                }
+            }
             if active && report.outcome == Outcome::Survived && c.runner != "command" {
                 // Resolve names in exactly the selection that the baseline ran.
                 // Package-wide listing can compile unrelated, feature-gated targets.
@@ -2699,6 +3188,10 @@ fn replay(
         if !baseline_ready {
             if c.runner == "command" {
                 command_tests(root, c, stop, &mut report, true)?;
+                if scope == Scope::Broad && c.broad_command.is_some() {
+                    command_breadth(root, c, stop, &mut report, true)?;
+                    validate_command_broad_baseline(c, &report)?;
+                }
             } else {
                 if !c.expect_red.is_empty() && !matches!(scope, Scope::Explore { .. }) {
                     let start = Instant::now();
@@ -2716,6 +3209,17 @@ fn replay(
                     return Ok(());
                 }
             }
+        }
+        // A caller may have prepared only narrow named baselines before asking
+        // for a broad replay. Collect the missing JUnit baseline while still clean.
+        if baseline_ready
+            && c.runner == "command"
+            && scope == Scope::Broad
+            && c.broad_command.is_some()
+            && report.baseline_results.is_none()
+        {
+            command_breadth(root, c, stop, &mut report, true)?;
+            validate_command_broad_baseline(c, &report)?;
         }
         if baseline_only {
             report.outcome = Outcome::Survived;
@@ -2739,6 +3243,9 @@ fn replay(
             command_tests(root, c, stop, &mut report, false)?;
             if c.catch_on.is_none() && report.outcome != Outcome::RedForAnotherReason {
                 report.outcome = grade(c, &report.red, &report.green);
+            }
+            if scope == Scope::Broad && c.broad_command.is_some() {
+                command_breadth(root, c, stop, &mut report, false)?;
             }
             return Ok(());
         }
@@ -2827,35 +3334,8 @@ fn replay(
                         }
                     }
                 }
-                if outcome == Outcome::Caught && report.breadth_observed {
-                    if let Some(reason) = &c.hub {
-                        let approved = c.hub_targets.as_deref().unwrap_or_default();
-                        let new_targets: Vec<_> = cross_targets
-                            .iter()
-                            .filter(|target| !approved.contains(target))
-                            .cloned()
-                            .collect();
-                        // A reviewed hub permits only the recorded cross-target
-                        // set. Same-target failures never require HUB approval;
-                        // fewer other targets are fine, new ones need review.
-                        if new_targets.is_empty() {
-                            report.reason = Some(reason.clone());
-                            Outcome::Hub
-                        } else {
-                            report.reason = Some(format!(
-                                "HUB collateral outside hub_targets: {}",
-                                new_targets.join(", ")
-                            ));
-                            Outcome::CaughtBroadly
-                        }
-                    } else if !cross_targets.is_empty() {
-                        Outcome::CaughtBroadly
-                    } else {
-                        outcome
-                    }
-                } else {
-                    outcome
-                }
+                report.outcome = outcome;
+                breadth_outcome(c, &mut report, &cross_targets)
             }
         };
         report.red = results.red;
@@ -4021,6 +4501,9 @@ mod order_tests {
             all_features: None,
             ignored: None,
             command: None,
+            broad_command: None,
+            broad_report: None,
+            broad_id: None,
             test_count_pattern: None,
             catch_on: None,
             output_normalize: vec![],

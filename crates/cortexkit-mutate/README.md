@@ -459,9 +459,11 @@ expect_red = ["script.tests.flows_rig.RigChecks.test_rejects_empty"]
 ```
 
 `{test}` must occur exactly once, as a complete argv element. For each expected
-id, it is replaced byte-for-byte with that id as **one argument**: dots, `::`,
-and other punctuation are not split or normalized. Ids must be nonempty and
-contain no whitespace or control characters. The command runs from the Git
+id, it is replaced byte-for-byte with that id as **one argument**: interior
+spaces, dots, `::`, Unicode and other punctuation are not split or normalized.
+Since 0.9.0, ids may contain interior spaces. Ids must be nonempty, have no leading
+or trailing whitespace, and contain no control characters (tabs, newlines and
+NUL included). The command runs from the Git
 root, without shell expansion. `package` and `target` must be absent, even if
 empty; cargo/nextest rows must not carry `command`. `only = true` is refused
 because command rows cannot observe extra failing tests.
@@ -494,12 +496,168 @@ The row's `timeout_s` applies separately to each baseline and mutant invocation.
 There is no normal build phase; command test timeouts report `timed_out_phase: "test"`.
 Declared prerequisites have their own build deadlines and timing fields.
 
-Only the expected ids run. `collateral` is always `{ "count": 0, "targets": [] }`
-and `breadth_observed` is always false. **Command rows have no breadth audit:**
-`run --broad` runs them normally and cannot discover other tests, despite the
-generic console suggestion to audit breadth. `explore` refuses command rows.
+Normally only the expected ids run: `collateral` is `{ "count": 0, "targets": [] }`
+and `breadth_observed` is false. Without the optional JUnit fields below,
+`run --broad` still runs just those named commands; it cannot discover collateral.
+`explore` continues to refuse command rows: use `prove` to append a named proof.
 `check` validates their fields, files, and anchors, but has no test-list protocol
 to validate names; the fresh baseline during replay verifies the invocation.
+
+### JUnit breadth audits (0.9.0)
+
+Set **all three** optional fields on a command row:
+
+- `broad_command = [argv…]`: a package-wide command, without `{test}` or a shell.
+  Under `run --broad` it runs on the clean tree first, then on each mutant
+  **after** the row's own expected tests have been graded. Normal runs and `prove`
+  do not run it. `timeout_s` bounds each
+  invocation separately, including any compile the external runner performs;
+  there is no extra command-row build phase. A timeout is ERROR with phase `test`.
+- `broad_report = "reports/junit.xml"`: a repository-relative path, deleted before
+  every audit invocation. Absolute paths, `..` and symlink components are refused,
+  including a symlink to an absent destination. The command must create a fresh
+  report; create any necessary parent directory in your runner first.
+- `broad_id = "{name}"`: maps XML-decoded testcase attributes to exact catalogue
+  ids. `{classname}.{name}`, `{classname}/{name}` and literal separators are also
+  supported. Only `{classname}` and `{name}` placeholders are allowed, and
+  `{name}` is required. Values are never trimmed, split or recursively expanded.
+
+A report must be UTF-8 JUnit XML rooted at `<testsuites>` or `<testsuite>`; nested
+suites, XML entities and CDATA are supported. Direct `<failure>` and `<error>`
+children mark red cases; skipped cases are not green. Missing, garbage, truncated
+or zero-testcase reports are **ERROR naming the report**, never evidence of no
+collateral. Duplicate mapped ids or absent expected ids also fail closed: choose
+a template that uniquely matches your catalogue. DOCTYPE declarations are refused.
+A nonzero command exit with no failed/errored cases is ERROR, as are spawn errors,
+126/127, signals and interruption. Expected-test grading remains the named
+command's verdict; the broad report cannot turn a named survivor into a catch.
+
+Successful audits set `breadth_observed: true` and include collateral reds and
+their JUnit failure/error messages in `red` and `failures`. As for Cargo, unlisted
+failures in the expected tests' own target are reported as collateral but remain
+CAUGHT. Failures in other targets grade **CAUGHT_BROADLY**. For command rows the
+target is exactly the JUnit **`classname`**, not the file or `<testsuite name>`.
+An empty classname is valid (Bun's top-level tests use it). A reviewed
+`hub = "reason of at least 20 characters"` plus `hub_targets = ["OtherClass"]`
+permits those cross-class failures as **HUB**; new classnames outside that list
+remain CAUGHT_BROADLY. A successful audit need not have collateral.
+
+Clean JUnit baselines are shared once per session by rows with identical
+`broad_command`, `broad_report`, `broad_id` and `timeout_s` selections; their
+timing is attributed once. Named-command baselines remain per row. Already-red
+JUnit ids are recorded by classname in `baseline_red` and their messages in
+`baseline_failures`, and excluded from mutant collateral just like Cargo's
+baseline failures. The mutant's `failures` map still retains their diagnostics.
+Every expected id must be present and green in the broad baseline. Missing,
+unparsable or zero-case baseline reports make all rows sharing that selection
+ERROR; a failed baseline never permits applying those rows' mutants.
+
+#### Runner mappings and example rows
+
+Inspect a clean report from your installed tool version before selecting ids:
+JUnit naming is not the same as every runner's native selector syntax.
+
+**Bun** writes JUnit at the end of `bun test --reporter=junit
+--reporter-outfile=…` while retaining console output. A testcase's `name` is the
+leaf test description, so **`{name}`** matches leaf catalogue ids, including
+spaces; `--test-name-pattern` selects by a regex, not an exact full display id.
+Choose unique leaf names and escape regex metacharacters in your named runner
+when needed. For tests under one `describe`, **`{classname} > {name}`** maps to
+the console's descriptive name if your named runner accepts that full id.
+Bun 1.4.2 reports an empty classname for top-level tests and reverses the describe
+order in nested classnames (`inner > outer`); that nested value cannot be reversed
+by a template. Use unique leaf ids or normalize the XML in a runner when full
+console ids are needed. Classnames group describes, **not test files**: top-level
+tests in different files share the empty target.
+
+```toml
+[[control]]
+id = "bun-isolates-routes"
+guards = "cached routes isolate sessions"
+file = "src/routes.ts"
+old = "cache.get(sessionId)"
+new = "cache.get(defaultSessionId)"
+test_file = "tests/routes.test.ts"
+runner = "command"
+command = ["bun", "test", "tests/routes.test.ts", "--test-name-pattern", "{test}"]
+test_count_pattern = "Ran {count} test"
+expect_red = ["cached routes isolate sessions"]
+broad_command = ["bun", "test", "--reporter=junit", "--reporter-outfile=reports/bun.xml"]
+broad_report = "reports/bun.xml"
+broad_id = "{name}"
+```
+
+**pytest `--junitxml`** emits dotted module/class `classname` and a method/function
+`name`, preserving parameter suffixes in `name`. **`{classname}.{name}`** matches
+dotted Python ids, including unittest-compatible tests run as shown below.
+Pytest's native node ids use paths and `::` instead; a template cannot convert a
+dotted classname back to a file path. For pytest-only tests, use a named runner
+that resolves these dotted ids to collected node ids and reports a verified
+executed count. Do not confuse collection counts with execution counts. Avoid
+`--junitprefix` unless its prefix is also part of the catalogue ids.
+
+```toml
+[[control]]
+id = "python-isolates-routes"
+guards = "cached routes isolate sessions"
+file = "app/routes.py"
+old = "cache[session_id]"
+new = "cache[default_session_id]"
+test_file = "tests/test_routes.py"
+runner = "command"
+command = ["python3", "-m", "unittest", "{test}"]
+test_count_pattern = "Ran {count} test"
+expect_red = ["tests.test_routes.TestRoutes.test_isolated"]
+broad_command = ["python3", "-m", "pytest", "--junitxml=reports/pytest.xml"]
+broad_report = "reports/pytest.xml"
+broad_id = "{classname}.{name}"
+```
+
+**SwiftPM XCTest** `swift test --parallel --xunit-output …` writes the XCTest
+case type as `classname` (typically `Module.Class`) and method as `name`.
+**`{classname}/{name}`** matches XCTest's filter/specifier form;
+`{classname}.{name}` also works if that is your named runner's id convention.
+The example's `swift-one.py` must invoke `swift test --filter ID`, preserve its
+exit status and print exactly one `Executed N selected tests` line based on the
+actual execution count. A wrapper is needed because XCTest repeats native
+"Executed N tests" summaries and the count protocol refuses ambiguous counts.
+Use this report for XCTest; Swift Testing's separate reports and ids vary with
+the toolchain and may need conversion/merging before declaring a package audit.
+
+```toml
+[[control]]
+id = "swift-isolates-routes"
+guards = "cached routes isolate sessions"
+file = "Sources/Routes/Cache.swift"
+old = "cache[sessionID]"
+new = "cache[defaultSessionID]"
+test_file = "Tests/RoutesTests/CacheTests.swift"
+runner = "command"
+command = ["python3", "scripts/swift-one.py", "{test}"]
+test_count_pattern = "Executed {count} selected tests"
+expect_red = ["RoutesTests.CacheTests/testIsolated"]
+broad_command = ["swift", "test", "--parallel", "--xunit-output", "reports/swift.xml"]
+broad_report = "reports/swift.xml"
+broad_id = "{classname}/{name}"
+```
+
+**Xcode** `xcodebuild test -resultBundlePath …` produces an `.xcresult` bundle,
+not JUnit. `xcresulttool get test-results tests --path …` (modern Xcode) exposes
+JSON; it does **not** directly export JUnit XML. Use one argv-invoked converter
+that runs xcodebuild, extracts those results with xcresulttool, writes JUnit and
+returns the build/test exit status. For a converter writing
+`classname="RoutesTests.CacheTests" name="testIsolated"`, use
+**`{classname}/{name}`**, as in the Swift row. Replace its `broad_command` with
+`["python3", "scripts/xcode-junit.py", "--scheme", "Routes", "--report",
+"reports/xcode.xml"]` and `broad_report` with `"reports/xcode.xml"`; the converter
+must cover the entire intended scheme. Converter naming is not standardized:
+inspect its output and make the named runner use identical ids.
+
+Sources: [Bun reporters](https://bun.com/docs/test/reporters),
+[pytest JUnit naming](https://github.com/pytest-dev/pytest/blob/main/src/_pytest/junitxml.py)
+(`record_testreport`/`mangle_test_address`), and
+[SwiftPM XUnitGenerator](https://github.com/swiftlang/swift-package-manager/blob/main/Sources/Commands/SwiftTestCommand.swift),
+plus the [xcresulttool command reference](https://keith.github.io/xcode-man-pages/xcresulttool.1.html).
 
 ### Output-equality command rows (0.7.0)
 

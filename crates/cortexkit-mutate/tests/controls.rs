@@ -96,6 +96,9 @@ impl Fixture {
             all_features: None,
             ignored: None,
             command: None,
+            broad_command: None,
+            broad_report: None,
+            broad_id: None,
             test_count_pattern: None,
             catch_on: None,
             output_normalize: vec![],
@@ -242,6 +245,9 @@ impl CommandFixture {
             all_features: None,
             ignored: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
+            broad_command: None,
+            broad_report: None,
+            broad_id: None,
             test_count_pattern: Some("Ran {count} tests".into()),
             catch_on: None,
             output_normalize: vec![],
@@ -655,14 +661,22 @@ fn command_load_rejects_invalid_ids_without_normalizing_dotted_ids() {
     let f = CommandFixture::new();
     for id in [
         "",
-        "has space",
+        " leading space",
+        "trailing space ",
+        "\u{a0}leading unicode whitespace",
         "has\ttab",
         "has\nnewline",
         "has\u{7f}control",
+        "has\0nul",
     ] {
         let mut c = f.control();
         c.expect_red = vec![id.into()];
         f.load_error(&c, "expect_red");
+        let error = load(&f.root().join(".git/invalid.toml")).err().unwrap();
+        assert!(
+            error.contains(&format!("invalid test id {id:?}")),
+            "{error}"
+        );
     }
     let c = f.control();
     let path = f.root().join(".git/valid.toml");
@@ -705,6 +719,369 @@ fn command_explore_refuses_without_mutation() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("explore refuses command rows"));
     assert_eq!(before, f.snapshot());
+}
+
+#[test]
+fn command_v090_spaced_id_round_trips_catalogue_run_report_and_prove_append() {
+    assert!(
+        python_available(),
+        "Python is required for the spaced argv proof"
+    );
+    const ID: &str = "scoped route opens > cached routes isolate A & B — café";
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red = vec![ID.into()];
+    let path = f.root().join(".git/spaced.toml");
+    append_control(&path, &c).unwrap();
+    let cat = load(&path).unwrap();
+    assert_eq!(cat.control[0].expect_red[0].as_bytes(), ID.as_bytes());
+    let row = f.run(&cat.control[0], false);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert_eq!(row.red, [ID]);
+    assert!(row.failures[ID].contains(ID));
+    let json = serde_json::to_vec(&row).unwrap();
+    let decoded: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    assert_eq!(
+        decoded["red"][0].as_str().unwrap().as_bytes(),
+        ID.as_bytes()
+    );
+    assert!(decoded["failures"].as_object().unwrap().contains_key(ID));
+    let out = f.cli(&[
+        "--catalogue",
+        ".git/spaced-proved.toml",
+        "prove",
+        "--id",
+        "spaced-guard",
+        "--guards",
+        "the named test observes the guard",
+        "--file",
+        "guard.py",
+        "--old",
+        "ENABLED = True",
+        "--new",
+        "ENABLED = False",
+        "--test-file",
+        "rig.py",
+        "--expect-red",
+        ID,
+        "--expect-message",
+        "deliberately missing failure message",
+        "--report",
+        ".git/spaced-wrong.json",
+        "--test-count-pattern",
+        "Ran {count} tests",
+        "--command",
+        "python3",
+        "rig.py",
+        "{test}",
+    ]);
+    assert!(!out.status.success());
+    let summary = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        summary.contains(&format!("unexpected red: {ID}")),
+        "{summary}"
+    );
+    let out = f.cli(&[
+        "--catalogue",
+        ".git/spaced-proved.toml",
+        "prove",
+        "--id",
+        "spaced-guard",
+        "--guards",
+        "the named test observes the guard",
+        "--file",
+        "guard.py",
+        "--old",
+        "ENABLED = True",
+        "--new",
+        "ENABLED = False",
+        "--test-file",
+        "rig.py",
+        "--expect-red",
+        ID,
+        "--report",
+        ".git/spaced-proof.json",
+        "--test-count-pattern",
+        "Ran {count} tests",
+        "--command",
+        "python3",
+        "rig.py",
+        "{test}",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let cat = load(&f.root().join(".git/spaced-proved.toml")).unwrap();
+    assert_eq!(cat.control[0].expect_red, [ID]);
+    let proof: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/spaced-proof.json")).unwrap())
+            .unwrap();
+    assert_eq!(proof[0]["red"][0], ID);
+    assert!(proof[0]["failures"].as_object().unwrap().contains_key(ID));
+    assert!(f.log().lines().all(|line| line.ends_with(ID)));
+}
+
+fn junit_control(f: &CommandFixture, mode: &str) -> Control {
+    assert!(
+        python_available(),
+        "Python is required for JUnit breadth fixtures"
+    );
+    fs::write(f.root().join("junit.py"), include_str!("fixture/junit.py")).unwrap();
+    cmd(f.root(), "git", &["add", "junit.py"]);
+    cmd(f.root(), "git", &["commit", "-qm", "JUnit fixture"]);
+    let mut c = f.control();
+    c.broad_command = Some(vec![
+        "python3".into(),
+        "junit.py".into(),
+        mode.into(),
+        ".git/broad.xml".into(),
+    ]);
+    c.broad_report = Some(".git/broad.xml".into());
+    c.broad_id = Some("{name}".into());
+    c
+}
+
+fn junit_run(f: &CommandFixture, c: &Control) -> Report {
+    let before = f.snapshot();
+    let _lock = TreeLock::acquire(f.root()).unwrap();
+    let report = run_broad_row(f.root(), c, false, &AtomicBool::new(false)).unwrap();
+    assert_eq!(before, f.snapshot(), "sources and Git state must restore");
+    report
+}
+
+#[test]
+fn command_v090_junit_grades_collateral_and_reviewed_classname_hubs() {
+    let f = CommandFixture::new();
+    let mut c = junit_control(&f, "collateral");
+    c.expect_red.push(COMMAND_OTHER.into());
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly, "{row:?}");
+    assert!(row.breadth_observed);
+    assert_eq!(row.collateral.count, 1);
+    assert_eq!(row.collateral.targets, ["Other"]);
+    assert_eq!(
+        row.red,
+        [
+            COMMAND_GUARD,
+            COMMAND_OTHER,
+            "unlisted collateral & failure"
+        ]
+    );
+    assert_eq!(row.green, ["green companion"]);
+    assert!(row.failures["unlisted collateral & failure"].contains("trace <details>"));
+    assert!(row.failures["unlisted collateral & failure"].contains("collateral error & message"));
+    c.hub = Some("these classes intentionally assert the same shared guard".into());
+    c.hub_targets = Some(vec!["Other".into()]);
+    assert_eq!(junit_run(&f, &c).outcome, Outcome::Hub);
+    c.hub_targets = Some(vec!["Unapproved".into()]);
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly);
+    assert!(row.reason.unwrap().contains("outside hub_targets: Other"));
+    c.hub = None;
+    c.hub_targets = None;
+    c.broad_command.as_mut().unwrap()[2] = "same".into();
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::Caught);
+    assert_eq!(row.collateral.count, 1);
+    assert_eq!(row.collateral.targets, ["Guard"]);
+    // Normal replay still runs named ids only, even when an audit is configured.
+    f.run(&c, false);
+}
+
+#[test]
+fn command_v090_junit_missing_report_is_error() {
+    let f = CommandFixture::new();
+    let mut c = junit_control(&f, "missing");
+    for mode in ["missing", "missing_mutant"] {
+        c.broad_command.as_mut().unwrap()[2] = mode.into();
+        let row = junit_run(&f, &c);
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        assert!(row
+            .reason
+            .unwrap()
+            .contains("broad_report .git/broad.xml: cannot read report"));
+        assert!(!row.breadth_observed);
+    }
+}
+
+#[test]
+fn command_v090_junit_garbage_and_zero_testcases_are_errors() {
+    let f = CommandFixture::new();
+    let mut c = junit_control(&f, "garbage");
+    for mode in ["garbage", "empty", "garbage_mutant", "empty_mutant"] {
+        c.broad_command.as_mut().unwrap()[2] = mode.into();
+        let row = junit_run(&f, &c);
+        assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+        assert!(row.reason.unwrap().contains("broad_report .git/broad.xml"));
+        assert!(!row.breadth_observed);
+    }
+}
+
+#[test]
+fn command_v090_junit_stale_report_is_deleted_before_spawn() {
+    let f = CommandFixture::new();
+    let c = junit_control(&f, "stale");
+    // A valid previous report would falsely establish a broad catch if reused.
+    fs::write(f.root().join(".git/broad.xml"), format!(
+        "<testsuite><testcase classname=\"Guard\" name=\"{COMMAND_GUARD}\"><failure/></testcase></testsuite>"
+    )).unwrap();
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly, "{row:?}");
+    assert!(row.breadth_observed);
+    assert!(
+        !row.test_tail.contains("stale report was not deleted"),
+        "{row:?}"
+    );
+    let fresh = fs::read_to_string(f.root().join(".git/broad.xml")).unwrap();
+    assert!(fresh.contains("unlisted collateral"));
+}
+
+#[test]
+fn command_v090_junit_excludes_failures_already_red_on_clean_tree() {
+    let f = CommandFixture::new();
+    let mut c = junit_control(&f, "baseline_red");
+    c.expect_red.push(COMMAND_OTHER.into());
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert!(row.breadth_observed);
+    assert_eq!(row.collateral.count, 0);
+    assert!(row.collateral.targets.is_empty());
+    assert_eq!(row.red, [COMMAND_GUARD, COMMAND_OTHER]);
+    assert_eq!(
+        row.baseline_red["Preexisting"],
+        ["already red on clean tree"]
+    );
+    assert!(row.baseline_failures["already red on clean tree"].contains("preexisting failure"));
+    assert!(row.failures["already red on clean tree"].contains("preexisting failure"));
+}
+
+#[test]
+fn command_v090_junit_shares_clean_baselines_and_errors_per_selection() {
+    let f = CommandFixture::new();
+    let mut c = junit_control(&f, "collateral");
+    let mut second = c.clone();
+    second.id = "second-row".into();
+    second.expect_red = vec![COMMAND_OTHER.into()];
+    for mode in ["collateral", "missing"] {
+        c.broad_command.as_mut().unwrap()[2] = mode.into();
+        second.broad_command = c.broad_command.clone();
+        let path = f.root().join(".git/shared.toml");
+        fs::write(
+            &path,
+            toml::to_string(&Catalogue {
+                control: vec![c.clone(), second.clone()],
+                ..Catalogue::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(f.root().join(".git/broad-log")).ok();
+        let out = f.cli(&[
+            "--catalogue",
+            ".git/shared.toml",
+            "run",
+            "--all",
+            "--broad",
+            "--report",
+            ".git/shared.json",
+        ]);
+        assert_eq!(
+            out.status.success(),
+            mode == "collateral",
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let rows: serde_json::Value =
+            serde_json::from_slice(&fs::read(f.root().join(".git/shared.json")).unwrap()).unwrap();
+        let expected = if mode == "collateral" {
+            "CAUGHT_BROADLY"
+        } else {
+            "ERROR"
+        };
+        assert_eq!(rows[0]["outcome"], expected, "{rows}");
+        assert_eq!(rows[1]["outcome"], expected, "{rows}");
+        let log = fs::read_to_string(f.root().join(".git/broad-log")).unwrap();
+        assert_eq!(
+            log,
+            if mode == "collateral" {
+                "baseline\nmutant\nmutant\n"
+            } else {
+                "baseline\n"
+            }
+        );
+        if mode == "missing" {
+            assert!(rows[0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains(".git/broad.xml"));
+            assert!(rows[1]["reason"]
+                .as_str()
+                .unwrap()
+                .contains(".git/broad.xml"));
+        }
+    }
+}
+
+#[test]
+fn command_v090_breadth_fields_and_report_paths_fail_closed() {
+    let f = CommandFixture::new();
+    let c = junit_control(&f, "missing");
+    let path = f.root().join(".git/audit.toml");
+    append_control(&path, &c).unwrap();
+    assert_eq!(load(&path).unwrap().control[0], c);
+    for field in ["broad_command", "broad_report", "broad_id"] {
+        let mut bad = c.clone();
+        match field {
+            "broad_command" => bad.broad_command = None,
+            "broad_report" => bad.broad_report = None,
+            _ => bad.broad_id = None,
+        }
+        f.load_error(&bad, field);
+    }
+    for template in ["{filename}.{name}", "{classname}", "{name", "{name}\n"] {
+        let mut bad = c.clone();
+        bad.broad_id = Some(template.into());
+        f.load_error(&bad, "broad_id");
+    }
+    for name in ["", "../outside.xml", "/absolute.xml", "a/../../outside.xml"] {
+        let mut bad = c.clone();
+        bad.broad_report = Some(name.into());
+        f.load_error(&bad, "broad_report");
+    }
+    for argv in [
+        vec![],
+        vec![""],
+        vec!["python3", "\0"],
+        vec!["python3", "{test}"],
+    ] {
+        let mut bad = c.clone();
+        bad.broad_command = Some(argv.into_iter().map(str::to_owned).collect());
+        f.load_error(&bad, "broad_command");
+    }
+    let mut bad = c.clone();
+    bad.runner = "cargo".into();
+    f.load_error(&bad, "broad_command");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), f.root().join(".git/outside")).unwrap();
+        bad = c.clone();
+        bad.broad_report = Some(".git/outside/new.xml".into());
+        let error = validate_mutant(f.root(), &bad).unwrap_err();
+        assert!(error.contains("symlink broad_report"), "{error}");
+        symlink(
+            outside.path().join("absent.xml"),
+            f.root().join(".git/link.xml"),
+        )
+        .unwrap();
+        bad.broad_report = Some(".git/link.xml".into());
+        assert!(validate_mutant(f.root(), &bad)
+            .unwrap_err()
+            .contains("symlink broad_report"));
+    }
 }
 
 #[test]

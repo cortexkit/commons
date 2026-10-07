@@ -4,6 +4,7 @@ import signal
 import sys
 import time
 
+sys.stdout.reconfigure(newline="\n")
 # Read bytes rather than importing the guard, so every invocation observes the
 # current source and creates no cached bytecode in the fixture tree.
 mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
@@ -31,6 +32,7 @@ if test_id == "script.tests.flows_rig.RigChecks.test_vacuous":
 if test_id in (
     "script.tests.flows_rig.RigChecks.test_guard",
     "script.tests.flows_rig.RigChecks.test_other",
+    "scoped route opens > cached routes isolate A & B — café",
 ):
     if mutated:
         print(f"guard assertion failed: {test_id}", flush=True)

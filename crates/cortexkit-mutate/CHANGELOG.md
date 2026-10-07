@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.0
+
+- Accept command-row test ids with interior spaces, preserving them byte-for-byte
+  as one argv element, in proofs, appended TOML, reports and failure maps. Empty
+  ids, leading/trailing whitespace, controls (including tabs, newlines and NUL)
+  are still refused with the offending id in the error.
+- Add optional command-row `broad_command`, `broad_report` and `broad_id` fields
+  for a real JUnit breadth audit under `run --broad`, after the named tests are
+  graded. Delete stale reports before execution; missing, invalid and zero-case
+  reports are ERROR. Map failed/errored cases to exact ids, retain failure output,
+  and grade cross-class collateral as CAUGHT_BROADLY or reviewed HUB. Command
+  `hub_targets` are JUnit `classname` values; successful audits record
+  `breadth_observed: true`. Rows without these fields are unchanged.
+- Share clean JUnit baselines by command/report/id/deadline selection, report
+  baseline-red ids and messages separately, and exclude pre-existing failures
+  from collateral. Invalid baseline reports make every sharing row ERROR.
+- Document Bun, pytest, SwiftPM XCTest and converted Xcode report mappings. Keep
+  command exploration refused; `prove` uses the same canonical append path as
+  `explore --append`. Add pinned quick-xml 0.42.0 without optional features.
+
 ## 0.8.0
 
 - **Breaking:** rename the CLI binary from `ck-mutate` to `ckdev-mutate`; the
