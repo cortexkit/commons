@@ -92,9 +92,9 @@
         "answer": "refuse",
         "request_id": "cr-000045",
         "code": "provider_busy",
-        "reason": "history is being rewritten; try again shortly",
-        "retryable": true
-      }
+        "reason": "history is being rewritten; try again shortly"
+      },
+      "retryable": true
     },
     {
       "name": "refuse, user must act",
@@ -102,9 +102,30 @@
         "answer": "refuse",
         "request_id": "cr-000046",
         "code": "window_too_small",
-        "reason": "this model's window cannot hold the session's head; switch to a larger model",
-        "retryable": false
-      }
+        "reason": "this model's window cannot hold the session's head; switch to a larger model"
+      },
+      "retryable": false
+    },
+    {
+      "name": "refuse with the provider's own reason in provider_code",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000047",
+        "code": "history_unreadable",
+        "reason": "the transcript before ordinal 40 could not be read",
+        "provider_code": "mc:transcript_gap"
+      },
+      "retryable": true
+    },
+    {
+      "name": "refuse with a code the role does not name: decodes, never retried",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000048",
+        "code": "acme_own_code",
+        "reason": "x"
+      },
+      "retryable": false
     },
     {
       "name": "opaque ids and any u64 version are the provider's to choose",
@@ -133,6 +154,17 @@
           "pressure": 0.4
         }
       }
+    },
+    {
+      "name": "refuse still carrying the removed retryable member: ignored, code decides",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000049",
+        "code": "window_too_small",
+        "reason": "x",
+        "retryable": true
+      },
+      "retryable": false
     }
   ],
   "undecodable": [
@@ -215,6 +247,14 @@
         "answer": "wait",
         "request_id": "cr-000042",
         "reason": "busy"
+      }
+    },
+    {
+      "name": "refuse without a code",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000050",
+        "reason": "x"
       }
     }
   ],

@@ -8,14 +8,9 @@ its vectors, and a separate `-conformance` crate will hold its suite (§17).
 `llm-runner/v1` states what the runner owes on the same interface; this
 document states the provider's side.
 
-Every item is marked:
-
-- **[pinned]**: a settled requirement. A provider must do
-  it, and a runner may rely on it.
-- **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
-  option down so the types and vectors can encode a concrete choice. Question `Qn`
-  in `OPEN-QUESTIONS.md` lists the options. An open item's wire shape below
-  is the draft implemented by the Rust types, not a settled requirement.
+Every item is marked **[pinned]**: a settled requirement. A provider must
+do it, and a runner may rely on it. `OPEN-QUESTIONS.md` points each
+numbered design question to the section that answers it.
 
 Names and types this role shares with `llm-runner/v1` (the `compaction`
 group, `compaction.ready`, the model view's `source`, the runner's codes)
@@ -29,16 +24,15 @@ runner sends to the model.
 
 - [pinned] A provider lists `compaction-provider/v1` in its manifest's
   `capabilities.provides` (`PROVIDES`). A module may serve several majors.
-- [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, the Setup op and
-  the per-step op. [open: Q2] The Setup and per-step op names are drafted as
-  `compaction.setup` and `compaction.step`; these wire names are not yet settled.
+- [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, the Setup op
+  `compaction.setup` and the per-step op `compaction.step`.
 - [pinned] A runner refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it.
 - [pinned] Compaction routes are module-level and unscoped. Requests name
   the opaque session handle; it is not an authorization credential.
-- [open: Q1] This draft uses `{method, params}` (`OpRequest`) for every op,
-  with empty params for `role.describe` (`DescribeRequest`); the envelope
-  spelling is not yet settled. `method` is the op's name and `params` its request.
+- [pinned] Every request in this role, in either direction, is `{method,
+  params}` (`OpRequest`): `method` is the op's name and `params` its
+  request. `role.describe` takes empty params (`DescribeRequest`).
 - [pinned] The provider sends one op the other way: `compaction.ready`
   (§10), which the runner serves.
 
@@ -58,13 +52,15 @@ runner sends to the model.
   consumer may cache it for as long as it talks to the same module
   incarnation.
 - [pinned] This role defines no module-level capabilities yet.
-- [open: Q8] This draft puts `runner_groups` in `role.describe`; whether
-  runner requirements belong there or in the starter's configuration is
-  undecided. The list names the `llm-runner/v1` capability groups the
-  provider needs from the runner besides `compaction`: `transcript_reads`
-  for a provider with no reader of its own. The session's starter checks
-  them against the runner's `role.describe` before it plans the session
-  (`unmet_runner_groups`).
+- [pinned] The provider declares what it needs from the runner in
+  `role.describe.runner_groups`: the `llm-runner/v1` capability groups it
+  needs besides `compaction`, such as `transcript_reads` for a provider
+  with no reader of its own. A list of strings, omitted when empty.
+- [pinned] The plan composer checks `runner_groups` against the groups the
+  runner advertises in its own `role.describe` when it composes the
+  session. An unmet group fails the launch, and the failure names each
+  unmet group (`unmet_runner_groups`). Runner requirements are carried
+  nowhere else.
 
 ## 3. Pairing with a runner
 
@@ -104,8 +100,9 @@ the session and freezes that plan for use.
 - [pinned] If Setup fails or times out with no answer, no model call is
   made and the run ends `error` with `provider_code`
   `compaction_unavailable`, `llm-runner/v1`'s code, which this crate
-  re-exports (`errors::runner_codes::COMPACTION_UNAVAILABLE`). A Setup
-  answered `refuse` ends it with the provider's own `code` instead (below).
+  re-exports (`errors::runner_codes::COMPACTION_UNAVAILABLE`). That code is
+  used for Setup only, and is not retryable (§14.3). A Setup answered
+  `refuse` ends it with the provider's own `code` instead (§11).
   Either way the next send calls Setup again, because no initial view was
   recorded. So a provider answers Setup for a
   session it has seen before, and its answer is well formed whatever it
@@ -121,7 +118,7 @@ the session and freezes that plan for use.
   since the Unix epoch.
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
   initial, stability?, call_when?}` or `{answer: "refuse", request_id, code,
-  reason, retryable}`.
+  reason, provider_code?}` (§11).
   - `initial` is a CompactionMessage (§8). Usually its range is empty at the
     start of the lineage, `{from: 0, to: 0}`: the provider's head is
     inserted before every message, and the model view shows it as the
@@ -132,11 +129,10 @@ the session and freezes that plan for use.
     less often. A main session of Magic Context declares `[{index: 0, rank:
     2}, {index: 1, rank: 1}]`; a subagent session declares nothing. The
     runner uses these as stability segments for cache breakpoints and change
-    policies. [open: Q13] This draft encodes stability as an array of
-    `{index, rank}`, with unsigned 32-bit members, defaulting to an empty
-    array and omitted when empty; the JSON encoding is not yet settled.
+    policies. Stability is an array of `{index, rank}`, both unsigned 32-bit
+    integers; it defaults to an empty array and is omitted when empty.
   - `call_when` (§5).
-  - A `refuse` ends the run `error` with `code` as its `provider_code`.
+  - A `refuse` ends the run `error` (§11).
 
 ## 5. When the provider is called
 
@@ -146,12 +142,17 @@ the session and freezes that plan for use.
   optional per-model overrides, measured against the step's reported usage:
   `{default: 0.8, models: {"<model id or pattern>": 0.7}}` (`CallWhen`). A
   share is above 0 and at most 1. New condition kinds are additive.
-- [open: Q9] This draft calls the provider on every step when a runner meets
-  an unknown condition kind (`has_unknown_conditions`); the fallback for
-  unknown kinds is not yet settled.
-- [open: Q9] This draft accepts a model id or pattern as a key in
-  `call_when.models`; the pattern syntax, matching rule and precedence
-  between overlapping matches are undecided.
+- [pinned] A runner that meets a condition kind it does not know calls the
+  provider on every step, exactly as with no `call_when`
+  (`setup::calls_every_step`). It never skips a call because it could not
+  read a condition.
+- [pinned] A key in `call_when.models` is an exact model id, or a pattern
+  ending in one `*` that matches every model id starting with the text
+  before the `*`. A `*` anywhere else is literal. The share for a model is
+  chosen in a fixed order (`CallWhen::share_for`): the key equal to the
+  model id; else the matching pattern with the longest prefix; else
+  `default`. A bare `*` matches every model and loses to any longer
+  pattern.
 - [pinned] With no `call_when`, the runner calls on every step. Whatever the
   conditions say, it always calls on a prefix rebuild and after an
   execution error.
@@ -188,22 +189,27 @@ The status (`StepStatus`) carries:
   lineage with none.
 - [pinned] `last_applied {compaction_id, version}`, so a provider that lost
   its counter resumes above it (`next_version`).
-- [open: Q7] This draft includes `last_not_applied {compaction_id, version,
-  reason}` in the status; whether to include this field is undecided. It names the newest
-  CompactionMessage the runner recorded and did not apply, when it is newer
-  than the last applied, with the reason (§9, or `structural` for the
-  runner's own checks). Without it a provider cannot tell a refused answer
-  from one still in flight.
+- [pinned] `last_not_applied {compaction_id, version, reason}` names the
+  newest CompactionMessage the runner recorded and did not apply, when it
+  is newer than the last applied, with the reason: a §9 reason, or
+  `structural` for the runner's own checks (`STRUCTURAL`). It is absent
+  otherwise. It lets a provider tell a refused answer from one still in
+  flight.
 - [pinned] The cursor and the messages after it: `after_ordinal`, the last
   ordinal of this lineage the provider was sent (absent on the first call in
   the lineage), and `messages: [{ordinal, mid, message}]`, every message
   after it, oldest first. `message` is the runner's message schema, with
   final values, as `session.read` pages carry it.
-- [open: Q6] This draft allows a byte cap on status messages; whether to cap
-  them or send all messages since the cursor is undecided. The runner may
-  stop `messages` at that cap before the newest
-  message and set `more: true`. A single message over the cap comes alone.
-  The cursor then advances only to the last message sent.
+- [pinned] `messages` is capped in bytes, each message counting the length
+  of its compact JSON encoding as a status entry (`message_bytes`). The
+  default cap is 4 MiB, 4,194,304 bytes (`DEFAULT_MESSAGE_CAP_BYTES`).
+  The runner takes messages oldest first while their total stays within
+  the cap, and sets `more: true` when it stops before the newest message;
+  `more` is omitted when false (`take_capped`).
+- [pinned] The first message after the cursor is always sent: a single
+  message over the cap is sent alone. The cursor advances only to the last
+  message sent (`next_cursor`), never to `newest`, and the next status
+  carries the rest.
 - [pinned] `now`, the runner's clock in milliseconds since the Unix epoch.
 - [pinned] The cursor is kept per provider per session, scoped to
   `lineage_id`, written in the same record as that call's answer, and
@@ -230,11 +236,11 @@ The status (`StepStatus`) carries:
 | `noop` | `{request_id}` | records it; the cursor advances; the request goes out unchanged |
 | `compaction_message` | `{request_id, compaction}` | applies the CompactionMessage if §9 allows |
 | `wait` | `{request_id, reason, bound_ms}` | holds the step (§10) |
-| `refuse` | `{request_id, code, reason, retryable}` | ends the run (§11) |
+| `refuse` | `{request_id, code, reason, provider_code?}` | ends the run (§11) |
 
-- [pinned] The four answers and their meaning. [open: Q2] This draft spells
-  the step answers `noop`, `compaction_message`, `wait` and `refuse`, and
-  Setup's successful answer `ready`; these wire spellings are not yet settled.
+- [pinned] The four answers, their meaning and their spellings: the step
+  answers `noop`, `compaction_message`, `wait` and `refuse`, and Setup's
+  `ready` and `refuse`.
 - [pinned] Strict on `answer`: an unknown or misspelled answer does not
   decode. The runner treats it as a failed call and keeps the last applied
   CompactionMessage; it never reads it as `noop`.
@@ -273,10 +279,12 @@ The status (`StepStatus`) carries:
   message schema. The runner does not run step transforms over it.
 - [pinned] `version` is an unsigned 64-bit integer (`u64`) the provider
   raises for every CompactionMessage of the session.
-- [pinned] `compaction_id` is an opaque string. The runner never
-  interprets it; it echoes it in the status and shows it in the model view.
-  [open: Q4] This draft has the provider mint `compaction_id` as its own
-  content name; whether the provider or runner allocates it is undecided.
+- [pinned] `compaction_id` is an opaque string minted by the provider, as
+  its own name for the content. It is stable for one logical compaction
+  lineage: CompactionMessages that carry on one compaction keep the same
+  id at rising versions, and the provider mints a new id only when it
+  starts a new one. The runner never mints, rewrites or interprets it; it
+  echoes it in the status and shows it in the model view.
 - [pinned] A CompactionMessage carries no cost label. The runner computes
   where the request first changes and maps it onto the stability segments.
 - [pinned] How the runner stores replacement content (by digest, say) is
@@ -357,9 +365,9 @@ The status (`StepStatus`) carries:
   - a ready for an older request, or before any request was issued, is
     ignored and is not an error;
   - it is a hint: the runner's bound is the backstop.
-- [open: Q1] This draft replies to an accepted or ignored ready with an empty
-  object (`ReadyReply`), revealing no outcome; whether the reply should be
-  empty or carry an acknowledgement outcome is undecided.
+- [pinned] The runner replies to `compaction.ready` with the empty object
+  `{}` (`ReadyReply`), whether it acted on the hint or ignored it. The
+  reply reveals no outcome.
 - [pinned] A provider sends `compaction.ready` only once the result its next
   answer will carry is durable in its own store, so a crash between the two
   loses nothing (kill point `WaitWorkDurable`). A provider that crashed with
@@ -371,27 +379,32 @@ The status (`StepStatus`) carries:
 
 ## 11. REFUSE
 
-- [pinned] `refuse {code, reason, retryable}` ends the run `error`. The
-  runner writes `code` as `provider_code`, with the provider and `reason`.
-  Nothing is added to the model's history, and the session stays usable:
-  the next send calls the provider again.
-- [pinned] `reason` is user-facing text. `retryable` tells the session's
-  owner whether retrying without the user acting makes sense (the provider
-  was only busy) or the user must act (switch model, fix configuration).
+- [pinned] `refuse {code, reason, provider_code?}` ends the run `error`.
+  The runner records the role `code` as the refusal's code, with the
+  provider and `reason`, and, when present, the provider's `provider_code`
+  as a separate member beside it, never in place of `code`. Nothing is
+  added to the model's history, and the session stays usable: the next
+  send calls the provider again.
+- [pinned] `code` is one of the four codes below (`RefuseCode`). Each has a
+  fixed retryability, which tells the session's owner whether retrying
+  without the user acting makes sense (the provider was only busy) or the
+  user must act (switch model, fix configuration). The answer carries no
+  retryability of its own: a `retryable` member is ignored on decode and
+  never decides retry.
+- [pinned] `provider_code` is an optional open string: the provider's own,
+  finer reason, for logs and display. It never replaces `code` and never
+  decides retry.
+- [pinned] A `code` the runner does not know decodes rather than failing
+  the answer (`RefuseCode::Unknown`). It still ends the run, is recorded as
+  received, and is not retryable.
+- [pinned] `reason` is user-facing text.
 - [pinned] On a tool step, the tool results already written stay.
-- [open: Q14] This draft names `window_too_small`, `provider_busy`,
-  `misconfigured` and `history_unreadable` as refusal codes
-  (`errors::refuse_codes`), with the retryability values below; the role's
-  named code vocabulary and required retryability values are not yet settled.
-
-| Code | When | `retryable` |
+| Code | When | Retryable |
 |---|---|---|
-| `window_too_small` | the model's window cannot hold the smallest view the provider can build | `false` |
-| `provider_busy` | the provider is busy with the session's history past the wait cap | `true` |
-| `misconfigured` | the configuration for this preset and params cannot be used | `false` |
-| `history_unreadable` | a gap after the cursor, and no transcript the provider can reach | `true` |
-
-  A provider may use codes of its own, with its own `retryable`.
+| `window_too_small` | the model's window cannot hold the smallest view the provider can build | no |
+| `provider_busy` | the provider is busy with the session's history past the wait cap | yes |
+| `misconfigured` | the configuration for this preset and params cannot be used | no |
+| `history_unreadable` | a gap after the cursor, and no transcript the provider can reach | yes |
 
 ## 12. The model view
 
@@ -439,13 +452,16 @@ role's ids show up in it.
 ## 14. Error codes
 
 Codes ride as the `code` of an `ERROR` frame's body `{code, message,
-detail?}` (`ErrorBody`). They are open strings: a party that meets one it does not know
-treats it as a terminal refusal of that one request.
+detail?}` (`ErrorBody`). They are open strings: a party that meets one it
+does not know treats it as a terminal refusal of that one request, and
+never retries it.
 
-`KnownCode` enumerates the codes in §11 and §14 for classification; it does
-not close the wire vocabulary. `ErrorBody.code`, `SetupAnswer::Refuse.code`
-and `StepAnswer::Refuse.code` remain strings. `detail` is arbitrary JSON,
-omitted when absent; `message` is a required string.
+`KnownCode` enumerates the codes in §11 and §14 for classification, with
+each one's fixed retryability (§14.3); it does not close the wire
+vocabulary. `ErrorBody.code` remains a string; a `refuse` answer's `code`
+decodes to `RefuseCode`, which keeps an unknown code as received (§11).
+`detail` is arbitrary JSON, omitted when absent; `message` is a required
+string.
 
 ### 14.1 Provider refusals (`errors`)
 
@@ -466,8 +482,27 @@ omitted when absent; `message` is a required string.
 | `invalid_params {field: "plan.compaction_item"}` | admission, on a runner without the `compaction` group |
 | `not_session_compaction_provider` | a `compaction.ready` whose route caller is not `plan.compaction_item.provider`, or for a session without a compaction item |
 | `invalid_params {field}` | a malformed `compaction.ready` |
-| `compaction_unavailable` | a run's `provider_code`: Setup failed or timed out with no answer (§4) |
+| `compaction_unavailable` | a run's `provider_code`, after Setup only: Setup failed or timed out with no answer (§4). A failed step call never ends a run with it; the runner keeps the last applied view (§7) |
 | `compaction_wait_exceeded` | a run's `provider_code`: a wait reached the cap and the request could not be shown to fit |
+
+### 14.3 Retryability and where a code ends a run (`KnownCode`)
+
+[pinned] Every code this role names has a fixed retryability and a fixed
+set of calls after which it may end a run (`KnownCode::retryable`,
+`KnownCode::ends_run_at`). No party chooses either per message. A code not
+in this table is not retryable.
+
+| Code | Retryable | Ends a run after |
+|---|---|---|
+| `invalid_params` | no | — |
+| `transient` | yes | — |
+| `window_too_small` | no | Setup, step |
+| `provider_busy` | yes | Setup, step |
+| `misconfigured` | no | Setup, step |
+| `history_unreadable` | yes | Setup, step |
+| `not_session_compaction_provider` | no | — |
+| `compaction_unavailable` | no | Setup |
+| `compaction_wait_exceeded` | yes | step |
 
 ## 15. Decoding
 
@@ -477,8 +512,10 @@ omitted when absent; `message` is a required string.
 - [pinned] **Strict on values**: `answer` in every answer, because a runner
   cannot act on an answer it does not understand. Values a runner may grow
   (`step_kind`, `prefix_rebuilding.reason`, `finish_reason`,
-  `last_not_applied.reason`, `provider_code`) are decoded open. The draft
-  `CallWhen` preserves unknown condition fields so callers can detect them.
+  `last_not_applied.reason`, `previous_provider_code`, a refusal's
+  `provider_code`) are decoded open, and so is a refusal's `code`, whose
+  unknown values are never retried (§11). `CallWhen` preserves unknown
+  condition fields so a runner can detect them (§5).
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
@@ -561,40 +598,20 @@ if no kill ended a real process.
 - The runner telling the provider which messages it stripped after a
   prefix-changing event.
 
-## Open questions
-
-Unresolved topics are the op envelope and ready reply, op and answer names,
-the allocator of `compaction_id`, status-message caps, `last_not_applied`,
-discovery of runner requirements, unknown-condition fallback and model-pattern
-matching, the stability encoding, and named refusal codes. The draft choices
-are listed below; `OPEN-QUESTIONS.md` adds recommendations and partial settlements.
-
-- **Q1. The envelope and the ready reply.** (a) **draft:** `{method,
-  params}`, as `llm-runner/v1` settled for its own ops, and an empty object
-  as the reply to `compaction.ready`; (b) `{name, arguments}`, as
-  `tool-provider/v1` uses.
-- **Q2. Names.** **draft:** ops `compaction.setup` and `compaction.step`;
-  answers `noop`, `compaction_message`, `wait`, `refuse` (snake_case, as the
-  hook names are), and `ready` for Setup.
-- **Q4. Who mints `compaction_id`.** Its type is settled: an opaque
-  string. (a) **draft:** the provider mints it, as its own content name;
-  (b) the runner, at recording.
-- **Q6. A cap on the status's messages.** (a) **draft:** a byte cap with
-  `more`, the cursor advancing only to the last message sent; (b) every
-  message since the cursor, uncapped. A lineage change on a long session
-  makes (b) large.
-- **Q7. `last_not_applied`.** (a) **draft:** in the status; (b) left out,
-  the provider inferring it from `last_applied`.
-- **Q8. `runner_groups`.** (a) **draft:** in `role.describe`, checked by the
-  starter; (b) the starter's own configuration per provider.
-- **Q9. Unknown `call_when` kinds and model patterns.** **draft:** a runner
-  meeting an unknown kind calls on every step. Pattern matching is unset:
-  exact id or a trailing `*`.
-- **Q13. The stability shape.** **draft:** an array of `{index, rank}`.
-- **Q14. Role-named `refuse` codes.** **draft:** the four in §11.
-
 ## Settled questions
 
+No question is open. Where each is answered:
+
+- **Q1. The envelope and the ready reply.** `{method, params}` (§1);
+  `compaction.ready` is answered `{}` (§10).
+- **Q2. Names.** §1 (ops) and §7 (answers).
+- **Q4. Who mints `compaction_id`.** The provider (§8).
+- **Q6. A cap on the status's messages.** §6.
+- **Q7. `last_not_applied`.** §6.
+- **Q8. `runner_groups`.** §2.
+- **Q9. Unknown `call_when` kinds and model patterns.** §5.
+- **Q13. The stability shape.** §4.
+- **Q14. Role-named `refuse` codes.** §11 and §14.3.
 - **Q3. Range ends.** Settled: half-open ordinals, `from` included and `to`
   excluded (§8). Ordinals are never reused within a lineage, they can name
   an empty range and a range running to the end, and the model view speaks

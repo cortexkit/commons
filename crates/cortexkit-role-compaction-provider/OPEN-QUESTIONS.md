@@ -1,15 +1,13 @@
 # Compaction provider draft decisions
 
-This is a review ledger, not a wire contract. Unresolved choices retain their
-markers in CONTRACT.md and their existing draft encodings in Rust. The
-authoritative sources do not select an option unless the disposition below
-says settled. The owner of this contract (Magic Context) must obtain the
-listed agreements before pinning an open item. Pinning means removing its
-`[open: Qn]` marker and freezing the wire spelling.
+This is a review ledger, not a wire contract. Every question below is
+settled, and CONTRACT.md states each answer as a pinned rule; this ledger
+only points to the section that holds it.
 
 Agreements name the owner of each affected contract: Broca is the CortexKit
 module that runs model sessions and owns `llm-runner/v1`; prefrontal owns the
-fetch-plan composer that writes each session's plan.
+fetch-plan composer that writes each session's plan; Magic Context is the
+provider that owns this contract.
 
 References to numbered design sections below are to
 `ck-extensibility-design-r7.3.md`; its corrections are in
@@ -17,19 +15,25 @@ References to numbered design sections below are to
 `cortexkit-role-llm-runner/CONTRACT.md`. Fetch-plan references name sections
 or files in prefrontal's `test-vectors/fetch-plan-v1/`.
 
-| Question | Disposition | Options and recommendation | Agreement needed |
-|---|---|---|---|
-| Q1: op envelope and ready reply | Open in part. Routes are module-level and unscoped; design §4.7.2, §14.1. Neither the design nor errata specifies these provider envelopes or the ready reply. | `{method, params}` or `{name, arguments}`; ready reply `{}` or an acknowledgement carrying an outcome. Keep `{method, params}` and `{}` to match runner management ops without making a ready hint into a query. `role.describe` uses empty params in this draft. | Owner of `llm-runner/v1` (Broca) |
-| Q2: op and answer spellings | Open. Setup and the per-step call have defined meanings, but not wire tags; design §5.1, §5.3. | Keep `compaction.setup`, `compaction.step`, `ready`, `noop`, `compaction_message`, `wait`, `refuse`; alternatives include `setup`/`status` and the design's uppercase labels. Recommend the existing namespaced ops and snake_case tags for consistency with the runner. | Owner of `llm-runner/v1` (Broca) |
-| Q4: who mints `compaction_id` | Open. The status carries an id and the provider maintains the version counter, but no rule selects the id's allocator; design §5.3, §5.4. | Provider-minted or runner-minted. Recommend provider-minted: the initial answer can name its content before recording, with no second allocation protocol. | Owner of `llm-runner/v1` (Broca) |
-| Q6: capped status messages | Open. The runner sends messages since the cursor, but no cap or pagination shape is specified; design §5.3. | Uncapped messages or a byte cap with `more`. Recommend the draft cap, a single oversized message sent alone, and advancement only to the last sent message, to bound lineage-reset requests without losing history. | Owner of `llm-runner/v1` (Broca) |
-| Q7: `last_not_applied` | Open. The status must identify the last applied compaction, but no rule requires this additional field; design §5.3. | Include the newest rejected message and reason, or infer from `last_applied`. Recommend including it: absence from the applied counter cannot distinguish rejection from outstanding work. | Owner of `llm-runner/v1` (Broca) |
-| Q8: `runner_groups` | Open in part. A provider without its own transcript reader needs runner transcript reads, but the discovery field is unspecified; design §10.4. | Provider discovery data or starter configuration. Recommend `role.describe.runner_groups`: build-level requirements remain discoverable for third-party providers. The starter checks them before pairing. | Owner of the fetch-plan composer (prefrontal) and owner of `llm-runner/v1` (Broca) |
-| Q9: unknown conditions and model patterns | Open. Condition kinds may be added and model overrides may use patterns, but fallback, matching and overlap precedence are unspecified; design §5.2. | Unknown kinds: always call, ignore, or refuse. Patterns: exact only, trailing `*`, or a broader grammar. Recommend always call for unknown kinds; exact match first, then longest trailing-star prefix, then default. This avoids skipping required work and keeps matching deterministic. No matcher is implemented until agreement. | Owner of `llm-runner/v1` (Broca) |
-| Q13: stability encoding | Open. Indexes refer to provider output and higher ranks mean more stable messages, but no JSON encoding is selected; design §5.1, §7, §13.2. | Array of `{index, rank}` or object keyed by index. Recommend the draft array, with unsigned 32-bit indexes/ranks, to avoid special JSON-key parsing. Empty declarations are omitted on serialization. | Owner of `llm-runner/v1` (Broca) |
-| Q14: role-named refusal codes | Open. A refusal carries `code`, `reason` and `retryable` and ends the run, but no provider-owned code vocabulary is defined; design §5.6. | The four draft codes or entirely provider-defined codes. Recommend `window_too_small`/false, `provider_busy`/true, `misconfigured`/false and `history_unreadable`/true, while keeping unknown codes open. They distinguish automatic retry from user action. | Owner of the fetch-plan composer (prefrontal) and owner of `llm-runner/v1` (Broca) |
+## Open questions
 
-## Already settled questions
+None.
+
+## Settled questions
+
+| Question | Where CONTRACT.md answers it |
+|---|---|
+| Q1: op envelope and ready reply | §1: every request is `{method, params}`; §10: `compaction.ready` is answered `{}`. Ruled by Magic Context and Broca. |
+| Q2: op and answer spellings | §1 and §7: `compaction.setup`, `compaction.step`; `ready`, `noop`, `compaction_message`, `wait`, `refuse`. Ruled by Magic Context and Broca. |
+| Q4: who mints `compaction_id` | §8: the provider; opaque, stable for one logical compaction lineage. Ruled by Magic Context and Broca. |
+| Q6: capped status messages | §6: a byte cap (default 4 MiB) with `more`; a single oversized message is sent alone; the cursor advances to the last message sent. Ruled by Magic Context and Broca. |
+| Q7: `last_not_applied` | §6: in the status, with its reason. Ruled by Magic Context and Broca. |
+| Q8: `runner_groups` | §2: declared in `role.describe.runner_groups`, checked by the plan composer at composition; an unmet group fails the launch by name. Ruled by ALF as the plan composer. |
+| Q9: unknown conditions and model patterns | §5: an unknown condition kind means every step; exact id, then the longest trailing-`*` pattern, then `default`. Ruled by Magic Context and Broca. |
+| Q13: stability encoding | §4: an array of `{index, rank}`. Ruled by Magic Context and Broca. |
+| Q14: role-named refusal codes | §11 and §14.3: four role codes with fixed retryability, the provider's own reason in `provider_code`, no `retryable` on the wire; `compaction_unavailable` only after Setup. Ruled by Magic Context and Broca. |
+
+## Settled earlier
 
 | Question | Decision and authority |
 |---|---|
@@ -45,8 +49,13 @@ or files in prefrontal's `test-vectors/fetch-plan-v1/`.
 
 ## Remaining interoperability wording
 
-The runner's provider-code documentation still says `compaction_unavailable`
-for Setup **or a compaction call**, whereas a failed step call continues with
-the last applied view (design §5.3). Recommend narrowing the runner wording
-to Setup, with agreement from the owner of `llm-runner/v1` (Broca). Its code
-string and this draft's behavior are unchanged; no runner file is changed here.
+These sit in `cortexkit-role-llm-runner/CONTRACT.md`, which this crate does
+not change; its owner (Broca) aligns them:
+
+- §12.2 still says `compaction_unavailable` is written for Setup **or a
+  compaction call**. This role uses it after Setup only (§14.3); a failed
+  step call continues with the last applied view (design §5.3).
+- §6 and §11 say a provider's refusal rides as the run error's
+  `provider_code`. Under §11 of this contract the run records the role
+  `code` and, separately, the refusal's own `provider_code`; the runner
+  contract has to name the member that holds each.

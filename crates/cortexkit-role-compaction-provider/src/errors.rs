@@ -6,15 +6,20 @@
 //!   body `{code, message, detail?}` ([`INVALID_PARAMS`], [`TRANSIENT`]).
 //!   The runner treats any refusal of a step call as a failed call: it
 //!   keeps the last applied CompactionMessage;
-//! - the `code` of a `refuse` answer, which becomes the run's
-//!   `provider_code` ([`refuse_codes`]);
+//! - the `code` of a `refuse` answer, one of the role's fixed codes
+//!   ([`RefuseCode`], [`refuse_codes`]); the provider's own, finer reason
+//!   rides beside it as the answer's `provider_code`;
 //! - codes the runner answers or writes, quoted from `llm-runner/v1` so
 //!   both sides spell them the same ([`runner_codes`]).
 //!
+//! Every named code has a fixed retryability and a fixed set of calls
+//! after which it may end a run ([`KnownCode::retryable`],
+//! [`KnownCode::ends_run_at`]); CONTRACT.md §14.3 tabulates both.
+//!
 //! Codes are open strings: a party that meets one it does not know treats
-//! it as a terminal refusal of that one request.
+//! it as a terminal refusal of that one request, never retried.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 /// An ERROR body. Codes remain open strings, including provider-defined ones.
@@ -63,6 +68,63 @@ macro_rules! known_codes {
     };
 }
 
+/// The two calls a runner makes to its compaction provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Call {
+    /// `compaction.setup`, once per session before its first model call.
+    Setup,
+    /// `compaction.step`, the per-step call.
+    Step,
+}
+
+impl Call {
+    pub const ALL: [Call; 2] = [Call::Setup, Call::Step];
+}
+
+impl KnownCode {
+    /// Whether a party may retry without the user acting. Fixed per code:
+    /// a `refuse` answer carries no retryability of its own.
+    pub fn retryable(self) -> bool {
+        match self {
+            Self::Transient
+            | Self::ProviderBusy
+            | Self::HistoryUnreadable
+            | Self::CompactionWaitExceeded => true,
+            Self::InvalidParams
+            | Self::WindowTooSmall
+            | Self::Misconfigured
+            | Self::NotSessionCompactionProvider
+            | Self::CompactionUnavailable => false,
+        }
+    }
+
+    /// Whether a run may end `error` with this code because of `call`.
+    /// The four `refuse` codes may end it after either call;
+    /// `compaction_unavailable` only after Setup, because a failed step
+    /// call keeps the last applied view instead; `compaction_wait_exceeded`
+    /// only after a step call, because only a step answers `wait`. ERROR
+    /// codes and the ready refusal never end a run themselves.
+    pub fn ends_run_at(self, call: Call) -> bool {
+        match self {
+            Self::WindowTooSmall
+            | Self::ProviderBusy
+            | Self::Misconfigured
+            | Self::HistoryUnreadable => true,
+            Self::CompactionUnavailable => call == Call::Setup,
+            Self::CompactionWaitExceeded => call == Call::Step,
+            Self::InvalidParams | Self::Transient | Self::NotSessionCompactionProvider => false,
+        }
+    }
+
+    /// The code with this spelling, if the role names it.
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|known| known.as_str() == code)
+    }
+}
+
 known_codes! {
     InvalidParams => INVALID_PARAMS,
     Transient => TRANSIENT,
@@ -101,9 +163,64 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
     detail?.get("field")?.as_str()
 }
 
-/// Codes a `refuse` answer carries, which the runner writes as the run's
-/// `provider_code`. A provider may use codes of its own beside these; for
-/// these, `retryable` must be the value [`refuse_codes::retryable`] gives.
+/// The `code` of a `refuse` answer: one of the role's four codes, each with
+/// a fixed retryability. A code this crate does not know still decodes, as
+/// [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
+/// answer undecodable; it is never retryable. A provider's own, finer reason
+/// goes in the answer's separate `provider_code`, never in `code`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RefuseCode {
+    WindowTooSmall,
+    ProviderBusy,
+    Misconfigured,
+    HistoryUnreadable,
+    /// A code this role does not name, kept as received.
+    Unknown(String),
+}
+
+impl RefuseCode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::WindowTooSmall => refuse_codes::WINDOW_TOO_SMALL,
+            Self::ProviderBusy => refuse_codes::PROVIDER_BUSY,
+            Self::Misconfigured => refuse_codes::MISCONFIGURED,
+            Self::HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
+            Self::Unknown(code) => code,
+        }
+    }
+
+    /// The code with this spelling; an unnamed spelling is [`Self::Unknown`].
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            refuse_codes::WINDOW_TOO_SMALL => Self::WindowTooSmall,
+            refuse_codes::PROVIDER_BUSY => Self::ProviderBusy,
+            refuse_codes::MISCONFIGURED => Self::Misconfigured,
+            refuse_codes::HISTORY_UNREADABLE => Self::HistoryUnreadable,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+
+    /// Whether retrying without the user acting makes sense. Fixed by the
+    /// code; an unknown code is never retried.
+    pub fn retryable(&self) -> bool {
+        refuse_codes::retryable(self.as_str())
+    }
+}
+
+impl Serialize for RefuseCode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RefuseCode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        Ok(Self::from_code(&code))
+    }
+}
+
+/// The spellings of the four [`RefuseCode`]s.
 pub mod refuse_codes {
     /// The model's window cannot hold the smallest view the provider can
     /// build. The user has to switch to a larger model. Not retryable.
@@ -125,15 +242,10 @@ pub mod refuse_codes {
         HISTORY_UNREADABLE,
     ];
 
-    /// The retryability the role fixes for one of its own codes, or `None`
-    /// for a code the provider defined itself, whose `retryable` value the
-    /// provider chooses.
-    pub fn retryable(code: &str) -> Option<bool> {
-        match code {
-            PROVIDER_BUSY | HISTORY_UNREADABLE => Some(true),
-            WINDOW_TOO_SMALL | MISCONFIGURED => Some(false),
-            _ => None,
-        }
+    /// The retryability the role fixes for a `refuse` code: `false` for a
+    /// code it does not name, which is never retried.
+    pub fn retryable(code: &str) -> bool {
+        matches!(code, PROVIDER_BUSY | HISTORY_UNREADABLE)
     }
 }
 
@@ -155,16 +267,18 @@ pub mod runner_codes {
     pub const NOT_SESSION_COMPACTION_PROVIDER: &str = errors::NOT_SESSION_COMPACTION_PROVIDER;
     /// The codes a `compaction.ready` may be refused with.
     pub const READY_CODES: &[&str] = &[INVALID_PARAMS, NOT_SESSION_COMPACTION_PROVIDER];
-    /// A `provider_code` the runner writes itself: Setup failed or timed out
-    /// with no answer, so no initial view was recorded and no model call was
-    /// made. The next send calls Setup again.
+    /// A `provider_code` the runner writes itself, after Setup only: Setup
+    /// failed or timed out with no answer, so no initial view was recorded
+    /// and no model call was made. The next send calls Setup again. A step
+    /// call that fails never ends the run with it: the runner keeps the last
+    /// applied view.
     pub const COMPACTION_UNAVAILABLE: &str = errors::provider_codes::COMPACTION_UNAVAILABLE;
     /// A `provider_code` the runner writes itself: a `wait` reached the
     /// runner's cap and the request could not be shown to fit.
     pub const COMPACTION_WAIT_EXCEEDED: &str = errors::provider_codes::COMPACTION_WAIT_EXCEEDED;
     /// The `provider_code` values the runner writes itself on account of
-    /// its compaction provider. A provider's own `refuse` code is written
-    /// as given.
+    /// its compaction provider. A `refuse` answer's code is recorded as
+    /// given.
     pub const PROVIDER_CODES: &[&str] = &[COMPACTION_UNAVAILABLE, COMPACTION_WAIT_EXCEEDED];
 }
 
@@ -275,12 +389,118 @@ mod tests {
         }
         for case in vectors::cases(&file, "refuse_codes") {
             let code = case["code"].as_str().unwrap();
+            let decoded: RefuseCode = vectors::round_trip(code, &case["code"]);
             assert_eq!(
-                refuse_codes::retryable(code),
-                case["retryable"].as_bool(),
+                matches!(decoded, RefuseCode::Unknown(_)),
+                !case["named"].as_bool().unwrap(),
                 "{code}"
             );
+            assert_eq!(
+                decoded.retryable(),
+                case["retryable"].as_bool().unwrap(),
+                "{code}"
+            );
+            assert_eq!(refuse_codes::retryable(code), decoded.retryable(), "{code}");
         }
+    }
+
+    #[test]
+    fn every_refuse_code_has_its_fixed_retryability() {
+        let expected = [
+            (RefuseCode::WindowTooSmall, false),
+            (RefuseCode::ProviderBusy, true),
+            (RefuseCode::Misconfigured, false),
+            (RefuseCode::HistoryUnreadable, true),
+        ];
+        assert_eq!(expected.len(), refuse_codes::ALL.len());
+        for (code, retryable) in expected {
+            assert_eq!(code.retryable(), retryable, "{}", code.as_str());
+            assert_eq!(RefuseCode::from_code(code.as_str()), code);
+            let known = KnownCode::from_code(code.as_str()).unwrap();
+            assert_eq!(known.retryable(), retryable, "{}", code.as_str());
+        }
+        // A code the role does not name decodes, is kept as received, and
+        // is never retried.
+        let unknown: RefuseCode = serde_json::from_value(Value::from("acme:quota")).unwrap();
+        assert_eq!(unknown, RefuseCode::Unknown("acme:quota".into()));
+        assert!(!unknown.retryable());
+        assert_eq!(serde_json::to_value(&unknown).unwrap(), "acme:quota");
+    }
+
+    /// The rows of CONTRACT.md §14.3: code, retryable, and the calls after
+    /// which the code may end a run.
+    fn contract_retryability() -> Vec<(String, bool, Vec<Call>)> {
+        let contract = include_str!("../CONTRACT.md");
+        let table = contract
+            .split("### 14.3 ")
+            .nth(1)
+            .expect("CONTRACT.md has no §14.3")
+            .split("\n## ")
+            .next()
+            .unwrap();
+        table
+            .lines()
+            .filter(|line| line.starts_with("| `"))
+            .map(|row| {
+                let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+                let code = cells[1].trim_matches('`').to_owned();
+                let retryable = match cells[2] {
+                    "yes" => true,
+                    "no" => false,
+                    other => panic!("{code}: retryable cell {other:?}"),
+                };
+                let calls = cells[3]
+                    .split(',')
+                    .map(str::trim)
+                    .filter_map(|call| match call {
+                        "Setup" => Some(Call::Setup),
+                        "step" => Some(Call::Step),
+                        "—" => None,
+                        other => panic!("{code}: call cell {other:?}"),
+                    })
+                    .collect();
+                (code, retryable, calls)
+            })
+            .collect()
+    }
+
+    /// The one table of retryability and of the calls after which each code
+    /// may end a run, held three ways: the enum, CONTRACT.md §14.3 and the
+    /// `retryability` vectors. `compaction_unavailable` is never retryable
+    /// and ends a run only after Setup.
+    #[test]
+    fn retryability_table_matches_contract_and_vectors() {
+        let table = contract_retryability();
+        assert_eq!(table.len(), KnownCode::ALL.len(), "§14.3 rows: {table:?}");
+        let file = vectors::load("errors.json");
+        let rows = vectors::cases(&file, "retryability");
+        assert_eq!(rows.len(), KnownCode::ALL.len());
+        for ((code, retryable, calls), row) in table.iter().zip(rows) {
+            let known = KnownCode::from_code(code).unwrap_or_else(|| panic!("{code}"));
+            assert_eq!(row["code"], code.as_str());
+            assert_eq!(known.retryable(), *retryable, "{code}: retryable");
+            assert_eq!(row["retryable"], *retryable, "{code}: vector retryable");
+            let ends: Vec<Call> = Call::ALL
+                .into_iter()
+                .filter(|call| known.ends_run_at(*call))
+                .collect();
+            assert_eq!(&ends, calls, "{code}: ends a run after");
+            let vector_calls: Vec<Call> = row["ends_run_at"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|call| match call.as_str().unwrap() {
+                    "setup" => Call::Setup,
+                    "step" => Call::Step,
+                    other => panic!("{code}: {other}"),
+                })
+                .collect();
+            assert_eq!(&vector_calls, calls, "{code}: vector ends_run_at");
+        }
+        let unavailable = KnownCode::CompactionUnavailable;
+        assert!(!unavailable.retryable());
+        assert!(unavailable.ends_run_at(Call::Setup));
+        assert!(!unavailable.ends_run_at(Call::Step));
     }
 
     #[test]

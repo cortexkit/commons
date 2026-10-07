@@ -68,15 +68,58 @@
     },
     {
       "name": "setup refused",
-      "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "misconfigured", "reason": "preset 'head' needs a memory store, and none is configured", "retryable": false}
+      "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "misconfigured", "reason": "preset 'head' needs a memory store, and none is configured"},
+      "retryable": false
+    },
+    {
+      "name": "setup refused with the provider's own reason in provider_code",
+      "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "misconfigured", "reason": "preset 'head' needs a memory store, and none is configured", "provider_code": "mc:no_memory_store"},
+      "retryable": false
+    },
+    {
+      "name": "setup refused with a code the role does not name: decodes, never retried",
+      "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "acme_own_code", "reason": "x"},
+      "retryable": false
     }
+  ],
+  "tolerated": [
+    {"name": "refuse still carrying the removed retryable member: ignored, code decides", "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "misconfigured", "reason": "x", "retryable": true}, "retryable": false}
   ],
   "undecodable": [
     {"name": "unknown answer", "answer": {"answer": "maybe", "request_id": "cr-000001"}},
     {"name": "ready without an initial message", "answer": {"answer": "ready", "request_id": "cr-000001"}},
     {"name": "no request id", "answer": {"answer": "ready", "initial": {"compaction_id": "x", "version": 1, "range": {"from": 0, "to": 0}, "replacement": []}}},
-    {"name": "refuse without retryable", "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "misconfigured", "reason": "x"}},
+    {"name": "refuse without a code", "answer": {"answer": "refuse", "request_id": "cr-000001", "reason": "x"}},
     {"name": "a negative stability rank", "answer": {"answer": "ready", "request_id": "cr-000001", "initial": {"compaction_id": "x", "version": 1, "range": {"from": 0, "to": 0}, "replacement": []}, "stability": [{"index": 0, "rank": -1}]}}
+  ],
+  "model_matching": [
+    {
+      "name": "exact over the longest trailing star over the default",
+      "call_when": {"default": 0.8, "models": {"anthropic/*": 0.6, "anthropic/claude-*": 0.65, "anthropic/claude-opus-4-5": 0.7}},
+      "expected": [
+        {"model": "anthropic/claude-opus-4-5", "share": 0.7},
+        {"model": "anthropic/claude-sonnet-4", "share": 0.65},
+        {"model": "anthropic/haiku", "share": 0.6},
+        {"model": "openai/gpt-5", "share": 0.8}
+      ]
+    },
+    {
+      "name": "a bare star matches every model but loses to any longer pattern",
+      "call_when": {"default": 0.8, "models": {"*": 0.9, "openai/*": 0.5}},
+      "expected": [
+        {"model": "openai/gpt-5", "share": 0.5},
+        {"model": "local/llama", "share": 0.9}
+      ]
+    },
+    {
+      "name": "a star inside a key is literal: it matches only exactly",
+      "call_when": {"default": 0.8, "models": {"a*b": 0.4}},
+      "expected": [
+        {"model": "a*b", "share": 0.4},
+        {"model": "axb", "share": 0.8},
+        {"model": "a*bc", "share": 0.8}
+      ]
+    }
   ],
   "shares_out_of_range": [
     {"name": "zero default", "call_when": {"default": 0.0}},

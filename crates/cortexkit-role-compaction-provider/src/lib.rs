@@ -12,8 +12,7 @@
 //! A provider claims the role by listing [`PROVIDES`] in its manifest's
 //! `capabilities.provides` and answers every op in [`REQUIRED_OPS`].
 //!
-//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document: it
-//! marks every item pinned or open. The types here are the wire shapes it
+//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document. The types here are the wire shapes it
 //! describes. Requests a provider decodes are lenient on fields, so a newer
 //! runner degrades against an older provider. Answers the runner decodes are
 //! strict on the `answer` value, because a runner cannot act on an answer it
@@ -30,8 +29,8 @@ pub mod ready;
 pub mod setup;
 pub mod status;
 
-/// The draft op envelope. The method names and envelope remain open in
-/// CONTRACT.md; the params type is the request of the named operation.
+/// The op envelope of every request in this role, `{method, params}`:
+/// `method` is the op's name ([`ops`]) and `params` its request.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct OpRequest<T> {

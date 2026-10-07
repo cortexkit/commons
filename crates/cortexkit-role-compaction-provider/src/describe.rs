@@ -44,8 +44,10 @@ pub struct RoleDescribe {
     pub capabilities: Vec<String>,
     /// The `llm-runner/v1` capability groups this provider needs from the
     /// runner besides `compaction`, for example `transcript_reads` for a
-    /// provider with no reader of its own. The session's starter checks them
-    /// against the runner's `role.describe` before it plans the session.
+    /// provider with no reader of its own. The plan composer checks them
+    /// against the groups the runner advertises in its `role.describe` when
+    /// it composes the session, and an unmet group fails the launch, named
+    /// ([`RoleDescribe::unmet_runner_groups`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runner_groups: Vec<String>,
 }
@@ -102,8 +104,8 @@ impl RoleDescribe {
 
     /// The runner groups this provider needs that `declared` (a runner's
     /// `role.describe` capabilities) does not list, in the order the
-    /// provider listed them. The session's starter does not pair the two
-    /// when this is not empty.
+    /// provider listed them. When this is not empty the composer fails the
+    /// launch and names each group listed.
     pub fn unmet_runner_groups<'a>(&'a self, declared: &[String]) -> Vec<&'a str> {
         self.runner_groups
             .iter()

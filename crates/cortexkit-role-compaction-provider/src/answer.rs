@@ -6,6 +6,7 @@
 //! describes the whole working range as it stands, never a change against
 //! an earlier CompactionMessage, so the runner applies the newest one alone.
 
+use crate::errors::RefuseCode;
 use cortexkit_role_llm_runner::read::EntrySource;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -141,18 +142,22 @@ pub enum StepAnswer {
         /// runner caps it with its own bounds.
         bound_ms: u64,
     },
-    /// Fail this step. The run ends `error` with `code` as its
-    /// `provider_code`, nothing is added to history, and the session stays
-    /// usable.
+    /// Fail this step. The run ends `error` with the role's `code`, and,
+    /// when present, the provider's own `provider_code` beside it. Nothing
+    /// is added to history, and the session stays usable. Whether the owner
+    /// retries is fixed by `code` ([`crate::errors::RefuseCode::retryable`]);
+    /// a `retryable` member an older provider still sends is ignored.
     Refuse {
         request_id: String,
-        /// The provider's code ([`crate::errors::refuse_codes`] lists the
-        /// ones this role names; a provider may use its own).
-        code: String,
+        /// One of the role's codes; an unknown one decodes and is never
+        /// retried.
+        code: RefuseCode,
         /// User-facing text.
         reason: String,
-        /// Whether retrying without the user acting makes sense.
-        retryable: bool,
+        /// The provider's own, finer reason code, an open string. It never
+        /// replaces `code` and never decides retry.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_code: Option<String>,
     },
 }
 
@@ -176,6 +181,15 @@ impl StepAnswer {
             Self::Refuse { .. } => "refuse",
         }
     }
+
+    /// Whether a `refuse` may be retried without the user acting, as its
+    /// code fixes it; `None` for every other answer.
+    pub fn retryable(&self) -> Option<bool> {
+        match self {
+            Self::Refuse { code, .. } => Some(code.retryable()),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -192,14 +206,20 @@ mod tests {
             let answer = vectors::round_trip::<StepAnswer>(name, &case["answer"]);
             assert_eq!(answer.name(), case["answer"]["answer"].as_str().unwrap());
             assert_eq!(answer.request_id(), case["answer"]["request_id"]);
+            if let Some(retryable) = case.get("retryable") {
+                assert_eq!(answer.retryable(), retryable.as_bool(), "{name}");
+            }
             if let StepAnswer::CompactionMessage { compaction, .. } = &answer {
                 assert_eq!(compaction.check(), Ok(()), "{name}");
             }
         }
         for case in vectors::cases(&file, "tolerated") {
             let name = case["name"].as_str().unwrap();
-            serde_json::from_value::<StepAnswer>(case["answer"].clone())
+            let answer = serde_json::from_value::<StepAnswer>(case["answer"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
+            if let Some(retryable) = case.get("retryable") {
+                assert_eq!(answer.retryable(), retryable.as_bool(), "{name}");
+            }
         }
         for case in vectors::cases(&file, "undecodable") {
             vectors::refused::<StepAnswer>(case["name"].as_str().unwrap(), &case["answer"]);

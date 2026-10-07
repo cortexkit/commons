@@ -104,13 +104,59 @@ pub struct AppliedRef {
 }
 
 /// The newest CompactionMessage the runner recorded and did not apply, and
-/// why ([`crate::fence::NotApplied::name`], or `structural` for the
-/// runner's own checks).
+/// why: a [`crate::fence::NotApplied::name`], or [`STRUCTURAL`] for the
+/// runner's own checks. `reason` is decoded open.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NotAppliedRef {
     pub compaction_id: String,
     pub version: u64,
     pub reason: String,
+}
+
+impl NotAppliedRef {
+    pub fn new(compaction_id: impl Into<String>, version: u64, reason: impl Into<String>) -> Self {
+        Self {
+            compaction_id: compaction_id.into(),
+            version,
+            reason: reason.into(),
+        }
+    }
+}
+
+/// The `last_not_applied.reason` a runner writes when its own structural
+/// checks (roles, tool-call pairing, its validity rules) fail a
+/// CompactionMessage that passed the fence.
+pub const STRUCTURAL: &str = "structural";
+
+/// The byte cap on a status's `messages` a runner uses unless it is
+/// configured otherwise: 4 MiB, measured as the sum of each entry's compact
+/// JSON encoding ([`message_bytes`]).
+pub const DEFAULT_MESSAGE_CAP_BYTES: usize = 4 * 1024 * 1024;
+
+/// The size a message counts against the cap: the length of its compact
+/// JSON encoding as a status entry `{ordinal, mid, message}`.
+pub fn message_bytes(message: &StatusMessage) -> usize {
+    serde_json::to_vec(message).map_or(0, |bytes| bytes.len())
+}
+
+/// How many of `pending` (the messages after the cursor, oldest first) one
+/// status carries under `cap_bytes`, and whether more remain (`more`).
+/// Messages are taken in order while their total stays within the cap. The
+/// first message is always taken, so a single message over the cap is sent
+/// alone and the cursor still moves past it; a later message that would
+/// overflow the cap waits for the next status.
+pub fn take_capped(pending: &[StatusMessage], cap_bytes: usize) -> (usize, bool) {
+    let mut used = 0usize;
+    let mut count = 0usize;
+    for message in pending {
+        let size = message_bytes(message);
+        if count > 0 && used.saturating_add(size) > cap_bytes {
+            break;
+        }
+        used = used.saturating_add(size);
+        count += 1;
+    }
+    (count, count < pending.len())
 }
 
 /// The `compaction.step` request.
@@ -283,6 +329,30 @@ impl StepStatus {
         self
     }
 
+    /// Set the cursor and as many of `pending` as fit under `cap_bytes`
+    /// ([`take_capped`]), with `more` when some are left for the next
+    /// status.
+    pub fn with_capped_messages(
+        self,
+        after_ordinal: Option<u64>,
+        pending: &[StatusMessage],
+        cap_bytes: usize,
+    ) -> Self {
+        let (count, more) = take_capped(pending, cap_bytes);
+        self.with_messages(after_ordinal, pending[..count].to_vec())
+            .with_more(more)
+    }
+
+    /// Where the cursor stands once this status's answer is durable: the
+    /// last message sent, or the old cursor when none was sent. A capped
+    /// status advances it only to its last message, never to `newest`.
+    pub fn next_cursor(&self) -> Option<u64> {
+        self.messages
+            .last()
+            .map(|message| message.ordinal)
+            .or(self.after_ordinal)
+    }
+
     /// Check what a provider relies on: the messages are oldest first,
     /// strictly after the cursor, and none is newer than `newest`.
     pub fn check_messages(&self) -> Result<(), StatusProblem> {
@@ -395,5 +465,95 @@ mod tests {
         );
         assert_eq!(status.next_version(None), 4);
         assert_eq!(status.next_version(Some(7)), 8);
+    }
+
+    fn message(ordinal: u64, text_len: usize) -> StatusMessage {
+        StatusMessage {
+            ordinal,
+            mid: format!("m{ordinal}"),
+            message: serde_json::json!({"role": "user", "text": "x".repeat(text_len)}),
+        }
+    }
+
+    fn status() -> StepStatus {
+        StepStatus::new(
+            "s",
+            "r",
+            "l",
+            "st",
+            step_kinds::USER_TURN,
+            "m",
+            Estimate::new(1),
+            1,
+        )
+        .with_newest(MessageRef {
+            ordinal: 14,
+            mid: "m14".into(),
+        })
+    }
+
+    /// The cap: messages go in order while they fit; a single message over
+    /// the cap is sent alone; the cursor advances only to the last message
+    /// sent, and `more` says the rest follows.
+    #[test]
+    fn capped_messages_send_an_oversized_one_alone_and_advance_to_it() {
+        let pending = vec![
+            message(11, 10),
+            message(12, 10),
+            message(13, 500),
+            message(14, 10),
+        ];
+        let small = message_bytes(&pending[0]);
+        let cap = 2 * small + 1;
+        assert!(message_bytes(&pending[2]) > cap);
+
+        // The two small messages fit; the oversized one does not join them.
+        let first = status().with_capped_messages(Some(10), &pending, cap);
+        assert_eq!(first.messages, pending[..2]);
+        assert!(first.more);
+        assert_eq!(first.next_cursor(), Some(12));
+
+        // Next status: the oversized message is first, so it goes alone.
+        let second = status().with_capped_messages(first.next_cursor(), &pending[2..], cap);
+        assert_eq!(second.messages, pending[2..3]);
+        assert!(second.more);
+        assert_eq!(second.next_cursor(), Some(13));
+        assert_eq!(second.check_messages(), Ok(()));
+
+        // The rest fits, and nothing more follows.
+        let third = status().with_capped_messages(second.next_cursor(), &pending[3..], cap);
+        assert_eq!(third.messages, pending[3..]);
+        assert!(!third.more);
+        assert_eq!(third.next_cursor(), Some(14));
+
+        // An oversized message at the head of the queue is sent alone even
+        // when nothing else is pending, and `more` stays false.
+        let alone = status().with_capped_messages(Some(12), &pending[2..3], cap);
+        assert_eq!((alone.messages.len(), alone.more), (1, false));
+        assert_eq!(alone.next_cursor(), Some(13));
+
+        // No messages: the cursor stays where it was.
+        let empty = status().with_capped_messages(Some(14), &[], cap);
+        assert_eq!((empty.next_cursor(), empty.more), (Some(14), false));
+        assert_eq!(DEFAULT_MESSAGE_CAP_BYTES, 4_194_304);
+        assert_eq!(take_capped(&pending, DEFAULT_MESSAGE_CAP_BYTES), (4, false));
+    }
+
+    #[test]
+    fn more_and_last_not_applied_round_trip() {
+        let status = status()
+            .with_messages(Some(10), vec![message(11, 1)])
+            .with_more(true)
+            .with_not_applied(NotAppliedRef::new("mc:snap-9", 9, STRUCTURAL));
+        let wire = serde_json::to_value(&status).unwrap();
+        assert_eq!(wire["more"], true);
+        assert_eq!(
+            wire["last_not_applied"],
+            serde_json::json!({"compaction_id": "mc:snap-9", "version": 9, "reason": "structural"})
+        );
+        assert_eq!(vectors::round_trip::<StepStatus>("more", &wire), status);
+        // `more` is omitted when false.
+        let plain = serde_json::to_value(status.with_more(false)).unwrap();
+        assert!(plain.get("more").is_none());
     }
 }

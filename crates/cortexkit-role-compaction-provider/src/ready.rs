@@ -22,8 +22,9 @@ pub use cortexkit_role_llm_runner::compaction::{
     plan_compaction_provider, CompactionReady, ReadyOutcome,
 };
 
-/// The draft empty acknowledgement of an accepted or ignored ready hint.
-/// Its encoding remains open in CONTRACT.md. Unknown fields are ignored.
+/// The runner's reply to `compaction.ready`: the empty object `{}`, the
+/// same whether the hint was acted on or ignored, so it reveals no outcome.
+/// Unknown fields are ignored.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct ReadyReply {}

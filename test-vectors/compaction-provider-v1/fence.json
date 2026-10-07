@@ -125,8 +125,7 @@
         "answer": "refuse",
         "request_id": "cr-9",
         "code": "provider_busy",
-        "reason": "busy",
-        "retryable": true
+        "reason": "busy"
       },
       "disposition": "act"
     },
@@ -320,8 +319,7 @@
         "answer": "refuse",
         "request_id": "cr-9",
         "code": "provider_busy",
-        "reason": "busy",
-        "retryable": true
+        "reason": "busy"
       },
       "disposition": "superseded_request"
     },

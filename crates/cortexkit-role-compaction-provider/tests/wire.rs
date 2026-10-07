@@ -1,10 +1,12 @@
 use cortexkit_role_compaction_provider::{
-    describe::DescribeRequest,
+    answer::StepAnswer,
+    describe::{check_describe, DescribeRequest, Major, RoleDescribe},
+    errors::RefuseCode,
     ops,
     ready::{CompactionReady, ReadyReply},
-    setup::SetupRequest,
+    setup::{SetupAnswer, SetupRequest},
     status::{Estimate, MessageRef, StepStatus},
-    OpRequest,
+    OpRequest, PROVIDES, REQUIRED_OPS,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Map, Value};
@@ -77,4 +79,53 @@ fn setup_setters_preserve_every_optional_field() {
             "newest": {"ordinal": 2, "mid": "m2"}
         }),
     );
+}
+
+#[test]
+fn runner_groups_round_trip_and_name_the_unmet_ones() {
+    let describe = RoleDescribe::new(
+        vec![Major::new(
+            PROVIDES,
+            REQUIRED_OPS.iter().map(|op| op.to_string()).collect(),
+            "alpha",
+        )],
+        "1.0.0",
+    )
+    .with_runner_groups(vec!["transcript_reads".into()]);
+    let wire = json!({
+        "majors": [{"version": "compaction-provider/v1",
+            "ops": ["role.describe", "compaction.setup", "compaction.step"],
+            "stability": "alpha"}],
+        "implementation_version": "1.0.0", "capabilities": [],
+        "runner_groups": ["transcript_reads"]
+    });
+    exact(&describe, wire.clone());
+    let decoded = check_describe(&wire).unwrap();
+    assert_eq!(
+        decoded.unmet_runner_groups(&["compaction".into()]),
+        ["transcript_reads"]
+    );
+    assert!(decoded
+        .unmet_runner_groups(&["compaction".into(), "transcript_reads".into()])
+        .is_empty());
+}
+
+#[test]
+fn refuse_carries_provider_code_and_no_retryable() {
+    let wire = json!({"answer": "refuse", "request_id": "r1", "code": "provider_busy",
+        "reason": "busy", "provider_code": "mc:historian_running"});
+    let step: StepAnswer = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        step,
+        StepAnswer::Refuse {
+            request_id: "r1".into(),
+            code: RefuseCode::ProviderBusy,
+            reason: "busy".into(),
+            provider_code: Some("mc:historian_running".into()),
+        }
+    );
+    exact(&step, wire.clone());
+    let setup: SetupAnswer = serde_json::from_value(wire.clone()).unwrap();
+    exact(&setup, wire);
+    assert_eq!(step.retryable(), Some(true));
 }
