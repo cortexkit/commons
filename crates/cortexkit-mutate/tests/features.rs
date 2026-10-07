@@ -199,7 +199,8 @@ fn listing_and_name_resolution_preserve_the_target_selector() {
     let (out, rows) = f.run(false);
     assert!(out.status.success(), "{out:?}; {rows}");
     assert_eq!(rows[0]["outcome"], "CAUGHT");
-    // Direct library replay also resolves names within its target selection.
+    // Calling `run_row` directly (no CLI session, so no shared baseline) must
+    // also resolve test names within the row's own `--test` target and features.
     let row = run_row(f.root(), &f.row(), false, &AtomicBool::new(false), false).unwrap();
     assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
 }
