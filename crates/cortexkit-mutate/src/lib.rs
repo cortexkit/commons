@@ -116,8 +116,9 @@ impl IgnoredSelection {
         }
     }
 
-    /// The value of nextest's `--run-ignored` option. Current nextest spells
-    /// these `all` and `only`; `only` replaced the older `ignored-only`.
+    /// The value of nextest's `--run-ignored` option: `all` or `only`. Older
+    /// nextest releases that spell the second one `ignored-only` are not
+    /// supported.
     fn nextest_value(self) -> &'static str {
         match self {
             Self::Include => "all",
