@@ -133,7 +133,7 @@ waits through the advertised deletion bound with a 300 ms margin. Reads are
 checked at expiry and again after that bound. An idle shortening send keeps
 the earlier messages and lineage; a fresh send to an expired session uses a
 new lineage and its own retention. Active and paused held runs outlive the
-bound and restart the clock at their terminal record. Positive shortening
+bound and restart the retention clock at their terminal record. Positive shortening
 and within-max lengthening are not applicable when the maximum is one;
 above-max is not applicable when it is `u64::MAX`.
 

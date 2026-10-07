@@ -46,8 +46,9 @@ pub const FOLD_RECORDED: &str = "FoldRecorded";
 /// The run's terminal state is durable. Resume never writes a second one.
 pub const TERMINAL: &str = "Terminal";
 
-/// Expiry's content-free tombstone is durable, but transcript and derived
-/// copies have not yet been deleted. Restart must finish the deletion.
+/// The expiry record (which holds no message or tool text) is durable, but the transcript
+/// and the runner's copies made from it are not yet deleted. Restart must finish deleting
+/// them.
 pub const RETENTION_TOMBSTONED: &str = "RetentionTombstoned";
 
 /// Every point in the role's vocabulary, in the order a run that uses them

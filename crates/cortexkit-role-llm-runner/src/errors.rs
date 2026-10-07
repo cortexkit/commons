@@ -47,7 +47,8 @@ impl ExpiredDetail {
     }
 }
 
-/// Detail of an `invalid_params` refusal of `session.send.retention`.
+/// Detail of the `invalid_params` refusal a runner returns when the `retention` field of a
+/// `session.send` request is out of range.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RetentionInvalidDetail {

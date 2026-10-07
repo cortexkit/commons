@@ -1,5 +1,6 @@
-//! Retention cases use real elapsed time and real routes. An expired read
-//! alone cannot prove deletion: tombstones hide content before it is erased.
+//! Retention cases use real elapsed time and real routes. An expired read alone cannot
+//! prove deletion: the runner's content-free expiry record (its tombstone) makes content
+//! unreadable before the content is erased.
 
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
@@ -369,7 +370,8 @@ where
             "retention_honoured" => {
                 let mut seed = self.retention_seed(Some(short), false).await?;
                 self.wait_expired(&seed, short, cap).await?;
-                // Empty success and expired are checked side by side.
+                // Check both answers together: an expired session refuses `expired`, while
+                // a session never written still answers an empty success.
                 let unwritten = self
                     .open("retention-never-written", Script::default())
                     .await?;
@@ -596,8 +598,9 @@ where
     }
 }
 
-/// The retention crash scenario cuts a background expiry rather than a send.
-/// It gets its own root and uses the same one-kill ledger as other points.
+/// The retention crash scenario kills the runner during expiry rather than during a send.
+/// It uses a separate data root and, like the other crash points, allows only one kill per
+/// run.
 pub(crate) async fn crash<S>(
     subject: &S,
     driver: &mut CrashDriver<'_, S>,
@@ -651,8 +654,9 @@ where
     let wait = wait_duration(seconds, cap.delete_within_ms)?;
     let trigger: Trigger<'_> = Box::pin(async {
         tokio::time::sleep(wait).await;
-        // A read may drive lazy expiry; on a background sweeper it simply
-        // observes the kill already performed by the armed harness.
+        // A runner that expires sessions on demand performs the expiry, and so meets the
+        // kill, when this read arrives. A runner that expires them in a background task has
+        // already been killed by the harness; this read then only observes the result.
         let _ = route.request(ops::SESSION_HEAD, json!({})).await;
     });
     driver
