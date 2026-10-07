@@ -113,7 +113,7 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Fourteen **crate-local additions** are listed separately from the copied cases:
+Fourteen **crate-local additions**, written in this crate rather than copied from the executor's corpus, cover the cases below:
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.

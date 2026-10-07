@@ -53,7 +53,7 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These twelve outcome pairs and two reply pairs extend the original corpus, for a
+These twelve outcome pairs and two reply pairs extend the caller corpus described above, for a
 total of 32 outcomes and 16 replies:
 
 - `outcomes/crate-local-unknown-refusal`: `refused_before_start` with reason
@@ -84,7 +84,7 @@ total of 32 outcomes and 16 replies:
 - `replies/crate-local-unknown-rebuild-result`: status `future_result`, decoded as
   `RebuildResult::Unknown`. Informational only.
 
-Six `outcomes/crate-local-server-reports-*` cases pin optional terminal reports
+Six outcome cases in `outcomes/` (named `crate-local-server-reports-*`) pin optional terminal reports
 of server state that is not copied back:
 
 - `all`: changed commit, ref, index tree and stash count; two new untracked

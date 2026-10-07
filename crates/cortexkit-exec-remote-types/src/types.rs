@@ -494,7 +494,7 @@ impl IgnoredWrites {
         }
     }
 
-    /// Record a producer-capped sample of ignored paths.
+    /// Record a sample of ignored paths; the producer caps its length (see the type's doc).
     pub fn with_sample_paths(mut self, sample_paths: Vec<String>) -> Self {
         self.sample_paths = sample_paths;
         self
