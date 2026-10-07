@@ -12,8 +12,8 @@
 //! A provider claims the role by listing [`PROVIDES`] in its manifest's
 //! `capabilities.provides` and answers every op in [`REQUIRED_OPS`].
 //!
-//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document. The types here are the wire shapes it
-//! describes. Requests a provider decodes are lenient on fields, so a newer
+//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document.
+//! The types here are the wire shapes it describes. Requests a provider decodes are lenient on fields, so a newer
 //! runner degrades against an older provider. Answers the runner decodes are
 //! strict on the `answer` value, because a runner cannot act on an answer it
 //! does not understand.
@@ -175,8 +175,9 @@ mod tests {
         assert_eq!(on_disk, listed);
     }
 
-    /// Every canonical Setup and step request names its caller's harness,
-    /// and the field survives a round trip.
+    /// Every request in the `requests` lists of `setup.json` (Setup) and
+    /// `status.json` (step) names its caller's harness, and the field
+    /// survives a round trip.
     #[test]
     fn every_request_kind_round_trips_its_harness() {
         let setup = vectors::load("setup.json");
@@ -193,8 +194,9 @@ mod tests {
         }
     }
 
-    /// `harness` is required: removing it from any canonical request makes
-    /// the request fail to decode, and the error names the field.
+    /// `harness` is required: removing it from any request in the
+    /// `requests` lists of `setup.json` and `status.json` makes the request
+    /// fail to decode, and the error names the field.
     #[test]
     fn a_request_without_harness_is_refused_by_name() {
         fn refused<T: serde::de::DeserializeOwned + std::fmt::Debug>(name: &str, request: &Value) {

@@ -12,10 +12,15 @@
 //! A provider claims the role by listing [`PROVIDES`] in its manifest's
 //! `capabilities.provides` and answers every op in [`REQUIRED_OPS`]. Its
 //! declaration ([`ops::TRANSFORM_DECLARE`]) bounds what a session's plan may
-//! subscribe it to; the plan picks within those bounds.
+//! subscribe it to: for each hook (and `pre_tool` phase), the tools it can
+//! act on, the operations it may return, what the runner does when it is
+//! unavailable (`on_unavailable`) and its time budget (`budget_ms`). A plan
+//! may subscribe it as declared or stricter: a subset of the tools or
+//! operations, a smaller budget, or `refuse` where the declaration says
+//! `pass`.
 //!
-//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document. The types here are the wire shapes it
-//! describes. Requests a provider decodes are lenient on fields and strict on
+//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document.
+//! The types here are the wire shapes it describes. Requests a provider decodes are lenient on fields and strict on
 //! the hook and phase values. Answers the runner decodes are strict on the
 //! `answer` and `op` values, because a runner cannot apply an operation it
 //! does not understand.
@@ -63,8 +68,10 @@ pub mod ops {
     /// Required.
     pub const ROLE_DESCRIBE: &str = "role.describe";
     /// The subscriptions a plan item may choose from, for the item's preset
-    /// and params. Fetched with the plan's other items during admission,
-    /// the plan check before accepting a session (CONTRACT.md §4).
+    /// and params: per hook, the tools, operations, `on_unavailable` and
+    /// `budget_ms` a plan may use, or something stricter. Fetched with the
+    /// plan's other items during admission, the plan check before accepting
+    /// a session (CONTRACT.md §4).
     /// Required.
     pub const TRANSFORM_DECLARE: &str = "transform.declare";
     /// One hook call. Required.

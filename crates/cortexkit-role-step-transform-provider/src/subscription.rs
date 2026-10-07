@@ -13,10 +13,11 @@
 //! subscription admits, and a looser one, or one whose hook or preset the
 //! provider no longer declares, refuses the plan as stale.
 //!
-//! The session has at most one reduction owner, its compaction provider: the
-//! only party allowed to remove or rewrite history (CONTRACT.md §5).
-//! Only the reduction owner may `replace` on `pre_user` and
-//! `post_assistant`. Every other step transform is preserving: it may
+//! The session has at most one reduction owner: its compaction provider,
+//! whose `replace` rewrites history and so must run before other providers'
+//! prepends and appends, and which is the only party allowed to remove or
+//! rewrite what was written (CONTRACT.md §5). Only the reduction owner may
+//! `replace` on `pre_user` and `post_assistant`. Every other step transform is preserving: it may
 //! prepend or append. Hooks run in the frozen plan's exact order; the plan
 //! composer places the reduction owner first ([`reduction_owner_first`]),
 //! so a later preserving prepend is never wiped by its replace.
@@ -874,9 +875,11 @@ mod tests {
         }
     }
 
-    /// The admission cases copied from the plan composer's `fetch-plan-v1`
-    /// vectors (each case's `source` names the upstream file and commit): the same plan and declaration must give the same refusal
-    /// bytes, or admit and freeze the plan's subscriptions unchanged.
+    /// These admission cases come from the plan composer's own test cases
+    /// (`fetch-plan-v1`; each case's `source` names the upstream file and
+    /// commit), so both sides must reach the same admission result: the same
+    /// plan and declaration give the same refusal bytes, or admit and freeze
+    /// the plan's subscriptions unchanged.
     #[test]
     fn fetch_plan_admission_vectors_agree() {
         let file = vectors::load("subscriptions.json");

@@ -3,8 +3,8 @@
 # bounds what a plan may subscribe to, the four hooks (pre_user,
 # post_assistant, pre_tool in its mutate, validate and approve phases,
 # post_tool) and their answers, error codes, the kill-point vocabulary its
-# crash suite will use, and CONTRACT.md, which says what is pinned and what is
-# still open. Pure serde plus small checks; no transport, no runtime.
+# crash suite will use, and CONTRACT.md, which states every rule as pinned.
+# Pure serde plus small checks; no transport, no runtime.
 #
 # A DRAFT for design review: not published until the role's consumers have
 # reviewed CONTRACT.md. The conformance runner will live in a sibling

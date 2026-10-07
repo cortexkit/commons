@@ -24,7 +24,8 @@ pub struct HookCall {
     pub session: String,
     /// The harness named in the session's key, which identifies the caller
     /// (for example `broca`). This differs from the route's bind harness,
-    /// which a runner binds as `runner`. Required: a request without it does
+    /// the harness a connection declares when it opens the route; a runner
+    /// always declares `runner`. Required: a request without it does
     /// not decode. A provider keys a runner conversation on
     /// `(project_root, session, harness)`.
     pub harness: String,
@@ -169,8 +170,9 @@ mod tests {
     use super::*;
     use crate::vectors;
 
-    /// Every canonical hook request, one or more per hook, names its
-    /// caller's harness, and the field survives a round trip.
+    /// Every request in the `requests` list of `hook-requests.json`, which
+    /// covers each hook at least once, names its caller's harness, and the
+    /// field survives a round trip.
     #[test]
     fn every_hook_request_round_trips_its_harness() {
         let file = vectors::load("hook-requests.json");
@@ -186,8 +188,9 @@ mod tests {
         }
     }
 
-    /// `harness` is required: removing it from any canonical hook request
-    /// makes the request fail to decode, and the error names the field.
+    /// `harness` is required: removing it from any request in the
+    /// `requests` list of `hook-requests.json` makes the request fail to
+    /// decode, and the error names the field.
     #[test]
     fn a_hook_request_without_harness_is_refused_by_name() {
         let file = vectors::load("hook-requests.json");

@@ -172,7 +172,8 @@ pub struct StepStatus {
     pub session: String,
     /// The harness named in the session's key, which identifies the caller
     /// (for example `broca`). This differs from the route's bind harness,
-    /// which a runner binds as `runner`. Required: a request without it does
+    /// the harness a connection declares when it opens the route; a runner
+    /// always declares `runner`. Required: a request without it does
     /// not decode. A provider keys a runner conversation on
     /// `(project_root, session, harness)`.
     pub harness: String,

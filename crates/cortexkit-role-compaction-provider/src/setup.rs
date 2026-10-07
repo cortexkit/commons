@@ -27,7 +27,8 @@ pub struct SetupRequest {
     pub session: String,
     /// The harness named in the session's key, which identifies the caller
     /// (for example `broca`). This differs from the route's bind harness,
-    /// which a runner binds as `runner`. Required: a request without it does
+    /// the harness a connection declares when it opens the route; a runner
+    /// always declares `runner`. Required: a request without it does
     /// not decode. A provider keys a runner conversation on
     /// `(project_root, session, harness)`.
     pub harness: String,
@@ -130,7 +131,9 @@ pub struct StabilityRank {
 /// When the runner calls the provider, frozen with the session. The runner
 /// calls when the step's reported usage reaches the model's share of the
 /// window ([`CallWhen::share_for`]). It also always calls on a prefix
-/// rebuild and after an execution error. With no `call_when`, or with a
+/// rebuild, when it re-sends the conversation from the start because its
+/// cached prefix was lost or invalidated (after a model change, say), and
+/// after an execution error. With no `call_when`, or with a
 /// condition kind it does not know, it calls on every step
 /// ([`calls_every_step`]).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

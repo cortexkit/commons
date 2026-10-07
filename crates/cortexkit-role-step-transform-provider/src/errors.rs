@@ -120,16 +120,26 @@ pub mod runner_codes {
     /// invalid subscription (`subscription::InvalidSubscriptionDetail`).
     pub const INVALID_PARAMS: &str = errors::INVALID_PARAMS;
     /// The `detail.field` value that locates an invalid subscription in the
-    /// proposed plan's step-transform list. CONTRACT.md §4 defines the
-    /// accompanying item index, subscription index and problem, so the
-    /// plan composer can identify which subscription to correct.
+    /// proposed plan's step-transform list. The detail is `{field:
+    /// "plan.step_transform_items", item, subscription, problem}`: `item` is
+    /// the index of the plan item, `subscription` the index of the
+    /// subscription within it, and `problem` the name of what is wrong (for
+    /// example `ops_on_pre_tool` or `replace_not_reduction_owner`), so the
+    /// plan composer can find and correct that subscription (CONTRACT.md §4).
     pub const PLAN_STEP_TRANSFORM_ITEMS: &str = "plan.step_transform_items";
     /// The runner refuses this at admission, the plan check before accepting
-    /// a session (CONTRACT.md §4), when a provider's current declaration no
-    /// longer covers the plan: a hook or preset is gone, or planned tools,
-    /// operations, availability policy or budget exceed the declared bounds.
-    /// The plan composer must rebuild the plan from the current declaration;
-    /// `subscription::StaleDifference` names what no longer fits.
+    /// a session, when a provider's current declaration no longer covers the
+    /// plan: a hook or preset is gone, or planned tools, operations,
+    /// availability policy or budget exceed the declared bounds. The detail
+    /// is `{differences: [...]}`, one entry per subscription that no longer
+    /// fits, each tagged by `kind`: `subscription_missing {provider, hook,
+    /// phase}` when the declaration lacks the hook and phase,
+    /// `subscription_loosened {provider, hook, phase, field}` when the plan's
+    /// `tools`, `ops`, `on_unavailable` or `budget_ms` is looser than
+    /// declared, and `preset_missing {provider, preset}`, once per item, when
+    /// the provider no longer knows the preset (`subscription::StaleDifference`).
+    /// The plan composer must rebuild the plan from the current declaration
+    /// (CONTRACT.md §4).
     pub const PLAN_STALE: &str = errors::PLAN_STALE;
     /// A user turn's `pre_user` hook was unavailable under `refuse`: the run
     /// ends `error` with this `provider_code`, and a steered or queued send

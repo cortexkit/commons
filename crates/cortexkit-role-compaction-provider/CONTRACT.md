@@ -9,8 +9,7 @@ its vectors, and a separate `-conformance` crate will hold its suite (§17).
 document states the provider's side.
 
 Every item is marked **[pinned]**: a settled requirement. A provider must
-do it, and a runner may rely on it. `OPEN-QUESTIONS.md` points each
-numbered design question to the section that answers it.
+do it, and a runner may rely on it.
 
 Names and types this role shares with `llm-runner/v1` (the `compaction`
 group, `compaction.ready`, the model view's `source`, the runner's codes)
@@ -49,8 +48,9 @@ runner sends to the model.
 - [pinned] Every compaction request, Setup (§4) and step (§6),
   carries a required string `harness`, next to `session`: the harness
   named in the session's key, which identifies the caller (for example
-  `broca`). This differs from the route's bind harness, which a runner
-  binds as `runner`. A request without `harness` does not decode; it is
+  `broca`). This differs from the route's bind harness, the harness a
+  connection declares when it opens the route; a runner always declares
+  `runner`. A request without `harness` does not decode; it is
   never defaulted.
 - [pinned] A provider keys a runner conversation, and every piece of
   per-session state it keeps for one, on `(project_root, session,
@@ -185,8 +185,10 @@ the session and freezes that plan for use.
   `default`. A bare `*` matches every model and loses to any longer
   pattern.
 - [pinned] With no `call_when`, the runner calls on every step. Whatever the
-  conditions say, it always calls on a prefix rebuild and after an
-  execution error.
+  conditions say, it always calls on a prefix rebuild (the runner re-sends
+  the conversation from the start because its cached prefix was lost or
+  invalidated, for example after a model change) and after an execution
+  error.
 - [pinned] On a step without a call, the runner keeps serving the last
   applied CompactionMessage's view: the same replacement and range, plus
   every newer message raw.
@@ -297,7 +299,8 @@ The status (`StepStatus`) carries:
   `from_ordinal` and `to_ordinal` (§12). `from == to` replaces nothing and
   inserts the replacement before `to`, so `{from: 0, to: 0}` puts it before
   every message. `to` may be one past the newest message (no raw tail),
-  never more. Only `from > to` is malformed (`range_inverted`).
+  never more. Only `from > to` is malformed (`range_inverted`). Ordinals
+  are never reused within a lineage.
 - [pinned] `to` never separates a tool call from its result. The runner
   checks this with the rest of its structural checks (roles, pairing over the
   replacement and the raw tail together, no tool-call id outside the range,
@@ -633,67 +636,31 @@ if no kill ended a real process.
 - The runner telling the provider which messages it stripped after a
   prefix-changing event.
 
-## Settled questions
+## Differences from `llm-runner/v1` wording
 
-No question is open. Each answer, with the section that states it:
+The `llm-runner/v1` contract (`cortexkit-role-llm-runner/CONTRACT.md`)
+states the runner's side of this interface. Three passages there are out of
+date against this contract and should be changed to match it:
 
-- **Q1. The envelope and the ready reply.** Every request is `{method,
-  params}` (§1); the runner answers `compaction.ready` with `{}` (§10).
-- **Q2. Names.** Ops `compaction.setup` and `compaction.step` (§1);
-  answers `ready`, `noop`, `compaction_message`, `wait` and `refuse` (§7).
-- **Q4. Who mints `compaction_id`.** The provider, as an opaque id stable
-  for one compaction lineage (§8).
-- **Q6. A cap on the status's messages.** A byte cap, 4 MiB by default,
-  with `more`; a single oversized message is sent alone, and the cursor
-  advances only to the last message sent (§6).
-- **Q7. `last_not_applied`.** In the status, with the reason the runner did
-  not apply it (§6).
-- **Q8. `runner_groups`.** Declared in `role.describe.runner_groups` and
-  checked by the plan composer; an unmet runner group fails the launch by
-  name (§2).
-- **Q9. Unknown `call_when` kinds and model patterns.** An unknown kind
-  means a call on every step; a model's share is the exact key, else the
-  longest matching trailing-`*` pattern, else `default` (§5).
-- **Q13. The stability shape.** An array of `{index, rank}` (§4).
-- **Q14. Role-named `refuse` codes.** Four codes, each with a fixed
-  retryability; the provider's own reason goes in `provider_code`;
-  `compaction_unavailable` only after Setup (§11, §14.3).
-- **Q3. Range ends.** Settled: half-open ordinals, `from` included and `to`
-  excluded (§8). Ordinals are never reused within a lineage, they can name
-  an empty range and a range running to the end, and the model view speaks
-  the same half-open ordinals (§12).
-- **Q5. `request_id`.** Settled with `llm-runner/v1`: an opaque string,
-  compared only for equality. `version` is settled as `u64`.
-- **Q10. Empty ranges in the model view.** Settled in the runner role: the
-  model view's replacement source is half-open, `{kind: "replacement",
-  compaction_id, version, from_ordinal, to_ordinal}`, and an empty range is
-  an insertion before `from_ordinal`; Setup's head is `[0, 0)` (§12). This
-  role defines no source kind of its own: the earlier draft's `inserted`
-  kind is dropped, and `EntrySource` is imported from the runner crate.
-- **Q11. Late answers.** The fence is strict (§9). An
-  answer applies only if it names the newest issued request and arrives
-  before that request's call deadline; any other answer, including one to
-  the newest request that arrives after its timeout, is recorded and never
-  applied, whatever its version (`superseded_request` or `late`). The
-  provider's answer to the next request carries the content instead, at a
-  higher version.
-- **Q12. The `provider_code` when Setup times out or fails without an
-  answer.** Settled in the runner role: `compaction_unavailable`, one of
-  `llm-runner/v1`'s provider codes, re-exported here (§4, §14.2).
-- **Q15. Pairing.** Settled: compaction is a runner capability group, all
-  or nothing; a runner without it refuses a compaction item at admission
-  with `invalid_params {field: "plan.compaction_item"}` (§3).
-- **Q16. `compaction.ready`.** Settled: `{session, request_id}`, accepted
-  only from the provider at `plan.compaction_item.provider` by route stamp,
-  otherwise `not_session_compaction_provider`; ignored for any request but
-  the newest; a hint (§10). The type is `llm-runner/v1`'s, re-exported.
-- **Q17. The model view.** Settled in the runner role: `ModelPage
-  {messages: [ModelEntry {source, message}], lineage_id?,
-  next_from_ordinal?, head?, compaction_id?, version?}`; messages `{kind:
-  "message", ordinal, mid}`, replacements `{kind: "replacement",
-  compaction_id, version, from_ordinal, to_ordinal}`; an unknown kind
-  fails to decode; tail and range reads only; `after_mid` refused with
-  `invalid_params {field: "view"}` (§12).
+- **The plan field naming the provider.** `llm-runner/v1` marks the
+  `compaction_item` provider field provisional and says not to build
+  against `plan.compaction_item.provider` yet. The field is settled: the
+  plan names the session's compaction provider at
+  `plan.compaction_item.provider`, inside `compaction_item: {provider,
+  preset, params}`, where `provider` is a module id, `preset` a string and
+  `params` an opaque object (§3). The runner crate's
+  `plan_compaction_provider` helper already reads it there.
+- **When `compaction_unavailable` is written.** `llm-runner/v1` lists it
+  for "Setup or a compaction call failed or timed out with no answer". It
+  should say Setup only. A step call that fails or times out does not end
+  the run: the runner sends the request with the last applied
+  CompactionMessage (§7, §14.3).
+- **What a refusal records.** `llm-runner/v1` says a provider's refusal
+  rides as the run error's `provider_code`. Here a `refuse` carries a role
+  `code` and, optionally, the provider's own finer `provider_code` (§11).
+  The runner contract should name one member for the role code and a
+  separate one for the provider's code, and never let the second replace
+  the first.
 
 ## Interoperability
 

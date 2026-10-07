@@ -29,8 +29,9 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Operation {
-    /// Put `text` before the block's text, in the same block. Several
-    /// providers' prepends stack outward.
+    /// Put `text` before the block's text, in the same block. Prepends
+    /// stack outward: each one lands before the text an earlier prepend
+    /// added, so the last one applied ends up first.
     Prepend {
         block: u32,
         text: String,
@@ -113,8 +114,8 @@ pub struct ApprovalAsk {
     /// The question, shown on the card beside the tool, its target and a
     /// short form of the final input.
     pub prompt: String,
-    /// The answers offered, an enumerated list of strings, when the gate
-    /// wants more than allow and decline. Omitted when empty.
+    /// The answers offered, an enumerated list of strings, when the approval
+    /// question needs more than allow and decline. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
     /// When the question expires: an absolute time in milliseconds since the
@@ -342,8 +343,10 @@ mod tests {
         for case in vectors::cases(&file, "undecodable") {
             let name = case["name"].as_str().unwrap();
             vectors::refused::<HookAnswer>(name, &case["answer"]);
-            // An unknown policy value is refused by name: the error says
-            // which value it did not know.
+            // An ask whose `on_expiry` or `late_execution` holds a value this
+            // role does not define must not decode, and the error must name
+            // that value (the case's `unknown_value`), so the refusal says
+            // exactly what the runner did not understand.
             if let Some(value) = case.get("unknown_value") {
                 let error = serde_json::from_value::<HookAnswer>(case["answer"].clone())
                     .unwrap_err()
@@ -446,7 +449,8 @@ mod tests {
             ],
         )
         .unwrap();
-        // Prepends stack outward, within the same block.
+        // Prepends stack outward within the same block: the second prepend
+        // lands before the first.
         assert_eq!(out, [text("alpha"), text("beta"), text("b a gamma")]);
         let replace = Operation::Replace {
             block: 0,
@@ -480,9 +484,11 @@ mod tests {
         );
     }
 
-    /// The runner's text accessor for a message part in the shape the
-    /// vectors' messages use: `{type: "text", text}` is a text block; every
-    /// other part is not.
+    /// A text accessor for message parts shaped like
+    /// `{type: "text", text: "..."}`: such a part is a text block and its
+    /// `text` is returned; every other part (thinking, an image, a tool call)
+    /// is not a text block and yields `None`. A runner supplies the
+    /// equivalent for its own message schema.
     fn text_part(part: &mut Value) -> Option<&mut String> {
         if part.get("type")? != "text" {
             return None;

@@ -9,8 +9,7 @@ vectors, and a separate `-conformance` crate will hold its suite (§12).
 this document states the provider's side.
 
 Every item is marked **[pinned]**: a settled requirement. A provider must
-do it, and a runner may rely on it. `OPEN-QUESTIONS.md` points each
-numbered design question to the section that answers it.
+do it, and a runner may rely on it.
 
 Codes this role shares with `llm-runner/v1` (the tool-result reasons,
 `pre_user_unavailable`, `invalid_params`) are taken from that crate, which
@@ -48,8 +47,9 @@ the newest message of a session.
 - [pinned] Every hook request (`transform.hook`, §7)
   carries a required string `harness`, next to `session`: the harness
   named in the session's key, which identifies the caller (for example
-  `broca`). This differs from the route's bind harness, which a runner
-  binds as `runner`. A request without `harness` does not decode; it is
+  `broca`). This differs from the route's bind harness, the harness a
+  connection declares when it opens the route; a runner always declares
+  `runner`. A request without `harness` does not decode; it is
   never defaulted.
 - [pinned] A provider keys a runner conversation, and every piece of
   per-session state it keeps for one, on `(project_root, session,
@@ -201,7 +201,8 @@ the session and freezes that plan for use.
   not an index into `blocks` is a disallowed answer
   (`block_out_of_range`).
 - [pinned] Several operations, and several providers on one hook, apply in
-  order: prepends to one block stack outward, appends stack in order, and a
+  order: prepends to one block stack outward (each lands before the text an
+  earlier prepend added), appends stack in order, and a
   `replace` sees the block's text as it stands at that point.
 - [pinned] Exclusivity. The session has exactly one reduction owner, its
   compaction provider: the only party that may remove or rewrite what was
@@ -465,52 +466,3 @@ the vectors in this crate.
   deny cancels the run itself.
 - A rule language. A rules engine is a module that answers hooks.
 - Hooks on reasoning, signatures or tool-call blocks.
-
-## Settled questions
-
-No question is open. Each answer, with the section that states it:
-
-- **Q1. The envelope.** `{method, params}` (§1).
-- **Q2. Names.** `transform.declare`, `transform.hook` (§1, §4); answers
-  `pass`, `ops`, `mutate`, `deny`, `ask` (§7).
-- **Q6. Subject shape.** Per-block text addressed by block index (§5, §7).
-- **Q7. A disallowed answer.** The hook is unavailable for that call (§5).
-- **Q8. Approve.** `{prompt, options?, expires_at_ms, on_expiry,
-  material_damage, late_execution}` (§6).
-- **Q9. Where the reduction owner runs.** Hooks run in exact plan order;
-  the plan composer places the reduction owner first (§5).
-- **Q10. The user's `replace` grant on `post_tool`.** The plan's
-  `user_grants` field and nowhere else (§5).
-- **Q12. `runner_groups`.** `role.describe.runner_groups`, checked by the
-  plan composer (§2).
-- **Q3. Where the declaration lives.** Per preset and params, read for plan
-  composition and rechecked at admission. It is not build-level discovery
-  or HELLO. The declaration op is `transform.declare` (§4).
-
-- **Q11. Tools or ops beyond the declaration.** Settled: `plan_stale` with
-  `{kind: "subscription_loosened", provider, hook, phase, field}`, naming
-  `tools` or `ops`. A plan composed against an older, wider declaration is
-  stale like a missing hook. Malformed plans remain `invalid_params` (§4).
-
-- **Q4. Where `on_unavailable` and the budget live.** Settled: the
-  declaration is the source, and the plan composer copies both into every
-  planned subscription, where they are frozen. At admission an equal or
-  stricter planned subscription admits; a looser one refuses `plan_stale`
-  with `{kind: "subscription_loosened", provider, hook, phase, field}`; a declared hook or
-  preset that is gone refuses `plan_stale` with `subscription_missing` or
-  `preset_missing` (§4).
-- **Q5. `ops` on `pre_tool`.** Settled: empty. `pre_tool` answers by phase;
-  a planned op there is refused `invalid_params` with `ops_on_pre_tool`
-  (§4).
-- **Q13. Hook names.** Settled: snake_case `pre_user`, `post_assistant`,
-  `pre_tool`, `post_tool`; `pre_tool` phases `mutate | validate |
-  approve`; a decline at `approve` is the runner's `pre_tool_declined`.
-- **Q14. Plan and declaration.** Settled: the plan carries
-  `step_transform_items` with subscriptions, and the provider's declaration
-  bounds what a plan may subscribe to.
-- **Q15. Exclusivity.** Settled: one reduction owner per session; every
-  other step transform is preserving. Hooks run in plan order with the
-  owner placed first by the plan composer (§5).
-- **Q16. Purity.** Settled: what a provider's fetch returns derives only
-  from the composition, preset, params and config, never from scope, agent
-  or session identity.

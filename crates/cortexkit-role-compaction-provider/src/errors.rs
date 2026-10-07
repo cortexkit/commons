@@ -18,7 +18,6 @@
 //! the four `refuse` codes after Setup or a step call,
 //! `compaction_unavailable` after Setup only, `compaction_wait_exceeded`
 //! after a step call only, and the ERROR and ready-refusal codes never.
-//! CONTRACT.md §14.3 holds the same table.
 //!
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request, never retried.
@@ -262,13 +261,15 @@ pub mod refuse_codes {
 pub mod runner_codes {
     use cortexkit_role_llm_runner::{compaction, errors};
 
-    /// The runner's malformed-request refusal. At admission (the plan check
-    /// before accepting a session, CONTRACT.md §3), a runner that
-    /// does not declare the `compaction` group refuses a plan naming a
-    /// compaction item with `detail.field` = [`PLAN_COMPACTION_ITEM`].
+    /// The runner's malformed-request refusal. At admission, the check a
+    /// runner makes on a proposed session plan before accepting it, a runner
+    /// that does not declare the `compaction` group refuses a plan naming a
+    /// compaction item with `detail.field` = [`PLAN_COMPACTION_ITEM`]
+    /// (CONTRACT.md §3).
     pub const INVALID_PARAMS: &str = errors::INVALID_PARAMS;
-    /// `detail.field` of the plan refusal defined in CONTRACT.md §3:
-    /// `plan.compaction_item`. It identifies the item the runner cannot serve.
+    /// The `detail.field` of that admission refusal: `plan.compaction_item`,
+    /// the plan's compaction item, which a runner without the `compaction`
+    /// group cannot serve.
     pub const PLAN_COMPACTION_ITEM: &str = compaction::PLAN_COMPACTION_ITEM_FIELD;
     /// A `compaction.ready` whose route caller is not the provider at
     /// `plan.compaction_item.provider`, or for a session without one.
@@ -436,8 +437,9 @@ mod tests {
         assert_eq!(serde_json::to_value(&unknown).unwrap(), "acme:quota");
     }
 
-    /// The rows of CONTRACT.md §14.3: code, retryable, and the calls after
-    /// which the code may end a run.
+    /// Reads the retryability table from CONTRACT.md. Each row is one named
+    /// code: its spelling, whether it is retryable, and the calls (Setup,
+    /// step) after which it may end a run.
     fn contract_retryability() -> Vec<(String, bool, Vec<Call>)> {
         let contract = include_str!("../CONTRACT.md");
         let table = contract
@@ -473,9 +475,11 @@ mod tests {
             .collect()
     }
 
-    /// The one table of retryability and of the calls after which each code
-    /// may end a run, held three ways: the enum, CONTRACT.md §14.3 and the
-    /// `retryability` vectors. `compaction_unavailable` is never retryable
+    /// Checks that three copies of one table agree: `KnownCode`'s
+    /// `retryable` and `ends_run_at`, the retryability table in CONTRACT.md,
+    /// and the `retryability` cases in `errors.json`. Each gives, per named
+    /// code, whether it is retryable and the calls after which it may end a
+    /// run. It also pins that `compaction_unavailable` is never retryable
     /// and ends a run only after Setup.
     #[test]
     fn retryability_table_matches_contract_and_vectors() {
