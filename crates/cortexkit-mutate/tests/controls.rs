@@ -155,7 +155,7 @@ impl Fixture {
         row
     }
     fn cli(&self, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+        Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
             .current_dir(self.root())
             .args(args)
             .output()
@@ -312,7 +312,7 @@ impl CommandFixture {
         assert_eq!(before, self.snapshot());
     }
     fn cli(&self, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+        Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
             .current_dir(self.root())
             .args(args)
             .output()
@@ -537,7 +537,7 @@ fn command_invalid_process_is_error_not_red_and_restores() {
         );
     }
     let mut c = f.control();
-    c.command.as_mut().unwrap()[0] = "./ck-mutate-program-that-does-not-exist".into();
+    c.command.as_mut().unwrap()[0] = "./ckdev-mutate-program-that-does-not-exist".into();
     let row = f.run(&c, false);
     assert_eq!(row.outcome, Outcome::Error, "{row:?}");
     assert!(row.red.is_empty());
@@ -2628,7 +2628,7 @@ fn signal_restores(signal: rustix::process::Signal, args: &[&str]) {
     )
     .unwrap();
     let before = fs::read(f.root().join("src/lib.rs")).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
         .current_dir(f.root())
         .args(args)
         .stdout(Stdio::null())

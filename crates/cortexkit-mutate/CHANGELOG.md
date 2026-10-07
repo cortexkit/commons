@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- **Breaking:** rename the CLI binary from `ck-mutate` to `ckdev-mutate`; the
+  `cortexkit-mutate` crate and library names are unchanged. Migrate by replacing
+  `ck-mutate` with `ckdev-mutate` in CI and scripts.
+
 ## 0.7.3
 
 - Add an optional Cargo/nextest row field `ignored = "include"` or `"only"` to

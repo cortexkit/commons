@@ -1,4 +1,4 @@
-# cortexkit-mutate / ck-mutate
+# cortexkit-mutate / ckdev-mutate
 
 A standalone, unpublished runner for checked-in mutation proofs. Install a reviewed,
 immutable revision (replace `<sha>` with a **full commit SHA**):
@@ -544,7 +544,7 @@ remaining argv elements, including options belonging to the test runner. The
 runner defaults to `command` when `--command` is present (otherwise `cargo`):
 
 ```sh
-ck-mutate prove --id rig-rejects-empty --guards 'the rig rejects an empty flow' \
+ckdev-mutate prove --id rig-rejects-empty --guards 'the rig rejects an empty flow' \
   --file script/flows_rig.py --old 'if not flows:' --new 'if False:' \
   --test-file script/tests/flows_rig.py \
   --expect-red script.tests.flows_rig.RigChecks.test_rejects_empty \
@@ -559,12 +559,12 @@ has no unscoped second replay because there is no package-wide test discovery.
 ## Commands
 
 ```sh
-ck-mutate check
-ck-mutate --catalogue other.toml run --all --report mutations.json
-ck-mutate run --diff origin/master --report mutations.json
-ck-mutate run --all --shard 1/4
-ck-mutate run --all --broad --report nightly-audit.json
-ck-mutate run --only flow-list-agent-sees-only-own
+ckdev-mutate check
+ckdev-mutate --catalogue other.toml run --all --report mutations.json
+ckdev-mutate run --diff origin/master --report mutations.json
+ckdev-mutate run --all --shard 1/4
+ckdev-mutate run --all --broad --report nightly-audit.json
+ckdev-mutate run --only flow-list-agent-sees-only-own
 ```
 
 `check` validates fields, files, anchors, and `expect_red` names via
@@ -600,7 +600,7 @@ one tree concurrently.
 An empty selection succeeds. Unknown IDs and invalid shards are errors.
 
 ```sh
-ck-mutate prove --id rejects-zero --guards 'zero is rejected' \
+ckdev-mutate prove --id rejects-zero --guards 'zero is rejected' \
   --file src/lib.rs --old 'value > 0' --new 'value >= 0' \
   --test-file src/lib.rs --package my-package --target=--lib \
   --expect-red tests::rejects_zero --only --report proof.json
@@ -620,13 +620,13 @@ function body (a constant, a type, an attribute), prints no hint.
 ### `explore`: when nobody knows the guarding tests yet
 
 ```sh
-ck-mutate explore --package my-package --file src/lib.rs \
+ckdev-mutate explore --package my-package --file src/lib.rs \
   --old 'value > 0' --new 'value >= 0' --report explore.json
-ck-mutate explore --package my-package --workspace --edits edits.toml
-ck-mutate explore --package my-package --file src/lib.rs \
+ckdev-mutate explore --package my-package --workspace --edits edits.toml
+ckdev-mutate explore --package my-package --file src/lib.rs \
   --old 'value > 0' --new 'value >= 0' \
   --append --id rejects-zero --guards 'zero is rejected' --test-file src/lib.rs
-ck-mutate explore --package my-package --file src/lib.rs \
+ckdev-mutate explore --package my-package --file src/lib.rs \
   --old 'value > 0' --new 'value >= 0' \
   --unreachable 'This helper is referenced only by unit tests; no production caller exists' \
   --append --id unused-guard --guards 'zero is rejected' --test-file src/lib.rs
@@ -860,11 +860,11 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install --locked --git https://github.com/cortexkit/commons --rev <sha> cortexkit-mutate
-      - run: ck-mutate check
+      - run: ckdev-mutate check
       - if: github.event_name == 'pull_request'
-        run: ck-mutate run --diff '${{ github.event.pull_request.base.sha }}' --shard ${{ matrix.shard }}/4 --report mutations.json
+        run: ckdev-mutate run --diff '${{ github.event.pull_request.base.sha }}' --shard ${{ matrix.shard }}/4 --report mutations.json
       - if: github.event_name == 'schedule'
-        run: ck-mutate run --all --broad --shard ${{ matrix.shard }}/4 --report mutations.json
+        run: ckdev-mutate run --all --broad --shard ${{ matrix.shard }}/4 --report mutations.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

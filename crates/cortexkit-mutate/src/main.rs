@@ -6,6 +6,7 @@ use std::{fs, path::PathBuf, sync::atomic::Ordering};
 
 #[derive(Parser)]
 #[command(
+    name = "ckdev-mutate",
     version,
     about = "Replay mutation proofs. Never git checkout a target mid-run: it removes the mutation before tests and fakes SURVIVED."
 )]
@@ -143,7 +144,7 @@ struct Proof {
     #[arg(long, allow_hyphen_values = true, conflicts_with = "command")]
     target: Option<String>,
     /// Command argv with one {test} element. Put this option last: all following
-    /// values (including flags) belong to the command, not to ck-mutate.
+    /// values (including flags) belong to the command, not to ckdev-mutate.
     #[arg(long, num_args = 1.., allow_hyphen_values = true, conflicts_with = "only")]
     command: Option<Vec<String>>,
     /// Literal runner-output pattern with one {count} decimal placeholder.
@@ -644,7 +645,7 @@ fn main() {
         Ok(true) => {}
         Ok(false) => std::process::exit(1),
         Err(e) => {
-            eprintln!("ck-mutate: {e}");
+            eprintln!("ckdev-mutate: {e}");
             std::process::exit(2);
         }
     }
@@ -660,7 +661,7 @@ mod cli_tests {
     #[test]
     fn old_and_new_accept_values_starting_with_hyphens() {
         let cli = Cli::try_parse_from([
-            "ck-mutate",
+            "ckdev-mutate",
             "prove",
             "--id",
             "r",
@@ -687,7 +688,7 @@ mod cli_tests {
         assert_eq!(p.new, "-- disabled");
 
         let cli = Cli::try_parse_from([
-            "ck-mutate",
+            "ckdev-mutate",
             "explore",
             "--package",
             "p",

@@ -91,7 +91,7 @@ timeout_s = 30
     }
 
     fn cli(&self, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+        Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
             .current_dir(self.root())
             .args(args)
             .output()

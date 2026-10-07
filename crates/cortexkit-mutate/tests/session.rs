@@ -113,7 +113,7 @@ only = true
     fn cli(&self, args: &[&str]) -> std::process::Output {
         let before = fs::read(self.root().join("src/lib.rs")).unwrap();
         let lock = fs::read(self.root().join("Cargo.lock")).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
             .args(args)
             .current_dir(self.root())
             .output()
@@ -520,7 +520,7 @@ fn interrupted_mutant_still_refreshes_clean_fixtures() {
     f.slow_mutant_test();
     let before = fs::read(f.root().join("src/lib.rs")).unwrap();
     let lock = fs::read(f.root().join("Cargo.lock")).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ck-mutate"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
         .current_dir(f.root())
         .args(["run", "--all", "--report", ".git/report.json"])
         .stdout(Stdio::null())
