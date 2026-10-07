@@ -456,7 +456,9 @@ nothing. These checks apply to every delivery mode.
 
 **Expiry and activity.** Expiry is wall-clock last activity plus the current
 retention. Last activity is the time of the newest durable send, step or
-terminal record; reads do not extend it. `expired_at_ms` is that expiry time
+terminal record; reads do not extend it. Records a runner writes on its own
+initiative, such as cache-warm records, are not activity either, so a
+keep-warm loop never keeps an idle session past its retention. `expired_at_ms` is that expiry time
 in milliseconds since the Unix epoch, not the time deletion finishes. A
 session with any non-terminal run never expires, even when it has no new
 records for longer than its retention. In particular, a paused run (including
@@ -491,7 +493,11 @@ are their owners' responsibility. This contract covers runner-held copies only.
 **Reads.** `session.read` (including model view), `session.head` and
 `run.result` on an expired session answer an `ERROR` with code `expired` and
 `detail: {expired_at_ms}` (`ExpiredDetail`). A runner that serves `run.status`
-answers the same refusal; its normal reply remains runner-specific. `expired`
+answers the same refusal; its normal reply remains runner-specific. A runner
+that serves `run.cancel` or `session.retract` also answers `expired` for an
+expired session and writes nothing; neither may act on a fresh lineage
+started after the expiry. These ops are runner-specific, so the conformance
+suite does not probe them. `expired`
 is terminal and never retried. It is not an empty page: that would falsely
 say the session has no messages, rather than that its messages expired.
 A session never written keeps the existing empty success answers. No read,
