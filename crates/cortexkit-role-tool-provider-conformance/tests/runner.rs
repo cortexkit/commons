@@ -7,7 +7,7 @@ use cortexkit_role_tool_provider_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject};
+use fake::{Defects, FakeSubject, SystemTextDefect};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -126,14 +126,175 @@ async fn guessing_a_variant_for_an_undefined_preset_fails_the_unknown_preset_cas
 }
 
 #[tokio::test]
+async fn digesting_a_json_wrapper_fails_system_text_digests_match_text_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        system_text: Some(SystemTextDefect::WrappedDigests),
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "system_text_digests_match_text");
+    let expected = cortexkit_role_tool_provider_conformance::wire::catalog::system_text_digest(
+        fake::SYSTEM_TEXT,
+    );
+    let received = cortexkit_role_tool_provider_conformance::wire::catalog::composition_digest(
+        &serde_json::json!({ "text": fake::SYSTEM_TEXT }),
+    )
+    .unwrap();
+    assert_ne!(received, expected);
+    assert!(reason.contains("system_text.item_digest"), "{reason}");
+    assert!(reason.contains(&received), "{reason}");
+    assert!(
+        reason.contains(&format!("expected digest {expected}")),
+        "{reason}"
+    );
+    for spec in CASES {
+        if spec.name != "system_text_digests_match_text" {
+            assert_passed(&report, spec.name);
+        }
+    }
+}
+
+#[tokio::test]
+async fn item_digest_hashes_text_and_both_digests_use_lowercase_hex() {
+    use SystemTextDefect::*;
+    for (defect, field) in [
+        (WrappedItemDigest, "item_digest"),
+        (UppercaseItemDigest, "item_digest"),
+        (UppercasePreflightDigest, "preflight_digest"),
+        (MissingItemDigest, "item_digest"),
+        (MissingPreflightDigest, "preflight_digest"),
+    ] {
+        let report = run(&FakeSubject::new(Defects {
+            system_text: Some(defect),
+            ..Defects::default()
+        }))
+        .await;
+        let reason = failed(&report, "system_text_digests_match_text");
+        assert!(
+            reason.contains(&format!("system_text.{field} received")),
+            "{defect:?}: {reason}"
+        );
+        let expected = cortexkit_role_tool_provider_conformance::wire::catalog::system_text_digest(
+            fake::SYSTEM_TEXT,
+        );
+        if field == "item_digest" {
+            assert!(
+                reason.contains(&format!("expected digest {expected}")),
+                "{defect:?}: {reason}"
+            );
+        } else {
+            assert!(reason.contains("provider-defined"), "{defect:?}: {reason}");
+            assert!(
+                reason.contains("64 lowercase hex characters"),
+                "{defect:?}: {reason}"
+            );
+        }
+        assert_passed(&report, "catalog_digest_only");
+    }
+}
+
+#[tokio::test]
+async fn system_text_requires_text_and_sorted_deduplicated_tool_names() {
+    use SystemTextDefect::*;
+    for (defect, field) in [
+        (MissingAnswer, "system_text received"),
+        (MissingText, "system_text.text received"),
+        (MissingToolNames, "system_text.tool_names received"),
+        (UnsortedToolNames, "system_text.tool_names received"),
+        (DuplicateToolNames, "system_text.tool_names received"),
+    ] {
+        let report = run(&FakeSubject::new(Defects {
+            system_text: Some(defect),
+            ..Defects::default()
+        }))
+        .await;
+        let reason = failed(&report, "system_text_digests_match_text");
+        assert!(reason.contains(field), "{defect:?}: {reason}");
+        assert_passed(&report, "catalog_digest_only");
+    }
+}
+
+#[tokio::test]
+async fn declaring_system_text_without_request_arguments_fails_the_case() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.system_text_arguments = None;
+    let report = run(&subject).await;
+    let reason = failed(&report, "system_text_digests_match_text");
+    assert!(
+        reason.contains("supplies no system-text catalog arguments"),
+        "{reason}"
+    );
+    subject.system_text_arguments = Some(serde_json::json!({ "params": {} }));
+    let report = run(&subject).await;
+    let reason = failed(&report, "system_text_digests_match_text");
+    assert!(
+        reason.contains("request system_text received null"),
+        "{reason}"
+    );
+    subject.system_text_arguments = Some(serde_json::json!({
+        "system_text": { "preset": "default", "params": {} }, "digest_only": true,
+    }));
+    let report = run(&subject).await;
+    let reason = failed(&report, "system_text_digests_match_text");
+    assert!(
+        reason.contains("digest_only, not a full answer"),
+        "{reason}"
+    );
+}
+
+#[tokio::test]
+async fn a_provider_defined_preflight_digest_need_not_equal_the_text_digest() {
+    let text_digest = cortexkit_role_tool_provider_conformance::wire::catalog::system_text_digest(
+        fake::SYSTEM_TEXT,
+    );
+    assert_ne!(fake::system_text_preflight_digest(), text_digest);
+    for defect in [None, Some(SystemTextDefect::WrappedPreflightDigest)] {
+        let report = run(&FakeSubject::new(Defects {
+            system_text: defect,
+            ..Defects::default()
+        }))
+        .await;
+        assert_passed(&report, "system_text_digests_match_text");
+        assert_passed(&report, "system_text_preflight_digest_stable");
+    }
+}
+
+#[tokio::test]
+async fn changing_either_digest_fails_system_text_preflight_digest_stable_by_name() {
+    for (defect, field) in [
+        (SystemTextDefect::ChangingItemDigest, "item_digest"),
+        (
+            SystemTextDefect::ChangingPreflightDigest,
+            "preflight_digest",
+        ),
+    ] {
+        let report = run(&FakeSubject::new(Defects {
+            system_text: Some(defect),
+            ..Defects::default()
+        }))
+        .await;
+        let reason = failed(&report, "system_text_preflight_digest_stable");
+        assert!(
+            reason.contains(&format!("second system_text.{field} received")),
+            "{defect:?}: {reason}"
+        );
+        assert!(reason.contains("expected digest"), "{reason}");
+        assert_passed(&report, "system_text_digests_match_text");
+    }
+}
+
+#[tokio::test]
 async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.remove(&Capability::ApprovalExecution);
     subject.capabilities.remove(&Capability::DisableTool);
+    subject.capabilities.remove(&Capability::SystemText);
     let report = run(&subject).await;
     for case in [
         "catalog_disabled_tool_absent",
         "call_disabled_tool_refused_by_name",
+        "system_text_digests_match_text",
+        "system_text_preflight_digest_stable",
         "late_results_cursor_round_trip",
         "late_results_ack",
         "crash_after_prepared_not_started",
@@ -149,7 +310,11 @@ async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
     assert_eq!(
         report.verdict,
         SuiteVerdict::ConformingForDeclaredCapabilities {
-            skipped: vec![Capability::DisableTool, Capability::ApprovalExecution],
+            skipped: vec![
+                Capability::DisableTool,
+                Capability::ApprovalExecution,
+                Capability::SystemText
+            ],
         },
         "{}",
         report.render()

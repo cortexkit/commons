@@ -12,7 +12,8 @@ use cortexkit_role_harness::{
 use cortexkit_role_tool_provider::{
     call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
-        check_flat_schema, is_schema_digest, schema_digest, session_capabilities, CatalogAnswer,
+        check_flat_schema, is_schema_digest, schema_digest, session_capabilities,
+        system_text_digest, CatalogAnswer,
     },
     check_capability_tag,
     describe::check_describe,
@@ -228,6 +229,10 @@ where
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
             "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
+            "system_text_digests_match_text" => self.system_text_digests_match_text().await,
+            "system_text_preflight_digest_stable" => {
+                self.system_text_preflight_digest_stable().await
+            }
             "catalog_disabled_tool_absent" => self.catalog_disabled_tool_absent().await,
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
@@ -467,6 +472,112 @@ where
             request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
         )?;
         expect_invalid_field(&error, PRESET_FIELD)
+    }
+
+    fn system_text_arguments(&self) -> Result<Value, String> {
+        let arguments = self
+            .subject
+            .system_text_catalog_arguments()
+            .ok_or("declares system_text but supplies no system-text catalog arguments")?;
+        if !arguments["system_text"].is_object() {
+            return Err(format!(
+                "request system_text received {}; expected {{preset, params}}",
+                arguments["system_text"]
+            ));
+        }
+        if arguments["digest_only"] == json!(true) {
+            return Err(
+                "system-text catalog arguments request digest_only, not a full answer".to_owned(),
+            );
+        }
+        Ok(arguments)
+    }
+
+    async fn system_text_catalog(
+        &self,
+        route: &S::Route,
+        arguments: Value,
+    ) -> Result<Value, String> {
+        expect_response(
+            "tool.catalog with system_text",
+            request(route, op_body(ops::TOOL_CATALOG, arguments)).await?,
+        )
+    }
+
+    async fn system_text_digests_match_text(&self) -> CaseResult {
+        let arguments = self.system_text_arguments()?;
+        let route = self.plain_route().await?;
+        let answer = self.system_text_catalog(&route, arguments).await?;
+        // Inspect the raw fields so even a missing digest reports its received
+        // value and the digest expected from the returned text.
+        let item = &answer["system_text"];
+        if !item.is_object() {
+            return Err(format!(
+                "system_text received {item}; expected a system-text answer"
+            ));
+        }
+        let text = item["text"].as_str().ok_or_else(|| {
+            format!(
+                "system_text.text received {}; expected the resolved text as a string",
+                item["text"]
+            )
+        })?;
+        let expected = system_text_digest(text);
+        let received = &item["item_digest"];
+        if !received
+            .as_str()
+            .is_some_and(|digest| is_schema_digest(digest) && digest == expected)
+        {
+            return Err(format!(
+                "system_text.item_digest received {received}; expected digest {expected} \
+                 (SHA-256 of the exact UTF-8 text bytes, as 64 lowercase hex characters)"
+            ));
+        }
+        let preflight = &item["preflight_digest"];
+        if !preflight.as_str().is_some_and(is_schema_digest) {
+            return Err(format!(
+                "system_text.preflight_digest received {preflight}; expected a provider-defined \
+                 digest as 64 lowercase hex characters (not necessarily {expected}, the text digest)"
+            ));
+        }
+        let names: Vec<String> = serde_json::from_value(item["tool_names"].clone()).map_err(|e| {
+            format!(
+                "system_text.tool_names received {}; expected a sorted, deduplicated list of tool names: {e}",
+                item["tool_names"]
+            )
+        })?;
+        let mut ordered = names.clone();
+        ordered.sort();
+        ordered.dedup();
+        if names != ordered {
+            return Err(format!(
+                "system_text.tool_names received {names:?}; expected sorted, deduplicated {ordered:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn system_text_preflight_digest_stable(&self) -> CaseResult {
+        let arguments = self.system_text_arguments()?;
+        let route = self.plain_route().await?;
+        let first = self.system_text_catalog(&route, arguments.clone()).await?;
+        let second = self.system_text_catalog(&route, arguments).await?;
+        for field in ["item_digest", "preflight_digest"] {
+            let expected = &first["system_text"][field];
+            if !expected.as_str().is_some_and(is_schema_digest) {
+                return Err(format!(
+                    "first system_text.{field} received {expected}; expected a digest as 64 lowercase hex characters"
+                ));
+            }
+            let received = &second["system_text"][field];
+            if received != expected {
+                return Err(format!(
+                    "second system_text.{field} received {received}; expected digest {expected} \
+                     from the identical first request"
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn disabled_tool(&self) -> Result<String, String> {

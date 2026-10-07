@@ -373,6 +373,7 @@ CI against its real module over a real route; never against a double.
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
 | `catalog_schemas_flat`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
 | `terminal_frame_on_cancel` | `cancellation` |
@@ -382,6 +383,14 @@ CI against its real module over a real route; never against a double.
 | `late_results_cursor_round_trip`, `late_results_ack` | `late_results`, `scope_stamp`, `held_calls`, `call_key`, `approval_execution` |
 | `late_results_incarnation_change_refused` | `late_results`, `scope_stamp` |
 | `crash_after_prepared_not_started`, `crash_after_authorized_not_started` | `approval_execution`, `held_calls`, `scope_stamp`, `call_key`, `late_results` |
+
+The `system_text` cases request full catalog answers. They check `item_digest`
+against the returned text's exact UTF-8 bytes, both digests' 64-lowercase-hex
+form, and that `tool_names` is present, sorted and deduplicated. Identical
+requests must return the same `item_digest` and the same `preflight_digest`,
+but the provider-defined `preflight_digest` need not equal the text digest.
+There is no digest-only comparison of `preflight_digest`: a `digest_only`
+answer carries only `generation` and `catalog_digest`, not `system_text`.
 
 Caller-side rules that no live provider can be made to exercise (an unknown
 withdraw `answer`, an unknown late-result `kind`, the withdraw caller policy)

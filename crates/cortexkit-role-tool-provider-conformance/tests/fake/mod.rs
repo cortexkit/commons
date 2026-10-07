@@ -22,7 +22,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -35,7 +35,7 @@ use cortexkit_role_tool_provider_conformance::{
     },
     wire::{
         call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
-        catalog::{schema_digest, CatalogRequest},
+        catalog::{composition_digest, schema_digest, system_text_digest, CatalogRequest},
         errors,
         late_results::{
             check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
@@ -61,6 +61,32 @@ pub const DISABLED: &str = "danger";
 const GENERATION: &str = "fake-gen-1";
 /// The only preset the fake defines: its default variant.
 const DEFAULT_PRESET: &str = "default";
+/// Quotes, non-ASCII text, newlines and trailing spaces must all be hashed
+/// exactly as returned, without JSON escaping or whitespace normalization.
+pub const SYSTEM_TEXT: &str = "Use \"echo\" for café.\nKeep trailing whitespace. \n";
+
+/// A provider-defined digest of the inputs, deliberately not the text digest.
+pub fn system_text_preflight_digest() -> String {
+    composition_digest(&json!({ "preset": DEFAULT_PRESET, "template": SYSTEM_TEXT })).unwrap()
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SystemTextDefect {
+    MissingAnswer,
+    MissingText,
+    WrappedDigests,
+    WrappedItemDigest,
+    WrappedPreflightDigest,
+    UppercaseItemDigest,
+    UppercasePreflightDigest,
+    MissingItemDigest,
+    MissingPreflightDigest,
+    MissingToolNames,
+    UnsortedToolNames,
+    DuplicateToolNames,
+    ChangingItemDigest,
+    ChangingPreflightDigest,
+}
 
 /// Deliberate contract breaks: each field makes the fake violate one rule a
 /// runner case must catch.
@@ -82,6 +108,8 @@ pub struct Defects {
     /// The held tool carries an unprefixed capability tag the role document
     /// does not define.
     pub undefined_unprefixed_tag: bool,
+    /// Return malformed system text without changing the other catalog cases.
+    pub system_text: Option<SystemTextDefect>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +145,7 @@ pub struct Module {
     /// The late-result log of this incarnation: `(seq, entry)`, seq from 1.
     late: Mutex<Vec<(u64, LateEntry)>>,
     acked: Mutex<BTreeSet<String>>,
+    system_text_fetches: AtomicU64,
 }
 
 impl Module {
@@ -139,6 +168,7 @@ impl Module {
             records: Mutex::new(BTreeMap::new()),
             late: Mutex::new(Vec::new()),
             acked: Mutex::new(BTreeSet::new()),
+            system_text_fetches: AtomicU64::new(0),
         });
         module.replay()?;
         let pending: Vec<Key> = module
@@ -353,15 +383,98 @@ impl Module {
                 ));
             }
         }
-        if request.digest_only == Some(true) {
-            return Ok(json!({ "generation": GENERATION, "catalog_digest": "fake-catalog-1" }));
+        if let Some(item) = &request.system_text {
+            if item.preset != DEFAULT_PRESET {
+                return Err(errors::invalid_request(
+                    "system_text.preset",
+                    format!("no system-text preset named {}", item.preset),
+                ));
+            }
         }
-        Ok(json!({
+        let catalog_digest = if request.system_text.is_some() {
+            "fake-catalog-with-system-text-1"
+        } else {
+            "fake-catalog-1"
+        };
+        if request.digest_only == Some(true) {
+            return Ok(json!({ "generation": GENERATION, "catalog_digest": catalog_digest }));
+        }
+        let mut answer = json!({
             "generation": GENERATION,
-            "catalog_digest": "fake-catalog-1",
+            "catalog_digest": catalog_digest,
             "capabilities": { "late_results": true },
             "tools": self.tools(),
-        }))
+        });
+        if request.system_text.is_some()
+            && !matches!(
+                self.defects.system_text,
+                Some(SystemTextDefect::MissingAnswer)
+            )
+        {
+            answer["system_text"] = self.system_text();
+        }
+        Ok(answer)
+    }
+
+    fn system_text(&self) -> Value {
+        let digest = system_text_digest(SYSTEM_TEXT);
+        let preflight = system_text_preflight_digest();
+        let fetch = self.system_text_fetches.fetch_add(1, Ordering::SeqCst);
+        let mut item = json!({
+            "text": SYSTEM_TEXT,
+            "item_digest": digest,
+            "preflight_digest": preflight,
+            "tool_names": [QUICK, HELD, SLOW],
+        });
+        let wrapped = || composition_digest(&json!({ "text": SYSTEM_TEXT })).unwrap();
+        match self.defects.system_text {
+            Some(SystemTextDefect::MissingText) => {
+                item.as_object_mut().unwrap().remove("text");
+            }
+            Some(SystemTextDefect::WrappedDigests) => {
+                item["item_digest"] = json!(wrapped());
+                item["preflight_digest"] = json!(wrapped());
+            }
+            Some(SystemTextDefect::WrappedItemDigest) => item["item_digest"] = json!(wrapped()),
+            Some(SystemTextDefect::WrappedPreflightDigest) => {
+                item["preflight_digest"] = json!(wrapped());
+            }
+            Some(SystemTextDefect::UppercaseItemDigest) => {
+                item["item_digest"] = json!(digest.to_uppercase());
+            }
+            Some(SystemTextDefect::UppercasePreflightDigest) => {
+                item["preflight_digest"] = json!(preflight.to_uppercase());
+            }
+            Some(SystemTextDefect::MissingItemDigest) => {
+                item.as_object_mut().unwrap().remove("item_digest");
+            }
+            Some(SystemTextDefect::MissingPreflightDigest) => {
+                item.as_object_mut().unwrap().remove("preflight_digest");
+            }
+            Some(SystemTextDefect::MissingToolNames) => {
+                item.as_object_mut().unwrap().remove("tool_names");
+            }
+            Some(SystemTextDefect::UnsortedToolNames) => {
+                item["tool_names"] = json!([SLOW, QUICK, HELD]);
+            }
+            Some(SystemTextDefect::DuplicateToolNames) => {
+                item["tool_names"] = json!([QUICK, QUICK, HELD, SLOW]);
+            }
+            Some(SystemTextDefect::ChangingItemDigest) => {
+                if fetch > 0 {
+                    item["item_digest"] =
+                        json!(system_text_digest(&format!("{SYSTEM_TEXT}{fetch}")));
+                }
+            }
+            Some(SystemTextDefect::ChangingPreflightDigest) => {
+                item["preflight_digest"] = json!(composition_digest(&json!({
+                    "preset": DEFAULT_PRESET, "template": SYSTEM_TEXT, "fetch": fetch,
+                }))
+                .unwrap());
+            }
+            None | Some(SystemTextDefect::MissingAnswer) => {}
+        }
+        item
     }
 
     fn handle(&self, stamp: &RouteStamp, body: Value) -> Result<Vec<ObservedFrame>, RouteFailure> {
@@ -604,6 +717,7 @@ impl ToolRoute for FakeRoute {
 pub struct FakeSubject {
     pub defects: Defects,
     pub capabilities: BTreeSet<Capability>,
+    pub system_text_arguments: Option<Value>,
     live: Mutex<Option<Arc<Module>>>,
 }
 
@@ -620,8 +734,13 @@ impl FakeSubject {
                 Capability::Cancellation,
                 Capability::ApprovalExecution,
                 Capability::LateResults,
+                Capability::SystemText,
             ]
             .into(),
+            system_text_arguments: Some(json!({
+                "params": {}, "preset": DEFAULT_PRESET,
+                "system_text": { "preset": DEFAULT_PRESET, "params": {} },
+            })),
             live: Mutex::new(None),
         }
     }
@@ -731,6 +850,10 @@ impl ToolProviderSubject for FakeSubject {
 
     fn catalog_arguments(&self) -> Value {
         json!({ "params": Map::new(), "preset": DEFAULT_PRESET })
+    }
+
+    fn system_text_catalog_arguments(&self) -> Option<Value> {
+        self.system_text_arguments.clone()
     }
 
     fn quick_call(&self) -> CallSpec {

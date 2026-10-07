@@ -15,7 +15,7 @@ pub struct CaseSpec {
 
 use Capability::{
     ApprovalExecution, CallKey, Cancellation, DisableTool, HeldCalls, LateResults, SchemaPin,
-    ScopeStamp,
+    ScopeStamp, SystemText,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -65,6 +65,16 @@ pub const CASES: &[CaseSpec] = &[
         name: "catalog_unknown_preset_refused",
         requires: &[],
         checks: "a tool.catalog request naming a preset the provider does not define is refused as invalid_request {field: \"preset\"}, never answered with a guessed variant",
+    },
+    CaseSpec {
+        name: "system_text_digests_match_text",
+        requires: &[SystemText],
+        checks: "a catalog requested with system_text includes text, item_digest equal to SHA-256 of its exact UTF-8 bytes, both digests as 64 lowercase hex characters, and sorted, deduplicated tool_names",
+    },
+    CaseSpec {
+        name: "system_text_preflight_digest_stable",
+        requires: &[SystemText],
+        checks: "two identical full catalog requests with system_text carry the same item_digest and the same provider-defined preflight_digest",
     },
     CaseSpec {
         name: "catalog_disabled_tool_absent",

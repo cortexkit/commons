@@ -39,6 +39,9 @@ pub enum Capability {
     /// The provider declares the `late_results` session capability and
     /// serves `late_results` and `late_results.ack`.
     LateResults,
+    /// The provider serves system text alongside its catalog. See
+    /// [`ToolProviderSubject::system_text_catalog_arguments`].
+    SystemText,
 }
 
 impl Capability {
@@ -53,6 +56,7 @@ impl Capability {
             Self::Cancellation => "cancellation",
             Self::ApprovalExecution => "approval_execution",
             Self::LateResults => "late_results",
+            Self::SystemText => "system_text",
         }
     }
 }
@@ -121,6 +125,15 @@ pub trait ToolProviderSubject: Harness {
     /// `catalog_unknown_preset_refused` case sends these arguments with the
     /// preset replaced by one no provider defines, and expects a refusal.
     fn catalog_arguments(&self) -> Value;
+
+    /// The arguments of a full `tool.catalog` request for system text, including
+    /// `system_text: {preset, params}` with a preset this provider defines.
+    /// Do not set `digest_only: true`: these cases need the full answer's text
+    /// and digests. Required by
+    /// [`Capability::SystemText`]; the default keeps existing subjects opt-in.
+    fn system_text_catalog_arguments(&self) -> Option<Value> {
+        None
+    }
 
     /// A call that completes promptly and successfully. Its tool must be in
     /// the catalog.
