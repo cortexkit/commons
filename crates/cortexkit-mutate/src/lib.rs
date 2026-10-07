@@ -1466,13 +1466,19 @@ fn execute_output(
         thread::sleep(Duration::from_millis(20));
     };
     drop(child);
-    let stdout_text = fs::read_to_string(&stdout).map_err(|e| e.to_string())?;
+    // Test tools do not always write UTF-8 (Python on Windows writes the
+    // console code page when redirected to a file). Decode lossily: an output
+    // byte the runner cannot decode must not turn a finished test run into a
+    // spawn error. Grades never depend on decoding; they come from exit
+    // status or from test lines, which still match exactly when valid.
+    let read_text = |path: &Path| {
+        fs::read(path)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .map_err(|e| e.to_string())
+    };
+    let stdout_text = read_text(&stdout)?;
     let text = if separate_stdout {
-        format!(
-            "{}{}",
-            stdout_text,
-            fs::read_to_string(&stderr).map_err(|e| e.to_string())?
-        )
+        format!("{}{}", stdout_text, read_text(&stderr)?)
     } else {
         stdout_text.clone()
     };

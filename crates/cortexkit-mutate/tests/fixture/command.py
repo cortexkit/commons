@@ -4,7 +4,9 @@ import signal
 import sys
 import time
 
-sys.stdout.reconfigure(newline="\n")
+# UTF-8 and LF on every platform: redirected to a file on Windows, Python
+# would otherwise write the console code page and CRLF.
+sys.stdout.reconfigure(newline="\n", encoding="utf-8")
 # Read bytes rather than importing the guard, so every invocation observes the
 # current source and creates no cached bytecode in the fixture tree.
 mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
@@ -19,6 +21,13 @@ assert len(sys.argv) == 2
 with Path(".git/command-log").open("a", newline="\n") as log:
     log.write(f"{'mutant' if mutated else 'baseline'} {test_id}\n")
 
+if test_id == "invalid_utf8":
+    # A tool whose output is not UTF-8: the grade must still come from the exit.
+    if mutated:
+        sys.stdout.flush()
+        sys.stdout.buffer.write(b"failure \xff\xfe not utf-8\n")
+        sys.stdout.buffer.flush()
+    sys.exit(3 if mutated else 0)
 if test_id == "always_red":
     sys.exit(3)
 if test_id == "sleep_baseline" or (mutated and test_id == "sleep_mutant"):

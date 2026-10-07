@@ -683,6 +683,19 @@ fn command_rows_respect_platform_desk_and_prebuild_before_baseline_and_mutant() 
 }
 
 #[test]
+fn command_output_that_is_not_utf8_still_grades_from_the_exit() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red = vec!["invalid_utf8".into()];
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert_eq!(row.red, ["invalid_utf8"]);
+}
+
+#[test]
 fn command_survived_if_any_expected_id_green_and_restores() {
     if !python_available() {
         return;
