@@ -1047,6 +1047,9 @@ fn command_failure_maps_keep_both_streams_and_uncapped_message_proof() {
         f.root().join("rig.py"),
         r#"from pathlib import Path
 import sys
+# Python on Windows writes CRLF to text streams; the assertions below match LF.
+sys.stdout.reconfigure(newline="\n")
+sys.stderr.reconfigure(newline="\n")
 mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
 test_id = sys.argv[1]
 print("Ran 1 tests", flush=True)
