@@ -1,12 +1,12 @@
 from pathlib import Path
 import sys
 
-sys.stdout.reconfigure(newline="\n")
+sys.stdout.reconfigure(newline="\n", encoding="utf-8")
 mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
 assert Path(".git/command-log").exists(), "named baseline precedes JUnit baseline"
 if mutated:
-    assert "mutant " in Path(".git/command-log").read_text(), "named tests run first"
-with Path(".git/broad-log").open("a", newline="\n") as log:
+    assert "mutant " in Path(".git/command-log").read_text(encoding="utf-8"), "named tests run first"
+with Path(".git/broad-log").open("a", newline="\n", encoding="utf-8") as log:
     log.write("mutant\n" if mutated else "baseline\n")
 mode, report = sys.argv[1:]
 if mutated:

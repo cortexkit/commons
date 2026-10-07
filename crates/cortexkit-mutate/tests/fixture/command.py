@@ -18,7 +18,7 @@ if test_id in ("zero_baseline", "zero_mutant"):
 assert len(sys.argv) == 2
 # Write \n explicitly: text mode on Windows would translate it to \r\n, and the
 # tests compare this log byte for byte.
-with Path(".git/command-log").open("a", newline="\n") as log:
+with Path(".git/command-log").open("a", newline="\n", encoding="utf-8") as log:
     log.write(f"{'mutant' if mutated else 'baseline'} {test_id}\n")
 
 if test_id == "invalid_utf8":
