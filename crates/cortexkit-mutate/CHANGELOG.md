@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.1
+
+- Add `failures` and `baseline_failures` report maps containing every red test's
+  own output, including collateral and baseline reds excluded from grading.
+  Cargo retains each libtest stdout block; nextest retains per-test stdout and
+  stderr; command rows retain each test id's combined output. Keep `test_tail`
+  unchanged, so early failures remain readable even after hundreds of passes.
+- Bound each failure entry to 16 KiB including an elision marker, retaining the
+  first 4 KiB and approximately the last 12 KiB on UTF-8 boundaries.
+- Print the first six lines of each unexpected red's failure beneath WRONG_TEST
+  and RED_FOR_ANOTHER_REASON rows, including message-mismatched expected tests.
+
 ## 0.7.0
 
 - Collect Cargo/nextest clean-tree baselines before any mutant, sharing one

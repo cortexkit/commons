@@ -179,6 +179,21 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
                 ""
             }
         );
+        if matches!(
+            row.outcome,
+            Outcome::WrongTest | Outcome::RedForAnotherReason
+        ) {
+            for (name, output) in row.unexpected_failures() {
+                println!("  unexpected red: {name}");
+                if output.is_empty() {
+                    println!("    <no failure output>");
+                } else {
+                    for line in output.lines().take(6) {
+                        println!("    {line}");
+                    }
+                }
+            }
+        }
     }
     let broad = rows
         .iter()

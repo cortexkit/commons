@@ -974,6 +974,12 @@ pub struct Report {
     pub timed_out_phase: Option<Phase>,
     pub red: Vec<String>,
     pub green: Vec<String>,
+    /// Each red test's own mutant output, bounded to 16 KiB per entry.
+    pub failures: BTreeMap<String, String>,
+    /// Each baseline-red test's own output, separate from mutant failures.
+    pub baseline_failures: BTreeMap<String, String>,
+    #[serde(skip)]
+    unexpected_red: BTreeSet<String>,
     pub collateral: Collateral,
     /// True only after an opt-in broad audit produced complete test results.
     /// A normal replay reports collateral but does not observe package breadth.
@@ -1012,6 +1018,9 @@ impl Report {
             timed_out_phase: None,
             red: vec![],
             green: vec![],
+            failures: BTreeMap::new(),
+            baseline_failures: BTreeMap::new(),
+            unexpected_red: BTreeSet::new(),
             collateral: Collateral {
                 count: 0,
                 targets: vec![],
@@ -1045,6 +1054,15 @@ impl Report {
                     | Outcome::SkippedPlatform
                     | Outcome::DeskOnly
             )
+    }
+
+    /// Failures needing explanation: collateral reds and message mismatches.
+    pub fn unexpected_failures(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.unexpected_red.iter().filter_map(|name| {
+            self.failures
+                .get(name)
+                .map(|output| (name.as_str(), output.as_str()))
+        })
     }
 }
 
@@ -1295,6 +1313,31 @@ fn tail(text: &str) -> String {
     text[start..].to_owned()
 }
 
+fn bounded_failure(text: &str) -> String {
+    const LIMIT: usize = 16 * 1024;
+    const HEAD: usize = 4 * 1024;
+    if text.len() <= LIMIT {
+        return text.to_owned();
+    }
+    let mut head_end = HEAD;
+    while !text.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let mut tail_start = text.len() - (LIMIT - head_end);
+    loop {
+        while !text.is_char_boundary(tail_start) {
+            tail_start += 1;
+        }
+        let marker = format!("\n[… {} bytes elided …]\n", tail_start - head_end);
+        let size = head_end + marker.len() + text.len() - tail_start;
+        if size <= LIMIT {
+            return format!("{}{marker}{}", &text[..head_end], &text[tail_start..]);
+        }
+        // The marker counts toward the cap; reserve its bytes from the tail.
+        tail_start += size - LIMIT;
+    }
+}
+
 fn validate_count_pattern(pattern: Option<&str>) -> Result<(&str, &str)> {
     let pattern = pattern.ok_or("is required for command rows")?;
     if pattern.matches("{count}").count() != 1 || pattern.contains('\0') {
@@ -1424,6 +1467,14 @@ fn command_tests(
             return Err(error("exit 127: program not found".into()));
         }
         command_test_count(&output.text, c.test_count_pattern.as_deref()).map_err(error)?;
+        if code != 0 {
+            let failures = if baseline {
+                &mut report.baseline_failures
+            } else {
+                &mut report.failures
+            };
+            failures.insert(id.clone(), bounded_failure(&output.text));
+        }
         if baseline {
             if code != 0 {
                 return Err(error(format!("exit {code}")));
@@ -1433,6 +1484,7 @@ fn command_tests(
         } else {
             report.red.push(id.clone());
             if let Some(reason) = wrong_message(c, id, &output.text)? {
+                report.unexpected_red.insert(id.clone());
                 report.outcome = Outcome::RedForAnotherReason;
                 report.reason.get_or_insert(reason);
             }
@@ -1566,6 +1618,7 @@ fn cargo_baseline(
         return Err(format!("baseline test run failed: {}", tail(&tests.text)));
     }
     let results = parse_test_results(&tests.text, &c.runner)?;
+    report.baseline_failures = results.failures();
     if let Some((name, signal)) = results.signals.iter().next() {
         return Err(format!("baseline {name}: test binary died by {signal}"));
     }
@@ -1626,6 +1679,15 @@ struct TestResults {
     names: BTreeMap<String, String>,
     failure_output: BTreeMap<String, String>,
     signals: BTreeMap<String, String>,
+}
+
+impl TestResults {
+    fn failures(&self) -> BTreeMap<String, String> {
+        self.red
+            .iter()
+            .map(|name| (name.clone(), bounded_failure(&self.failure_output[name])))
+            .collect()
+    }
 }
 
 // Keep binary identity until all output has been read. Two binaries can compile
@@ -2599,6 +2661,7 @@ fn replay(
             ));
         }
         let mut results = parse_test_results(&tests.text, &c.runner)?;
+        report.failures = results.failures();
         // Match baseline-red tests by (test binary, plain test name). A `--broad`
         // run prefixes a name with its binary when two binaries share it, so
         // the printed name can differ from the one recorded at baseline.
@@ -2615,6 +2678,13 @@ fn replay(
             Scope::Row | Scope::Package | Scope::Broad => {
                 let mut grading = c.clone();
                 grading.expect_red = resolve_expected(c, &results)?;
+                report.unexpected_red.extend(
+                    results
+                        .red
+                        .iter()
+                        .filter(|name| !grading.expect_red.contains(name))
+                        .cloned(),
+                );
                 let (extra, cross_targets) = collateral(&grading, &results)?;
                 report.collateral = extra;
                 report.breadth_observed = scope == Scope::Broad;
@@ -2624,8 +2694,8 @@ fn replay(
                         if let Some(reason) = wrong_message(c, name, &results.failure_output[name])?
                         {
                             outcome = Outcome::RedForAnotherReason;
-                            report.reason = Some(reason);
-                            break;
+                            report.unexpected_red.insert(name.clone());
+                            report.reason.get_or_insert(reason);
                         }
                     }
                 }
@@ -3097,11 +3167,18 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
                 return Err(format!("repeated test name: {target}::{name}"));
             }
             events.record(target, name, status == "failed")?;
-            events
+            let output = &mut events
                 .0
                 .get_mut(&(target.to_owned(), name.to_owned()))
                 .unwrap()
-                .output = event["stdout"].as_str().unwrap_or_default().to_owned();
+                .output;
+            output.push_str(event["stdout"].as_str().unwrap_or_default());
+            if let Some(stderr) = event["stderr"].as_str().filter(|text| !text.is_empty()) {
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
+                output.push_str(stderr);
+            }
         } else if kind == "suite" && matches!(status, "ok" | "failed") {
             summaries += 1;
             total += event["passed"]
@@ -3183,6 +3260,67 @@ mod broad_command_tests {
             let row = command(&c, "build", Scope::Row).unwrap();
             assert!(!row.get_args().any(|a| a == "--tests"));
         }
+    }
+}
+
+#[cfg(test)]
+mod failure_report_tests {
+    use super::*;
+
+    #[test]
+    fn failure_cap_keeps_head_tail_and_counts_elided_bytes() {
+        for text in [
+            format!("SETUP\n{}\nPANIC: required assertion", "x".repeat(40_000)),
+            format!("SETUP\n{}\nPANIC: required assertion", "🦀é".repeat(8_000)),
+        ] {
+            let bounded = bounded_failure(&text);
+            assert!(bounded.len() <= 16 * 1024);
+            let (head, rest) = bounded.split_once("\n[… ").unwrap();
+            let (elided, end) = rest.split_once(" bytes elided …]\n").unwrap();
+            assert!(text.starts_with(head));
+            assert!((4093..=4096).contains(&head.len()));
+            assert!(text.ends_with(end));
+            assert!((12_200..=12_288).contains(&end.len()));
+            assert_eq!(
+                elided.parse::<usize>().unwrap(),
+                text.len() - head.len() - end.len()
+            );
+            assert!(bounded.starts_with("SETUP\n"));
+            assert!(bounded.ends_with("PANIC: required assertion"));
+        }
+        for text in [String::new(), "é".repeat(8192)] {
+            assert_eq!(bounded_failure(&text), text);
+        }
+    }
+
+    #[test]
+    fn nextest_human_failure_survives_hundreds_of_later_passes() {
+        let mut text = String::from("FAIL [ 0.001s] fixture collateral\n  stdout ───\nsetup for collateral\n  stderr ───\nthread panicked: collateral invariant\n");
+        for i in 0..350 {
+            text.push_str(&format!("PASS [ 0.001s] fixture passing_test_{i:03}\n"));
+        }
+        text.push_str("Summary [ 1.0s] 351 tests run: 350 passed, 1 failed\nFAIL [ 0.001s] fixture collateral\n");
+        assert!(!tail(&text).contains("collateral invariant"));
+        let results = parse_test_results(&text, "nextest").unwrap();
+        assert_eq!(results.green.len(), 350);
+        let failures = results.failures();
+        assert_eq!(failures.len(), 1);
+        assert!(failures["collateral"].contains("setup for collateral"));
+        assert!(failures["collateral"].contains("collateral invariant"));
+        assert!(!failures["collateral"].contains("passing_test"));
+    }
+
+    #[test]
+    fn nextest_json_failure_retains_stdout_and_stderr_only_for_red_tests() {
+        let text = r#"{"type":"suite","event":"started","test_count":3}
+{"type":"test","event":"failed","name":"fixture::one$shared","stdout":"setup one","stderr":"panic one"}
+{"type":"test","event":"failed","name":"fixture::two$shared","stdout":"setup two\n","stderr":"panic two"}
+{"type":"test","event":"ok","name":"fixture::two$passes","stdout":"green output","stderr":"green error"}
+{"type":"suite","event":"failed","passed":1,"failed":2}"#;
+        let failures = parse_test_results(text, "nextest").unwrap().failures();
+        assert_eq!(failures.len(), 2);
+        assert_eq!(failures["fixture::one::shared"], "setup one\npanic one");
+        assert_eq!(failures["fixture::two::shared"], "setup two\npanic two");
     }
 }
 

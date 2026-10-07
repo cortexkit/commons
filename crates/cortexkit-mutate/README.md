@@ -616,6 +616,28 @@ lines are uppercase outcomes. Exit status is nonzero on any failing row or hard
 preflight error. A dirty-target refusal is a preflight error (no mutation/report
 row); normal row failures are included in the report.
 
+### Per-test failure output (0.7.1)
+
+Every row includes `failures` and `baseline_failures`, maps from full test name
+to that test's own failure output. `failures` includes every red in the mutant
+run: expected, collateral, and tests still red from baseline (even though those
+baseline reds are excluded from grading and `red`). `baseline_failures` holds
+the clean-tree failures separately, including expected baseline reds that stop
+replay. Repeated names use the same qualified binary identities as `red`.
+Green tests are not included; runs without failures have empty maps.
+
+Cargo entries come from each `---- name stdout ----` block. Nextest entries
+contain that test's stdout and stderr, not the run's aggregate output. Command
+test rows use each test id's combined output. Each entry is capped at **16 KiB**,
+keeping the first 4 KiB and approximately the last 12 KiB, with a
+`[… N bytes elided …]` marker counted within the cap. Cuts respect UTF-8
+boundaries. `test_tail` remains the last 8,000 characters of the whole run;
+failure maps retain early panics even when hundreds of PASS lines follow.
+
+WRONG_TEST and RED_FOR_ANOTHER_REASON console rows print the first six lines of
+each unexpected red's failure underneath the row. Unexpected reds include
+collateral tests and expected tests whose output mismatches `expect_message`.
+
 Every row includes `breadth_observed`: true only when an opt-in broad audit
 finished and its complete per-test results were parsed. Normal replays, `prove`,
 `explore`, explicit dispositions, and incomplete audits report false.

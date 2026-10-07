@@ -497,6 +497,9 @@ fn command_baseline_not_green_is_error_and_restores() {
         "{reason}"
     );
     assert!(row.red.is_empty() && row.green.is_empty());
+    assert!(row.failures.is_empty());
+    assert_eq!(row.baseline_failures.len(), 1);
+    assert!(row.baseline_failures["always_red"].contains("Ran 1 tests"));
     assert_eq!(
         f.log(),
         format!("baseline {COMMAND_GUARD}\nbaseline always_red\n")
@@ -947,6 +950,172 @@ fn different_message_is_red_for_another_reason_for_both_runners() {
         assert_eq!(
             serde_json::to_value(row.outcome).unwrap(),
             "RED_FOR_ANOTHER_REASON"
+        );
+    }
+}
+
+#[test]
+fn long_run_retains_expected_and_collateral_failures_for_both_runners() {
+    let panic_path = regex::Regex::new(r"src[\\/]lib\.rs:\d+:").unwrap();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let f = Fixture::new();
+        fs::create_dir_all(f.root().join("tests")).unwrap();
+        let passing = (0..350)
+            .map(|i| {
+                format!(
+                    "#[test] fn z_passing_{i:03}() {{ assert!(mutation_fixture::unrelated()); }}\n"
+                )
+            })
+            .collect::<String>();
+        fs::write(f.root().join("tests/zz_passes.rs"), passing).unwrap();
+        // Serialize nextest and prioritize the two failures so the fixture always
+        // leaves hundreds of PASS lines after their captured output.
+        fs::create_dir_all(f.root().join(".config")).unwrap();
+        fs::write(
+            f.root().join(".config/nextest.toml"),
+            "[profile.default]\ntest-threads = 1\n[[profile.default.overrides]]\nfilter = 'test(tests::guard_rejects_zero) | test(tests::waits)'\npriority = 100\n",
+        )
+        .unwrap();
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.target = Some("--tests".into());
+        c.file = None;
+        c.old = None;
+        c.new = None;
+        c.edits = vec![
+            Edit { file: "src/lib.rs".into(), old: "value > 0".into(), new: "value >= 0".into() },
+            Edit { file: "src/lib.rs".into(), old: "pub fn wait_hook() {}".into(), new: "pub fn wait_hook() { eprintln!(\"collateral setup\"); panic!(\"collateral invariant failed\"); }".into() },
+        ];
+        fs::write(
+            f.root().join("mutations.toml"),
+            toml::to_string(&Catalogue {
+                control: vec![c.clone()],
+                ..Catalogue::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        cmd(f.root(), "git", &["add", "tests", ".config"]);
+        f.commit();
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::WrongTest, "{runner}: {row:?}");
+        assert_eq!(row.green.len(), 354);
+        assert_eq!(row.failures.len(), 2);
+        assert!(row.baseline_failures.is_empty());
+        assert!(
+            !row.test_tail.contains("collateral invariant failed"),
+            "{runner}: {}",
+            row.test_tail
+        );
+        assert!(row.failures["tests::waits"].contains("collateral setup"));
+        assert!(row.failures["tests::waits"].contains("collateral invariant failed"));
+        assert!(!row.failures["tests::waits"].contains("z_passing_"));
+        assert!(row.failures["tests::guard_rejects_zero"]
+            .contains("assertion failed: !super::guarded(0)"));
+        // Cargo's panic path may use either separator on Windows.
+        assert!(panic_path.is_match(&row.failures["tests::waits"]));
+
+        let out = f.cli(&["run", "--all", "--report", ".git/failures.json"]);
+        assert!(!out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("guard: WRONG_TEST"), "{text}");
+        assert!(text.contains("  unexpected red: tests::waits\n"), "{text}");
+        assert!(text.contains("collateral invariant failed"), "{text}");
+        assert!(
+            !text.contains("  unexpected red: tests::guard_rejects_zero"),
+            "{text}"
+        );
+        let json = report_json(&f, ".git/failures.json");
+        assert!(json[0]["failures"]["tests::waits"]
+            .as_str()
+            .unwrap()
+            .contains("collateral invariant failed"));
+        assert_eq!(json[0]["baseline_failures"], serde_json::json!({}));
+    }
+}
+
+#[test]
+fn command_failure_maps_keep_both_streams_and_uncapped_message_proof() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    fs::write(
+        f.root().join("rig.py"),
+        r#"from pathlib import Path
+import sys
+mutated = Path("guard.py").read_bytes() == b"ENABLED = False\n"
+test_id = sys.argv[1]
+print("Ran 1 tests", flush=True)
+if mutated:
+    print("setup " + test_id, flush=True)
+    for i in range(1, 10):
+        print("detail " + str(i), flush=True)
+    print("x" * 20000 + "MIDDLE_ONLY" + "x" * 20000, flush=True)
+    print("panic " + test_id, file=sys.stderr, flush=True)
+sys.exit(1 if mutated else 0)
+"#,
+    )
+    .unwrap();
+    let mut c = f.control();
+    c.expect_red.push(COMMAND_OTHER.into());
+    c.expect_message = Some("MIDDLE_ONLY".into());
+    cmd(f.root(), "git", &["add", "rig.py"]);
+    cmd(
+        f.root(),
+        "git",
+        &["commit", "-qm", "verbose command fixture"],
+    );
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert_eq!(row.failures.len(), 2);
+    assert!(row.baseline_failures.is_empty());
+    for (id, other) in [
+        (COMMAND_GUARD, COMMAND_OTHER),
+        (COMMAND_OTHER, COMMAND_GUARD),
+    ] {
+        let output = &row.failures[id];
+        assert!(output.len() <= 16 * 1024);
+        assert!(output.starts_with(&format!("Ran 1 tests\nsetup {id}\n")));
+        assert!(output.trim_end().ends_with(&format!("panic {id}")));
+        assert!(!output.contains(other));
+        assert!(output.contains("bytes elided …]"));
+        assert!(!output.contains("MIDDLE_ONLY"));
+    }
+
+    c.expect_message = Some("required invariant".into());
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![c],
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "mutations.toml"]);
+    cmd(
+        f.root(),
+        "git",
+        &["commit", "-qm", "message mismatch fixture"],
+    );
+    let out = f.cli(&["run", "--all"]);
+    assert!(!out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("command-guard: RED_FOR_ANOTHER_REASON"),
+        "{text}"
+    );
+    for id in [COMMAND_GUARD, COMMAND_OTHER] {
+        let heading = format!("  unexpected red: {id}\n");
+        let block = text.split_once(&heading).unwrap().1;
+        assert!(block.starts_with(&format!("    Ran 1 tests\n    setup {id}\n    detail 1\n    detail 2\n    detail 3\n    detail 4\n")), "{block}");
+        assert!(
+            !block.lines().take(7).any(|line| line.contains("detail 5")),
+            "{block}"
         );
     }
 }
@@ -3119,6 +3288,10 @@ fn expected_baseline_red_is_error_and_never_runs_mutant() {
         assert_eq!(row.build_ms, 0);
         assert_eq!(row.test_ms, 0);
         assert!(row.baseline_test_ms > 0);
+        assert!(row.failures.is_empty());
+        assert_eq!(row.baseline_failures.len(), 1);
+        assert!(row.baseline_failures["tests::guard_rejects_zero"]
+            .contains("assertion failed: super::guarded(0)"));
     }
 }
 
@@ -3153,12 +3326,18 @@ fn unrelated_baseline_red_is_excluded_from_wrong_test_and_broad_catches() {
             assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
             assert_eq!(row.red, ["tests::guard_rejects_zero"]);
             assert_eq!(row.collateral.count, 0);
+            assert!(row.baseline_failures["tests::unrelated_test"]
+                .contains("assertion failed: !super::unrelated()"));
+            assert!(row.failures["tests::unrelated_test"]
+                .contains("assertion failed: !super::unrelated()"));
             assert!(row
                 .baseline_red
                 .values()
                 .flatten()
                 .any(|n| n == "tests::unrelated_test"));
             if broad {
+                assert!(row.baseline_failures["unrelated_test"].contains("already broken"));
+                assert!(row.failures["unrelated_test"].contains("already broken"));
                 assert!(row
                     .baseline_red
                     .values()
