@@ -117,6 +117,19 @@ status/JSON output flags); feature flags always precede any harness separator.
 Nextest's `cargo nextest run --help` capability probe is not a build/test/list and
 does not take feature selection.
 
+### Multiline anchors on CRLF checkouts (0.7.2)
+
+`check` and replay first match every edit's `old` anchor byte-exactly. Only if
+there are zero exact matches, the file contains CRLF, and `old` contains LF but
+no carriage returns, the runner retries with LF translated to CRLF in both
+`old` and `new`. This also applies to every `edits` entry, including sequential
+edits to one file. The chosen form must occur exactly once: exact and translated
+matches are never combined, and two exact matches never trigger a retry.
+Mixed-ending files therefore prefer the exact anchor without rewriting other
+line endings. A row using any retry adds `"line_endings": "crlf"` to its report;
+the field is absent for byte-exact matches. Restoration always copies the saved
+file bytes, preserving even mixed line endings exactly.
+
 ### Failure identity and signal deaths (0.6.0)
 
 An optional `expect_message` requires a **case-sensitive substring**, or a Rust

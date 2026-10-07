@@ -939,8 +939,14 @@ impl Drop for Saved {
 
 // Apply sequential edits in memory before writing anything. The replacement count
 // is the anchor check, including for multi-line anchors and repeated-file edits.
-fn replaced(root: &Path, edits: &[Edit]) -> Result<BTreeMap<PathBuf, String>> {
+struct Replacements {
+    files: BTreeMap<PathBuf, String>,
+    used_crlf: bool,
+}
+
+fn replaced(root: &Path, edits: &[Edit]) -> Result<Replacements> {
     let mut files = BTreeMap::new();
+    let mut used_crlf = false;
     for edit in edits {
         let path = safe_path(root, &edit.file)?;
         if !files.contains_key(&path) {
@@ -950,27 +956,26 @@ fn replaced(root: &Path, edits: &[Edit]) -> Result<BTreeMap<PathBuf, String>> {
             );
         }
         let text = files.get_mut(&path).expect("inserted file");
-        let mut count = 0;
-        let replacement =
-            text.split(&edit.old)
-                .enumerate()
-                .fold(String::new(), |mut out, (i, part)| {
-                    if i > 0 {
-                        count += 1;
-                        out.push_str(&edit.new);
-                    }
-                    out.push_str(part);
-                    out
-                });
+        let mut old = edit.old.clone();
+        let mut new = edit.new.clone();
+        let mut count = text.matches(&old).count();
+        // Git may check out LF-authored sources as CRLF. Prefer byte-exact
+        // anchors, even in mixed-ending files; never combine match counts.
+        if count == 0 && text.contains("\r\n") && old.contains('\n') && !old.contains('\r') {
+            old = old.replace('\n', "\r\n");
+            new = new.replace('\n', "\r\n");
+            count = text.matches(&old).count();
+            used_crlf = true;
+        }
         if count != 1 {
             return Err(format!(
                 "ANCHOR_MISSING {}: replaced {count} occurrences",
                 edit.file
             ));
         }
-        *text = replacement;
+        *text = text.replace(&old, &new);
     }
-    Ok(files)
+    Ok(Replacements { files, used_crlf })
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1020,6 +1025,10 @@ pub struct Collateral {
 pub struct Report {
     pub id: String,
     pub outcome: Outcome,
+    /// "crlf" when at least one edit used the LF-to-CRLF anchor retry.
+    /// Absent when every anchor matched byte-exactly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_endings: Option<String>,
     /// The phase whose deadline expired, including command-row ERROR timeouts.
     pub timed_out_phase: Option<Phase>,
     pub red: Vec<String>,
@@ -1065,6 +1074,7 @@ impl Report {
         Self {
             id: c.id.clone(),
             outcome: Outcome::Error,
+            line_endings: None,
             timed_out_phase: None,
             red: vec![],
             green: vec![],
@@ -2324,6 +2334,8 @@ impl ReplaySession {
                 report.id = c.id.clone();
                 report.baseline_build_ms = 0;
                 report.baseline_test_ms = 0;
+                // Shared test results say nothing about this row's edit anchors.
+                report.line_endings = None;
                 report
             } else {
                 let mut selection = (*c).clone();
@@ -2608,7 +2620,7 @@ fn replay(
         Err(e) => return Err(e),
     };
     let work = (|| -> Result<()> {
-        let files = match replaced(root, &edits) {
+        let replacement = match replaced(root, &edits) {
             Ok(f) => f,
             Err(e) if e.starts_with("ANCHOR_MISSING") => {
                 report.outcome = Outcome::AnchorMissing;
@@ -2617,6 +2629,8 @@ fn replay(
             }
             Err(e) => return Err(e),
         };
+        report.line_endings = replacement.used_crlf.then(|| "crlf".into());
+        let files = replacement.files;
         if stop.load(Ordering::SeqCst) {
             return Err("interrupted".into());
         }
@@ -3273,6 +3287,92 @@ fn parse_nextest_json(text: &str) -> Result<TestResults> {
         event.signal = Some(signal.to_owned());
     }
     Ok(events.finish("nextest"))
+}
+
+#[cfg(test)]
+mod line_ending_tests {
+    use super::*;
+
+    fn apply(bytes: &[u8], old: &str, new: &str) -> Result<Replacements> {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("source.rs"), bytes).unwrap();
+        let result = replaced(
+            root.path(),
+            &[Edit {
+                file: "source.rs".into(),
+                old: old.into(),
+                new: new.into(),
+            }],
+        );
+        assert_eq!(fs::read(root.path().join("source.rs")).unwrap(), bytes);
+        result
+    }
+
+    #[test]
+    fn lf_multiline_anchor_retries_crlf_without_changing_other_bytes() {
+        let result = apply(
+            b"before\r\nold\r\nbody\r\nafter\r\n",
+            "old\nbody",
+            "new\nbody",
+        )
+        .unwrap();
+        assert!(result.used_crlf);
+        assert_eq!(
+            result.files.values().next().unwrap().as_bytes(),
+            b"before\r\nnew\r\nbody\r\nafter\r\n"
+        );
+    }
+
+    #[test]
+    fn mixed_endings_use_only_the_exact_anchor_form() {
+        let result = apply(
+            b"old\nbody\nseparator\r\nold\r\nbody\r\n",
+            "old\nbody",
+            "new\nbody",
+        )
+        .unwrap();
+        assert!(!result.used_crlf);
+        assert_eq!(
+            result.files.values().next().unwrap().as_bytes(),
+            b"new\nbody\nseparator\r\nold\r\nbody\r\n"
+        );
+    }
+
+    #[test]
+    fn exact_anchor_ambiguity_never_retries_the_crlf_form() {
+        let error = apply(
+            b"old\nbody\nold\nbody\nold\r\nbody\r\n",
+            "old\nbody",
+            "new\nbody",
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("replaced 2 occurrences"), "{error}");
+    }
+
+    #[test]
+    fn crlf_retry_requires_exactly_one_occurrence() {
+        for (bytes, expected) in [
+            (b"old\r\nbody\r\nold\r\nbody\r\n".as_slice(), 2),
+            (b"unrelated\r\nbody\r\n".as_slice(), 0),
+        ] {
+            let error = apply(bytes, "old\nbody", "new\nbody").err().unwrap();
+            assert!(
+                error.contains(&format!("replaced {expected} occurrences")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_crlf_anchor_matches_exactly_without_retry() {
+        let result = apply(b"old\r\nbody\r\n", "old\r\nbody", "new\r\nbody").unwrap();
+        assert!(!result.used_crlf);
+        assert_eq!(
+            result.files.values().next().unwrap().as_bytes(),
+            b"new\r\nbody\r\n"
+        );
+    }
 }
 
 #[cfg(test)]

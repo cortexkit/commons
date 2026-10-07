@@ -13,6 +13,11 @@
   package target. Plain expectations only need qualification when ambiguous in
   the selected targets; unrelated targets no longer block narrow proofs.
 - Keep the unversioned catalogue format; existing rows retain default features.
+- Match edit anchors byte-exactly first. If an LF-only multiline anchor is absent
+  in a CRLF source, retry with both anchor and replacement translated to CRLF.
+  Keep the exactly-one-occurrence rule for the chosen form, never combine exact
+  and translated matches, and report `line_endings: "crlf"` when the retry was
+  used. Single and multi-edit rows still restore the saved bytes exactly.
 
 ## 0.7.1
 

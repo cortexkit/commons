@@ -2256,6 +2256,73 @@ fn multiline_anchor_is_replaced_exactly_once() {
     );
     assert_eq!(f.run(&c).outcome, Outcome::Caught);
 }
+
+#[test]
+fn crlf_multiline_anchor_check_replay_and_edits_restore_exact_bytes() {
+    let f = Fixture::new();
+    // These bytes do not depend on the host's checkout or Git conversion rules.
+    let source = b"pub fn guarded(value: i32) -> bool {\r\n    value > 0\r\n}\r\n#[cfg(test)]\r\nmod tests {\r\n    #[test]\r\n    fn guard_rejects_zero() {\r\n        let source = std::fs::read(\"src/lib.rs\").unwrap();\r\n        assert!(source.iter().enumerate().all(|(i, b)| *b != b'\\n' || (i > 0 && source[i - 1] == b'\\r')), \"source lost CRLF\");\r\n        assert!(!super::guarded(0), \"zero must be rejected\");\r\n    }\r\n}\r\n";
+    fs::write(f.root().join("src/lib.rs"), source).unwrap();
+    // --allow-dirty keeps Git from deciding whether the explicit CRLF bytes are
+    // a checkout-only difference. The runner must restore these very bytes.
+    for multi_edit in [false, true] {
+        let mut c = f.control();
+        c.old = Some("pub fn guarded(value: i32) -> bool {\n    value > 0\n}".into());
+        c.new = Some("pub fn guarded(value: i32) -> bool {\n    value >= 0\n}".into());
+        c.expect_message = Some("zero must be rejected".into());
+        if multi_edit {
+            c.edits = c.edits().unwrap();
+            c.edits.push(Edit {
+                file: "src/lib.rs".into(),
+                old: "#[cfg(test)]\nmod tests {".into(),
+                new: "#[cfg(test)]\nmod tests { // contract".into(),
+            });
+            c.file = None;
+            c.old = None;
+            c.new = None;
+        }
+        let cat = Catalogue {
+            control: vec![c.clone()],
+            ..Catalogue::default()
+        };
+        check(f.root(), &cat, &AtomicBool::new(false)).unwrap();
+        assert_eq!(fs::read(f.root().join("src/lib.rs")).unwrap(), source);
+        let row = run_row(f.root(), &c, true, &AtomicBool::new(false), false).unwrap();
+        assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+        assert_eq!(row.line_endings.as_deref(), Some("crlf"));
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["line_endings"], "crlf");
+        assert_eq!(fs::read(f.root().join("src/lib.rs")).unwrap(), source);
+    }
+}
+
+#[test]
+fn mixed_line_endings_replay_prefers_exact_anchor_and_restores_bytes() {
+    let f = Fixture::new();
+    // The commented copy has the translated form; only the live LF form matches.
+    let source = b"pub fn guarded(value: i32) -> bool {\n    value > 0\n}\n/*\r\npub fn guarded(value: i32) -> bool {\r\n    value > 0\r\n}\r\n*/\r\n#[cfg(test)]\r\nmod tests {\r\n    #[test]\r\n    fn guard_rejects_zero() { assert!(!super::guarded(0)); }\r\n}\r\n";
+    fs::write(f.root().join("src/lib.rs"), source).unwrap();
+    let mut c = f.control();
+    c.old = Some("pub fn guarded(value: i32) -> bool {\n    value > 0\n}".into());
+    c.new = Some("pub fn guarded(value: i32) -> bool {\n    value >= 0\n}".into());
+    check(
+        f.root(),
+        &Catalogue {
+            control: vec![c.clone()],
+            ..Catalogue::default()
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let row = run_row(f.root(), &c, true, &AtomicBool::new(false), false).unwrap();
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert_eq!(row.line_endings, None);
+    assert!(serde_json::to_value(&row)
+        .unwrap()
+        .get("line_endings")
+        .is_none());
+    assert_eq!(fs::read(f.root().join("src/lib.rs")).unwrap(), source);
+}
 #[test]
 fn lock_excludes_second_runner_and_releases() {
     let f = Fixture::new();
