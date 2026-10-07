@@ -1820,8 +1820,9 @@ fn command_breadth(
             return Ok(());
         }
         validate_command_broad_ids(c, &results)?;
-        // Keep diagnostics for every mutant failure, even those already red on
-        // the clean tree. Only newly red tests establish mutant collateral.
+        // Keep diagnostics for every failure under the mutant, including tests
+        // that already failed on the unmutated tree. Only tests that passed
+        // before the mutation and fail after it count as the mutant's collateral.
         for (id, output) in results.failures() {
             if !c.expect_red.contains(&id) {
                 report.failures.insert(id, output);
@@ -2250,8 +2251,9 @@ fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()>
         return Ok(());
     }
     for name in &c.expect_red {
-        // Exact selectors use the real harness name, not a binary-qualified
-        // report identity. Zero matches and skipped tests are never success.
+        // Match each expected name against the name the test harness itself
+        // printed, not the report id that is prefixed with the test binary. A
+        // name that matched no test, or a test the harness skipped, is an error.
         if !results.names.iter().any(|(id, actual)| {
             actual == name && (results.red.contains(id) || results.green.contains(id))
         }) {
@@ -2939,8 +2941,9 @@ impl ReplaySession {
             } else {
                 c.validate_runner()?;
                 let mut selection = (*c).clone();
-                // Named baselines remain per row. JUnit package baselines below
-                // are independent and shared by their argv/output selection.
+                // The baseline of a row's own expected tests is per row. The JUnit
+                // package-wide baseline below is separate: rows with the same
+                // `broad_command` and `broad_report` share one run of it.
                 if c.runner == "command" {
                     selection.broad_command = None;
                     selection.broad_report = None;
@@ -3304,8 +3307,9 @@ fn replay(
                 }
             }
         }
-        // A caller may have prepared only narrow named baselines before asking
-        // for a broad replay. Collect the missing JUnit baseline while still clean.
+        // A caller may have run only the rows' own expected-test baselines
+        // before asking for `--broad`. Run the missing package-wide JUnit
+        // baseline now, before any mutation is applied.
         if baseline_ready
             && c.runner == "command"
             && scope == Scope::Broad

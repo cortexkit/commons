@@ -1084,7 +1084,8 @@ fn command_v090_junit_grades_collateral_and_reviewed_classname_hubs() {
     assert_eq!(row.outcome, Outcome::Caught);
     assert_eq!(row.collateral.count, 1);
     assert_eq!(row.collateral.targets, ["Guard"]);
-    // Normal replay still runs named ids only, even when an audit is configured.
+    // Without --broad, the row runs only its expect_red tests, even though it
+    // configures broad_command.
     f.run(&c, false);
 }
 
