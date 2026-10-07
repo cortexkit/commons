@@ -90,9 +90,10 @@ to them. Nothing here names a particular implementation.
     hex characters (`system_text_digest` in this crate), never a digest of a
     JSON object wrapping it, and is present whether or not `text` is. A
     runner that receives `text` checks it by hashing the bytes it received.
-    `preflight_digest` is provider-defined: it must change whenever the text
-    the same request resolves to would change, and may change more often (a
-    provider may digest its inputs rather than its output). A runner compares
+    `preflight_digest` is provider-defined, written as 64 lowercase hex
+    characters: it must change whenever the text the same request resolves to
+    would change, and may change more often (a provider may digest its inputs
+    rather than its output). A runner compares
     it only with an earlier `preflight_digest` from the same provider, never
     with `item_digest`. `tool_names` lists, sorted and without
     duplicates, the model-facing names of the tools the text was composed

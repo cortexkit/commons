@@ -65,7 +65,9 @@ const DEFAULT_PRESET: &str = "default";
 /// exactly as returned, without JSON escaping or whitespace normalization.
 pub const SYSTEM_TEXT: &str = "Use \"echo\" for café.\nKeep trailing whitespace. \n";
 
-/// A provider-defined digest of the inputs, deliberately not the text digest.
+/// The fake's `preflight_digest`: a digest of its inputs (preset and template),
+/// deliberately different from the text digest, so the suite proves it never
+/// requires the two to be equal.
 pub fn system_text_preflight_digest() -> String {
     composition_digest(&json!({ "preset": DEFAULT_PRESET, "template": SYSTEM_TEXT })).unwrap()
 }
