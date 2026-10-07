@@ -153,6 +153,13 @@ where
     )
 }
 
+fn deserialize_retention<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    crate::strict::optional(deserializer, "retention", "u64 seconds")
+}
+
 /// The role's fields of a `session.send` request.
 ///
 /// Lenient on unknown fields: a runner's own send parameters (model,
@@ -188,6 +195,14 @@ pub struct SendRequest {
     /// replace the session's frozen manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Map<String, Value>>,
+    /// Whole-session retention in seconds. Frozen on the first send;
+    /// subsequent sends may only shorten it. Absent initially means forever.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_retention"
+    )]
+    pub retention: Option<u64>,
     /// The runner's own send parameters, kept as received.
     #[serde(flatten)]
     pub runner_params: Map<String, Value>,
@@ -201,6 +216,7 @@ impl SendRequest {
             delivery: None,
             mark: None,
             plan: None,
+            retention: None,
             runner_params: Map::new(),
         }
     }
@@ -218,6 +234,44 @@ impl SendRequest {
     pub fn with_plan(mut self, plan: Map<String, Value>) -> Self {
         self.plan = Some(plan);
         self
+    }
+
+    pub fn with_retention(mut self, seconds: u64) -> Self {
+        self.retention = Some(seconds);
+        self
+    }
+
+    /// Validate retention before writing anything. `previous` is `None`
+    /// for a fresh lineage and `Some(frozen_retention)` for an existing one,
+    /// including `Some(None)` for one first sent without retention. Absence
+    /// on a later send preserves the current policy, never resets it.
+    /// Expiry of an old lineage must be resolved before this check.
+    /// Pass `None` for `limits` when the capability group is undeclared,
+    /// even if an undeclared limits object was supplied in discovery.
+    pub fn check_retention(
+        &self,
+        limits: Option<&crate::describe::Retention>,
+        previous: Option<Option<u64>>,
+    ) -> Result<(), crate::errors::RetentionInvalidDetail> {
+        use crate::errors::RetentionInvalidDetail;
+        let Some(seconds) = self.retention else {
+            return Ok(());
+        };
+        let Some(limits) = limits else {
+            return Err(RetentionInvalidDetail::new());
+        };
+        if seconds == 0 {
+            return Err(RetentionInvalidDetail::new());
+        }
+        if seconds > limits.max_seconds {
+            return Err(RetentionInvalidDetail::new().with_max_seconds(limits.max_seconds));
+        }
+        if let Some(frozen) = previous {
+            if frozen.is_none_or(|value| seconds > value) {
+                return Err(RetentionInvalidDetail::new());
+            }
+        }
+        Ok(())
     }
 
     pub fn with_runner_params(mut self, runner_params: Map<String, Value>) -> Self {
@@ -566,5 +620,64 @@ mod tests {
         assert!(!delivered.is_delivered());
         let encoded = serde_json::to_value(&reply).unwrap();
         assert_eq!(encoded, raw);
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::SendRequest;
+    use crate::describe::Retention;
+    use serde_json::json;
+
+    #[test]
+    fn retention_is_a_role_field_and_round_trips() {
+        let request: SendRequest = serde_json::from_value(
+            json!({"prompt":"p", "send_id":"s", "retention":3, "model":"m"}),
+        )
+        .unwrap();
+        assert_eq!(request.retention, Some(3));
+        assert!(!request.runner_params.contains_key("retention"));
+        assert_eq!(serde_json::to_value(&request).unwrap()["retention"], 3);
+        for bad in [json!(-1), json!(1.5), json!("3"), json!(true)] {
+            let error = serde_json::from_value::<SendRequest>(
+                json!({"prompt":"p", "send_id":"s", "retention":bad}),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("u64"), "{error}");
+            assert!(error.to_string().contains("retention"), "{error}");
+        }
+    }
+
+    #[test]
+    fn retention_validation_freezes_and_only_shortens() {
+        let limits = Retention::new(10, 500);
+        let send = |value| SendRequest::new("p", "s").with_retention(value);
+        assert!(send(10).check_retention(Some(&limits), None).is_ok());
+        assert!(send(5)
+            .check_retention(Some(&limits), Some(Some(10)))
+            .is_ok());
+        assert!(send(5)
+            .check_retention(Some(&limits), Some(Some(5)))
+            .is_ok());
+        assert_eq!(
+            send(6)
+                .check_retention(Some(&limits), Some(Some(5)))
+                .unwrap_err()
+                .field,
+            "retention"
+        );
+        assert!(send(1).check_retention(Some(&limits), Some(None)).is_err());
+        assert!(send(1).check_retention(None, None).is_err());
+        assert!(send(0).check_retention(Some(&limits), None).is_err());
+        assert_eq!(
+            send(11)
+                .check_retention(Some(&limits), None)
+                .unwrap_err()
+                .max_seconds,
+            Some(10)
+        );
+        assert!(SendRequest::new("p", "s")
+            .check_retention(None, Some(Some(5)))
+            .is_ok());
     }
 }

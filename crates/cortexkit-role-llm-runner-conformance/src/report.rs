@@ -22,8 +22,8 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    DispatchAttribution, HoldToolCalls, Interrupt, KillAt, Queue, RunOps, Steer, Streaming,
-    TranscriptReads,
+    DispatchAttribution, HoldToolCalls, Interrupt, KillAt, Queue, Retention, RunOps, Steer,
+    Streaming, TranscriptReads,
 };
 
 const fn case(
@@ -44,6 +44,7 @@ const READS: &[Capability] = &[TranscriptReads, Queue];
 const RUNS: &[Capability] = &[RunOps, Queue];
 const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
+const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
@@ -283,6 +284,30 @@ pub const CASES: &[CaseSpec] = &[
         &[Queue, TranscriptReads, KillAt(points::TERMINAL)],
         "killed at Terminal and restarted: the run keeps its one terminal state, completed, and nothing is written twice",
     ),
+    case("retention_honoured", RETAINED,
+        "after retention plus delete_within_ms and margin all role reads answer expired with the last-activity expiry time, never-written sessions still answer empty, deletion is complete and a fresh send starts a new lineage with its own retention"),
+    case("retention_run_status_expired", RETAINED,
+        "run.status, if advertised, answers the same expired refusal; otherwise not applicable"),
+    case("retention_no_content_served", RETAINED,
+        "prompt, tool-result and run-title markers disappear from every known read and every advertised export/list/read op, including subscription replay"),
+    case("retention_shorten_continues_lineage", RETAINED,
+        "shortening an idle unexpired session preserves its lineage and earlier messages, then expires after the new terminal plus shorter retention"),
+    case("retention_equal_noop", RETAINED,
+        "an equal retention is accepted without replacing the lineage or disabling expiry; a later absent value preserves the policy"),
+    case("retention_lengthen_refused", RETAINED,
+        "a later longer retention is refused invalid_params naming retention and writes nothing"),
+    case("retention_late_opt_in_refused", RETAINED,
+        "a session first sent without retention refuses any later retention, naming retention and writing nothing"),
+    case("retention_zero_refused", RETAINED,
+        "retention zero is refused invalid_params naming retention and writes nothing"),
+    case("retention_above_max_refused", RETAINED,
+        "retention above max_seconds is refused invalid_params naming retention with max_seconds in detail; inapplicable if max_seconds is u64::MAX"),
+    CaseSpec { name: "retention_without_group_refused", requires: &[Queue], requires_any: &[], requires_undeclared_any: &[Retention],
+        checks: "a runner without the retention group refuses retention invalid_params naming retention, never ignores it" },
+    case("retention_active_run_never_expires", &[Retention, Queue, TranscriptReads, RunOps, HoldToolCalls],
+        "a held active or paused non-terminal run remains readable beyond retention, and expires only after its terminal plus retention"),
+    case("crash_at_RetentionTombstoned", &[Retention, Queue, TranscriptReads, RunOps, KillAt(points::RETENTION_TOMBSTONED)],
+        "real process kill after the durable expiry tombstone and before deletion; restart answers expired and reports actual deletion finished"),
 ];
 
 /// Where this suite skips or narrows a check because the role leaves the
@@ -290,6 +315,9 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "retention waits use Tokio timers: real-runner conformance must use an unpaused Tokio clock; only the suite's fake self-tests use virtual time",
+    "retention deletion completion is inspected by the subject in the runner's durable report and runner-held stores, never inferred from an expired read; non-role export/list/read request schemas and pagination are supplied by retention_probe_params, and every advertised extra op must be classified",
+    "retention_run_status_expired is inapplicable if run.status is not advertised; run.status remains runner-specific",
     "the fetch plan's shape is not pinned (CONTRACT §10), so the subject builds each session's first-send fields and the suite never inspects a plan or a baseline's items",
     "the suite writes sessions with session.send (delivery absent, which means queue), so every case that needs a written session requires queue; a runner that admits sessions declares it (§9)",
     "the suite waits for a run to end through session.head's last_run_state, or run.result where only run_ops is required, so cases that wait require transcript_reads",
@@ -297,7 +325,7 @@ pub const NARROWINGS: &[&str] = &[
     "message bodies are in the runner's own schema (§4.2), so the suite finds a scripted prompt, text part or tool result by a unique marker string inside a message body, and counts messages holding it",
     "where a tool result's reason sits is the runner's schema (§12.3), so crash_at_DispatchIntent only checks that some message holds the string outcome_unknown",
     "subscribe_from_head_no_gap_no_duplicate compares a replay from the head with a replay from start on an idle session; the live handoff race is not exercised",
-    "the crash guarantee that a read naming the old lineage after a lineage change is refused (§14, 2) is not checked: nothing in this subset changes a lineage",
+    "retention_honoured checks lineage_changed for the expired lineage after a fresh send; other ways of changing lineage are not exercised",
     "the crash guarantee of replay, not re-invocation (§14, 5) is checked only for the model and the tool (a durable step is not generated again, a recorded result is not re-invoked); hooks and compaction are not in this subset",
     "the crash guarantee that each resume writes one informational record (§14, 8) is not checked: where that record sits is the runner's schema",
     "a call's indeterminate window between a restart and its outcome_unknown close is not observable reliably, so crash_at_DispatchIntent checks the state after the close",

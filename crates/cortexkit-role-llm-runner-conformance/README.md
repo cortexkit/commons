@@ -26,6 +26,15 @@ fake under `tests/fake/` exists only to test the suite itself.
   of assistant messages in the request's history, and its scripted tool
   provider (serving `SCRIPTED_TOOL`) answers each call with its scripted
   result, counts invocations, and can hold a call until released.
+- For `retention`, an unpaused Tokio runtime, and
+  `retention_deletion_finished`: inspect the runner's durable completion
+  report and runner-held transcript/derived stores, never infer deletion
+  from an `expired` read. `retention_probe_params` classifies every extra
+  advertised op and supplies all export/list/read requests and listing pages
+  for the leak check. Return `None` only for ops that cannot serve stored
+  session content; an unclassified op fails the check. The suite sends a
+  unique `title` along with prompt and tool-result markers; a runner that
+  stores caller titles must erase them too.
 
 ## Verdict
 
@@ -64,6 +73,11 @@ from `session.baseline` has no admission reply to compare.
 | `undeclared_delivery_refused` | `queue`, `transcript_reads`, and `steer` or `interrupt` left undeclared |
 | `crash_at_Admitted`, `crash_at_SendRecorded`, `crash_at_StepRecorded`, `crash_at_ToolResultRecorded`, `crash_at_Terminal` | `queue`, `transcript_reads`, the kill point |
 | `crash_at_DispatchIntent` | `queue`, `transcript_reads`, `dispatch_attribution`, the kill point |
+| `retention_honoured`, `retention_no_content_served`, `retention_equal_noop`, `retention_shorten_continues_lineage`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
+| `retention_run_status_expired` | same; not applicable if `run.status` is not advertised |
+| `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
+| `retention_active_run_never_expires` | retention requirements plus `hold_tool_calls`; a held run may be active or paused |
+| `crash_at_RetentionTombstoned` | retention requirements plus the named kill point; must end a real process between tombstone and deletion |
 
 `CASES` in `src/report.rs` states what each case checks.
 
@@ -111,6 +125,28 @@ every report prints them. In short:
   `run_ops`, and is inapplicable when the send's reply names no `run_id`.
   A `delivered` receipt may move from absent to `pending`, since on a
   `confirm` runner absent already means `pending`.
+
+### Retention coverage
+
+Retention chooses at most two seconds (one if the maximum is one), then
+waits through the advertised deletion bound with a 300 ms margin. Reads are
+checked at expiry and again after that bound. An idle shortening send keeps
+the earlier messages and lineage; a fresh send to an expired session uses a
+new lineage and its own retention. Active and paused held runs outlive the
+bound and restart the clock at their terminal record. Positive shortening
+and within-max lengthening are not applicable when the maximum is one;
+above-max is not applicable when it is `u64::MAX`.
+
+The leak check scans raw/range/original/model reads, head, run result,
+optional run status, baseline and subscription replay, plus every advertised
+extra content op classified by the subject. It looks for prompt, tool-result
+and caller-title markers in both success and error answers. The deletion
+inspection additionally covers copies that are not served.
+
+The self-tests use a virtual Tokio clock and a disk-backed fake, with
+deliberate defects that show the conformance case names that go red. These
+are not evidence of production conformance: a runner's own CI must run the
+suite against its real process and unpaused clock.
 
 ## Not yet implemented
 

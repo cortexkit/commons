@@ -29,6 +29,53 @@ pub const UNKNOWN_MID: &str = "unknown_mid";
 /// `run.result` names a run the session does not have.
 pub const UNKNOWN_RUN: &str = "unknown_run";
 
+/// The session's transcript has expired. Terminal, never retried. The
+/// detail is [`ExpiredDetail`], not an empty never-written-session reply.
+pub const EXPIRED: &str = "expired";
+
+/// Detail of the named `expired` answer to a read of an expired session.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ExpiredDetail {
+    /// Wall-clock expiry in milliseconds since the Unix epoch, not deletion time.
+    pub expired_at_ms: u64,
+}
+
+impl ExpiredDetail {
+    pub fn new(expired_at_ms: u64) -> Self {
+        Self { expired_at_ms }
+    }
+}
+
+/// Detail of an `invalid_params` refusal of `session.send.retention`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RetentionInvalidDetail {
+    pub field: String,
+    /// Present for an above-maximum request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_seconds: Option<u64>,
+}
+
+impl RetentionInvalidDetail {
+    pub fn new() -> Self {
+        Self {
+            field: "retention".into(),
+            max_seconds: None,
+        }
+    }
+    pub fn with_max_seconds(mut self, max_seconds: u64) -> Self {
+        self.max_seconds = Some(max_seconds);
+        self
+    }
+}
+
+impl Default for RetentionInvalidDetail {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A send reused a `send_id` with a different payload or delivery mode.
 /// `detail.field` names the first field that differs, for example
 /// `delivery`.
@@ -130,6 +177,7 @@ pub const CODES: &[&str] = &[
     LINEAGE_CHANGED,
     UNKNOWN_MID,
     UNKNOWN_RUN,
+    EXPIRED,
     SEND_ID_REUSE,
     DELIVERY_UNSUPPORTED,
     RUN_PAUSED,
@@ -291,5 +339,27 @@ mod tests {
         );
         assert_eq!(refused_field(UNKNOWN_MID, Some(&detail)), None);
         assert_eq!(refused_field(INVALID_PARAMS, None), None);
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::{is_retryable, ExpiredDetail, CODES, EXPIRED};
+
+    #[test]
+    fn expired_is_named_terminal_and_carries_expiry_time() {
+        assert!(CODES.contains(&EXPIRED));
+        assert!(!is_retryable(EXPIRED));
+        let detail = ExpiredDetail::new(1234);
+        assert_eq!(
+            serde_json::to_value(&detail).unwrap(),
+            serde_json::json!({"expired_at_ms":1234})
+        );
+        assert_eq!(
+            serde_json::from_str::<ExpiredDetail>(r#"{"expired_at_ms":1234,"future":true}"#)
+                .unwrap(),
+            detail
+        );
+        assert!(serde_json::from_str::<ExpiredDetail>("{}").is_err());
     }
 }

@@ -46,6 +46,10 @@ pub const FOLD_RECORDED: &str = "FoldRecorded";
 /// The run's terminal state is durable. Resume never writes a second one.
 pub const TERMINAL: &str = "Terminal";
 
+/// Expiry's content-free tombstone is durable, but transcript and derived
+/// copies have not yet been deleted. Restart must finish the deletion.
+pub const RETENTION_TOMBSTONED: &str = "RetentionTombstoned";
+
 /// Every point in the role's vocabulary, in the order a run that uses them
 /// all reaches them.
 pub const ALL: &[&str] = &[
@@ -57,6 +61,7 @@ pub const ALL: &[&str] = &[
     DISPATCH_INTENT,
     TOOL_RESULT_RECORDED,
     TERMINAL,
+    RETENTION_TOMBSTONED,
 ];
 
 #[cfg(test)]

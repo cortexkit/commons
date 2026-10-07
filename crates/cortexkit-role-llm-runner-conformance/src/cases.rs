@@ -120,6 +120,7 @@ where
                 self.guaranteed_steer_never_pending_or_unknown().await
             }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
+            name if name.starts_with("retention_") => self.retention_case(name).await,
             other => Err(format!("the runner has no case named {other}")),
         }
     }
@@ -131,7 +132,11 @@ where
     // ---- sessions -------------------------------------------------------
 
     /// A fresh session whose model is `script`, with the owner's route.
-    async fn open(&self, label: &str, script: Script) -> Result<Session<S::Route>, String> {
+    pub(crate) async fn open(
+        &self,
+        label: &str,
+        script: Script,
+    ) -> Result<Session<S::Route>, String> {
         let name = self.mint.next(label);
         self.subject
             .install_script(&name, script)
@@ -157,7 +162,7 @@ where
     }
 
     /// The params of a send into `session`.
-    fn params(
+    pub(crate) fn params(
         &self,
         session: &Session<S::Route>,
         prompt: &str,

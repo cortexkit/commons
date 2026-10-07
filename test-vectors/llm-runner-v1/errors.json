@@ -17,6 +17,10 @@
       "retryable": false
     },
     {
+      "code": "expired",
+      "retryable": false
+    },
+    {
       "code": "send_id_reuse",
       "retryable": false
     },

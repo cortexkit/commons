@@ -63,6 +63,28 @@ pub struct RoleDescribe {
     /// ([`steer_receipt`]). Absent means [`steer_receipt::GUARANTEED`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steer_receipt: Option<String>,
+    /// Limits required when the `retention` capability group is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention: Option<Retention>,
+}
+
+/// Whole-session retention limits advertised by a runner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Retention {
+    /// Largest accepted `session.send.retention`, in seconds; must be positive.
+    pub max_seconds: u64,
+    /// Maximum delay from expiry to deletion of all runner-held content.
+    pub delete_within_ms: u64,
+}
+
+impl Retention {
+    pub fn new(max_seconds: u64, delete_within_ms: u64) -> Self {
+        Self {
+            max_seconds,
+            delete_within_ms,
+        }
+    }
 }
 
 /// A runner's `session.read` byte cap, in bytes.
@@ -122,6 +144,12 @@ impl RoleDescribe {
     /// State the `session.read` byte cap.
     pub fn with_max_bytes(mut self, default: u64, maximum: u64) -> Self {
         self.max_bytes = Some(MaxBytes { default, maximum });
+        self
+    }
+
+    /// State the retention limits (the capability must also be listed).
+    pub fn with_retention(mut self, max_seconds: u64, delete_within_ms: u64) -> Self {
+        self.retention = Some(Retention::new(max_seconds, delete_within_ms));
         self
     }
 
@@ -198,7 +226,9 @@ pub enum DescribeProblem {
     /// A required field is missing or has the wrong type.
     Undecodable(String),
     /// No entry in `majors` is `llm-runner/v1`.
-    MissingMajor { found: Vec<String> },
+    MissingMajor {
+        found: Vec<String>,
+    },
     /// The `llm-runner/v1` entry lacks a required op.
     MissingOp(&'static str),
     /// A declared capability group lacks one of its ops. A group is all or
@@ -211,6 +241,9 @@ pub enum DescribeProblem {
     MissingSessionCapabilitiesSource,
     /// The answer declares `transcript_reads` without stating its byte cap.
     MissingMaxBytes,
+    /// The retention group has no limits, or cannot accept a positive value.
+    MissingRetention,
+    InvalidRetention,
 }
 
 /// Decode `raw` and check it lists an `llm-runner/v1` major with every
@@ -254,6 +287,15 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.declares(capabilities::TRANSCRIPT_READS) && describe.max_bytes.is_none() {
         problems.push(DescribeProblem::MissingMaxBytes);
     }
+    if describe.declares(capabilities::RETENTION) {
+        match describe.retention {
+            None => problems.push(DescribeProblem::MissingRetention),
+            Some(limits) if limits.max_seconds == 0 => {
+                problems.push(DescribeProblem::InvalidRetention)
+            }
+            Some(_) => {}
+        }
+    }
     if describe.session_capabilities_from.is_none() {
         problems.push(DescribeProblem::MissingSessionCapabilitiesSource);
     }
@@ -280,6 +322,8 @@ mod tests {
                 "missing_session_capabilities_source"
             }
             DescribeProblem::MissingMaxBytes => "missing_max_bytes",
+            DescribeProblem::MissingRetention => "missing_retention",
+            DescribeProblem::InvalidRetention => "invalid_retention",
         }
     }
 
@@ -397,5 +441,32 @@ mod tests {
             Some(steer_receipt::CONFIRM)
         );
         assert_eq!(confirm_describe.steer_receipt(), steer_receipt::CONFIRM);
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::{check_describe, DescribeProblem, Major, Retention, RoleDescribe};
+    use crate::{capabilities, ops, PROVIDES, REQUIRED_OPS};
+
+    #[test]
+    fn retention_group_requires_positive_limits() {
+        let mut ops: Vec<String> = REQUIRED_OPS.iter().map(|s| (*s).into()).collect();
+        ops.push(ops::SESSION_SEND.into());
+        let base = RoleDescribe::new(vec![Major::new(PROVIDES, ops, "alpha")], "1")
+            .with_capabilities(vec![capabilities::RETENTION.into()])
+            .with_session_capabilities_from("baseline");
+        let check = |value: &RoleDescribe| check_describe(&serde_json::to_value(value).unwrap());
+        assert_eq!(check(&base), Err(vec![DescribeProblem::MissingRetention]));
+        assert_eq!(
+            check(&base.clone().with_retention(0, 0)),
+            Err(vec![DescribeProblem::InvalidRetention])
+        );
+        let described = check(&base.with_retention(u64::MAX, 0)).unwrap();
+        assert_eq!(described.retention, Some(Retention::new(u64::MAX, 0)));
+        let decoded: Retention =
+            serde_json::from_str(r#"{"max_seconds":3,"delete_within_ms":100,"future":true}"#)
+                .unwrap();
+        assert_eq!(decoded, Retention::new(3, 100));
     }
 }

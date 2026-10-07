@@ -13,6 +13,7 @@ use crate::{
     crash::{self, CrashObservation},
     drive::Mint,
     report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES},
+    retention,
     route::RunnerRoute,
     subject::{Capability, LlmRunnerSubject},
 };
@@ -80,7 +81,11 @@ where
         let outcome = match gate(spec, &declared) {
             Some(outcome) => outcome,
             None => {
-                let result = if let Some(point) = crash::point_of(spec.name) {
+                let result = if spec.name == "crash_at_RetentionTombstoned" {
+                    retention::crash(subject, &mut driver, work_dir, &declared, &mint)
+                        .await
+                        .map(|()| Ending::Passed)
+                } else if let Some(point) = crash::point_of(spec.name) {
                     if !crashes.contains_key(point) {
                         let observed =
                             crash::observe(subject, &mut driver, work_dir, &declared, &mint, point)
