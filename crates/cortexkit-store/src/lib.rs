@@ -130,12 +130,12 @@ mod sqlite_backend {
     use super::*;
     use std::{
         path::{Path, PathBuf},
-        sync::Mutex,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        sync::{Condvar, Mutex},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
     use cortexkit_lease::{protect_file, FileLeaseStore, LeaseHandle};
-    use rusqlite::Connection;
+    use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 
     /// Decides whether `open_sqlite` creates and narrows the store's directory:
     /// only when the store's file sits in a directory of its own.
@@ -151,12 +151,149 @@ mod sqlite_backend {
         !(memory_or_uri || no_own_dir)
     }
 
-    /// A lease-guarded, migrated sqlite store. Holds the single-writer lease for
-    /// its lifetime and serializes connection access behind a mutex (sqlite is
-    /// single-connection here; the module runs its domain queries via
-    /// [`SqliteStore::with_conn`]).
+    /// Options for [`open_sqlite_with`].
+    #[derive(Debug, Clone, Copy)]
+    pub struct SqliteOpenOptions {
+        /// Maximum simultaneous pooled readers. Must be at least one; defaults to 4.
+        pub read_pool_size: usize,
+        /// SQLite lock timeout on both writer and readers, and the maximum wait
+        /// for a pooled reader. Defaults to 5 seconds.
+        pub busy_timeout: Duration,
+    }
+
+    impl Default for SqliteOpenOptions {
+        fn default() -> Self {
+            Self {
+                read_pool_size: 4,
+                busy_timeout: Duration::from_secs(5),
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct ReaderState {
+        idle: Vec<Connection>,
+        // Includes connections being opened, so concurrent lazy opens stay bounded.
+        total: usize,
+    }
+
+    struct ReadPool {
+        path: String,
+        options: SqliteOpenOptions,
+        state: Mutex<ReaderState>,
+        available: Condvar,
+    }
+
+    impl ReadPool {
+        fn new(path: String, options: SqliteOpenOptions) -> Self {
+            Self {
+                path,
+                options,
+                state: Mutex::new(ReaderState::default()),
+                available: Condvar::new(),
+            }
+        }
+
+        fn acquire(&self) -> Result<PooledReader<'_>, StoreError> {
+            let started = Instant::now();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            loop {
+                if let Some(conn) = state.idle.pop() {
+                    return Ok(PooledReader {
+                        pool: self,
+                        conn: Some(conn),
+                    });
+                }
+                if state.total < self.options.read_pool_size {
+                    state.total += 1;
+                    drop(state);
+                    let opened = (|| {
+                        let conn = Connection::open_with_flags(
+                            &self.path,
+                            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+                        )?;
+                        conn.busy_timeout(self.options.busy_timeout)?;
+                        conn.pragma_update(None, "query_only", true)?;
+                        Ok::<_, rusqlite::Error>(conn)
+                    })();
+                    return match opened {
+                        Ok(conn) => Ok(PooledReader {
+                            pool: self,
+                            conn: Some(conn),
+                        }),
+                        Err(e) => {
+                            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+                            state.total -= 1;
+                            self.available.notify_one();
+                            Err(StoreError::Backend(format!("sqlite read pool open: {e}")))
+                        }
+                    };
+                }
+                let remaining = self.options.busy_timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(StoreError::Backend(format!(
+                        "sqlite read pool exhausted ({} readers): timed out after {:?}",
+                        self.options.read_pool_size, self.options.busy_timeout
+                    )));
+                }
+                (state, _) = self
+                    .available
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(|p| p.into_inner());
+            }
+        }
+    }
+
+    struct PooledReader<'a> {
+        pool: &'a ReadPool,
+        conn: Option<Connection>,
+    }
+
+    impl Drop for PooledReader<'_> {
+        fn drop(&mut self) {
+            let mut state = self.pool.state.lock().unwrap_or_else(|p| p.into_inner());
+            let conn = self.conn.take().expect("pooled reader owns a connection");
+            // Do not reuse a connection if a failed rollback left a transaction open.
+            if conn.is_autocommit() {
+                state.idle.push(conn);
+            } else {
+                state.total -= 1;
+            }
+            self.pool.available.notify_one();
+        }
+    }
+
+    // In-memory reads share the writer. Restore its query_only setting even if
+    // the read closure panics, so later with_conn writes retain their behavior.
+    struct QueryOnlyGuard<'a> {
+        conn: &'a Connection,
+        previous: bool,
+    }
+
+    impl Drop for QueryOnlyGuard<'_> {
+        fn drop(&mut self) {
+            let _ = self.conn.pragma_update(None, "query_only", self.previous);
+        }
+    }
+
+    fn read_transaction<T>(
+        conn: &Connection,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, StoreError> {
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Deferred)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let out = f(&tx).map_err(|e| StoreError::Backend(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(out)
+    }
+
+    /// A lease-guarded sqlite store. Holds the single-writer lease for its lifetime,
+    /// serializes writer access via [`SqliteStore::with_conn`], and offers opt-in
+    /// pooled read-only snapshots via [`SqliteStore::with_read`].
     pub struct SqliteStore {
         conn: Mutex<Connection>,
+        readers: Option<ReadPool>,
         epoch: u64,
         // The held lease releases on drop; kept alive for the store's lifetime.
         _lease: Box<dyn LeaseHandle>,
@@ -189,6 +326,7 @@ mod sqlite_backend {
             }
             SqliteStore {
                 conn: Mutex::new(conn),
+                readers: None,
                 epoch,
                 _lease: Box::new(NoLease(cortexkit_lease::LeaseKey::new(
                     "test", "sqlite", "test",
@@ -204,6 +342,47 @@ mod sqlite_backend {
         ) -> Result<T, StoreError> {
             let guard = self.conn.lock().unwrap_or_else(|p| p.into_inner());
             f(&guard).map_err(|e| StoreError::Backend(e.to_string()))
+        }
+
+        /// Run a closure in one read-only, DEFERRED transaction: all its statements
+        /// see one consistent snapshot. Success commits; errors or panics roll back.
+        ///
+        /// File stores use a bounded pool, opened lazily on first use after the
+        /// writer exists (and any migrations the caller has already run). If all
+        /// readers are busy, this waits up to the configured busy timeout, then
+        /// returns an error naming the read pool; it never falls back to the writer.
+        /// Writes through a reader fail. Reads neither take the epoch fence nor
+        /// create its table or run migrations.
+        ///
+        /// Readers see only committed data. To read your own uncommitted writes,
+        /// use [`Self::with_conn`] inside that write transaction instead. A read
+        /// started after a commit returns sees that commit. Long reads keep old WAL
+        /// frames alive and hold back checkpoints, so keep read closures short.
+        ///
+        /// For `:memory:` and `file::memory:` descriptors (including URI query
+        /// parameters), a separate connection cannot see the same private database.
+        /// These reads instead hold the existing writer mutex, still using a
+        /// read-only transaction. They cannot run beside a writer on that store.
+        pub fn with_read<T>(
+            &self,
+            f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+        ) -> Result<T, StoreError> {
+            if let Some(pool) = &self.readers {
+                let reader = pool.acquire()?;
+                read_transaction(reader.conn.as_ref().expect("pooled connection"), f)
+            } else {
+                let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+                let previous = conn
+                    .pragma_query_value(None, "query_only", |row| row.get(0))
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                conn.pragma_update(None, "query_only", true)
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                let _query_only = QueryOnlyGuard {
+                    conn: &conn,
+                    previous,
+                };
+                read_transaction(&conn, f)
+            }
         }
 
         /// Run a closure inside an epoch-FENCED write transaction: the write is
@@ -317,10 +496,25 @@ mod sqlite_backend {
     /// make them contend) or split one database across lease directories (which
     /// would break single-writer).
     pub fn open_sqlite(descriptor: &StorageDescriptor) -> Result<SqliteStore, StoreError> {
+        open_sqlite_with(descriptor, SqliteOpenOptions::default())
+    }
+
+    /// Like [`open_sqlite`], with a configurable read pool size and busy timeout.
+    /// Reader connections are opened only by [`SqliteStore::with_read`], never by
+    /// this function or by migrations. A zero pool size is rejected.
+    pub fn open_sqlite_with(
+        descriptor: &StorageDescriptor,
+        options: SqliteOpenOptions,
+    ) -> Result<SqliteStore, StoreError> {
         let path = match &descriptor.backend {
             StorageBackend::Sqlite { path } => path.clone(),
             other => return Err(StoreError::UnsupportedBackend(other.label().to_string())),
         };
+        if options.read_pool_size == 0 {
+            return Err(StoreError::Backend(
+                "sqlite read pool size must be at least one".into(),
+            ));
+        }
 
         let parent = Path::new(&path)
             .parent()
@@ -344,7 +538,7 @@ mod sqlite_backend {
         // timeout so a transient lock waits rather than erroring, foreign keys on.
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| StoreError::Backend(e.to_string()))?;
-        conn.busy_timeout(Duration::from_secs(5))
+        conn.busy_timeout(options.busy_timeout)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| StoreError::Backend(e.to_string()))?;
@@ -379,6 +573,15 @@ mod sqlite_backend {
 
         Ok(SqliteStore {
             conn: Mutex::new(conn),
+            readers: if path.is_empty()
+                || path == ":memory:"
+                || path == "file::memory:"
+                || path.starts_with("file::memory:?")
+            {
+                None
+            } else {
+                Some(ReadPool::new(path, options))
+            },
             epoch,
             _lease: lease,
         })
@@ -470,7 +673,7 @@ mod sqlite_backend {
 }
 
 #[cfg(feature = "sqlite")]
-pub use sqlite_backend::{open_sqlite, SqliteStore};
+pub use sqlite_backend::{open_sqlite, open_sqlite_with, SqliteOpenOptions, SqliteStore};
 
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
@@ -687,23 +890,42 @@ mod tests {
                 .unwrap_or_default()
         };
         let before = leases();
-        let store = open_sqlite(&StorageDescriptor {
-            module_id: "test-module".into(),
-            storage_namespace: "memory".into(),
-            isolation: Isolation::Module,
-            backend: StorageBackend::Sqlite {
-                path: ":memory:".into(),
-            },
-        });
-        let error = store.as_ref().err().map(ToString::to_string);
-        drop(store);
+        for path in [":memory:", "file::memory:", "file::memory:?cache=shared"] {
+            let store = open_sqlite(&StorageDescriptor {
+                module_id: "test-module".into(),
+                storage_namespace: "memory".into(),
+                isolation: Isolation::Module,
+                backend: StorageBackend::Sqlite { path: path.into() },
+            })
+            .expect("in-memory open");
+            store
+                .with_conn(|conn| {
+                    conn.execute_batch("CREATE TABLE memory_values (v INTEGER); INSERT INTO memory_values VALUES (10)")
+                })
+                .unwrap();
+            let value: i64 = store
+                .with_read(|conn| {
+                    assert!(!conn.is_autocommit());
+                    conn.query_row("SELECT v FROM memory_values", [], |row| row.get(0))
+                })
+                .unwrap();
+            assert_eq!(value, 10, "{path}");
+            assert!(store
+                .with_read(|conn| conn.execute("UPDATE memory_values SET v = 99", []))
+                .is_err());
+            let value: i64 = store
+                .with_read(|conn| {
+                    conn.query_row("SELECT v FROM memory_values", [], |row| row.get(0))
+                })
+                .unwrap();
+            assert_eq!(value, 10);
+            store
+                .with_conn(|conn| conn.execute("UPDATE memory_values SET v = 20", []))
+                .expect("memory read restores writable writer");
+        }
         for lease in leases().difference(&before) {
             let _ = std::fs::remove_file(lease);
         }
-        assert!(
-            error.is_none(),
-            "an in-memory store failed to open: {error:?}"
-        );
     }
 
     /// Only a store with a directory of its own gets it narrowed; the working
