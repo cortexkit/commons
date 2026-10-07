@@ -465,6 +465,20 @@ pub fn composition_digest(composition: &Value) -> Result<String, SchemaDigestErr
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+/// A system-text item's `item_digest` and `preflight_digest`: SHA-256 of the
+/// exact UTF-8 bytes of the text, as 64 lowercase hex characters.
+///
+/// The text itself is hashed, not a JSON object wrapping it, so a runner can
+/// check a fetched `text` against the digest by hashing what it received.
+/// `item_digest` is the digest of the text this answer resolved to, whether or
+/// not `text` is included; `preflight_digest` is the same function over the
+/// text a preflight of the same request resolves to, so the two are equal
+/// while the provider's configuration is unchanged.
+pub fn system_text_digest(text: &str) -> String {
+    let digest = Sha256::digest(text.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Whether `digest` has the `schema_digest` form: 64 lowercase hex characters.
 pub fn is_schema_digest(digest: &str) -> bool {
     digest.len() == 64
@@ -598,6 +612,25 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn system_text_digest_hashes_the_text_bytes_not_a_wrapper() {
+        // FIPS 180-2 test vectors.
+        assert_eq!(
+            system_text_digest(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            system_text_digest("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        // A provider that hashed the canonical JSON of `{"text": ...}` produced
+        // a different digest for the same text, which runners refused.
+        let wrapped = composition_digest(&serde_json::json!({ "text": "abc" })).unwrap();
+        assert_ne!(system_text_digest("abc"), wrapped);
+        // Non-ASCII text hashes its UTF-8 bytes.
+        assert!(is_schema_digest(&system_text_digest("café")));
     }
 
     #[test]

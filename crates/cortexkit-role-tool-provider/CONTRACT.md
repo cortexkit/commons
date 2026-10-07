@@ -85,7 +85,14 @@ to them. Nothing here names a particular implementation.
     them with the tools.
   - `system_text`, when requested, is `{text, item_digest, preflight_digest,
     composition_digest, tool_names}`, from the same configuration resolution
-    as the catalog in the same reply. `tool_names` lists, sorted and without
+    as the catalog in the same reply. `item_digest` and `preflight_digest` are
+    each the SHA-256 of the exact UTF-8 bytes of the text, as 64 lowercase hex
+    characters (`system_text_digest` in this crate), never a digest of a JSON
+    object wrapping it. `item_digest` is over the text this answer resolved
+    to, present whether or not `text` is; `preflight_digest` is over the text
+    a preflight of the same request resolves to, so the two agree while the
+    configuration is unchanged. A runner that receives `text` checks it by
+    hashing the bytes it received. `tool_names` lists, sorted and without
     duplicates, the model-facing names of the tools the text was composed
     for; it is required whenever `text` is present. A runner compares it with
     the names of the tools it fetched from the same provider and refuses the
