@@ -256,7 +256,9 @@ impl CommandFixture {
             hub: None,
             hub_targets: None,
             platforms: None,
-            timeout_s: 5,
+            // Only bounds a hung fixture. A Python start on a loaded Windows
+            // runner has exceeded 5 s; tests of the timeout set their own.
+            timeout_s: 60,
             build_timeout_s: default_build_timeout(),
         }
     }
@@ -442,7 +444,8 @@ fn command_rows_respect_platform_desk_and_prebuild_before_baseline_and_mutant() 
     let cat = Catalogue { control: vec![f.control(), second], prebuild: vec![Prebuild {
         name: "command-fixture".into(),
         command: vec!["python3".into(), "-c".into(), "from pathlib import Path; v = str(Path('guard.py').read_bytes() == b'ENABLED = False\\n'); Path('.git/fixture-output').write_text(v); f = Path('.git/prebuild-runs').open('a', newline='\\n'); f.write(v + '\\n'); f.close(); print('fixture refreshed: ' + v)".into()],
-        timeout_s: 5,
+        // Bounds a hung prebuild only; see the command fixture's timeout_s.
+        timeout_s: 60,
     }] };
     let path = f.root().join(".git/catalogue.toml");
     fs::write(&path, toml::to_string(&cat).unwrap()).unwrap();
