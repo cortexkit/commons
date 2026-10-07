@@ -39,6 +39,13 @@ pub struct Control {
     pub runner: String,
     pub package: Option<String>,
     pub target: Option<String>,
+    /// Cargo features enabled for every build, list and test in this row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_default_features: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all_features: Option<bool>,
     /// An argv template, not a shell string; substitutes one expected test id.
     pub command: Option<Vec<String>>,
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
@@ -172,6 +179,15 @@ impl Control {
         }
         match self.runner.as_str() {
             "command" => {
+                for (field, present) in [
+                    ("features", self.features.is_some()),
+                    ("no_default_features", self.no_default_features.is_some()),
+                    ("all_features", self.all_features.is_some()),
+                ] {
+                    if present {
+                        return Err(invalid(field, "must be absent for runner = command"));
+                    }
+                }
                 if self.package.is_some() {
                     return Err(invalid("package", "must be absent for runner = command"));
                 }
@@ -248,6 +264,7 @@ impl Control {
                     return Err(invalid("package", "is required and must be nonempty"));
                 }
                 self.targets()?;
+                self.feature_args()?;
             }
             _ => return Err(invalid("runner", "must be cargo, nextest, or command")),
         }
@@ -357,6 +374,39 @@ impl Control {
             }
         }
         Ok(words)
+    }
+
+    fn feature_args(&self) -> Result<Vec<String>> {
+        if self.all_features == Some(true)
+            && (self.features.is_some() || self.no_default_features == Some(true))
+        {
+            return Err(format!(
+                "{}: all_features is mutually exclusive with features and no_default_features",
+                self.id
+            ));
+        }
+        let mut args = vec![];
+        if let Some(features) = &self.features {
+            for name in features {
+                if name.is_empty()
+                    || name.starts_with('-')
+                    || name.contains(',')
+                    || name.chars().any(|c| c.is_whitespace() || c.is_control())
+                {
+                    return Err(format!("{}: invalid features name {name:?}: must be nonempty without whitespace, control characters, leading '-' or commas", self.id));
+                }
+            }
+            if !features.is_empty() {
+                args.extend(["--features".into(), features.join(",")]);
+            }
+        }
+        if self.no_default_features == Some(true) {
+            args.push("--no-default-features".into());
+        }
+        if self.all_features == Some(true) {
+            args.push("--all-features".into());
+        }
+        Ok(args)
     }
 }
 
@@ -1125,6 +1175,7 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
             cmd.arg("--workspace");
         }
     }
+    cmd.args(c.feature_args()?);
     match mode {
         "build" => {
             cmd.arg("--no-run");
@@ -2212,7 +2263,7 @@ impl ReplaySession {
     }
 
     /// Collect baselines before the first mutant, sharing Cargo/nextest runs
-    /// across rows with the same runner, package and target selection.
+    /// across rows with the same runner, package, target and feature selection.
     pub fn baselines(
         &mut self,
         root: &Path,
@@ -2257,7 +2308,7 @@ impl ReplaySession {
             return Err("baselines must be collected before replaying mutants".into());
         }
         let mut shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
-        let mut packages = BTreeMap::new();
+        let mut listings = BTreeMap::new();
         for c in rows {
             let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
             let key = if active && c.runner != "command" {
@@ -2291,15 +2342,16 @@ impl ReplaySession {
                     ReplayStage::Baseline,
                 )?;
                 if report.outcome != Outcome::AnchorMissing {
-                    shared.insert(key, report.clone());
+                    shared.insert(key.clone(), report.clone());
                 }
                 report
             };
             if active && report.outcome == Outcome::Survived && c.runner != "command" {
-                let package_key = (c.runner.clone(), c.package.clone());
-                let names = packages.entry(package_key).or_insert_with(|| {
+                // Resolve names in exactly the selection that the baseline ran.
+                // Package-wide listing can compile unrelated, feature-gated targets.
+                let names = listings.entry(key).or_insert_with(|| {
                     let start = Instant::now();
-                    let names = list_results(root, c, Scope::Package, stop);
+                    let names = list_results(root, c, scope, stop);
                     report.baseline_build_ms += start.elapsed().as_millis();
                     names
                 });
@@ -2574,7 +2626,7 @@ fn replay(
             } else {
                 if !c.expect_red.is_empty() && !matches!(scope, Scope::Explore { .. }) {
                     let start = Instant::now();
-                    let names = list_results(root, c, Scope::Package, stop)?;
+                    let names = list_results(root, c, scope, stop)?;
                     report.baseline_build_ms += start.elapsed().as_millis();
                     resolve_expected(c, &names)?;
                 }
@@ -2829,14 +2881,7 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
         {
             continue;
         }
-        // Even a narrow row must qualify a name shared elsewhere in its package.
-        let package = list_results(root, c, Scope::Package, stop)?;
-        resolve_expected(c, &package)?;
-        let selected = if c.target.is_some() {
-            list_results(root, c, Scope::Row, stop)?
-        } else {
-            package
-        };
+        let selected = list_results(root, c, Scope::Row, stop)?;
         for expected in resolve_expected(c, &selected)? {
             if !selected.names.contains_key(&expected) {
                 return Err(format!(
@@ -3235,6 +3280,52 @@ mod broad_command_tests {
     use super::*;
 
     #[test]
+    fn feature_flags_reach_every_runner_mode_and_scope_before_the_harness() {
+        let mut c =
+            toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
+                .unwrap()
+                .control
+                .remove(0);
+        for runner in ["cargo", "nextest"] {
+            c.runner = runner.into();
+            for scope in [
+                Scope::Row,
+                Scope::Broad,
+                Scope::Package,
+                Scope::Explore { workspace: false },
+                Scope::Explore { workspace: true },
+            ] {
+                for mode in ["build", "list", "run"] {
+                    for all_features in [false, true] {
+                        c.features =
+                            (!all_features).then(|| vec!["test-support".into(), "dep/seam".into()]);
+                        c.no_default_features = (!all_features).then_some(true);
+                        c.all_features = all_features.then_some(true);
+                        let cmd = command(&c, mode, scope).unwrap();
+                        let args: Vec<_> = cmd.get_args().map(|s| s.to_str().unwrap()).collect();
+                        let cargo_args =
+                            &args[..args.iter().position(|a| *a == "--").unwrap_or(args.len())];
+                        if all_features {
+                            assert!(cargo_args.contains(&"--all-features"), "{args:?}");
+                            assert!(!args.contains(&"--features"));
+                            assert!(!args.contains(&"--no-default-features"));
+                        } else {
+                            assert!(
+                                cargo_args
+                                    .windows(2)
+                                    .any(|w| w == ["--features", "test-support,dep/seam"]),
+                                "{args:?}"
+                            );
+                            assert!(cargo_args.contains(&"--no-default-features"), "{args:?}");
+                            assert!(!args.contains(&"--all-features"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn broad_commands_select_package_tests_and_preserve_explicit_targets() {
         let mut c =
             toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
@@ -3621,6 +3712,9 @@ mod order_tests {
             runner: "cargo".into(),
             package: Some(package.into()),
             target: None,
+            features: None,
+            no_default_features: None,
+            all_features: None,
             command: None,
             test_count_pattern: None,
             catch_on: None,

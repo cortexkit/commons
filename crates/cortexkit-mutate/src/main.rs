@@ -44,7 +44,20 @@ enum Action {
     Explore(Exploration),
 }
 #[derive(Args)]
+struct FeatureSelection {
+    /// Enable Cargo features (repeat or separate names with commas).
+    #[arg(long, value_delimiter = ',', conflicts_with = "all_features")]
+    features: Vec<String>,
+    #[arg(long, conflicts_with = "all_features")]
+    no_default_features: bool,
+    #[arg(long)]
+    all_features: bool,
+}
+
+#[derive(Args)]
 struct Exploration {
+    #[command(flatten)]
+    feature_selection: FeatureSelection,
     #[arg(long)]
     package: String,
     /// Restrict this row to Rust target-OS names (repeat for multiple OSes).
@@ -93,6 +106,8 @@ struct Exploration {
 }
 #[derive(Args)]
 struct Proof {
+    #[command(flatten)]
+    feature_selection: FeatureSelection,
     #[arg(long = "platform")]
     platforms: Vec<String>,
     /// Record why this proof requires a real desktop, without running a mutant.
@@ -413,6 +428,10 @@ fn run() -> Result<bool> {
                 }),
                 package: p.package,
                 target: p.target,
+                features: (!p.feature_selection.features.is_empty())
+                    .then_some(p.feature_selection.features),
+                no_default_features: p.feature_selection.no_default_features.then_some(true),
+                all_features: p.feature_selection.all_features.then_some(true),
                 command: p.command,
                 test_count_pattern: p.test_count_pattern,
                 catch_on: p.catch_on,
@@ -519,6 +538,10 @@ fn explore(
         package: Some(x.package),
         // An appended row replays the whole package, as explore ran it.
         target: None,
+        features: (!x.feature_selection.features.is_empty())
+            .then_some(x.feature_selection.features),
+        no_default_features: x.feature_selection.no_default_features.then_some(true),
+        all_features: x.feature_selection.all_features.then_some(true),
         command: None,
         test_count_pattern: None,
         catch_on: None,

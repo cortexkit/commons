@@ -25,6 +25,9 @@ test_file = "crates/basal-module/tests/list_contract.rs"
 runner = "cargo"
 package = "basal-module"
 target = "--test list_contract"
+# features = ["test-support"]
+# no_default_features = true
+# all_features = true # instead of features/no_default_features
 expect_red = ["list_agent_cannot_see_another_agents_flow"]
 # expect_message = "assertion failed: own_flows_only" # or "/own.*flows/"
 # signal_is_catch = "This guard intentionally aborts on invalid input"
@@ -61,16 +64,58 @@ shell syntax or an arbitrary command/name filter. Selectors include `--lib`,
 `--test name`, `--bin name`, `--example name`, `--bench name`, `--tests`, `--bins`,
 `--examples`, and `--all-targets`. Quoted paths and shell expansion are not supported.
 
-Cargo/nextest `expect_red` names may be plain when unique in the package. If two
+Cargo/nextest `expect_red` names may be plain when unique in the selected targets. If two
 test binaries share a name, use `target::test_name`, for example
 `ck-under-test::tests::cgroup_placement_override_requires_exact_disabled_value`
 (using the stable target name the runner reports). Nextest retains its binary id,
 such as `package::binary::tests::x`. Ambiguous plain expectations are validation
-errors listing the qualified candidates, even for a narrowly selected target.
+errors listing the qualified candidates within that selection.
 Broad, package and explore results qualify repeated names and keep each binary's
 independent red/green result; they never discard a binary to resolve ambiguity.
 Unique names remain plain in reports, and qualified expectations still work in
 a scoped replay observing only that one binary.
+
+### Cargo feature selection (0.7.2)
+
+| Row field | Default | Applies to | Meaning |
+| --- | --- | --- | --- |
+| `features = ["a", "b"]` | absent | cargo / nextest | Enable these Cargo features in addition to defaults. Dependency-qualified names such as `dep/seam` are allowed. |
+| `no_default_features = true` | false | cargo / nextest | Disable default features; may be combined with `features`. |
+| `all_features = true` | false | cargo / nextest | Enable every feature; mutually exclusive with `features` and `no_default_features = true`. |
+
+Feature names must be nonempty, without whitespace, control characters, commas,
+or a leading `-`. `check` rejects invalid combinations and names. Command rows
+must omit all three fields, even empty lists or false values: their argv owns
+its own build options. Do not put feature flags in `target`.
+
+Every row build, test run, clean-tree baseline and name listing uses the same
+feature selection, including `check`, `run --broad`, and package diagnosis.
+Baseline and name-list caches distinguish features and default/all-feature flags.
+`prove` and `explore` accept `--features a,b` (or repeated `--features a`),
+`--no-default-features`, and `--all-features`, and retain them when appending.
+Explore still runs the whole package (or workspace with `--workspace`).
+
+For a row with `package = "example"`, `target = "--test contract"`,
+`features = ["test-support"]` and `no_default_features = true`, the Cargo commands
+are (both clean baseline and mutant use the build/run commands):
+
+```sh
+cargo test --locked -p example --test contract --features test-support --no-default-features --no-run
+cargo test --locked -p example --test contract --features test-support --no-default-features -- --list
+cargo test --locked -p example --test contract --features test-support --no-default-features --no-fail-fast -- --test-threads=1
+```
+
+Before 0.7.2 baseline name resolution used `cargo test --locked -p example -- --list`,
+dropping the row's target (and lacking a way to select features). Now it uses the
+second command above, the same target and features as the replay. `check` likewise
+lists only selected targets. Broad audits add `--tests` before the row's target;
+package diagnosis and explore omit the row's target, retaining its features.
+Workspace explore replaces `-p example` with `--workspace`. Nextest uses the same
+selection flags with `cargo nextest run --no-run`, `cargo nextest list
+--message-format json`, and `cargo nextest run --no-fail-fast --retries 0` (plus
+status/JSON output flags); feature flags always precede any harness separator.
+Nextest's `cargo nextest run --help` capability probe is not a build/test/list and
+does not take feature selection.
 
 ### Failure identity and signal deaths (0.6.0)
 

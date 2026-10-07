@@ -91,6 +91,9 @@ impl Fixture {
             runner: "cargo".into(),
             package: Some("mutation-fixture".into()),
             target: Some("--lib".into()),
+            features: None,
+            no_default_features: None,
+            all_features: None,
             command: None,
             test_count_pattern: None,
             catch_on: None,
@@ -233,6 +236,9 @@ impl CommandFixture {
             runner: "command".into(),
             package: None,
             target: None,
+            features: None,
+            no_default_features: None,
+            all_features: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
             test_count_pattern: Some("Ran {count} tests".into()),
             catch_on: None,
@@ -1787,6 +1793,14 @@ fn shared_test_names_keep_each_binary_identity_and_require_qualified_expectation
         "qualified ids work in narrow targets too"
     );
     c.expect_red = vec!["tests::shared".into()];
+    let narrow = Catalogue {
+        control: vec![c.clone()],
+        ..Catalogue::default()
+    };
+    check(f.root(), &narrow, &AtomicBool::new(false)).unwrap();
+    assert_eq!(f.run(&c).outcome, Outcome::Caught);
+    // Ambiguity applies to binaries in the selection, not excluded siblings.
+    c.target = None;
     let cat = Catalogue {
         control: vec![c.clone()],
         ..Catalogue::default()

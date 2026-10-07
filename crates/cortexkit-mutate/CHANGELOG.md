@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.2
+
+- Add optional Cargo/nextest row fields `features`, `no_default_features`, and
+  `all_features`. Use the same feature selection in clean-tree baselines,
+  separate builds, test runs, test listing/name resolution, `check`, package
+  diagnosis, and `--broad` audits. Feature selections never share baseline or
+  name-list caches. Refuse malformed feature names and command-row feature fields.
+- Add matching `--features`, `--no-default-features`, and `--all-features` options
+  to `prove` and `explore`, preserving them in appended rows.
+- List names using the replay's target selector instead of compiling every
+  package target. Plain expectations only need qualification when ambiguous in
+  the selected targets; unrelated targets no longer block narrow proofs.
+- Keep the unversioned catalogue format; existing rows retain default features.
+
 ## 0.7.1
 
 - Add `failures` and `baseline_failures` report maps containing every red test's

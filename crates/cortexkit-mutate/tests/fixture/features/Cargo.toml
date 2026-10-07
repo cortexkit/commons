@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "feature-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["default-contract"]
+default-contract = []
+test-support = []
+strict-baseline = []
