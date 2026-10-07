@@ -33,6 +33,12 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-unknown-killed",
     "crate-local-unknown-ran",
     "crate-local-unknown-output-stream",
+    "crate-local-server-reports-all",
+    "crate-local-server-reports-older-runner",
+    "crate-local-server-reports-unknown-fields",
+    "crate-local-server-reports-detached-head",
+    "crate-local-server-reports-truncated-untracked",
+    "crate-local-server-reports-unchanged",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -92,6 +98,16 @@ fn round_trip<T: DeserializeOwned + Serialize>(bytes: &[u8]) -> Vec<u8> {
     serde_json_canonicalizer::to_vec(&decoded).unwrap()
 }
 
+fn expected_canonical_bytes(folder: &str, name: &str) -> Vec<u8> {
+    // Unknown object fields are ignored, so this input re-encodes to the
+    // separately pinned report containing only known fields.
+    if folder == "outcomes" && name == "crate-local-server-reports-unknown-fields" {
+        bytes(folder, "crate-local-server-reports-all")
+    } else {
+        bytes(folder, name)
+    }
+}
+
 fn canonical_reply(name: &str, bytes: &[u8]) -> Vec<u8> {
     if name.starts_with("prepare-") || name == "crate-local-unknown-prepare-outcome" {
         round_trip::<PrepareReply>(bytes)
@@ -137,9 +153,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 6);
+    assert_eq!(LOCAL_OUTCOMES.len(), 12);
     assert_eq!(LOCAL_REPLIES.len(), 2);
-    assert_eq!(cases().len(), 42);
+    assert_eq!(cases().len(), 48);
 }
 
 #[test]
@@ -163,7 +179,8 @@ fn golden_vectors_round_trip_to_pinned_canonical_bytes() {
             canonical_reply(name, &pinned)
         };
         assert_eq!(
-            canonical, pinned,
+            canonical,
+            expected_canonical_bytes(folder, name),
             "{folder}/{name} typed RFC 8785 round-trip"
         );
     }
@@ -208,7 +225,11 @@ fn all_caller_records_ignore_unknown_fields() {
         } else {
             canonical_reply(name, &extended)
         };
-        assert_eq!(canonical, pinned, "{folder}/{name} ignores additive fields");
+        assert_eq!(
+            canonical,
+            expected_canonical_bytes(folder, name),
+            "{folder}/{name} ignores additive fields"
+        );
     }
     ignores_unknown(AttachRequest::new(job_id(), 7));
     ignores_unknown(CancelRequest::new(job_id()));
@@ -219,6 +240,164 @@ fn all_caller_records_ignore_unknown_fields() {
 
 fn job_id() -> Uuid {
     "0192a64a-1234-7000-8000-000000000001".parse().unwrap()
+}
+
+fn server_report(name: &str) -> TerminalRecord {
+    let case: OutcomeCase = serde_json::from_slice(&bytes("outcomes", name)).unwrap();
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("expected one terminal in {name}")
+    };
+    terminal.clone()
+}
+
+#[test]
+fn server_reports_all_fields_match_vector_and_round_trip() {
+    let state = GitStateChange::new(0, 1)
+        .with_head_before("1111111111111111111111111111111111111111")
+        .with_head_after("2222222222222222222222222222222222222222")
+        .with_ref_before("refs/heads/main")
+        .with_ref_after("refs/heads/build")
+        .with_index_tree_before("4444444444444444444444444444444444444444")
+        .with_index_tree_after("5555555555555555555555555555555555555555");
+    assert!(state.changed());
+    let report = TerminalRecord::new(job_id(), Outcome::Exit { code: 0 }, 125, 25, 29)
+        .with_ran(Ran::Remote)
+        .with_tree_hash("3333333333333333333333333333333333333333")
+        .with_workspace_changes(vec!["result.txt".into()])
+        .with_git_state_changed(state)
+        .with_untracked_files(UntrackedFiles::new(vec![
+            "generated/new.txt".into(),
+            "notes.txt".into(),
+        ]))
+        .with_ignored_writes(
+            IgnoredWrites::new(25)
+                .with_sample_paths(vec!["scratch/debug.log".into(), "cache/result.bin".into()]),
+        );
+    assert_eq!(report, server_report("crate-local-server-reports-all"));
+    assert_eq!(
+        serde_json::to_value(StreamRecord::Terminal(report)).unwrap(),
+        value("outcomes", "crate-local-server-reports-all")["stream"][0]
+    );
+}
+
+#[test]
+fn server_reports_older_runner_decodes_as_not_reported() {
+    let report = server_report("crate-local-server-reports-older-runner");
+    assert_eq!(report.git_state_changed, None);
+    assert_eq!(report.untracked_files, None);
+    assert_eq!(report.ignored_writes, None);
+    let new = TerminalRecord::new(job_id(), Outcome::Exit { code: 0 }, 0, 0, 0);
+    assert_eq!(new.git_state_changed, None);
+    assert_eq!(new.untracked_files, None);
+    assert_eq!(new.ignored_writes, None);
+    let encoded = serde_json::to_value(StreamRecord::Terminal(report)).unwrap();
+    for field in ["git_state_changed", "untracked_files", "ignored_writes"] {
+        assert!(encoded.get(field).is_none(), "{field} must be omitted");
+    }
+    assert_eq!(
+        encoded,
+        value("outcomes", "crate-local-server-reports-older-runner")["stream"][0]
+    );
+}
+
+#[test]
+fn server_reports_unknown_fields_are_tolerated() {
+    let raw = value("outcomes", "crate-local-server-reports-unknown-fields");
+    for field in ["git_state_changed", "untracked_files", "ignored_writes"] {
+        assert_eq!(
+            raw["stream"][0][field]["future_extension"],
+            json!({"version": 3})
+        );
+    }
+    let report = server_report("crate-local-server-reports-unknown-fields");
+    assert_eq!(report, server_report("crate-local-server-reports-all"));
+    assert_eq!(
+        serde_json::to_value(StreamRecord::Terminal(report)).unwrap(),
+        value("outcomes", "crate-local-server-reports-all")["stream"][0]
+    );
+}
+
+#[test]
+fn server_reports_detached_head_keeps_null_refs_and_unavailable_index_tree() {
+    let report = server_report("crate-local-server-reports-detached-head");
+    let state = report.git_state_changed.as_ref().unwrap();
+    assert_eq!(state.ref_before, None);
+    assert_eq!(state.ref_after, None);
+    assert_eq!(state.index_tree_before, None);
+    assert_eq!(
+        state.index_tree_after.as_deref(),
+        Some("5555555555555555555555555555555555555555")
+    );
+    assert_eq!(
+        state.head_before.as_deref(),
+        Some("1111111111111111111111111111111111111111")
+    );
+    assert_eq!(
+        state.head_after.as_deref(),
+        Some("2222222222222222222222222222222222222222")
+    );
+    assert!(state.changed());
+    assert_eq!(
+        serde_json::to_value(StreamRecord::Terminal(report)).unwrap(),
+        value("outcomes", "crate-local-server-reports-detached-head")["stream"][0]
+    );
+}
+
+#[test]
+fn server_reports_truncated_untracked_list_is_explicit() {
+    let report = server_report("crate-local-server-reports-truncated-untracked");
+    assert_eq!(
+        report.untracked_files,
+        Some(
+            UntrackedFiles::new(vec!["generated/new.txt".into(), "notes.txt".into()])
+                .with_truncated(true)
+        )
+    );
+    assert_eq!(
+        serde_json::to_value(StreamRecord::Terminal(report)).unwrap(),
+        value("outcomes", "crate-local-server-reports-truncated-untracked")["stream"][0]
+    );
+}
+
+#[test]
+fn server_reports_unchanged_is_present_not_unreported() {
+    let report = server_report("crate-local-server-reports-unchanged");
+    assert!(!report.git_state_changed.as_ref().unwrap().changed());
+    assert_eq!(
+        report.untracked_files,
+        Some(UntrackedFiles::new(Vec::new()))
+    );
+    assert_eq!(report.ignored_writes, Some(IgnoredWrites::new(0)));
+    assert_eq!(
+        serde_json::to_value(StreamRecord::Terminal(report)).unwrap(),
+        value("outcomes", "crate-local-server-reports-unchanged")["stream"][0]
+    );
+}
+
+#[test]
+fn git_state_changed_checks_each_pair_and_availability() {
+    let unchanged = GitStateChange::new(0, 0);
+    assert!(!unchanged.changed());
+    // Exercise each comparison independently, rather than only a report in
+    // which every pair changes and an omitted comparison could go unnoticed.
+    for changed in [
+        unchanged.clone().with_head_before("commit"),
+        unchanged.clone().with_head_after("commit"),
+        unchanged.clone().with_ref_before("refs/heads/main"),
+        unchanged.clone().with_ref_after("refs/heads/main"),
+        unchanged.clone().with_index_tree_before("tree"),
+        unchanged.clone().with_index_tree_after("tree"),
+        GitStateChange::new(0, 1),
+        GitStateChange::new(1, 0),
+    ] {
+        assert!(changed.changed(), "{changed:?}");
+    }
+    assert_eq!(
+        serde_json::to_value(unchanged).unwrap(),
+        json!({"head_before": null, "head_after": null, "ref_before": null,
+            "ref_after": null, "index_tree_before": null, "index_tree_after": null,
+            "stash_count_before": 0, "stash_count_after": 0})
+    );
 }
 
 #[test]

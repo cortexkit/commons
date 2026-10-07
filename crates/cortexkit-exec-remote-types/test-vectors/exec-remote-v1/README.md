@@ -2,7 +2,7 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The eight `crate-local-*` cases documented below exist only
+pin the same bytes. The fourteen `crate-local-*` cases documented below exist only
 here. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
 
@@ -17,7 +17,9 @@ Each case has an RFC 8785 `.jcs` (no newline), and a lowercase 64-character
 `.sha256` over its actual `.jcs` bytes (no newline). This corpus contains ASCII
 strings and small integers only. The Rust golden test uses an independent RFC
 8785 implementation, checks SHA-256, decodes every request/reply, and requires
-re-encoding to preserve every declared field. Git must not convert line endings
+re-encoding to preserve every declared field. The nested-unknown-fields input
+re-encodes to the separately pinned `all` report, dropping only unknown fields.
+Git must not convert line endings
 in the canonical bytes or digests.
 
 ## Shapes
@@ -51,8 +53,8 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These six outcome pairs and two reply pairs extend the original corpus, for a
-total of 26 outcomes and 16 replies:
+These twelve outcome pairs and two reply pairs extend the original corpus, for a
+total of 32 outcomes and 16 replies:
 
 - `outcomes/crate-local-unknown-refusal`: `refused_before_start` with reason
   `future_refusal`, decoded as `RefusalReason::Unknown` while retaining the
@@ -81,6 +83,33 @@ total of 26 outcomes and 16 replies:
   it on that basis.
 - `replies/crate-local-unknown-rebuild-result`: status `future_result`, decoded as
   `RebuildResult::Unknown`. Informational only.
+
+Six `outcomes/crate-local-server-reports-*` cases pin optional terminal reports
+of server state that is not copied back:
+
+- `all`: changed commit, ref, index tree and stash count; two new untracked
+  paths; a total of 25 ignored writes with a two-path sample.
+- `older-runner`: all three reports absent, each decoding as `None` (not
+  reported, never proof that nothing changed).
+- `unknown-fields`: the same known data as `all`, with `future_extension`
+  inside each new report struct. Unknown fields are tolerated and dropped on
+  serialization; the expected canonical output is the independently pinned
+  `all` vector, not a re-encoding used as its own oracle.
+- `detached-head`: explicit null before/after refs and an unavailable index
+  tree before execution, while commit IDs still differ.
+- `truncated-untracked`: two sampled paths with `truncated: true`, representing
+  a producer choosing a smaller cap than the recommended 100 entries.
+- `unchanged`: equal Git before/after values, an empty untracked list with
+  `truncated: false`, and zero ignored writes with an empty sample. A reporting
+  runner emits these reports even when nothing changed.
+
+`GitStateChange` carries nullable `head_before`/`head_after`,
+`ref_before`/`ref_after`, and `index_tree_before`/`index_tree_after`, plus u32
+`stash_count_before`/`stash_count_after`. `UntrackedFiles` carries `paths` and
+`truncated`. `IgnoredWrites` carries the u64 total `count` and `sample_paths`.
+Producers should cap untracked paths at 100 and ignored-write samples at 20;
+ignored writes exclude `target/`, `node_modules/`, and `dist/`. These types only
+carry the data; the runner enforces caps and exclusions.
 
 Every enum a caller receives decodes unknown tags into a catch-all with a stated
 grading. Each catch-all round-trips its raw tag; unknown stream records also

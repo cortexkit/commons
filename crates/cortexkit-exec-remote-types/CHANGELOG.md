@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.2
+
+- Producers: `TerminalRecord` gains optional `git_state_changed:
+  Option<GitStateChange>`, `untracked_files: Option<UntrackedFiles>`, and
+  `ignored_writes: Option<IgnoredWrites>` reports for server state that is not
+  copied back. Use the matching `with_*` setters without changing existing
+  constructor calls. Reporting runners send all three reports, including equal
+  Git before/after values, empty untracked paths, or a zero ignored-write count.
+- Consumers: absent fields decode as `None`, meaning **not reported**, never
+  "nothing changed". Unknown fields inside the new reports are tolerated. Use
+  `GitStateChange::changed()` to detect differences in commit IDs, symbolic refs,
+  index trees, or stash counts; unavailable IDs and detached refs remain nullable.
+  A remote commit, staged change, or generated file is not evidence it exists
+  locally.
+- Producers should cap `UntrackedFiles.paths` at 100 entries and mark omitted
+  paths with `truncated`; cap `IgnoredWrites.sample_paths` at 20 entries while
+  retaining the total `count`. Ignored writes exclude `target/`, `node_modules/`,
+  and `dist/`. These data-only types do not enforce caps or exclusions.
+- Six crate-local canonical vector pairs cover all reports, an older runner,
+  nested unknown fields, detached HEAD, truncated untracked paths, and unchanged
+  reports. Existing vectors and public constructors retain their wire shapes.
+
 ## 0.2.1
 
 - `Accepted`, the first record of an `exec.run` stream, gains an optional
