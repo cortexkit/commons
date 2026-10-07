@@ -425,7 +425,22 @@
   ],
   "order": [
     {
-      "name": "the reduction owner runs first",
+      "name": "plan order: the composer placed the reduction owner first",
+      "providers": [
+        "magic-context",
+        "acme-tags",
+        "acme-recall"
+      ],
+      "reduction_owner": "magic-context",
+      "order": [
+        0,
+        1,
+        2
+      ],
+      "reduction_owner_first": true
+    },
+    {
+      "name": "plan order even when the composer broke its obligation: the runner does not move the owner",
       "providers": [
         "acme-tags",
         "magic-context",
@@ -433,10 +448,11 @@
       ],
       "reduction_owner": "magic-context",
       "order": [
-        1,
         0,
+        1,
         2
-      ]
+      ],
+      "reduction_owner_first": false
     },
     {
       "name": "no reduction owner: plan order",
@@ -448,7 +464,8 @@
       "order": [
         0,
         1
-      ]
+      ],
+      "reduction_owner_first": true
     },
     {
       "name": "a reduction owner with no step transforms: plan order",
@@ -460,7 +477,8 @@
       "order": [
         0,
         1
-      ]
+      ],
+      "reduction_owner_first": true
     }
   ],
   "items": [

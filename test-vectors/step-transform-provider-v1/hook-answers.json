@@ -13,11 +13,13 @@
         "ops": [
           {
             "op": "prepend",
+            "block": 0,
             "text": "\u00a712\u00a7 ",
             "note": "tag"
           },
           {
             "op": "append",
+            "block": 0,
             "text": "\n<recall>\u2026</recall>"
           }
         ]
@@ -30,7 +32,26 @@
         "ops": [
           {
             "op": "replace",
+            "block": 0,
             "value": "Done."
+          }
+        ]
+      }
+    },
+    {
+      "name": "ops on different text blocks of one message",
+      "answer": {
+        "answer": "ops",
+        "ops": [
+          {
+            "op": "prepend",
+            "block": 0,
+            "text": "\u00a713\u00a7 "
+          },
+          {
+            "op": "append",
+            "block": 1,
+            "text": "\n<recall>\u2026</recall>"
           }
         ]
       }
@@ -59,7 +80,7 @@
         "answer": "ask",
         "ask": {
           "prompt": "Run `rm -rf build`?",
-          "expiry_ms": 600000,
+          "expires_at_ms": 1790000723000,
           "on_expiry": "deny",
           "material_damage": true,
           "late_execution": "notify_only"
@@ -72,7 +93,7 @@
         "answer": "ask",
         "ask": {
           "prompt": "Run `rm -rf build`?",
-          "expiry_ms": 600000,
+          "expires_at_ms": 1790000723000,
           "on_expiry": "deny",
           "material_damage": true,
           "late_execution": "notify_only",
@@ -107,6 +128,7 @@
         "ops": [
           {
             "op": "wrap",
+            "block": 0,
             "text": "x"
           }
         ]
@@ -119,6 +141,7 @@
         "ops": [
           {
             "op": "replace",
+            "block": 0,
             "text": "x"
           }
         ]
@@ -141,6 +164,90 @@
           "late_execution": "execute"
         }
       }
+    },
+    {
+      "name": "operation without a block",
+      "answer": {
+        "answer": "ops",
+        "ops": [
+          {
+            "op": "append",
+            "text": "x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "operation with a negative block",
+      "answer": {
+        "answer": "ops",
+        "ops": [
+          {
+            "op": "append",
+            "block": -1,
+            "text": "x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ask with the removed relative expiry_ms",
+      "answer": {
+        "answer": "ask",
+        "ask": {
+          "prompt": "x",
+          "expiry_ms": 600000,
+          "on_expiry": "deny",
+          "material_damage": false,
+          "late_execution": "execute"
+        }
+      }
+    },
+    {
+      "name": "ask with an unknown on_expiry",
+      "answer": {
+        "answer": "ask",
+        "ask": {
+          "prompt": "x",
+          "expires_at_ms": 1790000723000,
+          "on_expiry": "approve",
+          "material_damage": false,
+          "late_execution": "execute"
+        }
+      },
+      "unknown_value": "approve"
+    },
+    {
+      "name": "ask with an unknown late_execution",
+      "answer": {
+        "answer": "ask",
+        "ask": {
+          "prompt": "x",
+          "expires_at_ms": 1790000723000,
+          "on_expiry": "deny",
+          "material_damage": false,
+          "late_execution": "queue"
+        }
+      },
+      "unknown_value": "queue"
+    },
+    {
+      "name": "ask with options that are not strings",
+      "answer": {
+        "answer": "ask",
+        "ask": {
+          "prompt": "x",
+          "options": [
+            {
+              "id": "run"
+            }
+          ],
+          "expires_at_ms": 1790000723000,
+          "on_expiry": "deny",
+          "material_damage": false,
+          "late_execution": "execute"
+        }
+      }
     }
   ],
   "checks": [
@@ -152,13 +259,16 @@
         "preset": "head",
         "params": {},
         "hook": "pre_user",
-        "text": "hi"
+        "blocks": [
+          "hi"
+        ]
       },
       "answer": {
         "answer": "ops",
         "ops": [
           {
             "op": "append",
+            "block": 0,
             "text": "x"
           }
         ]
@@ -176,13 +286,16 @@
         "preset": "head",
         "params": {},
         "hook": "pre_user",
-        "text": "hi"
+        "blocks": [
+          "hi"
+        ]
       },
       "answer": {
         "answer": "ops",
         "ops": [
           {
             "op": "replace",
+            "block": 0,
             "value": "x"
           }
         ]
@@ -223,13 +336,16 @@
         "params": {},
         "hook": "post_assistant",
         "step_id": "st_1",
-        "text": "ok"
+        "blocks": [
+          "ok"
+        ]
       },
       "answer": {
         "answer": "ops",
         "ops": [
           {
             "op": "replace",
+            "block": 0,
             "value": "ok"
           }
         ]
@@ -252,7 +368,9 @@
         "tool": "read",
         "tool_call_id": "call_1",
         "call_key": "lin_7:9",
-        "text": "x",
+        "blocks": [
+          "x"
+        ],
         "is_error": false
       },
       "answer": {
@@ -276,7 +394,9 @@
         "tool": "read",
         "tool_call_id": "call_1",
         "call_key": "lin_7:9",
-        "text": "x",
+        "blocks": [
+          "x"
+        ],
         "is_error": false
       },
       "answer": {
@@ -284,6 +404,7 @@
         "ops": [
           {
             "op": "replace",
+            "block": 0,
             "value": "short"
           }
         ]
@@ -310,7 +431,9 @@
         "tool": "read",
         "tool_call_id": "call_1",
         "call_key": "lin_7:9",
-        "text": "x",
+        "blocks": [
+          "x"
+        ],
         "is_error": false
       },
       "answer": {
@@ -318,6 +441,7 @@
         "ops": [
           {
             "op": "append",
+            "block": 0,
             "text": "\nreminder"
           }
         ]
@@ -445,7 +569,7 @@
         "answer": "ask",
         "ask": {
           "prompt": "Run `rm -rf build`?",
-          "expiry_ms": 600000,
+          "expires_at_ms": 1790000723000,
           "on_expiry": "deny",
           "material_damage": true,
           "late_execution": "notify_only"
@@ -474,7 +598,7 @@
         "answer": "ask",
         "ask": {
           "prompt": "Run `rm -rf build`?",
-          "expiry_ms": 600000,
+          "expires_at_ms": 1790000723000,
           "on_expiry": "deny",
           "material_damage": true,
           "late_execution": "notify_only"
@@ -504,6 +628,7 @@
         "ops": [
           {
             "op": "append",
+            "block": 0,
             "text": "x"
           }
         ]
@@ -512,6 +637,91 @@
         "append"
       ],
       "problem": "answer_not_allowed"
+    },
+    {
+      "name": "an operation on the second of two text blocks",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_assistant",
+        "step_id": "st_1",
+        "blocks": [
+          "first",
+          "second"
+        ]
+      },
+      "answer": {
+        "answer": "ops",
+        "ops": [
+          {
+            "op": "append",
+            "block": 1,
+            "text": "x"
+          }
+        ]
+      },
+      "subscribed_ops": [
+        "append"
+      ],
+      "problem": null
+    },
+    {
+      "name": "an operation past the last text block",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_assistant",
+        "step_id": "st_1",
+        "blocks": [
+          "first",
+          "second"
+        ]
+      },
+      "answer": {
+        "answer": "ops",
+        "ops": [
+          {
+            "op": "append",
+            "block": 2,
+            "text": "x"
+          }
+        ]
+      },
+      "subscribed_ops": [
+        "append"
+      ],
+      "problem": "block_out_of_range"
+    },
+    {
+      "name": "a block index on a subject with one text block",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [
+          "hi"
+        ]
+      },
+      "answer": {
+        "answer": "ops",
+        "ops": [
+          {
+            "op": "replace",
+            "block": 1,
+            "value": "x"
+          }
+        ]
+      },
+      "subscribed_ops": [
+        "replace"
+      ],
+      "problem": "block_out_of_range"
     }
   ]
 }

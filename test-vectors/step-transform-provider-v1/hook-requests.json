@@ -8,7 +8,9 @@
         "preset": "head",
         "params": {},
         "hook": "pre_user",
-        "text": "fix the failing test"
+        "blocks": [
+          "fix the failing test"
+        ]
       }
     },
     {
@@ -19,7 +21,9 @@
           "tags": "on"
         },
         "hook": "pre_user",
-        "text": "hello"
+        "blocks": [
+          "hello"
+        ]
       }
     },
     {
@@ -30,7 +34,9 @@
         "preset": "head",
         "params": {},
         "hook": "pre_user",
-        "text": "<system-reminder>late result</system-reminder>",
+        "blocks": [
+          "<system-reminder>late result</system-reminder>"
+        ],
         "mark": {
           "kind": "late_result",
           "from": "prefrontal-core"
@@ -47,7 +53,24 @@
         "params": {},
         "hook": "post_assistant",
         "step_id": "st_88",
-        "text": "Done. \n\n"
+        "blocks": [
+          "Done. \n\n"
+        ]
+      }
+    },
+    {
+      "name": "post_assistant with two text blocks around a tool call: only the text blocks are listed",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_assistant",
+        "step_id": "st_89",
+        "blocks": [
+          "Reading the file first.",
+          "Done: the test passes."
+        ]
       }
     },
     {
@@ -97,7 +120,28 @@
         "tool": "read",
         "tool_call_id": "call_1",
         "call_key": "lin_7:813",
-        "text": "1: fn main() {}",
+        "blocks": [
+          "1: fn main() {}"
+        ],
+        "is_error": false
+      }
+    },
+    {
+      "name": "post_tool whose result has two text parts",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_tool",
+        "step_id": "st_88",
+        "tool": "read",
+        "tool_call_id": "call_2",
+        "call_key": "lin_7:814",
+        "blocks": [
+          "1: fn main() {}",
+          "(truncated)"
+        ],
         "is_error": false
       }
     }
@@ -114,7 +158,9 @@
         "step_id": "st_88",
         "tool": "read",
         "tool_call_id": "call_1",
-        "text": "x",
+        "blocks": [
+          "x"
+        ],
         "is_error": false,
         "runner_trace": "t-1"
       }
@@ -127,7 +173,9 @@
         "preset": "head",
         "params": {},
         "hook": "pre_user",
-        "text": "x",
+        "blocks": [
+          "x"
+        ],
         "delivery": "broadcast"
       }
     }
@@ -141,7 +189,9 @@
         "preset": "head",
         "params": {},
         "hook": "pre_model",
-        "text": "x"
+        "blocks": [
+          "x"
+        ]
       }
     },
     {
@@ -151,7 +201,9 @@
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
-        "text": "x"
+        "blocks": [
+          "x"
+        ]
       }
     },
     {
@@ -194,15 +246,42 @@
         "step_id": "st_88",
         "tool": "read",
         "tool_call_id": "call_1",
-        "text": "x"
+        "blocks": [
+          "x"
+        ]
       }
     },
     {
       "name": "no session",
       "request": {
         "hook": "pre_user",
-        "text": "x",
+        "blocks": [
+          "x"
+        ],
         "params": {}
+      }
+    },
+    {
+      "name": "pre_user with the removed flat text and no blocks",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "pre_user",
+        "text": "x"
+      }
+    },
+    {
+      "name": "post_assistant blocks as one string",
+      "request": {
+        "session": "ses_01J9Z",
+        "lineage_id": "lin_7",
+        "preset": "head",
+        "params": {},
+        "hook": "post_assistant",
+        "step_id": "st_88",
+        "blocks": "x"
       }
     }
   ]

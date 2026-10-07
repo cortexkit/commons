@@ -14,8 +14,7 @@
 //! declaration ([`ops::TRANSFORM_DECLARE`]) bounds what a session's plan may
 //! subscribe it to; the plan picks within those bounds.
 //!
-//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document: it
-//! marks every item pinned or open. The types here are the wire shapes it
+//! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document. The types here are the wire shapes it
 //! describes. Requests a provider decodes are lenient on fields and strict on
 //! the hook and phase values. Answers the runner decodes are strict on the
 //! `answer` and `op` values, because a runner cannot apply an operation it
@@ -23,8 +22,8 @@
 
 #![forbid(unsafe_code)]
 
-/// The draft op envelope. The method names and envelope remain open in
-/// CONTRACT.md; the params type is the request of the named operation.
+/// The op envelope of every request in this role, `{method, params}`:
+/// `method` is the op's name ([`ops`]) and `params` its request.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct OpRequest<T> {
@@ -44,6 +43,7 @@ impl<T> OpRequest<T> {
 pub mod answer;
 pub mod describe;
 pub mod errors;
+pub mod grant;
 pub mod hook;
 pub mod points;
 pub mod subscription;
@@ -94,6 +94,7 @@ pub(crate) mod vectors {
     pub const FILES: &[&str] = &[
         "declare.json",
         "errors.json",
+        "grants.json",
         "hook-answers.json",
         "hook-requests.json",
         "role-describe.json",

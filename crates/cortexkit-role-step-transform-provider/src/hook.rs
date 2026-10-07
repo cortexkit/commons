@@ -65,8 +65,9 @@ impl HookCall {
 pub enum Subject {
     /// A user message, or a steered or queued prompt, before it is written.
     PreUser {
-        /// The message's text.
-        text: String,
+        /// The text of each of the message's text blocks, in message order
+        /// ([`Subject::blocks`]).
+        blocks: Vec<String>,
         /// The sender's mark on a steered or queued prompt, opaque, as the
         /// owner sent it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,7 +82,9 @@ pub enum Subject {
     PostAssistant {
         /// The step that produced the message, opaque.
         step_id: String,
-        text: String,
+        /// The text of each of the message's text blocks, in message order.
+        /// Reasoning, signatures and tool calls are not listed.
+        blocks: Vec<String>,
     },
     /// A tool call before it executes.
     PreTool {
@@ -108,8 +111,9 @@ pub enum Subject {
         /// The runner's key for the call.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_key: Option<String>,
-        /// The result's text.
-        text: String,
+        /// The text of each of the result's text parts, in order; a result
+        /// that is a single string is one block.
+        blocks: Vec<String>,
         is_error: bool,
     },
 }
@@ -128,6 +132,19 @@ impl Subject {
         match self {
             Self::PreTool { phase, .. } => Some(*phase),
             _ => None,
+        }
+    }
+
+    /// The subject's text blocks, which operations address by index:
+    /// only the text blocks of the message or result, in order. Non-text
+    /// blocks (images, tool calls, signed thinking) are neither listed nor
+    /// addressable. `None` on `pre_tool`, which has no text subject.
+    pub fn blocks(&self) -> Option<&[String]> {
+        match self {
+            Self::PreUser { blocks, .. }
+            | Self::PostAssistant { blocks, .. }
+            | Self::PostTool { blocks, .. } => Some(blocks),
+            Self::PreTool { .. } => None,
         }
     }
 

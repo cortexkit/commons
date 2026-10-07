@@ -17,8 +17,9 @@
 //! only party allowed to remove or rewrite history (CONTRACT.md §5).
 //! Only the reduction owner may `replace` on `pre_user` and
 //! `post_assistant`. Every other step transform is preserving: it may
-//! prepend or append. The reduction owner's hooks run first; the preserving
-//! transforms then run in plan order.
+//! prepend or append. Hooks run in the frozen plan's exact order; the plan
+//! composer places the reduction owner first ([`reduction_owner_first`]),
+//! so a later preserving prepend is never wiped by its replace.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -586,9 +587,9 @@ fn tools_cover(declared: Option<&Vec<String>>, planned: Option<&Vec<String>>) ->
 /// Check the reduction rule for one planned subscription of `provider`:
 /// `replace` on `pre_user` or `post_assistant` belongs to the session's
 /// reduction owner (its compaction provider, CONTRACT.md §5) alone, and
-/// without one it is refused. `replace` on
-/// `post_tool` is a separate user-tier grant, which this role does not
-/// carry and the runner checks on its own.
+/// without one it is refused. `replace` on `post_tool` is a separate
+/// user-tier grant carried in the plan's `user_grants`, checked per answer
+/// (`answer::check_post_tool_grant`), not here.
 pub fn check_reduction(
     planned: &Subscription,
     provider: &str,
@@ -602,15 +603,24 @@ pub fn check_reduction(
 }
 
 /// The order in which the runner calls the plan's step-transform items on a
-/// hook: the reduction owner (the session's compaction provider, CONTRACT.md
-/// §5) first, if it is among them, then every other
-/// item in plan order. Returns indices into `providers`.
-pub fn hook_order(providers: &[&str], reduction_owner: Option<&str>) -> Vec<usize> {
-    let owner = reduction_owner.and_then(|owner| providers.iter().position(|p| *p == owner));
-    owner
-        .into_iter()
-        .chain((0..providers.len()).filter(|index| Some(*index) != owner))
-        .collect()
+/// hook: the frozen plan's exact order. The runner never moves an item,
+/// including the reduction owner. Returns indices into `providers`.
+pub fn hook_order(providers: &[&str]) -> Vec<usize> {
+    (0..providers.len()).collect()
+}
+
+/// The plan composer's obligation on order: when the session's reduction
+/// owner (its compaction provider, CONTRACT.md §5) is among the
+/// step-transform items, it is the first of them, so its `replace` runs
+/// before every preserving prepend or append. The composer checks this
+/// when it writes the plan; providers do not enforce it, and the runner
+/// still calls items in plan order ([`hook_order`]). `true` when there is
+/// no reduction owner or it has no step-transform item.
+pub fn reduction_owner_first(providers: &[&str], reduction_owner: Option<&str>) -> bool {
+    match reduction_owner.and_then(|owner| providers.iter().position(|p| *p == owner)) {
+        None | Some(0) => true,
+        Some(_) => false,
+    }
 }
 
 /// Why the runner refuses a step-transform item during admission, the plan
@@ -788,9 +798,10 @@ mod tests {
                 .map(|p| p.as_str().unwrap())
                 .collect();
             let expected: Vec<usize> = serde_json::from_value(case["order"].clone()).unwrap();
+            assert_eq!(hook_order(&providers), expected, "{name}");
             assert_eq!(
-                hook_order(&providers, case["reduction_owner"].as_str()),
-                expected,
+                reduction_owner_first(&providers, case["reduction_owner"].as_str()),
+                case["reduction_owner_first"].as_bool().unwrap(),
                 "{name}"
             );
         }
