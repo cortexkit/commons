@@ -25,9 +25,9 @@ pub struct SetupRequest {
     /// The runner's opaque name for the session, as every later status
     /// spells it.
     pub session: String,
-    /// The caller's harness, from the session's key (`broca` for a session
-    /// an Alfonso mason runs, say). Not the route's bind harness, which is
-    /// `runner` for every Broca route. Required: a request without it does
+    /// The harness named in the session's key, which identifies the caller
+    /// (for example `broca`). This differs from the route's bind harness,
+    /// which a runner binds as `runner`. Required: a request without it does
     /// not decode. A provider keys a runner conversation on
     /// `(project_root, session, harness)`.
     pub harness: String,
@@ -247,8 +247,9 @@ impl SetupAnswer {
         }
     }
 
-    /// Whether a `refuse` may be retried without the user acting, as its
-    /// code fixes it; `None` for `ready`.
+    /// Whether a `refuse` may be retried; `None` for `ready`. Its
+    /// retryability is fixed by the code: `true` means the runner may
+    /// retry without the user acting.
     pub fn retryable(&self) -> Option<bool> {
         match self {
             Self::Refuse { code, .. } => Some(code.retryable()),

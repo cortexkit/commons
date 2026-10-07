@@ -529,7 +529,10 @@ mod tests {
                 "part {index} changed"
             );
         }
-        // Three text parts: index 3 does not exist, and nothing changes.
+        // The message has three text parts, so text-block indexes run 0 to 2.
+        // An operation on block 3 is out of range: the whole call is refused,
+        // and no part changes, not even block 0, which an earlier operation
+        // in the same list targeted.
         let mut untouched = original.as_array().unwrap().clone();
         let outcome = apply_to_parts(&mut untouched, text_part, &[append(0, "x"), append(3, "y")]);
         assert_eq!(outcome, Err(AnswerProblem::BlockOutOfRange));

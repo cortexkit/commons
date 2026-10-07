@@ -104,7 +104,7 @@ impl RoleDescribe {
 
     /// The runner groups this provider needs that `declared` (a runner's
     /// `role.describe` capabilities) does not list, in the order the
-    /// provider listed them. When this is not empty the composer fails the
+    /// provider listed them. When this is not empty the plan composer fails the
     /// launch and names each group listed.
     pub fn unmet_runner_groups<'a>(&'a self, declared: &[String]) -> Vec<&'a str> {
         self.runner_groups

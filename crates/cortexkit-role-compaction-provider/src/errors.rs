@@ -12,9 +12,13 @@
 //! - codes the runner answers or writes, quoted from `llm-runner/v1` so
 //!   both sides spell them the same ([`runner_codes`]).
 //!
-//! Every named code has a fixed retryability and a fixed set of calls
-//! after which it may end a run ([`KnownCode::retryable`],
-//! [`KnownCode::ends_run_at`]); CONTRACT.md §14.3 tabulates both.
+//! Every named code has a fixed retryability ([`KnownCode::retryable`]:
+//! `true` means the runner may retry without the user acting) and a fixed
+//! set of calls after which it may end a run ([`KnownCode::ends_run_at`]):
+//! the four `refuse` codes after Setup or a step call,
+//! `compaction_unavailable` after Setup only, `compaction_wait_exceeded`
+//! after a step call only, and the ERROR and ready-refusal codes never.
+//! CONTRACT.md §14.3 holds the same table.
 //!
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request, never retried.
@@ -82,8 +86,9 @@ impl Call {
 }
 
 impl KnownCode {
-    /// Whether a party may retry without the user acting. Fixed per code:
-    /// a `refuse` answer carries no retryability of its own.
+    /// Whether the code is retryable. Retryability is fixed by the code:
+    /// `true` means the runner may retry without the user acting. A
+    /// `refuse` answer carries no retryability of its own.
     pub fn retryable(self) -> bool {
         match self {
             Self::Transient
@@ -99,11 +104,13 @@ impl KnownCode {
     }
 
     /// Whether a run may end `error` with this code because of `call`.
-    /// The four `refuse` codes may end it after either call;
-    /// `compaction_unavailable` only after Setup, because a failed step
-    /// call keeps the last applied view instead; `compaction_wait_exceeded`
-    /// only after a step call, because only a step answers `wait`. ERROR
-    /// codes and the ready refusal never end a run themselves.
+    /// The four `refuse` codes may end it after either call.
+    /// `compaction_unavailable` may end it only after Setup: when a step
+    /// call fails or times out, the run does not end at all, because the
+    /// runner sends the request with the last applied CompactionMessage.
+    /// `compaction_wait_exceeded` may end it only after a step call,
+    /// because only a step call can be answered `wait`. ERROR codes and
+    /// the ready refusal never end a run themselves.
     pub fn ends_run_at(self, call: Call) -> bool {
         match self {
             Self::WindowTooSmall
@@ -200,8 +207,9 @@ impl RefuseCode {
         }
     }
 
-    /// Whether retrying without the user acting makes sense. Fixed by the
-    /// code; an unknown code is never retried.
+    /// Whether the refusal is retryable. Retryability is fixed by the code:
+    /// `true` means the runner may retry without the user acting. An
+    /// unknown code is never retried.
     pub fn retryable(&self) -> bool {
         refuse_codes::retryable(self.as_str())
     }
@@ -269,9 +277,10 @@ pub mod runner_codes {
     pub const READY_CODES: &[&str] = &[INVALID_PARAMS, NOT_SESSION_COMPACTION_PROVIDER];
     /// A `provider_code` the runner writes itself, after Setup only: Setup
     /// failed or timed out with no answer, so no initial view was recorded
-    /// and no model call was made. The next send calls Setup again. A step
-    /// call that fails never ends the run with it: the runner keeps the last
-    /// applied view.
+    /// and no model call was made. The next send calls Setup again. The
+    /// runner never writes this code after a step call: a step call that
+    /// fails or times out does not end the run, because the runner sends the
+    /// request with the last applied CompactionMessage.
     pub const COMPACTION_UNAVAILABLE: &str = errors::provider_codes::COMPACTION_UNAVAILABLE;
     /// A `provider_code` the runner writes itself: a `wait` reached the
     /// runner's cap and the request could not be shown to fit.

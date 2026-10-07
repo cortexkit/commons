@@ -122,13 +122,13 @@ pub mod runner_codes {
     /// The `detail.field` value that locates an invalid subscription in the
     /// proposed plan's step-transform list. CONTRACT.md §4 defines the
     /// accompanying item index, subscription index and problem, so the
-    /// session starter can identify which subscription to correct.
+    /// plan composer can identify which subscription to correct.
     pub const PLAN_STEP_TRANSFORM_ITEMS: &str = "plan.step_transform_items";
     /// The runner refuses this at admission, the plan check before accepting
     /// a session (CONTRACT.md §4), when a provider's current declaration no
     /// longer covers the plan: a hook or preset is gone, or planned tools,
     /// operations, availability policy or budget exceed the declared bounds.
-    /// The starter must rebuild the plan from the current declaration;
+    /// The plan composer must rebuild the plan from the current declaration;
     /// `subscription::StaleDifference` names what no longer fits.
     pub const PLAN_STALE: &str = errors::PLAN_STALE;
     /// A user turn's `pre_user` hook was unavailable under `refuse`: the run

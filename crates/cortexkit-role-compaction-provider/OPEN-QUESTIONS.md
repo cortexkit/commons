@@ -1,19 +1,21 @@
 # Compaction provider draft decisions
 
-This is a review ledger, not a wire contract. Every question below is
-settled, and CONTRACT.md states each answer as a pinned rule; this ledger
-only points to the section that holds it.
+This file maps each numbered design question for `compaction-provider/v1` to the
+CONTRACT.md section that answers it. It is a review ledger, not a wire
+contract: every question below is settled, and CONTRACT.md states each
+answer as a pinned rule.
 
-Agreements name the owner of each affected contract: Broca is the CortexKit
-module that runs model sessions and owns `llm-runner/v1`; prefrontal owns the
-fetch-plan composer that writes each session's plan; Magic Context is the
-provider that owns this contract.
+Each ruling names the role that made it: the owner of this contract (the
+provider side), the owner of the `llm-runner/v1` contract (the runner that
+calls the provider), or the plan composer's owner (the component that
+writes and freezes each session's plan).
 
 References to numbered design sections below are to
 `ck-extensibility-design-r7.3.md`; its corrections are in
 `ck-extensibility-r7.3-errata.md`. Runner-contract sections refer to
 `cortexkit-role-llm-runner/CONTRACT.md`. Fetch-plan references name sections
-or files in prefrontal's `test-vectors/fetch-plan-v1/`.
+or files in `test-vectors/fetch-plan-v1/` of the plan composer's repository
+(`prefrontal`).
 
 ## Open questions
 
@@ -23,16 +25,16 @@ None.
 
 | Question | Where CONTRACT.md answers it |
 |---|---|
-| Q1: op envelope and ready reply | §1: every request is `{method, params}`; §10: `compaction.ready` is answered `{}`. Ruled by Magic Context and Broca. |
-| Q2: op and answer spellings | §1 and §7: `compaction.setup`, `compaction.step`; `ready`, `noop`, `compaction_message`, `wait`, `refuse`. Ruled by Magic Context and Broca. |
-| Q4: who mints `compaction_id` | §8: the provider; opaque, stable for one logical compaction lineage. Ruled by Magic Context and Broca. |
-| Q6: capped status messages | §6: a byte cap (default 4 MiB) with `more`; a single oversized message is sent alone; the cursor advances to the last message sent. Ruled by Magic Context and Broca. |
-| Q7: `last_not_applied` | §6: in the status, with its reason. Ruled by Magic Context and Broca. |
-| Q8: `runner_groups` | §2: declared in `role.describe.runner_groups`, checked by the plan composer at composition; an unmet group fails the launch by name. Ruled by ALF as the plan composer. |
-| Q9: unknown conditions and model patterns | §5: an unknown condition kind means every step; exact id, then the longest trailing-`*` pattern, then `default`. Ruled by Magic Context and Broca. |
-| Q13: stability encoding | §4: an array of `{index, rank}`. Ruled by Magic Context and Broca. |
-| Q14: role-named refusal codes | §11 and §14.3: four role codes with fixed retryability, the provider's own reason in `provider_code`, no `retryable` on the wire; `compaction_unavailable` only after Setup. Ruled by Magic Context and Broca. |
-| Caller's harness (not numbered) | §1, §4, §6: every Setup and step request carries a required `harness` from the session's key; providers key a runner conversation on `(project_root, session, harness)`. Ruled by Magic Context and Broca. |
+| Q1: op envelope and ready reply | §1: every request is `{method, params}`; §10: `compaction.ready` is answered `{}`. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q2: op and answer spellings | §1 and §7: `compaction.setup`, `compaction.step`; `ready`, `noop`, `compaction_message`, `wait`, `refuse`. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q4: who mints `compaction_id` | §8: the provider; opaque, stable for one logical compaction lineage. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q6: capped status messages | §6: a byte cap (default 4 MiB) with `more`; a single oversized message is sent alone; the cursor advances to the last message sent. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q7: `last_not_applied` | §6: in the status, with its reason. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q8: `runner_groups` | §2: declared in `role.describe.runner_groups`, checked by the plan composer at composition; an unmet group fails the launch by name. Ruled by the plan composer's owner. |
+| Q9: unknown conditions and model patterns | §5: an unknown condition kind means every step; exact id, then the longest trailing-`*` pattern, then `default`. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q13: stability encoding | §4: an array of `{index, rank}`. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Q14: role-named refusal codes | §11 and §14.3: four role codes with fixed retryability, the provider's own reason in `provider_code`, no `retryable` on the wire; `compaction_unavailable` only after Setup. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
+| Caller's harness (not numbered) | §1, §4, §6: every Setup and step request carries a required `harness` from the session's key; providers key a runner conversation on `(project_root, session, harness)`. Ruled by the owner of this contract and the owner of the `llm-runner/v1` contract. |
 
 ## Settled earlier
 
@@ -46,17 +48,20 @@ None.
 | Q15 | A runner without the optional `compaction` group refuses a compaction plan item during admission, the plan check before accepting a session, with `invalid_params`; runner contract §3, §10.1 and fetch-plan README, Plan section. |
 | Q16 | Ready names the session and request; the runner verifies the module that opened the route and treats ready as a hint to ask again, not as compaction output. Runner contract §11.1; design §5.5. |
 | Q17 | Shared model-view page and source encodings: existing runner §4.2. |
-| Former provisional plan field | The plan names its compaction provider at `plan.compaction_item.provider`; fetch-plan README, Plan and Item sections, and `plans/pre-tool-two-phase.json` at prefrontal origin/main commit `473401d615547a8d5ad8c14b8e260a9c71c1ff4e`. The existing generic runner helper already reads that field; the helper's doc comment in `cortexkit-role-llm-runner` still calls it provisional. No shared type change is needed. |
+| Former provisional plan field | The plan names its compaction provider at `plan.compaction_item.provider`; fetch-plan README, Plan and Item sections, and `plans/pre-tool-two-phase.json` in the plan composer's repository (`prefrontal`), origin/main commit `473401d615547a8d5ad8c14b8e260a9c71c1ff4e`. The existing generic runner helper already reads that field; the helper's doc comment in `cortexkit-role-llm-runner` still calls it provisional. No shared type change is needed. |
 
 ## Remaining interoperability wording
 
 These sit in `cortexkit-role-llm-runner/CONTRACT.md`, which this crate does
-not change; its owner (Broca) aligns them:
+not change; the owner of the `llm-runner/v1` contract aligns them:
 
-- §12.2 still says `compaction_unavailable` is written for Setup **or a
-  compaction call**. This role uses it after Setup only (§14.3); a failed
-  step call continues with the last applied view (design §5.3).
-- §6 and §11 say a provider's refusal rides as the run error's
-  `provider_code`. Under §11 of this contract the run records the role
-  `code` and, separately, the refusal's own `provider_code`; the runner
-  contract has to name the member that holds each.
+- Its §12.2 still says `compaction_unavailable` is written for Setup **or a
+  compaction call**. This role writes it after Setup only: a step call
+  that fails or times out does not end the run, because the runner sends
+  the request with the last applied CompactionMessage (CONTRACT.md §14.2,
+  §14.3; design §5.3).
+- Its §6 and §11 say a provider's refusal rides as the run error's
+  `provider_code`. This contract has the run record the refusal's role
+  `code` and, separately, the refusal's own `provider_code`, the provider's
+  finer reason (CONTRACT.md §11); the runner contract has to name the
+  member that holds each.

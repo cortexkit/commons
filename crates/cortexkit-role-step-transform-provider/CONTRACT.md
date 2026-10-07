@@ -19,6 +19,22 @@ this crate depends on, so the two cannot drift apart.
 A step-transform provider is any module that makes write-time changes to
 the newest message of a session.
 
+## Terms
+
+- **Plan composer**: the component that writes a session's plan and freezes
+  it. It checks each provider's runner groups against the runner, places
+  the providers in order, and fills the plan's user-tier fields.
+- **Runner group**: a capability group a runner advertises in its
+  `llm-runner/v1` `role.describe`, such as `compaction` or
+  `transcript_reads`. A provider lists the groups it needs in its own
+  `role.describe.runner_groups`.
+- **Reduction owner**: the session's compaction provider, the only party
+  that may remove or rewrite history already written. Every other step
+  transform may only add to it.
+- **Signed thinking**: model reasoning blocks that carry a model provider's
+  signature. Any change to them, even one byte, invalidates the signature,
+  so nothing in these roles ever edits them.
+
 ## 1. Role identity and addressing
 
 - [pinned] A provider lists `step-transform-provider/v1` in its manifest's
@@ -30,11 +46,11 @@ the newest message of a session.
 - [pinned] Step-transform routes are module-level and unscoped. The opaque
   session handle in a hook call is a state key, not an authorization credential.
 - [pinned] Every hook request (`transform.hook`, §7)
-  carries a required string `harness`, next to `session`: the caller's
-  harness, taken from the session's key (`broca`
-  for a session an Alfonso mason runs, say). It is distinct from the
-  route's bind harness, which is always `runner` for a Broca route. A
-  request without `harness` does not decode; it is never defaulted.
+  carries a required string `harness`, next to `session`: the harness
+  named in the session's key, which identifies the caller (for example
+  `broca`). This differs from the route's bind harness, which a runner
+  binds as `runner`. A request without `harness` does not decode; it is
+  never defaulted.
 - [pinned] A provider keys a runner conversation, and every piece of
   per-session state it keeps for one, on `(project_root, session,
   harness)`: the project root it serves the request for, the session
@@ -54,12 +70,11 @@ the newest message of a session.
   `alpha`.
 - [pinned] The answer describes the provider build, never a session.
 - [pinned] The provider declares what it needs from the runner in
-  `role.describe.runner_groups`: the `llm-runner/v1` groups it needs, such
+  `role.describe.runner_groups`: the runner groups it needs, such
   as `transcript_reads` for a provider that reads history beyond what its
   hooks see. A list of strings, omitted when empty.
-- [pinned] The plan composer checks `runner_groups` against the groups the
-  runner advertises in its own `role.describe` when it composes the
-  session. An unmet group fails the launch, and the failure names each
+- [pinned] The plan composer checks `runner_groups` against the runner
+  groups the runner advertises when it composes the session. An unmet group fails the launch, and the failure names each
   unmet group (`unmet_runner_groups`). Runner requirements are carried
   nowhere else.
 
@@ -99,7 +114,7 @@ the session and freezes that plan for use.
 - [pinned] The plan's `step_transform_items` name the step-transform
   providers in order, each with its preset, params and `subscriptions:
   [{hook, phase?, tools?, ops, on_unavailable, budget_ms}]`
-  (`Subscription`), the shape prefrontal's `fetch-plan-v1` vectors carry.
+  (`Subscription`), the shape the plan composer's `fetch-plan-v1` vectors carry.
   The runner calls only matching providers.
 - [pinned] The provider's per-preset/params declaration bounds what a plan
   may subscribe to. It is read when composing the plan and checked again
@@ -199,7 +214,7 @@ the session and freezes that plan for use.
 - [pinned] The plan composer places the reduction owner, when it has a
   step-transform item, first among the step-transform items, so its
   `replace` runs before every preserving prepend or append and never wipes
-  them (`reduction_owner_first`). This is the composer's obligation, which
+  them (`reduction_owner_first`). This is the plan composer's obligation, which
   this contract records; providers do not enforce it, and a runner does
   not reorder a plan that breaks it.
 - [pinned] `replace` on `post_tool` is a separate permission only the user
@@ -453,7 +468,7 @@ the vectors in this crate.
 
 ## Settled questions
 
-No question is open. Where each is answered:
+No question is open. Each answer, with the section that states it:
 
 - **Q1. The envelope.** `{method, params}` (§1).
 - **Q2. Names.** `transform.declare`, `transform.hook` (§1, §4); answers
@@ -462,8 +477,8 @@ No question is open. Where each is answered:
 - **Q7. A disallowed answer.** The hook is unavailable for that call (§5).
 - **Q8. Approve.** `{prompt, options?, expires_at_ms, on_expiry,
   material_damage, late_execution}` (§6).
-- **Q9. Where the reduction owner runs.** Exact plan order; the composer
-  places the owner first (§5).
+- **Q9. Where the reduction owner runs.** Hooks run in exact plan order;
+  the plan composer places the reduction owner first (§5).
 - **Q10. The user's `replace` grant on `post_tool`.** The plan's
   `user_grants` field and nowhere else (§5).
 - **Q12. `runner_groups`.** `role.describe.runner_groups`, checked by the
@@ -478,7 +493,7 @@ No question is open. Where each is answered:
   stale like a missing hook. Malformed plans remain `invalid_params` (§4).
 
 - **Q4. Where `on_unavailable` and the budget live.** Settled: the
-  declaration is the source, and the composer copies both into every
+  declaration is the source, and the plan composer copies both into every
   planned subscription, where they are frozen. At admission an equal or
   stricter planned subscription admits; a looser one refuses `plan_stale`
   with `{kind: "subscription_loosened", provider, hook, phase, field}`; a declared hook or
@@ -495,7 +510,7 @@ No question is open. Where each is answered:
   bounds what a plan may subscribe to.
 - **Q15. Exclusivity.** Settled: one reduction owner per session; every
   other step transform is preserving. Hooks run in plan order with the
-  owner placed first by the composer (§5).
+  owner placed first by the plan composer (§5).
 - **Q16. Purity.** Settled: what a provider's fetch returns derives only
   from the composition, preset, params and config, never from scope, agent
   or session identity.

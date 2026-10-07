@@ -20,6 +20,22 @@ drift apart.
 A compaction provider is any module that decides the shape of the history a
 runner sends to the model.
 
+## Terms
+
+- **Plan composer**: the component that writes a session's plan and freezes
+  it. It checks each provider's runner groups against the runner, places
+  the providers in order, and fills the plan's user-tier fields.
+- **Runner group**: a capability group a runner advertises in its
+  `llm-runner/v1` `role.describe`, such as `compaction` or
+  `transcript_reads`. A provider lists the groups it needs in its own
+  `role.describe.runner_groups`.
+- **Reduction owner**: the session's compaction provider, the only party
+  that may remove or rewrite history already written. Every other step
+  transform may only add to it.
+- **Signed thinking**: model reasoning blocks that carry a model provider's
+  signature. Any change to them, even one byte, invalidates the signature,
+  so nothing in these roles ever edits them.
+
 ## 1. Role identity and addressing
 
 - [pinned] A provider lists `compaction-provider/v1` in its manifest's
@@ -31,11 +47,11 @@ runner sends to the model.
 - [pinned] Compaction routes are module-level and unscoped. Requests name
   the opaque session handle; it is not an authorization credential.
 - [pinned] Every compaction request, Setup (§4) and step (§6),
-  carries a required string `harness`, next to `session`: the caller's
-  harness, taken from the session's key (`broca`
-  for a session an Alfonso mason runs, say). It is distinct from the
-  route's bind harness, which is always `runner` for a Broca route. A
-  request without `harness` does not decode; it is never defaulted.
+  carries a required string `harness`, next to `session`: the harness
+  named in the session's key, which identifies the caller (for example
+  `broca`). This differs from the route's bind harness, which a runner
+  binds as `runner`. A request without `harness` does not decode; it is
+  never defaulted.
 - [pinned] A provider keys a runner conversation, and every piece of
   per-session state it keeps for one, on `(project_root, session,
   harness)`: the project root it serves the request for, the session
@@ -64,12 +80,11 @@ runner sends to the model.
   incarnation.
 - [pinned] This role defines no module-level capabilities yet.
 - [pinned] The provider declares what it needs from the runner in
-  `role.describe.runner_groups`: the `llm-runner/v1` capability groups it
-  needs besides `compaction`, such as `transcript_reads` for a provider
+  `role.describe.runner_groups`: the runner groups it needs besides
+  `compaction`, such as `transcript_reads` for a provider
   with no reader of its own. A list of strings, omitted when empty.
-- [pinned] The plan composer checks `runner_groups` against the groups the
-  runner advertises in its own `role.describe` when it composes the
-  session. An unmet group fails the launch, and the failure names each
+- [pinned] The plan composer checks `runner_groups` against the runner
+  groups the runner advertises when it composes the session. An unmet group fails the launch, and the failure names each
   unmet group (`unmet_runner_groups`). Runner requirements are carried
   nowhere else.
 
@@ -137,13 +152,18 @@ the session and freezes that plan for use.
     replacement.
   - `stability` ranks the provider's own messages: `index` is a position in
     every CompactionMessage's `replacement`, and a higher `rank` changes
-    less often. A main session of Magic Context declares `[{index: 0, rank:
-    2}, {index: 1, rank: 1}]`; a subagent session declares nothing. The
+    less often. For example, a provider whose head is a stable summary
+    followed by a more volatile one declares `[{index: 0, rank: 2},
+    {index: 1, rank: 1}]` for a main session, and nothing for a subagent
+    session that has no head. The
     runner uses these as stability segments for cache breakpoints and change
     policies. Stability is an array of `{index, rank}`, both unsigned 32-bit
     integers; it defaults to an empty array and is omitted when empty.
-  - `call_when` (§5).
-  - A `refuse` ends the run `error` (§11).
+  - `call_when` says when the runner calls the provider: a share of the
+    context window, with per-model overrides (§5). Absent, the runner
+    calls on every step.
+  - A `refuse` ends the run `error` with the refusal's role `code`, and the
+    next send runs Setup again (§11).
 
 ## 5. When the provider is called
 
@@ -486,7 +506,9 @@ string.
 - [pinned] The malformed-request code is `invalid_params`, as runners
   answer. `tool-provider/v1` spells it `invalid_request`; a consumer of
   both maps each by its own role.
-- [pinned] Any refusal of a step call is a failed call (§7).
+- [pinned] Any refusal of a step call is a failed call: the runner
+  records it and sends the request with the last applied
+  CompactionMessage, as after a timeout (§7).
 
 ### 14.2 Codes the runner answers or writes (`errors::runner_codes`)
 
@@ -495,7 +517,7 @@ string.
 | `invalid_params {field: "plan.compaction_item"}` | admission, on a runner without the `compaction` group |
 | `not_session_compaction_provider` | a `compaction.ready` whose route caller is not `plan.compaction_item.provider`, or for a session without a compaction item |
 | `invalid_params {field}` | a malformed `compaction.ready` |
-| `compaction_unavailable` | a run's `provider_code`, after Setup only: Setup failed or timed out with no answer (§4). A failed step call never ends a run with it; the runner keeps the last applied view (§7) |
+| `compaction_unavailable` | a run's `provider_code`, after Setup only: Setup failed or timed out with no answer, so no initial view exists and no model call is made (§4). The runner never writes it after a step call: a step call that fails or times out does not end the run, because the runner sends the request with the last applied CompactionMessage (§7) |
 | `compaction_wait_exceeded` | a run's `provider_code`: a wait reached the cap and the request could not be shown to fit |
 
 ### 14.3 Retryability and where a code ends a run (`KnownCode`)
@@ -613,18 +635,29 @@ if no kill ended a real process.
 
 ## Settled questions
 
-No question is open. Where each is answered:
+No question is open. Each answer, with the section that states it:
 
-- **Q1. The envelope and the ready reply.** `{method, params}` (§1);
-  `compaction.ready` is answered `{}` (§10).
-- **Q2. Names.** §1 (ops) and §7 (answers).
-- **Q4. Who mints `compaction_id`.** The provider (§8).
-- **Q6. A cap on the status's messages.** §6.
-- **Q7. `last_not_applied`.** §6.
-- **Q8. `runner_groups`.** §2.
-- **Q9. Unknown `call_when` kinds and model patterns.** §5.
-- **Q13. The stability shape.** §4.
-- **Q14. Role-named `refuse` codes.** §11 and §14.3.
+- **Q1. The envelope and the ready reply.** Every request is `{method,
+  params}` (§1); the runner answers `compaction.ready` with `{}` (§10).
+- **Q2. Names.** Ops `compaction.setup` and `compaction.step` (§1);
+  answers `ready`, `noop`, `compaction_message`, `wait` and `refuse` (§7).
+- **Q4. Who mints `compaction_id`.** The provider, as an opaque id stable
+  for one compaction lineage (§8).
+- **Q6. A cap on the status's messages.** A byte cap, 4 MiB by default,
+  with `more`; a single oversized message is sent alone, and the cursor
+  advances only to the last message sent (§6).
+- **Q7. `last_not_applied`.** In the status, with the reason the runner did
+  not apply it (§6).
+- **Q8. `runner_groups`.** Declared in `role.describe.runner_groups` and
+  checked by the plan composer; an unmet runner group fails the launch by
+  name (§2).
+- **Q9. Unknown `call_when` kinds and model patterns.** An unknown kind
+  means a call on every step; a model's share is the exact key, else the
+  longest matching trailing-`*` pattern, else `default` (§5).
+- **Q13. The stability shape.** An array of `{index, rank}` (§4).
+- **Q14. Role-named `refuse` codes.** Four codes, each with a fixed
+  retryability; the provider's own reason goes in `provider_code`;
+  `compaction_unavailable` only after Setup (§11, §14.3).
 - **Q3. Range ends.** Settled: half-open ordinals, `from` included and `to`
   excluded (§8). Ordinals are never reused within a lineage, they can name
   an empty range and a range running to the end, and the model view speaks

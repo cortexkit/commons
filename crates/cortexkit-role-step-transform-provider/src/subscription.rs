@@ -612,7 +612,7 @@ pub fn hook_order(providers: &[&str]) -> Vec<usize> {
 /// The plan composer's obligation on order: when the session's reduction
 /// owner (its compaction provider, CONTRACT.md §5) is among the
 /// step-transform items, it is the first of them, so its `replace` runs
-/// before every preserving prepend or append. The composer checks this
+/// before every preserving prepend or append. The plan composer checks this
 /// when it writes the plan; providers do not enforce it, and the runner
 /// still calls items in plan order ([`hook_order`]). `true` when there is
 /// no reduction owner or it has no step-transform item.
@@ -874,8 +874,8 @@ mod tests {
         }
     }
 
-    /// The admission cases copied from prefrontal's `fetch-plan-v1`
-    /// vectors: the same plan and declaration must give the same refusal
+    /// The admission cases copied from the plan composer's `fetch-plan-v1`
+    /// vectors (each case's `source` names the upstream file and commit): the same plan and declaration must give the same refusal
     /// bytes, or admit and freeze the plan's subscriptions unchanged.
     #[test]
     fn fetch_plan_admission_vectors_agree() {

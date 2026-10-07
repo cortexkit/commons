@@ -182,8 +182,9 @@ impl StepAnswer {
         }
     }
 
-    /// Whether a `refuse` may be retried without the user acting, as its
-    /// code fixes it; `None` for every other answer.
+    /// Whether a `refuse` may be retried; `None` for every other answer. Its
+    /// retryability is fixed by the code: `true` means the runner may
+    /// retry without the user acting.
     pub fn retryable(&self) -> Option<bool> {
         match self {
             Self::Refuse { code, .. } => Some(code.retryable()),
