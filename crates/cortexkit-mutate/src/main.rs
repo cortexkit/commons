@@ -52,6 +52,17 @@ struct FeatureSelection {
     no_default_features: bool,
     #[arg(long)]
     all_features: bool,
+    /// Also run `#[ignore]`d tests (include), or run only them (only).
+    #[arg(long, value_name = "SELECTION", value_parser = ["include", "only"])]
+    ignored: Option<String>,
+}
+
+/// Clap has already limited the value to the two catalogue spellings.
+fn ignored_selection(value: Option<&str>) -> Option<IgnoredSelection> {
+    match value? {
+        "include" => Some(IgnoredSelection::Include),
+        _ => Some(IgnoredSelection::Only),
+    }
 }
 
 #[derive(Args)]
@@ -432,6 +443,7 @@ fn run() -> Result<bool> {
                     .then_some(p.feature_selection.features),
                 no_default_features: p.feature_selection.no_default_features.then_some(true),
                 all_features: p.feature_selection.all_features.then_some(true),
+                ignored: ignored_selection(p.feature_selection.ignored.as_deref()),
                 command: p.command,
                 test_count_pattern: p.test_count_pattern,
                 catch_on: p.catch_on,
@@ -542,6 +554,7 @@ fn explore(
             .then_some(x.feature_selection.features),
         no_default_features: x.feature_selection.no_default_features.then_some(true),
         all_features: x.feature_selection.all_features.then_some(true),
+        ignored: ignored_selection(x.feature_selection.ignored.as_deref()),
         command: None,
         test_count_pattern: None,
         catch_on: None,

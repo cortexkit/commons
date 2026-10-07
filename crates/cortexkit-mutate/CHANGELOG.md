@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.3
+
+- Add an optional Cargo/nextest row field `ignored = "include"` or `"only"` to
+  run `#[ignore]`d tests too, or only them. libtest receives `--include-ignored`
+  or `--ignored` after `--`; nextest receives `--run-ignored all` or
+  `--run-ignored only`. The selection applies to test listing and name
+  resolution, clean-tree baselines, mutant runs, `check`, package diagnosis,
+  `run --broad` and `explore`; builds are unchanged. Baseline and name-list
+  caches are keyed by it, so selections never share a baseline.
+- Refuse an `expect_red` test that is `#[ignore]`d on a row without the field,
+  in `check` and at baseline, with a message naming the field, instead of a later
+  NO_TESTS_RAN. Name resolution no longer counts ignored tests the row skips.
+- Refuse the field on command rows and any value other than `include` or `only`.
+- Add `--ignored include|only` to `prove` and `explore`, preserved in appended rows.
+
 ## 0.7.2
 
 - Add optional Cargo/nextest row fields `features`, `no_default_features`, and

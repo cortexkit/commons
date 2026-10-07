@@ -28,6 +28,7 @@ target = "--test list_contract"
 # features = ["test-support"]
 # no_default_features = true
 # all_features = true # instead of features/no_default_features
+# ignored = "include" # or "only": also run (or run only) #[ignore]d tests
 expect_red = ["list_agent_cannot_see_another_agents_flow"]
 # expect_message = "assertion failed: own_flows_only" # or "/own.*flows/"
 # signal_is_catch = "This guard intentionally aborts on invalid input"
@@ -116,6 +117,48 @@ selection flags with `cargo nextest run --no-run`, `cargo nextest list
 status/JSON output flags); feature flags always precede any harness separator.
 Nextest's `cargo nextest run --help` capability probe is not a build/test/list and
 does not take feature selection.
+
+### Ignored-test selection (0.7.3)
+
+Expensive guards, such as tests that need a real daemon, are often kept
+`#[ignore]`d and run in a dedicated CI job. A cargo or nextest row selects them
+with one typed field; there is no free-form way to pass harness arguments.
+
+| Row field | Default | Applies to | Meaning |
+| --- | --- | --- | --- |
+| `ignored = "include"` | absent | cargo / nextest | Run `#[ignore]`d tests as well as the ordinary ones. |
+| `ignored = "only"` | absent | cargo / nextest | Run only `#[ignore]`d tests. |
+
+Any other value is a catalogue parse error, and command rows must omit the field
+(their argv owns its harness options). The selection reaches every test listing
+and run of the row, exactly as feature selection does: name resolution, the
+clean-tree baseline, the mutant run, `check`, `run --broad`, package diagnosis
+and `explore`. Builds select no tests and are unchanged. Baseline and name-list
+caches are keyed by the selection, so a row running ignored tests never reuses a
+baseline collected without them, or the reverse. `prove` and `explore` accept
+`--ignored include` or `--ignored only` and retain it when appending.
+
+| Runner | Mode | `ignored = "include"` | `ignored = "only"` |
+| --- | --- | --- | --- |
+| cargo | list | `cargo test ... -- --list --include-ignored` | `cargo test ... -- --list --ignored` |
+| cargo | run | `cargo test ... --no-fail-fast -- --test-threads=1 --include-ignored` | `cargo test ... --no-fail-fast -- --test-threads=1 --ignored` |
+| nextest | list | `cargo nextest list ... --message-format json --run-ignored all` | `cargo nextest list ... --message-format json --run-ignored only` |
+| nextest | run | `cargo nextest run ... --no-fail-fast --retries 0 --run-ignored all` (plus output flags) | `cargo nextest run ... --no-fail-fast --retries 0 --run-ignored only` (plus output flags) |
+
+Nextest's `--run-ignored` values are `default`, `only` and `all` in current
+releases; older releases spelled `only` as `ignored-only`. CI installs the latest
+nextest, which accepts `only`.
+
+A row without the field that expects an `#[ignore]`d test fails `check` (and its
+replay is an ERROR) with a message naming the field, for example `expect_red test
+ignored_guard is #[ignore]d and this row does not run ignored tests; set ignored =
+"include" (or "only") on the row`, instead of reporting NO_TESTS_RAN after a
+baseline. To find them, a cargo row without the field lists the selection a
+second time with `-- --list --ignored`, because libtest's plain `--list` does not
+mark ignored tests; nextest marks them in its JSON listing. With `"only"`,
+ordinary tests are not listed, so expecting one is reported as a name that no
+longer exists. Rustdoc reports `ignore` doctests as ignored tests, so an
+`"include"` or `"only"` row without a `target` also tries to run those.
 
 ### Multiline anchors on CRLF checkouts (0.7.2)
 

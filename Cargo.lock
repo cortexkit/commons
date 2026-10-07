@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-mutate"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "clap",
  "ctrlc",

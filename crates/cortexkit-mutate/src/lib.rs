@@ -46,6 +46,11 @@ pub struct Control {
     pub no_default_features: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub all_features: Option<bool>,
+    /// Whether every list and test run in this row also runs `#[ignore]`d
+    /// tests ("include") or runs only them ("only"). Absent runs only
+    /// tests that are not ignored, as Cargo does by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored: Option<IgnoredSelection>,
     /// An argv template, not a shell string; substitutes one expected test id.
     pub command: Option<Vec<String>>,
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
@@ -91,6 +96,44 @@ pub struct Control {
     #[serde(default = "default_build_timeout")]
     pub build_timeout_s: u64,
 }
+/// Which `#[ignore]`d tests a cargo or nextest row selects. Typed rather than
+/// free-form so a catalogue row can never inject arbitrary harness arguments.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum IgnoredSelection {
+    /// Run ignored tests as well as the ordinary ones.
+    Include,
+    /// Run only the ignored tests.
+    Only,
+}
+
+impl IgnoredSelection {
+    /// The libtest harness option, passed after Cargo's `--`.
+    fn libtest_arg(self) -> &'static str {
+        match self {
+            Self::Include => "--include-ignored",
+            Self::Only => "--ignored",
+        }
+    }
+
+    /// The value of nextest's `--run-ignored` option. Current nextest spells
+    /// these `all` and `only`; `only` replaced the older `ignored-only`.
+    fn nextest_value(self) -> &'static str {
+        match self {
+            Self::Include => "all",
+            Self::Only => "only",
+        }
+    }
+
+    /// The catalogue spelling, as written in a row's `ignored` field.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Include => "include",
+            Self::Only => "only",
+        }
+    }
+}
+
 fn default_timeout() -> u64 {
     600
 }
@@ -183,6 +226,7 @@ impl Control {
                     ("features", self.features.is_some()),
                     ("no_default_features", self.no_default_features.is_some()),
                     ("all_features", self.all_features.is_some()),
+                    ("ignored", self.ignored.is_some()),
                 ] {
                     if present {
                         return Err(invalid(field, "must be absent for runner = command"));
@@ -1188,19 +1232,29 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
     cmd.args(c.feature_args()?);
     match mode {
         "build" => {
+            // A build selects no tests, so `ignored` reaches only list and run
+            // modes; baseline sharing adds it to its key separately.
             cmd.arg("--no-run");
         }
         "list" if c.runner == "cargo" => {
             cmd.args(["--", "--list"]);
+            cmd.args(c.ignored.map(IgnoredSelection::libtest_arg));
         }
         "list" => {
             cmd.args(["--message-format", "json"]);
+            if let Some(ignored) = c.ignored {
+                cmd.args(["--run-ignored", ignored.nextest_value()]);
+            }
         }
         _ if c.runner == "cargo" => {
             cmd.args(["--no-fail-fast", "--", "--test-threads=1"]);
+            cmd.args(c.ignored.map(IgnoredSelection::libtest_arg));
         }
         _ => {
             cmd.args(["--no-fail-fast", "--retries", "0"]);
+            if let Some(ignored) = c.ignored {
+                cmd.args(["--run-ignored", ignored.nextest_value()]);
+            }
             let help = Command::new("cargo")
                 .args(["nextest", "run", "--help"])
                 .output()
@@ -2322,10 +2376,17 @@ impl ReplaySession {
         for c in rows {
             let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
             let key = if active && c.runner != "command" {
-                command(c, "build", scope)?
+                let mut key: Vec<String> = command(c, "build", scope)?
                     .get_args()
                     .map(|s| s.to_string_lossy().into_owned())
-                    .collect()
+                    .collect();
+                // The build arguments omit the ignored-test selection, yet a run
+                // that includes ignored tests observes different results.
+                key.push(format!(
+                    "ignored={}",
+                    c.ignored.map_or("none", IgnoredSelection::as_str)
+                ));
+                key
             } else {
                 vec![c.id.clone()]
             };
@@ -2370,7 +2431,7 @@ impl ReplaySession {
                 let validation = names
                     .as_ref()
                     .map_err(Clone::clone)
-                    .and_then(|names| resolve_expected(c, names).map(|_| ()))
+                    .and_then(|names| resolve_listed(c, names).map(|_| ()))
                     .and_then(|()| validate_baseline(c, &mut report));
                 if let Err(e) = validation {
                     report.outcome = Outcome::Error;
@@ -2642,7 +2703,7 @@ fn replay(
                     let start = Instant::now();
                     let names = list_results(root, c, scope, stop)?;
                     report.baseline_build_ms += start.elapsed().as_millis();
-                    resolve_expected(c, &names)?;
+                    resolve_listed(c, &names)?;
                 }
                 cargo_baseline(root, c, scope, stop, &mut report)?;
                 let mut baseline_control = c.clone();
@@ -2838,27 +2899,69 @@ fn replay(
     Ok(report)
 }
 
-fn list_results(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Result<TestResults> {
+/// The tests a row's selection runs, plus the `#[ignore]`d tests that the
+/// selection lists but skips, as (binary, name) pairs. The skipped ones let a
+/// row expecting an ignored test fail by naming the `ignored` field instead of
+/// reporting that no expected test ran.
+struct Listing {
+    results: TestResults,
+    skipped_ignored: Vec<(String, String)>,
+}
+
+fn list_output(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Result<String> {
     // List mode compiles the test binaries, so the build deadline bounds it.
     let output = execute(root, command(c, "list", scope)?, c.build_timeout_s, stop)?;
     if !output.success || output.timeout || output.interrupted {
         return Err(format!("{}: list failed: {}", c.id, tail(&output.text)));
     }
+    Ok(output.text)
+}
+
+fn cargo_listed(
+    root: &Path,
+    c: &Control,
+    scope: Scope,
+    stop: &AtomicBool,
+) -> Result<Vec<(String, String)>> {
+    let mut target = String::new();
+    let mut listed = vec![];
+    for line in list_output(root, c, scope, stop)?.lines().map(str::trim) {
+        if let Some(binary) = cargo_binary_header(line)? {
+            target = binary;
+        } else if let Some(name) = line.strip_suffix(": test") {
+            listed.push((target.clone(), name.to_owned()));
+        }
+    }
+    Ok(listed)
+}
+
+fn list_results(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Result<Listing> {
     let mut events = TestEvents::default();
+    let mut skipped_ignored = vec![];
     if c.runner == "cargo" {
-        let mut target = String::new();
-        for line in output.text.lines().map(str::trim) {
-            if let Some(binary) = cargo_binary_header(line)? {
-                target = binary;
-            } else if let Some(name) = line.strip_suffix(": test") {
-                events.record(&target, name, false)?;
+        let listed = cargo_listed(root, c, scope, stop)?;
+        // libtest's plain `--list` includes ignored tests without marking them,
+        // so a row that skips them asks the harness which ones they are.
+        let ignored: BTreeSet<_> = if c.ignored.is_none() && !c.expect_red.is_empty() {
+            let mut only = c.clone();
+            only.ignored = Some(IgnoredSelection::Only);
+            cargo_listed(root, &only, scope, stop)?
+                .into_iter()
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        for (target, name) in listed {
+            if ignored.contains(&(target.clone(), name.clone())) {
+                skipped_ignored.push((target, name));
+            } else {
+                events.record(&target, &name, false)?;
             }
         }
     } else {
+        let text = list_output(root, c, scope, stop)?;
         let json: serde_json::Value = serde_json::from_str(
-            output
-                .text
-                .lines()
+            text.lines()
                 .find(|l| l.starts_with('{'))
                 .ok_or("missing nextest list JSON")?,
         )
@@ -2872,12 +2975,45 @@ fn list_results(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Re
                 .get("testcases")
                 .and_then(|v| v.as_object())
                 .ok_or("missing nextest testcases")?;
-            for name in cases.keys() {
-                events.record(target, name, false)?;
+            for (name, case) in cases {
+                // nextest lists every test whatever the selection, marking
+                // each ignored one, so selection is decided from that mark.
+                let ignored = case
+                    .get("ignored")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                match (ignored, c.ignored) {
+                    (true, None) => skipped_ignored.push((target.clone(), name.clone())),
+                    (false, Some(IgnoredSelection::Only)) => {}
+                    _ => events.record(target, name, false)?,
+                }
             }
         }
     }
-    Ok(events.finish(&c.runner))
+    Ok(Listing {
+        results: events.finish(&c.runner),
+        skipped_ignored,
+    })
+}
+
+/// Resolve a row's expected names against its listing, refusing by name an
+/// expected test that exists only as an `#[ignore]`d test the row skips.
+fn resolve_listed(c: &Control, listing: &Listing) -> Result<Vec<String>> {
+    let resolved = resolve_expected(c, &listing.results)?;
+    for (expected, identity) in c.expect_red.iter().zip(&resolved) {
+        if listing.results.names.contains_key(identity) {
+            continue;
+        }
+        if listing.skipped_ignored.iter().any(|(target, name)| {
+            name == expected || format!("{}::{name}", stable_target(&c.runner, target)) == *expected
+        }) {
+            return Err(format!(
+                "{}: expect_red test {expected} is #[ignore]d and this row does not run ignored tests; set ignored = \"include\" (or \"only\") on the row",
+                c.id
+            ));
+        }
+    }
+    Ok(resolved)
 }
 
 pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()> {
@@ -2896,8 +3032,8 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
             continue;
         }
         let selected = list_results(root, c, Scope::Row, stop)?;
-        for expected in resolve_expected(c, &selected)? {
-            if !selected.names.contains_key(&expected) {
+        for expected in resolve_listed(c, &selected)? {
+            if !selected.results.names.contains_key(&expected) {
                 return Err(format!(
                     "{}: expect_red name no longer exists: {expected}",
                     c.id
@@ -3426,6 +3562,73 @@ mod broad_command_tests {
     }
 
     #[test]
+    fn ignored_selection_reaches_list_and_run_for_every_scope_but_not_build() {
+        let mut c =
+            toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
+                .unwrap()
+                .control
+                .remove(0);
+        for scope in [
+            Scope::Row,
+            Scope::Broad,
+            Scope::Package,
+            Scope::Explore { workspace: false },
+            Scope::Explore { workspace: true },
+        ] {
+            for (selection, libtest, nextest) in [
+                (IgnoredSelection::Include, "--include-ignored", "all"),
+                (IgnoredSelection::Only, "--ignored", "only"),
+            ] {
+                c.ignored = Some(selection);
+                let args = |runner: &str, mode: &str| -> Vec<String> {
+                    let mut c = c.clone();
+                    c.runner = runner.into();
+                    command(&c, mode, scope)
+                        .unwrap()
+                        .get_args()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .collect()
+                };
+                assert!(args("cargo", "list").ends_with(&[
+                    "--".into(),
+                    "--list".into(),
+                    libtest.into()
+                ]));
+                assert!(args("cargo", "run").ends_with(&[
+                    "--".into(),
+                    "--test-threads=1".into(),
+                    libtest.into()
+                ]));
+                for mode in ["list", "run"] {
+                    let args = args("nextest", mode);
+                    assert!(
+                        args.windows(2).any(|w| w == ["--run-ignored", nextest]),
+                        "{args:?}"
+                    );
+                    assert!(!args.iter().any(|a| a == "--"), "{args:?}");
+                }
+                for runner in ["cargo", "nextest"] {
+                    let args = args(runner, "build");
+                    assert!(
+                        !args.iter().any(|a| a.contains("ignored")),
+                        "a build selects no tests: {args:?}"
+                    );
+                }
+            }
+        }
+        c.ignored = None;
+        for runner in ["cargo", "nextest"] {
+            c.runner = runner.into();
+            for mode in ["build", "list", "run"] {
+                let cmd = command(&c, mode, Scope::Row).unwrap();
+                assert!(!cmd
+                    .get_args()
+                    .any(|a| a.to_string_lossy().contains("ignored")));
+            }
+        }
+    }
+
+    #[test]
     fn broad_commands_select_package_tests_and_preserve_explicit_targets() {
         let mut c =
             toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
@@ -3815,6 +4018,7 @@ mod order_tests {
             features: None,
             no_default_features: None,
             all_features: None,
+            ignored: None,
             command: None,
             test_count_pattern: None,
             catch_on: None,
