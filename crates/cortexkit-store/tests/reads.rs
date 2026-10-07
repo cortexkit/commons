@@ -248,6 +248,9 @@ fn readers_see_migrations_and_do_not_create_fence() {
     assert_eq!(fences, 0);
 }
 
+// Unix only: the test forces a reader open to fail by renaming the database
+// while the writer holds it open, and Windows refuses to rename an open file.
+#[cfg(unix)]
 #[test]
 fn failed_reader_open_is_lazy_and_retried() {
     let db = TestDb::new();
