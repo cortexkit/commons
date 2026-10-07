@@ -2336,8 +2336,10 @@ impl ReplaySession {
             }
             report
         });
-        // An unprepared library replay needs clean fixtures for its baseline,
-        // including exploratory rows that do not yet name expected tests.
+        // A row's clean-tree baseline must not see fixture binaries built from an
+        // earlier row's mutant, so rebuild them first when no session-wide
+        // baseline has done so. That includes `explore` rows, which have no
+        // expected tests yet but still run the baseline.
         if active && baseline.is_none() && self.fixtures_dirty {
             self.finish(root, &mut [], allow_dirty)?;
         }
@@ -2597,8 +2599,9 @@ fn replay(
             ));
         }
         let mut results = parse_test_results(&tests.text, &c.runner)?;
-        // Compare stable binary/name pairs, not the display identity: broad
-        // runs may qualify a name that was unique in a narrow baseline.
+        // Match baseline-red tests by (test binary, plain test name). A `--broad`
+        // run prefixes a name with its binary when two binaries share it, so
+        // the printed name can differ from the one recorded at baseline.
         exclude_baseline_red(c, &report, &mut results);
         if c.signal_is_catch.is_none() {
             if let Some((name, signal)) = results.signals.iter().next() {

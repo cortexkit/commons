@@ -2975,8 +2975,10 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "command_tests(root, c, stop, &mut report, true)",
         "command_tests(root, c, stop, &mut report, false)",
     ] {
-        // Clean-tree Cargo baselines use their own build/run/parser; the session
-        // also constructs a build argv as the shared target-selection cache key.
+        // Each needle must appear exactly as often as listed. Clean-tree Cargo
+        // baselines build, run and parse on their own path, and the session also
+        // builds a cargo command line to key the per-selection baseline cache,
+        // which is why some call sites appear twice.
         let expected = match needle {
             "Saved::new("
             | "saved.restore()"
@@ -3166,7 +3168,8 @@ fn unrelated_baseline_red_is_excluded_from_wrong_test_and_broad_catches() {
         }
         c.new = Some("0 < value".into());
         assert_eq!(f.run(&c).outcome, Outcome::Survived);
-        // Exercise the CLI's baselines-first phase and its non-silent summary.
+        // Through the CLI: every row's clean-tree baseline runs before any mutant,
+        // and the summary names each test that was red at baseline.
         c.new = Some("value >= 0".into());
         fs::write(
             f.root().join("mutations.toml"),
