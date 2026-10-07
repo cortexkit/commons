@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.0**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.2**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -29,6 +29,26 @@ string `"none"`, not null. Null workspace changes mean unavailable information;
 an empty array means known absence of changes. `killed`, `pipestatus`, and request
 scheduling overrides are omitted when absent. Repository status availability
 fields likewise emit explicit nulls.
+
+The terminal also carries three optional reports of state **on the server, not
+copied back**:
+
+- `git_state_changed: Option<GitStateChange>`: before/after commit IDs, symbolic
+  refs (null when detached), index tree IDs, and stash counts. Commit and index
+  IDs are nullable when unavailable. `GitStateChange::changed()` compares all
+  four before/after pairs, including availability differences.
+- `untracked_files: Option<UntrackedFiles>`: new untracked, non-ignored `paths`
+  and an explicit `truncated` flag. Producers should cap the list at 100 paths.
+- `ignored_writes: Option<IgnoredWrites>`: total `count` and capped `sample_paths`
+  for ignored writes outside `target/`, `node_modules/`, and `dist/`. Producers
+  should cap the sample at 20 paths, not the total count.
+
+Absent reports decode as `None` and are omitted on serialization. `None` means
+**not reported**, never "nothing changed". A reporting runner must send all three
+fields, even with equal before/after Git values, an empty untracked list with
+`truncated: false`, or a zero ignored-write count and empty sample. The runner,
+not these types, enforces caps and exclusions. Consumers must not assume that
+remote commits, staged changes, or generated files are present locally.
 
 Public named structs and enums are `#[non_exhaustive]`. Construct structs with
 `new`, then use `with_*` setters for optional fields, or deserialize them. Fields
@@ -93,7 +113,7 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Eight **crate-local additions** are listed separately from the copied cases:
+Fourteen **crate-local additions** are listed separately from the copied cases:
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.
@@ -111,18 +131,23 @@ Eight **crate-local additions** are listed separately from the copied cases:
   that the workspace is prepared.
 - `replies/crate-local-unknown-rebuild-result`: the informational `future_result`
   rebuild status.
+- Six `outcomes/crate-local-server-reports-*` cases: `all`, `older-runner`,
+  `unknown-fields` (inside each new struct), `detached-head`,
+  `truncated-untracked`, and `unchanged` (all reports present with no changes).
 
-Totals: **26 outcome pairs and 16 reply pairs**. Runner `frames/` and pretty
+Totals: **32 outcome pairs and 16 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent
-RFC 8785 canonical bytes. The vectors and tests are included in the package.
+RFC 8785 canonical bytes. The nested-unknown-fields input re-encodes to the
+separately pinned `all` case, dropping only unknown fields. The vectors and tests
+are included in the package.
 
 ## Verification
 
 ```sh
-cargo fmt --all --check
-cargo clippy -p cortexkit-exec-remote-types --all-targets --locked -- -D warnings
-cargo test -p cortexkit-exec-remote-types --locked
-cargo package -p cortexkit-exec-remote-types --locked --list
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo publish -p cortexkit-exec-remote-types --dry-run --locked
 ```

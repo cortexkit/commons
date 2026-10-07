@@ -358,6 +358,149 @@ impl From<Ran> for String {
     }
 }
 
+/// Server-side Git state before and after a command; it is not copied back.
+///
+/// A reporting producer sends this even when the values are unchanged. Use
+/// [`Self::changed`] to distinguish a reported change from a reported no-change.
+/// Construct with [`Self::new`] and fill the available IDs with `with_*` setters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct GitStateChange {
+    /// Commit ID before execution, or `None` for an unborn HEAD.
+    pub head_before: Option<String>,
+    /// Commit ID after execution, or `None` for an unborn HEAD.
+    pub head_after: Option<String>,
+    /// Symbolic ref before execution, or `None` when detached.
+    pub ref_before: Option<String>,
+    /// Symbolic ref after execution, or `None` when detached.
+    pub ref_after: Option<String>,
+    /// Index tree ID before execution, or `None` if no tree is available.
+    pub index_tree_before: Option<String>,
+    /// Index tree ID after execution, or `None` if no tree is available.
+    pub index_tree_after: Option<String>,
+    pub stash_count_before: u32,
+    pub stash_count_after: u32,
+}
+
+impl GitStateChange {
+    /// Record stash counts with unavailable commit, ref and index tree IDs.
+    pub fn new(stash_count_before: u32, stash_count_after: u32) -> Self {
+        Self {
+            head_before: None,
+            head_after: None,
+            ref_before: None,
+            ref_after: None,
+            index_tree_before: None,
+            index_tree_after: None,
+            stash_count_before,
+            stash_count_after,
+        }
+    }
+
+    /// Record the commit ID before execution.
+    pub fn with_head_before(mut self, head_before: impl Into<String>) -> Self {
+        self.head_before = Some(head_before.into());
+        self
+    }
+
+    /// Record the commit ID after execution.
+    pub fn with_head_after(mut self, head_after: impl Into<String>) -> Self {
+        self.head_after = Some(head_after.into());
+        self
+    }
+
+    /// Record the symbolic ref before execution; leave unset when detached.
+    pub fn with_ref_before(mut self, ref_before: impl Into<String>) -> Self {
+        self.ref_before = Some(ref_before.into());
+        self
+    }
+
+    /// Record the symbolic ref after execution; leave unset when detached.
+    pub fn with_ref_after(mut self, ref_after: impl Into<String>) -> Self {
+        self.ref_after = Some(ref_after.into());
+        self
+    }
+
+    /// Record the index tree ID before execution.
+    pub fn with_index_tree_before(mut self, index_tree_before: impl Into<String>) -> Self {
+        self.index_tree_before = Some(index_tree_before.into());
+        self
+    }
+
+    /// Record the index tree ID after execution.
+    pub fn with_index_tree_after(mut self, index_tree_after: impl Into<String>) -> Self {
+        self.index_tree_after = Some(index_tree_after.into());
+        self
+    }
+
+    /// Whether any reported before/after pair differs, including availability.
+    pub fn changed(&self) -> bool {
+        self.head_before != self.head_after
+            || self.ref_before != self.ref_after
+            || self.index_tree_before != self.index_tree_after
+            || self.stash_count_before != self.stash_count_after
+    }
+}
+
+/// New untracked, non-ignored paths on the server, not copied back.
+///
+/// Producers should cap `paths` at 100 entries and set `truncated` when more
+/// paths exist. The runner enforces the cap; this type does not. An empty list
+/// with `truncated: false` reports that no new untracked paths were found.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UntrackedFiles {
+    pub paths: Vec<String>,
+    /// Whether the list omits additional new untracked paths.
+    pub truncated: bool,
+}
+
+impl UntrackedFiles {
+    /// Record a complete list of new untracked paths, including an empty list.
+    pub fn new(paths: Vec<String>) -> Self {
+        Self {
+            paths,
+            truncated: false,
+        }
+    }
+
+    /// Indicate that additional paths were omitted by the producer's cap.
+    pub fn with_truncated(mut self, truncated: bool) -> Self {
+        self.truncated = truncated;
+        self
+    }
+}
+
+/// Server writes under ignored paths outside `target/`, `node_modules/`, and
+/// `dist/`; these writes are not copied back.
+///
+/// `count` is the total, not the sample length. Producers should cap
+/// `sample_paths` at 20 entries without capping `count`. The runner enforces the
+/// cap and build-directory exclusions; this type does not. A zero count and
+/// empty sample report that no such writes were found.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IgnoredWrites {
+    pub count: u64,
+    pub sample_paths: Vec<String>,
+}
+
+impl IgnoredWrites {
+    /// Record the total number of ignored writes with an empty sample.
+    pub fn new(count: u64) -> Self {
+        Self {
+            count,
+            sample_paths: Vec::new(),
+        }
+    }
+
+    /// Record a producer-capped sample of ignored paths.
+    pub fn with_sample_paths(mut self, sample_paths: Vec<String>) -> Self {
+        self.sample_paths = sample_paths;
+        self
+    }
+}
+
 /// The last record on an `exec.run` or `exec.attach` reply stream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -379,6 +522,22 @@ pub struct TerminalRecord {
     /// Null unless the command ran remotely. An empty array means no changes,
     /// not unavailable history. Remote writes are never copied back.
     pub workspace_changes: Option<Vec<String>>,
+    /// Server-side Git state, not copied back. `None` means not reported, never
+    /// no change. A reporting runner sends `Some` even for unchanged values;
+    /// consumers can use [`GitStateChange::changed`] to check for differences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_state_changed: Option<GitStateChange>,
+    /// New untracked, non-ignored server paths, not copied back. `None` means not
+    /// reported, never no change; a reporting runner sends an empty report when
+    /// no paths were found. See [`UntrackedFiles`] for the recommended cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untracked_files: Option<UntrackedFiles>,
+    /// Ignored server writes outside known build directories, not copied back.
+    /// `None` means not reported, never no change; a reporting runner sends a
+    /// zero-count, empty-sample report when none were found. See [`IgnoredWrites`]
+    /// for the recommended sample cap and build-directory exclusions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored_writes: Option<IgnoredWrites>,
 }
 
 impl TerminalRecord {
@@ -403,6 +562,9 @@ impl TerminalRecord {
             ran: None,
             tree_hash: None,
             workspace_changes: None,
+            git_state_changed: None,
+            untracked_files: None,
+            ignored_writes: None,
         }
     }
 
@@ -433,6 +595,24 @@ impl TerminalRecord {
     /// Record changed paths from remote execution, including an empty list.
     pub fn with_workspace_changes(mut self, workspace_changes: Vec<String>) -> Self {
         self.workspace_changes = Some(workspace_changes);
+        self
+    }
+
+    /// Report server-side Git state, including unchanged before/after values.
+    pub fn with_git_state_changed(mut self, git_state_changed: GitStateChange) -> Self {
+        self.git_state_changed = Some(git_state_changed);
+        self
+    }
+
+    /// Report new untracked server paths, including an empty report.
+    pub fn with_untracked_files(mut self, untracked_files: UntrackedFiles) -> Self {
+        self.untracked_files = Some(untracked_files);
+        self
+    }
+
+    /// Report ignored server writes, including a zero-count report.
+    pub fn with_ignored_writes(mut self, ignored_writes: IgnoredWrites) -> Self {
+        self.ignored_writes = Some(ignored_writes);
         self
     }
 }
@@ -834,6 +1014,8 @@ impl StatusReply {
 /// SSH heartbeats or transfer-control frames. Fields live inline beside `type`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+// Keep Terminal inline: boxing it would break existing public variant construction.
+#[allow(clippy::large_enum_variant)]
 pub enum StreamRecord {
     Accepted(Accepted),
     Output(Output),
@@ -853,6 +1035,8 @@ pub enum StreamRecord {
 /// Decode known tags separately so malformed known records cannot become unknown.
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Mirror the public inline Terminal variant without an extra allocation on decode.
+#[allow(clippy::large_enum_variant)]
 enum KnownStreamRecord {
     Accepted(Accepted),
     Output(Output),
@@ -879,6 +1063,8 @@ impl StreamRecordTag {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
+// The known-record arm mirrors the public inline Terminal variant.
+#[allow(clippy::large_enum_variant)]
 enum StreamRecordInput {
     Known(KnownStreamRecord),
     Tag(StreamRecordTag),
