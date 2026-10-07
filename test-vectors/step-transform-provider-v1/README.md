@@ -15,6 +15,10 @@ draft: these vectors change with the contract until it is reviewed.
 | `grants.json` | plans whose user-tier `replace` grants are read only from the dedicated `user_grants` field (a grant in an item's params, the composition or another field grants nothing; a grant on another hook or with no tools allows nothing), and malformed `user_grants` fields | the wire crate's grant test |
 | `errors.json` | every refusal code a provider answers with, plus one it does not, with whether it is retried, and the tool-result reasons the runner writes | the wire crate's error test |
 
+Every request vector carries the caller's `harness`; the wire crate's tests
+also remove it from each canonical request and check the request is refused
+naming the missing field.
+
 Every canonical vector round-trips: decoding it and encoding the result gives
 back the same JSON. Changing a vector changes the contract: bump the role
 crate's version and say why in the commit.

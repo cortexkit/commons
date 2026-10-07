@@ -15,6 +15,10 @@ draft: these vectors change with the contract until it is reviewed.
 | `ready.json` | the `compaction.ready` request, extras the runner ignores, requests that do not decode, and the runner's check: call again, ignored, or refused `not_session_compaction_provider` by the provider at `plan.compaction_item.provider` | the wire crate's ready test, through `llm-runner/v1`'s check |
 | `errors.json` | every refusal code a provider answers with, plus one it does not, with whether it is retried; the four role `refuse` codes with their fixed retryability, and a code the role does not name, which decodes and is never retried; the `provider_code`s the runner writes itself (`compaction_unavailable`, `compaction_wait_exceeded`), taken from `llm-runner/v1`; and the retryability table of CONTRACT.md §14.3, with the calls after which each code may end a run | the wire crate's error test |
 
+Every request vector carries the caller's `harness`; the wire crate's tests
+also remove it from each canonical request and check the request is refused
+naming the missing field.
+
 Every canonical vector round-trips: decoding it and encoding the result gives
 back the same JSON. Changing a vector changes the contract: bump the role
 crate's version and say why in the commit.

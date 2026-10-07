@@ -32,6 +32,7 @@ None.
 | Q9: unknown conditions and model patterns | §5: an unknown condition kind means every step; exact id, then the longest trailing-`*` pattern, then `default`. Ruled by Magic Context and Broca. |
 | Q13: stability encoding | §4: an array of `{index, rank}`. Ruled by Magic Context and Broca. |
 | Q14: role-named refusal codes | §11 and §14.3: four role codes with fixed retryability, the provider's own reason in `provider_code`, no `retryable` on the wire; `compaction_unavailable` only after Setup. Ruled by Magic Context and Broca. |
+| Caller's harness (not numbered) | §1, §4, §6: every Setup and step request carries a required `harness` from the session's key; providers key a runner conversation on `(project_root, session, harness)`. Ruled by Magic Context and Broca. |
 
 ## Settled earlier
 

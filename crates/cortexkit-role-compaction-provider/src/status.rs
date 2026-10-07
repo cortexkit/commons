@@ -170,6 +170,12 @@ pub struct StepStatus {
     /// per-session state on it and echoes it verbatim in `compaction.ready`;
     /// it never uses it to choose what it returns.
     pub session: String,
+    /// The caller's harness, from the session's key (`broca` for a session
+    /// an Alfonso mason runs, say). Not the route's bind harness, which is
+    /// `runner` for every Broca route. Required: a request without it does
+    /// not decode. A provider keys a runner conversation on
+    /// `(project_root, session, harness)`.
+    pub harness: String,
     /// This request's id, an opaque string the provider compares only for
     /// equality. Every answer names it, and `compaction.ready` echoes it.
     pub request_id: String,
@@ -237,6 +243,7 @@ impl StepStatus {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         session: impl Into<String>,
+        harness: impl Into<String>,
         request_id: impl Into<String>,
         lineage_id: impl Into<String>,
         step_id: impl Into<String>,
@@ -247,6 +254,7 @@ impl StepStatus {
     ) -> Self {
         Self {
             session: session.into(),
+            harness: harness.into(),
             request_id: request_id.into(),
             lineage_id: lineage_id.into(),
             step_id: step_id.into(),
@@ -438,6 +446,7 @@ mod tests {
     fn builders_match_decoding() {
         let status = StepStatus::new(
             "s",
+            "broca",
             "r1",
             "l1",
             "step-1",
@@ -478,6 +487,7 @@ mod tests {
     fn status() -> StepStatus {
         StepStatus::new(
             "s",
+            "broca",
             "r",
             "l",
             "st",

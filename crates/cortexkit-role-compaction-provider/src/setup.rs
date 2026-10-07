@@ -25,6 +25,12 @@ pub struct SetupRequest {
     /// The runner's opaque name for the session, as every later status
     /// spells it.
     pub session: String,
+    /// The caller's harness, from the session's key (`broca` for a session
+    /// an Alfonso mason runs, say). Not the route's bind harness, which is
+    /// `runner` for every Broca route. Required: a request without it does
+    /// not decode. A provider keys a runner conversation on
+    /// `(project_root, session, harness)`.
+    pub harness: String,
     /// This request's id; the answer names it.
     pub request_id: String,
     /// The session's lineage, absent when nothing has been written yet.
@@ -58,6 +64,7 @@ pub struct SetupRequest {
 impl SetupRequest {
     pub fn new(
         session: impl Into<String>,
+        harness: impl Into<String>,
         request_id: impl Into<String>,
         composition: Map<String, Value>,
         model: impl Into<String>,
@@ -65,6 +72,7 @@ impl SetupRequest {
     ) -> Self {
         Self {
             session: session.into(),
+            harness: harness.into(),
             request_id: request_id.into(),
             lineage_id: None,
             preset: None,
@@ -302,8 +310,8 @@ mod tests {
     fn builders_match_decoding() {
         let mut params = Map::new();
         params.insert("budget".into(), Value::from(3));
-        let request =
-            SetupRequest::new("s", "r0", Map::new(), "m", 1).with_item(Some("head".into()), params);
+        let request = SetupRequest::new("s", "broca", "r0", Map::new(), "m", 1)
+            .with_item(Some("head".into()), params);
         let encoded = serde_json::to_value(&request).unwrap();
         assert_eq!(
             serde_json::from_value::<SetupRequest>(encoded).unwrap(),

@@ -4,6 +4,7 @@
       "name": "a fresh session, nothing written yet",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000001",
         "preset": "head",
         "params": {},
@@ -18,6 +19,7 @@
       "name": "the first user message is already written",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000001",
         "lineage_id": "lin_7",
         "params": {"historian": "off"},

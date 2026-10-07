@@ -255,6 +255,7 @@
       "name": "pre_user ops within the subscription",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -282,6 +283,7 @@
       "name": "pre_user op outside the subscription",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -309,6 +311,7 @@
       "name": "pass is always allowed",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -331,6 +334,7 @@
       "name": "post_assistant replace by the reduction owner",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -360,6 +364,7 @@
       "name": "deny on post_tool",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -386,6 +391,7 @@
       "name": "post_tool op the tool does not accept",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -423,6 +429,7 @@
       "name": "post_tool op the tool accepts",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -459,6 +466,7 @@
       "name": "mutate in mutate",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -484,6 +492,7 @@
       "name": "mutate in validate",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -507,6 +516,7 @@
       "name": "deny in validate",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -530,6 +540,7 @@
       "name": "deny in mutate",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -553,6 +564,7 @@
       "name": "ask in approve",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -582,6 +594,7 @@
       "name": "ask in validate",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -611,6 +624,7 @@
       "name": "ops on pre_tool",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -642,6 +656,7 @@
       "name": "an operation on the second of two text blocks",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -671,6 +686,7 @@
       "name": "an operation past the last text block",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -700,6 +716,7 @@
       "name": "a block index on a subject with one text block",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},

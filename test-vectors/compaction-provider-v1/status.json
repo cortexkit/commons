@@ -4,6 +4,7 @@
       "name": "first step call in the lineage: no cursor, every message",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -59,6 +60,7 @@
       "name": "a tool step after the cursor, with usage",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -125,6 +127,7 @@
       "name": "after an overflow: a provider code and no usage",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -153,6 +156,7 @@
       "name": "a prefix rebuild on a model switch, window unresolved",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -183,6 +187,7 @@
       "name": "the provider's last answer was not applied",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -215,6 +220,7 @@
       "name": "messages capped by bytes: more follow",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -272,6 +278,7 @@
       "name": "runner extras on the status and on a message",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -316,6 +323,7 @@
       "name": "an unknown step kind decodes",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -338,6 +346,7 @@
       "name": "no request id",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "step_id": "st_88",
         "step_kind": "user_turn",
@@ -353,6 +362,7 @@
       "name": "no lineage",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "step_id": "st_88",
         "step_kind": "user_turn",
@@ -368,6 +378,7 @@
       "name": "no messages member",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -383,6 +394,7 @@
       "name": "a cursor that is not a number",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -402,6 +414,7 @@
       "name": "a message at the cursor",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -451,6 +464,7 @@
       "name": "messages out of order",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",
@@ -500,6 +514,7 @@
       "name": "a message newer than newest",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "request_id": "cr-000042",
         "lineage_id": "lin_7",
         "step_id": "st_88",

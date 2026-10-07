@@ -22,6 +22,12 @@ pub struct HookCall {
     /// The runner's opaque name for the session. A provider may key its own
     /// per-session state on it, and never uses it to choose what it returns.
     pub session: String,
+    /// The caller's harness, from the session's key (`broca` for a session
+    /// an Alfonso mason runs, say). Not the route's bind harness, which is
+    /// `runner` for every Broca route. Required: a request without it does
+    /// not decode. A provider keys a runner conversation on
+    /// `(project_root, session, harness)`.
+    pub harness: String,
     /// The session's current lineage. Absent only on `pre_user` for the
     /// first message of a session nothing has been written to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -37,9 +43,10 @@ pub struct HookCall {
 }
 
 impl HookCall {
-    pub fn new(session: impl Into<String>, subject: Subject) -> Self {
+    pub fn new(session: impl Into<String>, harness: impl Into<String>, subject: Subject) -> Self {
         Self {
             session: session.into(),
+            harness: harness.into(),
             lineage_id: None,
             preset: None,
             params: Map::new(),
@@ -161,6 +168,42 @@ impl Subject {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    /// Every canonical hook request, one or more per hook, names its
+    /// caller's harness, and the field survives a round trip.
+    #[test]
+    fn every_hook_request_round_trips_its_harness() {
+        let file = vectors::load("hook-requests.json");
+        let mut hooks = Vec::new();
+        for case in vectors::cases(&file, "requests") {
+            let name = case["name"].as_str().unwrap();
+            let call = vectors::round_trip::<HookCall>(name, &case["request"]);
+            assert_eq!(call.harness, "broca", "{name}");
+            hooks.push(call.subject.hook());
+        }
+        for hook in Hook::ALL {
+            assert!(hooks.contains(&hook), "{hook:?} has no request vector");
+        }
+    }
+
+    /// `harness` is required: removing it from any canonical hook request
+    /// makes the request fail to decode, and the error names the field.
+    #[test]
+    fn a_hook_request_without_harness_is_refused_by_name() {
+        let file = vectors::load("hook-requests.json");
+        for case in vectors::cases(&file, "requests") {
+            let name = case["name"].as_str().unwrap();
+            let mut request = case["request"].clone();
+            assert!(
+                request.as_object_mut().unwrap().remove("harness").is_some(),
+                "{name}"
+            );
+            let error = serde_json::from_value::<HookCall>(request)
+                .expect_err(name)
+                .to_string();
+            assert!(error.contains("missing field `harness`"), "{name}: {error}");
+        }
+    }
 
     #[test]
     fn hook_request_vectors_round_trip() {

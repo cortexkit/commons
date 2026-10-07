@@ -4,6 +4,7 @@
       "name": "pre_user on a human turn",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -17,6 +18,7 @@
       "name": "pre_user on the first message of a fresh session: no lineage",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "params": {
           "tags": "on"
         },
@@ -30,6 +32,7 @@
       "name": "pre_user on a steered prompt with its mark",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -48,6 +51,7 @@
       "name": "post_assistant",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -62,6 +66,7 @@
       "name": "post_assistant with two text blocks around a tool call: only the text blocks are listed",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -77,6 +82,7 @@
       "name": "pre_tool mutate",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -94,6 +100,7 @@
       "name": "pre_tool approve on a deferred call that has a key",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -112,6 +119,7 @@
       "name": "post_tool",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -130,6 +138,7 @@
       "name": "post_tool whose result has two text parts",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -151,6 +160,7 @@
       "name": "runner extras",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -169,6 +179,7 @@
       "name": "an unknown delivery decodes",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -185,6 +196,7 @@
       "name": "unknown hook",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -198,6 +210,7 @@
       "name": "no hook",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -210,6 +223,7 @@
       "name": "pre_tool without a phase",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -224,6 +238,7 @@
       "name": "pre_tool with an unknown phase",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -239,6 +254,7 @@
       "name": "post_tool without is_error",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -254,6 +270,7 @@
     {
       "name": "no session",
       "request": {
+        "harness": "broca",
         "hook": "pre_user",
         "blocks": [
           "x"
@@ -265,6 +282,7 @@
       "name": "pre_user with the removed flat text and no blocks",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},
@@ -276,6 +294,7 @@
       "name": "post_assistant blocks as one string",
       "request": {
         "session": "ses_01J9Z",
+        "harness": "broca",
         "lineage_id": "lin_7",
         "preset": "head",
         "params": {},

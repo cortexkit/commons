@@ -40,6 +40,7 @@ fn op_envelopes_round_trip() {
             ops::TRANSFORM_HOOK,
             HookCall::new(
                 "s",
+                "broca",
                 Subject::PreUser {
                     blocks: vec!["hi".into()],
                     mark: None,
@@ -50,7 +51,7 @@ fn op_envelopes_round_trip() {
             .with_item(Some("head".into()), Map::new()),
         ),
         json!({"method": "transform.hook", "params": {
-            "session": "s", "lineage_id": "l", "preset": "head",
+            "session": "s", "harness": "broca", "lineage_id": "l", "preset": "head",
             "params": {}, "hook": "pre_user", "blocks": ["hi"]
         }}),
     );

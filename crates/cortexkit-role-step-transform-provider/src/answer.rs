@@ -392,12 +392,13 @@ mod tests {
     fn multi_block_subjects_and_operations_round_trip() {
         let call = HookCall::new(
             "s",
+            "broca",
             Subject::PostAssistant {
                 step_id: "st".into(),
                 blocks: vec![text("one"), text("two")],
             },
         );
-        let wire = serde_json::json!({"session": "s", "params": {}, "hook": "post_assistant",
+        let wire = serde_json::json!({"session": "s", "harness": "broca", "params": {}, "hook": "post_assistant",
             "step_id": "st", "blocks": ["one", "two"]});
         assert_eq!(vectors::round_trip::<HookCall>("call", &wire), call);
         assert_eq!(call.subject.blocks().unwrap().len(), 2);

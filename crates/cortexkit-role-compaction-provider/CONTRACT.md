@@ -30,6 +30,17 @@ runner sends to the model.
   op, by name, before routing anything to it.
 - [pinned] Compaction routes are module-level and unscoped. Requests name
   the opaque session handle; it is not an authorization credential.
+- [pinned] Every compaction request, Setup (§4) and step (§6),
+  carries a required string `harness`, next to `session`: the caller's
+  harness, taken from the session's key (`broca`
+  for a session an Alfonso mason runs, say). It is distinct from the
+  route's bind harness, which is always `runner` for a Broca route. A
+  request without `harness` does not decode; it is never defaulted.
+- [pinned] A provider keys a runner conversation, and every piece of
+  per-session state it keeps for one, on `(project_root, session,
+  harness)`: the project root it serves the request for, the session
+  handle and the harness. Two requests that differ in any of the three
+  belong to different conversations.
 - [pinned] Every request in this role, in either direction, is `{method,
   params}` (`OpRequest`): `method` is the op's name and `params` its
   request. `role.describe` takes empty params (`DescribeRequest`).
@@ -107,8 +118,8 @@ the session and freezes that plan for use.
   recorded. So a provider answers Setup for a
   session it has seen before, and its answer is well formed whatever it
   answered last time (kill point `SetupRecorded`).
-- [pinned] The request (`SetupRequest`) is `{session, request_id, preset?,
-  params, composition, model, variant?, context_window?, output_limit?,
+- [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
+  preset?, params, composition, model, variant?, context_window?, output_limit?,
   newest?, lineage_id?, now}`. `model` is a string; `variant`,
   `context_window` and `output_limit` are sibling fields, not a nested
   model object. `params` defaults to `{}`; an absent `preset` selects the
@@ -167,6 +178,7 @@ The status (`StepStatus`) carries:
 - [pinned] `session`, the runner's opaque name for the session. The
   provider keys its per-session state on it and echoes it in
   `compaction.ready`; it never chooses bytes from it.
+- [pinned] `harness`, the caller's harness from the session's key (§1).
 - [pinned] `request_id`, the id of this request (§9): an opaque string the
   provider compares only for equality, the type `llm-runner/v1` gives it.
 - [pinned] `lineage_id`. Ordinals, the cursor and every range are in this
@@ -439,8 +451,9 @@ role's ids show up in it.
   derives only from the preset, the params, the provider's configuration
   and the composition. The same inputs give the same bytes.
 - [pinned] No request in this role carries scope, agent or session identity
-  beyond the opaque `session` handle. A provider uses that handle only as a
-  key for its own per-session state, never to choose a variant. A subagent
+  beyond the opaque `session` handle and the caller's `harness` (§1). A
+  provider uses them only as keys for its own per-session state, never to
+  choose a variant. A subagent
   session gets different behaviour through its preset or params, never
   through who is asking.
 - [pinned] The replacement is history content, not fetched text: it may

@@ -29,6 +29,17 @@ the newest message of a session.
   op, by name, before routing anything to it.
 - [pinned] Step-transform routes are module-level and unscoped. The opaque
   session handle in a hook call is a state key, not an authorization credential.
+- [pinned] Every hook request (`transform.hook`, §7)
+  carries a required string `harness`, next to `session`: the caller's
+  harness, taken from the session's key (`broca`
+  for a session an Alfonso mason runs, say). It is distinct from the
+  route's bind harness, which is always `runner` for a Broca route. A
+  request without `harness` does not decode; it is never defaulted.
+- [pinned] A provider keys a runner conversation, and every piece of
+  per-session state it keeps for one, on `(project_root, session,
+  harness)`: the project root it serves the request for, the session
+  handle and the harness. Two requests that differ in any of the three
+  belong to different conversations.
 - [pinned] Every request in this role is `{method, params}` (`OpRequest`):
   `method` is the op's name and `params` its request. `role.describe`
   takes empty params (`DescribeRequest`).
@@ -274,7 +285,8 @@ the session and freezes that plan for use.
 ## 7. `transform.hook`
 
 - [pinned] The request (`HookCall`) carries `session` (the runner's opaque
-  name for the session), `lineage_id` (absent only on `pre_user` for the
+  name for the session), `harness` (the caller's harness from the session's
+  key, required, §1), `lineage_id` (absent only on `pre_user` for the
   first message of a session nothing has been written to), the plan item's
   `preset` and `params` verbatim, and the subject, tagged by `hook`
   (`Subject`), flattened into the request, not nested under `subject`:
@@ -321,9 +333,9 @@ the session and freezes that plan for use.
   provider's configuration and the composition, never from scope, agent or
   session identity.
 - [pinned] No request in this role carries scope, agent or session identity
-  beyond the opaque `session` handle. A provider uses it only as a key for
-  its own per-session state (a tag counter, say), never to choose a
-  variant.
+  beyond the opaque `session` handle and the caller's `harness` (§1). A
+  provider uses them only as keys for its own per-session state (a tag
+  counter, say), never to choose a variant.
 - [pinned] A provider tells prompts apart itself, by the mark or by their
   wrapping. The runner does not classify turns.
 

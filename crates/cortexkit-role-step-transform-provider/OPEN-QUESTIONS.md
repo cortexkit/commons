@@ -31,6 +31,7 @@ None.
 | Q9: reduction-owner order | §5: hooks run in exact frozen plan order; placing the reduction owner first is the composer's obligation. Ruled by ALF as the plan composer. |
 | Q10: user-tier post_tool replace grant transport | §5: the plan's dedicated `user_grants` field, filled only from the user tier and frozen at admission; a grant anywhere else is ignored. Ruled by ALF as the plan composer. |
 | Q12: `runner_groups` | §2: declared in `role.describe.runner_groups`, checked by the plan composer at composition; an unmet group fails the launch by name. Ruled by ALF as the plan composer. |
+| Caller's harness (not numbered) | §1, §7: every hook request carries a required `harness` from the session's key; providers key a runner conversation on `(project_root, session, harness)`. Ruled by Magic Context and Broca. |
 
 ## Settled earlier
 

@@ -26,10 +26,10 @@ fn op_envelopes_and_empty_answers_round_trip() {
     exact(
         &OpRequest::new(
             ops::COMPACTION_SETUP,
-            SetupRequest::new("s", "r0", Map::new(), "m", 1),
+            SetupRequest::new("s", "broca", "r0", Map::new(), "m", 1),
         ),
         json!({"method": "compaction.setup", "params": {
-            "session": "s", "request_id": "r0", "params": {},
+            "session": "s", "harness": "broca", "request_id": "r0", "params": {},
             "composition": {}, "model": "m", "now": 1
         }}),
     );
@@ -38,6 +38,7 @@ fn op_envelopes_and_empty_answers_round_trip() {
             ops::COMPACTION_STEP,
             StepStatus::new(
                 "s",
+                "broca",
                 "r1",
                 "l",
                 "step",
@@ -48,7 +49,7 @@ fn op_envelopes_and_empty_answers_round_trip() {
             ),
         ),
         json!({"method": "compaction.step", "params": {
-            "session": "s", "request_id": "r1", "lineage_id": "l",
+            "session": "s", "harness": "broca", "request_id": "r1", "lineage_id": "l",
             "step_id": "step", "step_kind": "user_turn", "model": "m",
             "estimate": {"request_tokens": 3}, "messages": [], "now": 1
         }}),
@@ -62,7 +63,7 @@ fn op_envelopes_and_empty_answers_round_trip() {
 
 #[test]
 fn setup_setters_preserve_every_optional_field() {
-    let request = SetupRequest::new("s", "r0", Map::new(), "m", 1)
+    let request = SetupRequest::new("s", "broca", "r0", Map::new(), "m", 1)
         .with_item(Some("head".into()), Map::new())
         .with_lineage("l")
         .with_model_details(Some("high".into()), Some(200), Some(10))
@@ -73,7 +74,7 @@ fn setup_setters_preserve_every_optional_field() {
     exact(
         &request,
         json!({
-            "session": "s", "request_id": "r0", "params": {}, "preset": "head",
+            "session": "s", "harness": "broca", "request_id": "r0", "params": {}, "preset": "head",
             "composition": {}, "model": "m", "now": 1, "lineage_id": "l",
             "variant": "high", "context_window": 200, "output_limit": 10,
             "newest": {"ordinal": 2, "mid": "m2"}

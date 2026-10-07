@@ -160,6 +160,7 @@ pub(crate) mod vectors {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn every_vector_file_on_disk_is_listed() {
@@ -172,6 +173,49 @@ mod tests {
         let mut listed: Vec<String> = vectors::FILES.iter().map(|s| s.to_string()).collect();
         listed.sort();
         assert_eq!(on_disk, listed);
+    }
+
+    /// Every canonical Setup and step request names its caller's harness,
+    /// and the field survives a round trip.
+    #[test]
+    fn every_request_kind_round_trips_its_harness() {
+        let setup = vectors::load("setup.json");
+        for case in vectors::cases(&setup, "requests") {
+            let name = case["name"].as_str().unwrap();
+            let request = vectors::round_trip::<setup::SetupRequest>(name, &case["request"]);
+            assert_eq!(request.harness, "broca", "{name}");
+        }
+        let status = vectors::load("status.json");
+        for case in vectors::cases(&status, "requests") {
+            let name = case["name"].as_str().unwrap();
+            let request = vectors::round_trip::<status::StepStatus>(name, &case["request"]);
+            assert_eq!(request.harness, "broca", "{name}");
+        }
+    }
+
+    /// `harness` is required: removing it from any canonical request makes
+    /// the request fail to decode, and the error names the field.
+    #[test]
+    fn a_request_without_harness_is_refused_by_name() {
+        fn refused<T: serde::de::DeserializeOwned + std::fmt::Debug>(name: &str, request: &Value) {
+            let mut request = request.clone();
+            assert!(
+                request.as_object_mut().unwrap().remove("harness").is_some(),
+                "{name}"
+            );
+            let error = serde_json::from_value::<T>(request)
+                .expect_err(name)
+                .to_string();
+            assert!(error.contains("missing field `harness`"), "{name}: {error}");
+        }
+        let setup = vectors::load("setup.json");
+        for case in vectors::cases(&setup, "requests") {
+            refused::<setup::SetupRequest>(case["name"].as_str().unwrap(), &case["request"]);
+        }
+        let status = vectors::load("status.json");
+        for case in vectors::cases(&status, "requests") {
+            refused::<status::StepStatus>(case["name"].as_str().unwrap(), &case["request"]);
+        }
     }
 
     #[test]
