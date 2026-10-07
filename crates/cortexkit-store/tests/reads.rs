@@ -307,14 +307,17 @@ fn zero_read_pool_size_is_rejected() {
 }
 
 /// Run explicitly with `cargo test -p cortexkit-store --test reads
-/// point_lookup_medians_under_commits -- --ignored --nocapture`.
+/// point_lookup_latency_under_commits -- --ignored --nocapture`.
 #[test]
 #[ignore = "measurement, not a timing gate"]
-fn point_lookup_medians_under_commits() {
+fn point_lookup_latency_under_commits() {
     let db = TestDb::new();
     let store = db.open(SqliteOpenOptions::default());
     // Warm the lazy pool before measuring individual lookups.
     store.with_read(point).unwrap();
+    store
+        .with_conn(|conn| conn.execute_batch("CREATE TABLE IF NOT EXISTS ballast (x BLOB)"))
+        .unwrap();
     let running = Arc::new(AtomicBool::new(true));
     let entered = Arc::new(Barrier::new(2));
     let writer = {
@@ -328,6 +331,11 @@ fn point_lookup_medians_under_commits() {
                     .with_conn(|conn| {
                         let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
                         tx.execute("UPDATE points SET value = value + 1 WHERE id = 1", [])?;
+                        // A realistic write holds the writer for a while: a few hundred
+                        // rows per commit, so a mutexed read can land behind it.
+                        for _ in 0..300 {
+                            tx.execute("INSERT INTO ballast (x) VALUES (zeroblob(256))", [])?;
+                        }
                         if commits == 0 {
                             entered.wait();
                         }
@@ -356,8 +364,12 @@ fn point_lookup_medians_under_commits() {
     conn_times.sort_unstable();
     let read_median = (read_times[499] + read_times[500]) / 2;
     let conn_median = (conn_times[499] + conn_times[500]) / 2;
+    // The pool's benefit is in the tail: a mutexed read waits whenever it lands
+    // behind a commit, which the median hides.
     println!(
         "1000 point lookups per API, {commits} concurrent commits: \
-         with_read median {read_median:?}; with_conn median {conn_median:?}"
+         with_read p50 {read_median:?} p99 {:?} max {:?}; \
+         with_conn p50 {conn_median:?} p99 {:?} max {:?}",
+        read_times[989], read_times[999], conn_times[989], conn_times[999]
     );
 }
