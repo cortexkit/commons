@@ -2,6 +2,13 @@
 
 ## 0.9.0
 
+- Add typed optional Cargo/nextest `select = "expected"` to run only exact
+  `expect_red` harness names on the clean baseline and mutant, including named
+  ignored tests. Emit libtest `--exact` filters or nextest exact-name filtersets,
+  check execution counts and refuse missing/zero-match names as ERROR. Preserve
+  the narrow selection under `--broad`, report why breadth was not observed,
+  and refuse `only = true`, HUB annotations, command rows and unknown values.
+  Key shared baselines by expected names; rows without the field are unchanged.
 - Accept command-row test ids with interior spaces, preserving them byte-for-byte
   as one argv element, in proofs, appended TOML, reports and failure maps. Empty
   ids, leading/trailing whitespace, controls (including tabs, newlines and NUL)

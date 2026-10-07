@@ -95,6 +95,7 @@ impl Fixture {
             no_default_features: None,
             all_features: None,
             ignored: None,
+            select: None,
             command: None,
             broad_command: None,
             broad_report: None,
@@ -183,6 +184,202 @@ fn change(c: &mut Control, old: &str, new: &str, expected: &str) {
     c.expect_red = vec![expected.into()];
 }
 
+fn selection_fixture(ignored: bool) -> Fixture {
+    let f = Fixture::new();
+    let path = f.root().join("src/lib.rs");
+    let mut source = fs::read_to_string(&path)
+        .unwrap()
+        .replace(
+            "fn guard_accepts_positive()",
+            "fn guard_rejects_zero_prefix()",
+        )
+        .replace(
+            "assert!(super::guarded(1));",
+            "panic!(\"unlisted prefix test must not execute\");",
+        );
+    if ignored {
+        for name in ["guard_rejects_zero", "guard_rejects_zero_prefix"] {
+            source = source.replace(
+                &format!("#[test]\n    fn {name}()"),
+                &format!("#[test]\n    #[ignore]\n    fn {name}()"),
+            );
+        }
+    }
+    fs::write(path, source).unwrap();
+    f.commit();
+    f
+}
+
+fn selection_runners() -> Vec<&'static str> {
+    if Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        vec!["cargo", "nextest"]
+    } else {
+        assert!(
+            std::env::var("CK_MUTATE_REQUIRE_NEXTEST").as_deref() != Ok("1"),
+            "nextest is required"
+        );
+        vec!["cargo"]
+    }
+}
+
+#[test]
+fn select_expected_prefix_runs_only_named_tests() {
+    let f = selection_fixture(false);
+    for runner in selection_runners() {
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.only = false;
+        c.select = Some(TestSelection::Expected);
+        for broad in [false, true] {
+            let row = if broad {
+                run_broad_row(f.root(), &c, false, &AtomicBool::new(false)).unwrap()
+            } else {
+                f.run(&c)
+            };
+            assert_eq!(
+                row.outcome,
+                Outcome::Caught,
+                "{runner} broad={broad}: {row:?}"
+            );
+            assert_eq!(row.red, ["tests::guard_rejects_zero"]);
+            assert!(row.green.is_empty());
+            assert!(row.baseline_red.is_empty());
+            assert_eq!(row.collateral.count, 0);
+            assert!(!row.breadth_observed);
+            assert!(row.reason.unwrap().contains("selection was expected-only"));
+            assert!(!row
+                .test_tail
+                .contains("unlisted prefix test must not execute"));
+        }
+        c.expect_red.push("tests::unrelated_test".into());
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::Survived, "{row:?}");
+        assert_eq!(row.red, ["tests::guard_rejects_zero"]);
+        assert_eq!(row.green, ["tests::unrelated_test"]);
+    }
+}
+
+#[test]
+fn select_expected_runs_only_named_ignored_tests() {
+    let f = selection_fixture(true);
+    for runner in selection_runners() {
+        for ignored in [IgnoredSelection::Only, IgnoredSelection::Include] {
+            let mut c = f.control();
+            c.runner = runner.into();
+            c.only = false;
+            c.select = Some(TestSelection::Expected);
+            c.ignored = Some(ignored);
+            let row = f.run(&c);
+            assert_eq!(
+                row.outcome,
+                Outcome::Caught,
+                "{runner} {ignored:?}: {row:?}"
+            );
+            assert_eq!(row.red, ["tests::guard_rejects_zero"]);
+            assert!(row.green.is_empty() && row.baseline_red.is_empty());
+            assert!(!row.breadth_observed);
+        }
+    }
+}
+
+#[test]
+fn select_expected_missing_name_is_error_naming_the_test() {
+    let f = Fixture::new();
+    for runner in selection_runners() {
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.only = false;
+        c.select = Some(TestSelection::Expected);
+        c.expect_red = vec!["tests::guard_rejects".into()];
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::Error, "{runner}: {row:?}");
+        assert!(row.reason.unwrap().contains("tests::guard_rejects"));
+    }
+}
+
+#[test]
+fn select_expected_refuses_strict_breadth_hubs_commands_and_unknown_values() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.select = Some(TestSelection::Expected);
+    let path = f.root().join("selection.toml");
+    for kind in ["only", "hub", "hub_targets", "command"] {
+        let mut bad = c.clone();
+        bad.only = kind == "only";
+        match kind {
+            "hub" => bad.hub = Some("approved shared guard across several test binaries".into()),
+            "hub_targets" => bad.hub_targets = Some(vec!["Other".into()]),
+            "command" => bad.runner = "command".into(),
+            _ => {}
+        }
+        fs::write(
+            &path,
+            toml::to_string(&Catalogue {
+                control: vec![bad],
+                ..Catalogue::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let error = load(&path).err().expect("invalid selection must fail load");
+        assert!(
+            error.contains("select") && error.contains("guard"),
+            "{error}"
+        );
+    }
+    c.only = false;
+    let text = toml::to_string(&Catalogue {
+        control: vec![c.clone()],
+        ..Catalogue::default()
+    })
+    .unwrap();
+    fs::write(&path, &text).unwrap();
+    assert_eq!(
+        load(&path).unwrap().control[0].select,
+        Some(TestSelection::Expected)
+    );
+    fs::write(
+        &path,
+        text.replace("select = \"expected\"", "select = \"substring\""),
+    )
+    .unwrap();
+    let error = load(&path).err().unwrap();
+    assert!(error.contains("select"), "{error}");
+}
+
+#[test]
+fn select_expected_session_baselines_are_keyed_by_exact_names() {
+    let f = Fixture::new();
+    let mut c = f.control();
+    c.select = Some(TestSelection::Expected);
+    c.only = false;
+    let mut second = c.clone();
+    second.id = "positive-guard".into();
+    second.expect_red = vec!["tests::guard_accepts_positive".into()];
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![c, second],
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    f.commit();
+    let out = f.cli(&["run", "--all", "--broad", "--report", ".git/selection.json"]);
+    assert!(!out.status.success(), "one selected test should survive");
+    let rows: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root().join(".git/selection.json")).unwrap()).unwrap();
+    assert_eq!(rows[0]["outcome"], "CAUGHT", "{rows}");
+    assert_eq!(rows[1]["outcome"], "SURVIVED", "{rows}");
+    assert_eq!(rows[0]["breadth_observed"], false);
+    assert_eq!(rows[1]["breadth_observed"], false);
+}
+
 const COMMAND_GUARD: &str = "script.tests.flows_rig.RigChecks.test_guard";
 const COMMAND_OTHER: &str = "script.tests.flows_rig.RigChecks.test_other";
 const COMMAND_VACUOUS: &str = "script.tests.flows_rig.RigChecks.test_vacuous";
@@ -244,6 +441,7 @@ impl CommandFixture {
             no_default_features: None,
             all_features: None,
             ignored: None,
+            select: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
             broad_command: None,
             broad_report: None,

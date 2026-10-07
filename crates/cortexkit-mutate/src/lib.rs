@@ -51,6 +51,9 @@ pub struct Control {
     /// tests that are not ignored, as Cargo does by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignored: Option<IgnoredSelection>,
+    /// Run only exact expected test names rather than the whole target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<TestSelection>,
     /// An argv template, not a shell string; substitutes one expected test id.
     pub command: Option<Vec<String>>,
     /// Package-wide argv run only during a breadth audit, after named tests.
@@ -114,6 +117,12 @@ pub enum IgnoredSelection {
     Include,
     /// Run only the ignored tests.
     Only,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TestSelection {
+    Expected,
 }
 
 impl IgnoredSelection {
@@ -181,6 +190,20 @@ impl Control {
     fn validate_runner(&self) -> Result<()> {
         self.validate_platforms()?;
         let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
+        if self.select.is_some() {
+            if !matches!(self.runner.as_str(), "cargo" | "nextest") {
+                return Err(invalid(
+                    "select",
+                    "is supported only for cargo/nextest rows",
+                ));
+            }
+            if self.only || self.hub.is_some() || self.hub_targets.is_some() {
+                return Err(invalid("select = expected", "cannot be combined with only = true, hub or hub_targets: breadth is not observed"));
+            }
+            if self.expect_red.is_empty() {
+                return Err(invalid("select = expected", "requires nonempty expect_red"));
+            }
+        }
         let broad_fields = [
             self.broad_command.is_some(),
             self.broad_report.is_some(),
@@ -1276,6 +1299,13 @@ enum Scope {
 }
 
 fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
+    // Expected-only rows never widen their target or named-test selection,
+    // including when a caller asks for an expensive breadth pass.
+    let scope = if c.select.is_some() {
+        Scope::Row
+    } else {
+        scope
+    };
     let package = c.package.as_deref().unwrap_or_default();
     let mut cmd = Command::new("cargo");
     if c.runner == "nextest" {
@@ -1326,11 +1356,41 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
         _ if c.runner == "cargo" => {
             cmd.args(["--no-fail-fast", "--", "--test-threads=1"]);
             cmd.args(c.ignored.map(IgnoredSelection::libtest_arg));
+            if c.select.is_some() {
+                cmd.arg("--exact").args(&c.expect_red);
+            }
         }
         _ => {
             cmd.args(["--no-fail-fast", "--retries", "0"]);
             if let Some(ignored) = c.ignored {
                 cmd.args(["--run-ignored", ignored.nextest_value()]);
+            }
+            if c.select.is_some() {
+                let expression = c
+                    .expect_red
+                    .iter()
+                    .map(|name| {
+                        let mut escaped = String::new();
+                        for ch in name.chars() {
+                            match ch {
+                                '\\' | '/' | ')' | ',' => {
+                                    escaped.push('\\');
+                                    escaped.push(ch);
+                                }
+                                '\n' => escaped.push_str("\\n"),
+                                '\r' => escaped.push_str("\\r"),
+                                '\t' => escaped.push_str("\\t"),
+                                c if c.is_control() => {
+                                    escaped.push_str(&format!("\\u{{{:X}}}", c as u32))
+                                }
+                                _ => escaped.push(ch),
+                            }
+                        }
+                        format!("test(={escaped})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                cmd.args(["-E", &expression]);
             }
             let help = Command::new("cargo")
                 .args(["nextest", "run", "--help"])
@@ -2146,6 +2206,7 @@ fn cargo_baseline(
         return Err(format!("baseline test run failed: {}", tail(&tests.text)));
     }
     let results = parse_test_results(&tests.text, &c.runner)?;
+    validate_selected_execution(c, &results)?;
     report.baseline_failures = results.failures();
     if let Some((name, signal)) = results.signals.iter().next() {
         return Err(format!("baseline {name}: test binary died by {signal}"));
@@ -2180,6 +2241,35 @@ fn validate_baseline(c: &Control, report: &mut Report) -> Result<()> {
         {
             report.outcome = Outcome::NoTestsRan;
         }
+    }
+    Ok(())
+}
+
+fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()> {
+    if c.select.is_none() {
+        return Ok(());
+    }
+    for name in &c.expect_red {
+        // Exact selectors use the real harness name, not a binary-qualified
+        // report identity. Zero matches and skipped tests are never success.
+        if !results.names.iter().any(|(id, actual)| {
+            actual == name && (results.red.contains(id) || results.green.contains(id))
+        }) {
+            return Err(format!(
+                "{}: select = expected test {name:?} did not execute (zero matching tests)",
+                c.id
+            ));
+        }
+    }
+    if let Some(name) = results
+        .names
+        .values()
+        .find(|name| !c.expect_red.contains(name))
+    {
+        return Err(format!(
+            "{}: select = expected ran unlisted test {name:?}",
+            c.id
+        ));
     }
     Ok(())
 }
@@ -2830,6 +2920,10 @@ impl ReplaySession {
                     "ignored={}",
                     c.ignored.map_or("none", IgnoredSelection::as_str)
                 ));
+                if c.select.is_some() {
+                    key.push("select=expected".into());
+                    key.extend(c.expect_red.iter().cloned());
+                }
                 key
             } else {
                 vec![c.id.clone()]
@@ -2854,7 +2948,7 @@ impl ReplaySession {
                 }
                 // Baseline data is shared, but each row's expected reds are
                 // validated independently before its mutant can be applied.
-                if c.runner != "command" {
+                if c.runner != "command" && c.select.is_none() {
                     selection.expect_red.clear();
                 }
                 let report = replay(
@@ -3296,6 +3390,7 @@ fn replay(
             ));
         }
         let mut results = parse_test_results(&tests.text, &c.runner)?;
+        validate_selected_execution(c, &results)?;
         report.failures = results.failures();
         // Match baseline-red tests by (test binary, plain test name). A `--broad`
         // run prefixes a name with its binary when two binaries share it, so
@@ -3322,7 +3417,7 @@ fn replay(
                 );
                 let (extra, cross_targets) = collateral(&grading, &results)?;
                 report.collateral = extra;
-                report.breadth_observed = scope == Scope::Broad;
+                report.breadth_observed = scope == Scope::Broad && c.select.is_none();
                 let mut outcome = grade(&grading, &results.red, &results.green);
                 for name in &grading.expect_red {
                     if results.red.contains(name) {
@@ -3377,6 +3472,13 @@ fn replay(
         report.reason = Some(e);
     }
     report.prebuild_tail = tail(&report.prebuild_tail);
+    if c.select.is_some() && !baseline_only {
+        let selection = "selection was expected-only; breadth not observed";
+        report.reason = Some(report.reason.map_or_else(
+            || selection.to_owned(),
+            |reason| format!("{reason}; {selection}"),
+        ));
+    }
     Ok(report)
 }
 
@@ -3997,6 +4099,60 @@ mod broad_command_tests {
     use super::*;
 
     #[test]
+    fn expected_selection_builds_exact_libtest_and_nextest_filters_without_widening() {
+        let mut row: Control = toml::from_str(
+            r#"
+id = "selected"
+guards = "only the exact guard executes"
+file = "src/lib.rs"
+old = "guard()"
+new = "true"
+test_file = "src/lib.rs"
+runner = "cargo"
+package = "fixture"
+target = "--lib"
+select = "expected"
+ignored = "only"
+expect_red = ["tests::guard", "tests::other"]
+"#,
+        )
+        .unwrap();
+        for runner in ["cargo", "nextest"] {
+            row.runner = runner.into();
+            for scope in [Scope::Row, Scope::Broad, Scope::Package] {
+                let cmd = command(&row, "run", scope).unwrap();
+                let args: Vec<_> = cmd
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect();
+                assert!(args.contains(&"--lib".into()));
+                assert!(!args.contains(&"--tests".into()));
+                if runner == "cargo" {
+                    assert!(args.ends_with(&[
+                        "--ignored".into(),
+                        "--exact".into(),
+                        "tests::guard".into(),
+                        "tests::other".into()
+                    ]));
+                } else {
+                    let filter = args.windows(2).find(|args| args[0] == "-E").unwrap();
+                    assert_eq!(filter[1], "test(=tests::guard) | test(=tests::other)");
+                    assert!(args
+                        .windows(2)
+                        .any(|args| args == ["--run-ignored", "only"]));
+                }
+                let build = command(&row, "build", scope).unwrap();
+                assert!(!build.get_args().any(|arg| arg == "--exact" || arg == "-E"));
+                let list = command(&row, "list", scope).unwrap();
+                assert!(!list.get_args().any(|arg| arg == "--exact" || arg == "-E"));
+            }
+        }
+        row.expect_red = vec!["a),b\\c".into()];
+        let cmd = command(&row, "run", Scope::Row).unwrap();
+        assert!(cmd.get_args().any(|arg| arg == "test(=a\\)\\,b\\\\c)"));
+    }
+
+    #[test]
     fn feature_flags_reach_every_runner_mode_and_scope_before_the_harness() {
         let mut c =
             toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
@@ -4500,6 +4656,7 @@ mod order_tests {
             no_default_features: None,
             all_features: None,
             ignored: None,
+            select: None,
             command: None,
             broad_command: None,
             broad_report: None,

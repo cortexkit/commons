@@ -436,6 +436,46 @@ If a repo folds test binaries or changes module structure, update its rows.
 Names duplicated across binaries are ambiguous and fail closed rather than
 being silently combined. Ignored tests do not count as having run.
 
+### Exact expected-test selection (0.9.0)
+
+Cargo and nextest rows may opt into **`select = "expected"`** when a target
+contains an expensive folded rig and only a few named tests guard this mutant:
+
+```toml
+[[control]]
+id = "rig-isolates-sessions"
+guards = "the daemon rig isolates sessions"
+file = "src/session.rs"
+old = "session.id()"
+new = "default_session.id()"
+test_file = "tests/rig.rs"
+runner = "cargo" # or "nextest"
+package = "my-package"
+target = "--test rig"
+ignored = "only"
+select = "expected"
+expect_red = ["sessions::isolates_sessions"]
+```
+
+Only the `expect_red` names execute on both the clean baseline and the mutant:
+libtest receives the complete names as filters with `--exact`; nextest receives
+an equality filterset (`test(=sessions::isolates_sessions)`, with OR for multiple
+names). `ignored = "only"` or `"include"` still applies, but does not expand the
+name selection. Use real full harness names, not binary-qualified report aliases,
+and a target selector that identifies them unambiguously. Missing names, zero
+executed matches or selected tests that only skip are ERROR naming the test. The
+runner's count summary must agree with its per-test events; an unlisted executed
+name is also ERROR. Builds and name listing keep their usual target/feature
+selection; listing is not test execution. Without `select`, nothing changes.
+
+This mode never observes breadth, **even under `run --broad`**: the row's target
+and exact name selection stay narrow, `breadth_observed` is false, and the report
+reason says `selection was expected-only; breadth not observed`. `only = true`,
+`hub` and `hub_targets` are refused by name because they would claim breadth that
+did not run. Command rows cannot carry `select`. Baseline sharing keys include
+the exact expected names, so different name selections never borrow a baseline.
+To audit collateral, run a copy of the row without `select` under `--broad`.
+
 ## Command rows
 
 For Python, Bun, Xcode/Swift, or another runner with a per-test invocation, use
