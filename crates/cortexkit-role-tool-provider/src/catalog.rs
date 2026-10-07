@@ -278,7 +278,11 @@ impl CatalogTool {
 pub struct SystemTextAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// SHA-256 of the exact UTF-8 bytes of the text, as 64 lowercase hex
+    /// ([`system_text_digest`]), present whether or not `text` is.
     pub item_digest: String,
+    /// Provider-defined; changes whenever the text this request resolves to
+    /// would. Compared only with an earlier `preflight_digest`.
     pub preflight_digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_digest: Option<String>,
@@ -465,15 +469,13 @@ pub fn composition_digest(composition: &Value) -> Result<String, SchemaDigestErr
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// A system-text item's `item_digest` and `preflight_digest`: SHA-256 of the
-/// exact UTF-8 bytes of the text, as 64 lowercase hex characters.
+/// A system-text item's `item_digest`: SHA-256 of the exact UTF-8 bytes of
+/// the text, as 64 lowercase hex characters.
 ///
 /// The text itself is hashed, not a JSON object wrapping it, so a runner can
 /// check a fetched `text` against the digest by hashing what it received.
-/// `item_digest` is the digest of the text this answer resolved to, whether or
-/// not `text` is included; `preflight_digest` is the same function over the
-/// text a preflight of the same request resolves to, so the two are equal
-/// while the provider's configuration is unchanged.
+/// `preflight_digest` is not defined by this function: a provider may digest
+/// its inputs instead, as long as it changes whenever the text would.
 pub fn system_text_digest(text: &str) -> String {
     let digest = Sha256::digest(text.as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
