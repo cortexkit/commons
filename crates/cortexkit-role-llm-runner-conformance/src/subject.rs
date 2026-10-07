@@ -39,6 +39,8 @@ pub enum Capability {
     /// The `session_change` group. No case the suite implements yet
     /// requires it.
     SessionChange,
+    /// Whole-session retention with limits from `role.describe.retention`.
+    Retention,
     /// The subject's scripted tool provider can hold a call it received
     /// until the suite releases it. See
     /// [`LlmRunnerSubject::await_tool_call`] and
@@ -65,6 +67,7 @@ impl Capability {
         Self::Interrupt,
         Self::Compaction,
         Self::SessionChange,
+        Self::Retention,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -93,6 +96,7 @@ impl Capability {
             Self::Interrupt => groups::INTERRUPT,
             Self::Compaction => groups::COMPACTION,
             Self::SessionChange => groups::SESSION_CHANGE,
+            Self::Retention => groups::RETENTION,
             Self::HoldToolCalls | Self::KillAt(_) => return None,
         })
     }
@@ -245,6 +249,37 @@ pub trait LlmRunnerSubject: Harness {
     /// Let the held call with `arguments` answer its scripted result.
     /// Required by [`Capability::HoldToolCalls`].
     async fn release_tool_call(&self, arguments: &Value) -> Result<(), HarnessError>;
+
+    /// Inspect the runner's durable deletion-completion report and its
+    /// runner-held transcript/derived stores for this session. Required for
+    /// retention cases. Do not infer completion from an `expired` read: a
+    /// tombstone hides content before deletion is finished. Return true only
+    /// once deletion has actually finished, including after a restart.
+    async fn retention_deletion_finished(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<bool, HarnessError> {
+        Err(HarnessError::new(
+            "retention deletion inspection is not implemented",
+        ))
+    }
+
+    /// Classify every advertised non-role op for the retention leak check.
+    /// Return `Some` with all request variants needed to export/list/read
+    /// content for `session` (including all listing pages), or `None` only
+    /// for ops that cannot serve stored session content. Export/list schemas
+    /// are runner-specific, so the suite cannot construct these requests.
+    /// An unclassified advertised op fails the check, never silently skips it.
+    fn retention_probe_params(
+        &self,
+        _session: &str,
+        method: &str,
+    ) -> Result<Option<Vec<Value>>, HarnessError> {
+        Err(HarnessError::new(format!(
+            "unclassified retention probe op: {method}"
+        )))
+    }
 
     /// Wait a short while. The suite calls this between polls while it
     /// waits for a run to end.

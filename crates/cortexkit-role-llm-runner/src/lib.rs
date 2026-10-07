@@ -122,6 +122,9 @@ pub mod capabilities {
     /// it gets no mid-session changes; its owner applies them at the next
     /// session instead.
     pub const SESSION_CHANGE: &str = "session_change";
+    /// Caller-chosen whole-session transcript retention, with limits in
+    /// `role.describe.retention`.
+    pub const RETENTION: &str = "retention";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -140,6 +143,7 @@ pub mod capabilities {
         (QUEUE, &[ops::SESSION_SEND]),
         (INTERRUPT, &[ops::SESSION_SEND]),
         (PLANS, &[ops::SESSION_SEND]),
+        (RETENTION, &[ops::SESSION_SEND]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,

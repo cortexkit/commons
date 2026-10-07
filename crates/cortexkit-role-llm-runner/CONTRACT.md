@@ -62,7 +62,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, retention?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -119,6 +119,7 @@ shipping runner with this document.
 | `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
 | `compaction` | `compaction.ready`, and the calls of §11.1 the runner makes | §11.1 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
+| `retention` | `session.send` with `retention` | §9.1 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
@@ -426,6 +427,77 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   `confirm` runner, where absent already means `pending`; a `guaranteed`
   runner never answers `pending` at all.
 
+### 9.1 `retention`: whole-session transcript lifetime
+
+A runner declaring the `retention` capability group must implement all the
+rules in this section. These rules govern the entire session lineage, not
+individual runs: the transcript is append-only and each run's prompt replays
+earlier runs. Deleting individual runs would break that replay.
+
+**Discovery and sends.** `role.describe` lists `retention` in `capabilities`
+and carries `retention: {max_seconds: u64, delete_within_ms: u64}`
+(`Retention`). `max_seconds` must be positive; `delete_within_ms` is the
+maximum delay from expiry to complete deletion of runner-held content.
+`check_describe` refuses a declared group without limits (`missing_retention`)
+or with a zero maximum (`invalid_retention`).
+
+`session.send` accepts optional `retention: u64`, in seconds
+(`SendRequest::retention`). The first accepted send freezes it for the whole
+session. Absence on that first send means kept forever. On an existing
+lineage, a later send may shorten the current value; an equal value leaves
+the policy unchanged. A longer value, or any later retention on a lineage
+first sent without retention, is refused `invalid_params {field: "retention"}`.
+Absence on a later send leaves the current policy unchanged, never resets it
+to forever. Zero is refused by the same name. A value above `max_seconds` is
+refused `invalid_params` with `detail: {field: "retention", max_seconds}`
+(`RetentionInvalidDetail`). A runner without the group refuses any retention
+as `invalid_params {field: "retention"}`, never ignores it. Refusals write
+nothing. These checks apply to every delivery mode.
+
+**Expiry and activity.** Expiry is wall-clock last activity plus the current
+retention. Last activity is the time of the newest durable send, step or
+terminal record; reads do not extend it. `expired_at_ms` is that expiry time
+in milliseconds since the Unix epoch, not the time deletion finishes. A
+session with any non-terminal run never expires, even when it has no new
+records for longer than its retention. In particular, a paused run (including
+an authentication or restart pause) is non-terminal. Long tool calls and held
+steers do not expire either. The clock restarts from the terminal record when
+the last non-terminal run ends.
+
+An accepted send that shortens an idle, unexpired session continues the same
+lineage, preserving earlier messages. It records new activity, and the
+shorter clock applies from that activity; its active run then defers expiry
+as above. Whether the session was already expired is decided using its old
+retention, never the shorter value supplied by the new send. A session past
+its old retention is expired even if deletion has not finished yet. A send to
+that session starts a fresh lineage, with that send's own retention (absent
+means forever), never replays the expired content and never reuses its lineage
+id. Deletion of the old lineage must not delete the new one.
+
+**Deletion.** At expiry the runner durably records a content-free tombstone
+first, then deletes the transcript and every runner-held derived copy,
+including projections, snapshots and archives, within `delete_within_ms`.
+It must finish an interrupted deletion on restart. The tombstone survives
+deletion so expiry remains distinguishable from a session never written.
+
+Only content-free accounting and identity metadata may remain: identifiers
+of the session, runs, provider, model, credential and account; timestamps;
+token counts and cost; charge and billing classification; terminal status
+and error codes. None may contain message, system or tool text, tool arguments
+or results, or caller-supplied free text such as a run `title`. Copies held
+by other modules, including a compaction provider's own state and backups,
+are their owners' responsibility. This contract covers runner-held copies only.
+
+**Reads.** `session.read` (including model view), `session.head` and
+`run.result` on an expired session answer an `ERROR` with code `expired` and
+`detail: {expired_at_ms}` (`ExpiredDetail`). A runner that serves `run.status`
+answers the same refusal; its normal reply remains runner-specific. `expired`
+is terminal and never retried. It is not an empty page: that would falsely
+say the session has no messages, rather than that its messages expired.
+A session never written keeps the existing empty success answers. No read,
+export or listing may serve expired content, including free-text titles,
+even when retained accounting or identity metadata is served.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -644,6 +716,7 @@ treats it as a terminal refusal of that one request.
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `unknown_run` | `run.result` names no run of the session | — | no |
+| `expired` | a read of an expired session (§9.1), including `run.status` if served | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode | `field` | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send into a session whose last run is paused | `{run_id, reason}` | no |
@@ -715,7 +788,9 @@ lists them.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
   `session.send` tolerates unknown fields (a newer owner against an older
   runner degrades rather than fails), but `delivery` refuses an unknown value
-  naming the field. `view` on `session.read` is strict the same way.
+  naming the field. `retention` is a recognized field even on a runner without
+  its group, and is refused there (§9.1), never treated as an unknown extra.
+  `view` on `session.read` is strict the same way.
 - [pinned] A capability is declared only by being listed (`role.describe`)
   or by the value `true` (`session_capabilities`); any other value declares
   nothing.
@@ -767,7 +842,10 @@ state root (`cortexkit-role-harness`):
 8. [pinned] **Resume is recorded.** Each resume writes one informational
    record, before its first action, of what it replays, what it redoes and
    which calls it marks indeterminate. It never enters what the model is
-   sent.
+    sent.
+9. **Expiry deletion survives a crash.** A durable retention tombstone makes
+   the lineage unreadable; restart finishes deleting its transcript and all
+   runner-held derived copies (§9.1).
 
 Kill points (`points.rs`). [pinned] The list below. Approval-gated calls'
 points join it with the runner's approve-gate work.
@@ -782,6 +860,7 @@ points join it with the runner's approve-gate work.
 | `DispatchIntent` | a call's dispatch intent; the call may have been sent | 4, 7 |
 | `ToolResultRecorded` | a call's result with its PostTool output | 4, 5 |
 | `Terminal` | the run's terminal state | 3 |
+| `RetentionTombstoned` | a content-free expiry tombstone; transcript and derived copies not yet deleted | 9 |
 
 A runner whose durable state lives in a store where truncation is not
 meaningful reaches these points with a fault hook followed by a real process
@@ -817,6 +896,11 @@ step-transform providers. It will check:
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
 | `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
+| `retention_honoured`, `retention_no_content_served`, `retention_shorten_continues_lineage`, `retention_equal_noop`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
+| `retention_run_status_expired` | the above, and `run.status` served (otherwise not applicable) |
+| `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
+| `retention_active_run_never_expires` | `retention`, `queue`, `transcript_reads`, `run_ops`, held non-terminal run (active or paused) |
+| `crash_at_RetentionTombstoned` | `retention`, `queue`, `transcript_reads`, `run_ops`, and `RetentionTombstoned`; real process kill, expiry remains readable by name and deletion completion is reported after restart |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run
 state, an unknown event kind, a describe answer with a partial group, a

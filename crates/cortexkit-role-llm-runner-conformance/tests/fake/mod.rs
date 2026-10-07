@@ -40,7 +40,7 @@ use cortexkit_role_llm_runner_conformance::{
     wire::{
         baseline::{Baseline, BaselineItem, BaselineReply},
         capabilities as groups,
-        describe::{Major, RoleDescribe},
+        describe::{Major, Retention, RoleDescribe},
         errors, ops, points,
         read::{
             HeadMeta, LastRunState, ReadMessage, ReadMode, ReadPage, ReadRequest, ReadView,
@@ -61,6 +61,39 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 pub const TOOL_MODULE: &str = "fake.tools";
+pub const RETENTION_MAX: u64 = 4;
+const RETENTION_DELETE_MS: u64 = 100;
+// Self-tests neutralize this switch to prove their named failure assertions
+// observe the deliberate runner defects rather than a precomputed verdict.
+const RETENTION_DEFECTS_ENABLED: bool = true;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RetentionDefect {
+    #[default]
+    None,
+    Ignore,
+    Empty,
+    Timestamp,
+    ReuseLineage,
+    Inherit,
+    ShortenIgnored,
+    ShortenReplaces,
+    EqualRefused,
+    LengthenAccepted,
+    LateOptInAccepted,
+    ZeroAccepted,
+    AboveMaxAccepted,
+    MaxDetailMissing,
+    WithoutGroupIgnored,
+    ExpireHeld,
+    ClockNotRestarted,
+    DeleteIncomplete,
+    TombstoneForgotten,
+    TitleLeak,
+    PromptLeak,
+    ToolLeak,
+    Status,
+}
 const DEFAULT_MAX_BYTES: u64 = 64 * 1024;
 const MAXIMUM_MAX_BYTES: u64 = 1024 * 1024;
 const DEFAULT_LIMIT: u64 = 100;
@@ -152,6 +185,10 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    retention_defect: RetentionDefect,
+    epoch: tokio::time::Instant,
+    held_paused: bool,
+    advertise_status: bool,
     defects: Defects,
     step_recovery: StepRecovery,
     queue_receipt_pending_then_unknown: bool,
@@ -175,6 +212,9 @@ struct World {
 }
 
 impl World {
+    fn now(&self) -> u64 {
+        1_790_000_000_000 + self.epoch.elapsed().as_millis() as u64
+    }
     fn serves(&self, group: &str) -> bool {
         self.groups.iter().any(|served| served == group)
     }
@@ -255,6 +295,11 @@ struct CallRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    retention: Option<u64>,
+    last_activity: u64,
+    expired_at: Option<u64>,
+    deleted: bool,
+    title: Option<String>,
     owner: String,
     lineage: String,
     messages: Vec<Msg>,
@@ -295,6 +340,7 @@ fn point_of(kind: &str) -> &'static str {
         "intent" => points::DISPATCH_INTENT,
         "result" => points::TOOL_RESULT_RECORDED,
         "terminal" => points::TERMINAL,
+        "tombstone" => points::RETENTION_TOMBSTONED,
         _ => "",
     }
 }
@@ -335,6 +381,110 @@ pub struct Module {
 }
 
 impl Module {
+    fn sweep(&self, session: &str) -> Result<(), Killed> {
+        let state = self.sessions.lock().unwrap().get(session).cloned();
+        let Some(state) = state else {
+            return Ok(());
+        };
+        if state.expired_at.is_some() {
+            self.finish_deletion(session);
+            return Ok(());
+        }
+        if self.world.retention_defect == RetentionDefect::Ignore {
+            return Ok(());
+        }
+        if self.world.retention_defect != RetentionDefect::ExpireHeld
+            && state
+                .runs
+                .iter()
+                .any(|run| run.state == "active" || run.state == "paused")
+        {
+            return Ok(());
+        }
+        if let Some(seconds) = state.retention {
+            let expiry = state.last_activity + seconds * 1000;
+            if self.world.now() >= expiry {
+                self.commit(session, json!({"kind":"tombstone", "expired_at_ms":expiry}))?;
+                self.finish_deletion(session);
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_deletion(&self, session: &str) {
+        let state = self.sessions.lock().unwrap().get(session).cloned();
+        let Some(state) = state else {
+            return;
+        };
+        if state.expired_at.is_none()
+            || state.deleted
+            || self.world.retention_defect == RetentionDefect::DeleteIncomplete
+        {
+            return;
+        }
+        // The fake really removes the session's disk records as well as its
+        // replay projection, retaining a content-free tombstone and completion.
+        let text = std::fs::read_to_string(&self.log).unwrap_or_default();
+        let mut kept: Vec<Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .filter(|r: &Value| r["session"] != json!(session) || r["kind"] == json!("tombstone"))
+            .collect();
+        let mut record = json!({"kind":"deleted", "session":session, "at":self.world.now()});
+        if self.world.retention_defect == RetentionDefect::TitleLeak {
+            record["title"] = json!(state.title);
+        }
+        if self.world.retention_defect == RetentionDefect::PromptLeak {
+            record["leaked"] = json!(state
+                .messages
+                .iter()
+                .find(|m| m.body["role"] == "user")
+                .map(|m| m.body.clone()));
+        }
+        if self.world.retention_defect == RetentionDefect::ToolLeak {
+            record["leaked"] = json!(state
+                .messages
+                .iter()
+                .find(|m| m.body["role"] == "tool")
+                .map(|m| m.body.clone()));
+        }
+        kept.push(record.clone());
+        let mut file = std::fs::File::create(&self.log).unwrap();
+        for value in kept {
+            writeln!(file, "{value}").unwrap();
+        }
+        file.sync_all().unwrap();
+        self.apply(&record);
+    }
+
+    fn expiry_reply(&self, session: &str) -> Option<Reply> {
+        let sessions = self.sessions.lock().unwrap();
+        let expiry = sessions.get(session)?.expired_at?;
+        if self.world.retention_defect == RetentionDefect::Empty {
+            return None;
+        }
+        Some(refuse(
+            errors::EXPIRED,
+            Some(
+                json!({"expired_at_ms":expiry + u64::from(self.world.retention_defect == RetentionDefect::Timestamp)}),
+            ),
+        ))
+    }
+
+    fn listing(&self, session: &str) -> Reply {
+        let sessions = self.sessions.lock().unwrap();
+        let title = sessions.get(session).and_then(|s| s.title.clone());
+        let records: Vec<Value> = std::fs::read_to_string(&self.log)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .filter(|r: &Value| r["session"] == json!(session))
+            .collect();
+        respond(
+            json!({"title":title, "leaked":records.iter().filter_map(|r| r.get("leaked")).collect::<Vec<_>>()}),
+        )
+    }
+
     fn open(root: &Path, world: Arc<World>) -> Result<Arc<Self>, HarnessError> {
         std::fs::create_dir_all(root).map_err(|e| HarnessError::new(e.to_string()))?;
         let module = Arc::new(Self {
@@ -353,6 +503,23 @@ impl Module {
             }
         }
         let _ = module.resume();
+        let pending: Vec<String> = module
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, s)| s.expired_at.is_some() && !s.deleted)
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in pending {
+            if module.world.retention_defect == RetentionDefect::TombstoneForgotten {
+                let mut sessions = module.sessions.lock().unwrap();
+                sessions.get_mut(&name).unwrap().expired_at = None;
+                sessions.get_mut(&name).unwrap().retention = None;
+            } else {
+                module.finish_deletion(&name);
+            }
+        }
         Ok(module)
     }
 
@@ -448,6 +615,7 @@ impl Module {
             return Err(Killed);
         }
         record["session"] = json!(session);
+        record["at"] = json!(self.world.now());
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -484,8 +652,31 @@ impl Module {
             return;
         };
         sess.events.push(kind.clone());
+        if matches!(kind.as_str(), "send" | "steer" | "step" | "terminal")
+            && (self.world.retention_defect != RetentionDefect::ClockNotRestarted
+                || sess.last_activity == 0)
+        {
+            sess.last_activity = record["at"].as_u64().unwrap_or_default();
+        }
         match kind.as_str() {
+            "tombstone" => {
+                sess.expired_at = record["expired_at_ms"].as_u64();
+            }
+            "deleted" => {
+                sess.deleted = true;
+                sess.messages.clear();
+                sess.calls.clear();
+                sess.sends.clear();
+                sess.runs.clear();
+                sess.title = record["title"].as_str().map(str::to_owned);
+            }
             "send" | "steer" => {
+                if let Some(retention) = record["retention"].as_u64() {
+                    sess.retention = Some(retention);
+                }
+                if let Some(title) = record["title"].as_str() {
+                    sess.title = Some(title.into());
+                }
                 let run_id = text("run_id");
                 let ordinal = sess.push(
                     json!({ "role": "user", "text": text("prompt") }),
@@ -713,7 +904,22 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(RouteFailure::new("the module is not running"));
         }
+        self.sweep(session)
+            .map_err(|Killed| RouteFailure::new("the module was killed"))?;
+        if matches!(
+            method,
+            ops::SESSION_READ | ops::SESSION_HEAD | ops::RUN_RESULT | "run.status"
+        ) {
+            if let Some(reply) = self.expiry_reply(session) {
+                if method != "run.status" || self.world.retention_defect != RetentionDefect::Status
+                {
+                    return Ok(reply);
+                }
+            }
+        }
         let reply = match method {
+            "session.list" | "session.export" => Ok(self.listing(session)),
+            "run.status" if self.world.advertise_status => Ok(self.run_result(session, params)),
             ops::SESSION_READ | ops::SESSION_HEAD => {
                 self.world.transcript_calls.fetch_add(1, Ordering::SeqCst);
                 if !self.world.serves(groups::TRANSCRIPT_READS) {
@@ -750,6 +956,12 @@ impl Module {
             capabilities.push(groups::INTERRUPT.to_owned());
         }
         let mut served: Vec<String> = vec![ops::ROLE_DESCRIBE.into(), ops::SESSION_BASELINE.into()];
+        if self.world.serves(groups::RETENTION) {
+            served.extend(["session.list".into(), "session.export".into()]);
+        }
+        if self.world.advertise_status {
+            served.push("run.status".into());
+        }
         for group in &capabilities {
             for op in groups::group_ops(group).unwrap_or_default() {
                 if !served.iter().any(|s| s == op) {
@@ -764,6 +976,9 @@ impl Module {
                 .with_max_bytes(DEFAULT_MAX_BYTES, MAXIMUM_MAX_BYTES);
         if self.world.steer_receipt_confirm {
             describe = describe.with_steer_receipt("confirm");
+        }
+        if self.world.serves(groups::RETENTION) {
+            describe = describe.with_retention(RETENTION_MAX, RETENTION_DELETE_MS);
         }
         respond(describe)
     }
@@ -901,17 +1116,79 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if params
+            .get("retention")
+            .is_some_and(|value| !value.is_null() && value.as_u64().is_none())
+        {
+            return Ok(invalid("retention"));
+        }
         if let Some(delivery) = params.get(DELIVERY_FIELD) {
             if !matches!(delivery.as_str(), Some("queue" | "steer" | "interrupt")) {
                 return Ok(invalid(DELIVERY_FIELD));
             }
         }
-        let request: SendRequest = match serde_json::from_value(params) {
+        let mut request: SendRequest = match serde_json::from_value(params) {
             Ok(request) => request,
             Err(_) => return Ok(invalid("prompt")),
         };
         let delivery = request.delivery().as_str().to_owned();
-        let existing = self.sessions.lock().unwrap().get(session).cloned();
+        let old = self.sessions.lock().unwrap().get(session).cloned();
+        let mut existing = old.clone().filter(|s| s.expired_at.is_none());
+        let defect = self.world.retention_defect;
+        if defect == RetentionDefect::WithoutGroupIgnored && !self.world.serves(groups::RETENTION) {
+            request.retention = None;
+        }
+        let cap = self
+            .world
+            .serves(groups::RETENTION)
+            .then(|| Retention::new(RETENTION_MAX, RETENTION_DELETE_MS));
+        let previous = existing.as_ref().map(|s| s.retention);
+        let accept_bad = match defect {
+            RetentionDefect::ZeroAccepted => request.retention == Some(0),
+            RetentionDefect::AboveMaxAccepted => {
+                request.retention.is_some_and(|n| n > RETENTION_MAX)
+            }
+            RetentionDefect::LengthenAccepted => previous
+                .flatten()
+                .zip(request.retention)
+                .is_some_and(|(a, b)| b > a),
+            RetentionDefect::LateOptInAccepted => previous == Some(None),
+            _ => false,
+        };
+        if !accept_bad {
+            if let Err(mut detail) = request.check_retention(cap.as_ref(), previous) {
+                if defect == RetentionDefect::MaxDetailMissing {
+                    detail.max_seconds = None;
+                }
+                return Ok(refuse(
+                    errors::INVALID_PARAMS,
+                    Some(serde_json::to_value(detail).unwrap()),
+                ));
+            }
+        }
+        if defect == RetentionDefect::EqualRefused
+            && request.retention.is_some()
+            && request.retention == previous.flatten()
+        {
+            return Ok(invalid("retention"));
+        }
+        if defect == RetentionDefect::ShortenIgnored && existing.is_some() {
+            request.retention = None;
+        }
+        if defect == RetentionDefect::ShortenReplaces
+            && request
+                .retention
+                .zip(previous.flatten())
+                .is_some_and(|(a, b)| a < b)
+        {
+            existing = None;
+        }
+        if defect == RetentionDefect::Inherit
+            && old.as_ref().is_some_and(|s| s.expired_at.is_some())
+            && request.retention.is_none()
+        {
+            request.retention = old.as_ref().and_then(|s| s.retention);
+        }
         if let Some(sess) = &existing {
             if sess.owner != stamp.principal {
                 return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
@@ -948,7 +1225,7 @@ impl Module {
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
                             "prompt": request.prompt, "delivery": delivery,
-                            "run_id": run.run_id, "admitted": false }),
+                            "run_id": run.run_id, "admitted": false, "retention":request.retention }),
                 )?;
                 if self.world.defects.held_steer_ends_run {
                     self.world
@@ -971,9 +1248,14 @@ impl Module {
         }
         let admitted = existing.is_none();
         if admitted {
+            let lineage = if old.is_some() && defect != RetentionDefect::ReuseLineage {
+                format!("lin-{session}-{}", self.world.now())
+            } else {
+                format!("lin-{session}")
+            };
             self.commit(
                 session,
-                json!({ "kind": "start", "owner": stamp.principal, "lineage": format!("lin-{session}") }),
+                json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage }),
             )?;
         }
         let run_id = format!(
@@ -983,7 +1265,8 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt,
-                    "delivery": delivery, "run_id": run_id, "admitted": admitted }),
+                    "delivery": delivery, "run_id": run_id, "admitted": admitted,
+                    "retention":request.retention, "title":request.runner_params.get("title") }),
         )?;
         self.drive(session, &run_id)?;
         let send = self.sessions.lock().unwrap()[session].sends[&request.send_id].clone();
@@ -1120,15 +1403,25 @@ impl Module {
         let Some(sess) = sessions.get(session) else {
             return respond(HeadMeta::no_lineage());
         };
-        let mut head = HeadMeta::new(&sess.lineage, 1_790_000_000_000 + sess.events.len() as u64)
-            .with_head(cursor(sess.events.len()));
+        if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
+            return respond(HeadMeta::no_lineage());
+        }
+        let mut head =
+            HeadMeta::new(&sess.lineage, sess.last_activity).with_head(cursor(sess.events.len()));
         if let Some(last) = sess.messages.last() {
             head = head.with_last_ordinal(last.ordinal);
         }
         if let Some(run) = sess.runs.last() {
             head = head.with_last_run_state(LastRunState {
                 run_id: run.run_id.clone(),
-                state: run.state.clone(),
+                state: if self.world.held_paused
+                    && sess.retention.is_some()
+                    && run.state == "active"
+                {
+                    "paused".into()
+                } else {
+                    run.state.clone()
+                },
                 reason: None,
             });
         }
@@ -1146,7 +1439,17 @@ impl Module {
         let Some(run) = sessions.get(session).and_then(|s| s.run(&request.run_id)) else {
             return refuse(errors::UNKNOWN_RUN, None);
         };
-        let mut result = RunResult::new(&run.run_id, &run.state);
+        let mut result = RunResult::new(
+            &run.run_id,
+            if self.world.held_paused
+                && sessions[session].retention.is_some()
+                && run.state == "active"
+            {
+                "paused"
+            } else {
+                &run.state
+            },
+        );
         if run.state == "completed" {
             let ordinal = run.final_ordinal.unwrap_or_default();
             let mid = sessions[session].messages[ordinal as usize].mid.clone();
@@ -1243,6 +1546,9 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub retention_defect: RetentionDefect,
+    pub held_paused: bool,
+    pub advertise_status: bool,
     pub defects: Defects,
     pub step_recovery: StepRecovery,
     pub capabilities: BTreeSet<Capability>,
@@ -1294,11 +1600,15 @@ pub const KILL_POINTS: &[&str] = &[
     points::DISPATCH_INTENT,
     points::TOOL_RESULT_RECORDED,
     points::TERMINAL,
+    points::RETENTION_TOMBSTONED,
 ];
 
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            retention_defect: RetentionDefect::None,
+            held_paused: false,
+            advertise_status: false,
             defects,
             step_recovery: StepRecovery::Resume,
             capabilities: served(),
@@ -1322,6 +1632,14 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    retention_defect: if RETENTION_DEFECTS_ENABLED {
+                        self.retention_defect
+                    } else {
+                        RetentionDefect::None
+                    },
+                    epoch: tokio::time::Instant::now(),
+                    held_paused: self.held_paused,
+                    advertise_status: self.advertise_status,
                     defects: self.defects,
                     step_recovery: self.step_recovery,
                     queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
@@ -1379,6 +1697,11 @@ impl FakeSubject {
 
     pub fn held_steer_receipts(&self) -> Vec<Option<Delivered>> {
         self.world().held_steer_receipts.lock().unwrap().clone()
+    }
+
+    pub fn enable_retention(&mut self) {
+        self.capabilities.insert(Capability::Retention);
+        self.advertise_status = true;
     }
 }
 
@@ -1532,6 +1855,41 @@ impl LlmRunnerSubject for FakeSubject {
             }
         }
         Ok(())
+    }
+
+    async fn retention_deletion_finished(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<bool, HarnessError> {
+        handle
+            .0
+            .sweep(session)
+            .map_err(|Killed| HarnessError::new("killed during deletion inspection"))?;
+        let state = handle.0.sessions.lock().unwrap().get(session).cloned();
+        let disk = std::fs::read_to_string(&handle.0.log).unwrap_or_default();
+        let content_records = disk
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .any(|r| {
+                r["session"] == json!(session)
+                    && !matches!(r["kind"].as_str(), Some("tombstone" | "deleted"))
+            });
+        Ok(
+            state.is_some_and(|s| s.deleted && s.messages.is_empty() && s.calls.is_empty())
+                && !content_records,
+        )
+    }
+
+    fn retention_probe_params(
+        &self,
+        _session: &str,
+        method: &str,
+    ) -> Result<Option<Vec<Value>>, HarnessError> {
+        match method {
+            "session.list" | "session.export" => Ok(Some(vec![json!({})])),
+            _ => Err(HarnessError::new(format!("unclassified op: {method}"))),
+        }
     }
 
     async fn pause(&self) {

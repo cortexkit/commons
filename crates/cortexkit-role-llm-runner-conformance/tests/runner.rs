@@ -8,7 +8,7 @@ use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject, StepRecovery};
+use fake::{Defects, FakeSubject, RetentionDefect, StepRecovery};
 use std::time::Duration;
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
@@ -24,6 +24,21 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    // Legacy fake configurations intentionally do not declare retention.
+    // Assert the named skip, never count it as a passed retention case.
+    if CASES
+        .iter()
+        .find(|s| s.name == case)
+        .unwrap()
+        .requires
+        .contains(&Capability::Retention)
+        && report.outcome(case)
+            == Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::Retention],
+            })
+    {
+        return;
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),
@@ -85,10 +100,11 @@ async fn a_faithful_runner_passes_every_case_but_its_simulated_kills_fail_the_ru
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.claim_process_kill = true;
+    subject.enable_retention();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 }
@@ -286,7 +302,11 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
         SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped } => {
             assert_eq!(
                 skipped,
-                &vec![Capability::Streaming, Capability::HoldToolCalls]
+                &vec![
+                    Capability::Streaming,
+                    Capability::Retention,
+                    Capability::HoldToolCalls
+                ]
             );
             assert!(declared.contains(&Capability::TranscriptReads));
             assert!(!declared.contains(&Capability::Streaming));
@@ -626,7 +646,12 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
     assert_eq!(subject.run_result_calls(), 0, "{}", report.render());
     match &report.verdict {
         SuiteVerdict::ConformingForDeclaredCapabilities { skipped, .. } => {
-            assert_eq!(skipped, &vec![Capability::RunOps], "{}", report.render());
+            assert_eq!(
+                skipped,
+                &vec![Capability::RunOps, Capability::Retention],
+                "{}",
+                report.render()
+            );
         }
         other => panic!(
             "expected conforming for declared capabilities, got {other:?}\n{}",
@@ -676,4 +701,206 @@ async fn a_used_work_dir_is_refused() {
         .await
         .unwrap_err();
     assert!(matches!(error, SetupError::WorkDirNotEmpty(_)));
+}
+
+// Retention's timer uses paused time only for this in-process fake. Real
+// conformance runs use an unpaused clock and a runner process owned by its CI.
+async fn retention_break(defect: RetentionDefect, expected: &str, paused: bool) {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    subject.claim_process_kill = true;
+    subject.retention_defect = defect;
+    subject.held_paused = paused;
+    if defect == RetentionDefect::WithoutGroupIgnored {
+        subject.capabilities.remove(&Capability::Retention);
+    }
+    let report = run(&subject).await;
+    let reason = failed(&report, expected);
+    let failing: Vec<_> = report
+        .cases
+        .iter()
+        .filter_map(|case| match &case.outcome {
+            CaseOutcome::Failed { reason } => Some(format!("{}: {reason}", case.case)),
+            _ => None,
+        })
+        .collect();
+    // A retention defect must not trip an unrelated contract check.
+    for spec in CASES.iter().filter(|spec| {
+        !spec.name.starts_with("retention_") && spec.name != "crash_at_RetentionTombstoned"
+    }) {
+        assert_passed(&report, spec.name);
+    }
+    eprintln!(
+        "NON-VACUITY BREAK {defect:?}: expected {expected}: {reason}; all failures: {}",
+        failing.join("; ")
+    );
+}
+
+macro_rules! retention_violation {
+    ($name:ident, $defect:ident, $case:literal) => {
+        #[tokio::test(start_paused = true)]
+        async fn $name() {
+            retention_break(RetentionDefect::$defect, $case, false).await;
+        }
+    };
+}
+
+retention_violation!(
+    retention_violation_ignored_fails_by_name,
+    Ignore,
+    "retention_honoured"
+);
+retention_violation!(
+    retention_violation_empty_fails_by_name,
+    Empty,
+    "retention_honoured"
+);
+retention_violation!(
+    retention_violation_timestamp_fails_by_name,
+    Timestamp,
+    "retention_honoured"
+);
+retention_violation!(
+    retention_violation_lineage_reused_fails_by_name,
+    ReuseLineage,
+    "retention_honoured"
+);
+retention_violation!(
+    retention_violation_inherited_fails_by_name,
+    Inherit,
+    "retention_honoured"
+);
+retention_violation!(
+    retention_violation_shorten_ignored_fails_by_name,
+    ShortenIgnored,
+    "retention_shorten_continues_lineage"
+);
+retention_violation!(
+    retention_violation_shorten_replaces_fails_by_name,
+    ShortenReplaces,
+    "retention_shorten_continues_lineage"
+);
+retention_violation!(
+    retention_violation_equal_refused_fails_by_name,
+    EqualRefused,
+    "retention_equal_noop"
+);
+retention_violation!(
+    retention_violation_lengthen_accepted_fails_by_name,
+    LengthenAccepted,
+    "retention_lengthen_refused"
+);
+retention_violation!(
+    retention_violation_late_opt_in_fails_by_name,
+    LateOptInAccepted,
+    "retention_late_opt_in_refused"
+);
+retention_violation!(
+    retention_violation_zero_fails_by_name,
+    ZeroAccepted,
+    "retention_zero_refused"
+);
+retention_violation!(
+    retention_violation_above_max_fails_by_name,
+    AboveMaxAccepted,
+    "retention_above_max_refused"
+);
+retention_violation!(
+    retention_violation_max_detail_fails_by_name,
+    MaxDetailMissing,
+    "retention_above_max_refused"
+);
+retention_violation!(
+    retention_violation_without_group_fails_by_name,
+    WithoutGroupIgnored,
+    "retention_without_group_refused"
+);
+retention_violation!(
+    retention_violation_held_fails_by_name,
+    ExpireHeld,
+    "retention_active_run_never_expires"
+);
+retention_violation!(
+    retention_violation_clock_fails_by_name,
+    ClockNotRestarted,
+    "retention_active_run_never_expires"
+);
+
+#[tokio::test(start_paused = true)]
+async fn retention_violation_paused_fails_by_name() {
+    retention_break(
+        RetentionDefect::ExpireHeld,
+        "retention_active_run_never_expires",
+        true,
+    )
+    .await;
+}
+retention_violation!(
+    retention_violation_deletion_fails_by_name,
+    DeleteIncomplete,
+    "retention_honoured"
+);
+retention_violation!(
+    retention_violation_restart_fails_by_name,
+    TombstoneForgotten,
+    "crash_at_RetentionTombstoned"
+);
+retention_violation!(
+    retention_violation_title_fails_by_name,
+    TitleLeak,
+    "retention_no_content_served"
+);
+retention_violation!(
+    retention_violation_prompt_fails_by_name,
+    PromptLeak,
+    "retention_no_content_served"
+);
+retention_violation!(
+    retention_violation_tool_fails_by_name,
+    ToolLeak,
+    "retention_no_content_served"
+);
+retention_violation!(
+    retention_violation_status_fails_by_name,
+    Status,
+    "retention_run_status_expired"
+);
+
+#[tokio::test(start_paused = true)]
+async fn retention_paused_non_terminal_run_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    subject.claim_process_kill = true;
+    subject.held_paused = true;
+    let report = run(&subject).await;
+    assert_passed(&report, "retention_active_run_never_expires");
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test(start_paused = true)]
+async fn retention_status_is_inapplicable_when_not_served() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    subject.claim_process_kill = true;
+    subject.advertise_status = false;
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome("retention_run_status_expired"), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("run.status"))
+    );
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test(start_paused = true)]
+async fn retention_requires_a_real_tombstone_process_kill() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    let report = run(&subject).await;
+    let reason = failed(&report, "crash_at_RetentionTombstoned");
+    assert!(reason.contains("requires a real process kill"), "{reason}");
+    for spec in CASES
+        .iter()
+        .filter(|s| s.name.starts_with("retention_") && s.name != "retention_without_group_refused")
+    {
+        assert_passed(&report, spec.name);
+    }
 }
