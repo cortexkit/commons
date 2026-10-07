@@ -195,7 +195,7 @@ impl RefuseCode {
         }
     }
 
-    /// The code with this spelling; an unnamed spelling is [`Self::Unknown`].
+    /// Maps a `refuse` code string to its variant; a code this crate does not list becomes [`Self::Unknown`].
     pub fn from_code(code: &str) -> Self {
         match code {
             refuse_codes::WINDOW_TOO_SMALL => Self::WindowTooSmall,
@@ -249,8 +249,9 @@ pub mod refuse_codes {
         HISTORY_UNREADABLE,
     ];
 
-    /// The retryability the role fixes for a `refuse` code: `false` for a
-    /// code it does not name, which is never retried.
+    /// Whether this `refuse` code may be retried without the user acting. Only
+    /// `provider_busy` and `history_unreadable` are; any other code, including
+    /// one this crate does not list, is never retried.
     pub fn retryable(code: &str) -> bool {
         matches!(code, PROVIDER_BUSY | HISTORY_UNREADABLE)
     }
@@ -429,8 +430,8 @@ mod tests {
             let known = KnownCode::from_code(code.as_str()).unwrap();
             assert_eq!(known.retryable(), retryable, "{}", code.as_str());
         }
-        // A code the role does not name decodes, is kept as received, and
-        // is never retried.
+        // A code not listed in `KnownCode` still decodes, is kept as
+        // received, and is never retried.
         let unknown: RefuseCode = serde_json::from_value(Value::from("acme:quota")).unwrap();
         assert_eq!(unknown, RefuseCode::Unknown("acme:quota".into()));
         assert!(!unknown.retryable());

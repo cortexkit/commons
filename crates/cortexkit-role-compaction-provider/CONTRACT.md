@@ -8,7 +8,8 @@ its vectors, and a separate `-conformance` crate will hold its suite (§17).
 `llm-runner/v1` states what the runner owes on the same interface; this
 document states the provider's side.
 
-Every item is marked **[pinned]**: a settled requirement. A provider must
+Every item is marked **[pinned]**: a settled, binding requirement, even before
+the crate's first release. A provider must
 do it, and a runner may rely on it.
 
 Names and types this role shares with `llm-runner/v1` (the `compaction`

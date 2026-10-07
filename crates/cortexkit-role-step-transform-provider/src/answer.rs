@@ -90,12 +90,13 @@ impl Operation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnExpiry {
-    /// The call ends with the tool-result reason `pre_tool_expired`.
+    /// The tool call is denied because its approval question expired; its
+    /// result carries the reason `pre_tool_expired`.
     Deny,
 }
 
-/// What an approval arriving after the run moved on does. Strict, like
-/// [`OnExpiry`].
+/// What the runner does with an approval that arrives after the run has moved
+/// on. An unknown value does not decode, exactly as for [`OnExpiry`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LateExecution {

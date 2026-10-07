@@ -6,8 +6,8 @@
 # crash suite will use, and CONTRACT.md, which states every rule as pinned.
 # Pure serde plus small checks; no transport, no runtime.
 #
-# A DRAFT for design review: not published until the role's consumers have
-# reviewed CONTRACT.md. The conformance runner will live in a sibling
+# Not yet published to crates.io: consumers depend on it by git commit until
+# its first release. The conformance runner will live in a sibling
 # `-conformance` crate, so a provider's production build never pulls in the
 # suite.
 [package]
