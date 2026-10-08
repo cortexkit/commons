@@ -20,7 +20,8 @@ A step-transform provider is any module that makes write-time changes to
 the newest message of a session.
 
 Optional whole-message and lineage fields support runners that cannot serve
-`session.read`. Their absence leaves the existing hook behaviour unchanged.
+`session.read`. When they are absent, a hook request keeps its existing bytes,
+and the provider reads history and answers exactly as it does today.
 
 ## Terms
 
@@ -354,13 +355,17 @@ the session and freezes that plan for use.
   the supplied JSON bytes, not use parsed-value equality to hide a byte
   difference. Ingesting input does not make unused hook output durable or
   permit unused output to reach the model (§11).
-- [pinned] A provider may enforce a 4 MiB (4,194,304 byte) request cap on a
+- [pinned] A provider may enforce a 3 MiB (3,145,728 byte) request cap on a
   hook carrying `message` (`DEFAULT_HOOK_CAP_BYTES`,
   `HookCall::check_message_size`). All fields, including `message`, count:
   the size is the length of the compact JSON encoding of the `HookCall`
   request, not the `{method, params}` envelope. If exceeded, the provider
   refuses `invalid_params {field: "message"}` and never silently truncates.
   This optional cap imposes no new size policy on hooks without `message`.
+  It is below the 4 MiB per-connection queue budget of subc (the local daemon
+  that routes requests between runners and providers), which
+  closes a connection whose queued bytes exceed it, so a runner should not
+  send a hook larger than this cap even to a provider that does not enforce it.
 - [pinned] The first hook of a lineage may carry
   `descends_from: {lineage_id, through_ordinal}` (`DescendsFrom`), naming
   another lineage in the same conversation (§1). It continues that

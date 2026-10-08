@@ -104,7 +104,7 @@ fn legacy_hook_bytes_unchanged() {
 
 #[test]
 fn hook_message_counts_toward_request_cap() {
-    assert_eq!(DEFAULT_HOOK_CAP_BYTES, 4_194_304);
+    assert_eq!(DEFAULT_HOOK_CAP_BYTES, 3_145_728);
     let call = hook().with_subject_identity("m", 0).with_message(json!(""));
     let overhead = serde_json::to_vec(&call).unwrap().len();
     let at_cap = call

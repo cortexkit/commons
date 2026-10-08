@@ -33,9 +33,12 @@ impl DescendsFrom {
     }
 }
 
-/// A provider may enforce this cap on a hook carrying `message`: 4 MiB for
+/// A provider may enforce this cap on a hook carrying `message`: 3 MiB for
 /// the compact JSON request, including the whole message. Never truncate it.
-pub const DEFAULT_HOOK_CAP_BYTES: usize = 4 * 1024 * 1024;
+/// It sits below the subc daemon's 4 MiB per-connection queue budget, so a
+/// request at the cap plus its frame envelope cannot by itself make the
+/// daemon close the provider's connection.
+pub const DEFAULT_HOOK_CAP_BYTES: usize = 3 * 1024 * 1024;
 
 /// The `transform.hook` request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

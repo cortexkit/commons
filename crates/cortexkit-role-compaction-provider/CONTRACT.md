@@ -21,7 +21,8 @@ A compaction provider is any module that decides the shape of the history a
 runner sends to the model.
 
 Optional lineage, coverage and history-gap fields support runners that
-cannot serve `session.read`. Their absence leaves existing behaviour unchanged.
+cannot serve `session.read`. When they are absent, requests, answers and
+refusals keep their existing bytes and meaning.
 
 ## Terms
 
