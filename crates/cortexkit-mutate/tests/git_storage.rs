@@ -40,6 +40,10 @@ only = true
         .unwrap();
         fixture.command("cargo", &["generate-lockfile", "--offline"]);
         fixture.command("git", &["init", "-q"]);
+        // The source deliberately mixes CRLF and LF. Windows CI runners set
+        // core.autocrlf=true globally, which would normalize it on add and make
+        // the checkout differ from HEAD, so the fixture opts out.
+        fixture.command("git", &["config", "core.autocrlf", "false"]);
         fixture.command("git", &["config", "user.email", "fixture@example.invalid"]);
         fixture.command("git", &["config", "user.name", "Git storage fixture"]);
         fixture.command(
