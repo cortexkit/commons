@@ -350,10 +350,10 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   (`ModelPage::check`). The `source` kind is strict: an entry of a kind this
   role does not define does not decode, because a consumer cannot place it
   by ordinal.
-  The equal-anchor insertion-before-message rule has a v1 producer (an
-  empty compaction range); insertion-before-nonempty-replacement ordering
-  has no v1 producer. The compaction-provider contract §8 applies the newest
-  CompactionMessage alone, and §12 gives all its replacement entries that
+  An empty compaction range produces an insertion before the message at
+  that anchor. Nothing in the current contracts produces an insertion and a
+  non-empty replacement at the same anchor. The compaction-provider contract
+  §8 applies the newest CompactionMessage alone, and §12 gives all its replacement entries that
   message's one range; hook outputs transform fields on a raw record (§11.2),
   not additional range entries.
 
@@ -944,7 +944,8 @@ Consumer-side rules no live runner can be made to exercise (an unknown run
 state, an unknown event kind, a describe answer with a partial group, a
 model page that repeats a replacement, a completed run without its final
 message) are tested against the vectors in this crate.
-Live shared-start insertion/nonempty-replacement ordering has no v1 producer:
+Nothing in the current contracts produces an insertion and a non-empty
+replacement at the same start, so a live case cannot check their ordering:
 compaction-provider §8 applies only the newest CompactionMessage, and §12
 assigns its entire working range to every replacement entry. Hook outputs
 are fields on a transformed raw record, not range insertions. This ordering

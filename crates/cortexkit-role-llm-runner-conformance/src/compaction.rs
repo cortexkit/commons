@@ -1,5 +1,7 @@
-//! Scripted compaction, observed at the provider/model boundary and on real
-//! session routes. Clocks are injected into the runner, not inferred from logs.
+//! Compaction cases observe requests received by the scripted provider and
+//! model, and read the runner's real session routes. The runner adapter must
+//! inject the clock into runner timers, not infer elapsed time from logs.
+//! Compaction terms are defined in the crate's Contract vocabulary section.
 
 use std::{collections::BTreeSet, path::Path};
 
@@ -20,8 +22,9 @@ use crate::{
     RunnerRoute,
 };
 
-/// A provider replacement in schema-neutral form. The subject converts only
-/// replacement text to its runner's message schema, never the range or ids.
+/// A provider replacement in schema-neutral form. The runner adapter must
+/// translate only replacement text to its runner's message schema, preserving
+/// the range, ids and version verbatim.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompactionMessage {
     pub compaction_id: String,
@@ -31,7 +34,8 @@ pub struct CompactionMessage {
     pub replacement: Vec<String>,
 }
 
-/// A step answer, translated to compaction-provider/v1 verbatim.
+/// A step answer the runner adapter must translate to compaction-provider/v1
+/// without changing the answer kind or fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompactionAnswer {
     Noop,
@@ -43,7 +47,7 @@ pub enum CompactionAnswer {
     Refuse {
         code: RefuseCode,
         reason: String,
-        /// The provider's finer code, not the runner's run-error field.
+        /// The finer code carried in the provider's wire answer.
         provider_code: Option<String>,
     },
 }
@@ -63,15 +67,18 @@ pub enum CompactionSetup {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompactionStep {
     Answer(CompactionAnswer),
-    /// Prepare this answer in the provider, but deliver nothing until the
-    /// suite calls answer_compaction. Preparation is not a runner fence.
+    /// Prepare this answer in the scripted provider, but deliver nothing
+    /// until the case calls [`LlmRunnerSubject::answer_compaction`]. Preparing
+    /// content does not authorize the runner to apply it before delivery.
     Hold(CompactionAnswer),
 }
 
-/// Configure a real provider, held model and deterministic runner clock.
-/// No clock time advances implicitly. Setup omits call_when (every step).
-/// Missing steps answer NOOP. Timed-out calls remain deliverable, including
-/// duplicate deliveries: adapters must not enforce the runner's fence.
+/// Configuration for the scripted provider, held model calls and runner clock.
+/// The runner adapter must advance time only through
+/// [`LlmRunnerSubject::advance_compaction_clock`]. Setup must omit `call_when`
+/// so the runner calls the provider on every step. A step without a configured
+/// answer must receive NOOP. The adapter must deliver timed-out and duplicate
+/// answers to the runner; only the runner may enforce its answer fence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompactionScript {
     pub setup: CompactionSetup,
@@ -108,12 +115,13 @@ pub enum CompactionCallKind {
     Step,
 }
 
-/// Captured at the provider boundary, not computed from expected scripts.
+/// A call captured when the scripted provider receives a runner request.
+/// The runner adapter must not fabricate calls from the configured script.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompactionCall {
     pub kind: CompactionCallKind,
     pub request_id: String,
-    /// Times on the injected clock, relative to installation (zero).
+    /// Times on the injected clock, measured from initial installation at zero.
     pub issued_at_ms: u64,
     pub deadline_ms: u64,
 }
@@ -121,9 +129,10 @@ pub struct CompactionCall {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompactionObservation {
     pub calls: Vec<CompactionCall>,
-    /// Canonical messages actually presented to the scripted model, captured
-    /// before its held answer. Normalize the runner's request to ModelEntry;
-    /// do not substitute session.read or the provider's replacement script.
+    /// Canonical messages captured from requests received by the scripted
+    /// model while its answers are held. The runner adapter must translate
+    /// each request to ModelEntry, preserving its content and sources; it must
+    /// not substitute `session.read` responses or configured replacements.
     pub model_inputs: Vec<Vec<crate::wire::read::ModelEntry>>,
 }
 
@@ -433,8 +442,8 @@ where
     Ok(())
 }
 
-/// The runner's field is the provider's role code, not its optional finer
-/// provider_code wire field. RunResult.error otherwise remains runner-schema.
+/// Check `RunResult.error`'s refusal fields against the configured role code,
+/// reason and finer code. Other error fields use the runner's own schema.
 fn refusal_error(
     error: &Value,
     code: &str,
@@ -523,7 +532,8 @@ where
         }) {
             return Err("provider refusal added content to history".into());
         }
-        // Change only the external provider's next answer, not runner state.
+        // Configure a successful Setup answer in the external provider without
+        // changing the runner's stored session records or in-memory session.
         script.setup = CompactionSetup::Ready(initial(&case.mint.next("retry-head")));
         case.subject
             .install_compaction_script(&session.name, script)
@@ -545,7 +555,8 @@ where
             );
         }
     }
-    // The same mapping also holds on a step, not just on Setup.
+    // Check role-code and finer-code run-error fields for a step REFUSE as
+    // well as for a Setup REFUSE.
     let code = RefuseCode::WindowTooSmall;
     let reason = "step cannot reduce enough";
     let mut script = CompactionScript::new(initial(&case.mint.next("step-refusal")));
@@ -590,8 +601,9 @@ where
     S::Route: RunnerRoute,
 {
     let mut script = CompactionScript::new(initial(&case.mint.next("wait")));
-    // Below the window including output, but inside the runner's safety
-    // margin: 875 + 100 > 1000 - 50. It cannot be shown to fit safely.
+    // The 875-token input estimate plus the 100-token output allowance fits
+    // the 1000-token window, but exceeds the safe limit after reserving the
+    // 50-token safety margin: 875 + 100 > 1000 - 50.
     script.request_tokens = 875;
     script.steps = vec![CompactionStep::Answer(CompactionAnswer::Wait {
         reason: "building summary".into(),
@@ -737,10 +749,10 @@ where
             .model_inputs
             .is_empty()
         {
-            // Deadline disposal is independent of whether the timed-out
-            // step continues or takes a normal terminal error path. Probe
-            // the next request with an owner follow-up when needed; the
-            // separate timeout case checks continuation with the last view.
+            // Check rejection of late answers even if the timed-out run has
+            // ended. An owner follow-up creates a fresh request when no model
+            // call can be released. compaction_step_timeout_uses_last_view
+            // checks continuation after timeout separately.
             send(case, &mut session, "late-followup").await?;
         } else {
             release_model(case.subject, &session.name).await?;
@@ -749,8 +761,8 @@ where
         if obs.calls.len() != 3 || obs.calls[2].request_id == obs.calls[1].request_id {
             return Err("fresh step request not observed".into());
         }
-        // Fresh delivery before its own deadline, but names the previous id:
-        // this isolates the request fence from the deadline rule.
+        // Deliver before the fresh request's deadline, but name the previous
+        // request's id, so only the request fence can reject this answer.
         answer(
             case.subject,
             &session.name,
@@ -808,8 +820,8 @@ where
         CompactionAnswer::Message(first.clone()),
     )
     .await?;
-    // Same current request, before its deadline, strictly higher version.
-    // The accepted-answer fence must be consumed after the first application.
+    // Deliver a second view for the current request before its deadline,
+    // with a higher version. The consumed answer fence must reject it.
     answer(
         case.subject,
         &session.name,
@@ -828,9 +840,10 @@ where
     Ok(())
 }
 
-/// Run the durability checks on separate roots, using the suite's real kill
-/// ledger: FoldRecorded for initial Setup, and CompactionApplied for a step
-/// answer durable before fold. Each point is killed once per suite run.
+/// Run durability checks in separate persistent state directories and record
+/// kills in the conformance driver's ledger. Kill at FoldRecorded for Setup
+/// and at CompactionApplied for the step answer. Each point is killed once
+/// per conformance run.
 pub async fn crash_case<S>(
     subject: &S,
     driver: &mut CrashDriver<'_, S>,
@@ -942,7 +955,8 @@ where
         .map_err(|e| e.to_string())?;
     drop(cut);
     let handle = driver.restart(&root).await.map_err(|e| e.to_string())?;
-    // Reopening uses the same suite session name, never a new provider key.
+    // Reopen cut_name after restart so the provider retains the session's
+    // captured calls and configured answers under the original identity.
     finish_crash(subject, &handle, &cut_name, &head, &expected, fence).await?;
     if !fence {
         let obs = observation(subject, &cut_name).await?;

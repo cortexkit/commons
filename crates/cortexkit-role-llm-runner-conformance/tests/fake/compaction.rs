@@ -1,5 +1,6 @@
-//! Compaction portion of the durable-log fake. Provider/model observations
-//! live in World, independently of the log replayed by Module.
+//! Compaction portion of the durable-log fake. World stores provider and model
+//! observations outside Module's persistent log, so Module's restart cannot
+//! reconstruct or erase those observations.
 use super::*;
 use cortexkit_role_llm_runner::read::{EntrySource, ModelEntry, ModelPage};
 use cortexkit_role_llm_runner_conformance::{
@@ -277,8 +278,8 @@ impl Module {
             CompactionStep::Hold(CompactionAnswer::Message(m))
                 if self.world.defects.compaction == CompactionDefect::FoldBeforeAnswer =>
             {
-                // The provider has only prepared the content. Folding it here
-                // deliberately bypasses answer delivery and the request fence.
+                // This defect folds prepared provider content before delivery,
+                // bypassing the runner's answer fence.
                 self.commit(
                     session,
                     json!({"kind":"compaction_fold","message":encode(&m)}),

@@ -8,6 +8,9 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+The crate-level Rust documentation defines compaction terms in its Contract
+vocabulary section and identifies the governing contract sections.
+
 - A `cortexkit_role_harness::Harness`: spawn the runner on a state root,
   kill it at a point of `cortexkit_role_llm_runner::points`, and restart it
   on the same root. The points it declares decide which crash cases run.
@@ -18,12 +21,13 @@ fake under `tests/fake/` exists only to test the suite itself.
   declares, the owner and stranger identities, how to open a session's
   route, the fields of a session's first send (its plan, whose shape the
   role has not pinned yet), the module id of its scripted tool provider, and
-  a scripted model. The suite writes each session's model as a `Script`:
+  a scripted model. Conformance cases supply each session's model as a
+  `Script`:
   assistant turns made of text parts, reasoning parts and tool calls with
-  their arguments and scripted results. The subject backs it with its own
-  mock provider; the suite never speaks a provider's wire protocol. The
-  subject's model answers a request with the turn whose index is the number
-  of assistant messages in the request's history, and its scripted tool
+  their arguments and scripted results. The runner adapter must back the
+  script with a mock provider that speaks the runner's model protocol. The
+  adapter's scripted model answers a request with the turn whose index is
+  the number of assistant messages in the request's history, and its scripted tool
   provider (serving `SCRIPTED_TOOL`) answers each call with its scripted
   result, counts invocations, and can hold a call until released.
 - For `retention`, an unpaused Tokio runtime, and
@@ -32,17 +36,18 @@ fake under `tests/fake/` exists only to test the suite itself.
   from an `expired` read. `retention_probe_params` classifies every extra
   advertised op and supplies all export/list/read requests and listing pages
   for the leak check. Return `None` only for ops that cannot serve stored
-  session content; an unclassified op fails the check. The suite sends a
+  session content; an unclassified op fails the check. Retention cases send a
   unique `title` along with prompt and tool-result markers; a runner that
   stores caller titles must erase them too.
 - For `compaction`, a provider backed by `CompactionScript`, included in
-  the session plan only when installed. Convert replacement text to the
-  runner's schema, preserve ids/versions/ranges, and omit `call_when` so it
+  the session plan when installed. The runner adapter must convert
+  replacement text to the runner's schema, preserve ids/versions/ranges,
+  and omit `call_when` so it
   is called every step. `compaction_observation` captures actual provider
   calls and canonical inputs at the scripted model boundary outside the
   runner's process/state root; it must not reconstruct inputs from the
-  script or `session.read`. Hold every model answer until
-  `release_compaction_model`; select model turns by emitted answers, since
+  configured provider answers or `session.read` responses. Hold every model
+  answer until `release_compaction_model`; select model turns by emitted answers, since
   compaction can hide earlier assistant messages.
 - The compaction runner/provider clock is injected, starts at zero and
   advances only through `advance_compaction_clock`, which drains all due
@@ -50,14 +55,15 @@ fake under `tests/fake/` exists only to test the suite itself.
   cap, prompt-cache lifetime and token estimator from the script. This
   avoids scheduler tolerances hiding a cap violation. `answer_compaction`
   must deliver late/stale/duplicate responses to the runner's disposition
-  path, not discard them in the adapter. `durable_compaction_setup` reads
-  the initial answer from persistent runner storage while a model call is
-  held, never from its cache, the expected script or a model page.
+  path; the runner adapter must not discard them. `durable_compaction_setup`
+  must read the initial answer from persistent runner storage while a model call is
+  held, never from an in-memory cache, the configured provider answer or a
+  `session.read` model page.
 
 ## Verdict
 
-A case whose requirements the subject does not declare is skipped, naming
-what is missing, and is never passed. A run with skips and no failure is
+A case whose requirements the runner adapter does not declare is skipped,
+naming what is missing, and is never passed. A run with skips and no failure is
 "conforming for declared capabilities", naming them. A run fails if any case
 fails, or if no kill ended a real process (CONTRACT §14), including a run
 that made no kill at all. A case the runner's own declarations make
@@ -71,7 +77,7 @@ from `session.baseline` has no admission reply to compare.
 | Case | Requires |
 |---|---|
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
-| `compaction_fence_crash_replays_model_view` | same groups, `CompactionApplied`; answer durable before fold |
+| `compaction_fence_crash_replays_model_view` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `CompactionApplied`; answer durable before fold |
 | `model_view_half_open_ranges_and_travel`, `compaction_wait_cap`, `compaction_late_or_stale_answers_discarded`, `compaction_step_timeout_uses_last_view`, `compaction_one_view_per_step` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
@@ -105,11 +111,12 @@ from `session.baseline` has no admission reply to compare.
 Missing compaction/model-view requirements are rendered `N/A` by case name
 (represented by `CaseOutcome::Skipped`, preserving missing-capability
 verdicts), never passed. The equal-anchor insertion-before-message rule is
-tested live. There is no v1 producer of insertion plus nonempty replacement
-at one anchor: compaction-provider §8 applies only the newest message, §12
-assigns its one entire range to every replacement, and step-transform hooks
+tested live. Nothing in the current contracts produces an insertion and a
+nonempty replacement at one anchor: compaction-provider §8 applies only the
+newest message, §12 assigns its one entire range to every replacement, and step-transform hooks
 change fields on a raw message rather than inserting range entries. The
-suite does not claim live coverage of that unreachable half of ordering.
+conformance driver does not claim live coverage of
+insertion-before-replacement ordering.
 
 ## Where the suite narrows a check
 
@@ -117,16 +124,16 @@ The role contract marks some rules open (not yet defined), and some of its
 guarantees cannot be observed on the wire. `NARROWINGS` in `src/report.rs` lists every such choice, and
 every report prints them. In short:
 
-- The fetch plan's shape is not pinned (§10), so the subject builds a
-  session's first-send fields and the suite never inspects a plan.
-- The suite writes sessions with `session.send` (absent `delivery`, meaning
-  `queue`), and waits for runs through `session.head`, so cases that need a
+- The fetch plan's shape is not pinned (§10), so the runner adapter builds a
+  session's first-send fields and cases do not inspect the plan.
+- Cases write sessions with `session.send` (absent `delivery`, meaning
+  `queue`), and wait for runs through `session.head`, so cases that need a
   written session require `queue`, and cases that wait require
   `transcript_reads` (run-ops cases wait through `run.result`).
 - A read's byte measure is not pinned, so byte-cap cases use a one-byte cap
   or a message far above the cap.
-- Message bodies are the runner's schema, so the suite finds scripted
-  content by unique marker strings, and finds an `outcome_unknown` close
+- Message bodies are the runner's schema, so cases find scripted
+  content by unique marker strings, and find an `outcome_unknown` close
   only as that string in some message.
 - The subscription handoff is checked by comparing replays on an idle
   session, not the live race.
@@ -169,7 +176,7 @@ above-max is not applicable when it is `u64::MAX`.
 
 The leak check scans raw/range/original/model reads, head, run result,
 optional run status, baseline and subscription replay, plus every advertised
-extra content op classified by the subject. It looks for prompt, tool-result
+extra content op classified by the runner adapter. It looks for prompt, tool-result
 and caller-title markers in both success and error answers. The deletion
 inspection additionally covers copies that are not served.
 

@@ -1,4 +1,4 @@
-//! What a runner under test supplies beyond its harness: the capabilities
+//! What the runner adapter supplies beyond its harness: the capabilities
 //! it declares, how to reach a session's management route, and a scripted
 //! model, tool and compaction providers.
 
@@ -10,7 +10,7 @@ use cortexkit_role_llm_runner::capabilities as groups;
 use serde_json::{Map, Value};
 
 /// A capability a conformance case requires of the runner or its harness.
-/// A case whose requirement the subject does not declare is reported as
+/// A case whose requirement the runner adapter does not declare is reported as
 /// skipped with the missing names, never as passed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Capability {
@@ -27,7 +27,7 @@ pub enum Capability {
     ModelView,
     /// The `steer` delivery mode of `session.send`.
     Steer,
-    /// The `queue` delivery mode of `session.send`. The suite starts every
+    /// The `queue` delivery mode of `session.send`. Cases start every
     /// session it writes with a `queue` send (the mode an absent `delivery`
     /// means), so every case that needs a written session requires it.
     Queue,
@@ -36,19 +36,18 @@ pub enum Capability {
     /// The `compaction` group: scripted Setup, step answers, refusals,
     /// deadlines, request fences and durable replay.
     Compaction,
-    /// The `session_change` group. No case the suite implements yet
-    /// requires it.
+    /// The `session_change` group. Conformance cases do not require it.
     SessionChange,
     /// Whole-session retention with limits from `role.describe.retention`.
     Retention,
-    /// The subject's scripted tool provider can hold a call it received
-    /// until the suite releases it. See
+    /// The runner adapter's scripted tool provider can hold a received call
+    /// until the case releases it. See
     /// [`LlmRunnerSubject::await_tool_call`] and
     /// [`LlmRunnerSubject::release_tool_call`].
     HoldToolCalls,
     /// The harness can kill the runner at this point of
     /// `cortexkit_role_llm_runner::points`. Never listed by
-    /// [`LlmRunnerSubject::capabilities`]: the runner derives it from
+    /// [`LlmRunnerSubject::capabilities`]: the conformance driver derives it from
     /// [`Harness::declared_points`].
     KillAt(&'static str),
 }
@@ -112,8 +111,8 @@ impl Capability {
 
 /// A scripted model, written without any provider's wire protocol: a list
 /// of assistant turns, each the whole answer to one model request, in the
-/// order the model gives them. The subject adapts it to whatever its
-/// runner's model provider needs.
+/// order the model gives them. The runner adapter must translate the script
+/// to its runner's model protocol without changing the scripted content.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Script {
     pub turns: Vec<ScriptedTurn>,
@@ -140,18 +139,18 @@ pub enum ScriptedPart {
 /// A scripted tool call and its scripted result.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScriptedToolCall {
-    /// The model's id for the call. Display only: the suite reuses one id
+    /// The model's id for the call. Display only: cases reuse one id
     /// across turns on purpose.
     pub tool_call_id: String,
     /// Always [`crate::SCRIPTED_TOOL`].
     pub tool: String,
-    /// The call's arguments. Unique within a suite run, so the scripted
+    /// The call's arguments. Unique within a conformance run, so the scripted
     /// tool provider can find the call's result by them.
     pub arguments: Value,
     /// What the scripted tool provider answers the call with.
     pub result: Value,
-    /// Hold the call in the tool provider until the suite releases it.
-    /// Only set when the subject declares [`Capability::HoldToolCalls`].
+    /// Hold the call in the tool provider until the case releases it.
+    /// Only set when the runner adapter declares [`Capability::HoldToolCalls`].
     pub hold: bool,
 }
 
@@ -178,13 +177,13 @@ impl ScriptedTurn {
     }
 }
 
-/// A live runner under test: its harness plus what the suite cannot know
-/// about it. Every request the suite makes still goes over the runner's
-/// real management route; nothing here answers on the runner's behalf.
+/// The adapter for a live runner under test: its harness and runner-specific
+/// configuration. Every case request must go over the runner's real management
+/// route; the adapter must not synthesize management replies for the runner.
 ///
-/// The suite opens every route with [`LlmRunnerSubject::session_route`],
-/// because every role op rides a session-bound route. It never calls
-/// [`Harness::route`].
+/// Cases open routes with [`LlmRunnerSubject::session_route`], because every
+/// role op rides a session-bound route; they do not call [`Harness::route`].
+/// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
     /// The capability groups the runner declares, plus the harness
@@ -193,17 +192,17 @@ pub trait LlmRunnerSubject: Harness {
     /// missing are skipped, with the reason.
     fn capabilities(&self) -> BTreeSet<Capability>;
 
-    /// The identity the suite drives every session as: the session's owner.
+    /// The owner identity cases use to start and manage their sessions.
     fn owner_stamp(&self) -> RouteStamp;
 
     /// An identity that is not the owner of any session the owner stamp
     /// starts, for the owner-only cases.
     fn stranger_stamp(&self) -> RouteStamp;
 
-    /// Open the management route bound to the session the suite calls
-    /// `session`, under `stamp`, as a real caller with that identity would.
-    /// The suite uses a name once per run; the subject may map it to
-    /// whatever session identity its runner uses.
+    /// Open the management route for `session` under `stamp`, as a real
+    /// caller with that identity would. Cases use each session name once per
+    /// conformance run; the runner adapter may map the name to a native
+    /// session identity, but must preserve that mapping across restarts.
     async fn session_route(
         &self,
         handle: &Self::Handle,
@@ -211,11 +210,11 @@ pub trait LlmRunnerSubject: Harness {
         stamp: &RouteStamp,
     ) -> Result<Self::Route, HarnessError>;
 
-    /// Fields the suite adds to every `session.send` it makes into
+    /// Fields cases add to every `session.send` they make into
     /// `session`, beside the role's `prompt`, `send_id` and `delivery`.
     /// `first` is true for the session's first send, which carries the
     /// session's `plan` (whose shape the role has not pinned yet, so the
-    /// subject builds it) and any runner parameters admission needs. The
+    /// runner adapter builds it) and any runner parameters admission needs. The
     /// plan must make [`crate::SCRIPTED_TOOL`], served by the scripted tool
     /// provider, available to the model.
     fn send_fields(&self, session: &str, first: bool) -> Map<String, Value>;
@@ -224,22 +223,27 @@ pub trait LlmRunnerSubject: Harness {
     /// the scripted tool provider.
     fn tool_provider_module(&self) -> String;
 
-    /// Make `script` the model of `session`, before the suite's first send
-    /// into it. It stays in force across kills and restarts. The subject's
-    /// model answers a model request of the session with
+    /// Install `script` as the model for `session` before its first send.
+    /// The runner adapter must preserve the script across kills and restarts.
+    /// The scripted model answers a model request of the session with
     /// `script.turns[n]`, where `n` is the number of assistant messages in
-    /// the history the request carries; the suite never lets a session ask
-    /// for more turns than its script holds.
+    /// the history the request carries. Cases supply enough turns for every
+    /// model request they cause.
     /// Compaction may hide assistant messages from the model view; for a
     /// session with a compaction script, select turns by emitted assistant
     /// answers instead, keeping that cursor across held calls and restarts.
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError>;
 
-    /// Install the suite's compaction provider and controlled clock before
-    /// admission. The session plan must include that provider. Map text
-    /// replacements to the runner's message schema; preserve ranges, ids,
-    /// versions and request ids verbatim. See [`crate::CompactionScript`].
-    /// Required when `compaction` is declared, never called otherwise.
+    /// Install the scripted compaction provider and controlled clock for
+    /// `session`. Initial installation must precede admission, and the
+    /// session plan must name that provider. Replacing an installed script
+    /// changes the provider's configured answers, not its captured calls,
+    /// clock or the runner's persistent records.
+    /// Translate replacement text to the runner's message schema; preserve
+    /// ranges, ids, versions and request ids verbatim. Configure the runner's
+    /// timers and token estimator from [`crate::CompactionScript`].
+    /// Required when the runner adapter declares `compaction`; cases do not
+    /// call this method without that capability.
     async fn install_compaction_script(
         &self,
         _session: &str,
@@ -248,9 +252,11 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("scripted compaction is not implemented"))
     }
 
-    /// Provider calls and canonical inputs captured by the scripted model,
-    /// outside the runner process/state root. Do not derive these from the
-    /// script or session.read: they must observe actual calls and inputs.
+    /// Return provider calls observed at the scripted provider and canonical
+    /// inputs captured from requests received by the scripted model. Keep
+    /// both observations outside the runner process and its persistent state
+    /// directory so a runner crash cannot erase them. Do not reconstruct
+    /// observations from configured answers or `session.read` responses.
     async fn compaction_observation(
         &self,
         _session: &str,
@@ -260,11 +266,13 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Advance the injected runner/provider clock by exactly this many ms,
-    /// and drain all work due at that instant, including timers and terminal
-    /// records. No time advances implicitly. This makes deadline and cap
-    /// checks independent of scheduler speed. The clock and provider survive
-    /// runner crashes; configure the runner's actual timers, not a proxy.
+    /// Advance the injected runner/provider clock by `milliseconds` and
+    /// complete all work due at the resulting instant, including timer
+    /// handlers and durable terminal records, before returning. Time must
+    /// advance only through this method. The clock and scripted provider must
+    /// survive runner crashes. Advance the runner's actual timers; advancing
+    /// only adapter timestamps while runner timers use another clock is not
+    /// acceptable for deadline and cap checks.
     async fn advance_compaction_clock(
         &self,
         _session: &str,
@@ -275,10 +283,12 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Deliver an answer to an observed provider call (zero-based index,
-    /// including Setup). It must reach the runner even after timeout; do not
-    /// filter late/stale answers in the adapter. A missing request id means
-    /// echo this call's id; Some is delivered verbatim for fence probes.
+    /// Deliver `answer` for `calls[call_index]` returned by
+    /// [`Self::compaction_observation`]; the zero-based call list includes
+    /// Setup. Deliver late, stale and duplicate answers to the runner's
+    /// answer-disposition path, even after timeout; the runner adapter must
+    /// not filter them. `request_id: None` echoes the indexed call's id;
+    /// `Some(id)` must send `id` verbatim so cases can check the fence.
     async fn answer_compaction(
         &self,
         _session: &str,
@@ -291,19 +301,21 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Release exactly one held scripted model request. Compaction scripts
-    /// hold every model call so the suite can inspect the state before the
-    /// model's answer, without racing the next step.
+    /// Release exactly one held model call for `session`. Compaction scripts
+    /// must hold every model answer, letting cases inspect the canonical
+    /// input and durable records before the answer lets the runner prepare
+    /// another model request.
     async fn release_compaction_model(&self, _session: &str) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "held compaction model is not implemented",
         ))
     }
 
-    /// Read the initial CompactionMessage from the runner's durable store,
-    /// not its cache, the provider script, or model view. None means no
-    /// initial answer has been durably recorded. Called while the first
-    /// model request is held, to prove persistence before that call.
+    /// Read the initial CompactionMessage from the runner's persistent store.
+    /// Do not substitute an in-memory cache, the configured provider answer,
+    /// or a `session.read` model page. Return `None` if no initial answer is
+    /// durably recorded. Cases call this method while the first model call
+    /// is held, to check that Setup was persistent before the model request.
     async fn durable_compaction_setup(
         &self,
         _handle: &Self::Handle,
@@ -318,7 +330,7 @@ pub trait LlmRunnerSubject: Harness {
     /// `arguments`, counted across every kill and restart in the run.
     ///
     /// The count must be kept outside the runner's process and outside its
-    /// state root: in the suite's own process, or on disk somewhere a kill
+    /// state root: in the adapter's provider process, or on disk somewhere a kill
     /// and restart of the runner cannot touch. A count the runner holds is
     /// reset by every kill, and the at-most-once crash checks would then pass
     /// whatever the runner does.
@@ -351,7 +363,7 @@ pub trait LlmRunnerSubject: Harness {
     /// Return `Some` with all request variants needed to export/list/read
     /// content for `session` (including all listing pages), or `None` only
     /// for ops that cannot serve stored session content. Export/list schemas
-    /// are runner-specific, so the suite cannot construct these requests.
+    /// are runner-specific, so cases cannot construct these requests.
     /// An unclassified advertised op fails the check, never silently skips it.
     fn retention_probe_params(
         &self,
@@ -363,7 +375,6 @@ pub trait LlmRunnerSubject: Harness {
         )))
     }
 
-    /// Wait a short while. The suite calls this between polls while it
-    /// waits for a run to end.
+    /// Wait a short while between polls that check whether a run has ended.
     async fn pause(&self);
 }

@@ -15,7 +15,7 @@ pub struct CaseSpec {
     /// At least one of these must be declared, when not empty.
     pub requires_any: &'static [Capability],
     /// At least one of these must be left undeclared, when not empty. A
-    /// subject that declares all of them cannot be asked the question, so
+    /// runner adapter that declares all of them cannot be asked the question, so
     /// the case is [`CaseOutcome::Inapplicable`].
     pub requires_undeclared_any: &'static [Capability],
     pub checks: &'static str,
@@ -372,7 +372,7 @@ pub enum CaseOutcome {
     Failed {
         reason: String,
     },
-    /// Not run: the subject does not declare these capabilities.
+    /// Not run: the runner adapter does not declare these capabilities.
     Skipped {
         missing: Vec<Capability>,
     },
@@ -397,7 +397,7 @@ pub enum SuiteVerdict {
     /// Every case ran (or was inapplicable) and passed, and at least one
     /// kill ended a real process.
     Passed,
-    /// Nothing failed, but the subject does not declare every capability,
+    /// Nothing failed, but the runner adapter does not declare every capability,
     /// so the cases requiring `skipped` were not run. The runner conforms
     /// for the capabilities in `declared`, and for no others. Never a plain
     /// pass.
