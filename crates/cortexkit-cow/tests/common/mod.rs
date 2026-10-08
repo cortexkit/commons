@@ -20,6 +20,10 @@ pub fn git(cwd: &Path, args: &[&str]) {
 
 pub fn seed_repo(dir: &Path) {
     git(dir, &["init", "-q", "-b", "main"]);
+    // Windows CI runners set core.autocrlf=true globally, which makes git check
+    // files out with CRLF and would turn the fixture's LF bytes into CRLF in the
+    // copied workspace. The tests assert exact bytes, so the fixture opts out.
+    git(dir, &["config", "core.autocrlf", "false"]);
     std::fs::write(dir.join("file.txt"), "before\n").unwrap();
     git(dir, &["add", "file.txt"]);
     git(
