@@ -35,6 +35,17 @@ use std::{
 
 use fs2::FileExt;
 
+#[cfg(windows)]
+mod windows;
+
+/// Native Windows ACL observations and fixtures for tests only.
+///
+/// Available on Windows with the opt-in `test-support` feature. Enable the
+/// feature only on a dev-dependency; the fixture helpers deliberately grant
+/// broad access and must not be used to configure production permissions.
+#[cfg(all(windows, feature = "test-support"))]
+pub use windows::test_support;
+
 /// Force owner-only permissions on a file this process owns the lifecycle of.
 ///
 /// Files created through `File::create` or `OpenOptions::create` get their mode
@@ -79,7 +90,9 @@ pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    windows::protect_file(path)?;
+    #[cfg(not(any(unix, windows)))]
     let _ = path;
     Ok(())
 }
@@ -126,7 +139,11 @@ pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
         }
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows::create_private_dir(dir)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         std::fs::create_dir_all(dir)
     }

@@ -198,13 +198,20 @@ impl SegmentDestination {
 
 fn prepare_dir(dir: &Path, enforce_directory_mode: bool) -> io::Result<()> {
     let existed = dir.exists();
+    #[cfg(windows)]
+    if enforce_directory_mode || !existed {
+        cortexkit_lease::create_private_dir(dir)?;
+    } else {
+        fs::create_dir_all(dir)?;
+    }
+    #[cfg(not(windows))]
     fs::create_dir_all(dir)?;
     #[cfg(unix)]
     if enforce_directory_mode || !existed {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let _ = (enforce_directory_mode, existed);
     Ok(())
 }
@@ -218,6 +225,8 @@ fn open_append(path: &Path) -> io::Result<File> {
         options.mode(0o600);
     }
     let file = options.open(path)?;
+    #[cfg(windows)]
+    cortexkit_lease::protect_file(path)?;
     #[cfg(unix)]
     if file.metadata()?.file_type().is_file() {
         use std::os::unix::fs::PermissionsExt;
@@ -225,3 +234,7 @@ fn open_append(path: &Path) -> io::Result<File> {
     }
     Ok(file)
 }
+
+#[cfg(all(test, windows))]
+#[path = "windows_segment_tests.rs"]
+mod windows_tests;

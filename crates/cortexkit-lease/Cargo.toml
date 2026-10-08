@@ -1,11 +1,25 @@
 [package]
 name = "cortexkit-lease"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Single-writer durable lease (OS advisory lock + monotonic epoch fence) for CortexKit modules."
 
+[features]
+default = []
+# Native Windows ACL observations and fixtures for tests, not production use.
+test-support = []
+
 [dependencies]
 fs2 = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+] }

@@ -146,9 +146,16 @@ mod sqlite_backend {
     /// belongs to whoever started the process, so changing its mode would
     /// reach far beyond the store.
     pub(crate) fn owns_store_dir(path: &str, parent: &Path) -> bool {
-        let memory_or_uri = path == ":memory:" || path.is_empty() || path.starts_with("file:");
         let no_own_dir = parent.as_os_str().is_empty() || parent == Path::new(".");
-        !(memory_or_uri || no_own_dir)
+        !(is_memory_or_uri(path) || no_own_dir)
+    }
+
+    /// True for an in-memory database or a SQLite URI. Neither names a file
+    /// on disk under this exact string, so there is no file or directory to
+    /// create or protect. On Windows such a string is not even a valid file
+    /// name (`:` and `?`), so treating it as a path fails outright.
+    pub(crate) fn is_memory_or_uri(path: &str) -> bool {
+        path == ":memory:" || path.is_empty() || path.starts_with("file:")
     }
 
     /// Options for [`open_sqlite_with`].
@@ -566,9 +573,11 @@ mod sqlite_backend {
         // hands out an exclusive single-writer lease, so an out-of-band reader
         // is already outside the contract. That need is a read replica or an
         // export operation, not a looser file mode.
-        for suffix in ["", "-wal", "-shm"] {
-            protect_file(Path::new(&format!("{path}{suffix}")))
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if !is_memory_or_uri(&path) {
+            for suffix in ["", "-wal", "-shm"] {
+                protect_file(Path::new(&format!("{path}{suffix}")))
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
         }
 
         Ok(SqliteStore {
