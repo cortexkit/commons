@@ -1,0 +1,22 @@
+[package]
+name = "cortexkit-test-support"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Portable scratch storage, executable staging, and fenced daemon helpers for tests."
+readme = "README.md"
+publish = true
+include = ["Cargo.toml", "README.md", "CHANGELOG.md", "src/**", "tests/**"]
+
+[dependencies]
+sha2 = "0.10"
+subc-os = "=0.1.10"
+tokio = { version = "1", features = ["process", "rt", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

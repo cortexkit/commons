@@ -636,6 +636,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexkit-test-support"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "sha2 0.10.9",
+ "subc-os",
+ "tokio",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2139,9 +2149,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "subc-os"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eea891f779b39c29351ab135eaa75c8d64215e6181ca9bc5ba8d195cfca6806e"
+checksum = "deaa591b1073aed5dcc9af687eb2bf45839bd3296a04b598b29cc2bee1bfe8d9"
 dependencies = [
  "libc",
  "rustix",
