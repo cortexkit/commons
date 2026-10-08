@@ -102,6 +102,22 @@ async fn a_root_level_union_fails_the_flatness_case() {
 }
 
 #[tokio::test]
+async fn an_invalid_reply_fails_the_catalog_reply_case_by_tool_and_member() {
+    let report = run(&FakeSubject::new(Defects {
+        invalid_reply: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_reply_valid");
+    assert!(reason.contains("invalid_answer"), "{reason}");
+    assert!(reason.contains(fake::QUICK), "{reason}");
+    assert!(reason.contains("reply.max_ms"), "{reason}");
+    assert_passed(&report, "catalog_schemas_flat");
+    assert_passed(&report, "catalog_schema_digest_stable");
+    assert_passed(&report, "catalog_digest_only");
+}
+
+#[tokio::test]
 async fn an_undefined_unprefixed_capability_tag_fails_the_catalog_case() {
     let report = run(&FakeSubject::new(Defects {
         undefined_unprefixed_tag: true,

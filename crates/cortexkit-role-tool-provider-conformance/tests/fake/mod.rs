@@ -102,6 +102,8 @@ pub struct Defects {
     pub run_held_calls_on_restart: bool,
     /// The held tool's argument schema is a root-level union.
     pub root_union_schema: bool,
+    /// The quick tool declares a zero maximum reply time.
+    pub invalid_reply: bool,
     /// Acks are accepted but forgotten, so acked entries are served again.
     pub forget_acks: bool,
     /// `tool.catalog` answers with its default variant for any preset,
@@ -369,6 +371,7 @@ impl Module {
         for tool in &mut tools {
             tool["schema_digest"] = json!(schema_digest(&tool["input_schema"]).unwrap());
         }
+        tools[0]["reply"] = json!({"max_ms": if self.defects.invalid_reply { 0 } else { 120_000 }});
         tools
     }
 

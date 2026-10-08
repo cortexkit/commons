@@ -13,6 +13,7 @@ The role document is `crates/cortexkit-role-tool-provider/CONTRACT.md`.
 | `catalog-schemas.json` | flat and non-flat argument schemas | the wire crate's `check_flat_schema` test |
 | `catalog-requests.json` | `tool.catalog` request bodies: without a `preset` (the encoding omits the member), with `preset: "default"` and params, and an unknown preset with the `invalid_request {field: "preset"}` refusal body | the wire crate's request round-trip and refusal tests; the runner's `catalog_unknown_preset_refused` sends an undefined preset to a live provider |
 | `catalog-answers.json` | a full and a `digest_only` catalog answer (same `catalog_digest`), and tool entries a decoder refuses | the wire crate's catalog test |
+| `reply-deadline.json` | per-tool reply deadlines, integral and unusable hold arguments, fallback floors, saturating arithmetic, and valid, invalid and malformed declarations | the wire crate's reply tests; the runner's `catalog_reply_valid` checks every live tool with `check_reply` |
 | `composition-digest.json` | the `composition_digest` rule: each composition with its exact JCS bytes and digest, and objects that differ only in key order (same digest) | the wire crate's `composition_digest` test |
 | `late-results.json` | the `late_results` request, reply, ack, entry kinds (including an unknown one) and malformed entries | the wire crate's late-result tests |
 

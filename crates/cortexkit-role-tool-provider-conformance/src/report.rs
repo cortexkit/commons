@@ -52,6 +52,11 @@ pub const CASES: &[CaseSpec] = &[
         checks: "every catalog tool has a schema_digest, a flat input_schema and only defined or namespaced capability tags, no role op is listed as a tool, and the quick call's tool is listed",
     },
     CaseSpec {
+        name: "catalog_reply_valid",
+        requires: &[],
+        checks: "every catalog tool's optional reply metadata passes check_reply, with a bounded max_ms, positive bounded hold times and a declared numeric hold argument",
+    },
+    CaseSpec {
         name: "catalog_schema_digest_stable",
         requires: &[],
         checks: "two tool.catalog answers carry the same generation, catalog_digest and tools with the same semantics, and each schema_digest is the digest of its input_schema's structure",

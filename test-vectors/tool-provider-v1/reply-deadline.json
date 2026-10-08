@@ -1,0 +1,63 @@
+{
+  "_about": "Per-tool reply deadlines in milliseconds. Each deadline case pairs optional reply metadata and coerced arguments with an expected deadline under the given runner fallback. Validation cases use the default input_schema unless overridden; refused cases name the invalid tool member.",
+  "runner_fallback_ms": 120000,
+  "input_schema": {"type": "object", "properties": {"timeoutMs": {"type": "integer"}}},
+  "deadlines": [
+    {"name": "no_reply", "reply": null, "arguments": {}, "expected_ms": 120000},
+    {"name": "max_only", "reply": {"max_ms": 1830000}, "arguments": {}, "expected_ms": 1830000},
+    {"name": "integer_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 600000}, "expected_ms": 630000},
+    {"name": "integral_number_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 600000.0}, "expected_ms": 630000},
+    {"name": "absent_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {}, "expected_ms": 1830000},
+    {"name": "zero_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 0}, "expected_ms": 1830000},
+    {"name": "string_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": "600000"}, "expected_ms": 1830000},
+    {"name": "fractional_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 600000.5}, "expected_ms": 1830000},
+    {"name": "negative_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": -1}, "expected_ms": 1830000},
+    {"name": "null_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": null}, "expected_ms": 1830000},
+    {"name": "boolean_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": true}, "expected_ms": 1830000},
+    {"name": "object_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": {}}, "expected_ms": 1830000},
+    {"name": "array_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": []}, "expected_ms": 1830000},
+    {"name": "above_max_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 2000000}, "expected_ms": 1830000},
+    {"name": "saturating_hold_plus_grace", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 18446744073709551615}, "expected_ms": 1830000},
+    {"name": "huge_integral_number_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 1e100}, "expected_ms": 1830000},
+    {"name": "fallback_floor_max_5000", "reply": {"max_ms": 5000}, "arguments": {}, "expected_ms": 120000},
+    {"name": "fallback_floor_after_hold", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "arguments": {"timeoutMs": 1}, "expected_ms": 120000},
+    {"name": "fallback_above_max", "runner_fallback_ms": 2000000, "reply": {"max_ms": 1830000}, "arguments": {}, "expected_ms": 2000000},
+    {"name": "zero_fallback_max_one", "runner_fallback_ms": 0, "reply": {"max_ms": 1}, "arguments": {}, "expected_ms": 1},
+    {"name": "default_plus_grace_capped", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1830000, "grace_ms": 30000}}, "arguments": {}, "expected_ms": 1830000},
+    {"name": "default_plus_grace_uncapped", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 400000, "grace_ms": 30000}}, "arguments": {}, "expected_ms": 430000}
+  ],
+  "valid": [
+    {"name": "absent", "reply": null},
+    {"name": "lower_bound", "reply": {"max_ms": 1}},
+    {"name": "upper_bound", "reply": {"max_ms": 86400000}},
+    {"name": "integer_property", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}},
+    {"name": "number_property", "input_schema": {"type": "object", "properties": {"timeoutMs": {"type": "number"}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}},
+    {"name": "hold_times_at_max", "reply": {"max_ms": 1, "hold_argument": {"name": "timeoutMs", "default_ms": 1, "grace_ms": 1}}}
+  ],
+  "invalid": [
+    {"name": "max_zero", "reply": {"max_ms": 0}, "member": "reply.max_ms"},
+    {"name": "max_above_ceiling", "reply": {"max_ms": 86400001}, "member": "reply.max_ms"},
+    {"name": "default_zero", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 0, "grace_ms": 30000}}, "member": "reply.hold_argument.default_ms"},
+    {"name": "grace_zero", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 0}}, "member": "reply.hold_argument.grace_ms"},
+    {"name": "default_above_max", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1830001, "grace_ms": 30000}}, "member": "reply.hold_argument.default_ms"},
+    {"name": "grace_above_max", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 1830001}}, "member": "reply.hold_argument.grace_ms"},
+    {"name": "undeclared_property", "reply": {"max_ms": 1830000, "hold_argument": {"name": "missing", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"},
+    {"name": "nested_property", "input_schema": {"type": "object", "properties": {"options": {"type": "object", "properties": {"timeoutMs": {"type": "integer"}}}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"},
+    {"name": "string_property", "input_schema": {"type": "object", "properties": {"timeoutMs": {"type": "string"}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"},
+    {"name": "boolean_property", "input_schema": {"type": "object", "properties": {"timeoutMs": {"type": "boolean"}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"},
+    {"name": "untyped_property", "input_schema": {"type": "object", "properties": {"timeoutMs": {}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"},
+    {"name": "string_union_property", "input_schema": {"type": "object", "properties": {"timeoutMs": {"type": ["integer", "string"]}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"},
+    {"name": "numeric_union_without_type", "input_schema": {"type": "object", "properties": {"timeoutMs": {"anyOf": [{"type": "integer"}, {"type": "number"}]}}}, "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 30000}}, "member": "reply.hold_argument.name"}
+  ],
+  "malformed": [
+    {"name": "missing_max", "reply": {}, "member": "max_ms"},
+    {"name": "negative_max", "reply": {"max_ms": -1}},
+    {"name": "fractional_max", "reply": {"max_ms": 1.5}},
+    {"name": "string_max", "reply": {"max_ms": "120000"}},
+    {"name": "missing_name", "reply": {"max_ms": 1830000, "hold_argument": {"default_ms": 1800000, "grace_ms": 30000}}, "member": "name"},
+    {"name": "missing_default", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "grace_ms": 30000}}, "member": "default_ms"},
+    {"name": "missing_grace", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000}}, "member": "grace_ms"},
+    {"name": "negative_default", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": -1, "grace_ms": 30000}}},
+    {"name": "fractional_grace", "reply": {"max_ms": 1830000, "hold_argument": {"name": "timeoutMs", "default_ms": 1800000, "grace_ms": 0.5}}}
+  ]
+}

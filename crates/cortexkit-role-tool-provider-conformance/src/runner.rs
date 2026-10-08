@@ -12,7 +12,7 @@ use cortexkit_role_harness::{
 use cortexkit_role_tool_provider::{
     call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
-        check_flat_schema, is_schema_digest, schema_digest, session_capabilities,
+        check_flat_schema, check_reply, is_schema_digest, schema_digest, session_capabilities,
         system_text_digest, CatalogAnswer,
     },
     check_capability_tag,
@@ -226,6 +226,7 @@ where
             "role_describe_shape" => self.role_describe_shape().await,
             "role_describe_cacheable" => self.role_describe_cacheable().await,
             "catalog_schemas_flat" => self.catalog_schemas_flat().await,
+            "catalog_reply_valid" => self.catalog_reply_valid().await,
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
             "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
@@ -386,6 +387,15 @@ where
                     format!("{} carries capability tag {tag:?}: {problem}", tool.name)
                 })?;
             }
+        }
+        Ok(())
+    }
+
+    async fn catalog_reply_valid(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        for tool in &catalog.tools {
+            check_reply(tool).map_err(|problem| format!("invalid_answer: {problem}"))?;
         }
         Ok(())
     }
