@@ -13,6 +13,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use cortexkit_role_step_transform_provider::subscription::{
+    SubjectPartProblem, UnservedSubject,
+};
+
 /// History inherited by the current lineage, through the ordinal inclusive.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -254,6 +258,14 @@ pub struct StepStatus {
     /// named lineage through this ordinal or refuse `history_unreadable`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub descends_from: Option<DescendsFrom>,
+    /// Highest durably served ordinal after the pass's append transaction.
+    /// Absence grants no ordinal-confirmed promotion; it is not zero or newest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_through_ordinal: Option<u64>,
+    /// Subjects whose pending output must burn before promotion, in this
+    /// lineage. Omit an empty list. Parts use the step-transform role's shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unserved_subjects: Option<Vec<UnservedSubject>>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -297,12 +309,34 @@ impl StepStatus {
             more: false,
             now,
             descends_from: None,
+            served_through_ordinal: None,
+            unserved_subjects: None,
         }
     }
 
     pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
         self.descends_from = Some(descends_from);
         self
+    }
+
+    pub fn with_served_through_ordinal(mut self, ordinal: u64) -> Self {
+        self.served_through_ordinal = Some(ordinal);
+        self
+    }
+
+    pub fn with_unserved_subjects(mut self, subjects: Vec<UnservedSubject>) -> Self {
+        self.unserved_subjects = Some(subjects);
+        self
+    }
+
+    /// Validate burn-entry part ids before any promote-and-burn mutation.
+    /// Admission, held-history conflicts and watermark monotonicity require
+    /// provider context and are not checked here. Check message ordering with
+    /// [`Self::check_messages`] as well.
+    pub fn validate(&self) -> Result<(), SubjectPartProblem> {
+        cortexkit_role_step_transform_provider::subscription::validate_unserved_subjects(
+            self.unserved_subjects.as_deref().unwrap_or_default(),
+        )
     }
 
     /// Set the cursor and the messages after it.

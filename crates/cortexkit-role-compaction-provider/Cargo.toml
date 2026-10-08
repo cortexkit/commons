@@ -11,7 +11,7 @@
 # suite.
 [package]
 name = "cortexkit-role-compaction-provider"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -23,5 +23,6 @@ publish = false
 # The runner role's crate, for the names and types both sides of the
 # interface share, so they cannot drift apart.
 cortexkit-role-llm-runner = { version = "0.1.0", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-step-transform-provider = { version = "0.1.2", path = "../cortexkit-role-step-transform-provider" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

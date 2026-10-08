@@ -104,6 +104,7 @@ pub(crate) mod vectors {
         "answers.json",
         "errors.json",
         "fence.json",
+        "host-runner-lane.json",
         "host-runner.json",
         "ready.json",
         "role-describe.json",
