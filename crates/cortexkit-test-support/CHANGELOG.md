@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Require `subc-os` 0.1.10 or any later 0.1.x instead of exactly 0.1.10, so a
+  consumer that pins its own compatible `subc-os` can resolve this crate.
+
 ## 0.1.0
 
 - Add portable scratch fixtures with kernel-identity-based cleanup and preserved

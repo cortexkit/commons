@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-test-support"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,7 +12,7 @@ include = ["Cargo.toml", "README.md", "CHANGELOG.md", "src/**", "tests/**"]
 
 [dependencies]
 sha2 = "0.10"
-subc-os = "=0.1.10"
+subc-os = "0.1.10"
 tokio = { version = "1", features = ["process", "rt", "time"] }
 
 [target.'cfg(unix)'.dependencies]
