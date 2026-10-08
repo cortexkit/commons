@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.4
+
+- Cache test listings for each runner, package, target, feature and ignored-test
+  selection within a replay session, keeping clean-tree and mutated-tree
+  listings separate. Reuse successful listings and failures in both `check` and
+  `run`.
+
 ## 0.9.3
 
 - Add `prove --select expected` for cargo and nextest. It reuses the row's exact

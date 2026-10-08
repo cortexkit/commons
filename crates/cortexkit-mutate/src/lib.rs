@@ -2924,13 +2924,17 @@ pub fn run_row(
     unscoped: bool,
 ) -> Result<Report> {
     let scope = if unscoped { Scope::Package } else { Scope::Row };
+    let mut listings = ListingCache::default();
     replay(
         root,
         c,
         allow_dirty,
         stop,
         scope,
-        &[],
+        ReplayContext {
+            prebuild: &[],
+            listings: &mut listings,
+        },
         ReplayStage::Mutant(None),
     )
 }
@@ -2943,13 +2947,17 @@ pub fn run_broad_row(
     allow_dirty: bool,
     stop: &AtomicBool,
 ) -> Result<Report> {
+    let mut listings = ListingCache::default();
     replay(
         root,
         c,
         allow_dirty,
         stop,
         Scope::Broad,
-        &[],
+        ReplayContext {
+            prebuild: &[],
+            listings: &mut listings,
+        },
         ReplayStage::Mutant(None),
     )
 }
@@ -2964,13 +2972,17 @@ pub fn explore_row(
     stop: &AtomicBool,
     workspace: bool,
 ) -> Result<Report> {
+    let mut listings = ListingCache::default();
     replay(
         root,
         c,
         allow_dirty,
         stop,
         Scope::Explore { workspace },
-        &[],
+        ReplayContext {
+            prebuild: &[],
+            listings: &mut listings,
+        },
         ReplayStage::Mutant(None),
     )
 }
@@ -2985,6 +2997,7 @@ pub struct ReplaySession {
     validated_rows: BTreeSet<String>,
     clean_edits: Vec<Edit>,
     fixtures_dirty: bool,
+    listings: ListingCache,
 }
 
 impl ReplaySession {
@@ -3003,6 +3016,7 @@ impl ReplaySession {
             validated_rows: BTreeSet::new(),
             clean_edits: vec![],
             fixtures_dirty: false,
+            listings: ListingCache::default(),
         };
         let active: Vec<_> = rows
             .iter()
@@ -3075,7 +3089,6 @@ impl ReplaySession {
         }
         let mut shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
         let mut command_broad_shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
-        let mut listings = BTreeMap::new();
         for c in rows {
             let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
             let key = if active && c.runner != "command" {
@@ -3127,7 +3140,10 @@ impl ReplaySession {
                     allow_dirty,
                     stop,
                     scope,
-                    &[],
+                    ReplayContext {
+                        prebuild: &[],
+                        listings: &mut self.listings,
+                    },
                     ReplayStage::Baseline,
                 )?;
                 if report.outcome != Outcome::AnchorMissing {
@@ -3176,16 +3192,13 @@ impl ReplaySession {
             if active && report.outcome == Outcome::Survived && c.runner != "command" {
                 // Resolve names in exactly the selection that the baseline ran.
                 // Package-wide listing can compile unrelated, feature-gated targets.
-                let names = listings.entry(key).or_insert_with(|| {
-                    let start = Instant::now();
-                    let names = list_results(root, c, scope, stop);
+                let start = Instant::now();
+                let (names, listed_now) = self.listings.get(root, c, scope, true, stop);
+                if listed_now {
                     report.baseline_build_ms += start.elapsed().as_millis();
-                    names
-                });
+                }
                 let validation = names
-                    .as_ref()
-                    .map_err(Clone::clone)
-                    .and_then(|names| resolve_listed(c, names).map(|_| ()))
+                    .and_then(|names| resolve_listed(c, &names).map(|_| ()))
                     .and_then(|()| validate_baseline(c, &mut report));
                 if let Err(e) = validation {
                     report.outcome = Outcome::Error;
@@ -3290,7 +3303,10 @@ impl ReplaySession {
             allow_dirty,
             stop,
             scope,
-            &self.prebuild,
+            ReplayContext {
+                prebuild: &self.prebuild,
+                listings: &mut self.listings,
+            },
             ReplayStage::Mutant(baseline.map(Box::new)),
         )?;
         self.fixtures_dirty |= row.restore_prebuild_needed;
@@ -3374,6 +3390,11 @@ enum ReplayStage {
     Mutant(Option<Box<Report>>),
 }
 
+struct ReplayContext<'a> {
+    prebuild: &'a [Prebuild],
+    listings: &'a mut ListingCache,
+}
+
 // The only code that mutates source: dirty-target refusal, exact-once anchors,
 // the separate build, the test run, per-test parsing and byte restoration of
 // targets and Cargo.lock all live here, for every command.
@@ -3383,9 +3404,10 @@ fn replay(
     allow_dirty: bool,
     stop: &AtomicBool,
     scope: Scope,
-    prebuild: &[Prebuild],
+    context: ReplayContext<'_>,
     stage: ReplayStage,
 ) -> Result<Report> {
+    let ReplayContext { prebuild, listings } = context;
     let (mut report, baseline_only, baseline_ready) = match stage {
         ReplayStage::Baseline => (Report::new(c), true, false),
         ReplayStage::Mutant(Some(report)) => {
@@ -3459,7 +3481,8 @@ fn replay(
             } else {
                 if !c.expect_red.is_empty() && !matches!(scope, Scope::Explore { .. }) {
                     let start = Instant::now();
-                    let names = list_results(root, c, scope, stop)?;
+                    let (names, _) = listings.get(root, c, scope, true, stop);
+                    let names = names?;
                     report.baseline_build_ms += start.elapsed().as_millis();
                     resolve_listed(c, &names)?;
                 }
@@ -3657,9 +3680,116 @@ fn replay(
 /// selection lists but skips, as (binary, name) pairs. The skipped ones let a
 /// row expecting an ignored test fail by naming the `ignored` field instead of
 /// reporting that no expected test ran.
+#[derive(Clone)]
 struct Listing {
     results: TestResults,
     skipped_ignored: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ListingKey {
+    // The list command's arguments capture the runner, package, effective
+    // target selection, features, and ignored-test selection.
+    args: Vec<String>,
+    clean_tree: bool, // False keeps mutant-tree listings out of clean baselines.
+}
+
+impl ListingKey {
+    fn new(c: &Control, scope: Scope, clean_tree: bool) -> Result<Self> {
+        let args = command(c, "list", scope)?
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        Ok(Self { args, clean_tree })
+    }
+}
+
+#[derive(Default)]
+struct ListingCache(BTreeMap<ListingKey, Result<Listing>>);
+
+impl ListingCache {
+    /// Return the cached result and whether this call performed a listing.
+    /// Errors are cached too, so one failed listing is not retried in a session.
+    fn get(
+        &mut self,
+        root: &Path,
+        c: &Control,
+        scope: Scope,
+        clean_tree: bool,
+        stop: &AtomicBool,
+    ) -> (Result<Listing>, bool) {
+        let key = match ListingKey::new(c, scope, clean_tree) {
+            Ok(key) => key,
+            Err(error) => return (Err(error), false),
+        };
+        self.get_or_insert_with(key, || list_results(root, c, scope, stop))
+    }
+
+    fn get_or_insert_with(
+        &mut self,
+        key: ListingKey,
+        list: impl FnOnce() -> Result<Listing>,
+    ) -> (Result<Listing>, bool) {
+        if let Some(result) = self.0.get(&key) {
+            return (result.clone(), false);
+        }
+        let result = list();
+        self.0.insert(key, result.clone());
+        (result, true)
+    }
+}
+
+#[cfg(test)]
+mod listing_cache_tests {
+    use super::*;
+
+    fn control() -> Control {
+        toml::from_str(
+            r#"
+id = "listing"
+guards = "a listing test"
+file = "src/lib.rs"
+old = "true"
+new = "false"
+test_file = "src/lib.rs"
+runner = "cargo"
+package = "fixture"
+target = "--lib"
+expect_red = ["test"]
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn listing_key_separates_ignored_and_mutated_tree_selections() {
+        let control = control();
+        let clean = ListingKey::new(&control, Scope::Row, true).unwrap();
+        let mut ignored = control.clone();
+        ignored.ignored = Some(IgnoredSelection::Include);
+        assert_ne!(clean, ListingKey::new(&ignored, Scope::Row, true).unwrap());
+        assert_ne!(clean, ListingKey::new(&control, Scope::Row, false).unwrap());
+    }
+
+    #[test]
+    fn listing_cache_reuses_failures_without_retrying() {
+        let key = ListingKey::new(&control(), Scope::Row, true).unwrap();
+        let mut cache = ListingCache::default();
+        let mut calls = 0;
+        let (first, first_ran) = cache.get_or_insert_with(key.clone(), || {
+            calls += 1;
+            Err("list failed".into())
+        });
+        let (second, second_ran) = cache.get_or_insert_with(key, || {
+            calls += 1;
+            Err("retried list".into())
+        });
+        assert_eq!(first.err().as_deref(), Some("list failed"));
+        assert_eq!(second.err().as_deref(), Some("list failed"));
+        assert!(first_ran);
+        assert!(!second_ran);
+        assert_eq!(calls, 1);
+    }
 }
 
 fn list_output(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Result<String> {
@@ -3773,7 +3903,7 @@ fn resolve_listed(c: &Control, listing: &Listing) -> Result<Vec<String>> {
 pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()> {
     validate(root, catalogue)?;
     let rows: Vec<_> = catalogue.control.iter().collect();
-    let _session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
+    let mut session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
     for c in &catalogue.control {
         replaced(root, &c.edits()?)?;
         // Unreachable rows have no names to discover. Command rows have no list
@@ -3785,7 +3915,8 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
         {
             continue;
         }
-        let selected = list_results(root, c, Scope::Row, stop)?;
+        let (selected, _) = session.listings.get(root, c, Scope::Row, true, stop);
+        let selected = selected?;
         for expected in resolve_listed(c, &selected)? {
             if !selected.results.names.contains_key(&expected) {
                 return Err(format!(

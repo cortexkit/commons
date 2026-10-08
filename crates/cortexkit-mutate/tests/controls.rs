@@ -370,8 +370,52 @@ fn select_expected_session_baselines_are_keyed_by_exact_names() {
     )
     .unwrap();
     f.commit();
-    let out = f.cli(&["run", "--all", "--broad", "--report", ".git/selection.json"]);
-    assert!(!out.status.success(), "one selected test should survive");
+    #[cfg(unix)]
+    let shim = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    let list_log = shim.path().join("lists.log");
+    #[cfg(unix)]
+    let real_cargo = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|directory| directory.join("cargo"))
+        .find(|candidate| candidate.is_file())
+        .expect("Cargo executable in PATH");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let wrapper = shim.path().join("cargo");
+        fs::write(
+            &wrapper,
+            "#!/bin/sh\ncase \"$*\" in *--list*) printf '%s\\n' \"$*\" >> \"$CKDEV_MUTATE_LIST_LOG\";; esac\nexec \"$CKDEV_MUTATE_REAL_CARGO\" \"$@\"\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+    }
+    #[cfg(unix)]
+    let mut search_path = vec![shim.path().to_path_buf()];
+    #[cfg(unix)]
+    search_path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    #[cfg(unix)]
+    let output = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
+        .current_dir(f.root())
+        .args(["run", "--all", "--broad", "--report", ".git/selection.json"])
+        .env("PATH", std::env::join_paths(search_path).unwrap())
+        .env("CKDEV_MUTATE_REAL_CARGO", real_cargo)
+        .env("CKDEV_MUTATE_LIST_LOG", &list_log)
+        .output()
+        .unwrap();
+    #[cfg(not(unix))]
+    let output = f.cli(&["run", "--all", "--broad", "--report", ".git/selection.json"]);
+    assert!(!output.status.success(), "one selected test should survive");
+    #[cfg(unix)]
+    assert_eq!(
+        fs::read_to_string(list_log).unwrap().lines().count(),
+        2,
+        "both exact-name baselines must share the same pair of list commands"
+    );
     let rows: serde_json::Value =
         serde_json::from_slice(&fs::read(f.root().join(".git/selection.json")).unwrap()).unwrap();
     assert_eq!(rows[0]["outcome"], "CAUGHT", "{rows}");
@@ -3045,6 +3089,80 @@ fn check_validates_names_anchors_and_fields_without_mutation() {
     };
     assert!(validate(f.root(), &duplicate).is_err());
     assert_eq!(before, fs::read(f.root().join("src/lib.rs")).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn check_lists_once_per_selection_including_features() {
+    use std::{env, os::unix::fs::PermissionsExt};
+
+    let f = Fixture::new();
+    let mut rows = (0..4)
+        .map(|index| {
+            let mut row = f.control();
+            row.id = format!("shared-{index}");
+            row.ignored = Some(IgnoredSelection::Include);
+            row
+        })
+        .collect::<Vec<_>>();
+    let mut featured = f.control();
+    featured.id = "featured".into();
+    featured.ignored = Some(IgnoredSelection::Include);
+    featured.features = Some(vec!["fixture-feature".into()]);
+    rows.push(featured);
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: rows,
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+
+    let shim = tempfile::tempdir().unwrap();
+    let cargo = shim.path().join("cargo");
+    fs::write(
+        &cargo,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CKDEV_MUTATE_LIST_LOG\"\ncase \"$*\" in *--ignored*) exit 0;; esac\nprintf 'tests::guard_rejects_zero: test\\n'\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&cargo).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&cargo, permissions).unwrap();
+    let mut paths = vec![shim.path().to_path_buf()];
+    paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
+    let path = env::join_paths(paths).unwrap();
+    let log = shim.path().join("list.log");
+    let output = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
+        .current_dir(f.root())
+        .args(["check"])
+        .env("PATH", path)
+        .env("CKDEV_MUTATE_LIST_LOG", &log)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listings = fs::read_to_string(log).unwrap();
+    let commands: Vec<_> = listings.lines().collect();
+    assert_eq!(commands.len(), 2, "listing invocations: {listings}");
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|line| line.contains("--features fixture-feature"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|line| !line.contains("--features fixture-feature"))
+            .count(),
+        1
+    );
 }
 #[test]
 fn diff_selects_source_edits_test_file_and_changed_row() {
