@@ -182,6 +182,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
+dependencies = [
+ "memchr",
+ "serde_core",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -391,6 +401,21 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cortexkit-cow"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cortexkit-cow",
+ "libc",
+ "parking_lot",
+ "similar",
+ "subc-os",
+ "tempfile",
+ "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2042,6 +2067,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2101,6 +2135,17 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "subc-os"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eea891f779b39c29351ab135eaa75c8d64215e6181ca9bc5ba8d195cfca6806e"
+dependencies = [
+ "libc",
+ "rustix",
+ "tokio",
+]
 
 [[package]]
 name = "subc-protocol"
