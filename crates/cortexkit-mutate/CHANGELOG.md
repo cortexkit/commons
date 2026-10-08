@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.5
+
+- Move the per-worktree lock and stdout/stderr capture files out of `.git`
+  into the host's temporary directory, so mutation proofs work when Git metadata
+  is read-only (including Linux remote build jobs). Canonical worktree paths share
+  one lock across aliases; captures are removed on success and error.
+
 ## 0.9.4
 
 - Cache test listings for each runner, package, target, feature and ignored-test

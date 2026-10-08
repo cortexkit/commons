@@ -2,6 +2,7 @@
 
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
@@ -971,8 +972,11 @@ pub struct TreeLock {
 }
 impl TreeLock {
     pub fn acquire(root: &Path) -> Result<Self> {
-        let dir = git(root, &["rev-parse", "--git-path", "ck-mutate.lock"])?;
-        let path = root.join(String::from_utf8_lossy(&dir).trim());
+        // Hash native path bytes after resolving aliases so one worktree has
+        // one lock, without needing write access to Git's metadata directory.
+        let root = root.canonicalize().map_err(|e| e.to_string())?;
+        let digest = Sha256::digest(root.as_os_str().as_encoded_bytes());
+        let path = std::env::temp_dir().join(format!("ck-mutate-{digest:x}.lock"));
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -1431,13 +1435,17 @@ fn execute_output(
     separate_stdout: bool,
 ) -> Result<Output> {
     // Regular files cannot deadlock on full pipes or descendants holding pipes open.
-    let git_dir = git(root, &["rev-parse", "--git-dir"])?;
-    let dir = root.join(String::from_utf8_lossy(&git_dir).trim());
-    let stdout = dir.join("ck-mutate.stdout");
+    // Keep captures alive until all output has been read. RAII also removes
+    // them on spawn, wait or read errors, without writing into Git metadata.
+    let dir = tempfile::Builder::new()
+        .prefix("ck-mutate-")
+        .tempdir()
+        .map_err(|e| e.to_string())?;
+    let stdout = dir.path().join("stdout");
     let out_file = File::create(&stdout).map_err(|e| e.to_string())?;
     // Cargo prints binary headers on stderr and test events on stdout. Sharing
     // the file offset preserves their order, so events keep their binary identity.
-    let stderr = dir.join("ck-mutate.stderr");
+    let stderr = dir.path().join("stderr");
     let err_file = if separate_stdout {
         File::create(&stderr)
     } else {
@@ -1454,7 +1462,11 @@ fn execute_output(
         cmd.process_group(0);
     }
     let start = Instant::now();
-    let mut child = RunningChild(cmd.spawn().map_err(|e| e.to_string())?);
+    let child = cmd.spawn();
+    // Close the command's capture handles before cleanup, including when
+    // spawning fails (Windows cannot remove files with live handles).
+    drop(cmd);
+    let mut child = RunningChild(child.map_err(|e| e.to_string())?);
     let mut timed_out = false;
     let mut interrupted = false;
     let status = loop {
@@ -1487,10 +1499,6 @@ fn execute_output(
     } else {
         stdout_text.clone()
     };
-    let _ = fs::remove_file(stdout);
-    if separate_stdout {
-        let _ = fs::remove_file(stderr);
-    }
     Ok(Output {
         success: status.is_some_and(|s| s.success()),
         code: status.and_then(|s| s.code()),

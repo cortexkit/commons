@@ -1051,9 +1051,20 @@ List mode always uses nextest JSON. Current nextest is exercised in CI.
 
 ## Safety and traps
 
-An OS advisory lock at Git's `ck-mutate.lock` path excludes concurrent runs,
-including when `.git` is a worktree pointer. The lock file remains but the lock
-is released when its handle closes. A deleted or renamed edit target reports ANCHOR_MISSING for its row, naming the
+An OS advisory lock at
+`std::env::temp_dir()/ck-mutate-<hex SHA-256 of the canonical worktree root path>.lock`
+excludes concurrent runs on one worktree, including across symlink aliases such
+as `/tmp` and `/private/tmp`. Different worktrees of the same repository have
+independent locks. Lock coordination is per host and per user temporary directory,
+not across hosts or users with different temporary directories. Sessions that
+override their temporary directory must use the same directory to coordinate.
+The lock file remains but the lock is released when its handle closes, as before.
+Stdout/stderr captures use a separate temporary directory removed after reading
+the output, including on errors; reports retain output text, not capture paths.
+The runner's lock and captures never write to `.git`, so Git metadata can be
+mounted read-only. User-specified report/catalogue paths and commands still need
+write access to their chosen destinations.
+A deleted or renamed edit target reports ANCHOR_MISSING for its row, naming the
 missing file; subsequent rows still run. Every existing target is compared **byte for byte to
 HEAD**, including staged changes, before any mutation. `--allow-dirty` opts in
 explicitly, and restoration still uses saved local bytes, not HEAD or the index.
@@ -1135,5 +1146,4 @@ No internal workspace crates or async runtime are used. `clap` provides strict C
 and help; `serde` derives the catalogue/report schema; `toml` reads/writes the
 catalogue; `serde_json` writes evidence and reads nextest events; `fs2` supplies
 portable advisory locks; `ctrlc` supplies Unix interruption/termination and
-Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `regex` matches the optional per-test assertion pattern. `tempfile` is
-only a dev dependency, isolating real Git/Cargo fixture repos for tests.
+Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `regex` matches the optional per-test assertion pattern. `sha2` hashes canonical worktree paths for lock names. `tempfile` supplies automatically cleaned capture directories and isolates real Git/Cargo fixture repos for tests.
