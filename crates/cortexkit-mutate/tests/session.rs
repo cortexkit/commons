@@ -145,6 +145,36 @@ only = true
         .unwrap();
         self.commit();
     }
+
+    fn add_prove_count_tests(&self) {
+        let path = self.root().join("src/lib.rs");
+        let source = fs::read_to_string(&path).unwrap();
+        let old = r#"#[cfg(test)] mod tests {
+    #[test] fn fixture_guard() {
+        assert_eq!(std::fs::read_to_string("fixture-output").expect("prebuild must produce the fixture"), "false");
+    }
+}"#;
+        let new = r#"#[cfg(test)] mod tests {
+    #[test] fn fixture_guard() {
+        use std::io::Write;
+        std::fs::OpenOptions::new().create(true).append(true).open(".git/prove-test-runs").unwrap()
+            .write_all(b"guard\n").unwrap();
+        assert_eq!(std::fs::read_to_string("fixture-output").expect("prebuild must produce the fixture"), "false");
+        assert!(!super::guarded(0));
+    }
+    #[test] fn unselected() {
+        use std::io::Write;
+        std::fs::OpenOptions::new().create(true).append(true).open(".git/prove-test-runs").unwrap()
+            .write_all(b"unselected\n").unwrap();
+    }
+}"#;
+        assert!(
+            source.contains(old),
+            "fixture test source changed unexpectedly"
+        );
+        fs::write(path, source.replace(old, new)).unwrap();
+        self.commit();
+    }
 }
 
 fn other_os() -> &'static str {
@@ -484,6 +514,196 @@ fn prove_survivor_diagnosis_has_one_final_restore_and_check_has_no_mutants() {
         fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
         "false\nfalse\nfalse\nfalse\n",
         "initial, two mutants, one final cleanup: N+2 = 4"
+    );
+}
+
+#[test]
+fn prove_select_expected_runs_only_named_tests_on_baseline_and_mutant() {
+    let f = Fixture::new();
+    f.add_prove_count_tests();
+    let output = f.cli(&[
+        "prove",
+        "--id",
+        "selected-prove",
+        "--guards",
+        "the named fixture test rejects zero",
+        "--package",
+        "session-fixture",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value >= 0",
+        "--test-file",
+        "src/lib.rs",
+        "--target=--lib",
+        "--expect-red",
+        "tests::fixture_guard",
+        "--select",
+        "expected",
+        "--report",
+        ".git/report.json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let catalogue = load(&f.root().join("mutations.toml")).unwrap();
+    let appended = catalogue
+        .control
+        .iter()
+        .find(|row| row.id == "selected-prove")
+        .expect("caught proof should be appended");
+    assert_eq!(appended.select, Some(TestSelection::Expected));
+    let report = f.report();
+    assert_eq!(report[0]["outcome"], "CAUGHT");
+    assert_eq!(
+        report[0]["red"],
+        serde_json::json!(["tests::fixture_guard"])
+    );
+    assert_eq!(report[0]["green"], serde_json::json!([]));
+    assert_eq!(report[0]["baseline_red"], serde_json::json!({}));
+
+    let runs = fs::read_to_string(f.root().join(".git/prove-test-runs")).unwrap();
+    let runs: Vec<_> = runs.lines().collect();
+    assert_eq!(
+        runs,
+        ["guard", "guard"],
+        "the named test runs once on baseline and once on the mutant; the other fixture test must not run"
+    );
+}
+
+#[test]
+fn prove_without_select_still_runs_the_full_fixture_selection() {
+    let f = Fixture::new();
+    f.add_prove_count_tests();
+    let output = f.cli(&[
+        "prove",
+        "--id",
+        "unselected-prove",
+        "--guards",
+        "the named fixture test rejects zero",
+        "--package",
+        "session-fixture",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value >= 0",
+        "--test-file",
+        "src/lib.rs",
+        "--target=--lib",
+        "--expect-red",
+        "tests::fixture_guard",
+        "--report",
+        ".git/report.json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let catalogue = load(&f.root().join("mutations.toml")).unwrap();
+    let appended = catalogue
+        .control
+        .iter()
+        .find(|row| row.id == "unselected-prove")
+        .expect("caught proof should be appended");
+    assert_eq!(appended.select, None);
+
+    let runs = fs::read_to_string(f.root().join(".git/prove-test-runs")).unwrap();
+    assert_eq!(runs.lines().filter(|line| *line == "guard").count(), 2);
+    assert_eq!(runs.lines().filter(|line| *line == "unselected").count(), 2);
+    let report = f.report();
+    assert_eq!(
+        report[0]["red"],
+        serde_json::json!(["tests::fixture_guard"])
+    );
+    assert_eq!(report[0]["green"], serde_json::json!(["tests::unselected"]));
+}
+
+#[test]
+fn prove_select_expected_unknown_name_is_error_without_appending() {
+    let f = Fixture::new();
+    f.add_prove_count_tests();
+    let output = f.cli(&[
+        "prove",
+        "--id",
+        "unknown-prove",
+        "--guards",
+        "the named fixture test rejects zero",
+        "--package",
+        "session-fixture",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value >= 0",
+        "--test-file",
+        "src/lib.rs",
+        "--target=--lib",
+        "--expect-red",
+        "tests::missing",
+        "--select",
+        "expected",
+        "--report",
+        ".git/report.json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let report = f.report();
+    assert_eq!(report[0]["outcome"], "ERROR");
+    assert!(report[0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("tests::missing"));
+    assert!(!f.root().join(".git/prove-test-runs").exists());
+    let catalogue = load(&f.root().join("mutations.toml")).unwrap();
+    assert!(!catalogue
+        .control
+        .iter()
+        .any(|row| row.id == "unknown-prove"));
+}
+
+#[test]
+fn prove_select_expected_refuses_command_rows() {
+    let f = Fixture::new();
+    let output = f.cli(&[
+        "prove",
+        "--id",
+        "command-selection",
+        "--guards",
+        "the command runner must not use cargo selection",
+        "--file",
+        "src/lib.rs",
+        "--old",
+        "value > 0",
+        "--new",
+        "value >= 0",
+        "--test-file",
+        "src/lib.rs",
+        "--expect-red",
+        "fixture-test",
+        "--test-count-pattern",
+        "Ran {count} test",
+        "--select",
+        "expected",
+        "--command",
+        "printf",
+        "{test}",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("select is supported only for cargo/nextest"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

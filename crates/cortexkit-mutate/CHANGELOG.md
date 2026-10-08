@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.3
+
+- Add `prove --select expected` for cargo and nextest. It reuses the row's exact
+  expected-test selection for the clean baseline and mutant, preserves the
+  selection in the appended row, and refuses command rows, `--only`, and names
+  that do not execute. Selected proofs do not repeat a package-wide survivor
+  diagnosis that cannot widen their selection.
+
 ## 0.9.2
 
 - Use a testcase's non-empty JUnit `classname` as the collateral target, falling

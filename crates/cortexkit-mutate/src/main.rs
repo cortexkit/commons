@@ -164,6 +164,9 @@ struct Proof {
     signal_is_catch: Option<String>,
     #[arg(long)]
     only: bool,
+    /// Run only the exact --expect-red tests on the baseline and mutant.
+    #[arg(long, value_name = "SELECTION", value_parser = ["expected"], conflicts_with = "only")]
+    select: Option<String>,
     #[arg(long, default_value_t = 600)]
     timeout_s: u64,
     /// Bounds the mutant's build; --timeout-s bounds only the test run.
@@ -445,7 +448,7 @@ fn run() -> Result<bool> {
                 no_default_features: p.feature_selection.no_default_features.then_some(true),
                 all_features: p.feature_selection.all_features.then_some(true),
                 ignored: ignored_selection(p.feature_selection.ignored.as_deref()),
-                select: None,
+                select: p.select.as_deref().map(|_| TestSelection::Expected),
                 command: p.command,
                 broad_command: None,
                 broad_report: None,
@@ -476,7 +479,14 @@ fn run() -> Result<bool> {
             validate(&root, &catalogue)?;
             let mut session =
                 ReplaySession::prepare(&root, &catalogue.prebuild, &[&c], p.allow_dirty, &stop)?;
-            session.package_baselines(&root, &[&c], p.allow_dirty, &stop)?;
+            if c.select.is_some() {
+                // Expected-only proofs use the same target-and-test baseline as
+                // a normal selected row. Wider survivor diagnosis cannot broaden
+                // this explicit selection, so it is skipped below as well.
+                session.baselines(&root, &[&c], p.allow_dirty, &stop)?;
+            } else {
+                session.package_baselines(&root, &[&c], p.allow_dirty, &stop)?;
+            }
             let first = session.run_row(&root, &c, p.allow_dirty, &stop, false)?;
             let caught = first.outcome.is_caught();
             let recorded = caught || first.outcome == Outcome::DeskOnly;
@@ -484,7 +494,10 @@ fn run() -> Result<bool> {
             let work = (|| -> Result<()> {
                 if rows[0].outcome == Outcome::Survived && c.runner == "command" {
                     println!("An expected command test stayed green: inspect the guard or mutant equivalence. Command rows have no broader replay.");
-                } else if rows[0].outcome == Outcome::Survived && !stop.load(Ordering::SeqCst) {
+                } else if rows[0].outcome == Outcome::Survived
+                    && c.select.is_none()
+                    && !stop.load(Ordering::SeqCst)
+                {
                     let broader = session.run_row(&root, &c, p.allow_dirty, &stop, true)?;
                     if !broader.red.is_empty() {
                         println!("Unscoped package tests caught the mutant: the original command scope omitted covering tests. Update target and expect_red.");
@@ -666,6 +679,37 @@ mod cli_tests {
     // Mutation text is source code, which often starts with `--` (a flag in a
     // shell script, a SQL comment). It must parse as the value, not as an
     // unknown option.
+    #[test]
+    fn prove_expected_selection_conflicts_with_only() {
+        let result = Cli::try_parse_from([
+            "ckdev-mutate",
+            "prove",
+            "--id",
+            "r",
+            "--guards",
+            "g",
+            "--file",
+            "f.rs",
+            "--old",
+            "old",
+            "--new",
+            "new",
+            "--test-file",
+            "t.rs",
+            "--package",
+            "p",
+            "--expect-red",
+            "test_name",
+            "--select",
+            "expected",
+            "--only",
+        ]);
+        assert!(
+            result.is_err(),
+            "--select expected must be refused with --only"
+        );
+    }
+
     #[test]
     fn old_and_new_accept_values_starting_with_hyphens() {
         let cli = Cli::try_parse_from([

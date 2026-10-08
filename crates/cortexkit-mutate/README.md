@@ -509,7 +509,12 @@ reason says `selection was expected-only; breadth not observed`. `only = true`,
 `hub` and `hub_targets` are refused by name because they would claim breadth that
 did not run. Command rows cannot carry `select`. Baseline sharing keys include
 the exact expected names, so different name selections never borrow a baseline.
-To audit collateral, run a copy of the row without `select` under `--broad`.
+`prove` accepts `--select expected` for cargo and nextest: the clean baseline and
+mutant run only the exact `--expect-red` names, and the appended row records
+`select = "expected"`. Missing or non-executing names are errors. The option is
+refused for command rows and with `--only`; a selected proof does not repeat an
+unscoped survivor diagnosis because that replay cannot widen the selection. To
+audit collateral, run a copy of the row without `select` under `--broad`.
 
 ## Command rows
 
@@ -797,6 +802,9 @@ ckdev-mutate prove --id rig-rejects-empty --guards 'the rig rejects an empty flo
 Repeat `--expect-red <id>` to name multiple expected tests. `prove` appends only
 on CAUGHT, in the same canonical TOML format as cargo rows; a command survivor
 has no unscoped second replay because there is no package-wide test discovery.
+For cargo and nextest, add `--select expected` to run only those exact names on
+both the clean baseline and mutant; the appended row retains the selection. The
+selection cannot be combined with `--only` and is not supported for command rows.
 
 ## Commands
 
