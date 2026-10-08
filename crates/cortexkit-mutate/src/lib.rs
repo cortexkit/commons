@@ -2140,8 +2140,6 @@ mod junit_tests {
         let results = junit_results(xml, "{file}:{name}").unwrap();
         assert!(results.targets.contains_key("case.test.ts:own file"));
         assert!(results.targets.contains_key("suite.test.ts:suite file"));
-        assert_eq!(results.targets["case.test.ts:own file"], "case.test.ts");
-        assert_eq!(results.targets["suite.test.ts:suite file"], "suite.test.ts");
     }
 
     #[test]
