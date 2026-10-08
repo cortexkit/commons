@@ -26,10 +26,11 @@ Every item is marked:
 
 A question the role's owner has settled keeps its number and is marked
 "settled" there; the items it governs are marked **[pinned]** here. In this
-revision every numbered question is settled. Two items wait on the
-fetch-plan section (§10): the `compaction_item` provider field (§10.1,
-provisional) and the `session_change` request and reply types (§10.2,
-open).
+revision every numbered question is settled except Q22, the parts of the
+`run.status` answer one runner serves and the role has not chosen (§6.1).
+Two items wait on the fetch-plan section (§10): the `compaction_item`
+provider field (§10.1, provisional) and the `session_change` request and
+reply types (§10.2, open).
 
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation; "Gaps in broca today" at the end compares the one
@@ -42,13 +43,18 @@ shipping runner with this document.
 - [pinned] Required ops (`REQUIRED_OPS`): `role.describe` and
   `session.baseline`. `compaction.ready` is not required: it belongs to the
   `compaction` group (§3, §11.1).
+- [pinned] `session.baseline` is required of every runner whether or not a
+  given consumer calls it: it is where a session's owner reads what was
+  frozen and the session-level capabilities after a lost admission reply
+  or a fold (§10).
 - [pinned] The hook call sites and the tool-call rules (§11.2, §11.3) are
   required too. They are calls the runner makes, not ops it serves, so
   `role.describe` does not list them. The compaction interface (§11.1) is
   not required: it is the `compaction` group.
-- [pinned] Everything else is a declared capability group (§3). A runner
-  serves a group only if it declares it, and a consumer uses a group only if
-  it is declared.
+- [pinned] Everything else is a declared capability group (§3), including
+  the operations not every runner serves: `run.status`, `run.cancel` and
+  `session.retract`. A runner serves a group only if it declares it, and a
+  consumer uses a group only if it is declared.
 - [pinned] A consumer refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it. The check lives in the
   consumer, never in the daemon.
@@ -110,6 +116,8 @@ shipping runner with this document.
 |---|---|---|
 | `transcript_reads` | `session.read`, `session.head` | §4 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
+| `run_status` | `run.status` | §6.1 |
+| `run_cancel` | `run.cancel` | §6.2 |
 | `dispatch_attribution` | `session.read` (per-call fields) | §5 |
 | `streaming` | `session.read` (`head`), `session.subscribe` | §7 |
 | `model_view` | `session.read` (`view: "model"`) | §8 |
@@ -120,9 +128,17 @@ shipping runner with this document.
 | `compaction` | `compaction.ready`, and the calls of §11.1 the runner makes | §11.1 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
+| `retract` | `session.retract` | §9.2 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
+- [pinned] `run_status`, `run_cancel` and `retract` are each declared on
+  their own: a runner may serve any of them without the others, and
+  without `run_ops` or `transcript_reads`. This crate does not yet list
+  them in `capabilities::GROUPS` or carry their op names and types, so
+  `check_describe` does not check their ops; until it does, a consumer
+  checks that the major lists the op (`Major::serves`) as well as that the
+  group is declared (`RoleDescribe::declares`).
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue
   without being able to abort a model stream.
 - [pinned] `compaction` is all of §11.1 or none of it: Setup, the per-step
@@ -268,21 +284,87 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   `error` and `interrupted`. States are decoded open: a runner's own state
   (broca's `transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
-- [pinned] A run that ends `error` because of a provider carries the
-  provider's code as `provider_code` in `error`, with the provider and its
-  reason. `errors::provider_codes` lists the ones this role names.
-  For a compaction `REFUSE`, run error `provider_code` is the provider's role
-  `code` (`RefuseCode` in the compaction-provider contract), including an
-  unknown code recorded as received; `provider` and `reason` accompany it.
-  The answer's optional finer `provider_code` is mapped to the separate
-  optional run error member `provider_detail_code`: diagnostics only, never
-  replacing `provider_code` and never deciding retryability. Retryability is
-  fixed by the role's `RefuseCode`, not the finer diagnostic.
+- [pinned] A run that ends `error` because of a provider carries, in
+  `error` (`RunResult::error`, whose other members are the runner's
+  schema), `provider_code`, the provider that ended it as `provider`, and
+  its `reason`. `provider_code` is the code callers branch on.
+  `errors::provider_codes` lists the ones this role names (§12.2).
+- [pinned] For a compaction `REFUSE`, `provider_code` is the refusal's role
+  `code`: one of the compaction-provider contract's `RefuseCode` values
+  (its §11), or an unknown code recorded as received. Whether a caller
+  retries follows from that code, as the compaction-provider contract fixes
+  it, never from anything else in the error.
+- [pinned] The refusal's optional finer code goes in the separate, optional
+  `provider_detail_code`: diagnostics only, for logs and display. It never
+  replaces `provider_code`, a caller never branches on it, and it never
+  decides retry. The compaction-provider wire calls that finer code
+  `provider_code`; on a run error it is `provider_detail_code`. The two
+  `provider_code` members are different fields: the runner's carries the
+  role code, the provider's carries the finer one.
+- [pinned] A run error without a finer code omits `provider_detail_code`.
+  `compaction_unavailable` never carries one, because no answer arrived.
 - [pinned] An unknown `run_id` is refused `unknown_run`.
 - [pinned] **Run attribution.** Each message records which run and episode
   produced it, and whether it is that run's final message.
   [pinned] It rides as `run: {run_id, episode, final}` (`RunAttribution`),
   with `episode` an opaque string.
+
+### 6.1 `run_status`: `run.status`
+
+A runner that declares `run_status` serves `run.status`: a run's current
+state, polled without reading the transcript.
+
+- [pinned] The request is `{run_id}`, strict: an unknown field is refused
+  `invalid_params` naming it, because a misspelled `run_id` would otherwise
+  ask a different question (§13).
+- [pinned] The answer is `{state, reason?, error?, undelivered_steers?}`,
+  decoded leniently: a runner's own members ride beside these (broca's
+  `usage`, say).
+  - `state` is a run state as in `run.result` (`run::states`), decoded open
+    (`RunState::parse`): a consumer does not treat an unknown state as
+    terminal.
+  - `reason`, where the runner names one: why a paused run is paused, or
+    why an ended run ended.
+  - `error`: on a run that ended `error`, the same run error `run.result`
+    answers (§6), with the same `provider_code` and `provider_detail_code`
+    rules.
+- [pinned] `undelivered_steers` is the list of `send_id`s of the steers
+  this run accepted and never rendered to the model before it ended, in
+  the order they were accepted. On the status of a run that has ended:
+  - it is present whenever the runner could determine delivery, and is
+    `[]` when the runner checked and every steer was rendered, or none was
+    accepted;
+  - it is absent only when the runner could not determine delivery (a run
+    whose records predate the runner tracking it, say). A consumer reads an
+    absent list as "not known", never as "none".
+  On a run that has not ended it is absent, and its absence says nothing.
+  The list describes this run only: a steer it names may still be
+  delivered by a later turn, and the send's `delivered` receipt (§9) is
+  what reports that.
+- [pinned] On an expired session, `run.status` answers `expired` (§9.1).
+- [open: Q22] An unknown `run_id` is refused `unknown_run`, as `run.result`
+  refuses it. A request without `run_id` asks no question this role
+  defines: a runner may answer it with a session-level status of its own,
+  which a consumer reads only through that runner's schema.
+
+### 6.2 `run_cancel`: `run.cancel`
+
+A runner that declares `run_cancel` serves `run.cancel`: a caller stops a
+run.
+
+- [pinned] The request is `{run_id}`. The answer is a JSON string, decoded
+  open: `ack` or `not_active`.
+  - `ack`: the runner accepted the cancellation. The run still reaches
+    exactly one terminal state (§6): `cancelled`, or the terminal state it
+    reached first. `ack` does not say which; a caller reads it through
+    `run.result` or `run.status`.
+  - `not_active`: the runner did not cancel the run, because it has
+    already ended or the session has no such run. Nothing is written.
+  A consumer treats any other answer as not confirming a cancellation.
+- [pinned] A run a caller cancels ends `cancelled`, never `interrupted`
+  (§6).
+- [pinned] On an expired session, `run.cancel` answers `expired`, writes
+  nothing, and never acts on a lineage started after the expiry (§9.1).
 
 ## 7. `streaming`: `session.subscribe`
 
@@ -317,9 +399,21 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
     An empty range inserts before `from_ordinal`; Setup's head message is
     `[0, 0)`.
 - [pinned] Entries are ordered non-decreasingly by `from_ordinal` (a message's
-  `ordinal` is its anchor). At an equal anchor, insertions come before any
-  message or non-empty replacement. An insertion following either at its
-  anchor is malformed (`ModelPageProblem::InsertionAfterEntry`).
+  `ordinal` is its anchor). At an equal anchor, insertions come first: an
+  insertion following a message or a non-empty replacement at its anchor
+  is malformed (`ModelPageProblem::InsertionAfterEntry`).
+  - An insertion before a message has a v1 producer: an empty compaction
+    range, such as Setup's head message `[0, 0)` before message 0.
+  - An insertion before a non-empty replacement at the same anchor has no
+    v1 producer. The compaction-provider contract applies the newest
+    CompactionMessage alone (its §8) and gives all of that message's
+    replacement entries its one range (its §12), and hook outputs transform
+    fields on a raw record (§11.2), not additional range entries. A
+    consumer still refuses such a page as malformed (`ModelPage::check`);
+    no live runner can be made to exercise this half (§15).
+- [pinned] A runner applies at most one view per step (§11.1). A second
+  CompactionMessage answered for a step whose view already applied never
+  changes the model view, whatever its version.
 - [pinned] Tail and range reads apply, keyed on transcript ordinals. A
   replacement is returned whole, exactly once, on the page holding its
   `from_ordinal`: it is never split, and a later page that intersects its
@@ -350,12 +444,6 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   (`ModelPage::check`). The `source` kind is strict: an entry of a kind this
   role does not define does not decode, because a consumer cannot place it
   by ordinal.
-  An empty compaction range produces an insertion before the message at
-  that anchor. Nothing in the current contracts produces an insertion and a
-  non-empty replacement at the same anchor. The compaction-provider contract
-  §8 applies the newest CompactionMessage alone, and §12 gives all its replacement entries that
-  message's one range; hook outputs transform fields on a raw record (§11.2),
-  not additional range entries.
 
 ## 9. `steer`, `queue` and `interrupt`: `session.send` from the owner
 
@@ -505,17 +593,39 @@ are their owners' responsibility. This contract covers runner-held copies only.
 
 **Reads.** `session.read` (including model view), `session.head` and
 `run.result` on an expired session answer an `ERROR` with code `expired` and
-`detail: {expired_at_ms}` (`ExpiredDetail`). A runner that serves `run.status`
-answers the same refusal; its normal reply remains runner-specific. A runner
-that serves `run.cancel` or `session.retract` also answers `expired` for an
-expired session and writes nothing; neither may act on a fresh lineage
-started after the expiry. These ops are runner-specific, so the conformance
-suite does not probe them. `expired`
+`detail: {expired_at_ms}` (`ExpiredDetail`). A runner that declares
+`run_status` answers `run.status` with the same refusal. A runner that
+declares `run_cancel` or `retract` also answers `expired` to `run.cancel`
+or `session.retract` for an expired session and writes nothing; neither
+may act on a fresh lineage started after the expiry. The conformance suite
+probes `run.status` only. `expired`
 is terminal and never retried. It is not an empty page: that would falsely
 say the session has no messages, rather than that its messages expired.
 A session never written keeps the existing empty success answers. No read,
 export or listing may serve expired content, including free-text titles,
 even when retained accounting or identity metadata is served.
+
+### 9.2 `retract`: `session.retract`
+
+A runner that declares `retract` serves `session.retract`: a queued send
+is withdrawn before it starts.
+
+- [pinned] The request is `{submission_id}`, the id a `pending` send reply
+  named (§9). The answer is a JSON string, decoded open:
+  - `retracted`: the submission is durably withdrawn and never starts;
+  - `already_started`: it started a run, which `session.retract` does not
+    stop (on a runner that declares `run_cancel`, `run.cancel` does);
+  - `not_pending`: the session has no pending submission by that id: it
+    was already retracted, or never existed. Nothing is written.
+  A consumer treats any other answer as not confirming a retraction.
+- [pinned] A submission is either retracted or started, never both: the
+  runner decides from one durable order, and its answer says which.
+- [pinned] A re-send of a retracted send, with the same `send_id` and
+  payload, is refused `send_retracted` and writes nothing: it never starts
+  the send again. A different payload under that `send_id` is refused
+  `send_id_reuse` as in §9.
+- [pinned] On an expired session, `session.retract` answers `expired` and
+  writes nothing (§9.1).
 
 ## 10. `session.baseline` and the admission reply
 
@@ -553,8 +663,12 @@ even when retained accounting or identity metadata is served.
   guessing. [pinned] The admission reply nests one `baseline` object, the
   same struct `session.baseline` answers.
 - [pinned] Session-level capabilities are available before the session's
-  first step and frozen for the session. `mid_session_appends` is
-  re-evaluated only on a model switch, which rebuilds the prefix anyway.
+  first step and frozen for the session, with one exception:
+  `mid_session_appends` depends on the session's model
+  (`capabilities::session::MID_SESSION_APPENDS`), so a runner whose
+  sessions can switch model re-evaluates it on a switch, which rebuilds
+  the prefix anyway, and at no other time. After a switch the owner reads
+  the current value through `session.baseline`.
 - [pinned] A policy naming a rung the session does not support for that
   surface is refused `rung_unsupported` when it is set. [pinned] The ops
   that set a policy are `session.refresh` and `session.refresh_policy`, in
@@ -670,18 +784,21 @@ owes.
   consumes that step's answer fence; a second view for the same step is
   refused by the version and fence check, even if it names the same newest
   request, arrives before its deadline and carries a higher version.
-- [pinned] `REFUSE` ends the run `error` with the provider's code as
-  run error `provider_code`: the answer's role `code` (`RefuseCode` in the
-  compaction-provider contract), with `provider` and `reason`. The answer's
-  optional finer `provider_code` becomes the separate optional
-  `provider_detail_code`, diagnostics only; it never replaces the role code
-  and never decides retryability. Nothing is added to history, and the
-  session remains usable.
+- [pinned] `REFUSE` ends the run `error`. The run error's `provider_code`
+  is the answer's role `code` (`RefuseCode` in the compaction-provider
+  contract), with `provider` and `reason`; the answer's optional finer
+  code, which the provider's wire names `provider_code`, becomes the run
+  error's `provider_detail_code` (§6). Nothing is added to history, no
+  model call is made for the refused step, and the session remains
+  usable: the next send calls the provider again.
 - [pinned] A failed or timed-out step call is not a refusal. The runner
   records it and sends with the last applied CompactionMessage; an
-  over-window request then follows the normal path. `compaction_unavailable`
-  is reserved for Setup failure or timeout with no answer, which sends
-  nothing to the model.
+  over-window request then follows the normal path. The run does not end
+  `compaction_unavailable`.
+- [pinned] `compaction_unavailable` is Setup-only: Setup failed or timed
+  out with no answer. No model call is made, the run error carries no
+  `provider_detail_code`, and the session remains usable: the next send
+  calls Setup again, because no initial CompactionMessage was recorded.
 - [pinned] `compaction.ready {session, request_id}` (`CompactionReady`):
   after a `WAIT`, the provider signals that it is done, and the runner calls
   again with a fresh status instead of waiting out the bound. It is a hint;
@@ -748,9 +865,10 @@ treats it as a terminal refusal of that one request.
 | `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
-| `unknown_run` | `run.result` names no run of the session | — | no |
-| `expired` | a read of an expired session (§9.1), including `run.status` if served | `expired_at_ms` (Unix epoch milliseconds) | no |
+| `unknown_run` | `run.result`, or `run.status` (§6.1, open: Q22), names no run of the session | — | no |
+| `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode | `field` | no |
+| `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send into a session whose last run is paused | `{run_id, reason}` | no |
 | `scope_owner_mismatch` | a send or `session.baseline` from anyone but the owner | the accepted identity | no |
@@ -771,6 +889,8 @@ treats it as a terminal refusal of that one request.
 - [pinned] Only the codes marked retryable are retried with the same request
   (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
   meets the same refusal.
+- [pinned] `send_retracted` is not yet in `errors::CODES`; it is not
+  retryable, which `errors::is_retryable` already answers for it.
 - [pinned] Route refusals the daemon classifies as retryable on open (module
   reloading or warming, target unavailable) are retried by the caller's
   transport under the daemon's own list; this role does not restate them.
@@ -781,16 +901,24 @@ treats it as a terminal refusal of that one request.
 
 ### 12.2 Run errors (`errors::provider_codes`)
 
-[pinned] The provider codes this role names:
+[pinned] A run that ends `error` because of a provider names the code
+callers branch on as `provider_code` in its run error, and any finer
+diagnostic as `provider_detail_code`, which never decides anything (§6).
+The provider codes this role names:
 
 | Provider code | When |
 |---|---|
-| `compaction_unavailable` | Setup failed or timed out with no answer; no model call is made |
+| `compaction_unavailable` | Setup only: Setup failed or timed out with no answer; no model call is made, and no `provider_detail_code` is carried. A failed or timed-out step call never writes it (§11.1) |
 | `compaction_wait_exceeded` | a compaction `WAIT` hit its cap and the request could not be shown to fit |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 
+A compaction `REFUSE` adds the compaction-provider contract's `RefuseCode`
+values (its §11) as `provider_code`; this role does not repeat them. Their
+retryability, and that of the two compaction codes above, is the
+compaction-provider contract's.
+
 These are run errors, not request-refusal codes; `errors::provider_codes::CODES`
-lists them.
+lists the three above.
 
 ### 12.3 Tool-result reasons (`errors::tool_result_reasons`)
 
@@ -812,10 +940,11 @@ lists them.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
   strings): `role.describe`, every reply and event a consumer decodes
   (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
-  `SendReply`, `BaselineReply`), and `compaction.ready`. One exception: a
+  `SendReply`, `BaselineReply`, and the `run.status`, `run.cancel` and
+  `session.retract` answers), and `compaction.ready`. One exception: a
   model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
-  question: `session.read`, `session.head`, `run.result`,
+  question: `session.read`, `session.head`, `run.result`, `run.status`,
   `session.subscribe` and `session.baseline` requests. A runner refuses an
   unknown field with `invalid_params` naming it.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
@@ -926,6 +1055,8 @@ step-transform providers. It will check:
 | `model_view_differs_only_by_compaction`, `model_view_entry_sources`, `model_view_replacement_once_on_its_first_page`, `model_view_after_mid_refused`, `model_view_names_compaction_state` | `model_view` |
 | `refresh_unsupported_rung_refused`, `refresh_policy_superseded_refused`, `refresh_policy_already_applied_refused`, `flush_prefix_applies_pending` | `session_change` |
 | `steer_lands_at_step_boundary`, `steer_never_between_call_and_result` | `steer` |
+| `guaranteed_steer_never_pending_or_unknown` | `queue`, `transcript_reads`; not applicable without `steer`, on a runner that declares `steer_receipt: confirm`, or without a held tool call |
+| `resend_steer_delivered_stable` | `queue`, `transcript_reads`; not applicable without `steer` |
 | `queue_starts_next_turn` | `queue` |
 | `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
 | `undeclared_delivery_refused` | a delivery mode the subject does not declare |
@@ -935,21 +1066,23 @@ step-transform providers. It will check:
 | `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
 | `retention_honoured`, `retention_no_content_served`, `retention_shorten_continues_lineage`, `retention_equal_noop`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
-| `retention_run_status_expired` | the above, and `run.status` served (otherwise not applicable) |
+| `retention_run_status_expired` | the above; not applicable unless the major lists `run.status` (§6.1) |
 | `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
 | `retention_active_run_never_expires` | `retention`, `queue`, `transcript_reads`, `run_ops`, held non-terminal run (active or paused) |
 | `crash_at_RetentionTombstoned` | `retention`, `queue`, `transcript_reads`, `run_ops`, and `RetentionTombstoned`; real process kill, expiry remains readable by name and deletion completion is reported after restart |
+| `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run
 state, an unknown event kind, a describe answer with a partial group, a
 model page that repeats a replacement, a completed run without its final
 message) are tested against the vectors in this crate.
-Nothing in the current contracts produces an insertion and a non-empty
-replacement at the same start, so a live case cannot check their ordering:
-compaction-provider §8 applies only the newest CompactionMessage, and §12
-assigns its entire working range to every replacement entry. Hook outputs
-are fields on a transformed raw record, not range insertions. This ordering
-rule is therefore not claimed as live runner conformance.
+The equal-anchor rule's insertion-before-message half is live conformance
+(`model_view_half_open_ranges_and_travel`). Its
+insertion-before-non-empty-replacement half has no v1 producer (§8):
+compaction-provider §8 applies the newest CompactionMessage alone, §12
+gives every replacement its entire range, and hook outputs are fields on a
+transformed raw record, not range insertions. It is tested against the
+vectors only and is not claimed as live runner conformance.
 
 Verdict, as for `tool-provider/v1`: a case whose requirements the subject
 does not declare is skipped, never passed; a run with skips is "conforming
@@ -1056,102 +1189,65 @@ the decision; the items it governs are pinned above.
 - **Q21. Stability.** Settled: stability is data, never part of a capability
   name. Each major in `role.describe` carries `stability`, `alpha`, `beta` or
   `stable`, read as `alpha` when absent; this draft is `alpha` (§2).
+- **Q22. `run.status` beyond its pinned members.** Open. One runner answers
+  a `run_id` it does not know with `{state: "unknown"}`, and answers a
+  request without `run_id` with a session-level status, `{state: "idle"}`
+  or `{state: "active", run_id, step}`. Options: (a) refuse an unknown
+  `run_id` `unknown_run`, as `run.result` does, and leave the session-level
+  status to each runner (drafted, §6.1); (b) make `unknown` a role state
+  for `run.status` only, never terminal; (c) pin the session-level status
+  as a second mode of the op.
 
 ## Gaps in broca today
 
-Where broca's shipped surface differs from this document. Paths are in the
-broca repository; `Bn` labels name slices of broca's own build plan
-(`docs/extensibility-build-plan.md`). None of this is a change request against
-broca beyond what that plan already schedules.
+Where broca's served surface, at broca commit `f06a487`, differs from this
+document. Paths are in the broca repository. An optional group broca does
+not declare (`model_view`, `compaction`, `session_change`, `retention`) is
+not a gap. None of this is a change request against broca.
 
-1. **No `role.describe`.** The served ops are `cap.install`, `spend.delta`,
-   `session.send`, `session.import`, `session.retract`, `run.cancel`,
-   `run.status`, `session.read` and the `session.subscribe` stream
-   (`crates/broca-module-serve/src/serve.rs:1514-1836`); any other op gets
-   `unknown_method` (`crates/broca-module-serve/src/serve.rs:1837-1848`).
-   Until `role.describe` ships, the manifest claims
-   `session-send-delivery/v1` instead
-   (`crates/broca-module-serve/src/manifest.rs:37`), so broca has nowhere to
-   declare a group: no `compaction` and no `session_change` declaration
-   exists. Planned in B9 (`docs/extensibility-build-plan.md:358-367`).
-2. **No `session.baseline`, and the admission reply carries no baseline.**
-   `SendResult` is `active {run_id} | finished {run_id, reason} | pending
-   {submission_id}` (`crates/broca-wire/src/lib.rs:510-523`). Planned in B8
-   (`docs/extensibility-build-plan.md:347-356`).
-3. **No `compaction` group and no `model_view`.** Broca serves no
-   `compaction.ready`, has no `not_session_compaction_provider` caller check,
-   and does not check a plan's `compaction_item` at admission. B14 plans
-   inbound `compaction.ready(session)` and `session.read {view: model}`
-   (`docs/extensibility-build-plan.md:441`): the planned ready names only the
-   session, where the role's also carries `request_id`. Page messages carry
-   no `source` (`crates/broca-wire/src/lib.rs:525-532`), and a page names no
-   compaction state (`crates/broca-wire/src/lib.rs:568-585`). Thus it also
-   lacks the half-open replacement ranges, Setup head insertion `[0, 0)`,
-   tail insertion placement and insertion-first ordering required by §8.
-4. **`session.read` takes only `from_ordinal`, `limit` and `include_tools`**
-   (`crates/broca-wire/src/lib.rs:464-476`): no `after_mid`, `lineage_id`,
-   `max_bytes`, `include_originals` or `view`, so no `lineage_changed` or
-   `unknown_mid` refusal. The request is already strict on unknown fields,
-   as §13 requires. `include_tools` is a runner extra the role does not
-   define.
-5. **Pages are capped by count only:** default 200, maximum 500
-   (`crates/broca-core/src/context.rs:30-34`), with no byte cap and no
-   `max_bytes` in a describe answer (the role's values for broca are a 4 MiB
-   default and a 16 MiB maximum). `next_from_ordinal` is already set
-   whenever a page stops early.
-6. **`lineage_id` is absent on legacy lineages** until their next write
-   (`crates/broca-wire/src/lib.rs:563-566,574-575`), so a page of a session
-   that has messages can arrive without it. The role allows an absent
-   `lineage_id` only on the empty page of a session never written.
-7. **Messages carry only `{ordinal, mid, message}`**
-   (`crates/broca-wire/src/lib.rs:525-532`): no run attribution, no
-   `originals`, no per-call `dispatched_to`, `call_key` or indeterminate
-   flag. Dispatch attribution and `call_key` are planned in B9, originals in
-   B10, run attribution in B12 (`docs/extensibility-build-plan.md:358-367,
-   377-386, 410-419`).
-8. **No dispatch target is recorded:** `ToolDispatchIntent` holds
-   `batch_id`, `tool_call_id`, `tool_name` and `args`, no module
-   (`crates/broca-wal/src/record.rs:295-304`), and no `call_key` is minted.
-   Planned in B9.
-9. **`mid` is derived from the ordinal,** `m<ordinal>`
-   (`crates/broca-module/src/serve.rs:174`). That meets "never reused within
-   a lineage" and is opaque enough, but the same `mid` exists in every
-   lineage, so a cursor is only safe with its `lineage_id`, as §4.1 requires.
-10. **No `session.head`.** The nearest thing is `lineage_state` on every page
-    (`crates/broca-wire/src/lib.rs:546-559`), which describes the last run
-    but needs a page with bodies to reach.
-11. **No `run.result`.** `run.status` answers a run's state without its final
-    message, and its states include `transform_unavailable` and `unknown`
-    beside the role's (`crates/broca-wire/src/lib.rs:669-743`). The
-    `broca-session` tool's final reply already joins text parts with nothing
-    inserted (`crates/broca-module-serve/src/bin/broca-session.rs:1109-1122`),
-    but emits nothing for an empty text
-    (`crates/broca-module-serve/src/bin/broca-session.rs:1592-1601`), where
-    `run.result` answers `text: ""`.
-12. **`session.subscribe` is lenient on unknown fields**
-    (`crates/broca-wire/src/lib.rs:420-424`): a misspelled `from` attaches
-    live. The role makes the request strict. The `head` and cursor shape
-    `{wal_seq, sub_index}` (`crates/broca-wire/src/lib.rs:409-414`) and the
-    event shape (`crates/broca-wire/src/lib.rs:756-766`) already fit §7.
-13. **`send_id` is optional and `model` is required on every send**
-    (`crates/broca-wire/src/lib.rs:112-115`). The role requires `send_id` on
-    owner sends. Broca still requires `model` on every send, where the role
-    has a `steer` or `interrupt` into an existing session take every omitted
-    runner parameter from the session's frozen values (§9). There is no `mark` and no
-    `plan` member yet (B8, B12). The `delivery` modes and their strict value
-    already match §9 (`crates/broca-wire/src/lib.rs:177-190`), but there is
-    no `delivery_unsupported` refusal: broca accepts every mode.
-14. **`send_id_reuse` and `invalid_params` carry no `detail.field`:** the
-    error body is built from the code and message alone
-    (`crates/broca-module-serve/src/serve.rs:2078,2102,2123-2141`).
-15. **Separate steer and queue ops in the build plan,** being corrected in
-    broca. B12 still names new ops `session.steer` and `session.queue`
-    (`docs/extensibility-build-plan.md:417`); the role uses `session.send`
-    with `delivery` instead.
-16. **No `session_change` ops.** `session.refresh` and
-    `session.refresh_policy`, with `pending_superseded` and
-    `already_applied`, are planned in B15
-    (`docs/extensibility-build-plan.md:451,454`); `session.flush_prefix` and
-    `rung_unsupported` in B17 (`docs/extensibility-build-plan.md:475,478`).
-    None is served today: any of them gets `unknown_method`
-    (`crates/broca-module-serve/src/serve.rs:1837-1848`).
+1. **Served ops it does not declare.** broca serves `run.status`,
+   `run.cancel` and `session.retract` (`crates/broca-module-serve/src/serve.rs:2013-2051`;
+   `crates/broca-module/src/serve.rs:222-240`), but its `role.describe`
+   lists neither the ops nor the `run_status`, `run_cancel` and `retract`
+   groups (`crates/broca-wire/src/role.rs:181-191`).
+2. **`run.status` against §6.1.** An unknown run is answered `{state:
+   "unknown"}`, not refused `unknown_run` (Q22); a request without
+   `run_id` answers a session-level status
+   (`crates/broca-module/src/serve.rs:242-248`; `crates/broca-wire/src/lib.rs:752-853`).
+   `undelivered_steers` is emitted only when it is not empty, so an ended
+   run with every steer rendered omits it where §6.1 requires `[]`
+   (`crates/broca-module/src/serve.rs:455-518`).
+3. **No per-message run attribution,** although broca declares `run_ops`:
+   a page message carries no `run: {run_id, episode, final}`
+   (`crates/broca-wire/src/lib.rs:604-634`).
+4. **No `session_capabilities` in the baseline.** broca declares
+   `session_capabilities_from: "admission"`, and its baseline has no
+   `session_capabilities` member (`crates/broca-wire/src/role.rs:214-217,239-255`).
+   An absent member declares no session-level capability (§13), so broca
+   declares neither `mid_session_appends` nor `ordered_hook_phases`.
+5. **`lineage_id` is absent on legacy lineages** until their next write,
+   even on a page that has messages (`crates/broca-wire/src/lib.rs:644-659`).
+   §4.2 allows an absent `lineage_id` only on the empty page of a session
+   never written.
+6. **`send_id` is optional, and `prompt` may be given as `prompt_blocks`**
+   instead (`crates/broca-wire/src/lib.rs:121-135`). The role requires
+   both members.
+7. **`mark` is not recorded:** it is not a send field, so it is ignored as
+   an unknown key (`crates/broca-wire/src/lib.rs:108-226,310-318`).
+8. **A steer or interrupt inherits a fixed set of frozen parameters**
+   (model, tool choice, generation settings, stop conditions, cache,
+   budget, context limit, work class, service tier), while `keep_warm` and
+   `on_restart` stay per send
+   (`crates/broca-module-serve/src/serve.rs:1750-1804`). §9 has every
+   omitted runner parameter take its frozen value.
+9. **A queued send behind a restart pause is answered `pending`,** not
+   refused `run_paused` (`crates/broca-module/src/actor.rs:2240-2245`); a
+   send behind an authentication pause is refused `run_paused`
+   (`crates/broca-module/src/actor.rs:2187-2207`).
+10. **`send_id_reuse` names the differing field only when it can identify
+    one:** an aggregate or legacy identity mismatch omits `detail.field`
+    (`crates/broca-module-serve/src/serve.rs:2554-2575`).
+11. **`session.send` may answer `state: "paused"`,** with `run_id` and
+    `pause_reason`, to a keyed retry of a run paused by a restart
+    (`crates/broca-module/src/actor.rs:2095-2108`). `state` is decoded open
+    (§9), but the role names no `paused` send state.
