@@ -44,6 +44,11 @@ only = true
         // core.autocrlf=true globally, which would normalize it on add and make
         // the checkout differ from HEAD, so the fixture opts out.
         fixture.command("git", &["config", "core.autocrlf", "false"]);
+        // `git commit` starts `git maintenance run --auto --detach`, which keeps
+        // creating and removing lock files in .git after the commit returns.
+        // The read-only test walks .git and chmods every entry, so a lock file
+        // vanishing mid-walk fails it; the fixture turns maintenance off.
+        fixture.command("git", &["config", "maintenance.auto", "false"]);
         fixture.command("git", &["config", "user.email", "fixture@example.invalid"]);
         fixture.command("git", &["config", "user.name", "Git storage fixture"]);
         fixture.command(
