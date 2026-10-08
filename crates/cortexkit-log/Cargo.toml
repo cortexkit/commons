@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-log"
-version = "0.3.4"
+version = "0.3.5"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -20,6 +20,7 @@ default = ["store-paths"]
 store-paths = ["dep:cortexkit-store-types"]
 
 [dependencies]
+cortexkit-lease = { version = "0.1.2", path = "../cortexkit-lease" }
 cortexkit-store-types = { version = "0.2.1", path = "../cortexkit-store-types", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 regex = "1"
@@ -30,3 +31,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+cortexkit-lease = { version = "0.1.2", path = "../cortexkit-lease", features = ["test-support"] }
