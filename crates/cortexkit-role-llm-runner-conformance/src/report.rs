@@ -22,8 +22,8 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    DispatchAttribution, HoldToolCalls, Interrupt, KillAt, Queue, Retention, RunOps, Steer,
-    Streaming, TranscriptReads,
+    Compaction, DispatchAttribution, HoldToolCalls, Interrupt, KillAt, ModelView, Queue, Retention,
+    RunOps, Steer, Streaming, TranscriptReads,
 };
 
 const fn case(
@@ -45,9 +45,28 @@ const RUNS: &[Capability] = &[RunOps, Queue];
 const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
 const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
+const COMPACTED: &[Capability] = &[Compaction, ModelView, Queue, TranscriptReads, RunOps];
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("compaction_setup_durable_once",
+        &[Compaction, ModelView, Queue, TranscriptReads, RunOps, KillAt(points::FOLD_RECORDED)],
+        "Setup is durable before the first model call and never re-invoked after its recorded answer survives a crash"),
+    case("compaction_fence_crash_replays_model_view",
+        &[Compaction, ModelView, Queue, TranscriptReads, RunOps, KillAt(points::COMPACTION_APPLIED)],
+        "a held answer does not change the view; a crash between the durable answer and fold replays the same canonical view as an uncrashed run"),
+    case("model_view_half_open_ranges_and_travel", COMPACTED,
+        "Setup [0,0) insertions precede message zero and travel with it over count/byte caps; nonempty summaries are whole, once at their start, and preserve the exclusive-end raw message"),
+    case("compaction_unavailable_distinct_from_refuse", &[Compaction, Queue, TranscriptReads, RunOps],
+        "Setup unavailability and provider REFUSE end error distinctly, send nothing to the model and leave the session usable"),
+    case("compaction_wait_cap", COMPACTED,
+        "a request inside the safety margin cannot be shown to fit; WAIT sends nothing and ends compaction_wait_exceeded exactly at the configured engine/cache cap"),
+    case("compaction_late_or_stale_answers_discarded", COMPACTED,
+        "answers at/after their deadlines or naming a request other than the newest never change the view or reach the model"),
+    case("compaction_step_timeout_uses_last_view", COMPACTED,
+        "a failed or timed-out step call proceeds with the last view, never compaction_unavailable"),
+    case("compaction_one_view_per_step", COMPACTED,
+        "a second view for the same step is rejected even with a higher version and before the deadline"),
     case(
         "role_describe_shape",
         &[],
@@ -326,11 +345,14 @@ pub const NARROWINGS: &[&str] = &[
     "where a tool result's reason sits is the runner's schema (§12.3), so crash_at_DispatchIntent only checks that some message holds the string outcome_unknown",
     "subscribe_from_head_no_gap_no_duplicate compares a replay from the head with a replay from start on an idle session; the live handoff race is not exercised",
     "retention_honoured checks lineage_changed for the expired lineage after a fresh send; other ways of changing lineage are not exercised",
-    "the crash guarantee of replay, not re-invocation (§14, 5) is checked only for the model and the tool (a durable step is not generated again, a recorded result is not re-invoked); hooks and compaction are not in this subset",
+    "replay, not re-invocation (§14, 5) covers the model, tool and compaction provider (recorded Setup/step answers survive CompactionApplied before fold); step-transform hooks are not in this subset",
     "the crash guarantee that each resume writes one informational record (§14, 8) is not checked: where that record sits is the runner's schema",
     "a call's indeterminate window between a restart and its outcome_unknown close is not observable reliably, so crash_at_DispatchIntent checks the state after the close",
     "a run cut at DispatchIntent is expected to end interrupted, as the role's points list states for that point; StepRecorded accepts either one dispatch with continuation or zero dispatches with interrupted state; ToolResultRecorded checks only that the run has one terminal state that is not cancelled",
-    "the subject interface does not expose model requests, so StepRecorded checks transcript ordering on resume or after an owner follow-up to a sealed run: one result precedes the later assistant turn; result bodies are joined by the model call id or attributed call key, without inspecting content, since the runner's message schema is not pinned; it cannot inspect the history actually sent to the model",
+    "StepRecorded checks transcript ordering rather than model inputs; compaction cases independently capture canonical inputs at the scripted model boundary",
+    "compaction timing cases require an injected runner/provider clock and drain due work exactly at configured deadlines; the engine-wide WAIT cap and prompt-cache lifetime are configured by the script, since the contract pins no numeric cap",
+    "Setup durability is inspected from the runner's durable store while its first model request is held, never inferred from the provider script or model view",
+    "insertion-before-nonempty-replacement ordering has no v1 producer: compaction-provider §8 applies the newest CompactionMessage alone, §12 gives every replacement its entire range, and hooks transform fields on raw records; only the insertion-before-message half is live conformance",
     "the crash guarantee that messages read before a kill read the same after it (§14, 1) is checked on a second session written before the kill, because the cut session has nothing readable before its trigger",
     "run_result_interrupted_not_cancelled reads the run cut in the DispatchIntent crash scenario, because a run cuts each point only once",
     "extra_op_still_admitted reads its case as the consumer's lenient decoding (§2) applied to the live answer",
@@ -420,6 +442,17 @@ impl SuiteReport {
             let line = match &case.outcome {
                 CaseOutcome::Passed => format!("PASS {}", case.case),
                 CaseOutcome::Failed { reason } => format!("FAIL {}: {reason}", case.case),
+                CaseOutcome::Skipped { missing }
+                    if case.requires.contains(&Compaction)
+                        || case.requires.contains(&ModelView) =>
+                {
+                    format!(
+                        "N/A  {} (requires {}; missing {})",
+                        case.case,
+                        names(&case.requires),
+                        names(missing)
+                    )
+                }
                 CaseOutcome::Skipped { missing } => format!(
                     "SKIP {} (requires {}; missing {})",
                     case.case,

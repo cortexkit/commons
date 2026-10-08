@@ -60,6 +60,9 @@ use cortexkit_role_llm_runner_conformance::{
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
+mod compaction;
+pub use compaction::CompactionDefect;
+
 pub const TOOL_MODULE: &str = "fake.tools";
 pub const RETENTION_MAX: u64 = 4;
 const RETENTION_DELETE_MS: u64 = 100;
@@ -112,6 +115,7 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub compaction: CompactionDefect,
     /// A read with no cursor answers the oldest page instead of the newest.
     pub tail_returns_oldest: bool,
     /// A call's key is minted from the model's tool_call_id, so a model id
@@ -201,6 +205,7 @@ struct World {
     held_steer_break_answers: AtomicUsize,
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
+    compaction: Mutex<compaction::Providers>,
     invocations: Mutex<BTreeMap<String, usize>>,
     held: Mutex<BTreeSet<String>>,
     released: Mutex<BTreeSet<String>>,
@@ -282,6 +287,7 @@ struct RunRec {
     state: String,
     final_ordinal: Option<u64>,
     final_text: Option<String>,
+    error: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -295,6 +301,7 @@ struct CallRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    compaction: compaction::State,
     retention: Option<u64>,
     last_activity: u64,
     expired_at: Option<u64>,
@@ -341,6 +348,8 @@ fn point_of(kind: &str) -> &'static str {
         "result" => points::TOOL_RESULT_RECORDED,
         "terminal" => points::TERMINAL,
         "tombstone" => points::RETENTION_TOMBSTONED,
+        "compaction_message" => points::COMPACTION_APPLIED,
+        "compaction_fold" => points::FOLD_RECORDED,
         _ => "",
     }
 }
@@ -652,6 +661,7 @@ impl Module {
             return;
         };
         sess.events.push(kind.clone());
+        compaction::apply(&mut sess.compaction, record, self.world.defects.compaction);
         if matches!(kind.as_str(), "send" | "steer" | "step" | "terminal")
             && (self.world.retention_defect != RetentionDefect::ClockNotRestarted
                 || sess.last_activity == 0)
@@ -701,6 +711,7 @@ impl Module {
                         state: "active".into(),
                         final_ordinal: None,
                         final_text: None,
+                        error: None,
                     });
                 }
             }
@@ -778,6 +789,7 @@ impl Module {
                     .map(|m| m.ordinal);
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
+                    run.error = record.get("error").cloned();
                     if run.state == "completed" {
                         run.final_ordinal = final_ordinal;
                         run.final_text = record["final_text"].as_str().map(str::to_owned);
@@ -818,6 +830,9 @@ impl Module {
             }
             // The model consumed a turn even if recovery removed it from history.
             let turn_index = sess.events.iter().filter(|kind| *kind == "step").count();
+            if !self.prepare_compaction(session, run_id, turn_index)? {
+                return Ok(());
+            }
             let turn = self
                 .world
                 .scripts
@@ -1285,7 +1300,7 @@ impl Module {
             Ok(mode) => mode,
             Err(field) => return invalid(field),
         };
-        if request.view == Some(ReadView::Model) {
+        if request.view == Some(ReadView::Model) && !self.world.serves(groups::MODEL_VIEW) {
             return invalid("view");
         }
         let sessions = self.sessions.lock().unwrap();
@@ -1293,7 +1308,11 @@ impl Module {
             if request.lineage_id.is_some() {
                 return refuse(errors::LINEAGE_CHANGED, None);
             }
-            return respond(ReadPage::no_lineage());
+            return if request.view == Some(ReadView::Model) {
+                respond(cortexkit_role_llm_runner::read::ModelPage::no_lineage())
+            } else {
+                respond(ReadPage::no_lineage())
+            };
         };
         if request
             .lineage_id
@@ -1303,6 +1322,9 @@ impl Module {
             return refuse(errors::LINEAGE_CHANGED, None);
         }
         let limit = request.limit.unwrap_or(DEFAULT_LIMIT).min(MAXIMUM_LIMIT) as usize;
+        if request.view == Some(ReadView::Model) {
+            return self.model_read(sess, mode, &request);
+        }
         let cap = request
             .max_bytes
             .unwrap_or(DEFAULT_MAX_BYTES)
@@ -1459,6 +1481,9 @@ impl Module {
                 text: run.final_text.clone().unwrap_or_default(),
             });
         }
+        if let Some(error) = &run.error {
+            result = result.with_error(error.clone());
+        }
         respond(result)
     }
 
@@ -1577,14 +1602,15 @@ pub struct FakeSubject {
 }
 
 /// The capabilities the conforming fake declares: every group it serves,
-/// and held tool calls. It leaves `interrupt`, `model_view`, `compaction`
-/// and `session_change` undeclared.
+/// and held tool calls. It leaves `interrupt` and `session_change` undeclared.
 pub fn served() -> BTreeSet<Capability> {
     [
         Capability::TranscriptReads,
         Capability::RunOps,
         Capability::DispatchAttribution,
         Capability::Streaming,
+        Capability::Compaction,
+        Capability::ModelView,
         Capability::Steer,
         Capability::Queue,
         Capability::HoldToolCalls,
@@ -1601,6 +1627,8 @@ pub const KILL_POINTS: &[&str] = &[
     points::TOOL_RESULT_RECORDED,
     points::TERMINAL,
     points::RETENTION_TOMBSTONED,
+    points::COMPACTION_APPLIED,
+    points::FOLD_RECORDED,
 ];
 
 impl FakeSubject {
@@ -1655,6 +1683,7 @@ impl FakeSubject {
                         .map(str::to_owned)
                         .collect(),
                     scripts: Mutex::new(BTreeMap::new()),
+                    compaction: Mutex::new(compaction::Providers::default()),
                     invocations: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),
@@ -1791,11 +1820,15 @@ impl LlmRunnerSubject for FakeSubject {
         })
     }
 
-    fn send_fields(&self, _: &str, first: bool) -> Map<String, Value> {
+    fn send_fields(&self, session: &str, first: bool) -> Map<String, Value> {
         let mut fields = Map::new();
         if first {
             fields.insert("plan".into(), json!({ "tools": [SCRIPTED_TOOL] }));
             fields.insert("model".into(), json!("fake-model"));
+            if self.has_compaction_script(session) {
+                fields.get_mut("plan").unwrap()["compaction_item"] =
+                    json!({"provider":"fake.compaction"});
+            }
         }
         fields
     }
@@ -1821,6 +1854,48 @@ impl LlmRunnerSubject for FakeSubject {
             .get(&arguments.to_string())
             .copied()
             .unwrap_or(0)
+    }
+
+    async fn install_compaction_script(
+        &self,
+        session: &str,
+        script: cortexkit_role_llm_runner_conformance::CompactionScript,
+    ) -> Result<(), HarnessError> {
+        self.install_compaction(session, script);
+        Ok(())
+    }
+    async fn compaction_observation(
+        &self,
+        session: &str,
+    ) -> Result<cortexkit_role_llm_runner_conformance::CompactionObservation, HarnessError> {
+        Ok(self.observe_compaction(session))
+    }
+    async fn advance_compaction_clock(
+        &self,
+        session: &str,
+        milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        self.advance_compaction(session, milliseconds)
+    }
+    async fn answer_compaction(
+        &self,
+        session: &str,
+        call_index: usize,
+        request_id: Option<String>,
+        answer: cortexkit_role_llm_runner_conformance::CompactionAnswer,
+    ) -> Result<(), HarnessError> {
+        self.deliver_compaction(session, call_index, request_id, answer)
+    }
+    async fn release_compaction_model(&self, session: &str) -> Result<(), HarnessError> {
+        self.release_model(session)
+    }
+    async fn durable_compaction_setup(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<Option<cortexkit_role_llm_runner_conformance::CompactionMessage>, HarnessError>
+    {
+        self.durable_setup(handle, session)
     }
 
     async fn await_tool_call(&self, arguments: &Value) -> Result<(), HarnessError> {

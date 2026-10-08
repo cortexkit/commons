@@ -537,6 +537,7 @@ name = "cortexkit-role-llm-runner-conformance"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cortexkit-role-compaction-provider",
  "cortexkit-role-harness",
  "cortexkit-role-llm-runner",
  "futures-util",

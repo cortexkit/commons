@@ -8,7 +8,7 @@ use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject, RetentionDefect, StepRecovery};
+use fake::{CompactionDefect, Defects, FakeSubject, RetentionDefect, StepRecovery};
 use std::time::Duration;
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
@@ -86,7 +86,7 @@ async fn a_faithful_runner_passes_every_case_but_its_simulated_kills_fail_the_ru
     for spec in CASES {
         assert_passed(&report, spec.name);
     }
-    assert_eq!(report.kills.len(), 6, "{}", report.render());
+    assert_eq!(report.kills.len(), 8, "{}", report.render());
     assert!(report
         .kills
         .iter()
@@ -902,5 +902,167 @@ async fn retention_requires_a_real_tombstone_process_kill() {
         .filter(|s| s.name.starts_with("retention_") && s.name != "retention_without_group_refused")
     {
         assert_passed(&report, spec.name);
+    }
+}
+
+const COMPACTION_CASES: &[&str] = &[
+    "compaction_setup_durable_once",
+    "compaction_fence_crash_replays_model_view",
+    "model_view_half_open_ranges_and_travel",
+    "compaction_unavailable_distinct_from_refuse",
+    "compaction_wait_cap",
+    "compaction_late_or_stale_answers_discarded",
+    "compaction_step_timeout_uses_last_view",
+    "compaction_one_view_per_step",
+];
+
+async fn compaction_break(defect: CompactionDefect, case: &str) {
+    let subject = FakeSubject::new(Defects {
+        compaction: defect,
+        ..Defects::default()
+    });
+    let report = run(&subject).await;
+    assert!(!failed(&report, case).is_empty());
+    let failures: Vec<_> = report
+        .cases
+        .iter()
+        .filter(|c| matches!(c.outcome, CaseOutcome::Failed { .. }))
+        .map(|c| c.case)
+        .collect();
+    assert_eq!(failures, vec![case], "{}", report.render());
+    assert_others_passed(&report, &[case]);
+}
+
+#[tokio::test]
+async fn compaction_good_fake_passes_all_named_cases() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in COMPACTION_CASES {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn compaction_setup_rerun_fails_only_setup_durability() {
+    compaction_break(
+        CompactionDefect::RerunRecordedSetup,
+        "compaction_setup_durable_once",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_early_fold_fails_only_fence_crash() {
+    compaction_break(
+        CompactionDefect::FoldBeforeAnswer,
+        "compaction_fence_crash_replays_model_view",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_forgotten_answer_fails_only_fence_crash() {
+    compaction_break(
+        CompactionDefect::ForgetRecordedFold,
+        "compaction_fence_crash_replays_model_view",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_insertion_after_message_fails_only_model_ranges() {
+    compaction_break(
+        CompactionDefect::InsertionAfterMessage,
+        "model_view_half_open_ranges_and_travel",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_unavailable_as_refusal_fails_only_refusals() {
+    compaction_break(
+        CompactionDefect::UnavailableAsRefusal,
+        "compaction_unavailable_distinct_from_refuse",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_finer_code_replaces_role_code_fails_only_refusals() {
+    compaction_break(
+        CompactionDefect::FinerCodeReplacesRoleCode,
+        "compaction_unavailable_distinct_from_refuse",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_over_wait_cap_fails_only_wait_cap() {
+    compaction_break(CompactionDefect::ExceedWaitCap, "compaction_wait_cap").await;
+}
+#[tokio::test]
+async fn compaction_applies_late_fails_only_late_stale_answers() {
+    compaction_break(
+        CompactionDefect::ApplyLate,
+        "compaction_late_or_stale_answers_discarded",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_applies_stale_fails_only_late_stale_answers() {
+    compaction_break(
+        CompactionDefect::ApplyStale,
+        "compaction_late_or_stale_answers_discarded",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_timeout_ends_unavailable_fails_only_step_timeout() {
+    compaction_break(
+        CompactionDefect::TimeoutEndsUnavailable,
+        "compaction_step_timeout_uses_last_view",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_two_views_fails_only_one_view_per_step() {
+    compaction_break(
+        CompactionDefect::ApplyTwoViews,
+        "compaction_one_view_per_step",
+    )
+    .await;
+}
+#[tokio::test]
+async fn compaction_missing_groups_are_not_applicable_by_name() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::Compaction);
+    subject.capabilities.remove(&Capability::ModelView);
+    let report = run(&subject).await;
+    for name in COMPACTION_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::Compaction)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+        assert!(report
+            .render()
+            .lines()
+            .any(|line| line.starts_with(&format!("N/A  {name} "))));
+    }
+}
+
+#[tokio::test]
+async fn compaction_model_view_missing_is_not_applicable_independently() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::ModelView);
+    let report = run(&subject).await;
+    for name in COMPACTION_CASES {
+        if *name == "compaction_unavailable_distinct_from_refuse" {
+            assert_passed(&report, name);
+        } else {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Skipped {
+                    missing: vec![Capability::ModelView]
+                })
+            );
+            assert!(report
+                .render()
+                .lines()
+                .any(|line| line.starts_with(&format!("N/A  {name} "))));
+        }
     }
 }

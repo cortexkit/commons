@@ -35,6 +35,24 @@ fake under `tests/fake/` exists only to test the suite itself.
   session content; an unclassified op fails the check. The suite sends a
   unique `title` along with prompt and tool-result markers; a runner that
   stores caller titles must erase them too.
+- For `compaction`, a provider backed by `CompactionScript`, included in
+  the session plan only when installed. Convert replacement text to the
+  runner's schema, preserve ids/versions/ranges, and omit `call_when` so it
+  is called every step. `compaction_observation` captures actual provider
+  calls and canonical inputs at the scripted model boundary outside the
+  runner's process/state root; it must not reconstruct inputs from the
+  script or `session.read`. Hold every model answer until
+  `release_compaction_model`; select model turns by emitted answers, since
+  compaction can hide earlier assistant messages.
+- The compaction runner/provider clock is injected, starts at zero and
+  advances only through `advance_compaction_clock`, which drains all due
+  work before returning. Configure the actual call timers, engine WAIT
+  cap, prompt-cache lifetime and token estimator from the script. This
+  avoids scheduler tolerances hiding a cap violation. `answer_compaction`
+  must deliver late/stale/duplicate responses to the runner's disposition
+  path, not discard them in the adapter. `durable_compaction_setup` reads
+  the initial answer from persistent runner storage while a model call is
+  held, never from its cache, the expected script or a model page.
 
 ## Verdict
 
@@ -52,6 +70,10 @@ from `session.baseline` has no admission reply to compare.
 
 | Case | Requires |
 |---|---|
+| `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
+| `compaction_fence_crash_replays_model_view` | same groups, `CompactionApplied`; answer durable before fold |
+| `model_view_half_open_ranges_and_travel`, `compaction_wait_cap`, `compaction_late_or_stale_answers_discarded`, `compaction_step_timeout_uses_last_view`, `compaction_one_view_per_step` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
+| `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
 | `baseline_owner_only`, `baseline_matches_admission_reply` | `queue` |
@@ -80,6 +102,14 @@ from `session.baseline` has no admission reply to compare.
 | `crash_at_RetentionTombstoned` | retention requirements plus the named kill point; must end a real process between tombstone and deletion |
 
 `CASES` in `src/report.rs` states what each case checks.
+Missing compaction/model-view requirements are rendered `N/A` by case name
+(represented by `CaseOutcome::Skipped`, preserving missing-capability
+verdicts), never passed. The equal-anchor insertion-before-message rule is
+tested live. There is no v1 producer of insertion plus nonempty replacement
+at one anchor: compaction-provider §8 applies only the newest message, §12
+assigns its one entire range to every replacement, and step-transform hooks
+change fields on a raw message rather than inserting range entries. The
+suite does not claim live coverage of that unreachable half of ordering.
 
 ## Where the suite narrows a check
 
@@ -104,8 +134,8 @@ every report prints them. In short:
   lineage after a lineage change is refused (nothing in this subset changes
   a lineage), and that each resume writes one informational record (where
   it sits is the runner's schema). "Replay, not re-invocation" is checked
-  only for the model and the tool, since hooks and compaction are not in
-  this subset; the indeterminate
+   for the model, tool and compaction provider; step-transform hooks remain
+   outside this subset. The indeterminate
   window between a restart and the close is not observed; whether a run cut
   at `StepRecorded` or `ToolResultRecorded` completes or ends interrupted is
   not pinned, so only "one terminal state, not cancelled" is checked there.

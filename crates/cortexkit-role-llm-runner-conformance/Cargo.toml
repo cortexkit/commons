@@ -20,6 +20,7 @@ publish = false
 [dependencies]
 async-trait = "0.1"
 cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
+cortexkit-role-compaction-provider = { path = "../cortexkit-role-compaction-provider" }
 cortexkit-role-llm-runner = { version = "0.1.0", path = "../cortexkit-role-llm-runner" }
 futures-util = { version = "0.3", default-features = false }
 serde = "1"

@@ -443,6 +443,9 @@ The status (`StepStatus`) carries:
   as a separate member beside it, never in place of `code`. Nothing is
   added to the model's history, and the session stays usable: the next
   send calls the provider again.
+  In llm-runner run errors, this answer's role `code` maps to `provider_code`
+  and its optional finer `provider_code` maps to `provider_detail_code`,
+  diagnostics only, never replacing the role code or deciding retryability.
 - [pinned] `code` is one of the four codes below (`RefuseCode`). Each has a
   fixed retryability, which tells the session's owner whether retrying
   without the user acting makes sense (the provider was only busy) or the

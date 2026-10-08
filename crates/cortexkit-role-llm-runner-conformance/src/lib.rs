@@ -11,7 +11,7 @@
 //! - the [`LlmRunnerSubject`] facts the suite cannot know: the capability
 //!   groups and harness capabilities it declares, how to open a session's
 //!   route, the fields a session's first send needs, and a scripted model
-//!   and tool provider. The suite writes each session's model as a
+//!   and tool/compaction providers. The suite writes each session's model as a
 //!   [`Script`] of assistant turns (text, reasoning and tool-call parts,
 //!   with each call's scripted result) and never speaks a model provider's
 //!   wire protocol itself; the subject backs the script with its own mock.
@@ -36,6 +36,7 @@
 #![forbid(unsafe_code)]
 
 mod cases;
+mod compaction;
 mod crash;
 mod drive;
 mod report;
@@ -44,6 +45,10 @@ mod route;
 mod runner;
 mod subject;
 
+pub use compaction::{
+    CompactionAnswer, CompactionCall, CompactionCallKind, CompactionMessage, CompactionObservation,
+    CompactionScript, CompactionSetup, CompactionStep,
+};
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;
 pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES, NARROWINGS};

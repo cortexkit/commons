@@ -271,6 +271,13 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] A run that ends `error` because of a provider carries the
   provider's code as `provider_code` in `error`, with the provider and its
   reason. `errors::provider_codes` lists the ones this role names.
+  For a compaction `REFUSE`, run error `provider_code` is the provider's role
+  `code` (`RefuseCode` in the compaction-provider contract), including an
+  unknown code recorded as received; `provider` and `reason` accompany it.
+  The answer's optional finer `provider_code` is mapped to the separate
+  optional run error member `provider_detail_code`: diagnostics only, never
+  replacing `provider_code` and never deciding retryability. Retryability is
+  fixed by the role's `RefuseCode`, not the finer diagnostic.
 - [pinned] An unknown `run_id` is refused `unknown_run`.
 - [pinned] **Run attribution.** Each message records which run and episode
   produced it, and whether it is that run's final message.
@@ -343,6 +350,12 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   (`ModelPage::check`). The `source` kind is strict: an entry of a kind this
   role does not define does not decode, because a consumer cannot place it
   by ordinal.
+  The equal-anchor insertion-before-message rule has a v1 producer (an
+  empty compaction range); insertion-before-nonempty-replacement ordering
+  has no v1 producer. The compaction-provider contract §8 applies the newest
+  CompactionMessage alone, and §12 gives all its replacement entries that
+  message's one range; hook outputs transform fields on a raw record (§11.2),
+  not additional range entries.
 
 ## 9. `steer`, `queue` and `interrupt`: `session.send` from the owner
 
@@ -653,8 +666,22 @@ owes.
   deadline is late: it is recorded and never applied. Every applied
   CompactionMessage, `WAIT` entry and exit, and call timeout is durable before
   the request it affects is sent.
+- [pinned] A runner applies at most one view per step. Accepting a view
+  consumes that step's answer fence; a second view for the same step is
+  refused by the version and fence check, even if it names the same newest
+  request, arrives before its deadline and carries a higher version.
 - [pinned] `REFUSE` ends the run `error` with the provider's code as
-  `provider_code`, adds nothing to history, and leaves the session usable.
+  run error `provider_code`: the answer's role `code` (`RefuseCode` in the
+  compaction-provider contract), with `provider` and `reason`. The answer's
+  optional finer `provider_code` becomes the separate optional
+  `provider_detail_code`, diagnostics only; it never replaces the role code
+  and never decides retryability. Nothing is added to history, and the
+  session remains usable.
+- [pinned] A failed or timed-out step call is not a refusal. The runner
+  records it and sends with the last applied CompactionMessage; an
+  over-window request then follows the normal path. `compaction_unavailable`
+  is reserved for Setup failure or timeout with no answer, which sends
+  nothing to the model.
 - [pinned] `compaction.ready {session, request_id}` (`CompactionReady`):
   after a `WAIT`, the provider signals that it is done, and the runner calls
   again with a fresh status instead of waiting out the bound. It is a hint;
@@ -758,7 +785,7 @@ treats it as a terminal refusal of that one request.
 
 | Provider code | When |
 |---|---|
-| `compaction_unavailable` | Setup or a compaction call failed or timed out with no answer |
+| `compaction_unavailable` | Setup failed or timed out with no answer; no model call is made |
 | `compaction_wait_exceeded` | a compaction `WAIT` hit its cap and the request could not be shown to fit |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 
@@ -882,6 +909,11 @@ step-transform providers. It will check:
 
 | Case | Requires |
 |---|---|
+| `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `FoldRecorded` (initial answer/fold durable before first model call) |
+| `compaction_fence_crash_replays_model_view` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `CompactionApplied` (step answer durable before fold) |
+| `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; live head insertion precedes/travels with message zero, summaries stay whole on their first page, and the exclusive-end message survives |
+| `compaction_wait_cap`, `compaction_late_or_stale_answers_discarded`, `compaction_step_timeout_uses_last_view`, `compaction_one_view_per_step` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; scripted provider and injected runner/model clock |
+| `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer refusal codes |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
@@ -912,6 +944,11 @@ Consumer-side rules no live runner can be made to exercise (an unknown run
 state, an unknown event kind, a describe answer with a partial group, a
 model page that repeats a replacement, a completed run without its final
 message) are tested against the vectors in this crate.
+Live shared-start insertion/nonempty-replacement ordering has no v1 producer:
+compaction-provider §8 applies only the newest CompactionMessage, and §12
+assigns its entire working range to every replacement entry. Hook outputs
+are fields on a transformed raw record, not range insertions. This ordering
+rule is therefore not claimed as live runner conformance.
 
 Verdict, as for `tool-provider/v1`: a case whose requirements the subject
 does not declare is skipped, never passed; a run with skips is "conforming

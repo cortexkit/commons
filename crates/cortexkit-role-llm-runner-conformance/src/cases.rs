@@ -121,6 +121,11 @@ where
             }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("retention_") => self.retention_case(name).await,
+            name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
+                crate::compaction::run(self, name)
+                    .await
+                    .map(|()| Ending::Passed)
+            }
             other => Err(format!("the runner has no case named {other}")),
         }
     }

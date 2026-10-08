@@ -1,6 +1,6 @@
 //! What a runner under test supplies beyond its harness: the capabilities
 //! it declares, how to reach a session's management route, and a scripted
-//! model and tool provider.
+//! model, tool and compaction providers.
 
 use std::collections::BTreeSet;
 
@@ -22,8 +22,8 @@ pub enum Capability {
     DispatchAttribution,
     /// The `streaming` group: `session.subscribe` from a page's `head`.
     Streaming,
-    /// The `model_view` group. No case the suite implements yet requires
-    /// it.
+    /// The `model_view` group: live half-open replacement/insertion paging,
+    /// and the canonical view used by the compaction crash checks.
     ModelView,
     /// The `steer` delivery mode of `session.send`.
     Steer,
@@ -33,8 +33,8 @@ pub enum Capability {
     Queue,
     /// The `interrupt` delivery mode of `session.send`.
     Interrupt,
-    /// The `compaction` group. No case the suite implements yet requires
-    /// it.
+    /// The `compaction` group: scripted Setup, step answers, refusals,
+    /// deadlines, request fences and durable replay.
     Compaction,
     /// The `session_change` group. No case the suite implements yet
     /// requires it.
@@ -230,7 +230,89 @@ pub trait LlmRunnerSubject: Harness {
     /// `script.turns[n]`, where `n` is the number of assistant messages in
     /// the history the request carries; the suite never lets a session ask
     /// for more turns than its script holds.
+    /// Compaction may hide assistant messages from the model view; for a
+    /// session with a compaction script, select turns by emitted assistant
+    /// answers instead, keeping that cursor across held calls and restarts.
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError>;
+
+    /// Install the suite's compaction provider and controlled clock before
+    /// admission. The session plan must include that provider. Map text
+    /// replacements to the runner's message schema; preserve ranges, ids,
+    /// versions and request ids verbatim. See [`crate::CompactionScript`].
+    /// Required when `compaction` is declared, never called otherwise.
+    async fn install_compaction_script(
+        &self,
+        _session: &str,
+        _script: crate::CompactionScript,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("scripted compaction is not implemented"))
+    }
+
+    /// Provider calls and canonical inputs captured by the scripted model,
+    /// outside the runner process/state root. Do not derive these from the
+    /// script or session.read: they must observe actual calls and inputs.
+    async fn compaction_observation(
+        &self,
+        _session: &str,
+    ) -> Result<crate::CompactionObservation, HarnessError> {
+        Err(HarnessError::new(
+            "compaction observation is not implemented",
+        ))
+    }
+
+    /// Advance the injected runner/provider clock by exactly this many ms,
+    /// and drain all work due at that instant, including timers and terminal
+    /// records. No time advances implicitly. This makes deadline and cap
+    /// checks independent of scheduler speed. The clock and provider survive
+    /// runner crashes; configure the runner's actual timers, not a proxy.
+    async fn advance_compaction_clock(
+        &self,
+        _session: &str,
+        _milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "controlled compaction clock is not implemented",
+        ))
+    }
+
+    /// Deliver an answer to an observed provider call (zero-based index,
+    /// including Setup). It must reach the runner even after timeout; do not
+    /// filter late/stale answers in the adapter. A missing request id means
+    /// echo this call's id; Some is delivered verbatim for fence probes.
+    async fn answer_compaction(
+        &self,
+        _session: &str,
+        _call_index: usize,
+        _request_id: Option<String>,
+        _answer: crate::CompactionAnswer,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "compaction answer delivery is not implemented",
+        ))
+    }
+
+    /// Release exactly one held scripted model request. Compaction scripts
+    /// hold every model call so the suite can inspect the state before the
+    /// model's answer, without racing the next step.
+    async fn release_compaction_model(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "held compaction model is not implemented",
+        ))
+    }
+
+    /// Read the initial CompactionMessage from the runner's durable store,
+    /// not its cache, the provider script, or model view. None means no
+    /// initial answer has been durably recorded. Called while the first
+    /// model request is held, to prove persistence before that call.
+    async fn durable_compaction_setup(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<Option<crate::CompactionMessage>, HarnessError> {
+        Err(HarnessError::new(
+            "durable Setup inspection is not implemented",
+        ))
+    }
 
     /// How many times the scripted tool provider was called with
     /// `arguments`, counted across every kill and restart in the run.

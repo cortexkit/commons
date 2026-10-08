@@ -10,6 +10,7 @@ use cortexkit_role_llm_runner::points;
 
 use crate::{
     cases::{Case, Ending},
+    compaction,
     crash::{self, CrashObservation},
     drive::Mint,
     report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES},
@@ -81,7 +82,21 @@ where
         let outcome = match gate(spec, &declared) {
             Some(outcome) => outcome,
             None => {
-                let result = if spec.name == "crash_at_RetentionTombstoned" {
+                let result = if matches!(
+                    spec.name,
+                    "compaction_setup_durable_once" | "compaction_fence_crash_replays_model_view"
+                ) {
+                    compaction::crash_case(
+                        subject,
+                        &mut driver,
+                        work_dir,
+                        &declared,
+                        &mint,
+                        spec.name,
+                    )
+                    .await
+                    .map(|()| Ending::Passed)
+                } else if spec.name == "crash_at_RetentionTombstoned" {
                     retention::crash(subject, &mut driver, work_dir, &declared, &mint)
                         .await
                         .map(|()| Ending::Passed)
