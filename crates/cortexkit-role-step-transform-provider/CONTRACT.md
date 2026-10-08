@@ -113,6 +113,8 @@ and the provider reads history and answers exactly as it does today.
 
 ## 4. Subscriptions and the declaration
 
+The admitted host runner lane is the scoped admission exception in §13.1.
+
 Admission is the runner's check of a proposed session plan before it accepts
 the session and freezes that plan for use.
 
@@ -305,6 +307,8 @@ the session and freezes that plan for use.
 
 ## 7. `transform.hook`
 
+Optional host service, burn, part and pass fields are specified in §13.2–§13.3.
+
 - [pinned] The request (`HookCall`) carries `session` (the runner's opaque
   name for the session), `harness` (the caller's harness from the session's
   key, required, §1), `lineage_id` (absent only on `pre_user` for the
@@ -447,6 +451,8 @@ required string and `detail` arbitrary JSON, omitted when absent.
 
 ## 10. Decoding
 
+Host-lane omission and legacy compatibility are specified in §13.5.
+
 - [pinned] **Lenient on fields**: `role.describe`, the declaration request
   and answer, hook requests and answers. A newer runner can add fields
   without breaking an older provider, and the reverse.
@@ -519,6 +525,160 @@ check:
 Runner-side rules no live provider can exercise (bounding a plan, the
 reduction rule, the order, refusing a disallowed answer) are tested against
 the vectors in this crate.
+
+## 13. Host runner lane
+
+This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
+(`opencode2`), not a change to ordinary runner admission or observation.
+
+### 13.1 Admission and observation
+
+- [pinned] Admission is keyed only on the frozen plan item's params and the
+  route's bind `(project_root, session, harness)` under the route's
+  authenticated principal. The bind harness must be `opencode` or `opencode2`
+  and the principal a `direct` caller bound to that conversation. Neither the
+  body `harness` field nor body params select this exception or confer
+  authority. The conversation key remains the §1 triple; params select
+  behaviour, never another conversation.
+- [pinned] The frozen plan opts in with `params.serializer_profile:
+  "opencode-aisdk"`. Answer observation additionally requires
+  `params.observation: "answer"`; both opt-ins and host admission are required
+  for the promote-and-burn protocol below and the compaction departures in
+  §13.4. Missing or unrecognised required opt-ins grant no exception. The
+  same frozen params are passed on declaration, Setup and hooks.
+- [pinned] Only this admitted direct caller may use an empty runner-group set
+  without `transcript_reads` or a `compaction.ready` service. This grants no
+  runner-only operation, runner/Broca transcript read or other session.
+  A cross-session request refuses `invalid_params`, naming `session` (or
+  `project_root` for a project mismatch). Ordinary runners still undergo full
+  runner admission, including their required groups and ready service; a
+  runner-principal call with body `harness: "opencode"` and host params does
+  not enter this exception.
+- [pinned] This exception is no stronger than today's local direct-caller
+  trust for full-request transform. It requires the daemon caller-identity
+  stamp once that stamp lands; body fields are never a substitute for it.
+  It does not globally publish empty runner requirements in `role.describe`.
+- [pinned] From a runner principal, either host-only plan value,
+  `observation: "answer"` or `serializer_profile: "opencode-aisdk"`, on
+  `transform.declare` refuses `invalid_params`, with `detail.field` naming
+  `params.observation` or `params.serializer_profile`, respectively.
+  `compaction.setup` has the same rule (compaction-provider/v1 §18.1).
+  Authentication/admission is separate from the pure declaration (§4, §8).
+- [pinned] Answer observation makes zero `session.read` calls, including
+  restart and bootstrap. Ingest is not observation; a hook answer alone is
+  never proof that its output was served. Missing acknowledgement never
+  promotes pending output and never falls back to transcript reads.
+
+### 13.2 Durable service and discarded subjects
+
+- [pinned] `transform.hook` may carry `served_through_ordinal: u64`, an
+  optional sibling in the request, not an answer member. It is the highest
+  ordinal durably committed for serving on the call's lineage. Hooks in a
+  pass carry the previous committed watermark; a compaction step carries the
+  watermark after that pass's append transaction. Absence means no
+  ordinal-confirmed promotion, neither zero nor the newest ordinal.
+- [pinned] Per lineage the watermark moves only forward, except for a revert
+  clamp to the revert target in the same durable transaction. A lower value
+  without that revert refuses `invalid_params {field:
+  "served_through_ordinal"}`; it never un-promotes output. Promotion never
+  passes the newest ordinal the provider holds for the lineage. Pending
+  answers promote only through the watermark in the current lineage or an
+  ancestor's inherited prefix; ancestor pending answers beyond the descent
+  boundary burn. These rules survive retries and provider crashes.
+- [pinned] `transform.hook` may carry `unserved_subjects:
+  [{subject_mid: string, hook: Hook, subject_part?: string}]`, also optional
+  and not an answer member. The enclosing request supplies the lineage.
+  Entries require typed identity and the existing strict `Hook` discriminant;
+  unknown entry fields are ignored. Host subjects are `pre_user`,
+  `post_assistant` and `post_tool`; a tool subject carries its part id (§13.3).
+  An absent or empty list names no burns; omit the empty list.
+- [pinned] Burning is idempotent, and an entry naming a subject never answered
+  is ignored. Burns precede promotion and cadence. Burned numbers never enter
+  tags or rendering; queued reductions on burned pending tags are discarded.
+  Later status ingestion of the raw message never resurrects discarded hook
+  output. Validation, including held-history conflicts, precedes any
+  promote-and-burn mutation.
+- [pinned] After a timeout or partial failure the host freezes the whole
+  message raw and reports every subject, including answered ones, until a
+  later call answers. It clears the resend list only then. The same two
+  optional fields occur on `compaction.step`, not Setup
+  (compaction-provider/v1 §18.2).
+
+### 13.3 Part identity, pass barrier and size
+
+- [pinned] `transform.hook` may carry `subject_part: string` for a host
+  `post_tool` subject. When present it is opaque, non-empty, at most 256 bytes
+  in UTF-8, and compared byte for byte, without normalisation. An empty or
+  over-limit value refuses `invalid_params {field: "subject_part"}`.
+  The same rule applies inside `unserved_subjects`, with the field named
+  `unserved_subjects[i].subject_part` for a malformed entry.
+- [pinned] Host answer identity is `(lineage, subject_mid, hook,
+  subject_part)`. `pre_user` and `post_assistant` omit the part; omission
+  denotes the no-part slot, not a fabricated tool part id. `post_tool`
+  supplies the actual part id, not the model's display-only `tool_call_id`.
+  Distinct parts with identical call ids and output remain distinct answers;
+  burning one does not burn the other. Every hook on a message still supplies
+  the same opaque pre-op ingest bytes (§7), never an ops-modified clone.
+- [pinned] `transform.hook` may carry `pass_complete: boolean`, true only on
+  the pass's last hook and omitted unless true. Omitted or false schedules no
+  barrier. It is a scheduling hint for off-request historian evaluation,
+  never an acknowledgement and never a substitute for the durable watermark.
+  State sync, including the historian model chain, precedes hooks and ingest;
+  only the barrier schedules evaluation over the complete pass. A missing
+  barrier after unavailable hooks is covered by the next pass's barrier.
+- [pinned] A pass with no hooked append may place `pass_complete: true` on
+  MC's internal `state_sync` request for a zero-append chain change. That use
+  is MC-internal, not an op or field added to either commons role.
+  `pass_complete` is not on `compaction.step` or any provider answer;
+  `subject_part` is not top-level on a compaction step or its answer.
+- [pinned] Host encoded hook and status requests are capped at 3 MiB
+  (3,145,728 bytes), counting all fields, including `unserved_subjects` and
+  duplicate content in `blocks`. They are never truncated or sent over cap.
+  The §7 hook cap measures the compact `HookCall`, not its transport envelope;
+  the host's send check additionally budgets the encoded `{method, params}`
+  request. An oversized host status entry exits with
+  `provider_message_too_large`, never an oversized-single-entry paging loop.
+  This does not replace ordinary runners' size policy.
+
+### 13.4 Companion compaction departures
+
+- [pinned] Only an admitted answer-observation host uses immediate status
+  paging (compaction-provider/v1 §18.3): it re-pages only on `more: true`,
+  immediately with a fresh `request_id` under the same request fence, not on
+  ready or `bound_ms`. The provider releases the conversation lock before
+  answering and spawns no scan. Incomplete history may answer `wait` only
+  when `more: true`; an incomplete final page refuses `history_unreadable`
+  with `detail.history_gap_from` naming the first known missing ordinal.
+  `wait` on a final page is an unavailable call, never a retry loop. Absent
+  `newest` means no written message, not a reason to scan.
+- [pinned] Only that lane departs from compaction-provider/v1 §6's full
+  suffix/final-value rule (§18.4). `after_ordinal` is the highest contiguous
+  ordinal whose messages have every hook answered (`ingested = true` in
+  host records); later `messages` contains only entries not fully ingested,
+  oldest first, as opaque pre-op JSON. An unavailable/frozen-raw message is
+  sent even if some hooks already ingested it. No wire `ingested` member is
+  added. A missing cursor is the first status, not proof of held history;
+  `messages: []` with `after_ordinal == newest.ordinal` is valid after hooks
+  supplied all entries. Gaps are detected from held history, not list
+  sparsity, and conflicts refuse before promote-and-burn (`subject_mid` for
+  changed input under a held mid, `subject_ordinal` for another mid at a held
+  hook ordinal, `messages` for conflicting step entries).
+
+### 13.5 Compatibility
+
+- [pinned] The new fields default to absent and are omitted when absent, not
+  encoded as `null`. Older decoders ignore them; that is not semantic host
+  admission. Existing strict discriminants stay strict. `owned-broca` and
+  absent host opt-ins retain declaration, tag/cadence, subject identity,
+  historian scheduling, observation and answer bytes even with valid extra
+  fields; no host promotion, burning or barrier runs there. Pi and OMP keep
+  their existing paths. Rust mode does not require Broca to run.
+- [pinned] The request fence, version high-water, structural checks,
+  Setup-once rule (including on descent), frozen budgets and
+  `on_unavailable` are unchanged. These fields add no operation or answer
+  discriminant. `host-runner-lane.json` in the existing vector directory pins
+  wire examples and stateful expectations separately; older wire decoding
+  alone cannot verify the host protocol.
 
 ## Not in v1
 
