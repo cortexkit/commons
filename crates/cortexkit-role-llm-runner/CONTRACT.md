@@ -494,9 +494,14 @@ run.
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
 - [pinned] A `steer` or `interrupt` into an existing session takes every
-  runner parameter it omits (model, generation settings and the like) from
-  the session's frozen values, so an owner that knows only the role's
-  members can send one.
+  parameter the runner freezes for the session, when the send omits it,
+  from the frozen value, so an owner that knows only the role's members can
+  send one. A runner that freezes none has nothing to inherit.
+- [pinned] A runner never accepts a send and delivers it under settings
+  other than the ones the send named. A runner parameter the runner cannot
+  honour for that delivery (a steer naming a model or generation settings
+  other than those of the run it joins, say) is refused `invalid_params`
+  naming that parameter, and nothing is written.
 - [pinned] The reply is `{state, run_id?, submission_id?, reason?,
   baseline?, delivered?}` (`SendReply`), `state` decoded open (`active`,
   `finished`, `pending`).
@@ -606,8 +611,12 @@ even when retained accounting or identity metadata is served.
 
 ### 9.2 `retract`: `session.retract`
 
-A runner that declares `retract` serves `session.retract`: a queued send
-is withdrawn before it starts.
+A runner that declares `retract` serves `session.retract`: a send that has
+not started is withdrawn before it starts. That is a queued send and, on a
+`confirm` runner, a steer whose receipt is `pending`. A `pending` send reply
+carries `submission_id` exactly when the runner declares `retract`. On a
+`guaranteed` runner an accepted steer is already durable in the run it
+joined, and `session.retract` does not withdraw it.
 
 - [pinned] The request is `{submission_id}`, the id a `pending` send reply
   named (§9). The answer is a JSON string, decoded open:

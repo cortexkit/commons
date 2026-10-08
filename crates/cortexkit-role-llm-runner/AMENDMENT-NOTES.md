@@ -372,11 +372,15 @@ settles. The draft writes none of them into the contract as law.
    behind an authentication pause and queues one behind a restart pause
    (annotations row `run_paused`). Should §12.1 say "a runner may queue
    behind a paused run, answering `pending`"?
-5. **Steer inheritance.** §9 says a steer or interrupt takes every omitted
-   runner parameter from the frozen values. broca inherits a fixed set and
-   keeps `keep_warm` and `on_restart` per send (annotations row Omitted
-   params on steer). Narrow §9 to "every parameter the runner freezes for
-   the session"? Thalamus's behaviour is not in the inputs.
+5. **Steer inheritance: settled in §9.** Narrowed to "every parameter the
+   runner freezes for the session" (Thalamus freezes none). Thalamus added a
+   rule, now pinned: a runner refuses a parameter it cannot honour for that
+   delivery `invalid_params` naming it, and never delivers under other
+   settings. **broca does not meet this yet:** a steer that joins a run
+   silently ignores `model`, `variant`, generation settings, `tools`,
+   `cache`, `keep_warm` and `on_restart` (broca `actor.rs:2498-2516` takes
+   only the input). broca fixes it before the amendment merges; core should
+   say whether it ever sends a steer whose settings differ from the run's.
 6. **`send_id` required and `prompt` required.** broca accepts both absent
    (`prompt_blocks` replaces `prompt`; unkeyed sends are admitted). Core
    needs a stable `send_id` for recovery (annotations, Change item 2).
