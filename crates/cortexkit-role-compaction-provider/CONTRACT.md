@@ -715,6 +715,12 @@ This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
 
 ### 18.2 Durable service and discarded subjects
 
+A host can't answer `session.read`, so the provider learns from the host which
+answers it actually served. Two operations follow from that. To **promote** an
+answer is to treat a pending hook answer as served, so its tags and cadence
+take effect. To **burn** an answer is to discard a pending answer the host never
+served, so it never takes effect. Together they are **promote-and-burn**.
+
 - [pinned] `compaction.step` may carry `served_through_ordinal: u64`, an
   optional sibling in the status, not on Setup or an answer. It is the highest
   ordinal durably committed for serving on the call's lineage, after the
@@ -774,7 +780,8 @@ This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
   first known missing ordinal. A complete final page may run the step.
   Absent `newest` means no written message, not a reason to scan a transcript.
 - [pinned] The host re-pages only on `more: true`, immediately with the next
-  status and a fresh `request_id` under the same §9 fence, not after ready or
+  status and a fresh `request_id`, still subject to §9's rule that only an
+  answer naming the newest request is accepted, not after ready or
   `bound_ms`. The provider releases the conversation lock before answering;
   a host-mode wait spawns no scan and calls no `compaction.ready`. A `wait`
   returned on a final page is an unavailable call, never an automatic retry

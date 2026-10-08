@@ -106,7 +106,10 @@ pub fn validate_unserved_subjects(subjects: &[UnservedSubject]) -> Result<(), Su
     Ok(())
 }
 
-/// A host-only plan value that an authenticated runner principal cannot use.
+/// A plan parameter value reserved for an OpenCode host acting as a runner
+/// (`serializer_profile: "opencode-aisdk"` or `observation: "answer"`). A
+/// registered runner such as Broca must not send one, because these values
+/// select the host lane's relaxed admission rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RunnerParamsProblem {
@@ -124,9 +127,11 @@ impl RunnerParamsProblem {
     }
 }
 
-/// Reject host-only plan values on Setup or declaration from an authenticated
-/// runner principal. The caller must establish that principal from the route,
-/// never from the body harness. This is not a host admission check.
+/// Refuse those host-only values when they arrive on Setup or a declaration
+/// from a registered runner. The caller decides it is talking to a runner from
+/// the daemon-verified route (the module that opened it), never from the
+/// `harness` field in the request body. This only refuses a runner; it does not
+/// admit a host.
 pub fn check_runner_params(params: &Map<String, Value>) -> Result<(), RunnerParamsProblem> {
     if params.get("serializer_profile").and_then(Value::as_str) == Some("opencode-aisdk") {
         return Err(RunnerParamsProblem::SerializerProfile);
@@ -335,7 +340,8 @@ pub struct DeclareRequest {
 }
 
 impl DeclareRequest {
-    /// Check host-only plan values only after authenticating a runner principal.
+    /// Refuse host-only plan values. Call this only once the route shows the
+    /// caller is a registered runner.
     pub fn check_runner_params(&self) -> Result<(), RunnerParamsProblem> {
         check_runner_params(&self.params)
     }
