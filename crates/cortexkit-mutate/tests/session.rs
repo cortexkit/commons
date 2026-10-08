@@ -89,6 +89,47 @@ only = true
         .unwrap();
     }
 
+    fn catalogue_without_prebuild(&self, row: Control) {
+        fs::write(
+            self.root().join("mutations.toml"),
+            toml::to_string(&Catalogue {
+                control: vec![row],
+                prebuild: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn command_row(&self) -> Control {
+        let mut row = self.row();
+        row.runner = "command".into();
+        row.package = None;
+        row.target = None;
+        row.command = Some(vec![
+            "python3".into(),
+            "src/bin/record-invocation.py".into(),
+        ]);
+        row.catch_on = Some("output_differs".into());
+        row.expect_red.clear();
+        row.only = false;
+        row.test_count_pattern = None;
+        row
+    }
+
+    fn write_command_runner(&self) {
+        fs::write(
+            self.root().join("src/bin/record-invocation.py"),
+            r#"from pathlib import Path
+
+with Path(".git/command-invocations").open("a", encoding="utf-8") as log:
+    log.write("invoked\n")
+print(Path("src/lib.rs").read_text(encoding="utf-8"))
+"#,
+        )
+        .unwrap();
+    }
+
     fn cmd(&self, program: &str, args: &[&str]) {
         let output = Command::new(program)
             .args(args)
@@ -361,6 +402,76 @@ fn failing_unmutated_prebuild_aborts_replay_by_step_name() {
     assert_eq!(
         fs::read_to_string(f.root().join(".git/prebuild-runs")).unwrap(),
         "false\n"
+    );
+}
+
+#[test]
+fn run_creates_missing_nested_report_directory() {
+    if Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("skipping command-row report test: python3 is absent");
+        return;
+    }
+    let fixture = Fixture::new();
+    fixture.write_command_runner();
+    fixture.catalogue_without_prebuild(fixture.command_row());
+    fixture.commit();
+
+    let output = fixture.cli(&[
+        "run",
+        "--all",
+        "--report",
+        ".git/reports/nested/report.json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(
+        &fs::read(fixture.root().join(".git/reports/nested/report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(report[0]["outcome"], "CAUGHT");
+    assert_eq!(
+        fs::read_to_string(fixture.root().join(".git/command-invocations"))
+            .unwrap()
+            .lines()
+            .count(),
+        3,
+        "the command row should run twice for its baseline and once for its mutant"
+    );
+}
+
+#[test]
+fn run_refuses_unwritable_report_before_mutating_or_running_command() {
+    if Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("skipping command-row report test: python3 is absent");
+        return;
+    }
+    let fixture = Fixture::new();
+    fixture.write_command_runner();
+    fixture.catalogue_without_prebuild(fixture.command_row());
+    fixture.commit();
+    fs::write(fixture.root().join("report-parent"), "not a directory").unwrap();
+    let original_source = fs::read(fixture.root().join("src/lib.rs")).unwrap();
+
+    let output = fixture.cli(&[
+        "run",
+        "--all",
+        "--allow-dirty",
+        "--report",
+        "report-parent/report.json",
+    ]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("report-parent/report.json"), "{error}");
+    assert_eq!(
+        fs::read(fixture.root().join("src/lib.rs")).unwrap(),
+        original_source
+    );
+    assert!(
+        !fixture.root().join(".git/command-invocations").exists(),
+        "the command row ran despite the report preflight failure"
     );
 }
 
