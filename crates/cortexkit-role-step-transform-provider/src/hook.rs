@@ -4,16 +4,38 @@
 //! params (so the provider resolves the same frozen config on every call
 //! without remembering it), and the subject: the value the hook may change,
 //! with what identifies it. The runner calls a hook before the record it
-//! transforms is written, so a subject has no ordinal yet.
+//! transforms is written. A runner may supply its reserved message id and
+//! ordinal, and an opaque whole message, when it cannot serve `session.read`.
 //!
 //! Decoded leniently on fields, strictly on `hook` and `phase`: a provider
 //! that does not know a hook refuses the call rather than answer it as
 //! another.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::subscription::{Hook, Phase};
+
+/// History inherited by a new lineage, through the given ordinal inclusive.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct DescendsFrom {
+    pub lineage_id: String,
+    pub through_ordinal: u64,
+}
+
+impl DescendsFrom {
+    pub fn new(lineage_id: impl Into<String>, through_ordinal: u64) -> Self {
+        Self {
+            lineage_id: lineage_id.into(),
+            through_ordinal,
+        }
+    }
+}
+
+/// A provider may enforce this cap on a hook carrying `message`: 4 MiB for
+/// the compact JSON request, including the whole message. Never truncate it.
+pub const DEFAULT_HOOK_CAP_BYTES: usize = 4 * 1024 * 1024;
 
 /// The `transform.hook` request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -33,6 +55,25 @@ pub struct HookCall {
     /// first message of a session nothing has been written to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
+    /// The runner's message id. Present together with `subject_ordinal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_mid: Option<String>,
+    /// The subject's position in the current lineage, reserved by the runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_ordinal: Option<u64>,
+    /// The whole new message in the runner's schema, named by the opaque
+    /// `params.serializer_profile`. Requires both subject identity fields.
+    /// Providers must recognise the profile before interpreting this value.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_message"
+    )]
+    pub message: Option<Value>,
+    /// On the first hook of a lineage, the history it continues. A provider
+    /// must hold the named lineage through this ordinal, never guess it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descends_from: Option<DescendsFrom>,
     /// The plan item's preset, verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
@@ -49,6 +90,10 @@ impl HookCall {
             session: session.into(),
             harness: harness.into(),
             lineage_id: None,
+            subject_mid: None,
+            subject_ordinal: None,
+            message: None,
+            descends_from: None,
             preset: None,
             params: Map::new(),
             subject,
@@ -60,10 +105,83 @@ impl HookCall {
         self
     }
 
+    pub fn with_subject_identity(mut self, mid: impl Into<String>, ordinal: u64) -> Self {
+        self.subject_mid = Some(mid.into());
+        self.subject_ordinal = Some(ordinal);
+        self
+    }
+
+    pub fn with_message(mut self, message: Value) -> Self {
+        self.message = Some(message);
+        self
+    }
+
+    pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
+        self.descends_from = Some(descends_from);
+        self
+    }
+
+    /// Validate before interpreting or ingesting host-supplied history.
+    /// Shape decoding alone does not enforce the subject pairing rule.
+    /// Refuse a failure with `invalid_params`, naming the problem's field.
+    pub fn check_host_fields(&self) -> Result<(), HookProblem> {
+        if self.message.is_some() && (self.subject_mid.is_none() || self.subject_ordinal.is_none())
+        {
+            return Err(HookProblem::MessageWithoutSubject);
+        }
+        match (&self.subject_mid, self.subject_ordinal) {
+            (Some(_), None) => Err(HookProblem::SubjectOrdinalMissing),
+            (None, Some(_)) => Err(HookProblem::SubjectMidMissing),
+            _ => Ok(()),
+        }
+    }
+
+    /// Optionally enforce a request cap when a whole message is supplied.
+    /// All request fields count, not just `message`. Calls without `message`
+    /// retain their existing size policy. Refuse with `invalid_params`, never
+    /// silently truncate. [`DEFAULT_HOOK_CAP_BYTES`] is the default cap.
+    pub fn check_message_size(&self, cap_bytes: usize) -> Result<(), HookProblem> {
+        if self.message.is_some()
+            && serde_json::to_vec(self)
+                .expect("hook fields are JSON-serializable")
+                .len()
+                > cap_bytes
+        {
+            return Err(HookProblem::RequestTooLarge);
+        }
+        Ok(())
+    }
+
     pub fn with_item(mut self, preset: Option<String>, params: Map<String, Value>) -> Self {
         self.preset = preset;
         self.params = params;
         self
+    }
+}
+
+// Explicit JSON null is a present opaque message, not an absent field. It
+// must still satisfy pairing and survive a round trip without interpretation.
+fn present_message<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
+}
+
+/// Why host-supplied hook fields are invalid. All use `invalid_params`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookProblem {
+    MessageWithoutSubject,
+    SubjectOrdinalMissing,
+    SubjectMidMissing,
+    RequestTooLarge,
+}
+
+impl HookProblem {
+    /// The `detail.field` a provider names in its refusal.
+    pub fn field(self) -> &'static str {
+        match self {
+            Self::MessageWithoutSubject | Self::RequestTooLarge => "message",
+            Self::SubjectOrdinalMissing => "subject_ordinal",
+            Self::SubjectMidMissing => "subject_mid",
+        }
     }
 }
 

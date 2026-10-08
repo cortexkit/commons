@@ -13,6 +13,23 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// History inherited by the current lineage, through the ordinal inclusive.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct DescendsFrom {
+    pub lineage_id: String,
+    pub through_ordinal: u64,
+}
+
+impl DescendsFrom {
+    pub fn new(lineage_id: impl Into<String>, through_ordinal: u64) -> Self {
+        Self {
+            lineage_id: lineage_id.into(),
+            through_ordinal,
+        }
+    }
+}
+
 /// A message the runner wrote, by its place in the lineage.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MessageRef {
@@ -233,6 +250,10 @@ pub struct StepStatus {
     pub more: bool,
     /// The runner's clock, in milliseconds since the Unix epoch.
     pub now: u64,
+    /// History the current lineage continues. The provider must hold the
+    /// named lineage through this ordinal or refuse `history_unreadable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descends_from: Option<DescendsFrom>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -275,7 +296,13 @@ impl StepStatus {
             messages: Vec::new(),
             more: false,
             now,
+            descends_from: None,
         }
+    }
+
+    pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
+        self.descends_from = Some(descends_from);
+        self
     }
 
     /// Set the cursor and the messages after it.

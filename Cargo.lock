@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-compaction-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-step-transform-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",

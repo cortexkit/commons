@@ -123,6 +123,7 @@ fn refuse_carries_provider_code_and_no_retryable() {
             code: RefuseCode::ProviderBusy,
             reason: "busy".into(),
             provider_code: Some("mc:historian_running".into()),
+            detail: None,
         }
     );
     exact(&step, wire.clone());

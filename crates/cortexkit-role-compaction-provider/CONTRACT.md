@@ -20,6 +20,9 @@ drift apart.
 A compaction provider is any module that decides the shape of the history a
 runner sends to the model.
 
+Optional lineage, coverage and history-gap fields support runners that
+cannot serve `session.read`. Their absence leaves existing behaviour unchanged.
+
 ## Terms
 
 - **Plan composer**: the component that writes a session's plan and freezes
@@ -206,6 +209,14 @@ The status (`StepStatus`) carries:
   provider compares only for equality, the type `llm-runner/v1` gives it.
 - [pinned] `lineage_id`. Ordinals, the cursor and every range are in this
   lineage.
+- [pinned] Optional `descends_from: {lineage_id, through_ordinal}`
+  (`DescendsFrom`) declares that this lineage continues another lineage in
+  the same conversation (§1), up to and including the `u64`
+  `through_ordinal`. The inherited prefix keeps its message ids and
+  ordinals; no later history is inherited. The provider must hold that
+  prefix through the named ordinal or answer `refuse` with
+  `history_unreadable`, optionally naming its first missing ordinal in
+  `detail.history_gap_from` (§11). It never guesses ancestry or history.
 - [pinned] The step: `step_id` (opaque) and `step_kind`, `user_turn` or
   `tool_step`, decoded open.
 - [pinned] `model` and `variant`; `context_window` and `output_limit` when
@@ -257,8 +268,9 @@ The status (`StepStatus`) carries:
   `transcript_reads` or its own reader, or answers `refuse` with
   `history_unreadable`.
 - [pinned] A status on a new `lineage_id` starts the cursor again for that
-  lineage. The provider's state for the old lineage says nothing about the
-  new one.
+  lineage. Without `descends_from`, the provider's state for the old lineage
+  says nothing about the new one. With it, only the declared prefix is
+  inherited, and the cursor is still scoped to the new lineage.
 - [pinned] Decoded leniently: a provider ignores fields it does not know, so
   a newer runner degrades rather than fails against an older provider.
 
@@ -269,9 +281,9 @@ The status (`StepStatus`) carries:
 | Answer | Shape | The runner |
 |---|---|---|
 | `noop` | `{request_id}` | records it; the cursor advances; the request goes out unchanged |
-| `compaction_message` | `{request_id, compaction}` | applies the CompactionMessage if §9 allows |
+| `compaction_message` | `{request_id, compaction, coverage?}` | applies the CompactionMessage if §9 allows |
 | `wait` | `{request_id, reason, bound_ms}` | holds the step (§10) |
-| `refuse` | `{request_id, code, reason, provider_code?}` | ends the run (§11) |
+| `refuse` | `{request_id, code, reason, provider_code?, detail?}` | ends the run (§11) |
 
 - [pinned] The four answers, their meaning and their spellings: the step
   answers `noop`, `compaction_message`, `wait` and `refuse`, and Setup's
@@ -279,6 +291,15 @@ The status (`StepStatus`) carries:
 - [pinned] Strict on `answer`: an unknown or misspelled answer does not
   decode. The runner treats it as a failed call and keeps the last applied
   CompactionMessage; it never reads it as `noop`.
+- [pinned] A `compaction_message` answer may carry
+  `coverage: {end_mid, ordinal}` (`Coverage`), beside `compaction`.
+  `end_mid` is the runner's string message id and `ordinal` its `u64`
+  position in the request's lineage: the newest message the published
+  summary covers. A runner that needs a local trim marker may advance it
+  to that message only when the answer applies under §9, never for a late,
+  superseded or otherwise unapplied answer. A runner that does not need
+  coverage ignores it. Coverage does not change the replacement range or
+  bypass any application check; absence leaves view handling unchanged.
 - [pinned] A call has a budget of about 2 s for `noop` and
   `compaction_message`. On a timeout the runner records it and proceeds with
   the last applied CompactionMessage; one always exists, because Setup's is
@@ -415,7 +436,7 @@ The status (`StepStatus`) carries:
 
 ## 11. REFUSE
 
-- [pinned] `refuse {code, reason, provider_code?}` ends the run `error`.
+- [pinned] `refuse {code, reason, provider_code?, detail?}` ends the run `error`.
   The runner records the role `code` as the refusal's code, with the
   provider and `reason`, and, when present, the provider's `provider_code`
   as a separate member beside it, never in place of `code`. Nothing is
@@ -434,13 +455,20 @@ The status (`StepStatus`) carries:
   the answer (`RefuseCode::Unknown`). It still ends the run, is recorded as
   received, and is not retryable.
 - [pinned] `reason` is user-facing text.
+- [pinned] A step refusal may carry optional `detail` (`RefuseDetail`),
+  with optional `history_gap_from` (`u64`): the first ordinal of the
+  required history the provider lacks, so the runner can resend from
+  there. It is meaningful only with `history_unreadable`, the existing
+  retryable history refusal, including a missing `descends_from` prefix.
+  On every other code it is ignored, and never changes retryability. A
+  provider never fabricates a gap ordinal when it does not know one.
 - [pinned] On a tool step, the tool results already written stay.
 | Code | When | Retryable |
 |---|---|---|
 | `window_too_small` | the model's window cannot hold the smallest view the provider can build | no |
 | `provider_busy` | the provider is busy with the session's history past the wait cap | yes |
 | `misconfigured` | the configuration for this preset and params cannot be used | no |
-| `history_unreadable` | a gap after the cursor, and no transcript the provider can reach | yes |
+| `history_unreadable` | required history is missing, including a cursor gap or a declared inherited prefix the provider does not hold | yes |
 
 ## 12. The model view
 
@@ -558,6 +586,12 @@ in this table is not retryable.
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
+- [pinned] `descends_from`, `coverage`, a step refusal's `detail` and
+  `detail.history_gap_from` default to absent and are omitted when absent,
+  preserving existing request and answer bytes. A present `descends_from`
+  requires string `lineage_id` and `u64` `through_ordinal`; a present
+  `coverage` requires string `end_mid` and `u64` `ordinal`. Unknown fields
+  in these objects and refusal details remain ignored.
 
 ## 16. Crash and durability guarantees
 
