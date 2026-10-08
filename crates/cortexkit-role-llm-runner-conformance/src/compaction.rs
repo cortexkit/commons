@@ -750,8 +750,9 @@ where
             .is_empty()
         {
             // Check rejection of late answers even if the timed-out run has
-            // ended. An owner follow-up creates a fresh request when no model
-            // call can be released. compaction_step_timeout_uses_last_view
+            // ended. When no held model call is left to release, the case sends
+            // another message into the session, which makes the runner issue a
+            // fresh request. compaction_step_timeout_uses_last_view
             // checks continuation after timeout separately.
             send(case, &mut session, "late-followup").await?;
         } else {

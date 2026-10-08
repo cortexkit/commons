@@ -213,8 +213,8 @@ pub trait LlmRunnerSubject: Harness {
     /// Fields cases add to every `session.send` they make into
     /// `session`, beside the role's `prompt`, `send_id` and `delivery`.
     /// `first` is true for the session's first send, which carries the
-    /// session's `plan` (whose shape the role has not pinned yet, so the
-    /// runner adapter builds it) and any runner parameters admission needs. The
+    /// session's `plan` (this contract doesn't define the plan's shape, so
+    /// the runner adapter builds it) and any runner parameters admission needs. The
     /// plan must make [`crate::SCRIPTED_TOOL`], served by the scripted tool
     /// provider, available to the model.
     fn send_fields(&self, session: &str, first: bool) -> Map<String, Value>;
