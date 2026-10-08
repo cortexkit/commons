@@ -1436,6 +1436,84 @@ fn caught_all_failed_is_not_empty_and_restores() {
     assert!(!r.red.contains(&"result:".into()));
 }
 
+#[test]
+fn embedded_child_libtest_run_is_caught_without_double_counting_for_both_runners() {
+    let f = Fixture::new();
+    fs::write(
+        f.root().join("src/lib.rs"),
+        include_str!("fixture/embedded-libtest.rs"),
+    )
+    .unwrap();
+    f.commit();
+    for runner in ["cargo", "nextest"] {
+        if !runner_available(runner) {
+            continue;
+        }
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.expect_red = vec!["tests::captures_child_run".into()];
+        c.expect_message = Some("embedded child stdout:".into());
+        let row = f.run(&c);
+        assert_eq!(row.outcome, Outcome::Caught, "{runner}: {row:?}");
+        assert_eq!(row.red, ["tests::captures_child_run"]);
+        assert_eq!(row.green, ["tests::shared_passes"]);
+        assert_eq!(row.collateral.count, 0);
+        assert!(row.failures["tests::captures_child_run"].contains("embedded child stdout:"));
+        // Nextest 0.9.138 truncates its JSON stdout at an embedded libtest
+        // outcome line. Its status events still account for just the outer
+        // tests; the full child report remains in the human output.
+        let output = if runner == "cargo" {
+            &row.failures["tests::captures_child_run"]
+        } else {
+            &row.test_tail
+        };
+        for embedded in [
+            "running 1 test",
+            "test tests::captures_child_run ... FAILED",
+            "test child_only ... ok",
+            "---- nested stdout ----",
+            "test tests::shared_passes ... ok",
+            "child invariant",
+        ] {
+            assert!(
+                output.contains(embedded),
+                "{runner}: missing {embedded}: {output}"
+            );
+        }
+    }
+}
+
+#[test]
+fn genuinely_inconsistent_libtest_accounting_still_grades_error() {
+    let f = Fixture::new();
+    fs::write(
+        f.root().join("src/lib.rs"),
+        r#"pub fn guarded(value: i32) -> bool { value > 0 }
+#[test]
+fn inconsistent() {
+    if guarded(0) {
+        // Bypass libtest's capture to model a malformed harness report.
+        std::io::Write::write_all(&mut std::io::stdout(), b"\ntest synthetic ... ok\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;\n").unwrap();
+        std::process::exit(101);
+    }
+}
+"#,
+    )
+    .unwrap();
+    f.commit();
+    let mut c = f.control();
+    c.expect_red = vec!["inconsistent".into()];
+    let row = f.run(&c);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    assert!(
+        row.reason
+            .as_deref()
+            .unwrap()
+            .contains("libtest summary counts disagree with per-test output"),
+        "{row:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn signal_abort_is_error_for_cargo_and_nextest() {

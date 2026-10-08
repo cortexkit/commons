@@ -2434,6 +2434,67 @@ fn cargo_binary_header(line: &str) -> Result<Option<String>> {
     }
 }
 
+fn libtest_output_header(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("---- ")?;
+    rest.strip_suffix(" stdout ----")
+        .or_else(|| rest.strip_suffix(" stderr ----"))
+}
+
+struct LibtestBounds {
+    results_start: usize,
+    results_end: usize,
+    summary: Option<usize>,
+    failure_list: Option<usize>,
+}
+
+fn libtest_bounds(lines: &[&str], start: usize) -> LibtestBounds {
+    let end = (start..lines.len())
+        .find(|&i| {
+            let line = lines[i].trim();
+            line.starts_with("Running ") || line.starts_with("Doc-tests ")
+        })
+        .unwrap_or(lines.len());
+    // Captured output is unescaped: it can contain another complete libtest
+    // report, including identical block headers. Within each Cargo binary,
+    // use the first running header and the last summary, never a nested run.
+    let results_start = (start..end)
+        .find(|&i| {
+            lines[i]
+                .trim()
+                .strip_prefix("running ")
+                .and_then(|s| s.strip_suffix(" tests").or_else(|| s.strip_suffix(" test")))
+                .is_some_and(|n| n.parse::<usize>().is_ok())
+        })
+        .unwrap_or(start);
+    let summary = (results_start..end).rfind(|&i| lines[i].trim().starts_with("test result:"));
+    let report_end = summary.unwrap_or(end);
+    // All per-test events precede the first failure/success report. A nested
+    // failures: or ---- name stdout/stderr ---- cannot reopen the event stream.
+    let results_end = (results_start..report_end)
+        .find(|&i| {
+            matches!(lines[i].trim(), "failures:" | "successes:")
+                || libtest_output_header(lines[i].trim()).is_some()
+        })
+        .unwrap_or(report_end);
+    // The real name list is the final failures: followed only by blank lines
+    // and indented names up to the outer summary, not an earlier child report.
+    let failure_list = (results_end..report_end).rfind(|&i| {
+        lines[i].trim() == "failures:"
+            && lines[i + 1..report_end]
+                .iter()
+                .any(|line| !line.trim().is_empty())
+            && lines[i + 1..report_end]
+                .iter()
+                .all(|line| line.trim().is_empty() || line.starts_with(char::is_whitespace))
+    });
+    LibtestBounds {
+        results_start,
+        results_end,
+        summary,
+        failure_list,
+    }
+}
+
 fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     if runner == "nextest" && text.lines().any(|l| l.starts_with("{\"type\":\"suite\"")) {
         return parse_nextest_json(text);
@@ -2449,34 +2510,24 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
     let mut cargo_counts = BTreeMap::<String, usize>::new();
     let mut observed_summary = false;
     let mut nextest_total = None;
-    for line in text.lines() {
+    let lines: Vec<_> = text.lines().collect();
+    let mut cargo_bounds = libtest_bounds(&lines, 0);
+    let mut output_headers = BTreeSet::new();
+    for (index, &line) in lines.iter().enumerate() {
         let raw_line = line;
         let line = line.trim();
         if runner == "cargo" {
-            if let Some(name) = line
-                .strip_prefix("---- ")
-                .and_then(|s| s.strip_suffix(" stdout ----"))
-            {
-                failure_block = Some((cargo_target.clone(), name.to_owned()));
-                continue;
-            }
-            if line == "failures:" || line.starts_with("test result:") {
-                failure_block = None;
-            }
-            if let Some(key) = &failure_block {
-                let event = events
-                    .0
-                    .get_mut(key)
-                    .ok_or("failure output without test result")?;
-                event.output.push_str(raw_line);
-                event.output.push('\n');
-                continue;
-            }
             if let Some(target) = cargo_binary_header(line)? {
                 cargo_target = target;
                 cargo_started.insert(cargo_target.clone());
+                cargo_bounds = libtest_bounds(&lines, index + 1);
+                output_headers.clear();
                 pending = None;
-            } else if let Some(rest) = line.strip_prefix("test result:") {
+                failure_block = None;
+                continue;
+            } else if cargo_bounds.summary == Some(index) {
+                failure_block = None;
+                let rest = line.strip_prefix("test result:").unwrap();
                 cargo_complete.insert(cargo_target.clone());
                 observed_summary = true;
                 for key in ["passed", "failed", "ignored", "measured", "filtered"] {
@@ -2494,6 +2545,31 @@ fn parse_test_results(text: &str, runner: &str) -> Result<TestResults> {
                         *cargo_counts.entry(cargo_target.clone()).or_default() += count;
                     }
                 }
+            } else if index >= cargo_bounds.results_end {
+                if cargo_bounds.failure_list.is_some_and(|list| index >= list)
+                    || cargo_bounds.summary.is_some_and(|summary| index > summary)
+                {
+                    failure_block = None;
+                    continue;
+                }
+                if let Some(name) = libtest_output_header(line) {
+                    let key = (cargo_target.clone(), name.to_owned());
+                    // Unknown or repeated headers can be text from a child run.
+                    // Keep them in the current output, not as new test events.
+                    if events.0.contains_key(&key)
+                        && output_headers.insert((key.clone(), line.to_owned()))
+                    {
+                        failure_block = Some(key);
+                        continue;
+                    }
+                }
+                if let Some(key) = &failure_block {
+                    let event = events.0.get_mut(key).unwrap();
+                    event.output.push_str(raw_line);
+                    event.output.push('\n');
+                }
+            } else if index < cargo_bounds.results_start {
+                continue;
             } else if let Some(rest) = line.strip_prefix("test ") {
                 if let Some(name) = rest.strip_suffix(" ...") {
                     pending = Some(name.to_owned());
@@ -4368,6 +4444,73 @@ mod failure_report_tests {
 #[cfg(test)]
 mod target_parser_tests {
     use super::*;
+
+    #[test]
+    fn cargo_captured_nested_runs_use_only_outer_outcomes_and_summary() {
+        let text = include_str!("../tests/fixture/cargo-embedded.txt");
+        // Both stdout and stderr block headings delimit captured output.
+        for text in [
+            text.to_owned(),
+            text.replacen(" stdout ----", " stderr ----", 1),
+        ] {
+            let results = parse_test_results(&text, "cargo").unwrap();
+            assert_eq!(results.red, ["tests::captures_child_run"]);
+            assert_eq!(results.green, ["tests::shared_passes"]);
+            assert_eq!(results.targets.len(), 2);
+            let output = &results.failure_output["tests::captures_child_run"];
+            assert!(output.contains("---- nested stdout ----"));
+            assert!(output.contains("---- nested stderr ----"));
+            assert!(output.contains("test result: FAILED. 0 passed; 1 failed;"));
+            assert!(output.contains("parent assertion tail"));
+        }
+    }
+
+    #[test]
+    fn cargo_outer_inconsistency_is_not_hidden_by_embedded_summary() {
+        let text = include_str!("../tests/fixture/cargo-embedded.txt")
+            .replace("FAILED. 1 passed; 1 failed;", "FAILED. 2 passed; 1 failed;");
+        assert!(parse_test_results(&text, "cargo")
+            .unwrap_err()
+            .contains("libtest summary counts disagree with per-test output"));
+    }
+
+    #[test]
+    fn nextest_embedded_libtest_text_is_output_not_status_in_human_and_json() {
+        let child = include_str!("../tests/fixture/cargo-embedded.txt");
+        let human = format!("FAIL [ 0.01s] fixture tests::captures_child_run\n  stdout ───\n{child}\nPASS [ 0.01s] fixture tests::shared_passes\nSummary [ 0.02s] 2 tests run: 1 passed, 1 failed");
+        let json = format!(
+            "{}\n{}\n{}",
+            serde_json::json!({"type": "test", "event": "failed", "name": "fixture::fixture$tests::captures_child_run", "stdout": child}),
+            serde_json::json!({"type": "test", "event": "ok", "name": "fixture::fixture$tests::shared_passes"}),
+            r#"{"type":"suite","event":"failed","passed":1,"failed":1}"#,
+        );
+        for text in [human, json] {
+            let results = parse_test_results(&text, "nextest").unwrap();
+            assert_eq!(results.red, ["tests::captures_child_run"]);
+            assert_eq!(results.green, ["tests::shared_passes"]);
+            assert!(results.failure_output["tests::captures_child_run"].contains(child.trim()));
+        }
+    }
+
+    #[test]
+    fn inline_output_flags_are_not_reachable_through_row_targets() {
+        let mut c =
+            toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
+                .unwrap()
+                .control
+                .remove(0);
+        for target in [
+            "--lib --nocapture",
+            "--lib --show-output",
+            "--lib -- --nocapture",
+        ] {
+            c.target = Some(target.into());
+            assert!(c
+                .validate_runner()
+                .unwrap_err()
+                .contains("invalid cargo target selector"));
+        }
+    }
 
     #[test]
     fn recorded_abort_outputs_identify_the_test_and_signal() {

@@ -203,6 +203,41 @@ the runner to retain the intended message for that test (Cargo's captured
 stdout is generally lost on abort). For Cargo, tests
 after the abort do not run; missing expected tests still prevent a catch.
 
+### Captured libtest reports (0.9.1)
+
+Cargo's libtest output is unescaped text: an assertion message can contain a
+child's complete test run, even identical `---- name stdout ----` / `---- name
+stderr ----` headers, `failures:` headings and `test result:` summaries. Those
+headings cannot unambiguously delimit nested reports. Within each Cargo binary
+(`Running ... (...)` or `Doc-tests ...`), the parser therefore uses the **first
+`running N tests` (or `running 1 test`) header and the last `test result:` line**.
+It counts per-test outcomes only before the first `failures:`, `successes:` or
+captured-output header. A report heading never reopens outcome collection. The
+final `failures:` followed only by blank lines and indented failing names up to
+the outer summary ends captured output; earlier nested headings remain text.
+Summary counts must still agree with the outer per-test events or the row is
+**ERROR**. Minimal parser inputs without a running header remain supported.
+
+Nextest's human results use `PASS` / `FAIL` / signal statuses with duration and
+binary tokens, and a capitalized `Summary`, not libtest's `test ...` / `test
+result:`. Its JSON events encode captured output as escaped strings. Both paths
+are covered with embedded libtest text; no equivalent filtering is needed for
+these child reports.
+
+Nextest 0.9.138's own libtest-to-JSON conversion can truncate a failed test's
+`stdout` at an embedded `test ...` line, though its outer status/count events
+remain correct and the human output retains the child report. Message proofs
+using text beyond that point may fail with `RED_FOR_ANOTHER_REASON`; this runner
+does not reconstruct output missing from nextest's JSON event.
+
+Cargo/nextest rows do not accept arbitrary harness arguments: `target` is
+validated as a Cargo target selector. `--nocapture` and `--show-output` cannot be
+requested through row config. The Cargo parser assumes captured output; raw
+`--nocapture` output (including externally forced `RUST_TEST_NOCAPTURE`) is not
+an unambiguous event stream and may fail strict accounting. `--show-output`
+reports successes after the outcome lines, which the parser excludes just like
+failure reports. Command rows own their argv and do not use this libtest parser.
+
 ### Equivalent mutants (0.7.0)
 
 Use `equivalent` only when inspection establishes that the edit **cannot change

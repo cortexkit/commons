@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1
+
+- Ignore embedded child libtest runs in Cargo's captured stdout/stderr when
+  collecting per-test outcomes and summary counts. Use the first `running N
+  tests` header and the last `test result:` per binary, counting outcomes only
+  before the captured-output report. Keep genuinely inconsistent accounting as
+  ERROR and retain nested failure text for message proofs.
+- Cover nested reports, duplicate outer/child names, stderr blocks and strict
+  accounting with parser and replay fixtures. Confirm nextest's human status and
+  JSON event formats do not mistake embedded libtest text for test results.
+
 ## 0.9.0
 
 - Add typed optional Cargo/nextest `select = "expected"` to run only exact

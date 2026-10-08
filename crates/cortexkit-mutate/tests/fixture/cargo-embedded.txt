@@ -1,0 +1,36 @@
+Running unittests src/lib.rs (target/debug/deps/fixture-0123456789abcdef)
+
+running 2 tests
+test tests::captures_child_run ... FAILED
+test tests::shared_passes ... ok
+
+failures:
+
+---- tests::captures_child_run stdout ----
+thread panicked: embedded child stdout:
+
+running 1 test
+test tests::captures_child_run ... FAILED
+
+failures:
+
+---- tests::captures_child_run stdout ----
+test child_only ... ok
+failures:
+---- nested stdout ----
+test tests::shared_passes ... ok
+thread panicked: child invariant
+
+failures:
+    tests::captures_child_run
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out;
+---- nested stderr ----
+test stderr_child_only ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;
+parent assertion tail
+
+failures:
+    tests::captures_child_run
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;
