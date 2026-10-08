@@ -11,6 +11,43 @@ use cortexkit_role_llm_runner::read::EntrySource;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The newest message a published summary covers, in the request's lineage.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Coverage {
+    pub end_mid: String,
+    pub ordinal: u64,
+}
+
+impl Coverage {
+    pub fn new(end_mid: impl Into<String>, ordinal: u64) -> Self {
+        Self {
+            end_mid: end_mid.into(),
+            ordinal,
+        }
+    }
+}
+
+/// Optional detail on a step refusal. History recovery hints have meaning
+/// only with `history_unreadable`, not with another code.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RefuseDetail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_gap_from: Option<u64>,
+}
+
+impl RefuseDetail {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_history_gap_from(mut self, ordinal: u64) -> Self {
+        self.history_gap_from = Some(ordinal);
+        self
+    }
+}
+
 /// A half-open range of transcript ordinals, `from` included and `to`
 /// excluded, in the lineage of the request the answer answers.
 ///
@@ -130,6 +167,11 @@ pub enum StepAnswer {
     CompactionMessage {
         request_id: String,
         compaction: CompactionMessage,
+        /// A runner may advance its own trim marker to this covered message
+        /// only after the answer applies. A runner that does not need it
+        /// ignores it; absence leaves existing view handling unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        coverage: Option<Coverage>,
     },
     /// Hold this step while the provider works, up to `bound_ms`. The
     /// provider sends `compaction.ready` when it is done.
@@ -158,10 +200,25 @@ pub enum StepAnswer {
         /// replaces `code` and never decides retry.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_code: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<RefuseDetail>,
     },
 }
 
 impl StepAnswer {
+    /// The first missing ordinal, only for a retryable history refusal. A
+    /// hint on another code is ignored and never changes retryability.
+    pub fn history_gap_from(&self) -> Option<u64> {
+        match self {
+            Self::Refuse {
+                code: RefuseCode::HistoryUnreadable,
+                detail: Some(detail),
+                ..
+            } => detail.history_gap_from,
+            _ => None,
+        }
+    }
+
     /// The request this answer answers.
     pub fn request_id(&self) -> &str {
         match self {

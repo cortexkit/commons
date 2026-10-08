@@ -38,6 +38,15 @@ impl ErrorBody {
         self.detail = Some(detail);
         self
     }
+
+    /// Recovery hint on a transient history refusal. The provider supplies
+    /// the first missing ordinal; another refusal code gives it no meaning.
+    pub fn history_gap_from(&self) -> Option<u64> {
+        if self.code != TRANSIENT {
+            return None;
+        }
+        self.detail.as_ref()?.get("history_gap_from")?.as_u64()
+    }
 }
 
 // Generate the enumeration and its inventory together so a new variant cannot
@@ -73,7 +82,8 @@ known_codes! {
     PostToolUnavailable => runner_codes::tool_result_reasons::POST_TOOL_UNAVAILABLE,
 }
 
-/// A request field is malformed (an unknown preset or params value, say).
+/// A request field is malformed, misconfigured or conflicts with an already
+/// ingested subject (an unknown serializer profile or changed message, say).
 /// `detail.field` names it. The malformed-request code of the runner and
 /// provider roles alike; `tool-provider/v1` spells it `invalid_request`.
 pub const INVALID_PARAMS: &str = "invalid_params";
@@ -85,6 +95,8 @@ pub const NOT_SUBSCRIBED: &str = "not_subscribed";
 
 /// The provider could not answer now for a reason that may clear by itself.
 /// Retryable, but only within the hook's budget.
+/// For a history gap, `detail.history_gap_from` may name the first missing
+/// ordinal. Other codes ignore that hint.
 pub const TRANSIENT: &str = "transient";
 
 /// Every refusal code a provider of this role answers with.

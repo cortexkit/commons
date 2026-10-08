@@ -19,6 +19,9 @@ this crate depends on, so the two cannot drift apart.
 A step-transform provider is any module that makes write-time changes to
 the newest message of a session.
 
+Optional whole-message and lineage fields support runners that cannot serve
+`session.read`. Their absence leaves the existing hook behaviour unchanged.
+
 ## Terms
 
 - **Plan composer**: the component that writes a session's plan and freezes
@@ -322,6 +325,54 @@ the session and freezes that plan for use.
   subject. `params` defaults to `{}`. `mark` is arbitrary JSON; every other
   subject id field is a string, `input` arbitrary JSON, and `is_error` a
   boolean. `preset` absent selects the default.
+- [pinned] A hook may also carry `subject_mid` (the runner's message id,
+  string), `subject_ordinal` (its position in the current lineage, `u64`),
+  and `message` (the whole new message as opaque JSON in the runner's own
+  schema). `subject_mid` and `subject_ordinal` come together or not at all;
+  `message` requires both. These pairing rules are validation rules
+  (`HookCall::check_host_fields`), not shape-decoding rules. A provider must
+  validate before interpreting or ingesting the request and refuse a
+  violation with `invalid_params`, naming `message` or the missing identity
+  field in `detail.field`. An explicit JSON `null` is a present `message`
+  and must satisfy the same rule. None of these fields changes which text
+  blocks an operation may address (§5).
+- [pinned] The opaque value `params.serializer_profile` names the schema
+  of `message`; it is part of the existing params, not a separate contract
+  field. The provider must not interpret `message` unless it recognises the
+  profile. If it needs the supplied message and cannot read it, including
+  because the profile is absent or unrecognised, it refuses the hook as
+  misconfigured with `invalid_params {field: "params.serializer_profile"}`.
+  A provider that can read the required history elsewhere may ignore the
+  supplied message.
+- [pinned] Within the conversation's current lineage, the provider ingests
+  a supplied message at most once per `(lineage, subject_mid)`, including
+  across its own crash. A retry or another hook point on the same message
+  still gets a fresh hook answer (§3), but never another ingestion. A mid
+  already seen with a different ordinal or different supplied `message`
+  bytes is refused with `invalid_params {field: "subject_mid"}`, rather than
+  overwriting the earlier input. Providers comparing messages must retain
+  the supplied JSON bytes, not use parsed-value equality to hide a byte
+  difference. Ingesting input does not make unused hook output durable or
+  permit unused output to reach the model (§11).
+- [pinned] A provider may enforce a 4 MiB (4,194,304 byte) request cap on a
+  hook carrying `message` (`DEFAULT_HOOK_CAP_BYTES`,
+  `HookCall::check_message_size`). All fields, including `message`, count:
+  the size is the length of the compact JSON encoding of the `HookCall`
+  request, not the `{method, params}` envelope. If exceeded, the provider
+  refuses `invalid_params {field: "message"}` and never silently truncates.
+  This optional cap imposes no new size policy on hooks without `message`.
+- [pinned] The first hook of a lineage may carry
+  `descends_from: {lineage_id, through_ordinal}` (`DescendsFrom`), naming
+  another lineage in the same conversation (§1). It continues that
+  lineage's history up to and including the `u64` `through_ordinal`, with
+  the inherited prefix's message ids and ordinals unchanged; later history
+  from the named lineage is not inherited. The provider must hold that
+  prefix through the named ordinal. If it does not, it refuses the hook
+  with `transient` and may include `detail.history_gap_from`, the first
+  ordinal it lacks, so the runner can resend from there. The provider never
+  guesses ancestry or missing history. An absent `descends_from` declares
+  no inherited history. The hint is meaningful only on this role's
+  retryable history refusal, `transient`, and ignored on other codes.
 - [pinned] `tool_call_id` is the model's id: display only, not unique.
   `call_key` is the runner's key (`llm-runner/v1` §11.3); it is usually
   absent on `pre_tool`, because it is minted from the dispatch intent,
@@ -370,9 +421,9 @@ required string and `detail` arbitrary JSON, omitted when absent.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, or names a preset or params value the provider does not know | `field` | no |
+| `invalid_params` | a request field is malformed, misconfigured, over the optional whole-message request cap, or conflicts with an ingested subject | `field` | no |
 | `not_subscribed` | a hook call for a hook and phase the provider did not declare for the call's preset and params | `hook`, `phase?` | no |
-| `transient` | a condition that may clear by itself | — | **yes**, within the hook's budget |
+| `transient` | a condition that may clear by itself, including required history the provider does not hold | `history_gap_from?` for a history gap | **yes**, within the hook's budget |
 
 - [pinned] Any refusal of a hook call makes the hook unavailable for that
   call (§7).
@@ -406,6 +457,11 @@ required string and `detail` arbitrary JSON, omitted when absent.
   carries a required unsigned 32-bit `block`; `replace` carries string
   `value`, `prepend` and `append` string `text`, each with optional string
   `note`.
+- [pinned] `subject_mid`, `subject_ordinal`, `message` and `descends_from`
+  default to absent and are omitted when absent. Their absence preserves
+  existing request bytes and behaviour. `descends_from.lineage_id` is a
+  required string and `descends_from.through_ordinal` a required `u64` when
+  the object is present; unknown fields remain ignored.
 
 ## 11. Crash and durability guarantees
 
