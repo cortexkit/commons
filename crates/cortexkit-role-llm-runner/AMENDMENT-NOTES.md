@@ -404,12 +404,16 @@ settles. The draft writes none of them into the contract as law.
 11. **`run.cancel` and `session.retract` details.** Is a paused run
     cancellable (`ack`)? Are both owner-only, like `session.send`? broca's
     behaviour on either is not in the inputs.
-12. **`undelivered_steers` on a `guaranteed` runner.** §2 says a durably
-    accepted steer on a `guaranteed` runner is delivered; broca, which
-    declares `guaranteed`, lists steers a run never rendered (annotations,
-    Change item 4). Is every listed steer delivered later by a turn, or can
-    a run's end drop it? If it can, broca's `steer_receipt` should be
-    `confirm`.
+12. **`undelivered_steers` on a `guaranteed` runner.** Answered by broca, no
+    contract change. A steer a run never rendered is not dropped: broca
+    appends it to the conversation when the run ends and carries it into the
+    next episode's prefix, so the session's next model step includes it and
+    its receipt becomes `turn` naming that run (broca `replay.rs`
+    RunFinished and RunStarted handling, `run.rs` lineage prefix,
+    `actor.rs` receipt search). `undelivered_steers` means "not yet seen by
+    a model step of this run", which lets the owner prompt a turn sooner.
+    §2's "may be absent until the steer is rendered" already covers the
+    window, so `guaranteed` stands.
 13. **Other `run.status` members.** `indeterminate_tool_calls` (absent
     versus `[]`), `final_step_finish_reason`, `usage`, `retries_used`
     (annotations rows of those names). Runner members for now; does core
@@ -417,11 +421,10 @@ settles. The draft writes none of them into the contract as law.
 14. **`session.warm`.** broca serves it; no consumer dependency is claimed
     (annotations row `session.warm`). Not made a group here. A
     `session_warm` group if a second consumer appears?
-15. **`plan.compaction_item.provider` still provisional.** The provider
-    contract says the field is settled and the crate's
-    `plan_compaction_provider` already reads it ("Differences", first
-    item). §10.1 still marks it provisional pending the fetch-plan section.
-    No ruling covers it; promote it to pinned?
+15. **`plan.compaction_item.provider`: promoted to pinned in §10.1.** MC's
+    review: the field gates `compaction.ready` (§11.1), so it can't stay
+    provisional; Prefrontal's fetch plans already carry it and ck-mc passes
+    all 27 vectors that use it.
 16. **`send_id_reuse` `detail.field`.** broca names the differing field
     when it can identify one and omits it for aggregate or legacy identity
     mismatches (annotations row `send_id_reuse`). Should §9 say "names the

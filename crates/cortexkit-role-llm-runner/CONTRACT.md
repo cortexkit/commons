@@ -28,9 +28,8 @@ A question the role's owner has settled keeps its number and is marked
 "settled" there; the items it governs are marked **[pinned]** here. In this
 revision every numbered question is settled except Q22, the parts of the
 `run.status` answer one runner serves and the role has not chosen (§6.1).
-Two items wait on the fetch-plan section (§10): the `compaction_item`
-provider field (§10.1, provisional) and the `session_change` request and
-reply types (§10.2, open).
+One item waits on the fetch-plan section (§10): the `session_change` request
+and reply types (§10.2, open).
 
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation; "Gaps in broca today" at the end compares the one
@@ -711,10 +710,10 @@ is withdrawn before it starts.
   not declare `compaction`, is refused at admission `invalid_params {field:
   "plan.compaction_item"}` and writes nothing
   (`SendRequest::check_compaction_item`).
-- [provisional] The `compaction_item` names the session's compaction provider
-  as `provider`, frozen with the plan. The field name and position are
-  provisional until the fetch-plan section (§10) defines `plan`; do not build
-  against `plan.compaction_item.provider` yet.
+- [pinned] The `compaction_item` names the session's compaction provider as
+  `provider`, a module id, inside `compaction_item: {provider, preset,
+  params}`, frozen with the plan (`plan_compaction_provider`). It gates
+  `compaction.ready` (§11.1): only that provider may send it.
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
@@ -793,7 +792,8 @@ owes.
   usable: the next send calls the provider again.
 - [pinned] A failed or timed-out step call is not a refusal. The runner
   records it and sends with the last applied CompactionMessage; an
-  over-window request then follows the normal path. The run does not end
+  over-window request then goes through the runner's own overflow handling,
+  which never truncates history or sends it unmanaged. The run does not end
   `compaction_unavailable`.
 - [pinned] `compaction_unavailable` is Setup-only: Setup failed or timed
   out with no answer. No model call is made, the run error carries no
