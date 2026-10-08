@@ -4,10 +4,16 @@ use cortexkit_mutate::TreeLock;
 use std::{fs, path::Path, process::Command};
 use tempfile::TempDir;
 
+const LF_SOURCE: &str = "pub fn guarded(value: i32) -> bool { value > 0 }\n#[cfg(test)] mod tests {\n    #[test] fn rejects_zero() { assert!(!super::guarded(0)); }\n}\n";
+
 struct Fixture(TempDir);
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_autocrlf(false)
+    }
+
+    fn with_autocrlf(autocrlf: bool) -> Self {
         let fixture = Self(tempfile::tempdir().unwrap());
         fs::create_dir(fixture.root().join("src")).unwrap();
         fs::write(
@@ -18,7 +24,11 @@ impl Fixture {
         // Mixed line endings make restoration a byte-level contract, not a text comparison.
         fs::write(
             fixture.root().join("src/lib.rs"),
-            b"pub fn guarded(value: i32) -> bool { value > 0 }\r\n#[cfg(test)] mod tests {\n    #[test] fn rejects_zero() { assert!(!super::guarded(0)); }\r\n}\n",
+            if autocrlf {
+                LF_SOURCE.as_bytes()
+            } else {
+                b"pub fn guarded(value: i32) -> bool { value > 0 }\r\n#[cfg(test)] mod tests {\n    #[test] fn rejects_zero() { assert!(!super::guarded(0)); }\r\n}\n"
+            },
         )
         .unwrap();
         fs::write(
@@ -40,10 +50,16 @@ only = true
         .unwrap();
         fixture.command("cargo", &["generate-lockfile", "--offline"]);
         fixture.command("git", &["init", "-q"]);
-        // The source deliberately mixes CRLF and LF. Windows CI runners set
-        // core.autocrlf=true globally, which would normalize it on add and make
-        // the checkout differ from HEAD, so the fixture opts out.
-        fixture.command("git", &["config", "core.autocrlf", "false"]);
+        // Configure each repository explicitly so global Git settings cannot
+        // change whether its source is mixed-ending or an autocrlf checkout.
+        fixture.command(
+            "git",
+            &[
+                "config",
+                "core.autocrlf",
+                if autocrlf { "true" } else { "false" },
+            ],
+        );
         // `git commit` starts `git maintenance run --auto --detach`, which keeps
         // creating and removing lock files in .git after the commit returns.
         // The read-only test walks .git and chmods every entry, so a lock file
@@ -56,6 +72,11 @@ only = true
             &["add", "Cargo.toml", "Cargo.lock", "src", "mutations.toml"],
         );
         fixture.command("git", &["commit", "-qm", "fixture"]);
+        if autocrlf {
+            // Force a real checkout to convert the committed LF source to CRLF.
+            fs::remove_file(fixture.root().join("src/lib.rs")).unwrap();
+            fixture.command("git", &["checkout", "--", "src/lib.rs"]);
+        }
         fixture
     }
 
@@ -63,13 +84,14 @@ only = true
         self.0.path()
     }
 
-    fn command(&self, program: &str, args: &[&str]) {
+    fn command(&self, program: &str, args: &[&str]) -> Vec<u8> {
         let output = Command::new(program)
             .args(args)
             .current_dir(self.root())
             .output()
             .unwrap();
         assert!(output.status.success(), "{program} {args:?}: {output:?}");
+        output.stdout
     }
 
     fn cli(root: &Path, args: &[&str], temp: &Path) -> std::process::Output {
@@ -82,6 +104,106 @@ only = true
             .output()
             .unwrap()
     }
+}
+
+#[test]
+fn run_accepts_autocrlf_checkout_and_restores_crlf() {
+    let fixture = Fixture::with_autocrlf(true);
+    let temp = tempfile::tempdir().unwrap();
+    let source = fs::read(fixture.root().join("src/lib.rs")).unwrap();
+    assert_eq!(source, LF_SOURCE.replace('\n', "\r\n").as_bytes());
+    assert_eq!(
+        fixture.command("git", &["show", "HEAD:src/lib.rs"]),
+        LF_SOURCE.as_bytes()
+    );
+    let output = Fixture::cli(
+        fixture.root(),
+        &["run", "--all", "--report", "report.json"],
+        temp.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.root().join("report.json")).unwrap()).unwrap();
+    assert_eq!(report.as_array().unwrap().len(), 1, "{report}");
+    assert_eq!(report[0]["outcome"], "CAUGHT", "{report}");
+    assert_eq!(report[0]["red"], serde_json::json!(["tests::rejects_zero"]));
+    assert_eq!(source, fs::read(fixture.root().join("src/lib.rs")).unwrap());
+    assert!(fixture
+        .command(
+            "git",
+            &["status", "--porcelain=v1", "-z", "--", "src/lib.rs"]
+        )
+        .is_empty());
+}
+
+#[test]
+fn run_refuses_unstaged_edit_without_overwriting() {
+    let fixture = Fixture::with_autocrlf(true);
+    let temp = tempfile::tempdir().unwrap();
+    let source = LF_SOURCE.replace('\n', "\r\n") + "// local edit\r\n";
+    fs::write(fixture.root().join("src/lib.rs"), &source).unwrap();
+    assert_eq!(
+        fixture.command(
+            "git",
+            &["status", "--porcelain=v1", "-z", "--", "src/lib.rs"]
+        ),
+        b" M src/lib.rs\0"
+    );
+    let output = Fixture::cli(
+        fixture.root(),
+        &["run", "--all", "--report", "report.json"],
+        temp.path(),
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("dirty target refused: src/lib.rs (use --allow-dirty)"),
+        "{output:?}"
+    );
+    assert_eq!(
+        source.as_bytes(),
+        fs::read(fixture.root().join("src/lib.rs")).unwrap()
+    );
+    assert_eq!(
+        fixture.command("git", &["show", ":src/lib.rs"]),
+        LF_SOURCE.as_bytes()
+    );
+}
+
+#[test]
+fn run_refuses_staged_only_edit_without_overwriting() {
+    let fixture = Fixture::with_autocrlf(true);
+    let temp = tempfile::tempdir().unwrap();
+    let staged = LF_SOURCE.to_owned() + "// staged edit\n";
+    let source = staged.replace('\n', "\r\n");
+    fs::write(fixture.root().join("src/lib.rs"), &source).unwrap();
+    fixture.command("git", &["add", "src/lib.rs"]);
+    assert_eq!(
+        fixture.command(
+            "git",
+            &["status", "--porcelain=v1", "-z", "--", "src/lib.rs"]
+        ),
+        b"M  src/lib.rs\0"
+    );
+    let output = Fixture::cli(
+        fixture.root(),
+        &["run", "--all", "--report", "report.json"],
+        temp.path(),
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("dirty target refused: src/lib.rs (use --allow-dirty)"),
+        "{output:?}"
+    );
+    assert_eq!(
+        source.as_bytes(),
+        fs::read(fixture.root().join("src/lib.rs")).unwrap()
+    );
+    assert_eq!(
+        fixture.command("git", &["show", ":src/lib.rs"]),
+        staged.as_bytes()
+    );
 }
 
 fn assert_only_lock_remains(temp: &Path) {

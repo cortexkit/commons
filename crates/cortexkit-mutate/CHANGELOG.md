@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.6
+
+- Use Git status to check target cleanliness, honoring line-ending and filter
+  conversions so clean CRLF checkouts with `core.autocrlf=true` are accepted.
+  Staged and unstaged edits still require `--allow-dirty`; restoration still
+  writes back the saved local bytes unchanged.
+
 ## 0.9.5
 
 - Move the per-worktree lock and stdout/stderr capture files out of `.git`

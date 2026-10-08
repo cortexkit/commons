@@ -1015,7 +1015,23 @@ impl Saved {
         for e in edits {
             let path = safe_path(root, &e.file)?;
             let bytes = fs::read(&path).map_err(|err| target_io_error(&e.file, err))?;
-            if !allow_dirty && git(root, &["show", &format!("HEAD:{}", e.file)])? != bytes {
+            // Git applies line-ending and filter conversions when checking both
+            // index and worktree changes. Optional locks stay off for read-only Git metadata.
+            if !allow_dirty
+                && !git(
+                    root,
+                    &[
+                        "--no-optional-locks",
+                        "--literal-pathspecs",
+                        "status",
+                        "--porcelain=v1",
+                        "-z",
+                        "--",
+                        &e.file,
+                    ],
+                )?
+                .is_empty()
+            {
                 return Err(format!(
                     "dirty target refused: {} (use --allow-dirty)",
                     e.file

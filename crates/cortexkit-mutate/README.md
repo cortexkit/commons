@@ -1065,8 +1065,9 @@ The runner's lock and captures never write to `.git`, so Git metadata can be
 mounted read-only. User-specified report/catalogue paths and commands still need
 write access to their chosen destinations.
 A deleted or renamed edit target reports ANCHOR_MISSING for its row, naming the
-missing file; subsequent rows still run. Every existing target is compared **byte for byte to
-HEAD**, including staged changes, before any mutation. `--allow-dirty` opts in
+missing file; subsequent rows still run. Every existing target is checked for
+**staged and unstaged changes against HEAD using Git status**, honoring Git's
+line-ending and filter conversions, before any mutation. `--allow-dirty` opts in
 explicitly, and restoration still uses saved local bytes, not HEAD or the index.
 
 Every path restores saved source and verifies its bytes. Unless it is an edit
