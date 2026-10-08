@@ -1243,6 +1243,14 @@ fn command_v090_breadth_fields_and_report_paths_fail_closed() {
     let path = f.root().join(".git/audit.toml");
     append_control(&path, &c).unwrap();
     assert_eq!(load(&path).unwrap().control[0], c);
+    let mut file_template = c.clone();
+    file_template.broad_id = Some("{file}:{name}".into());
+    let file_template_path = f.root().join(".git/file-template.toml");
+    append_control(&file_template_path, &file_template).unwrap();
+    assert_eq!(
+        load(&file_template_path).unwrap().control[0].broad_id,
+        file_template.broad_id
+    );
     for field in ["broad_command", "broad_report", "broad_id"] {
         let mut bad = c.clone();
         match field {

@@ -593,8 +593,10 @@ Set **all three** optional fields on a command row:
   including a symlink to an absent destination. The command must create a fresh
   report; create any necessary parent directory in your runner first.
 - `broad_id = "{name}"`: maps XML-decoded testcase attributes to exact catalogue
-  ids. `{classname}.{name}`, `{classname}/{name}` and literal separators are also
-  supported. Only `{classname}` and `{name}` placeholders are allowed, and
+  ids. `{classname}.{name}`, `{classname}/{name}`, `{file}:{name}` and literal
+  separators are also supported. `{file}` uses the testcase's `file`, then the
+  enclosing testsuite's `file`; it is an ERROR if neither has that attribute.
+  Only `{classname}`, `{name}` and `{file}` placeholders are allowed, and
   `{name}` is required. Values are never trimmed, split or recursively expanded.
 
 A report must be UTF-8 JUnit XML rooted at `<testsuites>` or `<testsuite>`; nested
@@ -611,16 +613,20 @@ Successful audits set `breadth_observed: true` and include collateral reds and
 their JUnit failure/error messages in `red` and `failures`. As for Cargo, unlisted
 failures in the expected tests' own target are reported as collateral but remain
 CAUGHT. Failures in other targets grade **CAUGHT_BROADLY**. For command rows the
-target is exactly the JUnit **`classname`**, not the file or `<testsuite name>`.
-An empty classname is valid (Bun's top-level tests use it). A reviewed
-`hub = "reason of at least 20 characters"` plus `hub_targets = ["OtherClass"]`
-permits those cross-class failures as **HUB**; new classnames outside that list
-remain CAUGHT_BROADLY. A successful audit need not have collateral.
+collateral target is the non-empty JUnit **`classname`**; when it is empty, the
+  testcase's `file` is used, then the enclosing testsuite's `file`, then the empty
+  string. Bun's top-level tests therefore report their source-file path. A reviewed
+ `hub = "reason of at least 20 characters"` plus `hub_targets = ["OtherClass"]`
+ permits those cross-target failures as **HUB**; new targets outside that list
+ remain CAUGHT_BROADLY. Rows previously reviewed with `hub_targets: [""]` must
+ be re-reviewed because their target values can now be file paths. Existing ids
+ remain unchanged unless `broad_id` uses `{file}`. A successful audit need not
+ have collateral.
 
 Clean JUnit baselines are shared once per session by rows with identical
 `broad_command`, `broad_report`, `broad_id` and `timeout_s` selections; their
 timing is attributed once. Named-command baselines remain per row. Already-red
-JUnit ids are recorded by classname in `baseline_red` and their messages in
+JUnit ids are recorded by target in `baseline_red` and their messages in
 `baseline_failures`, and excluded from mutant collateral just like Cargo's
 baseline failures. The mutant's `failures` map still retains their diagnostics.
 Every expected id must be present and green in the broad baseline. Missing,
@@ -642,8 +648,11 @@ the console's descriptive name if your named runner accepts that full id.
 Bun 1.4.2 reports an empty classname for top-level tests and reverses the describe
 order in nested classnames (`inner > outer`); that nested value cannot be reversed
 by a template. Use unique leaf ids or normalize the XML in a runner when full
-console ids are needed. Classnames group describes, **not test files**: top-level
-tests in different files share the empty target.
+console ids are needed. For collateral targets, an empty classname falls back to
+the testcase `file`, then the enclosing testsuite `file`. `{file}` in `broad_id`
+can make ids file-specific (for example, `{file}:{name}`); a testcase or its
+enclosing testsuite must carry a `file` when the template uses that placeholder.
+Using the existing `{name}` template keeps ids unchanged.
 
 ```toml
 [[control]]

@@ -62,7 +62,8 @@ pub struct Control {
     /// Repository-relative JUnit XML output; removed before the audit command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broad_report: Option<String>,
-    /// Maps JUnit testcase attributes to exact catalogue ids.
+    /// Maps JUnit testcase attributes to exact catalogue ids; `{file}` uses the
+    /// testcase file or its enclosing testsuite file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broad_id: Option<String>,
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
@@ -94,7 +95,8 @@ pub struct Control {
     pub hub: Option<String>,
     /// The test targets, other than the expected tests' own, that a reviewer
     /// approved to fail alongside them in a `run --broad` replay. Stable names,
-    /// without Cargo's executable hash; JUnit classname values for command rows.
+    /// without Cargo's executable hash; command-row targets use nonempty JUnit
+    /// classname, then testcase file, then enclosing testsuite file.
     pub hub_targets: Option<Vec<String>>,
     /// Rust target-OS names; absent means the row runs on every host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -228,14 +230,17 @@ impl Control {
                 ));
             }
             let template = self.broad_id.as_deref().unwrap();
-            let literals = template.replace("{classname}", "").replace("{name}", "");
+            let literals = template
+                .replace("{classname}", "")
+                .replace("{name}", "")
+                .replace("{file}", "");
             if !template.contains("{name}")
                 || literals.contains(['{', '}'])
                 || template.chars().any(char::is_control)
             {
                 return Err(invalid(
                     "broad_id",
-                    "requires {name} and permits only {classname} and {name} placeholders",
+                    "requires {name} and permits only {classname}, {name} and {file} placeholders",
                 ));
             }
             repository_relative(self.broad_report.as_deref().unwrap())
@@ -1975,10 +1980,23 @@ fn junit_document(xml: &str) -> Result<JunitNode> {
 }
 
 fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
-    fn collect(node: &JunitNode, template: &str, results: &mut TestResults) -> Result<()> {
+    fn collect(
+        node: &JunitNode,
+        enclosing_suite_file: Option<&str>,
+        template: &str,
+        results: &mut TestResults,
+    ) -> Result<()> {
+        let suite_file = if node.tag == "testsuite" {
+            node.attributes
+                .get("file")
+                .map(String::as_str)
+                .or(enclosing_suite_file)
+        } else {
+            enclosing_suite_file
+        };
         for child in &node.children {
             if child.tag == "testsuite" {
-                collect(child, template, results)?;
+                collect(child, suite_file, template, results)?;
             } else if child.tag == "testcase" && node.tag == "testsuite" {
                 let name = child
                     .attributes
@@ -1988,17 +2006,37 @@ fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
                     .attributes
                     .get("classname")
                     .ok_or("testcase missing classname")?;
+                let file = child
+                    .attributes
+                    .get("file")
+                    .map(String::as_str)
+                    .or(suite_file);
+                if template.contains("{file}") && file.is_none() {
+                    return Err(format!(
+                        "testcase {name:?} uses {{file}} but has no file attribute on the testcase or enclosing testsuite"
+                    ));
+                }
                 // Replace placeholders in the template, never in attribute values:
                 // a literal {name} in a class name must survive byte-for-byte.
                 let id = template
                     .split("{classname}")
-                    .map(|part| part.replace("{name}", name))
+                    .map(|part| {
+                        part.split("{name}")
+                            .map(|part| part.replace("{file}", file.unwrap_or_default()))
+                            .collect::<Vec<_>>()
+                            .join(name)
+                    })
                     .collect::<Vec<_>>()
                     .join(classname);
                 validate_command_id(&id)?;
+                let target = if classname.is_empty() {
+                    file.unwrap_or_default()
+                } else {
+                    classname
+                };
                 if results
                     .targets
-                    .insert(id.clone(), classname.clone())
+                    .insert(id.clone(), target.to_owned())
                     .is_some()
                 {
                     return Err(format!(
@@ -2041,7 +2079,7 @@ fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
         failure_output: BTreeMap::new(),
         signals: BTreeMap::new(),
     };
-    collect(&document, template, &mut results)?;
+    collect(&document, None, template, &mut results)?;
     if results.targets.is_empty() {
         return Err("JUnit report contains zero testcases".into());
     }
@@ -2072,6 +2110,49 @@ mod junit_tests {
     }
 
     #[test]
+    fn bun_junit_empty_classnames_use_testcase_and_suite_file_targets() {
+        let xml = r#"<testsuite name="src/tests/quota-surfaces.test.ts" file="src/tests/quota-surfaces.test.ts">
+            <testcase name="top-level test" classname="" file="src/tests/quota-surfaces.test.ts"/>
+            <testcase name="suite-file test" classname=""/>
+            <testcase name="named suite test" classname="quota surface normalization" file="other.test.ts"/>
+        </testsuite>"#;
+        let results = junit_results(xml, "{name}").unwrap();
+        assert_eq!(
+            results.targets["top-level test"],
+            "src/tests/quota-surfaces.test.ts"
+        );
+        assert_eq!(
+            results.targets["suite-file test"],
+            "src/tests/quota-surfaces.test.ts"
+        );
+        assert_eq!(
+            results.targets["named suite test"],
+            "quota surface normalization"
+        );
+    }
+
+    #[test]
+    fn broad_id_file_uses_testcase_then_enclosing_suite_file() {
+        let xml = r#"<testsuites><testsuite file="outer.test.ts"><testsuite file="suite.test.ts">
+            <testcase classname="" name="own file" file="case.test.ts"/>
+            <testcase classname="" name="suite file"/>
+        </testsuite></testsuite></testsuites>"#;
+        let results = junit_results(xml, "{file}:{name}").unwrap();
+        assert!(results.targets.contains_key("case.test.ts:own file"));
+        assert!(results.targets.contains_key("suite.test.ts:suite file"));
+        assert_eq!(results.targets["case.test.ts:own file"], "case.test.ts");
+        assert_eq!(results.targets["suite.test.ts:suite file"], "suite.test.ts");
+    }
+
+    #[test]
+    fn broad_id_file_without_a_file_names_the_testcase_in_error() {
+        let xml = r#"<testsuite><testcase classname="" name="fileless case"/></testsuite>"#;
+        let error = junit_results(xml, "{file}:{name}").unwrap_err();
+        assert!(error.contains("fileless case"), "{error}");
+        assert!(error.contains("{file}"), "{error}");
+    }
+
+    #[test]
     fn malformed_or_ambiguous_junit_never_establishes_breadth() {
         for xml in [
             "", "garbage", "<testsuite>", "<testsuite><testcase></testsuite>",
@@ -2083,6 +2164,12 @@ mod junit_tests {
         ] {
             assert!(junit_results(xml, "{name}").is_err(), "{xml}");
         }
+        let error = junit_results(
+            "<testsuite><testcase name='missing class'/></testsuite>",
+            "{name}",
+        )
+        .unwrap_err();
+        assert_eq!(error, "testcase missing classname");
         let xml = "<testsuite><testcase classname='a' name='b'><system-out><failure>not a failure child</failure></system-out></testcase></testsuite>";
         assert!(junit_results(xml, "{name}").unwrap().red.is_empty());
     }

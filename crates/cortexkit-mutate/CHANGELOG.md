@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2
+
+- Use a testcase's non-empty JUnit `classname` as the collateral target, falling
+  back to its `file`, then the enclosing testsuite's `file`. Bun top-level tests
+  therefore report their source file instead of an empty target. Existing
+  `broad_id` ids remain unchanged unless the template uses the new `{file}`
+  placeholder, which maps from the testcase or enclosing testsuite file. Rows
+  reviewed with `hub_targets: [""]` must be re-reviewed because their target
+  values now use Bun's file paths.
+
 ## 0.9.1
 
 - Ignore embedded child libtest runs in Cargo's captured stdout/stderr when
