@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use cortexkit_mutate::*;
 use std::{fs, path::Path, process::Command, sync::atomic::AtomicBool};
 use tempfile::TempDir;
@@ -8,6 +10,7 @@ struct Fixture(TempDir);
 
 impl Fixture {
     fn new() -> Self {
+        support::isolate_fixture_environment();
         let f = Self(tempfile::tempdir().unwrap());
         for (path, source) in [
             ("Cargo.toml", include_str!("fixture/features/Cargo.toml")),

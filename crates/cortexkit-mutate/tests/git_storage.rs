@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use cortexkit_mutate::TreeLock;
 use std::{fs, path::Path, process::Command};
 use tempfile::TempDir;
@@ -95,6 +97,7 @@ only = true
     }
 
     fn cli(root: &Path, args: &[&str], temp: &Path) -> std::process::Output {
+        support::isolate_fixture_environment();
         Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
             .args(args)
             .current_dir(root)

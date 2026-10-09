@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use cortexkit_mutate::*;
 use std::{
     fs,
@@ -15,6 +17,7 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        support::isolate_fixture_environment();
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("src")).unwrap();
         fs::write(

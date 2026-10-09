@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.8
+
+- Tests: build every throwaway Cargo fixture into its own `target` directory.
+  The fixture copies share names and layouts, so under an inherited shared
+  `CARGO_TARGET_DIR` (as remote build runners export) parallel tests overwrote
+  each other's fixture binaries, and Cargo's modification-time freshness check
+  could reuse another test's mutated binary for a clean-tree baseline. Under CPU
+  contention that surfaced as `baseline red: tests::guard_rejects_zero` and
+  short collateral counts. The tests also drop an inherited
+  `NEXTEST_TEST_THREADS`, which overrode a fixture's own `test-threads = 1`
+  and let the order of that fixture's output depend on machine load. The
+  runner itself is unchanged.
+
+## 0.9.7
+
+- Prepare report, broad-report, and catalogue output paths before running work;
+  write JSON reports atomically so a late report error cannot leave a partial file.
+
 ## 0.9.6
 
 - Use Git status to check target cleanliness, honoring line-ending and filter

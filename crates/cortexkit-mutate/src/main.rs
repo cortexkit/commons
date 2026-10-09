@@ -2,7 +2,12 @@
 
 use clap::{Args, Parser, Subcommand};
 use cortexkit_mutate::*;
-use std::{fs, path::PathBuf, sync::atomic::Ordering};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::atomic::Ordering,
+};
 
 #[derive(Parser)]
 #[command(
@@ -318,14 +323,61 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         rows.iter().map(|r| r.baseline_prebuild_ms).sum::<u128>()
     );
     if let Some(path) = path {
-        fs::write(
-            path,
-            serde_json::to_vec_pretty(rows).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec_pretty(rows).map_err(|e| e.to_string())?;
+        let mut temporary = tempfile::NamedTempFile::new_in(output_parent(&path))
+            .map_err(|e| format!("cannot write report {}: {e}", path.display()))?;
+        temporary
+            .write_all(&bytes)
+            .map_err(|e| format!("cannot write report {}: {e}", path.display()))?;
+        temporary.persist(&path).map_err(|e| {
+            format!(
+                "cannot atomically write report {}: {}",
+                path.display(),
+                e.error
+            )
+        })?;
     }
     Ok(())
 }
+
+fn output_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn prepare_output_path(path: &Path) -> Result<()> {
+    let parent = output_parent(path);
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("cannot prepare output path {}: {e}", path.display()))?;
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => {
+            return Err(format!(
+                "cannot prepare output path {}: destination is a directory",
+                path.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(format!(
+                "cannot prepare output path {}: {e}",
+                path.display()
+            ));
+        }
+    }
+    tempfile::NamedTempFile::new_in(parent)
+        .and_then(|file| file.close())
+        .map_err(|e| format!("cannot prepare output path {}: {e}", path.display()))
+}
+
+fn prepare_optional_output(path: Option<&Path>) -> Result<()> {
+    if let Some(path) = path {
+        prepare_output_path(path)?;
+    }
+    Ok(())
+}
+
 fn run() -> Result<bool> {
     let cli = Cli::parse();
     let root = repository()?;
@@ -347,6 +399,7 @@ fn run() -> Result<bool> {
             allow_dirty,
             report,
         } => {
+            prepare_optional_output(report.as_deref())?;
             if !all && diff.is_none() && only.is_none() {
                 return Err("select --all, --diff <base>, or --only <id>".into());
             }
@@ -395,6 +448,13 @@ fn run() -> Result<bool> {
                 .filter(|(i, _)| i % count == index)
                 .map(|(_, c)| c)
                 .collect();
+            if broad {
+                for control in &shard {
+                    if let Some(name) = &control.broad_report {
+                        prepare_output_path(&root.join(name))?;
+                    }
+                }
+            }
             // Rows execute grouped by package to save rebuilds, but each report
             // lands in its sorted-ID slot, so output order never depends on it.
             let mut slots: Vec<Option<Report>> = shard.iter().map(|_| None).collect();
@@ -425,6 +485,8 @@ fn run() -> Result<bool> {
             Ok(!stop.load(Ordering::SeqCst) && rows.iter().all(Report::passes))
         }
         Action::Prove(p) => {
+            prepare_optional_output(p.report.as_deref())?;
+            prepare_output_path(&cli.catalogue)?;
             let c = Control {
                 id: p.id,
                 guards: p.guards,
@@ -544,6 +606,10 @@ fn explore(
 ) -> Result<bool> {
     if x.runner == "command" {
         return Err("explore refuses command rows: only expect_red ids can be observed; use prove --command instead".into());
+    }
+    prepare_optional_output(x.report.as_deref())?;
+    if x.append {
+        prepare_output_path(catalogue_path)?;
     }
     let edits = match x.edits {
         Some(text) => {
