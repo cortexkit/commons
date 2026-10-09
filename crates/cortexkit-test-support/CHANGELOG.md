@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Add `process_liveness(pid)`, which returns alive, dead or unknown (Linux
+  zombies count as dead), and `process_alive(pid)` for test assertions, which
+  panics instead of guessing when liveness can't be determined. Use
+  `wait_until_gone` to wait for a process to exit.
+
 ## 0.1.2
 
 - The daemon watcher writes the daemon's PID file atomically (a temporary

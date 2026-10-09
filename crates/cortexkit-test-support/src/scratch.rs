@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
-use subc_os::process_identity::{liveness, process_start, Liveness, ProcessStart};
+pub use subc_os::process_identity::Liveness;
+use subc_os::process_identity::{liveness, process_start, ProcessStart};
 
 /// Shared executable directory exempt from the scratch age sweep.
 pub const STABLE_BIN_DIR: &str = "stable-bin";
@@ -126,6 +127,30 @@ pub fn wait_until_gone(pid: i32, timeout: Duration) -> bool {
             return false;
         }
         std::thread::park_timeout(Duration::from_millis(10));
+    }
+}
+
+/// Return the tri-state liveness of `pid`: alive, dead, or unknown. Linux zombies
+/// are dead. Use [`process_alive`] for assertions and [`wait_until_gone`] when waiting.
+pub fn process_liveness(pid: i32) -> Liveness {
+    let Ok(pid) = u32::try_from(pid) else {
+        return Liveness::Unknown;
+    };
+    let started = process_start(pid);
+    liveness(pid, started.as_ref())
+}
+
+/// Return whether `pid` is positively alive: true for alive and false for dead.
+/// Panics with the PID and reason when liveness is unknown, including on
+/// unsupported platforms. Linux zombies are dead. Use this for assertions and
+/// [`wait_until_gone`] when waiting.
+pub fn process_alive(pid: i32) -> bool {
+    match process_liveness(pid) {
+        Liveness::Alive => true,
+        Liveness::Dead => false,
+        Liveness::Unknown => panic!(
+            "could not determine liveness for pid {pid}: the operating system returned an unknown state (unsupported platform or unavailable process identity)"
+        ),
     }
 }
 
@@ -331,14 +356,18 @@ mod tests {
     #[test]
     fn an_exited_unreaped_child_is_not_alive() {
         let mut child = std::process::Command::new("true").spawn().unwrap();
-        let gone = wait_until_gone(child.id() as i32, Duration::from_secs(5));
-        let found = rustix::process::test_kill_process(
-            rustix::process::Pid::from_raw(child.id() as i32).unwrap(),
-        )
-        .is_ok();
+        let pid = child.id() as i32;
+        let gone = wait_until_gone(pid, Duration::from_secs(5));
+        let found =
+            rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                .is_ok();
+        let liveness = process_liveness(pid);
+        let alive = process_alive(pid);
         child.wait().unwrap();
         assert!(found);
         assert!(gone);
+        assert_eq!(liveness, Liveness::Dead);
+        assert!(!alive);
     }
     #[cfg(unix)]
     #[test]
@@ -347,9 +376,34 @@ mod tests {
             .arg("30")
             .spawn()
             .unwrap();
-        let gone = wait_until_gone(child.id() as i32, Duration::from_millis(20));
+        let pid = child.id() as i32;
+        let liveness = process_liveness(pid);
+        let alive = process_alive(pid);
+        let gone = wait_until_gone(pid, Duration::from_millis(20));
         child.kill().unwrap();
         child.wait().unwrap();
+        assert_eq!(liveness, Liveness::Alive);
+        assert!(alive);
         assert!(!gone);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reaped_child_is_dead() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(process_liveness(pid), Liveness::Dead);
+        assert!(!process_alive(pid));
+    }
+
+    #[test]
+    #[should_panic(expected = "pid -1: the operating system returned an unknown state")]
+    fn process_alive_panics_when_liveness_is_unknown() {
+        process_alive(-1);
     }
 }

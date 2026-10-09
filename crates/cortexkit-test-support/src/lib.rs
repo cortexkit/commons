@@ -15,7 +15,10 @@ mod stable;
 pub use binaries::*;
 pub use daemon::{TestDaemon, TestDaemonCommand};
 pub use fence::*;
-pub use scratch::{scratch_root, shared_scratch_root, wait_until_gone, ScratchDir, STABLE_BIN_DIR};
+pub use scratch::{
+    process_alive, process_liveness, scratch_root, shared_scratch_root, wait_until_gone, Liveness,
+    ScratchDir, STABLE_BIN_DIR,
+};
 pub use sibling_cache::*;
 pub use spawn_guard::assert_test_binary_spawns;
 #[cfg(unix)]
