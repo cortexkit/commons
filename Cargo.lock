@@ -420,7 +420,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-exec-remote-types"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "base64",
  "serde",

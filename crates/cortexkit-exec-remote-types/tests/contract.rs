@@ -1,5 +1,5 @@
 use cortexkit_exec_remote_types::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fs, path::PathBuf};
@@ -42,6 +42,7 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-refusal-hints",
     "crate-local-runner-draining",
     "crate-local-runner-disk-full",
+    "crate-local-started",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -69,6 +70,54 @@ const LOCAL_REPLIES: &[&str] = &[
 struct OutcomeCase {
     request: RunRequest,
     stream: Vec<StreamRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownStreamRecord023 {
+    Accepted,
+    Output,
+    Terminal,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StreamRecord023Input {
+    Known(KnownStreamRecord023),
+    Tag(StreamRecord023Tag),
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamRecord023Tag {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default, deserialize_with = "deserialize_seq_023")]
+    seq: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum StreamRecord023 {
+    Accepted,
+    Output,
+    Terminal,
+    Unknown { kind: String, seq: Option<u64> },
+}
+
+fn deserialize_seq_023<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    u64::deserialize(deserializer).map(Some)
+}
+
+fn decode_stream_record_023(value: Value) -> StreamRecord023 {
+    match serde_json::from_value::<StreamRecord023Input>(value).unwrap() {
+        StreamRecord023Input::Known(KnownStreamRecord023::Accepted) => StreamRecord023::Accepted,
+        StreamRecord023Input::Known(KnownStreamRecord023::Output) => StreamRecord023::Output,
+        StreamRecord023Input::Known(KnownStreamRecord023::Terminal) => StreamRecord023::Terminal,
+        StreamRecord023Input::Tag(StreamRecord023Tag { kind, seq }) => {
+            StreamRecord023::Unknown { kind, seq }
+        }
+    }
 }
 
 fn root() -> PathBuf {
@@ -160,9 +209,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 15);
+    assert_eq!(LOCAL_OUTCOMES.len(), 16);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 52);
+    assert_eq!(cases().len(), 53);
 }
 
 #[test]
@@ -596,6 +645,58 @@ fn unknown_stream_record_retains_sequence_and_round_trips() {
     let case: OutcomeCase =
         serde_json::from_value(value("outcomes", "crate-local-unknown-stream-record")).unwrap();
     assert!(matches!(case.stream[1], StreamRecord::Terminal(_)));
+}
+
+#[test]
+fn started_record_round_trips_its_golden_vector() {
+    let raw = value("outcomes", "crate-local-started")["stream"][1].clone();
+    let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+    let started = Started::new(7, 125, 1_730_000_000_125);
+    assert_eq!(record, StreamRecord::Started(started.clone()));
+    assert_eq!(started.seq(), 7);
+    assert_eq!(started.queue_wait_ms(), 125);
+    assert_eq!(started.started_at_ms(), 1_730_000_000_125);
+    assert_eq!(serde_json::to_value(record).unwrap(), raw);
+}
+
+#[test]
+fn started_record_is_unknown_with_sequence_to_a_023_decoder() {
+    let raw = value("outcomes", "crate-local-started")["stream"][1].clone();
+    assert_eq!(
+        decode_stream_record_023(raw),
+        StreamRecord023::Unknown {
+            kind: "started".into(),
+            seq: Some(7),
+        }
+    );
+}
+
+#[test]
+fn started_sequence_advances_resume_cursor_and_is_nonterminal() {
+    let case: OutcomeCase =
+        serde_json::from_value(value("outcomes", "crate-local-started")).unwrap();
+    let [StreamRecord::Accepted(_), StreamRecord::Started(started), StreamRecord::Terminal(_)] =
+        case.stream.as_slice()
+    else {
+        panic!("expected acceptance, start, and terminal records in order")
+    };
+    let attach = AttachRequest::new(job_id(), started.seq() + 1);
+    assert_eq!(attach.from_seq, 8);
+}
+
+#[test]
+fn malformed_started_stream_record_is_rejected() {
+    for malformed in [
+        json!({"type": "started"}),
+        json!({"type": "started", "seq": "7", "queue_wait_ms": 125, "started_at_ms": 1_730_000_000_125_u64}),
+        json!({"type": "started", "seq": 7, "queue_wait_ms": 125}),
+        json!({"type": "started", "seq": 7, "queue_wait_ms": null, "started_at_ms": 1_730_000_000_125_u64}),
+    ] {
+        assert!(
+            serde_json::from_value::<StreamRecord>(malformed.clone()).is_err(),
+            "{malformed}"
+        );
+    }
 }
 
 #[test]

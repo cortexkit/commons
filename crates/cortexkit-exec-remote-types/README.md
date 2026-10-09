@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.2**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.4**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -18,8 +18,17 @@ sibling path-dependency consumers.
 | `workspace.drop` | `DropRequest` | `DropReply` |
 
 `StreamRecord` is internally tagged by `type`: known records are `accepted`,
-`output`, or `terminal`, with fields inline beside the discriminator. `Output`
-retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
+`started`, `output`, or `terminal`, with fields inline beside the discriminator.
+`Started` is emitted once after acceptance when the job takes runner capacity,
+before its first output or terminal; a job refused before start never has one.
+The runner's command timeout runs from this moment, not from acceptance. A
+caller can report that the job is now running instead of waiting for capacity,
+but must not start a timeout of its own from `Started`. Older runners may omit
+it, so callers keep their existing behavior when it is absent. It is progress,
+never a terminal record. Its `seq` counts toward the attach resume cursor;
+`queue_wait_ms` is measured by the runner and `started_at_ms` is for display only.
+
+`Output` retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
 character, so decoding never converts its payload to a string.
 

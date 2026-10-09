@@ -2,7 +2,7 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The eighteen `crate-local-*` cases documented below exist only
+pin the same bytes. The nineteen `crate-local-*` cases documented below exist only
 here. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
 
@@ -53,8 +53,9 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These fifteen outcome pairs and three reply pairs extend the caller corpus described above, for a
-total of 35 outcomes and 17 replies:
+These sixteen outcome cases (32 files: one `.jcs`/`.sha256` pair each) and
+three reply cases (six files) extend the caller corpus described above. The
+resulting corpus contains 36 outcome cases and 17 reply cases:
 
 - `outcomes/crate-local-unknown-refusal`: `refused_before_start` with reason
   `future_refusal`, decoded as `RefusalReason::Unknown` while retaining the
@@ -70,6 +71,13 @@ total of 35 outcomes and 17 replies:
   without a known terminal record, get the job's outcome from `exec.status` or
   `exec.attach` rather than waiting forever, and grade it outcome-unknown until
   one arrives.
+- `outcomes/crate-local-started`: an `accepted`, `started` (seq 7), and terminal
+  sequence. `Started` is emitted when the queued job takes capacity; its queue
+  wait is runner-measured and its start time is display-only. The runner's
+  command timeout runs from this moment, not acceptance. Callers may report the
+  job is running but must not start their own timeout from it. Older runners may
+  omit the record; it is progress, never terminal. A 0.2.3-shaped decoder sees
+  it as an unknown record and retains seq 7 for the resume cursor.
 - `outcomes/crate-local-unknown-killed`: reason `future_kill`, decoded as
   `Killed::Unknown`. The command was killed for an unrecognised reason.
 - `outcomes/crate-local-unknown-ran`: location `future_location`, decoded as

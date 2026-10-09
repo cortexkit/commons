@@ -733,6 +733,41 @@ impl Output {
     }
 }
 
+/// The job has taken runner capacity and begun running.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Started {
+    /// Replay sequence number for this stream record.
+    pub seq: u64,
+    /// Time spent waiting for runner capacity, measured by the runner.
+    pub queue_wait_ms: u64,
+    /// Runner wall-clock Unix time in milliseconds; use for display only.
+    pub started_at_ms: u64,
+}
+
+impl Started {
+    /// Record the moment the job began running.
+    pub fn new(seq: u64, queue_wait_ms: u64, started_at_ms: u64) -> Self {
+        Self {
+            seq,
+            queue_wait_ms,
+            started_at_ms,
+        }
+    }
+
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub fn queue_wait_ms(&self) -> u64 {
+        self.queue_wait_ms
+    }
+
+    pub fn started_at_ms(&self) -> u64 {
+        self.started_at_ms
+    }
+}
+
 /// Durable acceptance of a run and its queue position.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1113,6 +1148,15 @@ impl StatusReply {
 #[allow(clippy::large_enum_variant)]
 pub enum StreamRecord {
     Accepted(Accepted),
+    /// Emitted once after acceptance when the job takes runner capacity, before
+    /// its first output or terminal record. A job refused before starting never
+    /// has this record. The runner's command timeout runs from this moment, not
+    /// from acceptance. A caller can use `Started` to report that the job is now
+    /// running instead of waiting for capacity. It must not start a timeout of
+    /// its own from it. Older runners may omit this record, so callers retain
+    /// their existing behavior when it is absent. This is progress, never a
+    /// terminal record.
+    Started(Started),
     Output(Output),
     Terminal(TerminalRecord),
     /// An unrecognised record. Skip it and keep reading, counting its sequence
@@ -1134,6 +1178,7 @@ pub enum StreamRecord {
 #[allow(clippy::large_enum_variant)]
 enum KnownStreamRecord {
     Accepted(Accepted),
+    Started(Started),
     Output(Output),
     Terminal(TerminalRecord),
 }
@@ -1169,6 +1214,7 @@ impl Serialize for StreamRecord {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let known = match self {
             Self::Accepted(accepted) => KnownStreamRecord::Accepted(accepted.clone()),
+            Self::Started(started) => KnownStreamRecord::Started(started.clone()),
             Self::Output(output) => KnownStreamRecord::Output(output.clone()),
             Self::Terminal(terminal) => KnownStreamRecord::Terminal(terminal.clone()),
             Self::Unknown { kind, seq } => {
@@ -1190,7 +1236,10 @@ impl<'de> Deserialize<'de> for StreamRecord {
         let known = match StreamRecordInput::deserialize(deserializer)? {
             StreamRecordInput::Known(known) => known,
             StreamRecordInput::Tag(StreamRecordTag { kind, seq }) => {
-                if matches!(kind.as_str(), "accepted" | "output" | "terminal") {
+                if matches!(
+                    kind.as_str(),
+                    "accepted" | "started" | "output" | "terminal"
+                ) {
                     return Err(serde::de::Error::custom(format!(
                         "malformed fields for known stream record tag {kind}"
                     )));
@@ -1200,6 +1249,7 @@ impl<'de> Deserialize<'de> for StreamRecord {
         };
         Ok(match known {
             KnownStreamRecord::Accepted(accepted) => Self::Accepted(accepted),
+            KnownStreamRecord::Started(started) => Self::Started(started),
             KnownStreamRecord::Output(output) => Self::Output(output),
             KnownStreamRecord::Terminal(terminal) => Self::Terminal(terminal),
         })

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.4
+
+- `StreamRecord::Started` reports the sequence number, runner-measured queue
+  wait, and runner wall-clock start time when a queued job takes capacity. It
+  follows `Accepted` and precedes output or the terminal; a refusal before start
+  has no `Started` record. The runner's command timeout runs from this moment,
+  not acceptance. Callers can report that the job is now running, but must not
+  start their own timeout from this event. Older runners may omit it, so callers
+  keep their existing behavior when it is absent. `Started` is progress, never a
+  terminal record.
+- A present `Started` sequence advances the attach resume cursor like every
+  other sequenced stream record. Golden vectors cover its canonical wire shape,
+  malformed known-tag rejection, and decoding as an unknown sequenced record by
+  the 0.2.3 caller shape.
+
 ## 0.2.3
 
 - `TerminalRecord` and `PrepareReply` gain optional `refusal_detail:
