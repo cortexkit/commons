@@ -25,7 +25,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -90,7 +90,8 @@ pub enum RetentionDefect {
     WithoutGroupIgnored,
     ExpireHeld,
     ClockNotRestarted,
-    DeleteIncomplete,
+    /// Moves its retention clock forward but never deletes a session's content once it expires.
+    NeverPurge,
     TombstoneForgotten,
     TitleLeak,
     PromptLeak,
@@ -190,7 +191,9 @@ pub enum StepRecovery {
 /// its kills.
 struct World {
     retention_defect: RetentionDefect,
+    retention_delete_ms: u64,
     epoch: tokio::time::Instant,
+    retention_clock_advanced_ms: AtomicU64,
     held_paused: bool,
     advertise_status: bool,
     defects: Defects,
@@ -218,7 +221,9 @@ struct World {
 
 impl World {
     fn now(&self) -> u64 {
-        1_790_000_000_000 + self.epoch.elapsed().as_millis() as u64
+        1_790_000_000_000
+            + self.epoch.elapsed().as_millis() as u64
+            + self.retention_clock_advanced_ms.load(Ordering::SeqCst)
     }
     fn serves(&self, group: &str) -> bool {
         self.groups.iter().any(|served| served == group)
@@ -427,7 +432,7 @@ impl Module {
         };
         if state.expired_at.is_none()
             || state.deleted
-            || self.world.retention_defect == RetentionDefect::DeleteIncomplete
+            || self.world.retention_defect == RetentionDefect::NeverPurge
         {
             return;
         }
@@ -993,7 +998,7 @@ impl Module {
             describe = describe.with_steer_receipt("confirm");
         }
         if self.world.serves(groups::RETENTION) {
-            describe = describe.with_retention(RETENTION_MAX, RETENTION_DELETE_MS);
+            describe = describe.with_retention(RETENTION_MAX, self.world.retention_delete_ms);
         }
         respond(describe)
     }
@@ -1156,7 +1161,7 @@ impl Module {
         let cap = self
             .world
             .serves(groups::RETENTION)
-            .then(|| Retention::new(RETENTION_MAX, RETENTION_DELETE_MS));
+            .then(|| Retention::new(RETENTION_MAX, self.world.retention_delete_ms));
         let previous = existing.as_ref().map(|s| s.retention);
         let accept_bad = match defect {
             RetentionDefect::ZeroAccepted => request.retention == Some(0),
@@ -1572,6 +1577,7 @@ impl RunnerRoute for FakeRoute {
 
 pub struct FakeSubject {
     pub retention_defect: RetentionDefect,
+    pub retention_delete_ms: u64,
     pub held_paused: bool,
     pub advertise_status: bool,
     pub defects: Defects,
@@ -1635,6 +1641,7 @@ impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
             retention_defect: RetentionDefect::None,
+            retention_delete_ms: RETENTION_DELETE_MS,
             held_paused: false,
             advertise_status: false,
             defects,
@@ -1665,7 +1672,9 @@ impl FakeSubject {
                     } else {
                         RetentionDefect::None
                     },
+                    retention_delete_ms: self.retention_delete_ms,
                     epoch: tokio::time::Instant::now(),
+                    retention_clock_advanced_ms: AtomicU64::new(0),
                     held_paused: self.held_paused,
                     advertise_status: self.advertise_status,
                     defects: self.defects,
@@ -1730,6 +1739,7 @@ impl FakeSubject {
 
     pub fn enable_retention(&mut self) {
         self.capabilities.insert(Capability::Retention);
+        self.capabilities.insert(Capability::RetentionClock);
         self.advertise_status = true;
     }
 }
@@ -1876,6 +1886,23 @@ impl LlmRunnerSubject for FakeSubject {
         milliseconds: u64,
     ) -> Result<(), HarnessError> {
         self.advance_compaction(session, milliseconds)
+    }
+    async fn advance_retention_clock(
+        &self,
+        session: &str,
+        milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .retention_clock_advanced_ms
+            .fetch_add(milliseconds, Ordering::SeqCst);
+        for module in self.modules.lock().unwrap().clone() {
+            if module.alive.load(Ordering::SeqCst) {
+                module.sweep(session).map_err(|Killed| {
+                    HarnessError::new("module was killed while advancing retention clock")
+                })?;
+            }
+        }
+        Ok(())
     }
     async fn answer_compaction(
         &self,

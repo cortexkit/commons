@@ -97,9 +97,7 @@ where
                     .await
                     .map(|()| Ending::Passed)
                 } else if spec.name == "crash_at_RetentionTombstoned" {
-                    retention::crash(subject, &mut driver, work_dir, &declared, &mint)
-                        .await
-                        .map(|()| Ending::Passed)
+                    retention::crash(subject, &mut driver, work_dir, &declared, &mint).await
                 } else if let Some(point) = crash::point_of(spec.name) {
                     if !crashes.contains_key(point) {
                         let observed =
@@ -130,6 +128,9 @@ where
                 match result {
                     Ok(Ending::Passed) => CaseOutcome::Passed,
                     Ok(Ending::Inapplicable(reason)) => CaseOutcome::Inapplicable { reason },
+                    Ok(Ending::Skipped { missing, reason }) => {
+                        CaseOutcome::SkippedWithReason { missing, reason }
+                    }
                     Err(reason) => CaseOutcome::Failed { reason },
                 }
             }
@@ -177,7 +178,9 @@ where
     let skipped: BTreeSet<Capability> = cases
         .iter()
         .filter_map(|case| match &case.outcome {
-            CaseOutcome::Skipped { missing } => Some(missing.iter().copied()),
+            CaseOutcome::Skipped { missing } | CaseOutcome::SkippedWithReason { missing, .. } => {
+                Some(missing.iter().copied())
+            }
             _ => None,
         })
         .flatten()

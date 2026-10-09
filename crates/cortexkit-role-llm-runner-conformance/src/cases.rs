@@ -32,6 +32,11 @@ pub enum Ending {
     Passed,
     /// The question cannot be asked of this runner.
     Inapplicable(String),
+    /// Not run: without a test clock, the case would have to wait longer in real time than the suite allows (30 seconds).
+    Skipped {
+        missing: Vec<Capability>,
+        reason: String,
+    },
 }
 
 type Check = Result<(), String>;

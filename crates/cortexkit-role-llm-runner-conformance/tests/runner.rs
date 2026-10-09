@@ -9,7 +9,7 @@ use cortexkit_role_llm_runner_conformance::{
     SuiteVerdict, CASES,
 };
 use fake::{CompactionDefect, Defects, FakeSubject, RetentionDefect, StepRecovery};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -100,13 +100,69 @@ async fn a_faithful_runner_passes_every_case_but_its_simulated_kills_fail_the_ru
     }
 }
 
+const TIMED_RETENTION_CASES: &[&str] = &[
+    "retention_shorten_continues_lineage",
+    "retention_equal_noop",
+    "retention_honoured",
+    "retention_run_status_expired",
+    "retention_no_content_served",
+    "retention_active_run_never_expires",
+    "crash_at_RetentionTombstoned",
+];
+
 #[tokio::test(start_paused = true)]
 async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.claim_process_kill = true;
     subject.enable_retention();
+    let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    for name in TIMED_RETENTION_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    eprintln!(
+        "{} time-based retention cases passed in {:?}",
+        TIMED_RETENTION_CASES.len(),
+        started.elapsed()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_a_retention_clock_long_cases_skip_by_name_instead_of_waiting() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    subject.claim_process_kill = true;
+    subject.capabilities.remove(&Capability::RetentionClock);
+    subject.retention_delete_ms = 30_000;
+
+    let report = tokio::time::timeout(Duration::from_secs(1), run(&subject))
+        .await
+        .expect("a missing clock must not make long retention cases wait");
+    for name in TIMED_RETENTION_CASES {
+        match report.outcome(name) {
+            Some(CaseOutcome::SkippedWithReason { missing, reason }) => {
+                assert_eq!(missing, &[Capability::RetentionClock], "{name}: {reason}");
+                assert!(
+                    reason.contains("needs advance_retention_clock"),
+                    "{name}: {reason}"
+                );
+                assert!(reason.contains("real wait would be"), "{name}: {reason}");
+                eprintln!("{name}: {reason}");
+                assert!(report.render().contains(&format!("SKIP {name}")));
+            }
+            outcome => panic!(
+                "{name} should be skipped with its wait bound, got {outcome:?}\n{}",
+                report.render()
+            ),
+        }
+    }
+    assert_passed(&report, "retention_zero_refused");
 }
 
 #[tokio::test]
@@ -703,8 +759,8 @@ async fn a_used_work_dir_is_refused() {
     assert!(matches!(error, SetupError::WorkDirNotEmpty(_)));
 }
 
-// Retention's timer uses paused time only for this in-process fake. Real
-// conformance runs use an unpaused clock and a runner process owned by its CI.
+// Retention tests use the fake's explicit clock hook and can therefore run with
+// Tokio time paused; real subjects may use the same hook or short real waits.
 async fn retention_break(defect: RetentionDefect, expected: &str, paused: bool) {
     let mut subject = FakeSubject::new(Defects::default());
     subject.enable_retention();
@@ -836,8 +892,8 @@ async fn retention_violation_paused_fails_by_name() {
     .await;
 }
 retention_violation!(
-    retention_violation_deletion_fails_by_name,
-    DeleteIncomplete,
+    retention_violation_never_purges_fails_by_name,
+    NeverPurge,
     "retention_honoured"
 );
 retention_violation!(

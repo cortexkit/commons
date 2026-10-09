@@ -59,6 +59,15 @@ vocabulary section and identifies the governing contract sections.
   must read the initial answer from persistent runner storage while a model call is
   held, never from an in-memory cache, the configured provider answer or a
   `session.read` model page.
+- Retention time can be controlled separately. A subject opts in by declaring
+  `Capability::RetentionClock` and implementing
+  `LlmRunnerSubject::advance_retention_clock`; the adapter must advance the
+  runner's actual retention clock and complete expiry and due deletion work
+  before returning. Durable activity timestamps, expiry checks, and deletion
+  deadlines must all use that clock. Without the capability, cases use real
+  time only when their full wait is at most 30 seconds; longer cases are
+  skipped by name with the missing hook and wait bound. This hook belongs to
+  the conformance test adapter only and must not be exposed by release builds.
 
 ## Verdict
 

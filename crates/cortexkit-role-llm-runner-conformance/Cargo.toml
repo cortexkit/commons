@@ -9,7 +9,7 @@
 # Not published while the role crate itself is a draft.
 [package]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -40,6 +40,8 @@ pub enum Capability {
     SessionChange,
     /// Whole-session retention with limits from `role.describe.retention`.
     Retention,
+    /// The runner under test can move its retention clock forward on request, so expiry and deletion happen without waiting in real time. For tests only; release builds must not offer it.
+    RetentionClock,
     /// The runner adapter's scripted tool provider can hold a received call
     /// until the case releases it. See
     /// [`LlmRunnerSubject::await_tool_call`] and
@@ -75,6 +77,7 @@ impl Capability {
             Some(group) => group.to_owned(),
             None => match self {
                 Self::HoldToolCalls => "hold_tool_calls".to_owned(),
+                Self::RetentionClock => "advance_retention_clock".to_owned(),
                 Self::KillAt(point) => format!("kill_at:{point}"),
                 _ => unreachable!("every other capability is a group"),
             },
@@ -96,7 +99,7 @@ impl Capability {
             Self::Compaction => groups::COMPACTION,
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
-            Self::HoldToolCalls | Self::KillAt(_) => return None,
+            Self::HoldToolCalls | Self::RetentionClock | Self::KillAt(_) => return None,
         })
     }
 
@@ -187,7 +190,8 @@ impl ScriptedTurn {
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
     /// The capability groups the runner declares, plus the harness
-    /// capabilities ([`Capability::HoldToolCalls`]). Kill points come from
+    /// capabilities ([`Capability::HoldToolCalls`] and, when supported,
+    /// [`Capability::RetentionClock`]). Kill points come from
     /// [`Harness::declared_points`] instead. Cases requiring anything
     /// missing are skipped, with the reason.
     fn capabilities(&self) -> BTreeSet<Capability>;
@@ -280,6 +284,21 @@ pub trait LlmRunnerSubject: Harness {
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "controlled compaction clock is not implemented",
+        ))
+    }
+
+    /// Advance the session's retention clock by `milliseconds`, completing
+    /// expiry and any due deletion work before returning. Durable activity
+    /// timestamps, expiry checks, and deletion deadlines must all use this
+    /// same clock. Declare [`Capability::RetentionClock`] only when the
+    /// adapter can provide this behavior; otherwise short waits use real time.
+    async fn advance_retention_clock(
+        &self,
+        _session: &str,
+        _milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "controlled retention clock is not implemented",
         ))
     }
 
