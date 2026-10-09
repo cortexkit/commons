@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- The daemon watcher writes the daemon's PID file atomically (a temporary
+  file, then a rename). A reader polling for the file could otherwise see it
+  empty for a moment and fail to parse it.
+
 ## 0.1.1
 
 - Require `subc-os` 0.1.10 or any later 0.1.x instead of exactly 0.1.10, so a
