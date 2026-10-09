@@ -1106,10 +1106,12 @@ where
             .run_id
             .as_ref()
             .ok_or("Setup resume send has no run_id")?;
-        if !user.message.to_string().contains(SETUP_RESUME_PROMPT)
-            || user.run.as_ref().map(|r| &r.run_id) != Some(run_id)
-            || run_id == &last.run_id
-        {
+        // Recognise the appended message by its prompt text and by the send
+        // having started a new run. Don't also require the message to name its
+        // run: that per-message attribution is a separate rule of the runner
+        // contract (section 6, run attribution) with its own case, and this
+        // case only checks that Setup survives a crash without re-running.
+        if !user.message.to_string().contains(SETUP_RESUME_PROMPT) || run_id == &last.run_id {
             return Err("Setup resume did not append the new send's user message".into());
         }
         expected.messages.push(ModelEntry::new(
