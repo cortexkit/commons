@@ -1,0 +1,1 @@
+{"outcome":{"reason":"unreachable","type":"refused_before_start"},"refusal_detail":"The runner is temporarily unreachable; please retry shortly.","retry_after_ms":500,"transfer_id":"0192a64a-1234-7000-8000-000000000002"}

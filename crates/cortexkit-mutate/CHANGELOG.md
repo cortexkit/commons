@@ -1,10 +1,5 @@
 # Changelog
 
-## 0.9.7
-
-- Prepare report, broad-report, and catalogue output paths before running work;
-  write JSON reports atomically so a late report error cannot leave a partial file.
-
 ## 0.9.6
 
 - Use Git status to check target cleanliness, honoring line-ending and filter

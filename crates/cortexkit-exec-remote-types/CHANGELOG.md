@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.3
+
+- `TerminalRecord` and `PrepareReply` gain optional `refusal_detail:
+  Option<String>` and `retry_after_ms: Option<u64>`, with `with_*` setters and
+  getters. Existing constructors are unchanged; absent fields decode as `None`
+  and are omitted on serialization, preserving existing record bytes. The
+  `RefusedBeforeStart { reason }` outcome variants are unchanged, and old decoders
+  ignore the additive container fields.
+- Callers may quote `refusal_detail` verbatim to explain a refusal, but must never
+  parse it for decisions. Producers must send at most `REFUSAL_DETAIL_MAX_BYTES`
+  (1024 UTF-8 bytes) and must never include secrets, tokens or credential material.
+  The limit is a producer obligation: decoders retain longer received values
+  without truncation or rejection.
+- `retry_after_ms` hints that a refusal is transient. Callers must ignore it unless
+  the outcome is `RefusedBeforeStart`; they may retry after waiting at most
+  `min(retry_after_ms, their own remaining budget)` milliseconds. An absent hint
+  means not reported, not necessarily permanent. The types do not enforce retry
+  policy or cap the hint to a caller's budget.
+- `RefusalReason::RunnerDraining` (`runner_draining`) and
+  `RefusalReason::RunnerDiskFull` (`runner_disk_full`) are now known transient
+  reasons. Callers who matched `Unknown("runner_draining")` or
+  `Unknown("runner_disk_full")` must switch to the new variants.
+- Crate-local golden vectors cover both container fields, unchanged older
+  records, decoding by the 0.2.2 container shapes, and the two new reason strings.
+
 ## 0.2.2
 
 - Producers: `TerminalRecord` gains optional `git_state_changed:

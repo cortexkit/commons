@@ -39,6 +39,9 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-server-reports-detached-head",
     "crate-local-server-reports-truncated-untracked",
     "crate-local-server-reports-unchanged",
+    "crate-local-refusal-hints",
+    "crate-local-runner-draining",
+    "crate-local-runner-disk-full",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -59,6 +62,7 @@ const COPIED_REPLIES: &[&str] = &[
 const LOCAL_REPLIES: &[&str] = &[
     "crate-local-unknown-prepare-outcome",
     "crate-local-unknown-rebuild-result",
+    "crate-local-prepare-refusal-hints",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -109,7 +113,10 @@ fn expected_canonical_bytes(folder: &str, name: &str) -> Vec<u8> {
 }
 
 fn canonical_reply(name: &str, bytes: &[u8]) -> Vec<u8> {
-    if name.starts_with("prepare-") || name == "crate-local-unknown-prepare-outcome" {
+    if name.starts_with("prepare-")
+        || name == "crate-local-unknown-prepare-outcome"
+        || name == "crate-local-prepare-refusal-hints"
+    {
         round_trip::<PrepareReply>(bytes)
     } else if name.starts_with("drop-") {
         round_trip::<DropReply>(bytes)
@@ -153,9 +160,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 12);
-    assert_eq!(LOCAL_REPLIES.len(), 2);
-    assert_eq!(cases().len(), 48);
+    assert_eq!(LOCAL_OUTCOMES.len(), 15);
+    assert_eq!(LOCAL_REPLIES.len(), 3);
+    assert_eq!(cases().len(), 52);
 }
 
 #[test]
@@ -1007,5 +1014,246 @@ fn accepted_env_not_forwarded_is_optional_and_round_trips() {
     assert_eq!(
         back.env_not_forwarded.as_deref(),
         Some(&["TOKEN".to_string(), "HOME".to_string()][..])
+    );
+}
+
+#[test]
+fn refusal_hints_match_vectors_and_builders() {
+    let terminal = TerminalRecord::new(
+        job_id(),
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerFull,
+        },
+        0,
+        25,
+        29,
+    )
+    .with_ran(Ran::None)
+    .with_tree_hash("3333333333333333333333333333333333333333")
+    .with_refusal_detail("The runner is at capacity; please retry shortly.")
+    .with_retry_after_ms(250);
+    assert_eq!(terminal, server_report("crate-local-refusal-hints"));
+    assert_eq!(
+        terminal.refusal_detail(),
+        Some("The runner is at capacity; please retry shortly.")
+    );
+    assert_eq!(terminal.retry_after_ms(), Some(250));
+
+    let prepare = PrepareReply::new(
+        "0192a64a-1234-7000-8000-000000000002".parse().unwrap(),
+        PrepareOutcome::RefusedBeforeStart {
+            reason: RefusalReason::Unreachable,
+        },
+    )
+    .with_refusal_detail("The runner is temporarily unreachable; please retry shortly.")
+    .with_retry_after_ms(500);
+    let pinned: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "crate-local-prepare-refusal-hints")).unwrap();
+    assert_eq!(prepare, pinned);
+    assert_eq!(
+        prepare.refusal_detail(),
+        Some("The runner is temporarily unreachable; please retry shortly.")
+    );
+    assert_eq!(prepare.retry_after_ms(), Some(500));
+}
+
+#[test]
+fn refusal_hints_absent_preserve_existing_golden_bytes() {
+    let original: OutcomeCase = serde_json::from_slice(&bytes("outcomes", "runner_full")).unwrap();
+    let terminal = TerminalRecord::new(
+        job_id(),
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerFull,
+        },
+        0,
+        25,
+        29,
+    )
+    .with_ran(Ran::None)
+    .with_tree_hash("3333333333333333333333333333333333333333");
+    assert_eq!(terminal.refusal_detail(), None);
+    assert_eq!(terminal.retry_after_ms(), None);
+    assert_eq!(terminal, server_report("runner_full"));
+    let constructed = OutcomeCase {
+        request: original.request,
+        stream: vec![StreamRecord::Terminal(terminal)],
+    };
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&constructed).unwrap(),
+        bytes("outcomes", "runner_full")
+    );
+    let mut extended: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-refusal-hints")).unwrap();
+    let [StreamRecord::Terminal(terminal)] = extended.stream.as_mut_slice() else {
+        panic!("expected one terminal refusal")
+    };
+    terminal.refusal_detail = None;
+    terminal.retry_after_ms = None;
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&extended).unwrap(),
+        bytes("outcomes", "runner_full")
+    );
+
+    let original: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "prepare-unreachable")).unwrap();
+    assert_eq!(original.refusal_detail(), None);
+    assert_eq!(original.retry_after_ms(), None);
+    let constructed = PrepareReply::new(original.transfer_id, original.outcome.clone());
+    assert_eq!(constructed, original);
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&constructed).unwrap(),
+        bytes("replies", "prepare-unreachable")
+    );
+    let mut extended: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "crate-local-prepare-refusal-hints")).unwrap();
+    extended.refusal_detail = None;
+    extended.retry_after_ms = None;
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&extended).unwrap(),
+        bytes("replies", "prepare-unreachable")
+    );
+}
+
+// These containers mirror 0.2.2, before refusal metadata was added. Their field
+// types are unchanged; the hint fixtures use reasons already recognised in 0.2.2.
+#[derive(Debug, Serialize, Deserialize)]
+struct TerminalRecord022 {
+    job_id: Uuid,
+    outcome: Outcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    killed: Option<Killed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pipestatus: Option<Vec<i32>>,
+    wall_ms: u64,
+    queue_wait_ms: u64,
+    bundle_bytes: u64,
+    ran: Option<Ran>,
+    tree_hash: Option<String>,
+    workspace_changes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    git_state_changed: Option<GitStateChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    untracked_files: Option<UntrackedFiles>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ignored_writes: Option<IgnoredWrites>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum StreamRecord022 {
+    Terminal(TerminalRecord022),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OutcomeCase022 {
+    request: RunRequest,
+    stream: Vec<StreamRecord022>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PrepareReply022 {
+    transfer_id: Uuid,
+    outcome: PrepareOutcome,
+}
+
+#[test]
+fn refusal_hints_are_ignored_by_0_2_2_container_decoders() {
+    assert_eq!(
+        round_trip::<OutcomeCase022>(&bytes("outcomes", "crate-local-refusal-hints")),
+        bytes("outcomes", "runner_full")
+    );
+    assert_eq!(
+        round_trip::<PrepareReply022>(&bytes("replies", "crate-local-prepare-refusal-hints")),
+        bytes("replies", "prepare-unreachable")
+    );
+}
+
+#[test]
+fn refusal_detail_longer_than_producer_limit_decodes_without_truncation() {
+    assert_eq!(REFUSAL_DETAIL_MAX_BYTES, 1024);
+    // Multi-byte text makes the producer's byte limit distinct from a character
+    // limit. Decoding must keep even an over-limit value verbatim.
+    let detail = "é".repeat(REFUSAL_DETAIL_MAX_BYTES / 2 + 1);
+    assert_eq!(detail.len(), REFUSAL_DETAIL_MAX_BYTES + 2);
+    let mut terminal = value("outcomes", "crate-local-refusal-hints")["stream"][0].clone();
+    terminal["refusal_detail"] = json!(detail);
+    let decoded: TerminalRecord = serde_json::from_value(terminal).unwrap();
+    assert_eq!(decoded.refusal_detail(), Some(detail.as_str()));
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap()["refusal_detail"],
+        detail
+    );
+
+    let mut prepare = value("replies", "crate-local-prepare-refusal-hints");
+    prepare["refusal_detail"] = json!(detail);
+    let decoded: PrepareReply = serde_json::from_value(prepare).unwrap();
+    assert_eq!(decoded.refusal_detail(), Some(detail.as_str()));
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap()["refusal_detail"],
+        detail
+    );
+}
+
+#[test]
+fn refusal_hints_are_independently_optional_and_preserve_u64_bounds() {
+    let terminal = server_report("runner_full");
+    let detail_only = terminal.clone().with_refusal_detail("");
+    assert_eq!(detail_only.refusal_detail(), Some(""));
+    assert_eq!(detail_only.retry_after_ms(), None);
+    let retry_only = terminal.with_retry_after_ms(u64::MAX);
+    assert_eq!(retry_only.refusal_detail(), None);
+    let decoded: TerminalRecord =
+        serde_json::from_value(serde_json::to_value(retry_only).unwrap()).unwrap();
+    assert_eq!(decoded.retry_after_ms(), Some(u64::MAX));
+
+    let prepare: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "prepare-unreachable")).unwrap();
+    let detail_only = prepare.clone().with_refusal_detail("");
+    assert_eq!(detail_only.refusal_detail(), Some(""));
+    assert_eq!(detail_only.retry_after_ms(), None);
+    for hint in [0, u64::MAX] {
+        let retry_only = prepare.clone().with_retry_after_ms(hint);
+        assert_eq!(retry_only.refusal_detail(), None);
+        let decoded: PrepareReply =
+            serde_json::from_value(serde_json::to_value(retry_only).unwrap()).unwrap();
+        assert_eq!(decoded.retry_after_ms(), Some(hint));
+    }
+}
+
+#[test]
+fn runner_draining_vector_uses_known_reason_and_round_trips_string() {
+    let terminal = server_report("crate-local-runner-draining");
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerDraining
+        }
+    );
+    assert_eq!(
+        RefusalReason::from("runner_draining".to_owned()),
+        RefusalReason::RunnerDraining
+    );
+    assert_eq!(
+        String::from(RefusalReason::RunnerDraining),
+        "runner_draining"
+    );
+}
+
+#[test]
+fn runner_disk_full_vector_uses_known_reason_and_round_trips_string() {
+    let terminal = server_report("crate-local-runner-disk-full");
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerDiskFull
+        }
+    );
+    assert_eq!(
+        RefusalReason::from("runner_disk_full".to_owned()),
+        RefusalReason::RunnerDiskFull
+    );
+    assert_eq!(
+        String::from(RefusalReason::RunnerDiskFull),
+        "runner_disk_full"
     );
 }

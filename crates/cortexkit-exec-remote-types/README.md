@@ -107,13 +107,13 @@ for byte from the executor's own test corpus, so caller and executor pin the
 same bytes:
 
 - **20 outcomes**: complete `{request, stream}` cases covering every known
-  outcome/refusal reason, both kills, pipeline status, lost running/queued jobs,
+  original outcome/refusal reason, both kills, pipeline status, lost running/queued jobs,
   and pre-snapshot rejection.
 - **14 replies**: prepare (success plus seven refusal reasons), drop, cancel,
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Fourteen **crate-local additions**, written in this crate rather than copied from the executor's corpus, cover the cases below:
+Eighteen **crate-local additions**, written in this crate rather than copied from the executor's corpus, cover the cases below:
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.
@@ -135,7 +135,13 @@ Fourteen **crate-local additions**, written in this crate rather than copied fro
   `unknown-fields` (inside each new struct), `detached-head`,
   `truncated-untracked`, and `unchanged` (all reports present with no changes).
 
-Totals: **32 outcome pairs and 16 reply pairs**. Runner `frames/` and pretty
+- `outcomes/crate-local-refusal-hints` and
+  `replies/crate-local-prepare-refusal-hints`: optional refusal detail and retry
+  hints on the terminal and prepare containers, accepted by 0.2.2 decoders.
+- `outcomes/crate-local-runner-draining` and `outcomes/crate-local-runner-disk-full`:
+  the newly recognised transient refusal reasons.
+
+Totals: **35 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent

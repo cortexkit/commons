@@ -143,6 +143,10 @@ pub enum RefusalReason {
     SnapshotFailed,
     WorkspaceKeyRejected,
     RunnerFull,
+    /// Transient: the runner is draining and is not accepting new work.
+    RunnerDraining,
+    /// Transient: the runner needs disk space freed before accepting new work.
+    RunnerDiskFull,
     QueueWaitExceeded,
     TransferInterrupted,
     TreeHashMismatch,
@@ -161,6 +165,8 @@ impl From<String> for RefusalReason {
             "snapshot_failed" => Self::SnapshotFailed,
             "workspace_key_rejected" => Self::WorkspaceKeyRejected,
             "runner_full" => Self::RunnerFull,
+            "runner_draining" => Self::RunnerDraining,
+            "runner_disk_full" => Self::RunnerDiskFull,
             "queue_wait_exceeded" => Self::QueueWaitExceeded,
             "transfer_interrupted" => Self::TransferInterrupted,
             "tree_hash_mismatch" => Self::TreeHashMismatch,
@@ -179,6 +185,8 @@ impl From<RefusalReason> for String {
             RefusalReason::SnapshotFailed => "snapshot_failed".into(),
             RefusalReason::WorkspaceKeyRejected => "workspace_key_rejected".into(),
             RefusalReason::RunnerFull => "runner_full".into(),
+            RefusalReason::RunnerDraining => "runner_draining".into(),
+            RefusalReason::RunnerDiskFull => "runner_disk_full".into(),
             RefusalReason::QueueWaitExceeded => "queue_wait_exceeded".into(),
             RefusalReason::TransferInterrupted => "transfer_interrupted".into(),
             RefusalReason::TreeHashMismatch => "tree_hash_mismatch".into(),
@@ -501,12 +509,31 @@ impl IgnoredWrites {
     }
 }
 
+/// Maximum UTF-8 byte length producers may send in a refusal detail.
+///
+/// Producers must never include secrets, tokens or credential material. This is
+/// a producer obligation, not a decoder limit: longer received details are kept
+/// intact, without truncation or rejection.
+pub const REFUSAL_DETAIL_MAX_BYTES: usize = 1024;
+
 /// The last record on an `exec.run` or `exec.attach` reply stream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TerminalRecord {
     pub job_id: Uuid,
     pub outcome: Outcome,
+    /// Human-readable refusal explanation for quoting verbatim, never parsing.
+    /// Producers must keep it within [`REFUSAL_DETAIL_MAX_BYTES`] UTF-8 bytes and
+    /// exclude secrets, tokens and credential material. Decoders preserve longer
+    /// received values. `None` means no detail was reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_detail: Option<String>,
+    /// Millisecond hint that a refusal is transient. Ignore this field unless
+    /// `outcome` is [`Outcome::RefusedBeforeStart`]; wait at most the smaller of
+    /// this hint and the caller's remaining budget before retrying. `None` means
+    /// no retry hint was reported, not proof that a refusal is permanent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed: Option<Killed>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -554,6 +581,8 @@ impl TerminalRecord {
         Self {
             job_id,
             outcome,
+            refusal_detail: None,
+            retry_after_ms: None,
             killed: None,
             pipestatus: None,
             wall_ms,
@@ -566,6 +595,32 @@ impl TerminalRecord {
             untracked_files: None,
             ignored_writes: None,
         }
+    }
+
+    /// Set a verbatim refusal explanation. The producer must obey
+    /// [`REFUSAL_DETAIL_MAX_BYTES`] and exclude secrets and credential material;
+    /// this setter does not validate or truncate the detail.
+    pub fn with_refusal_detail(mut self, refusal_detail: impl Into<String>) -> Self {
+        self.refusal_detail = Some(refusal_detail.into());
+        self
+    }
+
+    /// Read the verbatim refusal explanation, if reported.
+    pub fn refusal_detail(&self) -> Option<&str> {
+        self.refusal_detail.as_deref()
+    }
+
+    /// Set a transient-refusal retry hint in milliseconds. Callers must ignore
+    /// it for other outcomes and cap their wait at their remaining budget.
+    pub fn with_retry_after_ms(mut self, retry_after_ms: u64) -> Self {
+        self.retry_after_ms = Some(retry_after_ms);
+        self
+    }
+
+    /// Read the retry hint, if reported. This does not check the outcome or cap
+    /// the hint to the caller's remaining budget.
+    pub fn retry_after_ms(&self) -> Option<u64> {
+        self.retry_after_ms
     }
 
     /// Record why a command was killed.
@@ -791,6 +846,18 @@ impl<'de> Deserialize<'de> for PrepareOutcome {
 pub struct PrepareReply {
     pub transfer_id: Uuid,
     pub outcome: PrepareOutcome,
+    /// Human-readable refusal explanation for quoting verbatim, never parsing.
+    /// Producers must keep it within [`REFUSAL_DETAIL_MAX_BYTES`] UTF-8 bytes and
+    /// exclude secrets, tokens and credential material. Decoders preserve longer
+    /// received values. `None` means no detail was reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_detail: Option<String>,
+    /// Millisecond hint that a refusal is transient. Ignore this field unless
+    /// `outcome` is [`PrepareOutcome::RefusedBeforeStart`]; wait at most the smaller
+    /// of this hint and the caller's remaining budget before retrying. `None`
+    /// means no hint was reported, not proof that a refusal is permanent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 impl PrepareReply {
@@ -798,7 +865,35 @@ impl PrepareReply {
         Self {
             transfer_id,
             outcome,
+            refusal_detail: None,
+            retry_after_ms: None,
         }
+    }
+
+    /// Set a verbatim refusal explanation. The producer must obey
+    /// [`REFUSAL_DETAIL_MAX_BYTES`] and exclude secrets and credential material;
+    /// this setter does not validate or truncate the detail.
+    pub fn with_refusal_detail(mut self, refusal_detail: impl Into<String>) -> Self {
+        self.refusal_detail = Some(refusal_detail.into());
+        self
+    }
+
+    /// Read the verbatim refusal explanation, if reported.
+    pub fn refusal_detail(&self) -> Option<&str> {
+        self.refusal_detail.as_deref()
+    }
+
+    /// Set a transient-refusal retry hint in milliseconds. Callers must ignore
+    /// it for other outcomes and cap their wait at their remaining budget.
+    pub fn with_retry_after_ms(mut self, retry_after_ms: u64) -> Self {
+        self.retry_after_ms = Some(retry_after_ms);
+        self
+    }
+
+    /// Read the retry hint, if reported. This does not check the outcome or cap
+    /// the hint to the caller's remaining budget.
+    pub fn retry_after_ms(&self) -> Option<u64> {
+        self.retry_after_ms
     }
 }
 
