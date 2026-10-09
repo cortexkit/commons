@@ -42,9 +42,13 @@ def main():
     daemon = subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL)
     # Record the daemon's PID separately from the watcher returned by spawn,
     # so lifecycle tests can assert that the supervised process is gone.
+    # Written to a temporary name and renamed, so a reader that sees the file
+    # always sees the whole PID, never an empty file mid-write.
     if os.environ.get("CORTEXKIT_TEST_DAEMON_PID_FILE"):
-        from pathlib import Path
-        Path(os.environ["CORTEXKIT_TEST_DAEMON_PID_FILE"]).write_text(str(daemon.pid))
+        target = os.environ["CORTEXKIT_TEST_DAEMON_PID_FILE"]
+        with open(target + ".tmp", "w") as pid_file:
+            pid_file.write(str(daemon.pid))
+        os.replace(target + ".tmp", target)
     # Retain descendants while the daemon is alive: a crashing daemon can
     # reparent its separately grouped modules before the next scan.
     owned = {}
