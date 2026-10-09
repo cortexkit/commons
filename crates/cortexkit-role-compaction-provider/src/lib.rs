@@ -230,4 +230,148 @@ mod tests {
                 .is_some_and(|ops| ops.contains(&ops::COMPACTION_READY))
         );
     }
+
+    fn joint_dir() -> String {
+        format!("{}/joint", vectors::dir())
+    }
+
+    fn sha256(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn joint_fixture_files_match_sha256sums() {
+        const FILES: &[&str] = &["transcript.json", "exchanges.json", "README.md"];
+        let sums_path = format!("{}/SHA256SUMS", joint_dir());
+        let sums = std::fs::read_to_string(&sums_path)
+            .unwrap_or_else(|error| panic!("{sums_path}: {error}"));
+        let checksums: std::collections::HashMap<&str, &str> = sums
+            .lines()
+            .map(|line| {
+                let (hash, name) = line
+                    .split_once("  ")
+                    .unwrap_or_else(|| panic!("invalid checksum entry: {line}"));
+                (name, hash)
+            })
+            .collect();
+        assert_eq!(
+            checksums.len(),
+            FILES.len(),
+            "unexpected SHA256SUMS entries"
+        );
+
+        for name in FILES {
+            let path = format!("{}/{name}", joint_dir());
+            let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+            let expected = checksums
+                .get(name)
+                .unwrap_or_else(|| panic!("{name}: missing from SHA256SUMS"));
+            assert_eq!(sha256(&bytes), *expected, "{name}: SHA-256 mismatch");
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct JointExchange {
+        name: String,
+        call: String,
+        request: Value,
+        answer: Value,
+        expected_view: Value,
+    }
+
+    fn decode_joint<T: serde::de::DeserializeOwned>(name: &str, part: &str, json: &Value) -> T {
+        serde_json::from_value(json.clone())
+            .unwrap_or_else(|error| panic!("{name}: {part} does not decode: {error}"))
+    }
+
+    fn joint_exchanges() -> Vec<JointExchange> {
+        let path = format!("{}/exchanges.json", joint_dir());
+        let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+        serde_json::from_slice(&bytes).unwrap_or_else(|error| panic!("{path}: {error}"))
+    }
+
+    #[test]
+    fn joint_fixture_exchanges_decode_with_the_wire_types_for_each_call() {
+        use cortexkit_role_step_transform_provider::{answer::HookAnswer, hook::HookCall};
+
+        let exchanges = joint_exchanges();
+        let names: Vec<&str> = exchanges
+            .iter()
+            .map(|exchange| exchange.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "setup-initial",
+                "tag-strip-mixed",
+                "reminder-last-text-block",
+                "noop-keeps-view",
+                "known-refusal",
+                "unknown-refusal-control",
+                "oversized-text-keeps-view",
+            ]
+        );
+
+        for exchange in &exchanges {
+            let method = exchange.request["method"].as_str().unwrap_or_else(|| {
+                panic!(
+                    "{}: request method is missing or not a string",
+                    exchange.name
+                )
+            });
+            match method {
+                "compaction.setup" => {
+                    assert_eq!(exchange.call, "setup", "{}", exchange.name);
+                    decode_joint::<OpRequest<setup::SetupRequest>>(
+                        &exchange.name,
+                        "request",
+                        &exchange.request,
+                    );
+                    decode_joint::<setup::SetupAnswer>(&exchange.name, "answer", &exchange.answer);
+                }
+                "compaction.step" => {
+                    assert_eq!(exchange.call, "step", "{}", exchange.name);
+                    decode_joint::<OpRequest<status::StepStatus>>(
+                        &exchange.name,
+                        "request",
+                        &exchange.request,
+                    );
+                    decode_joint::<answer::StepAnswer>(&exchange.name, "answer", &exchange.answer);
+                }
+                "transform.hook" => {
+                    assert_eq!(exchange.call, "step", "{}", exchange.name);
+                    decode_joint::<cortexkit_role_step_transform_provider::OpRequest<HookCall>>(
+                        &exchange.name,
+                        "request",
+                        &exchange.request,
+                    );
+                    decode_joint::<HookAnswer>(&exchange.name, "answer", &exchange.answer);
+                }
+                other => panic!("{}: unexpected call method {other}", exchange.name),
+            }
+            let _ = &exchange.expected_view;
+        }
+    }
+
+    #[test]
+    fn joint_unknown_refusal_control_decodes_as_an_unknown_refusal_code() {
+        let exchange = joint_exchanges()
+            .into_iter()
+            .find(|exchange| exchange.name == "unknown-refusal-control")
+            .expect("unknown-refusal-control exchange is present");
+        let answer = decode_joint::<setup::SetupAnswer>(&exchange.name, "answer", &exchange.answer);
+        match answer {
+            setup::SetupAnswer::Refuse { code, .. } => {
+                assert_eq!(
+                    code,
+                    errors::RefuseCode::Unknown("future_provider_reason".into())
+                );
+            }
+            other => panic!("{}: expected refusal, got {other:?}", exchange.name),
+        }
+    }
 }

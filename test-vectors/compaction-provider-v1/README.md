@@ -36,6 +36,14 @@ tests also remove it from each request in the `requests` lists of `setup.json` a
 `status.json` and check that the
 request is refused, naming the missing field.
 
+The `joint/` fixture was produced by a working compaction provider's own
+message encoder, not written by hand, so it shows the exact bytes a real
+provider sends. It is shared by every runner implementation that tests against
+this role. `transcript.json` holds the source conversation, `exchanges.json`
+holds the ordered request and answer pairs with the view each should produce,
+and `README.md` describes the cases. `joint/SHA256SUMS` pins the files' bytes;
+regenerate the fixture from the provider rather than editing it.
+
 Every canonical vector round-trips: decoding it and encoding the result gives
 back the same JSON. Changing a vector changes the contract: bump the role
 crate's version and say why in the commit.
