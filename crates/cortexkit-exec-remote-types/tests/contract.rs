@@ -43,6 +43,9 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-runner-draining",
     "crate-local-runner-disk-full",
     "crate-local-started",
+    "crate-local-network-outbound",
+    "crate-local-unknown-network",
+    "crate-local-network-unsupported",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -209,9 +212,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 16);
+    assert_eq!(LOCAL_OUTCOMES.len(), 19);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 53);
+    assert_eq!(cases().len(), 56);
 }
 
 #[test]
@@ -1356,5 +1359,183 @@ fn runner_disk_full_vector_uses_known_reason_and_round_trips_string() {
     assert_eq!(
         String::from(RefusalReason::RunnerDiskFull),
         "runner_disk_full"
+    );
+}
+
+#[test]
+fn network_absent_preserves_existing_golden_bytes() {
+    let mut original: OutcomeCase = serde_json::from_slice(&bytes("outcomes", "exit")).unwrap();
+    assert_eq!(original.request.network(), None);
+    let [StreamRecord::Accepted(accepted), StreamRecord::Terminal(_)] =
+        original.stream.as_mut_slice()
+    else {
+        panic!("expected acceptance followed by a terminal record")
+    };
+    assert_eq!(accepted.network(), None);
+
+    let request = RunRequest::new(
+        "/Users/example/worktrees/task",
+        "/Users/example/src/prefrontal",
+        "/Users/example/worktrees/task",
+        "cargo nextest run -p prefrontal-core-store",
+    )
+    .with_env([("RUST_BACKTRACE".into(), "1".into())].into())
+    .with_queue_wait_limit_s(300)
+    .with_siblings(vec!["/Users/example/src/commons".into()])
+    .with_timeout(60)
+    .with_weight_hint(16);
+    assert_eq!(request.network(), None);
+    assert_eq!(request, original.request);
+    let constructed = Accepted::new(job_id(), 1);
+    assert_eq!(constructed.network(), None);
+    assert_eq!(&constructed, accepted);
+    *accepted = constructed;
+    original.request = request;
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&original).unwrap(),
+        bytes("outcomes", "exit"),
+        "offline request and unacknowledged acceptance must preserve the existing exit vector"
+    );
+}
+
+#[test]
+fn network_outbound_vector_matches_known_variant_and_builders() {
+    let mut case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-network-outbound")).unwrap();
+    assert_eq!(case.request.network(), Some(&Network::Outbound));
+    let [StreamRecord::Accepted(accepted), StreamRecord::Terminal(_)] = case.stream.as_mut_slice()
+    else {
+        panic!("expected acceptance followed by a terminal record")
+    };
+    assert_eq!(accepted.network(), Some(&Network::Outbound));
+    assert_eq!(Network::from("outbound".to_owned()), Network::Outbound);
+    assert_eq!(String::from(Network::Outbound), "outbound");
+
+    let mut offline: OutcomeCase = serde_json::from_slice(&bytes("outcomes", "exit")).unwrap();
+    offline.request = offline.request.with_network(Network::Outbound);
+    assert_eq!(offline.request, case.request);
+    let constructed = Accepted::new(job_id(), 1).with_network(Network::Outbound);
+    assert_eq!(&constructed, accepted);
+    offline.stream[0] = StreamRecord::Accepted(constructed);
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&offline).unwrap(),
+        bytes("outcomes", "crate-local-network-outbound")
+    );
+}
+
+#[test]
+fn network_unknown_vector_retains_string_and_refusal_before_start() {
+    let case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-unknown-network")).unwrap();
+    let unknown = Network::Unknown("future_network".into());
+    assert_eq!(case.request.network(), Some(&unknown));
+    assert_eq!(Network::from("future_network".to_owned()), unknown);
+    assert_eq!(String::from(unknown.clone()), "future_network");
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("expected refusal without acceptance or start")
+    };
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::NetworkUnsupported
+        }
+    );
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", "crate-local-unknown-network")),
+        bytes("outcomes", "crate-local-unknown-network")
+    );
+    let accepted = Accepted::new(job_id(), 1).with_network(unknown.clone());
+    assert_eq!(
+        serde_json::from_value::<Accepted>(serde_json::to_value(&accepted).unwrap())
+            .unwrap()
+            .network(),
+        Some(&unknown)
+    );
+}
+
+#[test]
+fn network_unsupported_vector_uses_known_refusal_reason() {
+    let terminal = server_report("crate-local-network-unsupported");
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::NetworkUnsupported
+        }
+    );
+    assert_eq!(
+        RefusalReason::from("network_unsupported".to_owned()),
+        RefusalReason::NetworkUnsupported
+    );
+    assert_eq!(
+        String::from(RefusalReason::NetworkUnsupported),
+        "network_unsupported"
+    );
+}
+
+#[test]
+fn network_tags_reject_non_string_shapes() {
+    string_tags_reject_malformed_shapes::<Network>(&["outbound", "future_network"]);
+}
+
+#[test]
+fn network_null_fields_decode_as_absent() {
+    let mut request = value("outcomes", "exit")["request"].clone();
+    request["network"] = Value::Null;
+    assert_eq!(
+        serde_json::from_value::<RunRequest>(request)
+            .unwrap()
+            .network(),
+        None
+    );
+    let accepted: Accepted = serde_json::from_value(json!({
+        "job_id": job_id(), "queue_position": 1, "network": null
+    }))
+    .unwrap();
+    assert_eq!(accepted.network(), None);
+}
+
+// These shapes mirror 0.2.4 before network requests and grants were added, so
+// their re-encoding checks that older decoders ignore only the additive fields.
+#[derive(Serialize, Deserialize)]
+struct RunRequest024 {
+    workspace_key: String,
+    repository_root: String,
+    cwd: String,
+    command: String,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    weight_hint: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_wait_limit_s: Option<u64>,
+    #[serde(default)]
+    siblings: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Accepted024 {
+    job_id: Uuid,
+    queue_position: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    env_not_forwarded: Option<Vec<String>>,
+}
+
+#[test]
+fn network_fields_are_ignored_by_0_2_4_decoders() {
+    let extended = value("outcomes", "crate-local-network-outbound");
+    let original = value("outcomes", "exit");
+    assert_eq!(
+        round_trip::<RunRequest024>(&serde_json::to_vec(&extended["request"]).unwrap()),
+        serde_json_canonicalizer::to_vec(&original["request"]).unwrap()
+    );
+    let mut accepted = extended["stream"][0].clone();
+    accepted.as_object_mut().unwrap().remove("type");
+    let mut old_accepted = original["stream"][0].clone();
+    old_accepted.as_object_mut().unwrap().remove("type");
+    assert_eq!(
+        round_trip::<Accepted024>(&serde_json::to_vec(&accepted).unwrap()),
+        serde_json_canonicalizer::to_vec(&old_accepted).unwrap()
     );
 }

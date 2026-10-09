@@ -2,7 +2,7 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The nineteen `crate-local-*` cases documented below exist only
+pin the same bytes. The twenty-two `crate-local-*` cases documented below exist only
 here. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
 
@@ -53,9 +53,27 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These sixteen outcome cases (32 files: one `.jcs`/`.sha256` pair each) and
+These nineteen outcome cases (38 files: one `.jcs`/`.sha256` pair each) and
 three reply cases (six files) extend the caller corpus described above. The
-resulting corpus contains 36 outcome cases and 17 reply cases:
+resulting corpus contains 39 outcome cases and 17 reply cases:
+
+- `outcomes/crate-local-network-outbound`: a request with `network: "outbound"`
+  and an `accepted` record acknowledging `network: "outbound"`. The runner must
+  isolate internet access from the caller's machine and local network. Callers
+  cannot assume outbound access without `Some(Network::Outbound)` in the
+  acknowledgement, and must not automatically rerun after an unknown outcome
+  because a network-enabled job may have had outside effects.
+- `outcomes/crate-local-unknown-network`: `network: "future_network"` retained as
+  `Network::Unknown`, with `network_unsupported` refusal before start. A runner
+  must refuse unrecognised network requests rather than downgrade or upgrade them.
+- `outcomes/crate-local-network-unsupported`: an outbound request refused before
+  start with the known, non-transient `RefusalReason::NetworkUnsupported`.
+
+Absent network fields preserve the existing `outcomes/exit` bytes. Tests also
+decode the outbound request and accepted record with shapes mirroring 0.2.4 and
+compare their re-encoding to those records in the existing `exit` vector. Older
+decoders ignore the additive fields; an absent request remains offline, while an
+absent acknowledgement means the runner predates the field, not access granted.
 
 - `outcomes/crate-local-unknown-refusal`: `refused_before_start` with reason
   `future_refusal`, decoded as `RefusalReason::Unknown` while retaining the

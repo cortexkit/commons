@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.4**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.5**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -31,6 +31,27 @@ never a terminal record. Its `seq` counts toward the attach resume cursor;
 `Output` retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
 character, so decoding never converts its payload to a string.
+
+### Network access
+
+Runs stay offline unless the caller requests `RunRequest::with_network(Network::Outbound)`.
+`Network::Outbound` serializes as `"outbound"` and means the job may open outbound
+connections to the internet, for example to install packages. It never grants
+access to the caller's machine or local network; the runner must enforce that
+isolation. This crate only carries the request and acknowledgement.
+
+The runner reports the access actually granted through `Accepted::with_network`.
+If a caller asked for `Outbound` and `Accepted.network` is not `Some(Outbound)`,
+the job runs offline. `None` means the runner predates the field, not that access
+was granted. Both fields are omitted when absent, preserving existing bytes.
+
+Future strings round-trip as `Network::Unknown(String)`. A runner receiving an
+unrecognised request must refuse before start with the non-transient
+`RefusalReason::NetworkUnsupported` (`"network_unsupported"`), never downgrade or
+upgrade access. A job granted outbound access may have had outside effects, so
+the caller must not automatically rerun it after an unknown outcome.
+
+### Terminal reports
 
 The terminal's `ran`, `tree_hash`, and `workspace_changes` are explicit `Option`s
 and always serialize, including as JSON null. `Some(Ran::None)` encodes the
@@ -73,6 +94,7 @@ tags into a catch-all with a stated grading:**
 | Enum | Catch-all | Caller grading |
 |---|---|---|
 | `RefusalReason` | `Unknown(String)` | Inside `refused_before_start`, the command still did not start. |
+| `Network` | `Unknown(String)` | Never assume outbound access from an unknown acknowledgement. Runners must refuse unknown requests before start. |
 | `Outcome` | `Unknown { kind: String }` | Grade like `outcome_unknown`: never assume the command did not run, and never re-run it locally. |
 | `StreamRecord` | `Unknown { kind: String, seq: Option<u64> }` | Skip and keep reading; count its seq toward the resume cursor; never treat it as terminal. |
 | `Killed` | `Unknown(String)` | The command was killed for a reason this version does not recognise. |
@@ -122,7 +144,14 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Eighteen **crate-local additions**, written in this crate rather than copied from the executor's corpus, cover the cases below:
+Twenty-two **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
+
+- `outcomes/crate-local-network-outbound`: an outbound request and acknowledged
+  grant; 0.2.4-shaped request and accepted decoders ignore the additive fields.
+- `outcomes/crate-local-unknown-network`: a future network string retained as
+  `Unknown`, with a before-start refusal rather than an offline downgrade.
+- `outcomes/crate-local-network-unsupported`: the known `network_unsupported`
+  refusal reason for a runner that cannot grant the requested access.
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.

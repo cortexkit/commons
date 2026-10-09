@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.5
+
+- `RunRequest` gains optional `network: Option<Network>`, with a `with_network`
+  setter and getter. Absent requests remain offline and serialize to the same
+  bytes as 0.2.4. Callers can request `Network::Outbound` (`"outbound"`) for
+  internet access, for example to install packages. The runner, not these types,
+  must enforce isolation: outbound access never grants access to the caller's
+  machine or local network.
+- `Accepted` gains optional `network: Option<Network>`, with a `with_network`
+  setter and getter, for the access the runner actually granted. `None` means
+  the runner predates the field, so callers cannot assume access. If a caller
+  asked for `Outbound` and the acknowledgement is not `Some(Outbound)`, the job
+  runs offline. Callers must not automatically rerun a job granted outbound
+  access after an unknown outcome because it may have had outside effects.
+- `Network` is a non-exhaustive string enum retaining future strings as
+  `Unknown(String)`. Runners receiving an unrecognised network request must
+  refuse before start, not downgrade or upgrade access. The new non-transient
+  `RefusalReason::NetworkUnsupported` (`"network_unsupported"`) reports this
+  refusal. Callers matching `Unknown("network_unsupported")` must switch to the
+  known variant.
+- Crate-local golden vectors cover outbound requests and grants, unknown network
+  strings, the new refusal reason, unchanged offline bytes, and request/accepted
+  decoders mirroring 0.2.4 that ignore the additive network fields.
+
 ## 0.2.4
 
 - `StreamRecord::Started` reports the sequence number, runner-measured queue

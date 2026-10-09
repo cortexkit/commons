@@ -23,6 +23,42 @@ impl<'de> Deserialize<'de> for BytePayload {
     }
 }
 
+/// Network access requested by a caller or actually granted by a runner.
+///
+/// A job granted outbound access may have had outside effects. A caller must
+/// not automatically rerun it after an unknown outcome.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum Network {
+    /// The job may open outbound connections to the internet. This never means
+    /// access to the caller's machine or local network; the runner must enforce
+    /// that isolation.
+    Outbound,
+    /// A network mode this version does not recognise. A runner receiving it in
+    /// a request must refuse the job before start with
+    /// [`RefusalReason::NetworkUnsupported`], not downgrade or upgrade access.
+    Unknown(String),
+}
+
+impl From<String> for Network {
+    fn from(network: String) -> Self {
+        match network.as_str() {
+            "outbound" => Self::Outbound,
+            _ => Self::Unknown(network),
+        }
+    }
+}
+
+impl From<Network> for String {
+    fn from(network: Network) -> Self {
+        match network {
+            Network::Outbound => "outbound".into(),
+            Network::Unknown(network) => network,
+        }
+    }
+}
+
 /// `exec.run` parameters; executor-owned IDs and snapshot metadata are absent.
 /// Both timeout and queue_wait_limit_s are measured in seconds.
 ///
@@ -45,10 +81,14 @@ pub struct RunRequest {
     pub queue_wait_limit_s: Option<u64>,
     #[serde(default)]
     pub siblings: Vec<String>,
+    /// Requested network access. Absent means offline. The runner enforces the
+    /// isolation and reports the access actually granted in [`Accepted::network`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<Network>,
 }
 
 impl RunRequest {
-    /// A request with empty env/siblings and executor-default scheduling limits.
+    /// An offline request with empty env/siblings and executor-default scheduling limits.
     pub fn new(
         workspace_key: impl Into<String>,
         repository_root: impl Into<String>,
@@ -65,6 +105,7 @@ impl RunRequest {
             timeout: None,
             queue_wait_limit_s: None,
             siblings: Vec::new(),
+            network: None,
         }
     }
 
@@ -96,6 +137,17 @@ impl RunRequest {
     pub fn with_siblings(mut self, siblings: Vec<String>) -> Self {
         self.siblings = siblings;
         self
+    }
+
+    /// Request network access; the runner must acknowledge what it granted.
+    pub fn with_network(mut self, network: Network) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    /// Requested network access, or `None` for an offline job.
+    pub fn network(&self) -> Option<&Network> {
+        self.network.as_ref()
     }
 }
 
@@ -152,6 +204,9 @@ pub enum RefusalReason {
     TreeHashMismatch,
     BundleRejected,
     WorkspaceSetupFailed,
+    /// Not transient: the runner does not support the requested network mode.
+    /// The job was refused before start, without downgrading or upgrading access.
+    NetworkUnsupported,
     /// A refusal tag this version does not recognise. The refused command
     /// still did not start.
     Unknown(String),
@@ -172,6 +227,7 @@ impl From<String> for RefusalReason {
             "tree_hash_mismatch" => Self::TreeHashMismatch,
             "bundle_rejected" => Self::BundleRejected,
             "workspace_setup_failed" => Self::WorkspaceSetupFailed,
+            "network_unsupported" => Self::NetworkUnsupported,
             _ => Self::Unknown(reason),
         }
     }
@@ -192,6 +248,7 @@ impl From<RefusalReason> for String {
             RefusalReason::TreeHashMismatch => "tree_hash_mismatch".into(),
             RefusalReason::BundleRejected => "bundle_rejected".into(),
             RefusalReason::WorkspaceSetupFailed => "workspace_setup_failed".into(),
+            RefusalReason::NetworkUnsupported => "network_unsupported".into(),
             RefusalReason::Unknown(reason) => reason,
         }
     }
@@ -780,6 +837,12 @@ pub struct Accepted {
     /// absent list means "not reported", not "everything was forwarded".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_not_forwarded: Option<Vec<String>>,
+    /// Network access the runner actually granted. `None` means the runner
+    /// predates this field, so the caller cannot assume access. If a caller asked
+    /// for [`Network::Outbound`] and this is not `Some(Network::Outbound)`, the
+    /// job runs offline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<Network>,
 }
 
 impl Accepted {
@@ -788,6 +851,7 @@ impl Accepted {
             job_id,
             queue_position,
             env_not_forwarded: None,
+            network: None,
         }
     }
 
@@ -795,6 +859,17 @@ impl Accepted {
     pub fn with_env_not_forwarded(mut self, names: Vec<String>) -> Self {
         self.env_not_forwarded = Some(names);
         self
+    }
+
+    /// Report the network access actually granted by the runner.
+    pub fn with_network(mut self, network: Network) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    /// Network access actually granted, or `None` when not acknowledged.
+    pub fn network(&self) -> Option<&Network> {
+        self.network.as_ref()
     }
 }
 
