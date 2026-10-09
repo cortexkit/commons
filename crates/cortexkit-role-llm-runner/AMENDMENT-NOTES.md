@@ -101,6 +101,27 @@ follow-ups" lists them.
 - **Checks:** MC (provider side of the mapping), core (branches on
   `provider_code`).
 
+### §6 `run_ops`: run attribution
+
+- **Old:** each message records which run and episode produced it and
+  whether it is that run's final message, as `run: {run_id, episode,
+  final}`; what `final` means for a run that ended on a non-assistant
+  message, for a run still running, and for a message the runner cannot
+  attribute was left implicit.
+- **New:** three sentences. `final` is the last message the run produced,
+  whatever its role, so an `interrupted` run ending on a tool result marks
+  that tool result final. A run whose terminal is not durable has no final
+  message. A message the runner cannot attribute omits `run`; the runner
+  never invents one, and absence never means "the last run".
+- **Input:** a clarification of the existing pinned text, not a change.
+  broca's gap "no per-message run attribution despite `run_ops`" below is
+  closed by broca implementing §6 as written: its WAL records every
+  episode boundary, so a reprojection can attribute every message,
+  including archived sessions. broca will use the episode's `RunStarted`
+  WAL sequence as the opaque `episode`.
+- **Checks:** core and Thalamus (they read pages), MC (it reads transcripts
+  through the runner route).
+
 ### §6.1 `run_status`: `run.status` (new)
 
 - **Old:** none. `run.status` appeared only in §9.1 as a runner-specific op.
@@ -448,6 +469,15 @@ Not contract text; listed so the merge carries them.
   `errors::provider_codes::COMPACTION_UNAVAILABLE` to Setup-only. The
   `run-result.json` case named "compaction call unavailable with no answer"
   should be renamed to say Setup.
+- `cortexkit-role-llm-runner-conformance`: implement
+  `run_attribution_per_message` (today in the README's "not yet
+  implemented" list) in the same change as this amendment. It checks the
+  three §6 rules: every attributable message carries `run`; `final` sits on
+  exactly the last message of each run with a durable terminal and on none
+  of a running run's messages; an unattributable message omits `run`
+  rather than inventing one. Each rule has one deliberately broken fake
+  that must fail the case by name, so a runner pins against a case that
+  can fail.
 - `cortexkit-role-llm-runner-conformance`: the narrowing
   "retention_run_status_expired is inapplicable if run.status is not
   advertised; run.status remains runner-specific" should drop "remains

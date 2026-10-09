@@ -307,6 +307,12 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   produced it, and whether it is that run's final message.
   [pinned] It rides as `run: {run_id, episode, final}` (`RunAttribution`),
   with `episode` an opaque string.
+  [pinned] `final` means the last message this run produced, whatever its
+  role: an `interrupted` run that ended on a tool result marks that tool
+  result `final: true`. A run whose terminal is not yet durable has no final
+  message, so its newest message reads `final: false`.
+  [pinned] A message the runner cannot attribute omits `run`. A runner never
+  invents an attribution, and an absent `run` never means "the last run".
 
 ### 6.1 `run_status`: `run.status`
 
