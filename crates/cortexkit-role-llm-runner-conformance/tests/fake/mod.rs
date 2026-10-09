@@ -554,6 +554,9 @@ impl Module {
             .collect();
         for (session, run_id) in cut {
             self.commit(&session, json!({ "kind": "resume" }))?;
+            if self.seal_compaction_setup_crash(&session, &run_id)? {
+                continue;
+            }
             let open: Vec<String> = self.sessions.lock().unwrap()[&session]
                 .calls
                 .iter()
@@ -1583,6 +1586,7 @@ pub struct FakeSubject {
     pub defects: Defects,
     pub step_recovery: StepRecovery,
     pub capabilities: BTreeSet<Capability>,
+    pub seal_compaction_setup_crash: bool,
     pub kill_points: Vec<&'static str>,
     /// Report every kill as a real process kill, which this in-process fake
     /// cannot make. Only for tests of the verdict.
@@ -1647,6 +1651,7 @@ impl FakeSubject {
             defects,
             step_recovery: StepRecovery::Resume,
             capabilities: served(),
+            seal_compaction_setup_crash: false,
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
@@ -1692,7 +1697,9 @@ impl FakeSubject {
                         .map(str::to_owned)
                         .collect(),
                     scripts: Mutex::new(BTreeMap::new()),
-                    compaction: Mutex::new(compaction::Providers::default()),
+                    compaction: Mutex::new(compaction::Providers::new(
+                        self.seal_compaction_setup_crash,
+                    )),
                     invocations: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),

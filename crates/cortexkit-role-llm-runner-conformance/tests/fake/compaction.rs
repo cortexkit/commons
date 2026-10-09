@@ -13,6 +13,9 @@ pub enum CompactionDefect {
     #[default]
     None,
     RerunRecordedSetup,
+    RerunSetupOnResumeSend,
+    ChangeSetupResumeView,
+    CancelSetupCrash,
     FoldBeforeAnswer,
     InsertionAfterMessage,
     UnavailableAsRefusal,
@@ -44,11 +47,22 @@ pub(super) struct State {
     request_count: usize,
     checked_step: Option<usize>,
     wait: Option<(u64, u64)>,
+    sealed_setup_crash: bool,
 }
 
 #[derive(Default)]
 pub(super) struct Providers {
+    pub seal_setup_crash: bool,
     sessions: BTreeMap<String, Provider>,
+}
+
+impl Providers {
+    pub(super) fn new(seal_setup_crash: bool) -> Self {
+        Self {
+            seal_setup_crash,
+            ..Self::default()
+        }
+    }
 }
 
 struct Provider {
@@ -144,6 +158,25 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
         "resume" if defect == CompactionDefect::ForgetRecordedFold && state.view.is_some() => {
             state.fold = None;
         }
+        "terminal"
+            if record["state"] == "interrupted"
+                && state.request.as_ref().is_some_and(|r| r.setup) =>
+        {
+            state.sealed_setup_crash = true;
+        }
+        "send" if state.sealed_setup_crash => {
+            state.sealed_setup_crash = false;
+            match defect {
+                CompactionDefect::RerunSetupOnResumeSend => {
+                    state.setup = None;
+                    state.request = None;
+                }
+                CompactionDefect::ChangeSetupResumeView => {
+                    state.view.as_mut().unwrap().replacement[1] = "changed-kept-summary".into();
+                }
+                _ => {}
+            }
+        }
         _ => {}
     }
 }
@@ -178,6 +211,31 @@ fn canonical(sess: &Sess) -> Vec<ModelEntry> {
 }
 
 impl Module {
+    pub(super) fn seal_compaction_setup_crash(
+        &self,
+        session: &str,
+        run_id: &str,
+    ) -> Result<bool, Killed> {
+        let state = self.sessions.lock().unwrap()[session].compaction.clone();
+        if !self.world.compaction.lock().unwrap().seal_setup_crash
+            || state.setup.is_none()
+            || state.view.is_none()
+            || !state.request.as_ref().is_some_and(|r| r.setup)
+        {
+            return Ok(false);
+        }
+        let state = if self.world.defects.compaction == CompactionDefect::CancelSetupCrash {
+            "cancelled"
+        } else {
+            "interrupted"
+        };
+        self.commit(
+            session,
+            json!({"kind":"terminal", "run_id":run_id, "state":state}),
+        )?;
+        Ok(true)
+    }
+
     fn compaction_now(&self, session: &str) -> u64 {
         self.world.compaction.lock().unwrap().sessions[session].now
     }

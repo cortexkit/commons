@@ -1005,6 +1005,54 @@ async fn compaction_setup_rerun_fails_only_setup_durability() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn compaction_setup_sender_driven_recovery_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.seal_compaction_setup_crash = true;
+    let report = run(&subject).await;
+    for name in COMPACTION_CASES {
+        assert_passed(&report, name);
+    }
+    assert_others_passed(&report, &[]);
+}
+
+async fn compaction_sender_driven_break(defect: CompactionDefect, reason: &str) {
+    let mut subject = FakeSubject::new(Defects {
+        compaction: defect,
+        ..Defects::default()
+    });
+    subject.seal_compaction_setup_crash = true;
+    let report = run(&subject).await;
+    let failure = failed(&report, "compaction_setup_durable_once");
+    assert!(failure.contains(reason), "{failure}");
+    assert_others_passed(&report, &["compaction_setup_durable_once"]);
+}
+
+#[tokio::test]
+async fn compaction_setup_sender_driven_rerun_fails_only_setup_durability() {
+    compaction_sender_driven_break(CompactionDefect::RerunSetupOnResumeSend, "Setup was re-run")
+        .await;
+}
+
+#[tokio::test]
+async fn compaction_setup_sender_driven_changed_view_fails_only_setup_durability() {
+    compaction_sender_driven_break(
+        CompactionDefect::ChangeSetupResumeView,
+        "content at message 1 differs",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn compaction_setup_unexpected_recovery_state_fails_only_setup_durability() {
+    compaction_sender_driven_break(
+        CompactionDefect::CancelSetupCrash,
+        "unexpected run state cancelled",
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn compaction_early_fold_fails_only_fence_crash() {
     compaction_break(

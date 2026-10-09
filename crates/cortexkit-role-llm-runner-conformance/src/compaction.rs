@@ -9,7 +9,7 @@ use cortexkit_role_compaction_provider::errors::RefuseCode;
 use cortexkit_role_harness::{CrashDriver, KillPoint, Trigger};
 use cortexkit_role_llm_runner::{
     ops, points,
-    read::{EntrySource, ModelPage, ReadRequest, ReadView},
+    read::{EntrySource, ModelEntry, ModelPage, ReadRequest, ReadView},
     run::RunState,
     send::SendReply,
 };
@@ -17,7 +17,9 @@ use serde_json::{json, Value};
 
 use crate::{
     cases::{Case, Session},
-    drive::{call, decode, expect_ok, read_all, run_result, send_params, Mint},
+    drive::{
+        call, decode, expect_ok, head as session_head, read_all, run_result, send_params, Mint,
+    },
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
     RunnerRoute,
 };
@@ -958,8 +960,10 @@ where
     let handle = driver.restart(&root).await.map_err(|e| e.to_string())?;
     // Reopen cut_name after restart so the provider retains the session's
     // captured calls and configured answers under the original identity.
-    finish_crash(subject, &handle, &cut_name, &head, &expected, fence).await?;
-    if !fence {
+    if fence {
+        finish_crash(subject, &handle, &cut_name, &head, &expected, true).await?;
+    } else {
+        finish_setup_crash(subject, &handle, &cut_name, &head, &expected, mint).await?;
         let obs = observation(subject, &cut_name).await?;
         if obs.model_inputs.len() != 1 {
             return Err("restarted Setup did not reach its first held model request".into());
@@ -998,6 +1002,156 @@ where
         }
     }
     Ok(())
+}
+
+const SETUP_RESUME_PROMPT: &str = "resume-after-recorded-compaction-setup";
+
+fn expect_crash_entries(
+    what: &str,
+    actual: &[ModelEntry],
+    expected: &[ModelEntry],
+) -> Result<(), String> {
+    if actual.len() != expected.len() {
+        return Err(format!(
+            "{what}: message count differs: {} versus {} (only the resume user message may be appended)",
+            actual.len(), expected.len()
+        ));
+    }
+    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+        if actual.source != expected.source {
+            return Err(format!(
+                "{what}: source at message {index} differs (ids, range or ordering): {:?} versus {:?}",
+                actual.source, expected.source
+            ));
+        }
+        if actual.message != expected.message {
+            return Err(format!(
+                "{what}: content at message {index} differs: {} versus {}",
+                actual.message, expected.message
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn finish_setup_crash<S>(
+    subject: &S,
+    handle: &crate::harness::DriverHandle<S>,
+    session: &str,
+    head: &CompactionMessage,
+    expected: &ModelPage,
+    mint: &Mint,
+) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let route = subject
+        .session_route(handle.inner(), session, &subject.owner_stamp())
+        .await
+        .map_err(|e| e.to_string())?;
+    let last = session_head(&route)
+        .await?
+        .last_run_state
+        .ok_or("Setup crash recovery has no run state")?;
+    let interrupted = match RunState::parse(&last.state) {
+        RunState::Active => false,
+        RunState::Interrupted => true,
+        _ => {
+            return Err(format!(
+                "Setup crash recovery has unexpected run state {} (expected active or interrupted)",
+                last.state
+            ));
+        }
+    };
+    finish_crash(subject, handle, session, head, expected, false).await?;
+    let mut expected = model_page(&route, 0, false).await?;
+    if interrupted {
+        let obs = observation(subject, session).await?;
+        if !obs.model_inputs.is_empty() {
+            return Err("sealed Setup crash run called the model before a resume send".into());
+        }
+        // The uncrashed comparison run used its own session, so its message ids
+        // can't be compared with this one. Instead, compare this session's view
+        // with itself: what the model sees after the resume send must be the
+        // recovered view plus the one new user message, and nothing else.
+        let (_, before) = read_all(&route).await?;
+        let reply: SendReply = decode(
+            "Setup crash resume send",
+            expect_ok(
+                "Setup crash resume send",
+                call(
+                    &route,
+                    ops::SESSION_SEND,
+                    send_params(
+                        subject,
+                        session,
+                        false,
+                        SETUP_RESUME_PROMPT,
+                        &mint.next("send"),
+                        None,
+                    ),
+                )
+                .await?,
+            )?,
+        )?;
+        let (_, after) = read_all(&route).await?;
+        if after.len() != before.len() + 1 || after[..before.len()] != before {
+            return Err(
+                "Setup resume changed the kept transcript outside the appended user message".into(),
+            );
+        }
+        let user = after.last().expect("one message appended");
+        let run_id = reply
+            .run_id
+            .as_ref()
+            .ok_or("Setup resume send has no run_id")?;
+        if !user.message.to_string().contains(SETUP_RESUME_PROMPT)
+            || user.run.as_ref().map(|r| &r.run_id) != Some(run_id)
+            || run_id == &last.run_id
+        {
+            return Err("Setup resume did not append the new send's user message".into());
+        }
+        expected.messages.push(ModelEntry::new(
+            EntrySource::Message {
+                ordinal: user.ordinal,
+                mid: user.mid.clone(),
+            },
+            user.message.clone(),
+        ));
+    }
+    let obs = observation(subject, session).await?;
+    if obs
+        .calls
+        .iter()
+        .filter(|c| c.kind == CompactionCallKind::Setup)
+        .count()
+        != 1
+    {
+        return Err("Setup was re-run after its durable answer on crash recovery".into());
+    }
+    let page = model_page(&route, 0, false).await?;
+    if page.compaction_id != expected.compaction_id || page.version != expected.version {
+        return Err("Setup crash recovery changed the compaction id or version outside the appended user message".into());
+    }
+    if page.lineage_id != expected.lineage_id
+        || page.next_from_ordinal != expected.next_from_ordinal
+    {
+        return Err("Setup crash recovery changed the lineage or page cursor".into());
+    }
+    expect_crash_entries(
+        "Setup recovered model page",
+        &page.messages,
+        &expected.messages,
+    )?;
+    if obs.model_inputs.len() != 1 {
+        return Err("Setup crash recovery did not reach exactly one held model request".into());
+    }
+    expect_crash_entries(
+        "Setup first held model request",
+        &obs.model_inputs[0],
+        &expected.messages,
+    )
 }
 
 async fn finish_crash<S>(

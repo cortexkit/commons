@@ -907,6 +907,8 @@ in its own CI against its real module over real routes, never a double. It
 drives the runner with a scripted model provider and scripted compaction and
 step-transform providers. It will check:
 
+Crash recovery may be runner-driven (the runner resumes the cut run) or sender-driven (the runner seals the cut run `interrupted`, then the sender resumes with a new send on the same session), and the compaction cases accept both.
+
 | Case | Requires |
 |---|---|
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `FoldRecorded` (initial answer/fold durable before first model call) |
