@@ -17,6 +17,16 @@
 //! `(module_id, backend, storage_namespace)` so two modules sharing one lease root
 //! never collide, and the persisted epoch is available as the fence token a
 //! distributed/cloud backend's writes would compare-and-set on.
+//!
+//! File-backed SQLite databases also record their `(module_id, storage_namespace)`
+//! owner before taking a lease. A different owner is refused even through a path
+//! alias. Read-only operations do not claim or check ownership; in-memory and URI
+//! databases are exempt. Intentionally changing ownership requires clearing the
+//! row in `cortexkit_owner` while all writers are stopped; there is no API for it.
+//! A first claim attempts a best-effort WAL checkpoint. If readers delay it, the
+//! writer still opens, but hard-link aliases may not see the owner until a later
+//! checkpoint copies the row into the main file. Matching-owner opens never
+//! checkpoint ownership.
 
 pub use cortexkit_store_types::{
     postgres_database_name, sqlite_store_path, Isolation, StorageBackend, StorageDescriptor,
@@ -82,6 +92,14 @@ pub enum StoreError {
     Backend(String),
     /// An io failure preparing the store location.
     Io(std::io::Error),
+    /// The database belongs to a different module or storage namespace.
+    /// No writer lease was taken and no application writes were performed.
+    OwnershipMismatch {
+        recorded_module_id: String,
+        recorded_storage_namespace: String,
+        requested_module_id: String,
+        requested_storage_namespace: String,
+    },
     /// A fenced (epoch-checked) write was rejected because the database has already
     /// been claimed by a newer writer. `db_epoch` (the epoch stamped in the
     /// database) is greater than `holder_epoch` (this store's lease epoch), so this
@@ -101,6 +119,17 @@ impl std::fmt::Display for StoreError {
             StoreError::Migration(m) => write!(f, "migration: {m}"),
             StoreError::Backend(m) => write!(f, "storage backend: {m}"),
             StoreError::Io(e) => write!(f, "storage io: {e}"),
+            StoreError::OwnershipMismatch {
+                recorded_module_id,
+                recorded_storage_namespace,
+                requested_module_id,
+                requested_storage_namespace,
+            } => write!(
+                f,
+                "database ownership mismatch: recorded owner ({recorded_module_id:?}, \
+                 {recorded_storage_namespace:?}), requested owner ({requested_module_id:?}, \
+                 {requested_storage_namespace:?})"
+            ),
             StoreError::Fenced {
                 holder_epoch,
                 db_epoch,
@@ -135,7 +164,7 @@ mod sqlite_backend {
     };
 
     use cortexkit_lease::{protect_file, FileLeaseStore, LeaseHandle};
-    use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
+    use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
     /// Decides whether `open_sqlite` creates and narrows the store's directory:
     /// only when the store's file sits in a directory of its own.
@@ -533,20 +562,22 @@ mod sqlite_backend {
             std::fs::create_dir_all(&parent).map_err(StoreError::Io)?;
         }
 
-        // Acquire the single-writer lease first, co-located with the database file
-        // so the lease identity follows the database path by construction.
+        let mut conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
+        conn.busy_timeout(options.busy_timeout)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        if !is_memory_or_uri(&path) {
+            claim_owner(&mut conn, descriptor)?;
+        }
+
+        // Ownership must be checked before a descriptor-specific lease can admit
+        // a second writer to the same database under a different namespace.
         let lease = FileLeaseStore::new(&parent)
             .acquire(&lease_key(descriptor))
             .map_err(StoreError::Lease)?;
         let epoch = lease.epoch();
 
-        let conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
-        // Durability + concurrency pragmas: WAL for concurrent readers, a busy
-        // timeout so a transient lock waits rather than erroring, foreign keys on.
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        conn.busy_timeout(options.busy_timeout)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        // WAL permits concurrent readers; foreign keys protect referential integrity.
+        enable_wal(&conn, options.busy_timeout).map_err(|e| StoreError::Backend(e.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| StoreError::Backend(e.to_string()))?;
 
@@ -594,6 +625,129 @@ mod sqlite_backend {
             epoch,
             _lease: lease,
         })
+    }
+
+    /// Switch to WAL, retrying while another connection briefly holds a lock.
+    ///
+    /// Leaving rollback-journal mode needs an exclusive lock, and when another
+    /// connection holds a write lock SQLite reports busy at once instead of
+    /// running the busy handler, to avoid a deadlock. That happens on a fresh
+    /// database when a second opener under another owner is still inside its
+    /// claim transaction, about to be refused: without a retry, the opener that
+    /// rightly won the claim would fail to start. Retries stop at the caller's
+    /// busy timeout.
+    fn enable_wal(conn: &Connection, busy_timeout: Duration) -> rusqlite::Result<()> {
+        let started = Instant::now();
+        loop {
+            match conn.pragma_update(None, "journal_mode", "WAL") {
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if matches!(
+                        error.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) && started.elapsed() < busy_timeout =>
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    /// The recorded `(module_id, storage_namespace)` owner, or `None` when the
+    /// database has never been claimed.
+    fn read_owner(conn: &Connection) -> rusqlite::Result<Option<(String, String)>> {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema
+             WHERE type = 'table' AND name = 'cortexkit_owner')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Ok(None);
+        }
+        conn.query_row(
+            "SELECT module_id, storage_namespace FROM cortexkit_owner WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+    }
+
+    fn check_owner(
+        (module_id, storage_namespace): (String, String),
+        descriptor: &StorageDescriptor,
+    ) -> Result<(), StoreError> {
+        if module_id != descriptor.module_id || storage_namespace != descriptor.storage_namespace {
+            return Err(StoreError::OwnershipMismatch {
+                recorded_module_id: module_id,
+                recorded_storage_namespace: storage_namespace,
+                requested_module_id: descriptor.module_id.clone(),
+                requested_storage_namespace: descriptor.storage_namespace.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    fn claim_owner(
+        conn: &mut Connection,
+        descriptor: &StorageDescriptor,
+    ) -> Result<(), StoreError> {
+        let backend = |e: rusqlite::Error| StoreError::Backend(e.to_string());
+        // Almost every open finds an owner already recorded. Check that with a plain
+        // read first, so a reopen never waits for the write lock: behind a busy writer
+        // it would time out as a backend error instead of reaching the lease refusal.
+        if let Some(recorded) = read_owner(conn).map_err(backend)? {
+            return check_owner(recorded, descriptor);
+        }
+        // No owner yet. Serialize the first claim with every other writer open, not
+        // just openers whose descriptors happen to share a lease key, and look again
+        // inside the transaction, since another opener may have claimed it meanwhile.
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(backend)?;
+        if let Some(recorded) = read_owner(&tx).map_err(backend)? {
+            check_owner(recorded, descriptor)?;
+            return tx.commit().map_err(backend);
+        } else {
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS cortexkit_owner (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                module_id TEXT NOT NULL,
+                storage_namespace TEXT NOT NULL
+             );",
+            )
+            .map_err(backend)?;
+            tx.execute(
+                "INSERT INTO cortexkit_owner (id, module_id, storage_namespace) VALUES (1, ?1, ?2)",
+                rusqlite::params![descriptor.module_id, descriptor.storage_namespace],
+            )
+            .map_err(backend)?;
+        }
+        tx.commit().map_err(backend)?;
+
+        // Publish a first claim in the main file when possible, since a hard-link
+        // alias has a different WAL file name. A pinned read snapshot can delay
+        // this checkpoint; it must not prevent the owning writer from starting.
+        let checkpoint: rusqlite::Result<(i64, i64, i64)> =
+            conn.query_row("PRAGMA wal_checkpoint(FULL)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            });
+        match checkpoint {
+            Ok((0, frames, checkpointed)) if frames == checkpointed => {}
+            Ok((busy, frames, checkpointed)) => eprintln!(
+                "warning: SQLite owner ({:?}, {:?}) was recorded, but its first checkpoint \
+                 was busy or incomplete (busy={busy}, frames={frames}, checkpointed={checkpointed}); \
+                 continuing writer open, hard-link aliases may not see ownership until the next checkpoint",
+                descriptor.module_id, descriptor.storage_namespace,
+            ),
+            Err(error) => eprintln!(
+                "warning: SQLite owner ({:?}, {:?}) was recorded, but its first checkpoint \
+                 failed ({error}); continuing writer open, hard-link aliases may not see ownership \
+                 until the next checkpoint",
+                descriptor.module_id, descriptor.storage_namespace,
+            ),
+        }
+        Ok(())
     }
 
     /// Apply un-applied migrations for one `namespace` in ascending version order,
@@ -678,6 +832,91 @@ mod sqlite_backend {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    mod ownership_read_tests {
+        use super::*;
+
+        #[test]
+        fn readonly_handles_with_another_identity_never_claim_or_refuse_ownership() {
+            struct Cleanup(PathBuf);
+            impl Drop for Cleanup {
+                fn drop(&mut self) {
+                    let _ = std::fs::remove_dir_all(&self.0);
+                }
+            }
+            let root = std::env::temp_dir().join(format!(
+                "cortexkit-store-read-owner-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let _cleanup = Cleanup(root.clone());
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("store.db").to_string_lossy().into_owned();
+            let legacy = Connection::open(&path).unwrap();
+            legacy
+                .execute_batch("CREATE TABLE points (value INTEGER); INSERT INTO points VALUES (9)")
+                .unwrap();
+            drop(legacy);
+
+            let descriptor = StorageDescriptor {
+                module_id: "owner-module".into(),
+                storage_namespace: "owner-space".into(),
+                isolation: Isolation::Module,
+                backend: StorageBackend::Sqlite { path: path.clone() },
+            };
+            let mut readers = Vec::new();
+            for pooled in [false, true] {
+                let conn =
+                    Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+                let mut reader = SqliteStore::for_test(conn, 0);
+                assert_ne!(reader._lease.key(), &lease_key(&descriptor));
+                if pooled {
+                    reader.readers =
+                        Some(ReadPool::new(path.clone(), SqliteOpenOptions::default()));
+                }
+                assert_eq!(
+                    reader
+                        .with_read(|tx| tx.query_row(
+                            "SELECT count(*) FROM sqlite_schema WHERE name = 'cortexkit_owner'",
+                            [],
+                            |row| row.get::<_, i64>(0)
+                        ))
+                        .unwrap(),
+                    0
+                );
+                readers.push(reader);
+            }
+            let writer = open_sqlite(&descriptor).unwrap();
+            for reader in &readers {
+                assert_eq!(
+                    reader
+                        .with_read(|tx| tx
+                            .query_row("SELECT value FROM points", [], |row| row.get::<_, i64>(0)))
+                        .unwrap(),
+                    9
+                );
+                assert_eq!(
+                    reader
+                        .with_read(|tx| tx.query_row(
+                            "SELECT module_id, storage_namespace FROM cortexkit_owner WHERE id = 1",
+                            [],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        ))
+                        .unwrap(),
+                    (
+                        descriptor.module_id.clone(),
+                        descriptor.storage_namespace.clone()
+                    )
+                );
+            }
+            drop(writer);
+            drop(readers);
+        }
     }
 }
 

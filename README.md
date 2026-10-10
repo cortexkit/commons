@@ -22,6 +22,31 @@ be boring, stable, and safe to depend on.
 | `cortexkit-role-tool-provider` | the `tool-provider/v1` role: wire types and `CONTRACT.md`, which marks every item pinned or open |
 | `cortexkit-role-tool-provider-conformance` | the `tool-provider/v1` conformance runner, driving a live provider through its harness |
 
+### SQLite database ownership
+
+`cortexkit-store` records a file-backed database's `(module_id, storage_namespace)`
+owner in `cortexkit_owner` on its first writer open, before acquiring a lease.
+Concurrent first opens are serialized with an immediate transaction. Opening the
+same database under a different owner, including through a symlink or hard link,
+returns `StoreError::OwnershipMismatch` with both identities. Existing databases
+without an owner row are claimed automatically; matching owners can reopen.
+Read-only operations (`with_read` and its pool) do not claim or check ownership,
+and in-memory databases and SQLite URIs are exempt. `open_sqlite` and
+`open_sqlite_with` are writer opens, even if the caller only plans to read.
+
+The first ownership claim attempts a WAL checkpoint to publish the row in the
+main file. This is best effort: a busy or incomplete checkpoint emits a warning
+but does not prevent startup. Until a later checkpoint completes, a hard-link
+alias may not see that new owner. An open for an already-recorded owner only
+reads the row, with no checkpoint and no write lock. So a module restarting while
+another process holds a read snapshot still opens its store, and a second process
+with the same owner still gets the lease refusal, even mid-write.
+
+An intentional ownership change requires clearing the `cortexkit_owner` row while
+all writers are stopped. There is no API for transferring ownership. Version
+0.3.0 adds an error variant to the exhaustive (not `#[non_exhaustive]`)
+`StoreError` enum, so downstream exhaustive matches must be updated.
+
 ## Module roles
 
 Each module role (`tool-provider`, `llm-runner`, `compaction-provider`, …)
