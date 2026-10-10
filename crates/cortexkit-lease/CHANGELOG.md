@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Add `durable_replace` and `sync_dir` helpers for durable local filesystem updates on Unix and Windows.
+
 ## 0.1.2
 
 - Add an opt-in, Windows-only `test-support` module for native ACL observations,

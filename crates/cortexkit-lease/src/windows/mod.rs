@@ -4,14 +4,15 @@
 use std::{
     io,
     mem::{size_of, zeroed},
-    os::windows::{ffi::OsStrExt, fs::MetadataExt},
+    os::windows::{ffi::OsStrExt, fs::MetadataExt, io::AsRawHandle},
     path::Path,
     ptr::{null, null_mut},
 };
 
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, ERROR_ALREADY_EXISTS, ERROR_PATH_NOT_FOUND, HANDLE, INVALID_HANDLE_VALUE,
+        CloseHandle, ERROR_ALREADY_EXISTS, ERROR_PATH_NOT_FOUND, GENERIC_WRITE, HANDLE,
+        INVALID_HANDLE_VALUE,
     },
     Security::{
         AddAccessAllowedAceEx,
@@ -23,11 +24,11 @@ use windows_sys::Win32::{
         SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
     },
     Storage::FileSystem::{
-        CreateDirectoryW, CreateFileW, GetFileInformationByHandle, GetFileType,
-        BY_HANDLE_FILE_INFORMATION, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
+        CreateDirectoryW, CreateFileW, FlushFileBuffers, GetFileInformationByHandle, GetFileType,
+        MoveFileExW, BY_HANDLE_FILE_INFORMATION, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, OPEN_EXISTING,
-        READ_CONTROL, WRITE_DAC,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
     },
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
@@ -51,6 +52,57 @@ fn wide(path: &Path) -> io::Result<Vec<u16>> {
     }
     value.push(0);
     Ok(value)
+}
+
+pub(super) fn durable_replace(temp: &Path, dest: &Path) -> io::Result<()> {
+    let file = std::fs::OpenOptions::new().write(true).open(temp)?;
+    // SAFETY: The file is open for write access and remains alive through the
+    // flush call; FlushFileBuffers does not retain the handle.
+    if unsafe { FlushFileBuffers(file.as_raw_handle() as HANDLE) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    drop(file);
+
+    let temp = wide(temp)?;
+    let dest = wide(dest)?;
+    // SAFETY: Both paths are NUL-terminated UTF-16 strings valid for this call.
+    if unsafe {
+        MoveFileExW(
+            temp.as_ptr(),
+            dest.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+pub(super) fn sync_dir(dir: &Path) -> io::Result<()> {
+    let name = wide(dir)?;
+    // SAFETY: `name` is NUL-terminated; the returned handle is checked before
+    // it is wrapped in Handle, which closes it on every exit path.
+    let handle = unsafe {
+        CreateFileW(
+            name.as_ptr(),
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let handle = Handle(handle);
+    // SAFETY: The handle is open for write access on the requested directory.
+    if unsafe { FlushFileBuffers(handle.0) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 struct User(Vec<usize>);

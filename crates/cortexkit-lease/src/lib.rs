@@ -29,8 +29,8 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
-    path::PathBuf,
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
 };
 
 use fs2::FileExt;
@@ -147,6 +147,103 @@ pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     {
         std::fs::create_dir_all(dir)
     }
+}
+
+/// Flushes a completed temporary file, atomically replaces `dest`, then makes
+/// the replacement durable where the local filesystem supports that barrier.
+/// The temporary file must be in the same directory as `dest`; otherwise this
+/// returns [`io::ErrorKind::InvalidInput`] before changing either path.
+///
+/// On Unix, the file is synced before rename and the containing directory is
+/// synced afterward. On Windows, the file is flushed and `MoveFileExW` is
+/// called with write-through enabled. On local filesystems that honor these
+/// operations, a successful return requests durability across power loss. The
+/// rename is atomic to concurrent observers, so a process crash does not expose
+/// a partially copied destination; if the process crashes before this function
+/// returns, the caller cannot know whether the old or new name is durable. This
+/// is not a guarantee for remote filesystems, devices that ignore flushes, or
+/// filesystems that do not provide the documented barriers.
+pub fn durable_replace(temp: &Path, dest: &Path) -> io::Result<()> {
+    let parent = require_same_parent_directory(temp, dest)?;
+
+    #[cfg(unix)]
+    {
+        File::open(temp)?.sync_all()?;
+        std::fs::rename(temp, dest)?;
+        sync_dir(&parent)
+    }
+    #[cfg(windows)]
+    {
+        let _ = parent;
+        windows::durable_replace(temp, dest)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (temp, dest, parent);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "durable replacement is supported only on Unix and Windows",
+        ))
+    }
+}
+
+/// Flushes directory metadata after creating a name without replacing an
+/// existing one.
+///
+/// On Unix this calls `fsync` on the directory. An `EINVAL` response is treated
+/// as an unsupported filesystem operation, so `Ok(())` in that case does not
+/// promise power-loss durability. On Windows this opens the directory for write
+/// access and calls `FlushFileBuffers`; NTFS supports this operation, but other
+/// filesystems may refuse it and their errors are returned. A successful
+/// barrier on a local filesystem that honors it requests persistence across
+/// power loss; it is not needed to preserve metadata across a process-only
+/// crash and does not guarantee behavior for remote filesystems or devices that
+/// ignore flushes.
+pub fn sync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        match File::open(dir)?.sync_all() {
+            // EINVAL means this filesystem refuses fsync on directories; unlike
+            // other errors it is documented as an unsupported barrier.
+            Err(error)
+                if error.kind() == io::ErrorKind::InvalidInput
+                    && error.raw_os_error().is_some() =>
+            {
+                Ok(())
+            }
+            result => result,
+        }
+    }
+    #[cfg(windows)]
+    {
+        windows::sync_dir(dir)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = dir;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "directory syncing is supported only on Unix and Windows",
+        ))
+    }
+}
+
+fn require_same_parent_directory(temp: &Path, dest: &Path) -> io::Result<PathBuf> {
+    fn parent_or_current(path: &Path) -> &Path {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+    }
+
+    let temp_parent = std::fs::canonicalize(parent_or_current(temp))?;
+    let dest_parent = std::fs::canonicalize(parent_or_current(dest))?;
+    if temp_parent != dest_parent {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "temporary file and destination must be in the same directory",
+        ));
+    }
+    Ok(dest_parent)
 }
 
 /// Identifies the thing being single-writer-guarded, namespaced so distinct
@@ -810,6 +907,64 @@ mod tests {
         let g2 = store2.acquire(&k).expect("re-acquire");
         assert_eq!(g2.epoch(), 2);
         drop(g2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn durable_replace_replaces_contents_and_removes_temp_file() {
+        let (_, dir) = tmp_store();
+        std::fs::create_dir_all(&dir).expect("create directory");
+        let temp = dir.join("state.tmp");
+        let dest = dir.join("state");
+        std::fs::write(&temp, b"new contents").expect("write temporary file");
+        std::fs::write(&dest, b"old contents").expect("write existing file");
+
+        durable_replace(&temp, &dest).expect("replace durably");
+
+        assert_eq!(
+            std::fs::read(&dest).expect("read destination"),
+            b"new contents"
+        );
+        assert!(!temp.exists(), "the temporary name must be removed");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn durable_replace_refuses_different_directories() {
+        let (_, dir) = tmp_store();
+        let temp_dir = dir.join("temp");
+        let dest_dir = dir.join("destination");
+        std::fs::create_dir_all(&temp_dir).expect("create temporary directory");
+        std::fs::create_dir_all(&dest_dir).expect("create destination directory");
+        let temp = temp_dir.join("state.tmp");
+        let dest = dest_dir.join("state");
+        std::fs::write(&temp, b"new contents").expect("write temporary file");
+        std::fs::write(&dest, b"old contents").expect("write existing file");
+
+        let error = durable_replace(&temp, &dest).expect_err("different directories must fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            std::fs::read(&temp).expect("read temporary file"),
+            b"new contents"
+        );
+        assert_eq!(
+            std::fs::read(&dest).expect("read destination"),
+            b"old contents"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_dir_succeeds_on_a_real_directory() {
+        let (_, dir) = tmp_store();
+        std::fs::create_dir_all(&dir).expect("create directory");
+
+        sync_dir(&dir).expect("sync directory");
+
         let _ = std::fs::remove_dir_all(dir);
     }
 }
