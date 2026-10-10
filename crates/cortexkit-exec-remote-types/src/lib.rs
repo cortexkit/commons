@@ -9,8 +9,14 @@
 //! unknown tags in a catch-all with documented grading. Unknown stream records
 //! retain their sequence number for replay cursors, but are never terminal.
 //! Unknown terminal outcomes are graded like outcome-unknown, never as proof
-//! that the command did not run. These types do not implement transport framing,
-//! execution policy, UUID generation or executor-to-runner transfer control.
+//! that the command did not run.
+//!
+//! A missing requested execution platform means Linux. A runner that understands
+//! the platform field reports the platform it will actually use in [`Accepted`].
+//! If a caller requested a non-Linux platform, it must cancel the job and not
+//! trust its result unless the acceptance acknowledges that exact platform. These
+//! types do not implement transport framing, execution policy, UUID generation or
+//! executor-to-runner transfer control.
 
 #![forbid(unsafe_code)]
 

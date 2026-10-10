@@ -46,6 +46,10 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-network-outbound",
     "crate-local-unknown-network",
     "crate-local-network-unsupported",
+    "crate-local-platform-linux",
+    "crate-local-platform-windows",
+    "crate-local-platform-unsupported",
+    "crate-local-unknown-platform",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -212,9 +216,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 19);
+    assert_eq!(LOCAL_OUTCOMES.len(), 23);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 56);
+    assert_eq!(cases().len(), 60);
 }
 
 #[test]
@@ -1492,6 +1496,109 @@ fn network_null_fields_decode_as_absent() {
     }))
     .unwrap();
     assert_eq!(accepted.network(), None);
+}
+
+#[test]
+fn platform_variants_round_trip_in_requests_and_acknowledgements() {
+    for (wire_name, platform) in [
+        ("linux", Platform::Linux),
+        ("windows", Platform::Windows),
+        (
+            "future_platform",
+            Platform::Unknown("future_platform".into()),
+        ),
+    ] {
+        let request = RunRequest::new("workspace", "/repo", "/workspace", "true")
+            .with_platform(platform.clone());
+        let request_value = serde_json::to_value(&request).unwrap();
+        assert_eq!(request_value["platform"], wire_name);
+        assert_eq!(
+            serde_json::from_value::<RunRequest>(request_value).unwrap(),
+            request
+        );
+
+        let accepted = Accepted::new(job_id(), 1).with_platform(platform.clone());
+        let accepted_value = serde_json::to_value(&accepted).unwrap();
+        assert_eq!(accepted_value["platform"], wire_name);
+        assert_eq!(
+            serde_json::from_value::<Accepted>(accepted_value).unwrap(),
+            accepted
+        );
+    }
+}
+
+#[test]
+fn platform_absent_preserves_legacy_request_wire_bytes() {
+    let request = RunRequest::new("workspace", "/repo", "/workspace", "true");
+    assert_eq!(request.platform(), None);
+    let wire = serde_json::to_string(&request).unwrap();
+    assert_eq!(
+        wire,
+        r#"{"workspace_key":"workspace","repository_root":"/repo","cwd":"/workspace","command":"true","env":{},"siblings":[]}"#
+    );
+    assert_eq!(serde_json::from_str::<RunRequest>(&wire).unwrap(), request);
+}
+
+#[test]
+fn accepted_without_platform_decodes_as_unacknowledged() {
+    let accepted: Accepted = serde_json::from_value(json!({
+        "job_id": job_id(), "queue_position": 1
+    }))
+    .unwrap();
+    assert_eq!(accepted.platform(), None);
+}
+
+#[test]
+fn unknown_platform_is_retained_and_refused_before_start() {
+    let case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-unknown-platform")).unwrap();
+    assert_eq!(
+        case.request.platform(),
+        Some(&Platform::Unknown("future_platform".into()))
+    );
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("an unknown platform must be refused before acceptance or start")
+    };
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::PlatformUnsupported
+        }
+    );
+    assert_eq!(terminal.refusal_detail(), Some("future_platform"));
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", "crate-local-unknown-platform")),
+        bytes("outcomes", "crate-local-unknown-platform")
+    );
+}
+
+#[test]
+fn platform_unsupported_refusal_round_trips_requested_platform_name() {
+    let case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-platform-unsupported")).unwrap();
+    assert_eq!(case.request.platform(), Some(&Platform::Windows));
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("an unsupported platform must be refused before acceptance or start")
+    };
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::PlatformUnsupported
+        }
+    );
+    assert_eq!(terminal.refusal_detail(), Some("windows"));
+    assert_eq!(
+        RefusalReason::from("platform_unsupported".to_owned()),
+        RefusalReason::PlatformUnsupported
+    );
+    assert_eq!(
+        String::from(RefusalReason::PlatformUnsupported),
+        "platform_unsupported"
+    );
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", "crate-local-platform-unsupported")),
+        bytes("outcomes", "crate-local-platform-unsupported")
+    );
 }
 
 // These shapes mirror 0.2.4 before network requests and grants were added, so

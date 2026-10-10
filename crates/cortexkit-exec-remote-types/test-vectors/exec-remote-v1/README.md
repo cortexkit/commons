@@ -2,8 +2,9 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The twenty-two `crate-local-*` cases documented below exist only
-here. The following encoding and shape rules
+pin the same bytes. The twenty-six `crate-local-*` cases documented below were
+written in this crate rather than copied from the executor's vectors, to pin
+caller-side cases the executor's set does not cover. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
 
 ## Encoding
@@ -53,9 +54,9 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These nineteen outcome cases (38 files: one `.jcs`/`.sha256` pair each) and
+These twenty-three outcome cases (46 files: one `.jcs`/`.sha256` pair each) and
 three reply cases (six files) extend the caller corpus described above. The
-resulting corpus contains 39 outcome cases and 17 reply cases:
+resulting corpus contains 43 outcome cases and 17 reply cases:
 
 - `outcomes/crate-local-network-outbound`: a request with `network: "outbound"`
   and an `accepted` record acknowledging `network: "outbound"`. The runner must
@@ -68,6 +69,15 @@ resulting corpus contains 39 outcome cases and 17 reply cases:
   must refuse unrecognised network requests rather than downgrade or upgrade them.
 - `outcomes/crate-local-network-unsupported`: an outbound request refused before
   start with the known, non-transient `RefusalReason::NetworkUnsupported`.
+- `outcomes/crate-local-platform-linux` and `outcomes/crate-local-platform-windows`:
+  explicit platform requests and acknowledgements. Runners report the platform
+  they actually use; callers requesting a non-Linux platform must require an exact
+  acknowledgement or cancel without trusting the result.
+- `outcomes/crate-local-platform-unsupported`: a Windows request refused before
+  start with `platform_unsupported` and the requested wire name in
+  `refusal_detail`.
+- `outcomes/crate-local-unknown-platform`: an unrecognised platform retained on
+  the request and refused before start with its wire name in `refusal_detail`.
 
 Absent network fields preserve the existing `outcomes/exit` bytes. Tests also
 decode the outbound request and accepted record with shapes mirroring 0.2.4 and

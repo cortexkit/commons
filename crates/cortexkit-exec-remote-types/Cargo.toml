@@ -2,7 +2,7 @@
 # Transport framing and runner-only transfer control stay with the executor.
 [package]
 name = "cortexkit-exec-remote-types"
-version = "0.2.5"
+version = "0.2.6"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.6
+
+- `RunRequest` gains optional `platform: Option<Platform>` with a
+  `with_platform` setter and getter. Absent means Linux and is omitted during
+  serialization, preserving existing request bytes. `Platform::Linux` and
+  `Platform::Windows` use the wire strings `"linux"` and `"windows"`; unrecognised
+  strings round-trip as `Platform::Unknown`.
+- `Accepted` gains optional `platform: Option<Platform>` with a `with_platform`
+  setter and getter. A runner that understands platform requests always reports
+  the platform it will actually use. Callers who requested a non-Linux platform
+  must cancel without trusting the result if acceptance does not acknowledge the
+  exact requested platform, including when an older runner omits the field.
+- A runner must refuse an unavailable or unrecognised requested platform before
+  start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`),
+  reporting the requested platform wire name in `refusal_detail`. Golden vectors
+  pin Linux and Windows acknowledgements, unsupported and unknown refusals. Tests pin absent-platform bytes.
+
 ## 0.2.5
 
 - `RunRequest` gains optional `network: Option<Network>`, with a `with_network`

@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.5**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.6**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -51,6 +51,21 @@ unrecognised request must refuse before start with the non-transient
 upgrade access. A job granted outbound access may have had outside effects, so
 the caller must not automatically rerun it after an unknown outcome.
 
+### Execution platform
+
+`RunRequest::with_platform` requests `Platform::Linux` (`"linux"`) or
+`Platform::Windows` (`"windows"`). An absent platform means Linux and is omitted
+from the request, preserving bytes for existing callers. Unknown platform strings
+round-trip as `Platform::Unknown`.
+
+A runner that understands this field always acknowledges the platform it will
+actually use in `Accepted.platform`. An older runner may ignore the request field
+and omit the acknowledgement. If a caller requested a non-Linux platform, it
+must cancel the job and must not trust its result unless `Accepted.platform`
+exactly matches the request. Unknown or unavailable platforms are refused before
+start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`); the
+requested platform's wire name is reported in `refusal_detail`.
+
 ### Terminal reports
 
 The terminal's `ran`, `tree_hash`, and `workspace_changes` are explicit `Option`s
@@ -95,6 +110,7 @@ tags into a catch-all with a stated grading:**
 |---|---|---|
 | `RefusalReason` | `Unknown(String)` | Inside `refused_before_start`, the command still did not start. |
 | `Network` | `Unknown(String)` | Never assume outbound access from an unknown acknowledgement. Runners must refuse unknown requests before start. |
+| `Platform` | `Unknown(String)` | Runners must refuse unknown requests before start. Callers requesting non-Linux platforms must require an exact acknowledgement or cancel without trusting the result. |
 | `Outcome` | `Unknown { kind: String }` | Grade like `outcome_unknown`: never assume the command did not run, and never re-run it locally. |
 | `StreamRecord` | `Unknown { kind: String, seq: Option<u64> }` | Skip and keep reading; count its seq toward the resume cursor; never treat it as terminal. |
 | `Killed` | `Unknown(String)` | The command was killed for a reason this version does not recognise. |
@@ -144,7 +160,7 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Twenty-two **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
+Twenty-six **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
 
 - `outcomes/crate-local-network-outbound`: an outbound request and acknowledged
   grant; 0.2.4-shaped request and accepted decoders ignore the additive fields.
@@ -152,6 +168,12 @@ Twenty-two **crate-local additions** were written in this crate, rather than cop
   `Unknown`, with a before-start refusal rather than an offline downgrade.
 - `outcomes/crate-local-network-unsupported`: the known `network_unsupported`
   refusal reason for a runner that cannot grant the requested access.
+- `outcomes/crate-local-platform-linux` and `outcomes/crate-local-platform-windows`:
+  explicit platform requests and acknowledgements.
+- `outcomes/crate-local-platform-unsupported`: a Windows request refused before
+  start, with its wire name in `refusal_detail`.
+- `outcomes/crate-local-unknown-platform`: an unrecognised platform retained on
+  the request and refused before start with its wire name in `refusal_detail`.
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.
@@ -179,7 +201,7 @@ Twenty-two **crate-local additions** were written in this crate, rather than cop
 - `outcomes/crate-local-runner-draining` and `outcomes/crate-local-runner-disk-full`:
   the newly recognised transient refusal reasons.
 
-Totals: **35 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
+Totals: **43 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent

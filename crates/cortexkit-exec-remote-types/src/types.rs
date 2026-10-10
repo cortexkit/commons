@@ -59,6 +59,42 @@ impl From<Network> for String {
     }
 }
 
+/// The operating system requested for a run or used by the runner.
+///
+/// An absent request means Linux. Runners must refuse unknown requested platforms
+/// before start rather than silently running the command elsewhere.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum Platform {
+    /// Run on Linux.
+    Linux,
+    /// Run on Windows.
+    Windows,
+    /// A platform string this version does not recognise.
+    Unknown(String),
+}
+
+impl From<String> for Platform {
+    fn from(platform: String) -> Self {
+        match platform.as_str() {
+            "linux" => Self::Linux,
+            "windows" => Self::Windows,
+            _ => Self::Unknown(platform),
+        }
+    }
+}
+
+impl From<Platform> for String {
+    fn from(platform: Platform) -> Self {
+        match platform {
+            Platform::Linux => "linux".into(),
+            Platform::Windows => "windows".into(),
+            Platform::Unknown(platform) => platform,
+        }
+    }
+}
+
 /// `exec.run` parameters; executor-owned IDs and snapshot metadata are absent.
 /// Both timeout and queue_wait_limit_s are measured in seconds.
 ///
@@ -85,6 +121,10 @@ pub struct RunRequest {
     /// isolation and reports the access actually granted in [`Accepted::network`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<Network>,
+    /// Requested execution platform. Absent means Linux; the runner reports the
+    /// platform it actually uses in [`Accepted::platform`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
 }
 
 impl RunRequest {
@@ -106,6 +146,7 @@ impl RunRequest {
             queue_wait_limit_s: None,
             siblings: Vec::new(),
             network: None,
+            platform: None,
         }
     }
 
@@ -148,6 +189,17 @@ impl RunRequest {
     /// Requested network access, or `None` for an offline job.
     pub fn network(&self) -> Option<&Network> {
         self.network.as_ref()
+    }
+
+    /// Request a platform; the runner must acknowledge the platform it uses.
+    pub fn with_platform(mut self, platform: Platform) -> Self {
+        self.platform = Some(platform);
+        self
+    }
+
+    /// Requested execution platform, or `None` for the default Linux platform.
+    pub fn platform(&self) -> Option<&Platform> {
+        self.platform.as_ref()
     }
 }
 
@@ -207,6 +259,9 @@ pub enum RefusalReason {
     /// Not transient: the runner does not support the requested network mode.
     /// The job was refused before start, without downgrading or upgrading access.
     NetworkUnsupported,
+    /// The runner does not support the requested platform. The job was refused
+    /// before start; `refusal_detail` carries the requested platform wire name.
+    PlatformUnsupported,
     /// A refusal tag this version does not recognise. The refused command
     /// still did not start.
     Unknown(String),
@@ -228,6 +283,7 @@ impl From<String> for RefusalReason {
             "bundle_rejected" => Self::BundleRejected,
             "workspace_setup_failed" => Self::WorkspaceSetupFailed,
             "network_unsupported" => Self::NetworkUnsupported,
+            "platform_unsupported" => Self::PlatformUnsupported,
             _ => Self::Unknown(reason),
         }
     }
@@ -249,6 +305,7 @@ impl From<RefusalReason> for String {
             RefusalReason::BundleRejected => "bundle_rejected".into(),
             RefusalReason::WorkspaceSetupFailed => "workspace_setup_failed".into(),
             RefusalReason::NetworkUnsupported => "network_unsupported".into(),
+            RefusalReason::PlatformUnsupported => "platform_unsupported".into(),
             RefusalReason::Unknown(reason) => reason,
         }
     }
@@ -843,6 +900,10 @@ pub struct Accepted {
     /// job runs offline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<Network>,
+    /// Execution platform the runner will use. Runners that understand the
+    /// request must fill this with the platform they will actually use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
 }
 
 impl Accepted {
@@ -852,6 +913,7 @@ impl Accepted {
             queue_position,
             env_not_forwarded: None,
             network: None,
+            platform: None,
         }
     }
 
@@ -870,6 +932,17 @@ impl Accepted {
     /// Network access actually granted, or `None` when not acknowledged.
     pub fn network(&self) -> Option<&Network> {
         self.network.as_ref()
+    }
+
+    /// Report the execution platform the runner will actually use.
+    pub fn with_platform(mut self, platform: Platform) -> Self {
+        self.platform = Some(platform);
+        self
+    }
+
+    /// Execution platform the runner will use, or `None` when not acknowledged.
+    pub fn platform(&self) -> Option<&Platform> {
+        self.platform.as_ref()
     }
 }
 
