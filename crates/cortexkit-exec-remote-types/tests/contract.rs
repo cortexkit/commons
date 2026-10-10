@@ -81,6 +81,37 @@ struct OutcomeCase {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+enum KnownOutcome026 {
+    Exit,
+    Signal,
+    Cancelled,
+    RefusedBeforeStart,
+    OutcomeUnknown,
+    HistoryExpired,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Outcome026Input {
+    Known(KnownOutcome026),
+    Tag(Outcome026Tag),
+}
+
+#[derive(Debug, Deserialize)]
+struct Outcome026Tag {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+fn decode_outcome_026(json: &str) -> Outcome {
+    match serde_json::from_str::<Outcome026Input>(json).unwrap() {
+        Outcome026Input::Known(known) => panic!("unexpected known 0.2.6 outcome: {known:?}"),
+        Outcome026Input::Tag(Outcome026Tag { kind }) => Outcome::Unknown { kind },
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 enum KnownStreamRecord023 {
     Accepted,
     Output,
@@ -547,6 +578,8 @@ fn unknown_refusal_tag_retains_before_start_arm_and_round_trips() {
 fn known_outcome_tags_with_malformed_fields_do_not_become_unknown() {
     for malformed in [
         json!({"type": "exit"}),
+        json!({"type": "windows_exit"}),
+        json!({"type": "windows_exit", "code": "1"}),
         json!({"type": "exit", "code": "0"}),
         json!({"type": "exit", "code": 2147483648_i64}),
         json!({"type": "signal"}),
@@ -619,6 +652,40 @@ fn known_outcome_tags_keep_their_semantic_variants() {
 }
 
 #[test]
+fn windows_exit_round_trips_full_unsigned_codes() {
+    for (code, wire) in [
+        (0, r#"{"type":"windows_exit","code":0}"#),
+        (1, r#"{"type":"windows_exit","code":1}"#),
+        (
+            3_221_225_477,
+            r#"{"type":"windows_exit","code":3221225477}"#,
+        ),
+    ] {
+        let outcome = Outcome::WindowsExit { code };
+        assert_eq!(serde_json::to_string(&outcome).unwrap(), wire);
+        assert_eq!(serde_json::from_str::<Outcome>(wire).unwrap(), outcome);
+    }
+}
+
+#[test]
+fn windows_exit_ntstatus_failure_marks_crashes() {
+    assert!(Outcome::WindowsExit { code: 0xC000_0005 }.ntstatus_failure());
+    assert!(!Outcome::WindowsExit { code: 1 }.ntstatus_failure());
+    assert!(!Outcome::Exit { code: 1 }.ntstatus_failure());
+}
+
+#[test]
+fn windows_exit_is_unknown_not_refused_to_older_decoders() {
+    let wire = r#"{"type":"windows_exit","code":3221225477}"#;
+    assert_eq!(
+        decode_outcome_026(wire),
+        Outcome::Unknown {
+            kind: "windows_exit".into()
+        }
+    );
+}
+
+#[test]
 fn unknown_stream_record_retains_sequence_and_round_trips() {
     let raw = value("outcomes", "crate-local-unknown-stream-record")["stream"][0].clone();
     let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
@@ -664,6 +731,30 @@ fn started_record_round_trips_its_golden_vector() {
     assert_eq!(started.queue_wait_ms(), 125);
     assert_eq!(started.started_at_ms(), 1_730_000_000_125);
     assert_eq!(serde_json::to_value(record).unwrap(), raw);
+}
+
+#[test]
+fn started_without_path_mapping_preserves_pinned_wire_bytes() {
+    const LEGACY_STARTED: &str = r#"{"seq":7,"queue_wait_ms":125,"started_at_ms":1730000000125}"#;
+
+    let started = Started::new(7, 125, 1_730_000_000_125);
+    assert_eq!(serde_json::to_string(&started).unwrap(), LEGACY_STARTED);
+    assert_eq!(
+        serde_json::from_str::<Started>(LEGACY_STARTED).unwrap(),
+        started
+    );
+}
+
+#[test]
+fn started_path_mapping_round_trips() {
+    let mapping = PathMapping::new("/", r"C:\m");
+    let started = Started::new(7, 125, 1_730_000_000_125).with_path_mapping(mapping.clone());
+    let wire = r#"{"seq":7,"queue_wait_ms":125,"started_at_ms":1730000000125,"path_mapping":{"host_prefix":"/","guest_prefix":"C:\\m"}}"#;
+
+    assert_eq!(mapping.host_prefix(), "/");
+    assert_eq!(mapping.guest_prefix(), r"C:\m");
+    assert_eq!(serde_json::to_string(&started).unwrap(), wire);
+    assert_eq!(serde_json::from_str::<Started>(wire).unwrap(), started);
 }
 
 #[test]

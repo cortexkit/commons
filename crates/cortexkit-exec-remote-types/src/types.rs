@@ -319,6 +319,15 @@ pub enum Outcome {
     Exit {
         code: i32,
     },
+    /// The full unsigned 32-bit value reported by `GetExitCodeProcess`. Normal
+    /// exits carry their status; crashes carry their NTSTATUS, not a signed
+    /// Linux-style exit code. Use [`Self::ntstatus_failure`] to identify crashes.
+    ///
+    /// Older callers decode this tag as [`Outcome::Unknown`] and must grade it
+    /// as `outcome_unknown`, never as proof that the command did not run.
+    WindowsExit {
+        code: u32,
+    },
     Signal {
         signal: i32,
     },
@@ -342,6 +351,7 @@ pub enum Outcome {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum KnownOutcome {
     Exit { code: i32 },
+    WindowsExit { code: u32 },
     Signal { signal: i32 },
     Cancelled,
     RefusedBeforeStart { reason: RefusalReason },
@@ -366,6 +376,7 @@ impl Serialize for Outcome {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let known = match self {
             Self::Exit { code } => KnownOutcome::Exit { code: *code },
+            Self::WindowsExit { code } => KnownOutcome::WindowsExit { code: *code },
             Self::Signal { signal } => KnownOutcome::Signal { signal: *signal },
             Self::Cancelled => KnownOutcome::Cancelled,
             Self::RefusedBeforeStart { reason } => KnownOutcome::RefusedBeforeStart {
@@ -392,6 +403,7 @@ impl<'de> Deserialize<'de> for Outcome {
                 if matches!(
                     kind.as_str(),
                     "exit"
+                        | "windows_exit"
                         | "signal"
                         | "cancelled"
                         | "refused_before_start"
@@ -407,12 +419,24 @@ impl<'de> Deserialize<'de> for Outcome {
         };
         Ok(match known {
             KnownOutcome::Exit { code } => Self::Exit { code },
+            KnownOutcome::WindowsExit { code } => Self::WindowsExit { code },
             KnownOutcome::Signal { signal } => Self::Signal { signal },
             KnownOutcome::Cancelled => Self::Cancelled,
             KnownOutcome::RefusedBeforeStart { reason } => Self::RefusedBeforeStart { reason },
             KnownOutcome::OutcomeUnknown => Self::OutcomeUnknown,
             KnownOutcome::HistoryExpired => Self::HistoryExpired,
         })
+    }
+}
+
+impl Outcome {
+    /// Whether this Windows exit code is an NTSTATUS failure.
+    ///
+    /// Callers should display such codes in hexadecimal as a crash, rather
+    /// than as an ordinary process exit status. Other outcome variants return
+    /// `false`.
+    pub fn ntstatus_failure(&self) -> bool {
+        matches!(self, Self::WindowsExit { code } if code & 0xC000_0000 == 0xC000_0000)
     }
 }
 
@@ -847,6 +871,49 @@ impl Output {
     }
 }
 
+/// A mapping between caller paths and the paths used by a runner.
+///
+/// A runner that rewrites paths sends `host_prefix` in the caller's form (for
+/// example, `/`) and `guest_prefix` (for example, `C:\m`). A caller path P
+/// maps to `guest_prefix` + P with `/` turned into `\`. When a job starts,
+/// any path that cannot be mapped is refused. In output, only paths inside the
+/// mapped folder are translated back; anything else is passed through
+/// unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PathMapping {
+    pub host_prefix: String,
+    pub guest_prefix: String,
+}
+
+impl PathMapping {
+    /// Describe the caller and runner prefixes used to rewrite paths.
+    pub fn new(host_prefix: impl Into<String>, guest_prefix: impl Into<String>) -> Self {
+        Self {
+            host_prefix: host_prefix.into(),
+            guest_prefix: guest_prefix.into(),
+        }
+    }
+
+    pub fn with_host_prefix(mut self, host_prefix: impl Into<String>) -> Self {
+        self.host_prefix = host_prefix.into();
+        self
+    }
+
+    pub fn with_guest_prefix(mut self, guest_prefix: impl Into<String>) -> Self {
+        self.guest_prefix = guest_prefix.into();
+        self
+    }
+
+    pub fn host_prefix(&self) -> &str {
+        &self.host_prefix
+    }
+
+    pub fn guest_prefix(&self) -> &str {
+        &self.guest_prefix
+    }
+}
+
 /// The job has taken runner capacity and begun running.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -857,6 +924,9 @@ pub struct Started {
     pub queue_wait_ms: u64,
     /// Runner wall-clock Unix time in milliseconds; use for display only.
     pub started_at_ms: u64,
+    /// Path prefixes used by the runner, absent when it does not rewrite paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_mapping: Option<PathMapping>,
 }
 
 impl Started {
@@ -866,7 +936,13 @@ impl Started {
             seq,
             queue_wait_ms,
             started_at_ms,
+            path_mapping: None,
         }
+    }
+
+    pub fn with_path_mapping(mut self, path_mapping: PathMapping) -> Self {
+        self.path_mapping = Some(path_mapping);
+        self
     }
 
     pub fn seq(&self) -> u64 {
@@ -879,6 +955,10 @@ impl Started {
 
     pub fn started_at_ms(&self) -> u64 {
         self.started_at_ms
+    }
+
+    pub fn path_mapping(&self) -> Option<&PathMapping> {
+        self.path_mapping.as_ref()
     }
 }
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.7
+
+- `Outcome::WindowsExit` carries the full unsigned Windows process exit code.
+  NTSTATUS failure codes identify crashes and should be displayed in hexadecimal;
+  callers that do not recognize the tag must grade it as `outcome_unknown`, not
+  as proof the command did not run.
+- `Started` gains an optional `PathMapping`, omitted when absent to preserve
+  existing wire bytes. A runner that rewrites paths reports the caller-side
+  `host_prefix` and runner-side `guest_prefix`; caller paths map by appending the
+  path with `/` changed to `\`. Jobs are refused if a path cannot be mapped;
+  output paths inside the mapped folder are translated back and other paths pass
+  through unchanged.
+
 ## 0.2.6
 
 - `RunRequest` gains optional `platform: Option<Platform>` with a
