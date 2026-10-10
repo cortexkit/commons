@@ -455,11 +455,30 @@ pub struct AccountInfo {
     /// the upstream states no plan.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub plan_type: Option<String>,
+    /// When the subscription next charges and renews. Stated only for an active
+    /// or trialing subscription with no scheduled end; when the upstream states
+    /// an end, this is absent and [`Self::subscription_ends_at`] carries it.
+    ///
+    /// An RFC 3339 date-time, or a full date (`YYYY-MM-DD`) when the upstream
+    /// gives only a date. Accept both. A full date means that day, not midnight
+    /// UTC, so a producer must not turn one into a timestamp. Absent means the
+    /// upstream did not state it, not that the plan never renews.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub subscription_renews_at: Option<String>,
+    /// When the subscription is scheduled to end, for example after it was
+    /// cancelled. Same format as [`Self::subscription_renews_at`]. Absent means
+    /// the upstream stated no end.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub subscription_ends_at: Option<String>,
 }
 
 impl AccountInfo {
     pub fn is_empty(&self) -> bool {
-        self.email.is_none() && self.org_name.is_none() && self.plan_type.is_none()
+        self.email.is_none()
+            && self.org_name.is_none()
+            && self.plan_type.is_none()
+            && self.subscription_renews_at.is_none()
+            && self.subscription_ends_at.is_none()
     }
 }
 
@@ -833,6 +852,8 @@ mod tests {
             email: Some("operator@example.com".to_string()),
             org_name: Some("Example Org".to_string()),
             plan_type: Some("max".to_string()),
+            subscription_renews_at: Some("2026-11-03".to_string()),
+            subscription_ends_at: Some("2026-12-01T00:00:00Z".to_string()),
         };
         let value = serde_json::to_value(&populated).expect("serialise");
         let object = value.as_object().expect("object");
@@ -840,7 +861,13 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["email", "orgName", "planType"],
+            [
+                "email",
+                "orgName",
+                "planType",
+                "subscriptionEndsAt",
+                "subscriptionRenewsAt"
+            ],
             "AccountInfo's serialised key set changed. If a field was ADDED: is it \
              personally identifying? If so it reaches `ck quota --redact`, whose filter \
              removes fields by name and will pass it straight through into a screenshot. \
@@ -856,6 +883,48 @@ mod tests {
             "an empty AccountInfo must emit no keys; a present-but-null field reads to a \
              consumer as a resolved-and-blank identity rather than an unresolved one"
         );
+    }
+
+    /// The subscription dates round-trip under their camelCase names, a
+    /// date-only value survives byte for byte, and a payload written before
+    /// the fields existed still decodes with both absent.
+    #[test]
+    fn subscription_dates_round_trip_and_older_payloads_still_decode() {
+        let info = AccountInfo {
+            subscription_renews_at: Some("2026-11-03".to_string()),
+            subscription_ends_at: Some("2026-12-01T09:30:00Z".to_string()),
+            ..AccountInfo::default()
+        };
+        let value = serde_json::to_value(&info).expect("serialise");
+        assert_eq!(value["subscriptionRenewsAt"], "2026-11-03");
+        assert_eq!(value["subscriptionEndsAt"], "2026-12-01T09:30:00Z");
+        let back: AccountInfo = serde_json::from_value(value).expect("decode");
+        assert_eq!(back, info);
+
+        let older: AccountInfo =
+            serde_json::from_str(r#"{"email":"a@example.com","planType":"max"}"#)
+                .expect("a payload without the new fields decodes");
+        assert_eq!(older.subscription_renews_at, None);
+        assert_eq!(older.subscription_ends_at, None);
+
+        let one = AccountInfo {
+            subscription_renews_at: Some("2026-11-03".to_string()),
+            ..AccountInfo::default()
+        };
+        let object = serde_json::to_value(&one).expect("serialise");
+        assert!(
+            object.get("subscriptionEndsAt").is_none(),
+            "an unstated end is omitted, not sent as null: {object}"
+        );
+
+        // Each date alone makes the account info non-empty, so it is published
+        // rather than dropped as an empty label set.
+        assert!(!one.is_empty(), "a renewal date alone is not empty");
+        let ends_only = AccountInfo {
+            subscription_ends_at: Some("2026-12-01".to_string()),
+            ..AccountInfo::default()
+        };
+        assert!(!ends_only.is_empty(), "an end date alone is not empty");
     }
 
     /// Full AccountIdentity round-trips with every field present, and the
@@ -1144,6 +1213,7 @@ mod tests {
             email: Some("a@b.com".to_string()),
             org_name: None,
             plan_type: Some("pro".to_string()),
+            ..AccountInfo::default()
         });
         let json = serde_json::to_string(&labeled).unwrap();
         assert!(json.contains("\"email\":\"a@b.com\""));
