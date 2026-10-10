@@ -217,6 +217,10 @@ struct World {
     transcript_calls: AtomicUsize,
     /// Every `run.result` request received, served or not.
     run_result_calls: AtomicUsize,
+    /// How many `run.result` reads of an ended run still answer `active`,
+    /// modelling a runner that reports the run as ended only a moment after
+    /// the send returns.
+    late_seal_reads: AtomicUsize,
 }
 
 impl World {
@@ -1469,6 +1473,15 @@ impl Module {
         let Some(run) = sessions.get(session).and_then(|s| s.run(&request.run_id)) else {
             return refuse(errors::UNKNOWN_RUN, None);
         };
+        let sealed_late = run.state != "active"
+            && self
+                .world
+                .late_seal_reads
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok();
+        if sealed_late {
+            return respond(RunResult::new(&run.run_id, "active"));
+        }
         let mut result = RunResult::new(
             &run.run_id,
             if self.world.held_paused
@@ -1579,6 +1592,9 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    /// The first `late_seal_reads` `run.result` reads of an ended run answer
+    /// `active`, as if the runner reported the end late.
+    pub late_seal_reads: usize,
     pub retention_defect: RetentionDefect,
     pub retention_delete_ms: u64,
     pub held_paused: bool,
@@ -1644,6 +1660,7 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            late_seal_reads: 0,
             retention_defect: RetentionDefect::None,
             retention_delete_ms: RETENTION_DELETE_MS,
             held_paused: false,
@@ -1705,6 +1722,7 @@ impl FakeSubject {
                     released: Mutex::new(BTreeSet::new()),
                     transcript_calls: AtomicUsize::new(0),
                     run_result_calls: AtomicUsize::new(0),
+                    late_seal_reads: AtomicUsize::new(self.late_seal_reads),
                 })
             })
             .clone()

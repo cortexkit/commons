@@ -304,16 +304,13 @@ async fn advance<S: LlmRunnerSubject>(subject: &S, session: &str, ms: u64) -> Re
         .map_err(|e| e.to_string())
 }
 
-async fn result<S>(
-    _case: &Case<'_, S>,
-    session: &Session<S::Route>,
+/// The run id for a send: the id in the send's reply, or, when the reply names
+/// none, the session's newest run, which is the one this send started.
+async fn send_run_id<R: RunnerRoute>(
+    session: &Session<R>,
     reply: &SendReply,
-) -> Result<crate::wire::run::RunResult, String>
-where
-    S: LlmRunnerSubject,
-    S::Route: RunnerRoute,
-{
-    let id = match &reply.run_id {
+) -> Result<String, String> {
+    Ok(match &reply.run_id {
         Some(id) => id.clone(),
         None => {
             crate::drive::head(&session.route)
@@ -322,8 +319,42 @@ where
                 .ok_or("send has no observable run")?
                 .run_id
         }
-    };
-    run_result(&session.route, &id).await
+    })
+}
+
+/// One read of the run's current state. Only for a case that checks the run has
+/// NOT ended yet; to assert how a run ended, use [`result`].
+async fn current_result<R: RunnerRoute>(
+    session: &Session<R>,
+    reply: &SendReply,
+) -> Result<crate::wire::run::RunResult, String> {
+    run_result(&session.route, &send_run_id(session, reply).await?).await
+}
+
+/// The result of the run a send started, once that run has ended. A run that
+/// has not ended yet answers its current state (`active`), so a single read
+/// can see `active` for a run that is about to end in `error`.
+async fn result<S>(
+    case: &Case<'_, S>,
+    session: &Session<S::Route>,
+    reply: &SendReply,
+) -> Result<crate::wire::run::RunResult, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let id = send_run_id(session, reply).await?;
+    for _ in 0..crate::drive::MAX_POLLS {
+        let result = run_result(&session.route, &id).await?;
+        if result.run_state().is_terminal() {
+            return Ok(result);
+        }
+        case.subject.pause().await;
+    }
+    Err(format!(
+        "run {id} did not end within {} polls",
+        crate::drive::MAX_POLLS
+    ))
 }
 
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<(), String>
@@ -623,7 +654,7 @@ where
     .await?;
     let reply = send(case, &mut session, "near-window").await?;
     advance(case.subject, &session.name, cap - 1).await?;
-    if result(case, &session, &reply)
+    if current_result(&session, &reply)
         .await?
         .run_state()
         .is_terminal()

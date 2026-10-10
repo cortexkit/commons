@@ -1170,3 +1170,14 @@ async fn compaction_model_view_missing_is_not_applicable_independently() {
         }
     }
 }
+
+/// A runner may accept a send and end the run a moment later, so a read immediately
+/// after the send can still say `active`. The compaction cases that assert how
+/// a run ended must wait for the end rather than read once.
+#[tokio::test]
+async fn compaction_cases_wait_for_a_run_reported_ended_late() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.late_seal_reads = 3;
+    let report = run(&subject).await;
+    assert_passed(&report, "compaction_unavailable_distinct_from_refuse");
+}

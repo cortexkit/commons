@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- The compaction cases that assert how a run ended now wait for it to end
+  instead of reading `run.result` once. A runner may accept a send and end the
+  run a moment later, so a single read could see `active` and fail
+  `compaction_unavailable_distinct_from_refuse` with "Setup failure ended
+  "active", not error" on a correct runner under load. `compaction_wait_cap`
+  still reads once before the cap, where it checks the run has not ended.
+
 ## 0.1.3
 
 - `compaction_setup_durable_once` checks that compaction Setup survives a crash
