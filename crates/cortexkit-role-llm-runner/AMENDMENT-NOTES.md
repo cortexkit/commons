@@ -6,7 +6,8 @@ read for this draft. Each entry below covers one changed section: what it
 said, what it says now, the input that justifies the change, and who checks
 it. Reviewers: **core** (prefrontal, the session owner), **MC** (Magic
 Context, the compaction provider and context manager) and **Thalamus** (the
-second runner). Open questions follow the entries.
+second runner). The "Rulings" section below records the agreed answers to
+seventeen questions.
 
 Inputs, by short name:
 
@@ -20,7 +21,10 @@ Inputs, by short name:
   contract;
 - **annotations**: `llm-runner-v1-broca-annotations.md`, broca source
   citations per row at broca `f06a487`, with Thalamus's corrections;
-- **rulings 1 to 6**: the decisions already settled for this amendment.
+- **rulings 1 to 6**: the earlier decisions settled for this amendment;
+- **settled rulings**: the answers agreed by SUBC, Thalamus and broca to the
+  seventeen questions below, including core's additions to the provider
+  codes.
 
 Every type or helper the amended text names was checked against the copied
 crate source: `RunResult` (`error`), `run::states`, `RunState::parse`,
@@ -36,12 +40,12 @@ follow-ups" lists them.
 
 ## Changed sections
 
-### Preamble (status of the open questions)
+### Preamble (status of the rulings)
 
-- **Old:** every numbered question is settled.
-- **New:** every numbered question is settled except Q22, the parts of the
-  `run.status` answer one runner serves and the role has not chosen.
-- **Input:** the new §6.1 needs an `[open: Q22]` item (see that entry).
+- **Old:** Q22 was left open after Q1 to Q21 were settled.
+- **New:** every numbered question is settled, including Q22.
+- **Input:** settled ruling 1 chooses the unknown-run answer and leaves the
+  session-level status form optional.
 - **Checks:** core.
 
 ### §1 Role identity and addressing
@@ -73,18 +77,31 @@ follow-ups" lists them.
   `session.retract`, marked "contract is wrong"). Core calls all three
   (diff §1 notes). Thalamus declares neither `run_ops` nor
   `transcript_reads` (annotations, "Keep for other producers"), so the new
-  groups must not ride inside either. The group names are this draft's
-  proposal.
+  groups must not ride inside either. The group names are agreed, and no
+  `session_warm` group is defined until a second consumer exists (settled
+  rulings 14 and 17).
 - **Checks:** core (uses them), Thalamus (declares or omits them).
+
+### §4.3 Head metadata
+
+- **Old:** `session.head.last_run_state` is pinned; pages may add runner
+  members such as broca's `lineage_state`.
+- **New:** makes the boundary explicit: `last_run_state` is the pinned run
+  summary, while a page's `lineage_state` is not pinned.
+- **Input:** settled ruling 9; §4.2 stays unchanged (settled ruling 8).
+- **Checks:** core, Thalamus.
 
 ### §6 `run_ops`: run errors
 
 - **Old:** one clause: `provider_code` carries the provider's code; for a
   compaction `REFUSE` it is the role `code`, and the answer's finer
   `provider_code` maps to `provider_detail_code`.
-- **New:** four clauses. `provider_code` is the code callers branch on and
-  sits in `RunResult`'s `error` with `provider` and `reason`. For a
-  compaction `REFUSE` it is a `RefuseCode` value (the list is pointed at,
+- **New:** a typed error with required `class`, `message` and
+  `provider_code`, and optional `status`, `retry_after_secs`, `resets_at_ms`,
+  `account_ref`, `provider`, `reason` and `provider_detail_code`. An absent
+  optional member means not measured, never zero. `provider_code` is the
+  code callers branch on. For a compaction `REFUSE` it is a `RefuseCode`
+  value (the list is pointed at,
   not repeated) or an unknown code as received, and retry follows from it
   as the provider contract fixes it. The finer code is
   `provider_detail_code`, diagnostics only, never branched on. The text says
@@ -92,8 +109,8 @@ follow-ups" lists them.
   runner's `provider_detail_code`, so the two same-named members are not
   read as one field. A run error without a finer code omits
   `provider_detail_code`; `compaction_unavailable` never carries one.
-- **Input:** ruling 1. Provider contract §11 (the mapping, retryability
-  fixed by `RefuseCode`) and its "Differences from `llm-runner/v1`
+- **Input:** ruling 1 and settled ruling 10. Provider contract §11 (the
+  mapping, retryability fixed by `RefuseCode`) and its "Differences from `llm-runner/v1`
   wording", third item. Suite: `compaction_unavailable_distinct_from_refuse`
   checks `provider_code`, `provider`, `reason` and `provider_detail_code`
   for Setup and step refusals (`refusal_error` in `src/compaction.rs`), and
@@ -114,9 +131,9 @@ follow-ups" lists them.
   message. A message the runner cannot attribute omits `run`; the runner
   never invents one, and absence never means "the last run".
 - **Input:** a clarification of the existing pinned text, not a change.
-  broca's gap "no per-message run attribution despite `run_ops`" below is
-  closed by broca implementing §6 as written: its WAL records every
-  episode boundary, so a reprojection can attribute every message,
+  broca's gap "no per-message run attribution despite `run_ops`" below
+  will close after merge when broca implements §6 as written: its WAL
+  records every episode boundary, so a reprojection can attribute every message,
   including archived sessions. broca will use the episode's `RunStarted`
   WAL sequence as the opaque `episode`.
 - **Checks:** core and Thalamus (they read pages), MC (it reads transcripts
@@ -125,27 +142,30 @@ follow-ups" lists them.
 ### §6.1 `run_status`: `run.status` (new)
 
 - **Old:** none. `run.status` appeared only in §9.1 as a runner-specific op.
-- **New:** request `{run_id}`, strict. Answer `{state, reason?, error?,
+- **New:** request `{run_id?}`, strict; `{}` is an optional session-level
+  form within the group. Answer `{state, reason?, error?,
   undelivered_steers?}`, lenient, with runner members beside it. `state`
-  uses `run::states`, decoded open. `error` follows the §6 run-error rules.
+  uses `run::states`, decoded open; an unknown run answers
+  `{state: "unknown"}`, never an error. `reason` is an open string with
+  known pause reasons `auth_required` and `restart`. `error` follows the §6
+  run-error rules.
   `undelivered_steers` on an ended run is present whenever delivery could
   be determined, `[]` when checked and clean, and absent only when
   delivery could not be determined; on a run that has not ended it is
   absent and means nothing. The list covers this run only; a later
-  delivery shows in the send's `delivered` receipt. An unknown `run_id`,
-  and a request without `run_id`, are `[open: Q22]`.
+  delivery shows in the send's `delivered` receipt.
 - **Input:** ruling 4 (the group) and ruling 5 (`undelivered_steers`).
   broca's served shape: annotations rows `run.status`,
   `run.status.undelivered_steers` ("contract is wrong: define terminal
   run.status undelivered_steers, including omission and episode scope"),
-  `run.status.error`, `pause_reason`. broca omits the list when empty,
-  which ruling 5 rules out; that is gap 2 in "Gaps in broca today". The
-  "this run only" clause follows the annotations' Change item "Distinguish
+  `run.status.error`, `pause_reason`. Current broca emits `[]` when its
+  terminal WAL shows no undelivered steers
+  (`crates/broca-core/src/replay.rs:1932-1935,1977-1980`), so that old gap is
+  removed. The "this run only" clause follows the annotations' Change item
+  "Distinguish
   durable steer admission from model consumption". Core polls `run.status`
-  (diff §1). Members broca serves that no ruling covers (`pause_reason`,
-  `usage`, `retries_used`, `indeterminate_tool_calls`,
-  `final_step_finish_reason`) are left as runner members; see open
-  questions.
+  (diff §1). Settled rulings 1, 2 and 13 fix the unknown-run answer,
+  optional session-level form, `reason` and the runner-only status members.
 - **Checks:** core (reads it), Thalamus (whether it can determine
   delivery).
 
@@ -156,13 +176,25 @@ follow-ups" lists them.
   `not_active`. `ack` accepts the cancellation and does not say which
   terminal state the run reaches; the caller reads that through
   `run.result` or `run.status`. A cancelled run ends `cancelled`, never
-  `interrupted`. An expired session answers `expired`.
-- **Input:** ruling 4. broca's reply strings: annotations row `run.cancel`.
-  The cancel-versus-completion race: annotations, Add item 1 ("cancel-
+  `interrupted`. A paused run is cancellable with `ack`; the op is
+  owner-only under the session's frozen scope. An expired session answers
+  `expired`.
+- **Input:** ruling 4 and settled ruling 11. broca's reply strings:
+  annotations row `run.cancel`. The cancel-versus-completion race: annotations, Add item 1 ("cancel-
   versus-completion and retract-versus-start races"); the answer follows
   from the existing one-terminal-per-run rule (§6, `RunState`). The
   `expired` clause moves here from §9.1.
 - **Checks:** core.
+
+### §7 `streaming`
+
+- **Old:** event kinds and cursors are pinned, but pause reasons are not
+  named.
+- **New:** a stream event naming why a run is paused uses `reason`, an open
+  string with known values `auth_required` and `restart`, as `run.status`
+  does.
+- **Input:** settled ruling 2.
+- **Checks:** core, Thalamus.
 
 ### §8 `model_view`
 
@@ -189,6 +221,25 @@ follow-ups" lists them.
   `read.rs`).
 - **Checks:** MC.
 
+### §9 Owner sends, settings and replies
+
+- **Old:** owner sends require `send_id` and `prompt`; `mark` is recorded;
+  replies name `active`, `finished` and `pending`. Reuse must name the
+  differing field, and a paused run is listed as a send refusal.
+- **New:** `send_id` and `prompt` stay required of owner sends; a runner may
+  admit unkeyed non-owner sends without retry idempotency. `mark` is
+  dropped. The steer-settings rule stands: a joining steer whose settings
+  differ is refused `invalid_params` naming the first differing field.
+  `paused` is named in `send::states`, decoded open, and its `pause_reason`
+  stays. A send behind a paused run may be queued with `pending` or refused
+  `run_paused`; `send_id_reuse` names `detail.field` when identifiable.
+- **Input:** settled rulings 3 to 7 and 16. broca now refuses differing
+  joining-steer settings in stable field order
+  (`crates/broca-module/src/actor.rs:586-619,2908-2915`;
+  `crates/broca-module-serve/src/serve.rs:2695-2698`). §14's crash-idempotency
+  guarantee is scoped to keyed sends for the permitted unkeyed form.
+- **Checks:** core, Thalamus.
+
 ### §9.1 `retention`, Reads paragraph
 
 - **Old:** a runner that serves `run.status`, `run.cancel` or
@@ -209,9 +260,10 @@ follow-ups" lists them.
   `not_pending`. A submission is retracted or started, never both. A
   re-send of a retracted send with the same `send_id` and payload is
   refused `send_retracted` and writes nothing; a different payload is
-  `send_id_reuse` as before. An expired session answers `expired`.
-- **Input:** ruling 4. broca's reply strings: annotations row
-  `session.retract`; `send_retracted`: annotations row `send_retracted`
+  `send_id_reuse` as before. The op is owner-only under the session's
+  frozen scope. An expired session answers `expired`.
+- **Input:** ruling 4 and settled ruling 11. broca's reply strings:
+  annotations row `session.retract`; `send_retracted`: annotations row `send_retracted`
   ("keyed submission already durably retracted") and diff §4. The
   retract-versus-start race: annotations, Add item 1.
 - **Checks:** core.
@@ -258,9 +310,12 @@ follow-ups" lists them.
 
 - **Old:** `unknown_run` only for `run.result`; `expired` mentions
   `run.status` "if served"; no `send_retracted`.
-- **New:** `unknown_run` also for `run.status` (marked open: Q22);
-  `expired` names the three ops where their groups are declared; new row
-  `send_retracted`, not retryable. A clause says `send_retracted` is not yet
+- **New:** `unknown_run` remains only for `run.result`; `run.status`
+  answers `{state: "unknown"}`. `expired` names the three ops where their
+  groups are declared; new row `send_retracted`, not retryable. The
+  `run_paused` row permits queueing instead of refusal, `send_id_reuse`
+  names the field when identifiable, and `scope_owner_mismatch` includes
+  `run.cancel` and `session.retract`. A clause says `send_retracted` is not yet
   in `errors::CODES` and `errors::is_retryable` already answers false for
   it.
 - **Input:** ruling 4 and the §6.1 and §9.2 entries above. broca emits
@@ -277,8 +332,20 @@ follow-ups" lists them.
   `provider_detail_code`, and is never written after a step call. A
   paragraph points at the provider contract's `RefuseCode` list for
   `REFUSE` codes without repeating it, and leaves the compaction codes'
-  retryability to that contract.
-- **Input:** rulings 1 and 2. The copied `CONTRACT.md` already lacked the
+  retryability to that contract. The table also pins `context_overflow`,
+  `output_ceiling`, `response_deadline`, `account_limit_exhausted`,
+  `billing_exhausted`, `account_changed`, `cyber_policy`, `bio_policy`,
+  `misalignment_policy_violation`, `content_filter`,
+  `access_terminated_error` and the read-only legacy alias
+  `insufficient_quota`. The content-policy codes are provider policy
+  refusals, `content_filter` is the normalized safety finish, genuine
+  access termination makes the seat unable to run, and consumers must
+  interpret recorded `insufficient_quota` as `billing_exhausted` while
+  runners stop emitting it. broca's Kimi usage-limit normalization and
+  billing-code emission from 0.3.193 on are recorded; plan-fetch refusals
+  stay outside the run-error list.
+- **Input:** rulings 1 and 2, and settled ruling 10 with core's additions.
+  The commons master contract used for this amendment already lacked the
   words "or a compaction call" in this table; they survive in the crate's
   doc comment on `errors::provider_codes::COMPACTION_UNAVAILABLE` ("Setup or
   a compaction call failed or timed out with no answer") and in the vector
@@ -320,17 +387,12 @@ follow-ups" lists them.
 - **Checks:** MC (ordering paragraph), core and Thalamus (steer receipts,
   `run_status`).
 
-### Open questions: Q22 (new)
+### Q22 ruling
 
-- **Old:** Q1 to Q21, all settled.
-- **New:** Q22, `run.status` beyond its pinned members: how an unknown
-  `run_id` is answered and whether a request without `run_id` (a
-  session-level status) is part of the role. Options listed; option (a) is
-  drafted.
-- **Input:** annotations rows `run.status`, `state: unknown` / future
-  states and `unknown_run` (broca answers `state: "unknown"` for an
-  unknown run on `run.status` and refuses `unknown_run` on `run.result`).
-  No ruling covers it, and Thalamus's behaviour is not in the inputs.
+- **Old:** unknown-run and session-level status forms were left open.
+- **New:** an unknown `run_id` answers `{state: "unknown"}`, not an error;
+  request `{}` is an optional session-level form within `run_status`.
+- **Input:** settled ruling 1, agreed by SUBC, Thalamus and broca.
 - **Checks:** core, Thalamus.
 
 ### Gaps in broca today
@@ -338,29 +400,34 @@ follow-ups" lists them.
 - **Old:** sixteen gaps describing an older broca: no `role.describe`, no
   `session.baseline`, no `session.head`, no `run.result`, count-only pages,
   build-plan slice references.
-- **New:** eleven gaps at broca `f06a487`: undeclared `run.status`,
-  `run.cancel` and `session.retract`; `run.status` against §6.1 (unknown
-  run, omitted empty `undelivered_steers`); no per-message run attribution
-  despite `run_ops`; no `session_capabilities` in the baseline; legacy
-  lineages without `lineage_id`; optional `send_id` and `prompt_blocks`;
-  `mark` not recorded; steer and interrupt inheriting a fixed parameter set;
-  queue behind a restart pause answered `pending`; `send_id_reuse` without
-  `detail.field` for aggregate mismatches; the `paused` send state. Optional
-  groups broca does not declare are stated not to be gaps.
-- **Input:** the annotations, row by row, with their broca citations
-  (`role.describe`, `run.status`, `run.cancel`, `session.retract`, Message
-  `run` attribution, `baseline.session_capabilities`, Page `lineage_id`,
-  `prompt`, `send_id`, `mark`, Omitted params on steer, `run_paused`,
-  `send_id_reuse`, Send `paused`). The old list contradicts the
-  annotations (broca now serves `role.describe`, `session.baseline`,
-  `session.head`, `run.result`, `max_bytes`, `after_mid` and
-  `lineage_id`), so it is replaced rather than edited. Items the
-  annotations do not evidence (subscribe strictness, build-plan slices) are
-  dropped.
+- **New:** five remaining gaps checked at broca 0.3.194 (`549f678`): the
+  undeclared `run_status`, `run_cancel` and `retract` groups; no per-message
+  run attribution; no `session_capabilities` in the baseline; legacy
+  lineages without `lineage_id` until a write; and owner sends whose wire
+  shape does not require both `send_id` and `prompt`. Every remaining item
+  has current file:line citations in the contract. Per-message run
+  attribution remains open for broca to implement after merge.
+- **Input:** current broca source: role declarations and baseline
+  (`crates/broca-wire/src/role.rs:192-282`), read messages and legacy IDs
+  (`crates/broca-wire/src/lib.rs:662-717`), owner-send shape
+  (`crates/broca-wire/src/lib.rs:126-140`;
+  `crates/broca-module-serve/src/wire.rs:112-154`), and terminal steer
+  delivery (`crates/broca-core/src/replay.rs:1932-1935,1977-1980`). Empty
+  `undelivered_steers` is now present when known, frozen settings inherit,
+  and differing joining-steer settings are refused. The rulings remove the
+  old unknown-run, `mark`, pause-queueing, `send_id_reuse` and paused-reply
+  differences. Retention, hooks, compaction, the approval gate,
+  `billing_exhausted` and `output_ceiling` are live, not missing features;
+  an optional group a broca build does not declare is not a gap.
 - **Checks:** core (it reads broca), MC and Thalamus for awareness only.
 
 ### Unchanged on purpose
 
+- **§4.2 `lineage_id` on every page (settled ruling 8).** Kept unchanged;
+  legacy lineages remain a broca gap until they have a write.
+- **Rulings 12 and 15 below.** The explanation of guaranteed steer
+  delivery into the next episode and the pinned
+  `plan.compaction_item.provider` decision are kept as written.
 - **§9 `delivered` receipts (ruling 6).** "A re-send's `delivered` moves
   forward only" is already in §9 and matches the suite
   (`resend_steer_delivered_stable`, `delivered_move_allowed` in
@@ -372,63 +439,53 @@ follow-ups" lists them.
 - **§2 `steer_receipt: confirm`.** Kept for Thalamus (annotations, same
   section).
 
-## Open questions
+## Rulings
 
-Each is a difference between runners or a consumer need that no ruling
-settles. The draft writes none of them into the contract as law.
+SUBC, Thalamus and broca have agreed each answer. The contract records these
+rulings in the sections they govern.
 
-1. **Q22, `run.status` unknown run and session-level mode.** In the
-   contract. broca answers an unknown run `{state: "unknown"}` and serves a
-   session-level status for `{}`. Core and Thalamus: which option?
-2. **Pause reasons and `pause_reason`.** broca's paused run status carries
-   `reason` (`auth_required` or `restart`) and, for `restart` only, a
-   separate `pause_reason`; its stream uses `reason` only (annotations rows
-   `pause_reason`, Pause `auth_required`, Pause `restart`). Does the role
-   name pause reasons, and which member carries them? (diff question 6.)
-3. **`paused` as a `session.send` state.** broca answers it to a keyed
-   retry of a restart-paused run; core's decoder rejects it (annotations
-   row Send `paused`). Name it in `send::states`, or keep it a runner value
-   decoded open? (diff question 5.)
-4. **`run_paused` versus queueing behind a pause.** broca refuses a send
-   behind an authentication pause and queues one behind a restart pause
-   (annotations row `run_paused`). Should §12.1 say "a runner may queue
-   behind a paused run, answering `pending`"?
-5. **Steer inheritance: settled in §9.** Narrowed to "every parameter the
-   runner freezes for the session" (Thalamus freezes none). Thalamus added a
-   rule, now pinned: a runner refuses a parameter it cannot honour for that
-   delivery `invalid_params` naming it, and never delivers under other
-   settings. **broca does not meet this yet:** a steer that joins a run
-   silently ignores `model`, `variant`, generation settings, `tools`,
-   `cache`, `keep_warm` and `on_restart` (broca `actor.rs:2498-2516` takes
-   only the input). broca fixes it before the amendment merges; core should
-   say whether it ever sends a steer whose settings differ from the run's.
-6. **`send_id` required and `prompt` required.** broca accepts both absent
-   (`prompt_blocks` replaces `prompt`; unkeyed sends are admitted). Core
-   needs a stable `send_id` for recovery (annotations, Change item 2).
-   Keep both required of owner sends, or allow unkeyed non-owner sends?
-   (diff question 3.)
-7. **`mark`.** broca ignores it; core never sends it (diff §2). Keep it in
-   the role? (diff question 4.)
-8. **`lineage_id` on legacy lineages.** broca omits it until the next write
-   (annotations row Page `lineage_id`). The suite's
-   `lineage_id_on_every_page` requires it on every page of a written
-   session, so this draft does not relax §4.2; relaxing it needs the suite
-   changed with it.
-9. **`lineage_state` on a page.** broca puts a required latest-run summary
-   on every page and marks the contract wrong for not defining it
-   (annotations row `lineage_state`). Does a consumer rely on it, or is
-   `session.head`'s `last_run_state` enough?
-10. **Provider codes and the run error's schema.** broca writes
-    `response_deadline`, `account_limit_exhausted`, `account_changed` and
-    `restart_resume_refused`, and a typed error with `class`, `message`,
-    `status`, `retry_after_secs` (fractional) and account reset fields
-    (annotations "Reasons and provider codes"; diff §5). Core branches on
-    some of them (diff question 6). Which does the role name, and does it
-    type the run error beyond `provider_code`, `provider`, `reason` and
-    `provider_detail_code`?
-11. **`run.cancel` and `session.retract` details.** Is a paused run
-    cancellable (`ack`)? Are both owner-only, like `session.send`? broca's
-    behaviour on either is not in the inputs.
+1. **Q22, `run.status` unknown run and session-level mode.** An unknown run
+   answers `{state: "unknown"}`, not an error. The session-level form,
+   request `{}`, is optional within `run_status`.
+2. **Pause reasons and `pause_reason`.** The role names `reason` on
+   `run.status` and on the stream, an open string with known values
+   `auth_required` and `restart`. The send reply's `pause_reason` stays.
+3. **`paused` as a `session.send` state.** Name `paused` in `send::states`,
+   decoded open.
+4. **`run_paused` versus queueing behind a pause.** A runner may queue a
+   send behind a paused run, answering `pending`, or refuse it with
+   `run_paused`; both conform.
+5. **Steer inheritance: settled in §9.** The steer-settings rule stands:
+   a joining steer whose settings differ is refused `invalid_params`,
+   naming the first differing field. broca now meets the rule
+   (`crates/broca-module/src/actor.rs:586-619,2908-2915`;
+   `crates/broca-module-serve/src/serve.rs:2695-2698`).
+6. **`send_id` required and `prompt` required.** Both stay required of
+   owner sends. A runner may admit unkeyed non-owner sends, without retry
+   idempotency.
+7. **`mark`.** Drop `mark` from the role.
+8. **`lineage_id` on legacy lineages.** Keep §4.2 unchanged: every page of
+   a written session carries `lineage_id`.
+9. **`lineage_state` on a page.** It is a runner member, not pinned;
+   `session.head.last_run_state` is the pinned surface.
+10. **Provider codes and the run error's schema.** Alongside the pinned
+    compaction codes, pin `context_overflow`, `output_ceiling`,
+    `response_deadline`, `account_limit_exhausted`, `billing_exhausted`,
+    `account_changed`, `cyber_policy`, `bio_policy`,
+    `misalignment_policy_violation`, `content_filter` (the normalized safety
+    finish), `access_terminated_error` (the seat cannot run) and
+    `insufficient_quota` (a legacy alias consumers MUST treat as
+    `billing_exhausted` and runners MUST stop emitting); the content-policy
+    codes are provider policy refusals, broca maps a Kimi usage-limit
+    message under `access_terminated_error` to `account_limit_exhausted`
+    instead, and broca emits `billing_exhausted` from 0.3.193 on.
+    The run error requires `class`, `message` and `provider_code`, with
+    optional `status`, `retry_after_secs`, `resets_at_ms`, `account_ref`,
+    `provider`, `reason` and `provider_detail_code`; an absent member means
+    not measured, never zero, and plan-fetch refusals such as
+    `plan_param_refused` stay send refusals, outside the run-error list.
+11. **`run.cancel` and `session.retract` details.** A paused run is
+    cancellable with `ack`. Both ops are owner-only, like `session.send`.
 12. **`undelivered_steers` on a `guaranteed` runner.** Answered by broca, no
     contract change. A steer a run never rendered is not dropped: broca
     appends it to the conversation when the run ends and carries it into the
@@ -439,32 +496,31 @@ settles. The draft writes none of them into the contract as law.
     a model step of this run", which lets the owner prompt a turn sooner.
     §2's "may be absent until the steer is rendered" already covers the
     window, so `guaranteed` stands.
-13. **Other `run.status` members.** `indeterminate_tool_calls` (absent
-    versus `[]`), `final_step_finish_reason`, `usage`, `retries_used`
-    (annotations rows of those names). Runner members for now; does core
-    need any of them pinned?
-14. **`session.warm`.** broca serves it; no consumer dependency is claimed
-    (annotations row `session.warm`). Not made a group here. A
-    `session_warm` group if a second consumer appears?
+13. **Other `run.status` members.** `indeterminate_tool_calls`,
+    `final_step_finish_reason`, `usage` and `retries_used` stay runner
+    members, unpinned.
+14. **`session.warm`.** No `session_warm` group until a second consumer
+    exists.
 15. **`plan.compaction_item.provider`: promoted to pinned in §10.1.** MC's
     review: the field gates `compaction.ready` (§11.1), so it can't stay
     provisional; Prefrontal's fetch plans already carry it and ck-mc passes
     all 27 vectors that use it.
-16. **`send_id_reuse` `detail.field`.** broca names the differing field
-    when it can identify one and omits it for aggregate or legacy identity
-    mismatches (annotations row `send_id_reuse`). Should §9 say "names the
-    field when the runner can identify it"?
-17. **Group names.** `run_status`, `run_cancel` and `retract` are this
-    draft's spellings. SUBC may rename before the crate adds them.
+16. **`send_id_reuse` `detail.field`.** Name the differing field in
+    `detail.field` when the runner can identify it.
+17. **Group names.** Keep `run_status`, `run_cancel` and `retract`.
 
 ## Crate and suite follow-ups
 
 Not contract text; listed so the merge carries them.
 
 - `cortexkit-role-llm-runner`: add op constants for `run.status`,
-  `run.cancel` and `session.retract`, the three groups in
-  `capabilities::GROUPS`, request and answer types for them, a typed
-  `provider_detail_code` (today `RunResult::error` is untyped JSON),
+  `run.cancel` and `session.retract`, their groups `run_status`,
+  `run_cancel` and `retract` in `capabilities::GROUPS`, request and answer
+  types for them, the typed
+  run error with required `class`, `message` and `provider_code` and the
+  optional members in §6, the newly pinned provider codes in §12.2,
+  `paused` in `send::states` and `pause_reason` in `SendReply`; remove
+  `mark` from `SendRequest`, add
   `send_retracted` in `errors::CODES`, and change the doc comment on
   `errors::provider_codes::COMPACTION_UNAVAILABLE` to Setup-only. The
   `run-result.json` case named "compaction call unavailable with no answer"

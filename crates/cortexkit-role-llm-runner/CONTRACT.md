@@ -26,8 +26,7 @@ Every item is marked:
 
 A question the role's owner has settled keeps its number and is marked
 "settled" there; the items it governs are marked **[pinned]** here. In this
-revision every numbered question is settled except Q22, the parts of the
-`run.status` answer one runner serves and the role has not chosen (§6.1).
+revision every numbered question, including Q22 (§6.1), is settled.
 One item waits on the fetch-plan section (§10): the `session_change` request
 and reply types (§10.2, open).
 
@@ -138,6 +137,8 @@ shipping runner with this document.
   `check_describe` does not check their ops; until it does, a consumer
   checks that the major lists the op (`Major::serves`) as well as that the
   group is declared (`RoleDescribe::declares`).
+- [pinned] `session.warm` has no role group. A `session_warm` group waits
+  until a second consumer exists.
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue
   without being able to abort a model stream.
 - [pinned] `compaction` is all of §11.1 or none of it: Setup, the per-step
@@ -232,7 +233,8 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   (`HeadRequest`); `last_ordinal` is absent on an empty transcript;
   `last_run_state` is `{run_id, state, reason?}` (`LastRunState`) and
   describes the most recent run, never the transcript; `updated_at` is
-  milliseconds since the Unix epoch.
+  milliseconds since the Unix epoch. `last_run_state` is the pinned run
+  summary; a page's `lineage_state` is a runner member, not pinned.
 - [pinned] It follows the read rule (§4.2): an absent `lineage_id` means the
   session has no lineage yet. For a session never written, `lineage_id`,
   `last_ordinal`, `head`, `last_run_state` and `updated_at` are all absent.
@@ -283,11 +285,19 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   `error` and `interrupted`. States are decoded open: a runner's own state
   (broca's `transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
-- [pinned] A run that ends `error` because of a provider carries, in
-  `error` (`RunResult::error`, whose other members are the runner's
-  schema), `provider_code`, the provider that ended it as `provider`, and
-  its `reason`. `provider_code` is the code callers branch on.
-  `errors::provider_codes` lists the ones this role names (§12.2).
+- [pinned] A run error (`RunResult::error`) is `{class, message,
+  provider_code, status?, retry_after_secs?, resets_at_ms?, account_ref?,
+  provider?, reason?, provider_detail_code?}`. `class`, `message` and
+  `provider_code` are required strings; `class` and `provider_code` are
+  decoded open. `status` is an HTTP status when applicable;
+  `retry_after_secs` is a number of seconds and may be fractional;
+  `resets_at_ms` is milliseconds since the Unix epoch. `account_ref`,
+  `provider`, `reason` and `provider_detail_code` are optional strings.
+  An absent optional member means not measured, never zero.
+- [pinned] `provider_code` is the code callers branch on.
+  `errors::provider_codes` lists the ones this role names (§12.2). A
+  compaction `REFUSE` also carries the provider that ended it as `provider`
+  and its `reason` (§11.1).
 - [pinned] For a compaction `REFUSE`, `provider_code` is the refusal's role
   `code`: one of the compaction-provider contract's `RefuseCode` values
   (its §11), or an unknown code recorded as received. Whether a caller
@@ -319,17 +329,19 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 A runner that declares `run_status` serves `run.status`: a run's current
 state, polled without reading the transcript.
 
-- [pinned] The request is `{run_id}`, strict: an unknown field is refused
+- [pinned] The request is `{run_id?}`, strict: an unknown field is refused
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, undelivered_steers?}`,
-  decoded leniently: a runner's own members ride beside these (broca's
-  `usage`, say).
+  decoded leniently: a runner's own members ride beside these.
+  `indeterminate_tool_calls`, `final_step_finish_reason`, `usage` and
+  `retries_used` stay runner members, not pinned.
   - `state` is a run state as in `run.result` (`run::states`), decoded open
     (`RunState::parse`): a consumer does not treat an unknown state as
     terminal.
   - `reason`, where the runner names one: why a paused run is paused, or
-    why an ended run ended.
+    why an ended run ended. It is an open string; the known pause reasons
+    are `auth_required` and `restart`.
   - `error`: on a run that ended `error`, the same run error `run.result`
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
@@ -347,10 +359,12 @@ state, polled without reading the transcript.
   delivered by a later turn, and the send's `delivered` receipt (§9) is
   what reports that.
 - [pinned] On an expired session, `run.status` answers `expired` (§9.1).
-- [open: Q22] An unknown `run_id` is refused `unknown_run`, as `run.result`
-  refuses it. A request without `run_id` asks no question this role
-  defines: a runner may answer it with a session-level status of its own,
-  which a consumer reads only through that runner's schema.
+- [pinned] An unknown `run_id` answers `{state: "unknown"}`, never an
+  `unknown_run` refusal. `unknown` is a `run.status` state only, not a
+  terminal run state.
+- [pinned] The session-level form, request `{}`, is optional within
+  `run_status`. A runner MAY serve it with a session-level status in its
+  own schema; declaring `run_status` does not promise this form.
 
 ### 6.2 `run_cancel`: `run.cancel`
 
@@ -366,6 +380,10 @@ run.
   - `not_active`: the runner did not cancel the run, because it has
     already ended or the session has no such run. Nothing is written.
   A consumer treats any other answer as not confirming a cancellation.
+- [pinned] A paused run is cancellable: `run.cancel` MUST accept its
+  cancellation with `ack`.
+- [pinned] Owner-only under the session's frozen scope, like `session.send`:
+  any other caller is refused `scope_owner_mismatch`.
 - [pinned] A run a caller cancels ends `cancelled`, never `interrupted`
   (§6).
 - [pinned] On an expired session, `run.cancel` answers `expired`, writes
@@ -382,6 +400,9 @@ run.
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
   never replayed.
+- [pinned] A stream event that names why a run is paused uses `reason`, an
+  open string with known values `auth_required` and `restart`, as
+  `run.status` does (§6.1).
 
 ## 8. `model_view`
 
@@ -473,28 +494,28 @@ run.
   (`SendRequest::check_delivery`).
 - [pinned] A runner that admits sessions declares `queue`, because its first
   send is one.
+- [pinned] Owner sends MUST carry both `send_id` and `prompt`.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
   part of the send's identity:
   - the same key with the same payload and mode is answered with the
     existing state, so a retry looks like success;
   - the same key with a different payload or mode is refused `send_id_reuse`,
-    with `detail.field` naming the field that differs.
+    with `detail.field` naming the field that differs when the runner can
+    identify it.
 - [pinned] The owner derives `send_id` from what it delivers, never from the
   attempt. The runner keeps it for the session's lifetime, rebuilt from
   replay.
 - [pinned] The reply follows the sync: the runner answers only after the one
-  record holding the message, its `send_id` and (for a steered or queued
-  prompt) its PreUser output is durable. PreUser runs before the write,
-  within the request's deadline. An unavailable PreUser under
+  record holding the message, its `send_id` on a keyed send and (for a
+  steered or queued prompt) its PreUser output is durable. PreUser runs
+  before the write, within the request's deadline. An unavailable PreUser under
   `on_unavailable: refuse` refuses the send `pre_user_unavailable` and writes
   nothing.
 - [pinned] A steered prompt written before PreUser existed is never run
   through PreUser later, on resume or replay.
-- [pinned] Owner-only under the session's frozen scope: any other caller is
-  refused `scope_owner_mismatch`.
-- [pinned] The sender's mark says the prompt is model-visible but not a human
-  turn. The runner records it and does not act on it.
-  [pinned] The member is `mark`, opaque JSON.
+- [pinned] Owner sends use the session's frozen scope. A runner MAY admit
+  unkeyed non-owner sends, without retry idempotency; otherwise any other
+  caller is refused `scope_owner_mismatch`.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. The rest of the request is lenient: a
   runner's own send parameters ride beside the role's members
@@ -507,10 +528,15 @@ run.
   other than the ones the send named. A runner parameter the runner cannot
   honour for that delivery (a steer naming a model or generation settings
   other than those of the run it joins, say) is refused `invalid_params`
-  naming that parameter, and nothing is written.
+  naming that parameter, and nothing is written. A joining steer whose
+  settings differ MUST be refused `invalid_params`, naming the first
+  differing field.
 - [pinned] The reply is `{state, run_id?, submission_id?, reason?,
-  baseline?, delivered?}` (`SendReply`), `state` decoded open (`active`,
-  `finished`, `pending`).
+  pause_reason?, baseline?, delivered?}` (`SendReply`), `state` decoded open
+  (`send::states`: `active`, `finished`, `pending`, `paused`). A paused
+  reply may carry `pause_reason`; it is not renamed to `reason`.
+- [pinned] A send behind a paused run MAY be queued, answering `pending`,
+  or refused `run_paused`. Both conform.
 - [pinned] `delivered` (`Delivered`) is optional: `{as, ref?}`:
   - `as` is one of `step | turn | pending | unknown`, decoded open: an
     unknown string survives as itself and does not fail the decode;
@@ -632,6 +658,8 @@ joined, and `session.retract` does not withdraw it.
   - `not_pending`: the session has no pending submission by that id: it
     was already retracted, or never existed. Nothing is written.
   A consumer treats any other answer as not confirming a retraction.
+- [pinned] Owner-only under the session's frozen scope, like `session.send`:
+  any other caller is refused `scope_owner_mismatch`.
 - [pinned] A submission is either retracted or started, never both: the
   runner decides from one durable order, and its answer says which.
 - [pinned] A re-send of a retracted send, with the same `send_id` and
@@ -880,13 +908,13 @@ treats it as a terminal refusal of that one request.
 | `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
-| `unknown_run` | `run.result`, or `run.status` (§6.1, open: Q22), names no run of the session | — | no |
+| `unknown_run` | `run.result` names no run of the session | — | no |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
-| `send_id_reuse` | a `send_id` reused with another payload or mode | `field` | no |
+| `send_id_reuse` | a `send_id` reused with another payload or mode | `field` when the runner can identify it | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
-| `run_paused` | a send into a session whose last run is paused | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | a send or `session.baseline` from anyone but the owner | the accepted identity | no |
+| `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9), `session.baseline`, `run.cancel` or `session.retract` | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
@@ -926,14 +954,40 @@ The provider codes this role names:
 | `compaction_unavailable` | Setup only: Setup failed or timed out with no answer; no model call is made, and no `provider_detail_code` is carried. A failed or timed-out step call never writes it (§11.1) |
 | `compaction_wait_exceeded` | a compaction `WAIT` hit its cap and the request could not be shown to fit |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
+| `context_overflow` | the request exceeds the model's context window |
+| `output_ceiling` | the provider's output-token ceiling prevents a complete response |
+| `response_deadline` | the provider's response deadline ended the request |
+| `account_limit_exhausted` | the provider account's usage limit is exhausted |
+| `billing_exhausted` | the provider account's billing or spending allowance is exhausted |
+| `account_changed` | the provider served an account different from the run's frozen account |
+| `cyber_policy` | a provider content-policy refusal |
+| `bio_policy` | a provider content-policy refusal |
+| `misalignment_policy_violation` | a provider content-policy refusal |
+| `content_filter` | the normalized safety finish, treated as a provider policy refusal |
+| `access_terminated_error` | the provider terminated the account's access; the seat is unable to run |
+| `insufficient_quota` | a legacy alias of `billing_exhausted`, for already recorded run errors only |
 
 A compaction `REFUSE` adds the compaction-provider contract's `RefuseCode`
 values (its §11) as `provider_code`; this role does not repeat them. Their
 retryability, and that of the two compaction codes above, is the
 compaction-provider contract's.
 
-These are run errors, not request-refusal codes; `errors::provider_codes::CODES`
-lists the three above.
+- [pinned] A consumer MUST treat `cyber_policy`, `bio_policy`,
+  `misalignment_policy_violation` and `content_filter` as provider policy
+  refusals. `content_filter` is the normalized safety finish.
+- [pinned] A consumer MUST treat a seat whose provider reports
+  `access_terminated_error` as unable to run. The broca runner normalizes a
+  Kimi usage-limit message under that type to `account_limit_exhausted`,
+  rather than reporting access termination.
+- [pinned] Runners MUST stop emitting `insufficient_quota`. Already
+  recorded run errors may still carry it; consumers MUST treat it as
+  `billing_exhausted`. broca emits `billing_exhausted` from 0.3.193 on.
+
+These are run errors, not request-refusal codes. Plan-fetch refusals, such
+as `plan_param_refused`, are send refusals and do not belong in this list.
+`errors::provider_codes::CODES` in the role crate still lists only the
+three compaction and PreUser codes above; it must add the newly pinned
+provider codes.
 
 ### 12.3 Tool-result reasons (`errors::tool_result_reasons`)
 
@@ -1011,9 +1065,9 @@ state root (`cortexkit-role-harness`):
    output replay from durable state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
    they would change was sent.
-6. [pinned] **Sends are idempotent across a kill.** A send whose record was
-   durable when the runner died is answered with the existing state on
-   retry, and nothing is written twice.
+6. [pinned] **Keyed sends are idempotent across a kill.** A keyed send
+   whose record was durable when the runner died is answered with the
+   existing state on retry, and nothing is written twice.
 7. [pinned] **Keys are stable.** A call's `call_key` read before a kill is
    the same after it.
 8. [pinned] **Resume is recorded.** Each resume writes one informational
@@ -1171,7 +1225,7 @@ the decision; the items it governs are pinned above.
   `detail.delivery`, never falling back to `queue`. An absent `delivery` is
   `queue`, a declared group like the others, and a runner that admits
   sessions declares it (§3, §9).
-- **Q13. The mark.** Settled as drafted: `mark`, opaque JSON (§9).
+- **Q13. The mark.** Settled: `mark` is not a member of the role (§9).
 - **Q14. Change ops.** Settled, as the session owner's role owner chose:
   role ops in their own group, `session_change`, holding `session.refresh
   {plan, policy, generation}`, `session.refresh_policy {generation, policy,
@@ -1184,7 +1238,8 @@ the decision; the items it governs are pinned above.
   `not_yet` as the answer before the first request (§10).
 - **Q16. Unnamed codes.** Settled: `invalid_params` stays, and
   `tool-provider/v1`'s `invalid_request` is a difference between roles;
-  `send_id_reuse` names the differing field in `detail.field`; the drafted
+  `send_id_reuse` names the differing field in `detail.field` when the
+  runner can identify it; the drafted
   names `unknown_run`, `tool_name_collision`, `plan_drift` and
   `scope_owner_mismatch` stay (§12).
 - **Q17. A session with no lineage yet.** Settled, a third option: a read of
@@ -1204,65 +1259,44 @@ the decision; the items it governs are pinned above.
 - **Q21. Stability.** Settled: stability is data, never part of a capability
   name. Each major in `role.describe` carries `stability`, `alpha`, `beta` or
   `stable`, read as `alpha` when absent; this draft is `alpha` (§2).
-- **Q22. `run.status` beyond its pinned members.** Open. One runner answers
-  a `run_id` it does not know with `{state: "unknown"}`, and answers a
-  request without `run_id` with a session-level status, `{state: "idle"}`
-  or `{state: "active", run_id, step}`. Options: (a) refuse an unknown
-  `run_id` `unknown_run`, as `run.result` does, and leave the session-level
-  status to each runner (drafted, §6.1); (b) make `unknown` a role state
-  for `run.status` only, never terminal; (c) pin the session-level status
-  as a second mode of the op.
+- **Q22. `run.status` beyond its pinned members.** Settled: an unknown
+  `run_id` answers `{state: "unknown"}`, not an error. The session-level
+  form, request `{}`, is optional within `run_status` (§6.1).
 
 ## Gaps in broca today
 
-Where broca's served surface, at broca commit `f06a487`, differs from this
-document. Paths are in the broca repository. An optional group broca does
-not declare (`model_view`, `compaction`, `session_change`, `retention`) is
-not a gap. None of this is a change request against broca.
+Where broca 0.3.194, at commit `549f678`, differs from this document.
+Paths are in the broca repository. An optional group a broca build does not
+declare is not a gap. None of this is a change request against broca.
 
-1. **Served ops it does not declare.** broca serves `run.status`,
-   `run.cancel` and `session.retract` (`crates/broca-module-serve/src/serve.rs:2013-2051`;
-   `crates/broca-module/src/serve.rs:222-240`), but its `role.describe`
-   lists neither the ops nor the `run_status`, `run_cancel` and `retract`
-   groups (`crates/broca-wire/src/role.rs:181-191`).
-2. **`run.status` against §6.1.** An unknown run is answered `{state:
-   "unknown"}`, not refused `unknown_run` (Q22); a request without
-   `run_id` answers a session-level status
-   (`crates/broca-module/src/serve.rs:242-248`; `crates/broca-wire/src/lib.rs:752-853`).
-   `undelivered_steers` is emitted only when it is not empty, so an ended
-   run with every steer rendered omits it where §6.1 requires `[]`
-   (`crates/broca-module/src/serve.rs:455-518`).
-3. **No per-message run attribution,** although broca declares `run_ops`:
+1. **Served ops it does not declare as groups.** broca serves `run.status`,
+   `run.cancel` and `session.retract`
+   (`crates/broca-module-serve/src/serve.rs:2159-2243`;
+   `crates/broca-module/src/serve.rs:822-860`), but its `role.describe`
+   declares none of `run_status`, `run_cancel` and `retract`. Its ordinary
+   op list omits all three; a retention-enabled build adds `run.status`
+   as an op, still without its group (`crates/broca-wire/src/role.rs:192-244`).
+2. **No per-message run attribution,** although broca declares `run_ops`:
    a page message carries no `run: {run_id, episode, final}`
-   (`crates/broca-wire/src/lib.rs:604-634`).
-4. **No `session_capabilities` in the baseline.** broca declares
-   `session_capabilities_from: "admission"`, and its baseline has no
-   `session_capabilities` member (`crates/broca-wire/src/role.rs:214-217,239-255`).
-   An absent member declares no session-level capability (§13), so broca
-   declares neither `mid_session_appends` nor `ordered_hook_phases`.
-5. **`lineage_id` is absent on legacy lineages** until their next write,
-   even on a page that has messages (`crates/broca-wire/src/lib.rs:644-659`).
-   §4.2 allows an absent `lineage_id` only on the empty page of a session
-   never written.
-6. **`send_id` is optional, and `prompt` may be given as `prompt_blocks`**
-   instead (`crates/broca-wire/src/lib.rs:121-135`). The role requires
-   both members.
-7. **`mark` is not recorded:** it is not a send field, so it is ignored as
-   an unknown key (`crates/broca-wire/src/lib.rs:108-226,310-318`).
-8. **A steer or interrupt inherits a fixed set of frozen parameters**
-   (model, tool choice, generation settings, stop conditions, cache,
-   budget, context limit, work class, service tier), while `keep_warm` and
-   `on_restart` stay per send
-   (`crates/broca-module-serve/src/serve.rs:1750-1804`). §9 has every
-   omitted runner parameter take its frozen value.
-9. **A queued send behind a restart pause is answered `pending`,** not
-   refused `run_paused` (`crates/broca-module/src/actor.rs:2240-2245`); a
-   send behind an authentication pause is refused `run_paused`
-   (`crates/broca-module/src/actor.rs:2187-2207`).
-10. **`send_id_reuse` names the differing field only when it can identify
-    one:** an aggregate or legacy identity mismatch omits `detail.field`
-    (`crates/broca-module-serve/src/serve.rs:2554-2575`).
-11. **`session.send` may answer `state: "paused"`,** with `run_id` and
-    `pause_reason`, to a keyed retry of a run paused by a restart
-    (`crates/broca-module/src/actor.rs:2095-2108`). `state` is decoded open
-    (§9), but the role names no `paused` send state.
+   (`crates/broca-wire/src/lib.rs:662-673`;
+   `crates/broca-module/src/serve.rs:278-289`). broca will implement §6 run
+   attribution after merge; page-level `lineage_state` is not a substitute.
+3. **No `session_capabilities` in the baseline.** broca declares
+   `session_capabilities_from: "admission"`, but its baseline has no
+   `session_capabilities` member
+   (`crates/broca-wire/src/role.rs:226-238,258-282`). An absent member
+   declares no session-level capability (§13); the baseline does not report
+   `mid_session_appends` or session-level `ordered_hook_phases`.
+4. **`lineage_id` is absent on legacy lineages** until their next write,
+   even on a page that has messages (`crates/broca-wire/src/lib.rs:702-717`;
+   `crates/broca-module/src/serve.rs:278-295`). Identity is minted on append,
+   not read (`crates/broca-wal/src/file_wal.rs:758-798`). §4.2 allows an
+   absent `lineage_id` only on the empty page of a session never written.
+5. **Owner sends do not require both `send_id` and `prompt` in broca's
+   request shape.** `send_id` is optional, and `prompt_blocks` may supply
+   the prompt instead (`crates/broca-wire/src/lib.rs:126-140`;
+   `crates/broca-module-serve/src/wire.rs:112-154`). A send without a key
+   uses a minted run id (`crates/broca-module-serve/src/serve.rs:311-322,2044-2048`);
+   ownership is checked separately (`crates/broca-module/src/actor.rs:2192-2240`).
+   §9's permission for unkeyed non-owner sends does not relax the required
+   members of owner sends.
