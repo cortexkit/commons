@@ -379,13 +379,9 @@ mod tests {
             .iter()
             .map(|case| case["code"].as_str().unwrap())
             .collect();
-        for code in CODES.iter().filter(|&&code| code != SEND_RETRACTED) {
+        for code in CODES {
             assert!(listed.contains(code), "{code} has no vector");
         }
-        // errors.json has no send_retracted case, so check that refusal here
-        // while retaining vector coverage for every earlier refusal code.
-        assert!(CODES.contains(&SEND_RETRACTED));
-        assert!(!is_retryable(SEND_RETRACTED));
         for case in vectors::cases(&file, "codes") {
             let code = case["code"].as_str().unwrap();
             assert_eq!(

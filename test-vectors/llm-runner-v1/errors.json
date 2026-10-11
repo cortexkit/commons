@@ -25,6 +25,10 @@
       "retryable": false
     },
     {
+      "code": "send_retracted",
+      "retryable": false
+    },
+    {
       "code": "delivery_unsupported",
       "retryable": false
     },
