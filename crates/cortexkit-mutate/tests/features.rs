@@ -220,7 +220,7 @@ fn feature_fields_validate_and_round_trip_without_argument_injection() {
         };
         let error = check(f.root(), &cat, &AtomicBool::new(false)).unwrap_err();
         assert!(
-            error.contains("feature-guard: invalid features name"),
+            error.contains("feature-guard (<unrecorded row>): invalid features name"),
             "{error}"
         );
     }

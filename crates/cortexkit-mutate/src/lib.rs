@@ -18,6 +18,24 @@ use std::{
 
 pub type Result<T> = std::result::Result<T, String>;
 
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct RowSource {
+    pub file: String,
+    pub line: usize,
+}
+
+impl RowSource {
+    fn location(&self) -> String {
+        if self.file.is_empty() {
+            "<unrecorded row>".into()
+        } else if self.line == 0 {
+            self.file.clone()
+        } else {
+            format!("{}:{}", self.file, self.line)
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Edit {
@@ -30,6 +48,9 @@ pub struct Edit {
 #[serde(deny_unknown_fields)]
 pub struct Control {
     pub id: String,
+    /// Load-time provenance is not part of the catalogue's TOML schema.
+    #[serde(skip)]
+    pub source: RowSource,
     pub guards: String,
     pub file: Option<String>,
     pub old: Option<String>,
@@ -164,6 +185,10 @@ pub fn default_build_timeout() -> u64 {
 }
 
 impl Control {
+    pub fn label(&self) -> String {
+        format!("{} ({})", self.id, self.source.location())
+    }
+
     pub fn matches_platform(&self) -> bool {
         self.platforms
             .as_ref()
@@ -175,14 +200,14 @@ impl Control {
             if names.is_empty() {
                 return Err(format!(
                     "{}: platforms must be nonempty when present",
-                    self.id
+                    self.label()
                 ));
             }
             for name in names {
                 if !known_os(name) {
                     return Err(format!(
                         "{}: unknown target_os in platforms: {name:?}",
-                        self.id
+                        self.label()
                     ));
                 }
             }
@@ -192,7 +217,7 @@ impl Control {
 
     fn validate_runner(&self) -> Result<()> {
         self.validate_platforms()?;
-        let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.id);
+        let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.label());
         if self.select.is_some() {
             if !matches!(self.runner.as_str(), "cargo" | "nextest") {
                 return Err(invalid(
@@ -401,23 +426,26 @@ impl Control {
         if self.equivalent.is_some() || self.unreachable.is_some() || self.desk_only.is_some() {
             return Err(format!(
                 "{}: hub, equivalent and unreachable are exclusive; desk_only is also exclusive",
-                self.id
+                self.label()
             ));
         }
         let reason = self
             .hub
             .as_deref()
-            .ok_or_else(|| format!("{}: HUB requires a hub reason", self.id))?;
+            .ok_or_else(|| format!("{}: HUB requires a hub reason", self.label()))?;
         if reason.trim().chars().count() < 20 {
             return Err(format!(
                 "{}: HUB reason must be at least 20 characters after trimming",
-                self.id
+                self.label()
             ));
         }
         if self.hub_targets.as_ref().is_none_or(|targets| {
             targets.is_empty() || targets.iter().any(|target| target.trim().is_empty())
         }) {
-            return Err(format!("{}: HUB requires non-empty hub_targets", self.id));
+            return Err(format!(
+                "{}: HUB requires non-empty hub_targets",
+                self.label()
+            ));
         }
         Ok(())
     }
@@ -436,7 +464,7 @@ impl Control {
         {
             return Err(format!(
                 "{}: equivalent, unreachable and desk_only are exclusive",
-                self.id
+                self.label()
             ));
         }
         let disposition = self
@@ -450,7 +478,7 @@ impl Control {
         {
             return Err(format!(
                 "{}: recorded disposition requires a non-empty reason",
-                self.id
+                self.label()
             ));
         }
         Ok(disposition)
@@ -466,7 +494,7 @@ impl Control {
             (None, None, None, false) => Ok(self.edits.clone()),
             _ => Err(format!(
                 "{}: use file/old/new or edits, exclusively",
-                self.id
+                self.label()
             )),
         }
     }
@@ -485,7 +513,8 @@ impl Control {
                 _ => {
                     return Err(format!(
                         "{}: invalid cargo target selector {}",
-                        self.id, target
+                        self.label(),
+                        target
                     ))
                 }
             }
@@ -499,7 +528,7 @@ impl Control {
         {
             return Err(format!(
                 "{}: all_features is mutually exclusive with features and no_default_features",
-                self.id
+                self.label()
             ));
         }
         let mut args = vec![];
@@ -510,7 +539,7 @@ impl Control {
                     || name.contains(',')
                     || name.chars().any(|c| c.is_whitespace() || c.is_control())
                 {
-                    return Err(format!("{}: invalid features name {name:?}: must be nonempty without whitespace, control characters, leading '-' or commas", self.id));
+                    return Err(format!("{}: invalid features name {name:?}: must be nonempty without whitespace, control characters, leading '-' or commas", self.label()));
                 }
             }
             if !features.is_empty() {
@@ -631,7 +660,84 @@ pub struct Catalogue {
     pub control: Vec<Control>,
 }
 
+/// Resolve the default directory without concealing a half-finished migration.
+pub fn catalogue_path(path: &Path) -> Result<PathBuf> {
+    let (file, directory) = match path.file_name().and_then(|n| n.to_str()) {
+        Some("mutations.toml") => (path.to_path_buf(), path.with_file_name("mutations.d")),
+        Some("mutations.d") => (path.with_file_name("mutations.toml"), path.to_path_buf()),
+        _ => return Ok(path.to_path_buf()),
+    };
+    if file.exists() && directory.is_dir() {
+        return Err(format!(
+            "both {} and {} exist; finish the catalogue migration before continuing",
+            file.display(),
+            directory.display()
+        ));
+    }
+    Ok(if directory.is_dir() {
+        directory
+    } else {
+        path.to_path_buf()
+    })
+}
+
+fn source_file(path: &Path) -> String {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    if let Ok(absolute) = fs::canonicalize(parent) {
+        for ancestor in absolute.ancestors() {
+            if let Ok(bytes) = git(ancestor, &["rev-parse", "--show-toplevel"]) {
+                let root = PathBuf::from(String::from_utf8_lossy(&bytes).trim());
+                if let Some(name) = path.file_name() {
+                    if let Ok(relative) = absolute.join(name).strip_prefix(&root) {
+                        return relative.to_string_lossy().into_owned();
+                    }
+                }
+            }
+        }
+    }
+    path.to_string_lossy().into_owned()
+}
+
+fn fragment_paths(path: &Path) -> Result<Vec<PathBuf>> {
+    if !path.is_dir() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))? {
+        let entry = entry.map_err(|e| format!("{}: {e}", path.display()))?;
+        let name = entry.file_name();
+        if !name.as_encoded_bytes().starts_with(b".")
+            && entry.path().extension().is_some_and(|e| e == "toml")
+            && entry.path().is_file()
+        {
+            paths.push(entry.path());
+        }
+    }
+    paths.sort_by(|a, b| {
+        a.file_name()
+            .unwrap()
+            .as_encoded_bytes()
+            .cmp(b.file_name().unwrap().as_encoded_bytes())
+    });
+    Ok(paths)
+}
+
 pub fn load(path: &Path) -> Result<Catalogue> {
+    let path = catalogue_path(path)?;
+    let fragments = fragment_paths(&path)?
+        .into_iter()
+        .map(|file| {
+            let text = fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            Ok((source_file(&file), text))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    load_fragments(fragments)
+}
+
+fn load_fragments(fragments: Vec<(String, String)>) -> Result<Catalogue> {
     // Deserialize each row separately so malformed fields still name its id.
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -641,28 +747,76 @@ pub fn load(path: &Path) -> Result<Catalogue> {
         #[serde(default)]
         control: Vec<toml::Value>,
     }
-    let rows: Rows = toml::from_str(&fs::read_to_string(path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let control = rows
-        .control
-        .into_iter()
-        .map(|row| {
+    #[derive(Deserialize)]
+    struct Locations {
+        #[serde(default)]
+        control: Vec<IdLocation>,
+    }
+    #[derive(Deserialize)]
+    struct IdLocation {
+        id: Option<toml::Spanned<String>>,
+    }
+    let mut catalogue = Catalogue::default();
+    let mut settings = BTreeMap::new();
+    for (file, text) in fragments {
+        let table: toml::Table = toml::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
+        for key in table.keys().filter(|key| key.as_str() != "control") {
+            if let Some(previous) = settings.insert(key.clone(), file.clone()) {
+                return Err(format!(
+                    "top-level setting {key:?} defined in both {previous} and {file}"
+                ));
+            }
+        }
+        let locations: Locations = toml::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
+        let rows: Rows = toml::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
+        catalogue.prebuild.extend(rows.prebuild);
+        for (row, location) in rows.control.into_iter().zip(locations.control) {
             let id = row
                 .get("id")
                 .and_then(toml::Value::as_str)
                 .unwrap_or("<missing id>")
                 .to_owned();
-            let c: Control = row.try_into().map_err(|e| format!("{id}: {e}"))?;
-            c.validate_runner()?;
-            c.recorded_disposition()?;
-            Ok(c)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    validate_prebuild(&rows.prebuild)?;
-    Ok(Catalogue {
-        control,
-        prebuild: rows.prebuild,
-    })
+            let line = location.id.as_ref().map_or(1, |id| {
+                text[..id.span().start]
+                    .bytes()
+                    .filter(|b| *b == b'\n')
+                    .count()
+                    + 1
+            });
+            let mut c: Control = row
+                .try_into()
+                .map_err(|e| format!("{id} ({file}:{line}): {e}"))?;
+            c.source = RowSource {
+                file: file.clone(),
+                line,
+            };
+            catalogue.control.push(c);
+        }
+    }
+    unique_ids(&catalogue)?;
+    for c in &catalogue.control {
+        c.validate_runner()?;
+        c.recorded_disposition()?;
+    }
+    validate_prebuild(&catalogue.prebuild)?;
+    Ok(catalogue)
+}
+
+fn unique_ids(catalogue: &Catalogue) -> Result<()> {
+    let mut ids: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for c in &catalogue.control {
+        ids.entry(&c.id).or_default().push(c.source.location());
+    }
+    let duplicates: Vec<_> = ids
+        .into_iter()
+        .filter(|(_, sources)| sources.len() > 1)
+        .map(|(id, sources)| format!("duplicate id {id:?}: {}", sources.join(", ")))
+        .collect();
+    if duplicates.is_empty() {
+        Ok(())
+    } else {
+        Err(duplicates.join("\n"))
+    }
 }
 
 fn target_io_error(name: &str, error: std::io::Error) -> String {
@@ -730,16 +884,15 @@ fn validate_command_id(id: &str) -> Result<()> {
 
 pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
     validate_prebuild(&catalogue.prebuild)?;
-    let mut ids = BTreeSet::new();
+    unique_ids(catalogue)?;
     for c in &catalogue.control {
         if c.id.is_empty()
             || !c
                 .id
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            || !ids.insert(&c.id)
         {
-            return Err(format!("invalid or duplicate id: {}", c.id));
+            return Err(format!("invalid id: {}", c.label()));
         }
         if c.guards.trim().is_empty()
             || (c.expect_red.is_empty()
@@ -750,9 +903,9 @@ pub fn validate(root: &Path, catalogue: &Catalogue) -> Result<()> {
             || c.expect_red.iter().any(|n| n.trim().is_empty())
             || c.equivalent.as_ref().is_some_and(|s| s.trim().is_empty())
         {
-            return Err(format!("{}: invalid required field", c.id));
+            return Err(format!("{}: invalid required field", c.label()));
         }
-        safe_path(root, &c.test_file)?;
+        safe_path(root, &c.test_file).map_err(|e| format!("{}: {e}", c.label()))?;
         validate_mutant(root, c)?;
     }
     Ok(())
@@ -766,7 +919,7 @@ pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
     c.recorded_disposition()?;
     c.validate_runner()?;
     if let Some(name) = &c.broad_report {
-        report_path(root, name)?;
+        report_path(root, name).map_err(|e| format!("{}: {e}", c.label()))?;
     }
     for edit in c.edits()? {
         // Deleted edit targets are row outcomes, not catalogue-wide errors.
@@ -774,26 +927,57 @@ pub fn validate_mutant(root: &Path, c: &Control) -> Result<()> {
         match safe_path(root, &edit.file) {
             Ok(_) => {}
             Err(e) if e.starts_with("ANCHOR_MISSING ") => {}
-            Err(e) => return Err(e),
+            Err(e) => return Err(format!("{}: {e}", c.label())),
         }
         if edit.old.is_empty() || edit.old == edit.new {
-            return Err(format!("{}: empty or unchanged edit", c.id));
+            return Err(format!("{}: empty or unchanged edit", c.label()));
         }
     }
     Ok(())
 }
 
-/// Append one control to the catalogue file as a new `[[control]]` table.
+/// Choose an id-named fragment so independent new rows do not share an append point.
+pub fn control_destination(path: &Path, id: &str) -> Result<PathBuf> {
+    let path = catalogue_path(path)?;
+    if path.is_dir() {
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err(format!("invalid id for catalogue fragment: {id}"));
+        }
+        Ok(path.join(format!("{id}.toml")))
+    } else {
+        Ok(path)
+    }
+}
+
+pub fn control_source(path: &Path, id: &str) -> Result<RowSource> {
+    Ok(RowSource {
+        file: source_file(&control_destination(path, id)?),
+        line: 0,
+    })
+}
+
+/// Append a table to a file, or create an id-named fragment in a directory.
 /// `prove` and `explore --append` both write rows through this function.
 pub fn append_control(path: &Path, c: &Control) -> Result<()> {
     use std::io::Write;
+    let catalogue_path = catalogue_path(path)?;
+    let destination = control_destination(&catalogue_path, &c.id)?;
     // HUB records a person's review of an observed broad catch, not a discovery
     // that prove or explore may assign automatically.
     if c.hub.is_some() || c.hub_targets.is_some() {
         return Err(format!(
             "{}: cannot append HUB; review a broad catch and edit the catalogue manually",
-            c.id
+            c.label()
         ));
+    }
+    if catalogue_path.exists() {
+        let mut catalogue = load(&catalogue_path)?;
+        catalogue.control.push(c.clone());
+        unique_ids(&catalogue)?;
     }
     let row = toml::to_string(&Catalogue {
         control: vec![c.clone()],
@@ -801,10 +985,11 @@ pub fn append_control(path: &Path, c: &Control) -> Result<()> {
     })
     .map_err(|e| e.to_string())?;
     let mut file = OpenOptions::new()
-        .create(true)
+        .create(!catalogue_path.is_dir())
+        .create_new(catalogue_path.is_dir())
         .append(true)
-        .open(path)
-        .map_err(|e| e.to_string())?;
+        .open(&destination)
+        .map_err(|e| format!("{}: {e}", destination.display()))?;
     writeln!(file, "\n{row}").map_err(|e| e.to_string())
 }
 
@@ -1193,6 +1378,7 @@ pub struct Collateral {
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub id: String,
+    pub source: RowSource,
     pub outcome: Outcome,
     /// "crlf" when at least one edit used the LF-to-CRLF anchor retry.
     /// Absent when every anchor matched byte-exactly.
@@ -1239,9 +1425,14 @@ pub struct Report {
     pub reason: Option<String>,
 }
 impl Report {
+    pub fn label(&self) -> String {
+        format!("{} ({})", self.id, self.source.location())
+    }
+
     fn new(c: &Control) -> Self {
         Self {
             id: c.id.clone(),
+            source: c.source.clone(),
             outcome: Outcome::Error,
             line_endings: None,
             timed_out_phase: None,
@@ -1703,7 +1894,7 @@ fn command_tests(
         } else {
             ("mutated command", "mutated command output")
         };
-        let error = |reason: String| format!("{}: {id}: {label}: {reason}", c.id);
+        let error = |reason: String| format!("{}: {id}: {label}: {reason}", c.label());
         let args: Vec<_> = argv
             .iter()
             .map(|arg| if arg == "{test}" { id } else { arg })
@@ -1882,7 +2073,7 @@ fn command_breadth(
         report.outcome = breadth_outcome(c, report, &cross_targets);
         Ok(())
     })();
-    audit.map_err(|e| format!("{}: broad_report {name}: {e}", c.id))
+    audit.map_err(|e| format!("{}: broad_report {name}: {e}", c.label()))
 }
 
 fn validate_command_broad_ids(c: &Control, results: &TestResults) -> Result<()> {
@@ -1903,7 +2094,7 @@ fn validate_command_broad_baseline(c: &Control, report: &Report) -> Result<()> {
             if !results.green.contains(id) {
                 return Err(format!(
                     "{}: broad_report {}: baseline test {id:?} was not green",
-                    c.id,
+                    c.label(),
                     c.broad_report.as_deref().unwrap_or_default()
                 ));
             }
@@ -2374,7 +2565,7 @@ fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()>
         }) {
             return Err(format!(
                 "{}: select = expected test {name:?} did not execute (zero matching tests)",
-                c.id
+                c.label()
             ));
         }
     }
@@ -2385,7 +2576,7 @@ fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()>
     {
         return Err(format!(
             "{}: select = expected ran unlisted test {name:?}",
-            c.id
+            c.label()
         ));
     }
     Ok(())
@@ -2499,7 +2690,7 @@ fn resolve_expected(c: &Control, results: &TestResults) -> Result<Vec<String>> {
             if candidates.len() > 1 {
                 return Err(format!(
                     "{}: ambiguous expect_red name {expected}; choose a qualified name: {}",
-                    c.id,
+                    c.label(),
                     candidates.join(", ")
                 ));
             }
@@ -3137,6 +3328,7 @@ impl ReplaySession {
             let mut report = if let Some(report) = shared.get(&key) {
                 let mut report = report.clone();
                 report.id = c.id.clone();
+                report.source = c.source.clone();
                 report.baseline_build_ms = 0;
                 report.baseline_test_ms = 0;
                 // Shared test results say nothing about this row's edit anchors.
@@ -3461,7 +3653,7 @@ fn replay(
     if c.runner == "command" && matches!(scope, Scope::Explore { .. }) {
         return Err(format!(
             "{}: explore refuses command rows: only expect_red ids can be observed",
-            c.id
+            c.label()
         ));
     }
     c.validate_runner()?;
@@ -3820,7 +4012,11 @@ fn list_output(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Res
     // List mode compiles the test binaries, so the build deadline bounds it.
     let output = execute(root, command(c, "list", scope)?, c.build_timeout_s, stop)?;
     if !output.success || output.timeout || output.interrupted {
-        return Err(format!("{}: list failed: {}", c.id, tail(&output.text)));
+        return Err(format!(
+            "{}: list failed: {}",
+            c.label(),
+            tail(&output.text)
+        ));
     }
     Ok(output.text)
 }
@@ -3917,7 +4113,7 @@ fn resolve_listed(c: &Control, listing: &Listing) -> Result<Vec<String>> {
         }) {
             return Err(format!(
                 "{}: expect_red test {expected} is #[ignore]d and this row does not run ignored tests; set ignored = \"include\" (or \"only\") on the row",
-                c.id
+                c.label()
             ));
         }
     }
@@ -3929,7 +4125,7 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
     let rows: Vec<_> = catalogue.control.iter().collect();
     let mut session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
     for c in &catalogue.control {
-        replaced(root, &c.edits()?)?;
+        replaced(root, &c.edits()?).map_err(|e| format!("{}: {e}", c.label()))?;
         // Unreachable rows have no names to discover. Command rows have no list
         // protocol: replay verifies their expected ids with a fresh baseline.
         if !c.matches_platform()
@@ -3940,17 +4136,81 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
             continue;
         }
         let (selected, _) = session.listings.get(root, c, Scope::Row, true, stop);
-        let selected = selected?;
+        let selected = selected.map_err(|e| format!("{}: {e}", c.label()))?;
         for expected in resolve_listed(c, &selected)? {
             if !selected.results.names.contains_key(&expected) {
                 return Err(format!(
                     "{}: expect_red name no longer exists: {expected}",
-                    c.id
+                    c.label()
                 ));
             }
         }
     }
     Ok(())
+}
+
+fn git_catalogue(root: &Path, path: &str, base: &str) -> Result<Option<Catalogue>> {
+    let path = Path::new(path);
+    let mut candidates = vec![path.to_path_buf()];
+    match path.file_name().and_then(|n| n.to_str()) {
+        Some("mutations.toml") => candidates.push(path.with_file_name("mutations.d")),
+        Some("mutations.d") => candidates.push(path.with_file_name("mutations.toml")),
+        _ => {}
+    }
+    let mut args = vec!["ls-tree", "-r", "--name-only", "-z", base, "--"];
+    let names: Vec<_> = candidates
+        .iter()
+        .map(|p| p.to_str().ok_or("non-UTF-8 catalogue path"))
+        .collect::<std::result::Result<_, _>>()?;
+    args.extend(names);
+    let listing = git(root, &args)?;
+    let files: Vec<_> = listing
+        .split(|b| *b == 0)
+        .filter(|b| !b.is_empty())
+        .map(|b| std::str::from_utf8(b).map_err(|e| e.to_string()))
+        .collect::<Result<_>>()?;
+    let mut fragments = Vec::new();
+    let mut forms = BTreeSet::new();
+    for candidate in &candidates {
+        for file in &files {
+            let file_path = Path::new(file);
+            let single = file_path == candidate;
+            let direct = file_path.parent() == Some(candidate.as_path());
+            if single
+                || (direct
+                    && !file_path
+                        .file_name()
+                        .unwrap()
+                        .as_encoded_bytes()
+                        .starts_with(b".")
+                    && file_path.extension().is_some_and(|e| e == "toml"))
+            {
+                forms.insert(candidate);
+                let bytes = git(root, &["show", &format!("{base}:{file}")])?;
+                fragments.push((
+                    (*file).to_owned(),
+                    String::from_utf8(bytes).map_err(|e| e.to_string())?,
+                ));
+            }
+        }
+    }
+    if forms.len() > 1 {
+        return Err(format!(
+            "base catalogue has both forms: {}",
+            candidates
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ));
+    }
+    if fragments.is_empty() {
+        return Ok(None);
+    }
+    fragments.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    load_fragments(fragments)
+        .map(Some)
+        .map_err(|e| format!("base catalogue is invalid: {e}"))
 }
 
 pub fn select_diff(
@@ -3964,18 +4224,27 @@ pub fn select_diff(
         .split(|b| *b == 0)
         .filter_map(|b| std::str::from_utf8(b).ok())
         .collect();
-    let old: Catalogue = match git(root, &["show", &format!("{base}:{catalogue_path}")]) {
-        Ok(b) => toml::from_str(std::str::from_utf8(&b).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("base catalogue is invalid: {e}"))?,
-        Err(_) if paths.contains(catalogue_path) => Catalogue::default(),
-        Err(_) => return Err("base catalogue missing and catalogue not added in diff".into()),
+    let old = match git_catalogue(root, catalogue_path, base)? {
+        Some(catalogue) => catalogue,
+        None if paths
+            .iter()
+            .any(|p| Path::new(p).starts_with(catalogue_path)) =>
+        {
+            Catalogue::default()
+        }
+        None => return Err("base catalogue missing and catalogue not added in diff".into()),
     };
     let mut selected = BTreeSet::new();
     for c in &catalogue.control {
         if paths.contains(c.test_file.as_str())
             || old.prebuild != catalogue.prebuild
             || c.edits()?.iter().any(|e| paths.contains(e.file.as_str()))
-            || !old.control.iter().any(|o| o == c)
+            || !old.control.iter().any(|o| {
+                let mut definition = o.clone();
+                // Moving a row between fragments does not change its mutation.
+                definition.source = c.source.clone();
+                definition == *c
+            })
         {
             selected.insert(c.id.clone());
         }
@@ -5036,6 +5305,7 @@ mod order_tests {
     fn row(id: &str, package: &str, file: &str) -> Control {
         Control {
             id: id.into(),
+            source: RowSource::default(),
             guards: "g".into(),
             file: Some(file.into()),
             old: Some("a".into()),

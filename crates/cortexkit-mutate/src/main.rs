@@ -186,7 +186,7 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
     for row in rows {
         println!(
             "{}: {}{}{}{}",
-            row.id,
+            row.label(),
             serde_json::to_value(&row.outcome)
                 .map_err(|e| e.to_string())?
                 .as_str()
@@ -273,7 +273,7 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         for row in unreachable {
             println!(
                 "  {}: {}",
-                row.id,
+                row.label(),
                 row.reason.as_deref().unwrap_or_default()
             );
         }
@@ -283,7 +283,7 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         for row in hubs {
             println!(
                 "  {}: {}",
-                row.id,
+                row.label(),
                 row.reason.as_deref().unwrap_or_default()
             );
         }
@@ -293,7 +293,7 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         for row in desk {
             println!(
                 "  {}: {}",
-                row.id,
+                row.label(),
                 row.reason.as_deref().unwrap_or_default()
             );
         }
@@ -382,11 +382,12 @@ fn run() -> Result<bool> {
     let cli = Cli::parse();
     let root = repository()?;
     std::env::set_current_dir(&root).map_err(|e| e.to_string())?;
+    let catalogue_path = catalogue_path(&cli.catalogue)?;
     let _lock = TreeLock::acquire(&root)?;
     let stop = signal_flag()?;
     match cli.command {
         Action::Check => {
-            check(&root, &load(&cli.catalogue)?, &stop)?;
+            check(&root, &load(&catalogue_path)?, &stop)?;
             println!("Catalogue anchors and exact test names verified");
             Ok(true)
         }
@@ -403,7 +404,7 @@ fn run() -> Result<bool> {
             if !all && diff.is_none() && only.is_none() {
                 return Err("select --all, --diff <base>, or --only <id>".into());
             }
-            let catalogue = load(&cli.catalogue)?;
+            let catalogue = load(&catalogue_path)?;
             validate(&root, &catalogue)?;
             if only
                 .as_ref()
@@ -413,7 +414,9 @@ fn run() -> Result<bool> {
             }
             let selected = diff
                 .map(|base| {
-                    let relative = cli.catalogue.strip_prefix(&root).unwrap_or(&cli.catalogue);
+                    let relative = catalogue_path
+                        .strip_prefix(&root)
+                        .unwrap_or(&catalogue_path);
                     select_diff(
                         &root,
                         relative.to_str().ok_or("non-UTF-8 catalogue path")?,
@@ -486,8 +489,9 @@ fn run() -> Result<bool> {
         }
         Action::Prove(p) => {
             prepare_optional_output(p.report.as_deref())?;
-            prepare_output_path(&cli.catalogue)?;
+            prepare_output_path(&control_destination(&catalogue_path, &p.id)?)?;
             let c = Control {
+                source: control_source(&catalogue_path, &p.id)?,
                 id: p.id,
                 guards: p.guards,
                 file: Some(p.file),
@@ -532,8 +536,8 @@ fn run() -> Result<bool> {
                 timeout_s: p.timeout_s,
                 build_timeout_s: p.build_timeout_s,
             };
-            let mut catalogue = if cli.catalogue.exists() {
-                load(&cli.catalogue)?
+            let mut catalogue = if catalogue_path.exists() {
+                load(&catalogue_path)?
             } else {
                 Catalogue::default()
             };
@@ -578,7 +582,7 @@ fn run() -> Result<bool> {
             session.finish(&root, &mut rows, p.allow_dirty)?;
             work?;
             if recorded && !stop.load(Ordering::SeqCst) {
-                append_control(&cli.catalogue, &c)?;
+                append_control(&catalogue_path, &c)?;
                 if caught {
                     // The proved file is restored by now, so the hint reads its
                     // unmutated text. `prove` always takes exactly one edit.
@@ -595,7 +599,7 @@ fn run() -> Result<bool> {
             Ok(!stop.load(Ordering::SeqCst)
                 && (recorded || rows[0].outcome == Outcome::SkippedPlatform))
         }
-        Action::Explore(x) => explore(&root, &cli.catalogue, x, &stop),
+        Action::Explore(x) => explore(&root, &catalogue_path, x, &stop),
     }
 }
 fn explore(
@@ -609,7 +613,10 @@ fn explore(
     }
     prepare_optional_output(x.report.as_deref())?;
     if x.append {
-        prepare_output_path(catalogue_path)?;
+        prepare_output_path(&control_destination(
+            catalogue_path,
+            x.id.as_deref().unwrap_or("explore"),
+        )?)?;
     }
     let edits = match x.edits {
         Some(text) => {
@@ -623,6 +630,7 @@ fn explore(
         None => vec![],
     };
     let mut c = Control {
+        source: control_source(catalogue_path, x.id.as_deref().unwrap_or("explore"))?,
         id: x.id.unwrap_or_else(|| "explore".into()),
         guards: x.guards.unwrap_or_default(),
         file: x.file,
@@ -724,7 +732,11 @@ fn explore(
         format!("explore row failed check, nothing appended (with --workspace, red tests outside --package cannot be named in its row): {e}")
     })?;
     append_control(catalogue_path, &c)?;
-    println!("Appended row {} to {}", c.id, catalogue_path.display());
+    println!(
+        "Appended row {} to {}",
+        c.label(),
+        control_destination(catalogue_path, &c.id)?.display()
+    );
     Ok(true)
 }
 fn main() {

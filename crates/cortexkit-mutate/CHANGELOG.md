@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0
+
+- Add directory catalogues: `mutations.d/` or `--catalogue <dir>` loads visible,
+  direct `*.toml` fragments in filename byte order. Refuse both default forms
+  being present and shared top-level settings defined in multiple fragments.
+- Behaviour change: every catalogue load now refuses duplicate control ids,
+  including in a single file, with every definition's source file and line.
+- Include repository-relative source files in JSON/text reports and row errors.
+  Diff selection reads both catalogue forms, including a manual migration;
+  `prove` and `explore --append` create id-named fragments for directories.
+
 ## 0.9.8
 
 - Tests: build every throwaway Cargo fixture into its own `target` directory.
