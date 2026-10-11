@@ -178,6 +178,11 @@ pub const CASES: &[CaseSpec] = &[
         "a completed run whose final message has only reasoning answers final_message with text \"\", never without final_message",
     ),
     case(
+        "run_attribution_per_message",
+        &[RunOps, Queue, TranscriptReads, HoldToolCalls],
+        "every attributable message names its run and episode; only the last message of a durably ended run is final, no running message is final, and unknown-origin records omit run (requires the native fixture hook or an explicit impossibility declaration)",
+    ),
+    case(
         "run_result_interrupted_not_cancelled",
         &[RunOps, Queue, TranscriptReads, KillAt(points::DISPATCH_INTENT)],
         "a run cut by a kill at DispatchIntent answers run.result interrupted, never cancelled",
@@ -334,9 +339,10 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "run_attribution_per_message uses transcript_reads and a held tool call to observe a non-terminal run, cancelling it over run.cancel only when run_cancel is declared; the native fixture hook supplies unknown-origin records independently of read replies, or explicitly declares only that rule inapplicable via CannotHoldUnattributable (NotSupported fails)",
     "retention cases use advance_retention_clock when declared; otherwise waits over 30 seconds are skipped by name and shorter waits use real time",
     "retention deletion completion is inspected by the subject in the runner's durable report and runner-held stores, never inferred from an expired read; non-role export/list/read request schemas and pagination are supplied by retention_probe_params, and every advertised extra op must be classified",
-    "retention_run_status_expired is inapplicable if run.status is not advertised; run.status remains runner-specific",
+    "retention_run_status_expired is inapplicable if run.status is not advertised",
     "the fetch plan's shape is not pinned (CONTRACT §10), so the subject builds each session's first-send fields and the suite never inspects a plan or a baseline's items",
     "the suite writes sessions with session.send (delivery absent, which means queue), so every case that needs a written session requires queue; a runner that admits sessions declares it (§9)",
     "the suite waits for a run to end through session.head's last_run_state, or run.result where only run_ops is required, so cases that wait require transcript_reads",
@@ -369,6 +375,15 @@ pub const NARROWINGS: &[&str] = &[
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CaseOutcome {
     Passed,
+    /// Every rule checked over the real route passed, but one rule was not
+    /// checked. In `run_attribution_per_message`, the adapter answered
+    /// `CannotHoldUnattributable`: it declares the runner never stores a
+    /// message without the run that produced it, so the rule that such a
+    /// message must omit `run` cannot be exercised. `reason` names the
+    /// unchecked rule, so the report never reads as a plain pass.
+    PassedWithInapplicableRule {
+        reason: String,
+    },
     Failed {
         reason: String,
     },
@@ -446,6 +461,10 @@ impl SuiteReport {
         for case in &self.cases {
             let line = match &case.outcome {
                 CaseOutcome::Passed => format!("PASS {}", case.case),
+                CaseOutcome::PassedWithInapplicableRule { reason } => format!(
+                    "PASS {} (one rule not applicable by declaration: {reason})",
+                    case.case
+                ),
                 CaseOutcome::Failed { reason } => format!("FAIL {}: {reason}", case.case),
                 CaseOutcome::Skipped { missing }
                     if case.requires.contains(&Compaction)

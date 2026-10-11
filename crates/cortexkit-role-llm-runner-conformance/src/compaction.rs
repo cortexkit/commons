@@ -476,20 +476,20 @@ where
 }
 
 /// Check `RunResult.error`'s refusal fields against the configured role code,
-/// reason and finer code. Other error fields use the runner's own schema.
+/// reason and finer code. Required class/message are checked by wire decoding.
 fn refusal_error(
-    error: &Value,
+    error: &cortexkit_role_llm_runner::run::RunError,
     code: &str,
     reason: &str,
     finer: Option<&str>,
 ) -> Result<(), String> {
-    if error["provider_code"] != code
-        || error["reason"] != reason
-        || error["provider"].as_str().is_none_or(str::is_empty)
-        || error.get("provider_detail_code").and_then(Value::as_str) != finer
+    if error.provider_code != code
+        || error.reason.as_deref() != Some(reason)
+        || error.provider.as_deref().is_none_or(str::is_empty)
+        || error.provider_detail_code.as_deref() != finer
     {
         return Err(format!(
-            "REFUSE mapping lost role code/provider/reason or finer diagnostic: {error}"
+            "REFUSE mapping lost role code/provider/reason or finer diagnostic: {error:?}"
         ));
     }
     Ok(())
@@ -537,11 +537,11 @@ where
         let error = ended.error.ok_or("Setup failure has no run error")?;
         match &setup {
             CompactionSetup::Unavailable => {
-                if error["provider_code"] != "compaction_unavailable"
-                    || error.get("provider_detail_code").is_some()
+                if error.provider_code != "compaction_unavailable"
+                    || error.provider_detail_code.is_some()
                 {
                     return Err(format!(
-                        "unavailable was mapped to a provider refusal: {error}"
+                        "unavailable was mapped to a provider refusal: {error:?}"
                     ));
                 }
             }
@@ -674,7 +674,7 @@ where
         || ended
             .error
             .as_ref()
-            .is_none_or(|e| e["provider_code"] != "compaction_wait_exceeded")
+            .is_none_or(|e| e.provider_code != "compaction_wait_exceeded")
     {
         return Err(format!(
             "WAIT did not end compaction_wait_exceeded at {cap} ms: {ended:?}"

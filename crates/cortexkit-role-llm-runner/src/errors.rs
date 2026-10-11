@@ -82,6 +82,9 @@ impl Default for RetentionInvalidDetail {
 /// `delivery`.
 pub const SEND_ID_REUSE: &str = "send_id_reuse";
 
+/// A retry of a durably retracted send. Nothing is written and it never starts.
+pub const SEND_RETRACTED: &str = "send_retracted";
+
 /// A send whose delivery mode (`queue` when absent) the runner does not
 /// declare as a capability group. `detail.delivery` names the mode. Nothing
 /// was written, and the send is never delivered in another mode instead.
@@ -180,6 +183,7 @@ pub const CODES: &[&str] = &[
     UNKNOWN_RUN,
     EXPIRED,
     SEND_ID_REUSE,
+    SEND_RETRACTED,
     DELIVERY_UNSUPPORTED,
     RUN_PAUSED,
     SCOPE_OWNER_MISMATCH,
@@ -239,7 +243,8 @@ pub mod tool_result_reasons {
 /// `provider_code` values a runner writes on a run that ends `error`
 /// because of a provider the session depends on.
 pub mod provider_codes {
-    /// Setup or a compaction call failed or timed out with no answer.
+    /// Setup only: failed or timed out with no answer. A step-call failure
+    /// uses the last view instead and never writes this code.
     pub const COMPACTION_UNAVAILABLE: &str = "compaction_unavailable";
     /// A compaction WAIT reached its cap and the request could not be shown
     /// to fit.
@@ -248,11 +253,58 @@ pub mod provider_codes {
     /// user turn.
     pub const PRE_USER_UNAVAILABLE: &str = "pre_user_unavailable";
 
+    /// The request exceeds the model's context window.
+    pub const CONTEXT_OVERFLOW: &str = "context_overflow";
+    /// The provider's output-token ceiling prevents a complete response.
+    pub const OUTPUT_CEILING: &str = "output_ceiling";
+    /// The provider's response deadline ended the request.
+    pub const RESPONSE_DEADLINE: &str = "response_deadline";
+    /// The account's usage limit is exhausted.
+    pub const ACCOUNT_LIMIT_EXHAUSTED: &str = "account_limit_exhausted";
+    /// The account's billing or spending allowance is exhausted.
+    pub const BILLING_EXHAUSTED: &str = "billing_exhausted";
+    /// The provider served an account other than the run's frozen account.
+    pub const ACCOUNT_CHANGED: &str = "account_changed";
+    /// A provider content-policy refusal.
+    pub const CYBER_POLICY: &str = "cyber_policy";
+    /// A provider content-policy refusal.
+    pub const BIO_POLICY: &str = "bio_policy";
+    /// A provider content-policy refusal.
+    pub const MISALIGNMENT_POLICY_VIOLATION: &str = "misalignment_policy_violation";
+    /// The normalized safety finish, a provider policy refusal.
+    pub const CONTENT_FILTER: &str = "content_filter";
+    /// Access terminated: the seat cannot run.
+    pub const ACCESS_TERMINATED_ERROR: &str = "access_terminated_error";
+    /// Read-only legacy alias. Runners must emit `billing_exhausted` instead.
+    pub const INSUFFICIENT_QUOTA: &str = "insufficient_quota";
+
+    /// Normalize recorded legacy codes for consumer decisions, preserving
+    /// unknown codes verbatim. This does not rewrite stored run errors.
+    pub fn normalize(code: &str) -> &str {
+        if code == INSUFFICIENT_QUOTA {
+            BILLING_EXHAUSTED
+        } else {
+            code
+        }
+    }
+
     /// Every provider code this role names; providers may define others.
     pub const CODES: &[&str] = &[
         COMPACTION_UNAVAILABLE,
         COMPACTION_WAIT_EXCEEDED,
         PRE_USER_UNAVAILABLE,
+        CONTEXT_OVERFLOW,
+        OUTPUT_CEILING,
+        RESPONSE_DEADLINE,
+        ACCOUNT_LIMIT_EXHAUSTED,
+        BILLING_EXHAUSTED,
+        ACCOUNT_CHANGED,
+        CYBER_POLICY,
+        BIO_POLICY,
+        MISALIGNMENT_POLICY_VIOLATION,
+        CONTENT_FILTER,
+        ACCESS_TERMINATED_ERROR,
+        INSUFFICIENT_QUOTA,
     ];
 }
 
@@ -290,6 +342,37 @@ mod tests {
     }
 
     #[test]
+    fn newly_pinned_provider_codes_and_legacy_alias_are_named() {
+        for code in [
+            "context_overflow",
+            "output_ceiling",
+            "response_deadline",
+            "account_limit_exhausted",
+            "billing_exhausted",
+            "account_changed",
+            "cyber_policy",
+            "bio_policy",
+            "misalignment_policy_violation",
+            "content_filter",
+            "access_terminated_error",
+            "insufficient_quota",
+        ] {
+            assert!(provider_codes::CODES.contains(&code), "{code}");
+        }
+        assert_eq!(
+            provider_codes::normalize("insufficient_quota"),
+            "billing_exhausted"
+        );
+        assert_eq!(
+            provider_codes::normalize("billing_exhausted"),
+            "billing_exhausted"
+        );
+        assert_eq!(provider_codes::normalize("future-code"), "future-code");
+        assert!(CODES.contains(&"send_retracted"));
+        assert!(!is_retryable("send_retracted"));
+    }
+
+    #[test]
     fn retryability_matches_the_vectors() {
         let file = vectors::load("errors.json");
         let listed: Vec<&str> = vectors::cases(&file, "codes")
@@ -314,15 +397,12 @@ mod tests {
         let file = vectors::load("run-result.json");
         let case = vectors::cases(&file, "answers")
             .iter()
-            .find(|case| case["name"] == "compaction call unavailable with no answer")
+            .find(|case| case["name"] == "Setup unavailable with no answer")
             .unwrap();
         let result: crate::run::RunResult =
             vectors::round_trip("compaction unavailable", &case["answer"]);
         let error = result.error.unwrap();
-        assert_eq!(
-            error["provider_code"].as_str(),
-            Some(provider_codes::COMPACTION_UNAVAILABLE)
-        );
+        assert_eq!(error.provider_code, provider_codes::COMPACTION_UNAVAILABLE);
         assert!(provider_codes::CODES.contains(&"compaction_unavailable"));
         assert!(!CODES.contains(&"compaction_unavailable"));
     }

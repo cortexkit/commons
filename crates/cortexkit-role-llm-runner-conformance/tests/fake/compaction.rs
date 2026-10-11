@@ -248,7 +248,7 @@ impl Module {
         reason: &str,
         finer: Option<String>,
     ) -> Result<(), Killed> {
-        let mut error = json!({"provider_code":code,"provider":"fake.compaction","reason":reason});
+        let mut error = json!({"class":"permanent","message":reason,"provider_code":code,"provider":"fake.compaction","reason":reason});
         if let Some(finer) = finer {
             if self.world.defects.compaction == CompactionDefect::FinerCodeReplacesRoleCode {
                 error["provider_code"] = json!(finer);

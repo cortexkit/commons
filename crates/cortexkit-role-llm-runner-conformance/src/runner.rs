@@ -127,6 +127,9 @@ where
                 };
                 match result {
                     Ok(Ending::Passed) => CaseOutcome::Passed,
+                    Ok(Ending::PassedWithInapplicableRule(reason)) => {
+                        CaseOutcome::PassedWithInapplicableRule { reason }
+                    }
                     Ok(Ending::Inapplicable(reason)) => CaseOutcome::Inapplicable { reason },
                     Ok(Ending::Skipped { missing, reason }) => {
                         CaseOutcome::SkippedWithReason { missing, reason }

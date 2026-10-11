@@ -30,6 +30,10 @@ use crate::{
 /// How a case that did not fail ended.
 pub enum Ending {
     Passed,
+    /// Every rule the case could check over the real route passed. The named
+    /// rule was not checked, because the runner's adapter declared that the
+    /// runner cannot produce the situation it tests.
+    PassedWithInapplicableRule(String),
     /// The question cannot be asked of this runner.
     Inapplicable(String),
     /// Not run: without a test clock, the case would have to wait longer in real time than the suite allows (30 seconds).
@@ -107,6 +111,7 @@ where
             "run_result_completed_final_text" => passed(self.run_result_final_text().await),
             "run_result_text_parts_joined_unchanged" => passed(self.run_result_joined().await),
             "run_result_completed_no_text_is_empty" => passed(self.run_result_no_text().await),
+            "run_attribution_per_message" => self.run_attribution_per_message().await,
             "dispatched_to_per_call" => passed(self.dispatched_to_per_call().await),
             "indeterminate_until_closed" => passed(self.indeterminate_until_closed().await),
             "sibling_calls_distinct_call_keys" => passed(self.sibling_call_keys().await),
@@ -931,6 +936,115 @@ where
             ));
         }
         Ok(())
+    }
+
+    async fn run_attribution_per_message(&self) -> Result<Ending, String> {
+        use crate::subject::AttributionFixture;
+        if !self.declares(Capability::HoldToolCalls) {
+            return Err(
+                "run_attribution_per_message needs a held tool call to check a still-running run"
+                    .into(),
+            );
+        }
+        let mut held = self.mint.call("attribution-held");
+        held.hold = true;
+        let arguments = held.arguments.clone();
+        let mut session = self
+            .open(
+                "attribution",
+                Script {
+                    turns: vec![
+                        ScriptedTurn {
+                            parts: vec![ScriptedPart::Text("first-final".into())],
+                        },
+                        ScriptedTurn {
+                            parts: vec![ScriptedPart::ToolCall(held)],
+                        },
+                        ScriptedTurn {
+                            parts: vec![ScriptedPart::Text("second-final".into())],
+                        },
+                    ],
+                },
+            )
+            .await?;
+        let (_, first) = self.run_prompt(&mut session, "first-prompt").await?;
+        let (_, before) = read_all(&session.route).await?;
+        check_run_attribution(&before, &first.run_id, true)?;
+        let reply: SendReply = decode(
+            "session.send",
+            expect_ok(
+                "session.send",
+                self.send_raw(&session, "second-prompt", &self.mint.next("send"), None)
+                    .await?,
+            )?,
+        )?;
+        let second = reply.run_id.clone().ok_or("second send has no run_id")?;
+        self.subject
+            .await_tool_call(&arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        let active = run_result(&session.route, &second).await?;
+        if active.run_state().is_terminal() {
+            return Err("held tool call did not keep the run non-terminal".into());
+        }
+        let (_, during) = read_all(&session.route).await?;
+        if during.len() < before.len() {
+            return Err("transcript lost the first run's messages".into());
+        }
+        check_run_attribution(&during[..before.len()], &first.run_id, true)?;
+        check_run_attribution(&during[before.len()..], &second, false)?;
+        // Cancellation is optional, but when declared it exercises a terminal
+        // whose last message need not be an assistant answer.
+        let describe: RoleDescribe = decode(
+            "role.describe",
+            expect_ok(
+                "role.describe",
+                call(&session.route, ops::ROLE_DESCRIBE, json!({})).await?,
+            )?,
+        )?;
+        let can_cancel = describe.declares(groups::RUN_CANCEL);
+        if can_cancel {
+            let answer: cortexkit_role_llm_runner::run::RunCancelReply = decode(
+                "run.cancel",
+                expect_ok(
+                    "run.cancel",
+                    call(&session.route, ops::RUN_CANCEL, json!({"run_id":second})).await?,
+                )?,
+            )?;
+            if answer != cortexkit_role_llm_runner::run::RunCancelReply::Ack {
+                return Err("run.cancel did not acknowledge the held run".into());
+            }
+        }
+        self.subject
+            .release_tool_call(&arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        wait_run_end(
+            self.subject,
+            &session.route,
+            self.declared,
+            Some(&first.run_id),
+            &reply,
+        )
+        .await?;
+        let (_, after) = read_all(&session.route).await?;
+        if after.len() < before.len() {
+            return Err("transcript lost the first run's messages".into());
+        }
+        check_run_attribution(&after[..before.len()], &first.run_id, true)?;
+        check_run_attribution(&after[before.len()..], &second, true)?;
+        match self.subject.install_attribution_fixture(self.handle.inner(), &session.name).await.map_err(|e| e.to_string())? {
+            AttributionFixture::NotSupported => Err("run_attribution_per_message: native attribution fixture hook is missing (NotSupported)".into()),
+            AttributionFixture::CannotHoldUnattributable => Ok(Ending::PassedWithInapplicableRule("unknown-origin rule: adapter declares every native write path names a run (CannotHoldUnattributable)".into())),
+            AttributionFixture::Installed { ordinal, marker } => {
+                let (_, messages) = read_all(&session.route).await?;
+                if holding(&messages, &marker) != 1 { return Err("attribution fixture marker is missing or repeated".into()); }
+                let message = messages.iter().find(|m| m.ordinal == ordinal).ok_or("attribution fixture ordinal is missing")?;
+                if holding(std::slice::from_ref(message), &marker) != 1 { return Err("attribution fixture marker has the wrong ordinal".into()); }
+                if message.run.is_some() { return Err("unattributable message invented run attribution".into()); }
+                Ok(Ending::Passed)
+            }
+        }
     }
 
     // ---- dispatch attribution ---------------------------------------------
@@ -1966,6 +2080,38 @@ fn distinct_keys(what: &str, keys: &[Option<String>]) -> Check {
         (Some(a), Some(_)) => Err(format!("{what} share call_key {a}")),
         _ => Err(format!("{what}: a call carries no call_key ({keys:?})")),
     }
+}
+
+/// Compare against the run driven by the case, not against run ids reported by
+/// the messages themselves: filtering by those ids would hide missing attribution.
+fn check_run_attribution(messages: &[ReadMessage], run_id: &str, terminal: bool) -> Check {
+    if messages.is_empty() {
+        return Err("scripted run produced no messages to attribute".into());
+    }
+    let mut episode: Option<&str> = None;
+    for (index, message) in messages.iter().enumerate() {
+        let run = message
+            .run
+            .as_ref()
+            .ok_or_else(|| format!("attributable message {} is missing run", message.ordinal))?;
+        if run.run_id != run_id {
+            return Err(format!(
+                "message {} names run {}, expected {run_id}",
+                message.ordinal, run.run_id
+            ));
+        }
+        if episode.is_some_and(|e| e != run.episode) {
+            return Err("run episode is inconsistent".into());
+        }
+        episode = Some(&run.episode);
+        if run.is_final != (terminal && index + 1 == messages.len()) {
+            return Err(format!(
+                "message {} final is not last-only for durable terminal={terminal}",
+                message.ordinal
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -18,6 +18,12 @@ pub enum Capability {
     TranscriptReads,
     /// The `run_ops` group: `run.result` and run attribution.
     RunOps,
+    /// Poll run.status, without transcript reads.
+    RunStatus,
+    /// Cancel active or paused runs under the session owner's scope.
+    RunCancel,
+    /// Withdraw a submission before it starts.
+    Retract,
     /// The `dispatch_attribution` group: per-call fields on a page.
     DispatchAttribution,
     /// The `streaming` group: `session.subscribe` from a page's `head`.
@@ -60,6 +66,9 @@ impl Capability {
     pub const GROUPS: &'static [Capability] = &[
         Self::TranscriptReads,
         Self::RunOps,
+        Self::RunStatus,
+        Self::RunCancel,
+        Self::Retract,
         Self::DispatchAttribution,
         Self::Streaming,
         Self::ModelView,
@@ -90,6 +99,9 @@ impl Capability {
         Some(match self {
             Self::TranscriptReads => groups::TRANSCRIPT_READS,
             Self::RunOps => groups::RUN_OPS,
+            Self::RunStatus => groups::RUN_STATUS,
+            Self::RunCancel => groups::RUN_CANCEL,
+            Self::Retract => groups::RETRACT,
             Self::DispatchAttribution => groups::DISPATCH_ATTRIBUTION,
             Self::Streaming => groups::STREAMING,
             Self::ModelView => groups::MODEL_VIEW,
@@ -180,6 +192,19 @@ impl ScriptedTurn {
     }
 }
 
+/// The native-record fixture for the unknown-origin attribution rule.
+/// Its ordinal and marker come from fixture construction, never from a read reply.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttributionFixture {
+    /// A durably installed message whose run cannot be determined.
+    Installed { ordinal: u64, marker: String },
+    /// No fixture hook: the named conformance case must fail.
+    NotSupported,
+    /// The adapter declares that every native write path records a run.
+    /// Only the unknown-origin rule is inapplicable, not the route-driven rules.
+    CannotHoldUnattributable,
+}
+
 /// The adapter for a live runner under test: its harness and runner-specific
 /// configuration. Every case request must go over the runner's real management
 /// route; the adapter must not synthesize management replies for the runner.
@@ -237,6 +262,21 @@ pub trait LlmRunnerSubject: Harness {
     /// session with a compaction script, select turns by emitted assistant
     /// answers instead, keeping that cursor across held calls and restarts.
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError>;
+
+    /// Install one native persistent message with no recoverable run or episode
+    /// in the existing session. Return its ordinal and a unique marker stored
+    /// in its body, derived from fixture construction rather than `session.read`.
+    /// Do not synthesize management replies or invent a run for this record.
+    /// Return `CannotHoldUnattributable` only if every native write path names
+    /// a run, so the runner truly cannot store such a message. The default
+    /// `NotSupported` fails the case; it is not a partial conformance pass.
+    async fn install_attribution_fixture(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<AttributionFixture, HarnessError> {
+        Ok(AttributionFixture::NotSupported)
+    }
 
     /// Install the scripted compaction provider and controlled clock for
     /// `session`. Initial installation must precede admission, and the

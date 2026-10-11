@@ -1,11 +1,10 @@
-//! `run.result`: a run's terminal state and its final assistant message.
+//! Run results, status polling and cancellation.
 //!
 //! Every run reaches exactly one terminal state, and a crash never gives it a
 //! second one. `interrupted` (the runner stopped or crashed under the run)
 //! is distinct from `cancelled` (a caller asked it to stop).
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// Run state names. A state not listed here decodes as [`RunState::Other`],
 /// keeping its name, and a consumer treats it as unclassified.
@@ -93,11 +92,9 @@ pub struct RunResult {
     /// Why the run ended, where the runner names a reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// The typed error of a run that ended `error`. Its schema is the
-    /// runner's; it carries the `provider_code` when a provider ended the
-    /// run.
+    /// The error of a run that ended `error`, with optional measured details.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<Value>,
+    pub error: Option<RunError>,
     /// The final assistant message of a run that ended `completed`: always
     /// present on a completed run, with `text: ""` when the message has no
     /// text parts. Absent on a run that has not ended.
@@ -121,7 +118,7 @@ impl RunResult {
         self
     }
 
-    pub fn with_error(mut self, error: Value) -> Self {
+    pub fn with_error(mut self, error: RunError) -> Self {
         self.error = Some(error);
         self
     }
@@ -184,10 +181,332 @@ pub struct FinalMessage {
     pub text: String,
 }
 
+/// A run error. Codes and classes are open strings; unknown values are kept.
+/// Missing optional members mean not measured, never zero or an empty string.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RunError {
+    pub class: String,
+    pub message: String,
+    /// The role code consumers branch on, not the provider's finer diagnostic.
+    pub provider_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Diagnostics only: never replaces `provider_code` or decides retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_detail_code: Option<String>,
+}
+
+impl RunError {
+    pub fn new(
+        class: impl Into<String>,
+        message: impl Into<String>,
+        provider_code: impl Into<String>,
+    ) -> Self {
+        Self {
+            class: class.into(),
+            message: message.into(),
+            provider_code: provider_code.into(),
+            status: None,
+            retry_after_secs: None,
+            resets_at_ms: None,
+            account_ref: None,
+            provider: None,
+            reason: None,
+            provider_detail_code: None,
+        }
+    }
+    pub fn with_status(mut self, status: u16) -> Self {
+        self.status = Some(status);
+        self
+    }
+    pub fn with_retry_after_secs(mut self, seconds: f64) -> Self {
+        self.retry_after_secs = Some(seconds);
+        self
+    }
+    pub fn with_resets_at_ms(mut self, ms: u64) -> Self {
+        self.resets_at_ms = Some(ms);
+        self
+    }
+    pub fn with_account_ref(mut self, value: impl Into<String>) -> Self {
+        self.account_ref = Some(value.into());
+        self
+    }
+    pub fn with_provider(mut self, value: impl Into<String>) -> Self {
+        self.provider = Some(value.into());
+        self
+    }
+    pub fn with_reason(mut self, value: impl Into<String>) -> Self {
+        self.reason = Some(value.into());
+        self
+    }
+    pub fn with_provider_detail_code(mut self, value: impl Into<String>) -> Self {
+        self.provider_detail_code = Some(value.into());
+        self
+    }
+}
+
+/// The strict `run.status` request. The session-level form `{}` is optional
+/// for runners: declaring `run_status` only promises the run-id form.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct RunStatusRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+}
+impl RunStatusRequest {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
+        self
+    }
+}
+
+/// Known reasons for a pause. Other reasons survive decoding unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
+pub enum RunReason {
+    AuthRequired,
+    Restart,
+    Unknown(String),
+}
+impl From<String> for RunReason {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "auth_required" => Self::AuthRequired,
+            "restart" => Self::Restart,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<RunReason> for String {
+    fn from(value: RunReason) -> Self {
+        match value {
+            RunReason::AuthRequired => "auth_required".into(),
+            RunReason::Restart => "restart".into(),
+            RunReason::Unknown(s) => s,
+        }
+    }
+}
+
+/// The lenient run-id `run.status` answer. Session-level answers may use a
+/// runner's own schema. An unknown run answers only `{state: "unknown"}`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RunStatus {
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<RunReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<RunError>,
+    /// On an ended run, `None` means delivery could not be determined; an
+    /// empty list means checked and clean. Absent on a non-terminal run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undelivered_steers: Option<Vec<String>>,
+}
+impl RunStatus {
+    pub fn new(state: impl Into<String>) -> Self {
+        Self {
+            state: state.into(),
+            reason: None,
+            error: None,
+            undelivered_steers: None,
+        }
+    }
+    pub fn with_reason(mut self, reason: RunReason) -> Self {
+        self.reason = Some(reason);
+        self
+    }
+    pub fn with_error(mut self, error: RunError) -> Self {
+        self.error = Some(error);
+        self
+    }
+    pub fn with_undelivered_steers(mut self, steers: Vec<String>) -> Self {
+        self.undelivered_steers = Some(steers);
+        self
+    }
+    pub fn run_state(&self) -> RunState {
+        RunState::parse(&self.state)
+    }
+}
+
+/// Stop the named active or paused run, under the session owner's scope.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RunCancelRequest {
+    pub run_id: String,
+}
+impl RunCancelRequest {
+    pub fn new(run_id: impl Into<String>) -> Self {
+        Self {
+            run_id: run_id.into(),
+        }
+    }
+}
+
+/// A JSON string. `Ack` accepts cancellation, but does not determine which
+/// terminal wins a race. Unknown replies do not confirm cancellation.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
+pub enum RunCancelReply {
+    Ack,
+    NotActive,
+    Unknown(String),
+}
+impl From<String> for RunCancelReply {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "ack" => Self::Ack,
+            "not_active" => Self::NotActive,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<RunCancelReply> for String {
+    fn from(value: RunCancelReply) -> Self {
+        match value {
+            RunCancelReply::Ack => "ack".into(),
+            RunCancelReply::NotActive => "not_active".into(),
+            RunCancelReply::Unknown(s) => s,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{errors, vectors};
+
+    #[test]
+    fn run_error_absent_members_are_not_measured_and_bytes_are_pinned() {
+        let bytes = r#"{"class":"future-class","message":"failed","provider_code":"future-code"}"#;
+        let error: RunError = serde_json::from_str(bytes).unwrap();
+        assert_eq!(
+            error,
+            RunError::new("future-class", "failed", "future-code")
+        );
+        assert_eq!(error.status, None);
+        assert_eq!(error.retry_after_secs, None);
+        assert_eq!(error.resets_at_ms, None);
+        assert_eq!(error.account_ref, None);
+        assert_eq!(error.provider, None);
+        assert_eq!(error.reason, None);
+        assert_eq!(error.provider_detail_code, None);
+        assert_eq!(serde_json::to_string(&error).unwrap(), bytes);
+        let full = RunError::new("transient", "limited", "billing_exhausted")
+            .with_status(429)
+            .with_retry_after_secs(0.5)
+            .with_resets_at_ms(1234)
+            .with_account_ref("account-1")
+            .with_provider("provider-1")
+            .with_reason("limit")
+            .with_provider_detail_code("diagnostic");
+        let full_bytes = r#"{"class":"transient","message":"limited","provider_code":"billing_exhausted","status":429,"retry_after_secs":0.5,"resets_at_ms":1234,"account_ref":"account-1","provider":"provider-1","reason":"limit","provider_detail_code":"diagnostic"}"#;
+        assert_eq!(serde_json::to_string(&full).unwrap(), full_bytes);
+        assert_eq!(serde_json::from_str::<RunError>(full_bytes).unwrap(), full);
+        for bytes in [
+            r#"{"message":"m","provider_code":"c"}"#,
+            r#"{"class":"c","provider_code":"p"}"#,
+            r#"{"class":"c","message":"m"}"#,
+        ] {
+            assert!(serde_json::from_str::<RunError>(bytes).is_err());
+        }
+        assert!(serde_json::from_str::<RunError>(
+            r#"{"class":"c","message":"m","provider_code":"p","future":true}"#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn run_status_wire_bytes_open_reason_and_unknown_run() {
+        for (request, bytes) in [
+            (RunStatusRequest::new(), "{}"),
+            (
+                RunStatusRequest::new().with_run_id("r1"),
+                r#"{"run_id":"r1"}"#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&request).unwrap(), bytes);
+            assert_eq!(
+                serde_json::from_str::<RunStatusRequest>(bytes).unwrap(),
+                request
+            );
+        }
+        let error = serde_json::from_str::<RunStatusRequest>(r#"{"runId":"r1"}"#).unwrap_err();
+        assert!(error.to_string().contains("runId"));
+        let unknown = RunStatus::new("unknown");
+        assert_eq!(
+            serde_json::to_string(&unknown).unwrap(),
+            r#"{"state":"unknown"}"#
+        );
+        assert!(!unknown.run_state().is_terminal());
+        assert_eq!(
+            serde_json::from_str::<RunStatus>(r#"{"state":"unknown","future":true}"#).unwrap(),
+            unknown
+        );
+        let full = RunStatus::new("error")
+            .with_reason(RunReason::Unknown("future-reason".into()))
+            .with_error(RunError::new("permanent", "failed", "future-code"))
+            .with_undelivered_steers(vec!["send-1".into(), "send-2".into()]);
+        let bytes = r#"{"state":"error","reason":"future-reason","error":{"class":"permanent","message":"failed","provider_code":"future-code"},"undelivered_steers":["send-1","send-2"]}"#;
+        assert_eq!(serde_json::to_string(&full).unwrap(), bytes);
+        assert_eq!(serde_json::from_str::<RunStatus>(bytes).unwrap(), full);
+        let clean = RunStatus::new("completed").with_undelivered_steers(vec![]);
+        assert_eq!(
+            serde_json::to_string(&clean).unwrap(),
+            r#"{"state":"completed","undelivered_steers":[]}"#
+        );
+        assert_ne!(
+            clean.undelivered_steers,
+            RunStatus::new("completed").undelivered_steers
+        );
+        for (bytes, reason) in [
+            (r#""auth_required""#, RunReason::AuthRequired),
+            (r#""restart""#, RunReason::Restart),
+        ] {
+            assert_eq!(serde_json::from_str::<RunReason>(bytes).unwrap(), reason);
+            assert_eq!(serde_json::to_string(&reason).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn run_cancel_wire_bytes_and_unknown_reply() {
+        let request = RunCancelRequest::new("r1");
+        assert_eq!(
+            serde_json::to_string(&request).unwrap(),
+            r#"{"run_id":"r1"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<RunCancelRequest>(r#"{"run_id":"r1","future":true}"#).unwrap(),
+            request
+        );
+        assert!(serde_json::from_str::<RunCancelRequest>("{}").is_err());
+        for (bytes, reply) in [
+            (r#""ack""#, RunCancelReply::Ack),
+            (r#""not_active""#, RunCancelReply::NotActive),
+            (r#""future""#, RunCancelReply::Unknown("future".into())),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<RunCancelReply>(bytes).unwrap(),
+                reply
+            );
+            assert_eq!(serde_json::to_string(&reply).unwrap(), bytes);
+        }
+    }
 
     #[test]
     fn run_result_vectors_decode_and_round_trip() {

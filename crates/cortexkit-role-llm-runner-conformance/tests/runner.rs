@@ -1171,6 +1171,94 @@ async fn compaction_model_view_missing_is_not_applicable_independently() {
     }
 }
 
+#[tokio::test]
+async fn run_attribution_installed_fixture_passes() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert_passed(&report, "run_attribution_per_message");
+}
+
+#[tokio::test]
+async fn run_attribution_missing_fixture_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_fixture_missing: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "run_attribution_per_message").contains("hook is missing"));
+}
+
+#[tokio::test]
+async fn run_attribution_impossible_fixture_names_only_unknown_origin_skip() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_cannot_hold_unattributable: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        matches!(report.outcome("run_attribution_per_message"), Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("unknown-origin") && reason.contains("CannotHoldUnattributable"))
+    );
+    assert!(report
+        .render()
+        .contains("PASS run_attribution_per_message (one rule not applicable by declaration:"));
+    let broken = run(&FakeSubject::new(Defects {
+        attribution_cannot_hold_unattributable: true,
+        attribution_wrong_final: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&broken, "run_attribution_per_message").contains("final is not last-only"));
+}
+
+#[tokio::test]
+async fn run_attribution_missing_run_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_missing_run: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "run_attribution_per_message").contains("missing run"));
+}
+
+#[tokio::test]
+async fn run_attribution_wrong_final_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_wrong_final: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "run_attribution_per_message").contains("final is not last-only"));
+}
+
+#[tokio::test]
+async fn run_attribution_invented_run_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_invent_run: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "run_attribution_per_message").contains("invented run attribution"));
+}
+
+#[tokio::test]
+async fn run_attribution_running_final_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_running_final: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "run_attribution_per_message").contains("durable terminal=false"));
+}
+
+#[tokio::test]
+async fn run_attribution_tool_result_final_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        attribution_assistant_only_final: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "run_attribution_per_message").contains("durable terminal=true"));
+}
+
 /// A runner may accept a send and end the run a moment later, so a read immediately
 /// after the send can still say `active`. The compaction cases that assert how
 /// a run ended must wait for the end rather than read once.

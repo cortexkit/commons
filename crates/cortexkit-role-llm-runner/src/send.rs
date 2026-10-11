@@ -184,10 +184,6 @@ pub struct SendRequest {
         deserialize_with = "deserialize_delivery"
     )]
     pub delivery: Option<Delivery>,
-    /// The sender's mark: the prompt is model-visible but not a human turn.
-    /// The runner records it and does not act on it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mark: Option<Value>,
     /// The session's fetch plan, carried verbatim when the runner declares
     /// `plans`. The first send establishes the session's plan and freezes its
     /// fetched manifest. An identical later repeat does not fetch again;
@@ -214,7 +210,6 @@ impl SendRequest {
             prompt: prompt.into(),
             send_id: send_id.into(),
             delivery: None,
-            mark: None,
             plan: None,
             retention: None,
             runner_params: Map::new(),
@@ -223,11 +218,6 @@ impl SendRequest {
 
     pub fn with_delivery(mut self, delivery: Delivery) -> Self {
         self.delivery = Some(delivery);
-        self
-    }
-
-    pub fn with_mark(mut self, mark: Value) -> Self {
-        self.mark = Some(mark);
         self
     }
 
@@ -339,6 +329,30 @@ pub mod states {
     /// The message is durably queued as `submission_id` and will start a new
     /// run of its own.
     pub const PENDING: &str = "pending";
+    /// The run is paused; `pause_reason` may explain why.
+    pub const PAUSED: &str = "paused";
+}
+
+/// A send state, classified without rejecting a runner's additional states.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SendState {
+    Active,
+    Finished,
+    Pending,
+    Paused,
+    Unknown(String),
+}
+impl SendState {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            states::ACTIVE => Self::Active,
+            states::FINISHED => Self::Finished,
+            states::PENDING => Self::Pending,
+            states::PAUSED => Self::Paused,
+            other => Self::Unknown(other.into()),
+        }
+    }
 }
 
 /// The `session.send` reply. Decoded leniently.
@@ -356,6 +370,9 @@ pub struct SendReply {
     pub submission_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// A paused reply's reason, distinct from the run's terminal `reason`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_reason: Option<String>,
     /// On the reply to the send that admitted the session: what was frozen,
     /// read from the record the runner wrote. A retry of that send with the
     /// same `send_id` gets the same facts.
@@ -373,6 +390,7 @@ impl SendReply {
             run_id: None,
             submission_id: None,
             reason: None,
+            pause_reason: None,
             baseline: None,
             delivered: None,
         }
@@ -393,6 +411,15 @@ impl SendReply {
         self
     }
 
+    pub fn with_pause_reason(mut self, reason: impl Into<String>) -> Self {
+        self.pause_reason = Some(reason.into());
+        self
+    }
+
+    pub fn send_state(&self) -> SendState {
+        SendState::parse(&self.state)
+    }
+
     pub fn with_baseline(mut self, baseline: Baseline) -> Self {
         self.baseline = Some(baseline);
         self
@@ -408,6 +435,27 @@ impl SendReply {
 mod tests {
     use super::*;
     use crate::{errors, vectors};
+
+    #[test]
+    fn paused_send_bytes_preserve_pause_reason_and_open_states() {
+        let absent = SendReply::new(states::PAUSED);
+        assert_eq!(
+            serde_json::to_string(&absent).unwrap(),
+            r#"{"state":"paused"}"#
+        );
+        let full = absent.with_run_id("r1").with_pause_reason("future-pause");
+        let bytes = r#"{"state":"paused","run_id":"r1","pause_reason":"future-pause"}"#;
+        assert_eq!(serde_json::to_string(&full).unwrap(), bytes);
+        assert_eq!(serde_json::from_str::<SendReply>(bytes).unwrap(), full);
+        assert_eq!(full.send_state(), SendState::Paused);
+        let future = serde_json::from_str::<SendReply>(r#"{"state":"future"}"#).unwrap();
+        assert_eq!(future.send_state(), SendState::Unknown("future".into()));
+        let request = serde_json::from_str::<SendRequest>(
+            r#"{"prompt":"p","send_id":"s","mark":"runner-owned"}"#,
+        )
+        .unwrap();
+        assert_eq!(request.runner_params["mark"], "runner-owned");
+    }
 
     #[test]
     fn send_vectors_decode_and_round_trip() {
