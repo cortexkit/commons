@@ -67,6 +67,7 @@ impl EnvSource for SystemEnv {
 
 /// A path could not be resolved without an unsafe relative fallback.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PathsError {
     /// None of the listed variables supplied a usable absolute directory.
     Unresolved {
