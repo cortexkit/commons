@@ -378,8 +378,21 @@ run.
   A consumer treats any other answer as not confirming a cancellation.
 - [pinned] A paused run is cancellable: `run.cancel` MUST accept its
   cancellation with `ack`.
-- [pinned] Owner-only under the session's frozen scope, like `session.send`:
-  any other caller is refused `scope_owner_mismatch`.
+- [pinned] Owner-only: admitted only from the session's owner principal,
+  meaning the daemon-attested principal that froze the session's scope, or
+  that sent its first episode on a session without one. The check compares
+  principals, not routes: the owner is admitted on any route, scoped or
+  unscoped, and at any scope epoch, because cleanup cancels often arrive
+  after the scope has ended or reopened. Any other caller is refused
+  `scope_owner_mismatch`. A local process presenting no consumer identity
+  (`direct`) is not the owner, and no operator principal is admitted
+  beside it.
+- [pinned] A session with no recorded attested owner (one written before
+  its runner recorded owners, or first sent by an unverified principal) is
+  not owner-protected: a runner MAY admit `run.cancel` and
+  `session.retract` from any caller on the session's route. A consumer
+  that needs the protection sends with an attested identity from the
+  first episode.
 - [pinned] A run a caller cancels ends `cancelled`, never `interrupted`
   (§6).
 - [pinned] On an expired session, `run.cancel` answers `expired`, writes
@@ -654,8 +667,10 @@ joined, and `session.retract` does not withdraw it.
   - `not_pending`: the session has no pending submission by that id: it
     was already retracted, or never existed. Nothing is written.
   A consumer treats any other answer as not confirming a retraction.
-- [pinned] Owner-only under the session's frozen scope, like `session.send`:
-  any other caller is refused `scope_owner_mismatch`.
+- [pinned] Owner-only, exactly as for `run.cancel` (§6.2): the session's
+  owner principal on any route and at any epoch, `scope_owner_mismatch`
+  for anyone else, and no protection on a session with no recorded
+  attested owner.
 - [pinned] A submission is either retracted or started, never both: the
   runner decides from one durable order, and its answer says which.
 - [pinned] A re-send of a retracted send, with the same `send_id` and
