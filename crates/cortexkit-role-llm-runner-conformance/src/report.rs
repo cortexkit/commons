@@ -375,10 +375,12 @@ pub const NARROWINGS: &[&str] = &[
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CaseOutcome {
     Passed,
-    /// The route-driven attribution rules passed. The adapter returned
-    /// `CannotHoldUnattributable`, declaring that every native write path names
-    /// a run, so the unknown-origin rule alone cannot be exercised. `reason`
-    /// records that declaration instead of reporting an unconditional pass.
+    /// Every rule checked over the real route passed, but one rule was not
+    /// checked. In `run_attribution_per_message`, the adapter answered
+    /// `CannotHoldUnattributable`: it declares the runner never stores a
+    /// message without the run that produced it, so the rule that such a
+    /// message must omit `run` cannot be exercised. `reason` names the
+    /// unchecked rule, so the report never reads as a plain pass.
     PassedWithInapplicableRule {
         reason: String,
     },

@@ -30,8 +30,10 @@ vocabulary section and identifies the governing contract sections.
   the number of assistant messages in the request's history, and its scripted tool
   provider (serving `SCRIPTED_TOOL`) answers each call with its scripted
   result, counts invocations, and can hold a call until released.
-- For `run_attribution_per_message`, a held scripted tool call and
-  `install_attribution_fixture(handle, session)`. The case creates two runs
+- For `run_attribution_per_message`, which checks that each message names
+  the run that produced it, that only a finished run's last message is marked
+  final, and that a message whose run is unknown names none: a held scripted
+  tool call and `install_attribution_fixture(handle, session)`. The case creates two runs
   through the real route, reads while the second is held, then releases it
   and checks durable finals. If `run_cancel` is declared, it cancels that held
   run over the real route before release. The hook is only for the
@@ -226,4 +228,6 @@ subset:
   and `crash_at_FoldRecorded`;
 - also `baseline_not_yet_before_first_request`;
 - `run_status_undelivered_steers_present_when_clean` is planned and not
-  implemented; it requires `run_status` and `queue`.
+  implemented. It will check that `run.status` on an ended run lists the
+  steering messages that were never delivered, and lists none when every
+  steer was delivered. It requires `run_status` and `queue`.

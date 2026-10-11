@@ -30,7 +30,9 @@ use crate::{
 /// How a case that did not fail ended.
 pub enum Ending {
     Passed,
-    /// Route-driven rules passed; the named rule is inapplicable by declaration.
+    /// Every rule the case could check over the real route passed. The named
+    /// rule was not checked, because the runner's adapter declared that the
+    /// runner cannot produce the situation it tests.
     PassedWithInapplicableRule(String),
     /// The question cannot be asked of this runner.
     Inapplicable(String),
