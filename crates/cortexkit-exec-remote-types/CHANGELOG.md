@@ -1,5 +1,99 @@
 # Changelog
 
+## 0.2.7
+
+- `Outcome::WindowsExit` carries the full unsigned Windows process exit code.
+  NTSTATUS failure codes identify crashes and should be displayed in hexadecimal;
+  callers that do not recognize the tag must grade it as `outcome_unknown`, not
+  as proof the command did not run.
+- `Started` gains an optional `PathMapping`, omitted when absent to preserve
+  existing wire bytes. A runner that rewrites paths reports the caller-side
+  `host_prefix` and runner-side `guest_prefix`; caller paths map by appending the
+  path with `/` changed to `\`. Jobs are refused if a path cannot be mapped;
+  output paths inside the mapped folder are translated back and other paths pass
+  through unchanged.
+
+## 0.2.6
+
+- `RunRequest` gains optional `platform: Option<Platform>` with a
+  `with_platform` setter and getter. Absent means Linux and is omitted during
+  serialization, preserving existing request bytes. `Platform::Linux` and
+  `Platform::Windows` use the wire strings `"linux"` and `"windows"`; unrecognised
+  strings round-trip as `Platform::Unknown`.
+- `Accepted` gains optional `platform: Option<Platform>` with a `with_platform`
+  setter and getter. A runner that understands platform requests always reports
+  the platform it will actually use. Callers who requested a non-Linux platform
+  must cancel without trusting the result if acceptance does not acknowledge the
+  exact requested platform, including when an older runner omits the field.
+- A runner must refuse an unavailable or unrecognised requested platform before
+  start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`),
+  reporting the requested platform wire name in `refusal_detail`. Golden vectors
+  pin Linux and Windows acknowledgements, unsupported and unknown refusals. Tests pin absent-platform bytes.
+
+## 0.2.5
+
+- `RunRequest` gains optional `network: Option<Network>`, with a `with_network`
+  setter and getter. Absent requests remain offline and serialize to the same
+  bytes as 0.2.4. Callers can request `Network::Outbound` (`"outbound"`) for
+  internet access, for example to install packages. The runner, not these types,
+  must enforce isolation: outbound access never grants access to the caller's
+  machine or local network.
+- `Accepted` gains optional `network: Option<Network>`, with a `with_network`
+  setter and getter, for the access the runner actually granted. `None` means
+  the runner predates the field, so callers cannot assume access. If a caller
+  asked for `Outbound` and the acknowledgement is not `Some(Outbound)`, the job
+  runs offline. Callers must not automatically rerun a job granted outbound
+  access after an unknown outcome because it may have had outside effects.
+- `Network` is a non-exhaustive string enum retaining future strings as
+  `Unknown(String)`. Runners receiving an unrecognised network request must
+  refuse before start, not downgrade or upgrade access. The new non-transient
+  `RefusalReason::NetworkUnsupported` (`"network_unsupported"`) reports this
+  refusal. Callers matching `Unknown("network_unsupported")` must switch to the
+  known variant.
+- Crate-local golden vectors cover outbound requests and grants, unknown network
+  strings, the new refusal reason, unchanged offline bytes, and request/accepted
+  decoders mirroring 0.2.4 that ignore the additive network fields.
+
+## 0.2.4
+
+- `StreamRecord::Started` reports the sequence number, runner-measured queue
+  wait, and runner wall-clock start time when a queued job takes capacity. It
+  follows `Accepted` and precedes output or the terminal; a refusal before start
+  has no `Started` record. The runner's command timeout runs from this moment,
+  not acceptance. Callers can report that the job is now running, but must not
+  start their own timeout from this event. Older runners may omit it, so callers
+  keep their existing behavior when it is absent. `Started` is progress, never a
+  terminal record.
+- A present `Started` sequence advances the attach resume cursor like every
+  other sequenced stream record. Golden vectors cover its canonical wire shape,
+  malformed known-tag rejection, and decoding as an unknown sequenced record by
+  the 0.2.3 caller shape.
+
+## 0.2.3
+
+- `TerminalRecord` and `PrepareReply` gain optional `refusal_detail:
+  Option<String>` and `retry_after_ms: Option<u64>`, with `with_*` setters and
+  getters. Existing constructors are unchanged; absent fields decode as `None`
+  and are omitted on serialization, preserving existing record bytes. The
+  `RefusedBeforeStart { reason }` outcome variants are unchanged, and old decoders
+  ignore the additive container fields.
+- Callers may quote `refusal_detail` verbatim to explain a refusal, but must never
+  parse it for decisions. Producers must send at most `REFUSAL_DETAIL_MAX_BYTES`
+  (1024 UTF-8 bytes) and must never include secrets, tokens or credential material.
+  The limit is a producer obligation: decoders retain longer received values
+  without truncation or rejection.
+- `retry_after_ms` hints that a refusal is transient. Callers must ignore it unless
+  the outcome is `RefusedBeforeStart`; they may retry after waiting at most
+  `min(retry_after_ms, their own remaining budget)` milliseconds. An absent hint
+  means not reported, not necessarily permanent. The types do not enforce retry
+  policy or cap the hint to a caller's budget.
+- `RefusalReason::RunnerDraining` (`runner_draining`) and
+  `RefusalReason::RunnerDiskFull` (`runner_disk_full`) are now known transient
+  reasons. Callers who matched `Unknown("runner_draining")` or
+  `Unknown("runner_disk_full")` must switch to the new variants.
+- Crate-local golden vectors cover both container fields, unchanged older
+  records, decoding by the 0.2.2 container shapes, and the two new reason strings.
+
 ## 0.2.2
 
 - Producers: `TerminalRecord` gains optional `git_state_changed:

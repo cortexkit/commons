@@ -102,6 +102,81 @@ async fn a_root_level_union_fails_the_flatness_case() {
 }
 
 #[tokio::test]
+async fn an_invalid_reply_fails_the_catalog_reply_case_by_tool_and_member() {
+    let report = run(&FakeSubject::new(Defects {
+        invalid_reply: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_reply_valid");
+    assert!(reason.contains("invalid_answer"), "{reason}");
+    assert!(reason.contains(fake::QUICK), "{reason}");
+    assert!(reason.contains("reply.max_ms"), "{reason}");
+    assert_passed(&report, "catalog_schemas_flat");
+    assert_passed(&report, "catalog_schema_digest_stable");
+    assert_passed(&report, "catalog_digest_only");
+}
+
+#[tokio::test]
+async fn invalid_modes_fail_the_catalog_case_by_tool_and_member() {
+    let report = run(&FakeSubject::new(Defects {
+        invalid_modes: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_modes_valid");
+    assert!(reason.contains("invalid_answer: echo modes:"), "{reason}");
+    assert!(reason.contains("must not be empty"), "{reason}");
+}
+
+#[tokio::test]
+async fn ignoring_bind_mode_fails_the_mode_case() {
+    let report = run(&FakeSubject::new(Defects {
+        ignore_call_mode: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "call_mode_matches_catalog");
+    assert!(reason.contains("an unlisted-mode call"), "{reason}");
+    for case in &report.cases {
+        if case.case != "call_mode_matches_catalog" {
+            assert_passed(&report, case.case);
+        }
+    }
+}
+
+#[tokio::test]
+async fn refusing_a_listed_mode_fails_the_mode_case() {
+    let report = run(&FakeSubject::new(Defects {
+        refuse_served_mode: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "call_mode_matches_catalog");
+    assert!(reason.contains("the listed-mode call failed"), "{reason}");
+    assert_passed(&report, "catalog_modes_valid");
+    assert_passed(&report, "terminal_frame_on_success");
+}
+
+#[tokio::test]
+async fn no_restricted_mode_fixture_is_skipped_by_name_never_passed() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.mode_probe = None;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("call_mode_matches_catalog"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::CallModes],
+        })
+    );
+    assert!(report
+        .render()
+        .contains("SKIP call_mode_matches_catalog (requires call_modes; missing call_modes)"));
+    assert!(!report.render().contains("PASS call_mode_matches_catalog"));
+    assert_passed(&report, "catalog_modes_valid");
+}
+
+#[tokio::test]
 async fn an_undefined_unprefixed_capability_tag_fails_the_catalog_case() {
     let report = run(&FakeSubject::new(Defects {
         undefined_unprefixed_tag: true,

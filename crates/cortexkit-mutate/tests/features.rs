@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use cortexkit_mutate::*;
 use std::{fs, path::Path, process::Command, sync::atomic::AtomicBool};
 use tempfile::TempDir;
@@ -8,6 +10,7 @@ struct Fixture(TempDir);
 
 impl Fixture {
     fn new() -> Self {
+        support::isolate_fixture_environment();
         let f = Self(tempfile::tempdir().unwrap());
         for (path, source) in [
             ("Cargo.toml", include_str!("fixture/features/Cargo.toml")),
@@ -217,7 +220,7 @@ fn feature_fields_validate_and_round_trip_without_argument_injection() {
         };
         let error = check(f.root(), &cat, &AtomicBool::new(false)).unwrap_err();
         assert!(
-            error.contains("feature-guard: invalid features name"),
+            error.contains("feature-guard (<unrecorded row>): invalid features name"),
             "{error}"
         );
     }

@@ -340,7 +340,7 @@ pub const CASES: &[CaseSpec] = &[
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
     "run_attribution_per_message uses transcript_reads and a held tool call to observe a non-terminal run, cancelling it over run.cancel only when run_cancel is declared; the native fixture hook supplies unknown-origin records independently of read replies, or explicitly declares only that rule inapplicable via CannotHoldUnattributable (NotSupported fails)",
-    "retention waits use Tokio timers: real-runner conformance must use an unpaused Tokio clock; only the suite's fake self-tests use virtual time",
+    "retention cases use advance_retention_clock when declared; otherwise waits over 30 seconds are skipped by name and shorter waits use real time",
     "retention deletion completion is inspected by the subject in the runner's durable report and runner-held stores, never inferred from an expired read; non-role export/list/read request schemas and pagination are supplied by retention_probe_params, and every advertised extra op must be classified",
     "retention_run_status_expired is inapplicable if run.status is not advertised",
     "the fetch plan's shape is not pinned (CONTRACT §10), so the subject builds each session's first-send fields and the suite never inspects a plan or a baseline's items",
@@ -390,6 +390,11 @@ pub enum CaseOutcome {
     /// Not run: the runner adapter does not declare these capabilities.
     Skipped {
         missing: Vec<Capability>,
+    },
+    /// Not run: without a test clock, the case would have to wait longer in real time than the suite allows (30 seconds).
+    SkippedWithReason {
+        missing: Vec<Capability>,
+        reason: String,
     },
     /// Not run: the question cannot be asked of this runner at all (for
     /// example, an undeclared delivery mode of a runner that declares them
@@ -474,6 +479,12 @@ impl SuiteReport {
                 }
                 CaseOutcome::Skipped { missing } => format!(
                     "SKIP {} (requires {}; missing {})",
+                    case.case,
+                    names(&case.requires),
+                    names(missing)
+                ),
+                CaseOutcome::SkippedWithReason { missing, reason } => format!(
+                    "SKIP {} (requires {}; missing {}): {reason}",
                     case.case,
                     names(&case.requires),
                     names(missing)

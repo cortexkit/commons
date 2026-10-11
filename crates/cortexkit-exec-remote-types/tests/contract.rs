@@ -1,5 +1,5 @@
 use cortexkit_exec_remote_types::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fs, path::PathBuf};
@@ -39,6 +39,17 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-server-reports-detached-head",
     "crate-local-server-reports-truncated-untracked",
     "crate-local-server-reports-unchanged",
+    "crate-local-refusal-hints",
+    "crate-local-runner-draining",
+    "crate-local-runner-disk-full",
+    "crate-local-started",
+    "crate-local-network-outbound",
+    "crate-local-unknown-network",
+    "crate-local-network-unsupported",
+    "crate-local-platform-linux",
+    "crate-local-platform-windows",
+    "crate-local-platform-unsupported",
+    "crate-local-unknown-platform",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -59,12 +70,92 @@ const COPIED_REPLIES: &[&str] = &[
 const LOCAL_REPLIES: &[&str] = &[
     "crate-local-unknown-prepare-outcome",
     "crate-local-unknown-rebuild-result",
+    "crate-local-prepare-refusal-hints",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OutcomeCase {
     request: RunRequest,
     stream: Vec<StreamRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownOutcome026 {
+    Exit,
+    Signal,
+    Cancelled,
+    RefusedBeforeStart,
+    OutcomeUnknown,
+    HistoryExpired,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Outcome026Input {
+    Known(KnownOutcome026),
+    Tag(Outcome026Tag),
+}
+
+#[derive(Debug, Deserialize)]
+struct Outcome026Tag {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+fn decode_outcome_026(json: &str) -> Outcome {
+    match serde_json::from_str::<Outcome026Input>(json).unwrap() {
+        Outcome026Input::Known(known) => panic!("unexpected known 0.2.6 outcome: {known:?}"),
+        Outcome026Input::Tag(Outcome026Tag { kind }) => Outcome::Unknown { kind },
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownStreamRecord023 {
+    Accepted,
+    Output,
+    Terminal,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StreamRecord023Input {
+    Known(KnownStreamRecord023),
+    Tag(StreamRecord023Tag),
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamRecord023Tag {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default, deserialize_with = "deserialize_seq_023")]
+    seq: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum StreamRecord023 {
+    Accepted,
+    Output,
+    Terminal,
+    Unknown { kind: String, seq: Option<u64> },
+}
+
+fn deserialize_seq_023<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    u64::deserialize(deserializer).map(Some)
+}
+
+fn decode_stream_record_023(value: Value) -> StreamRecord023 {
+    match serde_json::from_value::<StreamRecord023Input>(value).unwrap() {
+        StreamRecord023Input::Known(KnownStreamRecord023::Accepted) => StreamRecord023::Accepted,
+        StreamRecord023Input::Known(KnownStreamRecord023::Output) => StreamRecord023::Output,
+        StreamRecord023Input::Known(KnownStreamRecord023::Terminal) => StreamRecord023::Terminal,
+        StreamRecord023Input::Tag(StreamRecord023Tag { kind, seq }) => {
+            StreamRecord023::Unknown { kind, seq }
+        }
+    }
 }
 
 fn root() -> PathBuf {
@@ -109,7 +200,10 @@ fn expected_canonical_bytes(folder: &str, name: &str) -> Vec<u8> {
 }
 
 fn canonical_reply(name: &str, bytes: &[u8]) -> Vec<u8> {
-    if name.starts_with("prepare-") || name == "crate-local-unknown-prepare-outcome" {
+    if name.starts_with("prepare-")
+        || name == "crate-local-unknown-prepare-outcome"
+        || name == "crate-local-prepare-refusal-hints"
+    {
         round_trip::<PrepareReply>(bytes)
     } else if name.starts_with("drop-") {
         round_trip::<DropReply>(bytes)
@@ -153,9 +247,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 12);
-    assert_eq!(LOCAL_REPLIES.len(), 2);
-    assert_eq!(cases().len(), 48);
+    assert_eq!(LOCAL_OUTCOMES.len(), 23);
+    assert_eq!(LOCAL_REPLIES.len(), 3);
+    assert_eq!(cases().len(), 60);
 }
 
 #[test]
@@ -484,6 +578,8 @@ fn unknown_refusal_tag_retains_before_start_arm_and_round_trips() {
 fn known_outcome_tags_with_malformed_fields_do_not_become_unknown() {
     for malformed in [
         json!({"type": "exit"}),
+        json!({"type": "windows_exit"}),
+        json!({"type": "windows_exit", "code": "1"}),
         json!({"type": "exit", "code": "0"}),
         json!({"type": "exit", "code": 2147483648_i64}),
         json!({"type": "signal"}),
@@ -556,6 +652,40 @@ fn known_outcome_tags_keep_their_semantic_variants() {
 }
 
 #[test]
+fn windows_exit_round_trips_full_unsigned_codes() {
+    for (code, wire) in [
+        (0, r#"{"type":"windows_exit","code":0}"#),
+        (1, r#"{"type":"windows_exit","code":1}"#),
+        (
+            3_221_225_477,
+            r#"{"type":"windows_exit","code":3221225477}"#,
+        ),
+    ] {
+        let outcome = Outcome::WindowsExit { code };
+        assert_eq!(serde_json::to_string(&outcome).unwrap(), wire);
+        assert_eq!(serde_json::from_str::<Outcome>(wire).unwrap(), outcome);
+    }
+}
+
+#[test]
+fn windows_exit_ntstatus_failure_marks_crashes() {
+    assert!(Outcome::WindowsExit { code: 0xC000_0005 }.ntstatus_failure());
+    assert!(!Outcome::WindowsExit { code: 1 }.ntstatus_failure());
+    assert!(!Outcome::Exit { code: 1 }.ntstatus_failure());
+}
+
+#[test]
+fn windows_exit_is_unknown_not_refused_to_older_decoders() {
+    let wire = r#"{"type":"windows_exit","code":3221225477}"#;
+    assert_eq!(
+        decode_outcome_026(wire),
+        Outcome::Unknown {
+            kind: "windows_exit".into()
+        }
+    );
+}
+
+#[test]
 fn unknown_stream_record_retains_sequence_and_round_trips() {
     let raw = value("outcomes", "crate-local-unknown-stream-record")["stream"][0].clone();
     let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
@@ -589,6 +719,82 @@ fn unknown_stream_record_retains_sequence_and_round_trips() {
     let case: OutcomeCase =
         serde_json::from_value(value("outcomes", "crate-local-unknown-stream-record")).unwrap();
     assert!(matches!(case.stream[1], StreamRecord::Terminal(_)));
+}
+
+#[test]
+fn started_record_round_trips_its_golden_vector() {
+    let raw = value("outcomes", "crate-local-started")["stream"][1].clone();
+    let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+    let started = Started::new(7, 125, 1_730_000_000_125);
+    assert_eq!(record, StreamRecord::Started(started.clone()));
+    assert_eq!(started.seq(), 7);
+    assert_eq!(started.queue_wait_ms(), 125);
+    assert_eq!(started.started_at_ms(), 1_730_000_000_125);
+    assert_eq!(serde_json::to_value(record).unwrap(), raw);
+}
+
+#[test]
+fn started_without_path_mapping_preserves_pinned_wire_bytes() {
+    const LEGACY_STARTED: &str = r#"{"seq":7,"queue_wait_ms":125,"started_at_ms":1730000000125}"#;
+
+    let started = Started::new(7, 125, 1_730_000_000_125);
+    assert_eq!(serde_json::to_string(&started).unwrap(), LEGACY_STARTED);
+    assert_eq!(
+        serde_json::from_str::<Started>(LEGACY_STARTED).unwrap(),
+        started
+    );
+}
+
+#[test]
+fn started_path_mapping_round_trips() {
+    let mapping = PathMapping::new("/", r"C:\m");
+    let started = Started::new(7, 125, 1_730_000_000_125).with_path_mapping(mapping.clone());
+    let wire = r#"{"seq":7,"queue_wait_ms":125,"started_at_ms":1730000000125,"path_mapping":{"host_prefix":"/","guest_prefix":"C:\\m"}}"#;
+
+    assert_eq!(mapping.host_prefix(), "/");
+    assert_eq!(mapping.guest_prefix(), r"C:\m");
+    assert_eq!(serde_json::to_string(&started).unwrap(), wire);
+    assert_eq!(serde_json::from_str::<Started>(wire).unwrap(), started);
+}
+
+#[test]
+fn started_record_is_unknown_with_sequence_to_a_023_decoder() {
+    let raw = value("outcomes", "crate-local-started")["stream"][1].clone();
+    assert_eq!(
+        decode_stream_record_023(raw),
+        StreamRecord023::Unknown {
+            kind: "started".into(),
+            seq: Some(7),
+        }
+    );
+}
+
+#[test]
+fn started_sequence_advances_resume_cursor_and_is_nonterminal() {
+    let case: OutcomeCase =
+        serde_json::from_value(value("outcomes", "crate-local-started")).unwrap();
+    let [StreamRecord::Accepted(_), StreamRecord::Started(started), StreamRecord::Terminal(_)] =
+        case.stream.as_slice()
+    else {
+        panic!("expected acceptance, start, and terminal records in order")
+    };
+    let attach = AttachRequest::new(job_id(), started.seq() + 1);
+    assert_eq!(attach.from_seq, 8);
+}
+
+#[test]
+fn malformed_started_stream_record_is_rejected() {
+    for malformed in [
+        json!({"type": "started"}),
+        json!({"type": "started", "seq": "7", "queue_wait_ms": 125, "started_at_ms": 1_730_000_000_125_u64}),
+        json!({"type": "started", "seq": 7, "queue_wait_ms": 125}),
+        json!({"type": "started", "seq": 7, "queue_wait_ms": null, "started_at_ms": 1_730_000_000_125_u64}),
+    ] {
+        assert!(
+            serde_json::from_value::<StreamRecord>(malformed.clone()).is_err(),
+            "{malformed}"
+        );
+    }
 }
 
 #[test]
@@ -1007,5 +1213,527 @@ fn accepted_env_not_forwarded_is_optional_and_round_trips() {
     assert_eq!(
         back.env_not_forwarded.as_deref(),
         Some(&["TOKEN".to_string(), "HOME".to_string()][..])
+    );
+}
+
+#[test]
+fn refusal_hints_match_vectors_and_builders() {
+    let terminal = TerminalRecord::new(
+        job_id(),
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerFull,
+        },
+        0,
+        25,
+        29,
+    )
+    .with_ran(Ran::None)
+    .with_tree_hash("3333333333333333333333333333333333333333")
+    .with_refusal_detail("The runner is at capacity; please retry shortly.")
+    .with_retry_after_ms(250);
+    assert_eq!(terminal, server_report("crate-local-refusal-hints"));
+    assert_eq!(
+        terminal.refusal_detail(),
+        Some("The runner is at capacity; please retry shortly.")
+    );
+    assert_eq!(terminal.retry_after_ms(), Some(250));
+
+    let prepare = PrepareReply::new(
+        "0192a64a-1234-7000-8000-000000000002".parse().unwrap(),
+        PrepareOutcome::RefusedBeforeStart {
+            reason: RefusalReason::Unreachable,
+        },
+    )
+    .with_refusal_detail("The runner is temporarily unreachable; please retry shortly.")
+    .with_retry_after_ms(500);
+    let pinned: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "crate-local-prepare-refusal-hints")).unwrap();
+    assert_eq!(prepare, pinned);
+    assert_eq!(
+        prepare.refusal_detail(),
+        Some("The runner is temporarily unreachable; please retry shortly.")
+    );
+    assert_eq!(prepare.retry_after_ms(), Some(500));
+}
+
+#[test]
+fn refusal_hints_absent_preserve_existing_golden_bytes() {
+    let original: OutcomeCase = serde_json::from_slice(&bytes("outcomes", "runner_full")).unwrap();
+    let terminal = TerminalRecord::new(
+        job_id(),
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerFull,
+        },
+        0,
+        25,
+        29,
+    )
+    .with_ran(Ran::None)
+    .with_tree_hash("3333333333333333333333333333333333333333");
+    assert_eq!(terminal.refusal_detail(), None);
+    assert_eq!(terminal.retry_after_ms(), None);
+    assert_eq!(terminal, server_report("runner_full"));
+    let constructed = OutcomeCase {
+        request: original.request,
+        stream: vec![StreamRecord::Terminal(terminal)],
+    };
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&constructed).unwrap(),
+        bytes("outcomes", "runner_full")
+    );
+    let mut extended: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-refusal-hints")).unwrap();
+    let [StreamRecord::Terminal(terminal)] = extended.stream.as_mut_slice() else {
+        panic!("expected one terminal refusal")
+    };
+    terminal.refusal_detail = None;
+    terminal.retry_after_ms = None;
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&extended).unwrap(),
+        bytes("outcomes", "runner_full")
+    );
+
+    let original: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "prepare-unreachable")).unwrap();
+    assert_eq!(original.refusal_detail(), None);
+    assert_eq!(original.retry_after_ms(), None);
+    let constructed = PrepareReply::new(original.transfer_id, original.outcome.clone());
+    assert_eq!(constructed, original);
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&constructed).unwrap(),
+        bytes("replies", "prepare-unreachable")
+    );
+    let mut extended: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "crate-local-prepare-refusal-hints")).unwrap();
+    extended.refusal_detail = None;
+    extended.retry_after_ms = None;
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&extended).unwrap(),
+        bytes("replies", "prepare-unreachable")
+    );
+}
+
+// These containers mirror 0.2.2, before refusal metadata was added. Their field
+// types are unchanged; the hint fixtures use reasons already recognised in 0.2.2.
+#[derive(Debug, Serialize, Deserialize)]
+struct TerminalRecord022 {
+    job_id: Uuid,
+    outcome: Outcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    killed: Option<Killed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pipestatus: Option<Vec<i32>>,
+    wall_ms: u64,
+    queue_wait_ms: u64,
+    bundle_bytes: u64,
+    ran: Option<Ran>,
+    tree_hash: Option<String>,
+    workspace_changes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    git_state_changed: Option<GitStateChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    untracked_files: Option<UntrackedFiles>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ignored_writes: Option<IgnoredWrites>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum StreamRecord022 {
+    Terminal(TerminalRecord022),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OutcomeCase022 {
+    request: RunRequest,
+    stream: Vec<StreamRecord022>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PrepareReply022 {
+    transfer_id: Uuid,
+    outcome: PrepareOutcome,
+}
+
+#[test]
+fn refusal_hints_are_ignored_by_0_2_2_container_decoders() {
+    assert_eq!(
+        round_trip::<OutcomeCase022>(&bytes("outcomes", "crate-local-refusal-hints")),
+        bytes("outcomes", "runner_full")
+    );
+    assert_eq!(
+        round_trip::<PrepareReply022>(&bytes("replies", "crate-local-prepare-refusal-hints")),
+        bytes("replies", "prepare-unreachable")
+    );
+}
+
+#[test]
+fn refusal_detail_longer_than_producer_limit_decodes_without_truncation() {
+    assert_eq!(REFUSAL_DETAIL_MAX_BYTES, 1024);
+    // Multi-byte text makes the producer's byte limit distinct from a character
+    // limit. Decoding must keep even an over-limit value verbatim.
+    let detail = "é".repeat(REFUSAL_DETAIL_MAX_BYTES / 2 + 1);
+    assert_eq!(detail.len(), REFUSAL_DETAIL_MAX_BYTES + 2);
+    let mut terminal = value("outcomes", "crate-local-refusal-hints")["stream"][0].clone();
+    terminal["refusal_detail"] = json!(detail);
+    let decoded: TerminalRecord = serde_json::from_value(terminal).unwrap();
+    assert_eq!(decoded.refusal_detail(), Some(detail.as_str()));
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap()["refusal_detail"],
+        detail
+    );
+
+    let mut prepare = value("replies", "crate-local-prepare-refusal-hints");
+    prepare["refusal_detail"] = json!(detail);
+    let decoded: PrepareReply = serde_json::from_value(prepare).unwrap();
+    assert_eq!(decoded.refusal_detail(), Some(detail.as_str()));
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap()["refusal_detail"],
+        detail
+    );
+}
+
+#[test]
+fn refusal_hints_are_independently_optional_and_preserve_u64_bounds() {
+    let terminal = server_report("runner_full");
+    let detail_only = terminal.clone().with_refusal_detail("");
+    assert_eq!(detail_only.refusal_detail(), Some(""));
+    assert_eq!(detail_only.retry_after_ms(), None);
+    let retry_only = terminal.with_retry_after_ms(u64::MAX);
+    assert_eq!(retry_only.refusal_detail(), None);
+    let decoded: TerminalRecord =
+        serde_json::from_value(serde_json::to_value(retry_only).unwrap()).unwrap();
+    assert_eq!(decoded.retry_after_ms(), Some(u64::MAX));
+
+    let prepare: PrepareReply =
+        serde_json::from_slice(&bytes("replies", "prepare-unreachable")).unwrap();
+    let detail_only = prepare.clone().with_refusal_detail("");
+    assert_eq!(detail_only.refusal_detail(), Some(""));
+    assert_eq!(detail_only.retry_after_ms(), None);
+    for hint in [0, u64::MAX] {
+        let retry_only = prepare.clone().with_retry_after_ms(hint);
+        assert_eq!(retry_only.refusal_detail(), None);
+        let decoded: PrepareReply =
+            serde_json::from_value(serde_json::to_value(retry_only).unwrap()).unwrap();
+        assert_eq!(decoded.retry_after_ms(), Some(hint));
+    }
+}
+
+#[test]
+fn runner_draining_vector_uses_known_reason_and_round_trips_string() {
+    let terminal = server_report("crate-local-runner-draining");
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerDraining
+        }
+    );
+    assert_eq!(
+        RefusalReason::from("runner_draining".to_owned()),
+        RefusalReason::RunnerDraining
+    );
+    assert_eq!(
+        String::from(RefusalReason::RunnerDraining),
+        "runner_draining"
+    );
+}
+
+#[test]
+fn runner_disk_full_vector_uses_known_reason_and_round_trips_string() {
+    let terminal = server_report("crate-local-runner-disk-full");
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::RunnerDiskFull
+        }
+    );
+    assert_eq!(
+        RefusalReason::from("runner_disk_full".to_owned()),
+        RefusalReason::RunnerDiskFull
+    );
+    assert_eq!(
+        String::from(RefusalReason::RunnerDiskFull),
+        "runner_disk_full"
+    );
+}
+
+#[test]
+fn network_absent_preserves_existing_golden_bytes() {
+    let mut original: OutcomeCase = serde_json::from_slice(&bytes("outcomes", "exit")).unwrap();
+    assert_eq!(original.request.network(), None);
+    let [StreamRecord::Accepted(accepted), StreamRecord::Terminal(_)] =
+        original.stream.as_mut_slice()
+    else {
+        panic!("expected acceptance followed by a terminal record")
+    };
+    assert_eq!(accepted.network(), None);
+
+    let request = RunRequest::new(
+        "/Users/example/worktrees/task",
+        "/Users/example/src/prefrontal",
+        "/Users/example/worktrees/task",
+        "cargo nextest run -p prefrontal-core-store",
+    )
+    .with_env([("RUST_BACKTRACE".into(), "1".into())].into())
+    .with_queue_wait_limit_s(300)
+    .with_siblings(vec!["/Users/example/src/commons".into()])
+    .with_timeout(60)
+    .with_weight_hint(16);
+    assert_eq!(request.network(), None);
+    assert_eq!(request, original.request);
+    let constructed = Accepted::new(job_id(), 1);
+    assert_eq!(constructed.network(), None);
+    assert_eq!(&constructed, accepted);
+    *accepted = constructed;
+    original.request = request;
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&original).unwrap(),
+        bytes("outcomes", "exit"),
+        "offline request and unacknowledged acceptance must preserve the existing exit vector"
+    );
+}
+
+#[test]
+fn network_outbound_vector_matches_known_variant_and_builders() {
+    let mut case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-network-outbound")).unwrap();
+    assert_eq!(case.request.network(), Some(&Network::Outbound));
+    let [StreamRecord::Accepted(accepted), StreamRecord::Terminal(_)] = case.stream.as_mut_slice()
+    else {
+        panic!("expected acceptance followed by a terminal record")
+    };
+    assert_eq!(accepted.network(), Some(&Network::Outbound));
+    assert_eq!(Network::from("outbound".to_owned()), Network::Outbound);
+    assert_eq!(String::from(Network::Outbound), "outbound");
+
+    let mut offline: OutcomeCase = serde_json::from_slice(&bytes("outcomes", "exit")).unwrap();
+    offline.request = offline.request.with_network(Network::Outbound);
+    assert_eq!(offline.request, case.request);
+    let constructed = Accepted::new(job_id(), 1).with_network(Network::Outbound);
+    assert_eq!(&constructed, accepted);
+    offline.stream[0] = StreamRecord::Accepted(constructed);
+    assert_eq!(
+        serde_json_canonicalizer::to_vec(&offline).unwrap(),
+        bytes("outcomes", "crate-local-network-outbound")
+    );
+}
+
+#[test]
+fn network_unknown_vector_retains_string_and_refusal_before_start() {
+    let case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-unknown-network")).unwrap();
+    let unknown = Network::Unknown("future_network".into());
+    assert_eq!(case.request.network(), Some(&unknown));
+    assert_eq!(Network::from("future_network".to_owned()), unknown);
+    assert_eq!(String::from(unknown.clone()), "future_network");
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("expected refusal without acceptance or start")
+    };
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::NetworkUnsupported
+        }
+    );
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", "crate-local-unknown-network")),
+        bytes("outcomes", "crate-local-unknown-network")
+    );
+    let accepted = Accepted::new(job_id(), 1).with_network(unknown.clone());
+    assert_eq!(
+        serde_json::from_value::<Accepted>(serde_json::to_value(&accepted).unwrap())
+            .unwrap()
+            .network(),
+        Some(&unknown)
+    );
+}
+
+#[test]
+fn network_unsupported_vector_uses_known_refusal_reason() {
+    let terminal = server_report("crate-local-network-unsupported");
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::NetworkUnsupported
+        }
+    );
+    assert_eq!(
+        RefusalReason::from("network_unsupported".to_owned()),
+        RefusalReason::NetworkUnsupported
+    );
+    assert_eq!(
+        String::from(RefusalReason::NetworkUnsupported),
+        "network_unsupported"
+    );
+}
+
+#[test]
+fn network_tags_reject_non_string_shapes() {
+    string_tags_reject_malformed_shapes::<Network>(&["outbound", "future_network"]);
+}
+
+#[test]
+fn network_null_fields_decode_as_absent() {
+    let mut request = value("outcomes", "exit")["request"].clone();
+    request["network"] = Value::Null;
+    assert_eq!(
+        serde_json::from_value::<RunRequest>(request)
+            .unwrap()
+            .network(),
+        None
+    );
+    let accepted: Accepted = serde_json::from_value(json!({
+        "job_id": job_id(), "queue_position": 1, "network": null
+    }))
+    .unwrap();
+    assert_eq!(accepted.network(), None);
+}
+
+#[test]
+fn platform_variants_round_trip_in_requests_and_acknowledgements() {
+    for (wire_name, platform) in [
+        ("linux", Platform::Linux),
+        ("windows", Platform::Windows),
+        (
+            "future_platform",
+            Platform::Unknown("future_platform".into()),
+        ),
+    ] {
+        let request = RunRequest::new("workspace", "/repo", "/workspace", "true")
+            .with_platform(platform.clone());
+        let request_value = serde_json::to_value(&request).unwrap();
+        assert_eq!(request_value["platform"], wire_name);
+        assert_eq!(
+            serde_json::from_value::<RunRequest>(request_value).unwrap(),
+            request
+        );
+
+        let accepted = Accepted::new(job_id(), 1).with_platform(platform.clone());
+        let accepted_value = serde_json::to_value(&accepted).unwrap();
+        assert_eq!(accepted_value["platform"], wire_name);
+        assert_eq!(
+            serde_json::from_value::<Accepted>(accepted_value).unwrap(),
+            accepted
+        );
+    }
+}
+
+#[test]
+fn platform_absent_preserves_legacy_request_wire_bytes() {
+    let request = RunRequest::new("workspace", "/repo", "/workspace", "true");
+    assert_eq!(request.platform(), None);
+    let wire = serde_json::to_string(&request).unwrap();
+    assert_eq!(
+        wire,
+        r#"{"workspace_key":"workspace","repository_root":"/repo","cwd":"/workspace","command":"true","env":{},"siblings":[]}"#
+    );
+    assert_eq!(serde_json::from_str::<RunRequest>(&wire).unwrap(), request);
+}
+
+#[test]
+fn accepted_without_platform_decodes_as_unacknowledged() {
+    let accepted: Accepted = serde_json::from_value(json!({
+        "job_id": job_id(), "queue_position": 1
+    }))
+    .unwrap();
+    assert_eq!(accepted.platform(), None);
+}
+
+#[test]
+fn unknown_platform_is_retained_and_refused_before_start() {
+    let case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-unknown-platform")).unwrap();
+    assert_eq!(
+        case.request.platform(),
+        Some(&Platform::Unknown("future_platform".into()))
+    );
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("an unknown platform must be refused before acceptance or start")
+    };
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::PlatformUnsupported
+        }
+    );
+    assert_eq!(terminal.refusal_detail(), Some("future_platform"));
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", "crate-local-unknown-platform")),
+        bytes("outcomes", "crate-local-unknown-platform")
+    );
+}
+
+#[test]
+fn platform_unsupported_refusal_round_trips_requested_platform_name() {
+    let case: OutcomeCase =
+        serde_json::from_slice(&bytes("outcomes", "crate-local-platform-unsupported")).unwrap();
+    assert_eq!(case.request.platform(), Some(&Platform::Windows));
+    let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+        panic!("an unsupported platform must be refused before acceptance or start")
+    };
+    assert_eq!(
+        terminal.outcome,
+        Outcome::RefusedBeforeStart {
+            reason: RefusalReason::PlatformUnsupported
+        }
+    );
+    assert_eq!(terminal.refusal_detail(), Some("windows"));
+    assert_eq!(
+        RefusalReason::from("platform_unsupported".to_owned()),
+        RefusalReason::PlatformUnsupported
+    );
+    assert_eq!(
+        String::from(RefusalReason::PlatformUnsupported),
+        "platform_unsupported"
+    );
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", "crate-local-platform-unsupported")),
+        bytes("outcomes", "crate-local-platform-unsupported")
+    );
+}
+
+// These shapes mirror 0.2.4 before network requests and grants were added, so
+// their re-encoding checks that older decoders ignore only the additive fields.
+#[derive(Serialize, Deserialize)]
+struct RunRequest024 {
+    workspace_key: String,
+    repository_root: String,
+    cwd: String,
+    command: String,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    weight_hint: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_wait_limit_s: Option<u64>,
+    #[serde(default)]
+    siblings: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Accepted024 {
+    job_id: Uuid,
+    queue_position: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    env_not_forwarded: Option<Vec<String>>,
+}
+
+#[test]
+fn network_fields_are_ignored_by_0_2_4_decoders() {
+    let extended = value("outcomes", "crate-local-network-outbound");
+    let original = value("outcomes", "exit");
+    assert_eq!(
+        round_trip::<RunRequest024>(&serde_json::to_vec(&extended["request"]).unwrap()),
+        serde_json_canonicalizer::to_vec(&original["request"]).unwrap()
+    );
+    let mut accepted = extended["stream"][0].clone();
+    accepted.as_object_mut().unwrap().remove("type");
+    let mut old_accepted = original["stream"][0].clone();
+    old_accepted.as_object_mut().unwrap().remove("type");
+    assert_eq!(
+        round_trip::<Accepted024>(&serde_json::to_vec(&accepted).unwrap()),
+        serde_json_canonicalizer::to_vec(&old_accepted).unwrap()
     );
 }

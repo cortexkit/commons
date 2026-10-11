@@ -14,6 +14,55 @@ list invocation uses `--locked`. The runner never stages or checks out files.
 
 ## Catalogue
 
+### Single file or directory (0.10.0)
+
+Keep `mutations.toml` as a single file, or split the catalogue into fragments:
+
+```text
+mutations.d/
+  00-settings.toml
+  flow-list.toml
+  storage-contract.toml
+```
+
+If `mutations.d/` exists beside the default `mutations.toml` path, the runner
+loads the directory instead. **Both present is an error**, even if one is empty.
+`--catalogue proofs/` also accepts an explicit directory; relative paths still
+resolve from the Git root. Only visible `*.toml` files directly inside the
+directory are read, in filename byte order. Hidden files, other extensions and
+subdirectories are ignored. Each fragment uses the same schema as a single file
+and may contain several `[[control]]` rows.
+
+The only shared top-level setting in the current schema is `prebuild`; `control`
+is the row list. A shared setting may appear in only one fragment, even if two
+files define equal values or empty lists. We recommend `00-settings.toml` for
+settings, but the name is not required. `platforms`, `timeout_s` and
+`build_timeout_s` belong to each control row, not to the catalogue root, and must
+stay with that row. Unknown root keys remain errors.
+
+To migrate manually:
+
+1. Create `mutations.d/` and split complete `[[control]]` tables into suitably
+   named `.toml` files. Keep every row's fields together, including its trailing
+   platform and deadline settings.
+2. Move the root `prebuild` list, if present, into a single `00-settings.toml`
+   before any rows in that file. Do not copy it into every fragment.
+3. Remove `mutations.toml`, then run `ckdev-mutate check` and commit the migration
+   together. No automatic migration or schema conversion is needed.
+
+Ids must be unique across all fragments. Every command that loads a catalogue
+refuses duplicates, naming all source files and id-line numbers. **This also
+changes single-file behaviour:** duplicate ids no longer survive loading.
+Text reports, coverage errors and JSON reports identify the repository-relative
+source file; JSON rows include `source: {"file": "mutations.d/flow-list.toml",
+"line": 2}`. The line is the id value's line. For a newly proved or explored row,
+`line: 0` means it has not been written yet. `prove` and `explore --append` create
+`<id>.toml` in directory form rather than sharing one append point; single-file
+appends are unchanged. `run --diff` compares row definitions across both forms,
+so splitting an unchanged row into another file does not select it on its own.
+
+### Control schema
+
 ```toml
 [[control]]
 id = "flow-list-agent-sees-only-own"
@@ -1051,11 +1100,23 @@ List mode always uses nextest JSON. Current nextest is exercised in CI.
 
 ## Safety and traps
 
-An OS advisory lock at Git's `ck-mutate.lock` path excludes concurrent runs,
-including when `.git` is a worktree pointer. The lock file remains but the lock
-is released when its handle closes. A deleted or renamed edit target reports ANCHOR_MISSING for its row, naming the
-missing file; subsequent rows still run. Every existing target is compared **byte for byte to
-HEAD**, including staged changes, before any mutation. `--allow-dirty` opts in
+An OS advisory lock at
+`std::env::temp_dir()/ck-mutate-<hex SHA-256 of the canonical worktree root path>.lock`
+excludes concurrent runs on one worktree, including across symlink aliases such
+as `/tmp` and `/private/tmp`. Different worktrees of the same repository have
+independent locks. Lock coordination is per host and per user temporary directory,
+not across hosts or users with different temporary directories. Sessions that
+override their temporary directory must use the same directory to coordinate.
+The lock file remains but the lock is released when its handle closes, as before.
+Stdout/stderr captures use a separate temporary directory removed after reading
+the output, including on errors; reports retain output text, not capture paths.
+The runner's lock and captures never write to `.git`, so Git metadata can be
+mounted read-only. User-specified report/catalogue paths and commands still need
+write access to their chosen destinations.
+A deleted or renamed edit target reports ANCHOR_MISSING for its row, naming the
+missing file; subsequent rows still run. Every existing target is checked for
+**staged and unstaged changes against HEAD using Git status**, honoring Git's
+line-ending and filter conversions, before any mutation. `--allow-dirty` opts in
 explicitly, and restoration still uses saved local bytes, not HEAD or the index.
 
 Every path restores saved source and verifies its bytes. Unless it is an edit
@@ -1135,5 +1196,4 @@ No internal workspace crates or async runtime are used. `clap` provides strict C
 and help; `serde` derives the catalogue/report schema; `toml` reads/writes the
 catalogue; `serde_json` writes evidence and reads nextest events; `fs2` supplies
 portable advisory locks; `ctrlc` supplies Unix interruption/termination and
-Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `regex` matches the optional per-test assertion pattern. `tempfile` is
-only a dev dependency, isolating real Git/Cargo fixture repos for tests.
+Windows Ctrl-C handling; Unix-only `rustix` with its `process` feature supplies safe process-group and test signal APIs. The library, binary and integration tests forbid unsafe code. `regex` matches the optional per-test assertion pattern. `sha2` hashes canonical worktree paths for lock names. `tempfile` supplies automatically cleaned capture directories and isolates real Git/Cargo fixture repos for tests.

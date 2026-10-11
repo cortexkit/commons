@@ -1,7 +1,7 @@
 [package]
 name = "cortexkit-paths"
-version = "0.1.1"
-description = "Shared CortexKit-neutral path canonicalization primitives for project root identities."
+version = "0.1.2"
+description = "Shared path identity and absolute user-directory resolution primitives."
 keywords = ["path", "canonicalization", "realpath", "cortexkit"]
 categories = ["filesystem"]
 edition.workspace = true

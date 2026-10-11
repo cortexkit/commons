@@ -12,8 +12,8 @@ use cortexkit_role_harness::{
 use cortexkit_role_tool_provider::{
     call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
-        check_flat_schema, is_schema_digest, schema_digest, session_capabilities,
-        system_text_digest, CatalogAnswer,
+        check_flat_schema, check_modes, check_reply, is_schema_digest, schema_digest,
+        session_capabilities, system_text_digest, CatalogAnswer,
     },
     check_capability_tag,
     describe::check_describe,
@@ -21,7 +21,7 @@ use cortexkit_role_tool_provider::{
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
     ops, points,
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    PROVIDES,
+    CallMode, PROVIDES,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -104,7 +104,12 @@ where
             .map_err(|e| SetupError::Io(format!("creating {dir}: {e}")))?;
     }
 
-    let capabilities = subject.capabilities();
+    let mut capabilities = subject.capabilities();
+    // A provider may serve every known mode on every tool. Without a
+    // restricted probe there is no refusal to exercise, so report a skip.
+    if subject.call_mode_probe().is_none() {
+        capabilities.remove(&Capability::CallModes);
+    }
     let mut driver = CrashDriver::new(subject);
     let mut mint = KeyMint(0);
     let main = driver
@@ -226,6 +231,9 @@ where
             "role_describe_shape" => self.role_describe_shape().await,
             "role_describe_cacheable" => self.role_describe_cacheable().await,
             "catalog_schemas_flat" => self.catalog_schemas_flat().await,
+            "catalog_reply_valid" => self.catalog_reply_valid().await,
+            "catalog_modes_valid" => self.catalog_modes_valid().await,
+            "call_mode_matches_catalog" => self.call_mode_matches_catalog().await,
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
             "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
@@ -388,6 +396,72 @@ where
             }
         }
         Ok(())
+    }
+
+    async fn catalog_reply_valid(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        for tool in &catalog.tools {
+            check_reply(tool).map_err(|problem| format!("invalid_answer: {problem}"))?;
+        }
+        Ok(())
+    }
+
+    async fn catalog_modes_valid(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        for tool in &catalog.tools {
+            check_modes(tool).map_err(|problem| format!("invalid_answer: {problem}"))?;
+        }
+        Ok(())
+    }
+
+    async fn call_mode_matches_catalog(&self) -> CaseResult {
+        let probe = self.subject.call_mode_probe().ok_or(
+            "call_modes declared without a restricted tool probe; omit the capability to skip",
+        )?;
+        if matches!(probe.unlisted_mode, CallMode::Unknown(_)) {
+            return Err("the probe must name a known unlisted mode".into());
+        }
+        let catalog = self.catalog(&self.plain_route().await?).await?;
+        let (name, arguments) = probe.call;
+        let tool = catalog
+            .tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .ok_or_else(|| format!("the mode probe's tool {name} is not in the catalog"))?;
+        check_modes(tool).map_err(|problem| format!("invalid_answer: {problem}"))?;
+        let default = [CallMode::Classic];
+        let modes = tool.modes.as_deref().unwrap_or(&default);
+        if modes.contains(&probe.unlisted_mode) {
+            return Err(format!(
+                "the mode probe's tool {name} lists its supposed unlisted mode"
+            ));
+        }
+        let served_mode = &modes[0];
+        let stamp = self.subject.plain_stamp();
+        let unlisted_route = self
+            .subject
+            .route_with_mode(self.handle.inner(), &stamp, &probe.unlisted_mode)
+            .await
+            .map_err(|e| format!("opening an unlisted-mode route: {e}"))?;
+        // The same call body goes over both routes: the bind, not an argument,
+        // must decide which mode the provider enforces.
+        let body = call_body(&name, arguments, None);
+        expect_error(
+            "an unlisted-mode call",
+            request(&unlisted_route, body.clone()).await?,
+        )?;
+        let served_route = self
+            .subject
+            .route_with_mode(self.handle.inner(), &stamp, served_mode)
+            .await
+            .map_err(|e| format!("opening a served-mode route: {e}"))?;
+        let exchange = request(&served_route, body).await?;
+        match single_terminal(&exchange).map_err(|p| p.to_string())? {
+            ObservedFrame::Error(error) => Err(format!("the listed-mode call failed: {error:?}")),
+            _ => Ok(()),
+        }
     }
 
     async fn catalog_schema_digest_stable(&self) -> CaseResult {

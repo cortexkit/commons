@@ -105,13 +105,35 @@ to them. Nothing here names a particular implementation.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
-  capabilities, description?, input_schema}`.
+  capabilities, description?, input_schema, reply?, modes?}`.
   - `name` is the exact name the user tier disables the tool by.
   - `schema_digest` is the digest of the **structure** of `input_schema`
     (see "Schema digest" below): 64 lowercase hex characters. Description
     text never changes it.
   - `semantics` is an integer, bumped whenever the tool's behaviour changes
     without a schema change.
+  - `modes` lists the call modes this tool serves: `classic`, `codemode` and
+    `flow`. Absent means `["classic"]`. An explicit `["classic"]` decodes to
+    absence (`None`), and both forms encode without `modes`, including a
+    directly assigned default list. A provider hashes the encoded catalog,
+    not a raw input spelling, so writing the default explicitly cannot change
+    its digest. Other lists retain their order and spelling; unknown strings
+    decode as `CallMode::Unknown` and round-trip unchanged.
+    - A provider declares only modes it handles: `check_modes` rejects empty
+      lists, duplicates and unknown modes. A consumer refuses an invalid
+      provider catalog as `invalid_answer`, naming the tool and `modes`, as
+      with invalid reply metadata.
+    - A provider declaring `CALL_MODES_CAPABILITY` (`call-modes/v1`) reads the
+      daemon's mode on every route bind. The daemon derives it from scope;
+      a request body cannot choose it. Absent bind mode means classic.
+      `serves_call_mode` checks every tool call against that bind mode before
+      execution: an unlisted mode or `Unknown` is never served. The provider
+      owns the refusal code and wording; refusal is a terminal `ERROR` frame.
+    - Nondefault lists are catalog content, covered by `catalog_digest`, not
+      the argument schema digest or schema pin. The optional default emits no
+      new bytes, preserving existing catalog digests.
+    - `test-vectors/tool-provider-v1/call-modes.json` pins invalid declarations
+      and default/nondefault content digests for one provider-defined scheme.
   - `result_ops` lists the hook result operations the tool accepts, from
     `prepend`, `append`, `replace`. Absent means all three.
   - `capabilities` lists capability tags: unprefixed (`code.outline/v1`,
@@ -149,6 +171,51 @@ to them. Nothing here names a particular implementation.
     `DEFINED_CAPABILITY_TAGS` and checks a tag with `check_capability_tag`;
     the conformance suite refuses a catalog with any tag that fails it.
   - `input_schema` is the argument schema; `description` its description.
+  - `reply` is optional per-tool reply deadline metadata:
+    `{max_ms, hold_argument?: {name, default_ms, grace_ms}}`. There is no
+    catalog-wide default. A provider knows how long its tools may hold a call;
+    declaring that time lets a runner wait without guessing a deadline or
+    maintaining a provider-specific table.
+    - `max_ms` is a required integer from 1 through 86,400,000 (24 hours), in
+      milliseconds from a provider receiving a request to its terminal frame.
+    - `hold_argument`, when present, names the tool argument that controls its
+      hold. `name` must name a top-level property of `input_schema` whose
+      `type` is `integer` or `number`, not a union or a property that allows a
+      string. `default_ms` and `grace_ms` are required integers from 1 through
+      `max_ms`. `default_ms` is the hold for an absent or unusable argument;
+      `grace_ms` allows time for the reply to arrive after the hold.
+    - A runner refuses a catalog whose `reply` violates these rules as
+      `invalid_answer`, naming the tool and the member. `check_reply` validates
+      the metadata beside `check_flat_schema`; the conformance suite checks it.
+      Missing required members or non-integer metadata also make an answer
+      invalid.
+    - A runner computes the deadline for one call from its coerced arguments
+      (`reply_deadline_ms`):
+      1. No `reply`: use the runner's own fallback.
+      2. `reply` without `hold_argument`: use `max_ms`.
+      3. With `hold_argument`: use the named argument as the hold only if it is
+         a JSON integer or an integral number at least 1. Absence, zero,
+         strings, fractional numbers, negative numbers, null and other values
+         use `default_ms`. Add `grace_ms` with saturating arithmetic, then take
+         `min(hold + grace_ms, max_ms)`.
+      4. Never use a deadline below the runner's own fallback, even if `max_ms`
+         is smaller. The fallback floor applies after the maximum is applied.
+    - The deadline bounds how long a runner waits; it never changes the call's
+      arguments or a provider's own limits. A provider exceeding its declared
+      `max_ms` violates the contract; a runner records `outcome_unknown` and
+      never re-sends that call. When the reply deadline expires without
+      a terminal frame, a runner records `outcome_unknown` and never re-sends
+      the call.
+    - A runner saves `reply` together with the tool when it admits the tool
+      into a run's plan. A resumed run uses that saved value, never a value
+      fetched again from the provider.
+    - `reply` is omitted from serialization when absent: existing catalog
+      bytes, digests and pins do not change. When present, it is covered by
+      `catalog_digest`, never by `schema_digest` or `schema_pin`. Changing only
+      a deadline therefore never invalidates a pinned call. Old runners may
+      ignore the optional member; old providers may omit it.
+    - `test-vectors/tool-provider-v1/reply-deadline.json` pins the deadline
+      arithmetic and valid and invalid reply declarations.
 - The answer is a pure function of its inputs (the plan item's preset and
   params, the composition, user and project configuration, host facts), so
   `catalog_digest` covers the preset: a `digest_only` request with the same
@@ -373,7 +440,8 @@ CI against its real module over a real route; never against a double.
 | Case | Requires |
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
-| `catalog_schemas_flat`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
@@ -392,6 +460,16 @@ requests must return the same `item_digest` and the same `preflight_digest`,
 but the provider-defined `preflight_digest` need not equal the text digest.
 There is no digest-only comparison of `preflight_digest`: a `digest_only`
 answer carries only `generation` and `catalog_digest`, not `system_text`.
+
+The `call_modes` case requires a restricted tool probe and a harness that
+opens real routes with known bind modes. The subject supplies the call and
+one known mode its tool does not list; the suite chooses a listed mode from
+the catalog. The same body must be refused on the unlisted-mode route and
+served on the listed-mode route. If no restricted tool fixture exists,
+`call_mode_matches_catalog` is skipped with missing `call_modes`, never
+passed. See the conformance crate's README for the subject hooks. The current
+daemon stamps only known bind modes; unknown-mode refusal is checked in the
+helper's unit tests instead.
 
 Caller-side rules that no live provider can be made to exercise (an unknown
 withdraw `answer`, an unknown late-result `kind`, the withdraw caller policy)

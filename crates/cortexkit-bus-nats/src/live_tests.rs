@@ -227,6 +227,53 @@ fn digest(value: &str) -> ContentDigest {
 }
 
 #[tokio::test]
+async fn publish_reports_jetstream_duplicates() {
+    let Some(server) = TestServer::open().await else {
+        eprintln!("publish_reports_jetstream_duplicates: skipped (nats-server unavailable)");
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let subject = "ck.box.peer.agent.s.deliver";
+    create_stream_and_consumer(
+        &admin,
+        "CK_BOX_PEER",
+        subject,
+        subject,
+        "c_agent",
+        -1,
+        Duration::from_secs(30),
+    )
+    .await;
+    let stream = admin.stream("CK_BOX_PEER");
+    let first = stream
+        .publish(subject, "same-id", digest("first"), Headers::new())
+        .await
+        .unwrap();
+    let duplicate = stream
+        .publish(subject, "same-id", digest("second"), Headers::new())
+        .await
+        .unwrap();
+    assert!(!first.duplicate());
+    assert!(duplicate.duplicate());
+    assert_eq!(duplicate.stream_sequence(), first.stream_sequence());
+    let mut cursor = stream.consumer(DurableOwner::Agent("agent")).await.unwrap();
+    let delivery = cursor.next().await.unwrap().unwrap();
+    assert_eq!(delivery.stream_seq, first.stream_sequence());
+    assert_eq!(delivery.message.digest, digest("first"));
+    cursor.ack().await.unwrap();
+    let info = admin
+        .jetstream()
+        .get_stream("CK_BOX_PEER")
+        .await
+        .unwrap()
+        .info()
+        .await
+        .unwrap()
+        .clone();
+    assert_eq!(info.state.messages, 1);
+}
+
+#[tokio::test]
 async fn configured_connection_generates_only_credential_scoped_inboxes() {
     let Some(server) = TestServer::open().await else {
         return;
@@ -257,7 +304,7 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
     .await;
     let publisher = admin.stream("CK_BOX_PEER");
 
-    publisher
+    assert!(!publisher
         .publish(
             "ck.box.peer.agent.s.deliver",
             "m1",
@@ -265,7 +312,8 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
             Headers::new(),
         )
         .await
-        .expect("publish first");
+        .expect("publish first")
+        .duplicate());
     let original = connect(&server.url, "UORIGINAL").await;
     let mut cursor = original
         .stream("CK_BOX_PEER")
@@ -282,7 +330,7 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
     drop(cursor);
     drop(original);
 
-    publisher
+    assert!(!publisher
         .publish(
             "ck.box.peer.agent.s.deliver",
             "m2",
@@ -290,7 +338,8 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
             Headers::new(),
         )
         .await
-        .expect("publish second");
+        .expect("publish second")
+        .duplicate());
     let restarted = connect(&server.url, "UORIGINAL").await;
     let mut cursor = restarted
         .stream("CK_BOX_PEER")
@@ -307,7 +356,7 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
     drop(cursor);
     drop(restarted);
 
-    publisher
+    assert!(!publisher
         .publish(
             "ck.box.peer.agent.s.deliver",
             "m3",
@@ -315,7 +364,8 @@ async fn durable_cursor_survives_restart_and_credential_rekey() {
             Headers::new(),
         )
         .await
-        .expect("publish third");
+        .expect("publish third")
+        .duplicate());
     let rekeyed = connect(&server.url, "UREKEYED").await;
     let mut cursor = rekeyed
         .stream("CK_BOX_PEER")
@@ -508,7 +558,7 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
     )
     .await;
     let effect_stream = admin.stream("CK_BOX_EFFECT");
-    effect_stream
+    assert!(!effect_stream
         .publish(
             "ck.box.effect.agent.s.intent",
             "effect-1",
@@ -516,7 +566,8 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
             Headers::new(),
         )
         .await
-        .expect("publish work item");
+        .expect("publish work item")
+        .duplicate());
 
     let worker = connect(&server.url, "UWORKERONE").await;
     let queue = worker
@@ -541,7 +592,7 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
     };
     let record = DeadLetterRecord::from_exhaustion(&exhausted);
     let dead_stream = admin.stream("CK_BOX_EFFECT_DEAD");
-    dead_stream
+    assert!(!dead_stream
         .publish(
             "ck.box.effect.dead",
             &record.message_id,
@@ -549,7 +600,8 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
             record.headers(),
         )
         .await
-        .expect("dead-letter publish is confirmed before term");
+        .expect("dead-letter publish is confirmed before term")
+        .duplicate());
 
     // Dropping both handles simulates a worker crash after the dead-letter publish but before term().
     drop(queue);
@@ -586,7 +638,7 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
         Some("max_deliveries_exceeded")
     );
 
-    terminally_dispose(
+    let receipt = terminally_dispose(
         &dead_stream,
         &queue,
         "box",
@@ -595,6 +647,11 @@ async fn dead_letter_precedes_term_and_crash_window_keeps_original_redeliverable
     )
     .await
     .expect("confirmed dead-letter publish precedes term");
+    assert!(
+        receipt.duplicate(),
+        "crash retry must report the original dead letter"
+    );
+    assert_eq!(receipt.stream_sequence(), dead_record.stream_seq);
     dead.ack().await.expect("ack dead-letter record");
 }
 
@@ -652,7 +709,7 @@ async fn a_term_survives_the_claimant_exiting_straight_after_it() {
     let effect_stream = admin.stream("CK_BOX_EFFECT");
     for index in 0..20 {
         let id = format!("effect-{index}");
-        effect_stream
+        assert!(!effect_stream
             .publish(
                 "ck.box.effect.agent.s.intent",
                 &id,
@@ -660,7 +717,8 @@ async fn a_term_survives_the_claimant_exiting_straight_after_it() {
                 Headers::new(),
             )
             .await
-            .expect("publish work item");
+            .expect("publish work item")
+            .duplicate());
     }
 
     // Each claimant takes one item, terminates it and exits without any flush.
@@ -720,7 +778,7 @@ async fn peer_stream_with_ack_wait(admin: &NatsConnection, ack_wait: Duration) {
 async fn publish_peer(admin: &NatsConnection, ids: &[&str]) {
     let stream = admin.stream("CK_BOX_PEER");
     for id in ids {
-        stream
+        assert!(!stream
             .publish(
                 "ck.box.peer.agent.s.deliver",
                 id,
@@ -728,7 +786,8 @@ async fn publish_peer(admin: &NatsConnection, ids: &[&str]) {
                 Headers::new(),
             )
             .await
-            .expect("publish peer delivery");
+            .expect("publish peer delivery")
+            .duplicate());
     }
 }
 
@@ -992,10 +1051,12 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
 
     let core = connect_user(&server.url, "authority", "UCORE").await;
     let post = account.room_post("room_live").expect("room subject");
-    core.stream(room.clone())
+    assert!(!core
+        .stream(room.clone())
         .publish(&post, "room:room_live:1", digest("post"), Headers::new())
         .await
-        .expect("the delivery authority publishes a room post");
+        .expect("the delivery authority publishes a room post")
+        .duplicate());
     let mut cursor = core
         .stream(room.clone())
         .consumer(DurableOwner::Module("prefrontal-core"))

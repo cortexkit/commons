@@ -23,6 +23,78 @@ impl<'de> Deserialize<'de> for BytePayload {
     }
 }
 
+/// Network access requested by a caller or actually granted by a runner.
+///
+/// A job granted outbound access may have had outside effects. A caller must
+/// not automatically rerun it after an unknown outcome.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum Network {
+    /// The job may open outbound connections to the internet. This never means
+    /// access to the caller's machine or local network; the runner must enforce
+    /// that isolation.
+    Outbound,
+    /// A network mode this version does not recognise. A runner receiving it in
+    /// a request must refuse the job before start with
+    /// [`RefusalReason::NetworkUnsupported`], not downgrade or upgrade access.
+    Unknown(String),
+}
+
+impl From<String> for Network {
+    fn from(network: String) -> Self {
+        match network.as_str() {
+            "outbound" => Self::Outbound,
+            _ => Self::Unknown(network),
+        }
+    }
+}
+
+impl From<Network> for String {
+    fn from(network: Network) -> Self {
+        match network {
+            Network::Outbound => "outbound".into(),
+            Network::Unknown(network) => network,
+        }
+    }
+}
+
+/// The operating system requested for a run or used by the runner.
+///
+/// An absent request means Linux. Runners must refuse unknown requested platforms
+/// before start rather than silently running the command elsewhere.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum Platform {
+    /// Run on Linux.
+    Linux,
+    /// Run on Windows.
+    Windows,
+    /// A platform string this version does not recognise.
+    Unknown(String),
+}
+
+impl From<String> for Platform {
+    fn from(platform: String) -> Self {
+        match platform.as_str() {
+            "linux" => Self::Linux,
+            "windows" => Self::Windows,
+            _ => Self::Unknown(platform),
+        }
+    }
+}
+
+impl From<Platform> for String {
+    fn from(platform: Platform) -> Self {
+        match platform {
+            Platform::Linux => "linux".into(),
+            Platform::Windows => "windows".into(),
+            Platform::Unknown(platform) => platform,
+        }
+    }
+}
+
 /// `exec.run` parameters; executor-owned IDs and snapshot metadata are absent.
 /// Both timeout and queue_wait_limit_s are measured in seconds.
 ///
@@ -45,10 +117,18 @@ pub struct RunRequest {
     pub queue_wait_limit_s: Option<u64>,
     #[serde(default)]
     pub siblings: Vec<String>,
+    /// Requested network access. Absent means offline. The runner enforces the
+    /// isolation and reports the access actually granted in [`Accepted::network`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<Network>,
+    /// Requested execution platform. Absent means Linux; the runner reports the
+    /// platform it actually uses in [`Accepted::platform`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
 }
 
 impl RunRequest {
-    /// A request with empty env/siblings and executor-default scheduling limits.
+    /// An offline request with empty env/siblings and executor-default scheduling limits.
     pub fn new(
         workspace_key: impl Into<String>,
         repository_root: impl Into<String>,
@@ -65,6 +145,8 @@ impl RunRequest {
             timeout: None,
             queue_wait_limit_s: None,
             siblings: Vec::new(),
+            network: None,
+            platform: None,
         }
     }
 
@@ -96,6 +178,28 @@ impl RunRequest {
     pub fn with_siblings(mut self, siblings: Vec<String>) -> Self {
         self.siblings = siblings;
         self
+    }
+
+    /// Request network access; the runner must acknowledge what it granted.
+    pub fn with_network(mut self, network: Network) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    /// Requested network access, or `None` for an offline job.
+    pub fn network(&self) -> Option<&Network> {
+        self.network.as_ref()
+    }
+
+    /// Request a platform; the runner must acknowledge the platform it uses.
+    pub fn with_platform(mut self, platform: Platform) -> Self {
+        self.platform = Some(platform);
+        self
+    }
+
+    /// Requested execution platform, or `None` for the default Linux platform.
+    pub fn platform(&self) -> Option<&Platform> {
+        self.platform.as_ref()
     }
 }
 
@@ -143,11 +247,21 @@ pub enum RefusalReason {
     SnapshotFailed,
     WorkspaceKeyRejected,
     RunnerFull,
+    /// Transient: the runner is draining and is not accepting new work.
+    RunnerDraining,
+    /// Transient: the runner needs disk space freed before accepting new work.
+    RunnerDiskFull,
     QueueWaitExceeded,
     TransferInterrupted,
     TreeHashMismatch,
     BundleRejected,
     WorkspaceSetupFailed,
+    /// Not transient: the runner does not support the requested network mode.
+    /// The job was refused before start, without downgrading or upgrading access.
+    NetworkUnsupported,
+    /// The runner does not support the requested platform. The job was refused
+    /// before start; `refusal_detail` carries the requested platform wire name.
+    PlatformUnsupported,
     /// A refusal tag this version does not recognise. The refused command
     /// still did not start.
     Unknown(String),
@@ -161,11 +275,15 @@ impl From<String> for RefusalReason {
             "snapshot_failed" => Self::SnapshotFailed,
             "workspace_key_rejected" => Self::WorkspaceKeyRejected,
             "runner_full" => Self::RunnerFull,
+            "runner_draining" => Self::RunnerDraining,
+            "runner_disk_full" => Self::RunnerDiskFull,
             "queue_wait_exceeded" => Self::QueueWaitExceeded,
             "transfer_interrupted" => Self::TransferInterrupted,
             "tree_hash_mismatch" => Self::TreeHashMismatch,
             "bundle_rejected" => Self::BundleRejected,
             "workspace_setup_failed" => Self::WorkspaceSetupFailed,
+            "network_unsupported" => Self::NetworkUnsupported,
+            "platform_unsupported" => Self::PlatformUnsupported,
             _ => Self::Unknown(reason),
         }
     }
@@ -179,11 +297,15 @@ impl From<RefusalReason> for String {
             RefusalReason::SnapshotFailed => "snapshot_failed".into(),
             RefusalReason::WorkspaceKeyRejected => "workspace_key_rejected".into(),
             RefusalReason::RunnerFull => "runner_full".into(),
+            RefusalReason::RunnerDraining => "runner_draining".into(),
+            RefusalReason::RunnerDiskFull => "runner_disk_full".into(),
             RefusalReason::QueueWaitExceeded => "queue_wait_exceeded".into(),
             RefusalReason::TransferInterrupted => "transfer_interrupted".into(),
             RefusalReason::TreeHashMismatch => "tree_hash_mismatch".into(),
             RefusalReason::BundleRejected => "bundle_rejected".into(),
             RefusalReason::WorkspaceSetupFailed => "workspace_setup_failed".into(),
+            RefusalReason::NetworkUnsupported => "network_unsupported".into(),
+            RefusalReason::PlatformUnsupported => "platform_unsupported".into(),
             RefusalReason::Unknown(reason) => reason,
         }
     }
@@ -196,6 +318,15 @@ impl From<RefusalReason> for String {
 pub enum Outcome {
     Exit {
         code: i32,
+    },
+    /// The full unsigned 32-bit value reported by `GetExitCodeProcess`. Normal
+    /// exits carry their status; crashes carry their NTSTATUS, not a signed
+    /// Linux-style exit code. Use [`Self::ntstatus_failure`] to identify crashes.
+    ///
+    /// Older callers decode this tag as [`Outcome::Unknown`] and must grade it
+    /// as `outcome_unknown`, never as proof that the command did not run.
+    WindowsExit {
+        code: u32,
     },
     Signal {
         signal: i32,
@@ -220,6 +351,7 @@ pub enum Outcome {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum KnownOutcome {
     Exit { code: i32 },
+    WindowsExit { code: u32 },
     Signal { signal: i32 },
     Cancelled,
     RefusedBeforeStart { reason: RefusalReason },
@@ -244,6 +376,7 @@ impl Serialize for Outcome {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let known = match self {
             Self::Exit { code } => KnownOutcome::Exit { code: *code },
+            Self::WindowsExit { code } => KnownOutcome::WindowsExit { code: *code },
             Self::Signal { signal } => KnownOutcome::Signal { signal: *signal },
             Self::Cancelled => KnownOutcome::Cancelled,
             Self::RefusedBeforeStart { reason } => KnownOutcome::RefusedBeforeStart {
@@ -270,6 +403,7 @@ impl<'de> Deserialize<'de> for Outcome {
                 if matches!(
                     kind.as_str(),
                     "exit"
+                        | "windows_exit"
                         | "signal"
                         | "cancelled"
                         | "refused_before_start"
@@ -285,12 +419,24 @@ impl<'de> Deserialize<'de> for Outcome {
         };
         Ok(match known {
             KnownOutcome::Exit { code } => Self::Exit { code },
+            KnownOutcome::WindowsExit { code } => Self::WindowsExit { code },
             KnownOutcome::Signal { signal } => Self::Signal { signal },
             KnownOutcome::Cancelled => Self::Cancelled,
             KnownOutcome::RefusedBeforeStart { reason } => Self::RefusedBeforeStart { reason },
             KnownOutcome::OutcomeUnknown => Self::OutcomeUnknown,
             KnownOutcome::HistoryExpired => Self::HistoryExpired,
         })
+    }
+}
+
+impl Outcome {
+    /// Whether this Windows exit code is an NTSTATUS failure.
+    ///
+    /// Callers should display such codes in hexadecimal as a crash, rather
+    /// than as an ordinary process exit status. Other outcome variants return
+    /// `false`.
+    pub fn ntstatus_failure(&self) -> bool {
+        matches!(self, Self::WindowsExit { code } if code & 0xC000_0000 == 0xC000_0000)
     }
 }
 
@@ -501,12 +647,31 @@ impl IgnoredWrites {
     }
 }
 
+/// Maximum UTF-8 byte length producers may send in a refusal detail.
+///
+/// Producers must never include secrets, tokens or credential material. This is
+/// a producer obligation, not a decoder limit: longer received details are kept
+/// intact, without truncation or rejection.
+pub const REFUSAL_DETAIL_MAX_BYTES: usize = 1024;
+
 /// The last record on an `exec.run` or `exec.attach` reply stream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TerminalRecord {
     pub job_id: Uuid,
     pub outcome: Outcome,
+    /// Human-readable refusal explanation for quoting verbatim, never parsing.
+    /// Producers must keep it within [`REFUSAL_DETAIL_MAX_BYTES`] UTF-8 bytes and
+    /// exclude secrets, tokens and credential material. Decoders preserve longer
+    /// received values. `None` means no detail was reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_detail: Option<String>,
+    /// Millisecond hint that a refusal is transient. Ignore this field unless
+    /// `outcome` is [`Outcome::RefusedBeforeStart`]; wait at most the smaller of
+    /// this hint and the caller's remaining budget before retrying. `None` means
+    /// no retry hint was reported, not proof that a refusal is permanent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed: Option<Killed>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -554,6 +719,8 @@ impl TerminalRecord {
         Self {
             job_id,
             outcome,
+            refusal_detail: None,
+            retry_after_ms: None,
             killed: None,
             pipestatus: None,
             wall_ms,
@@ -566,6 +733,32 @@ impl TerminalRecord {
             untracked_files: None,
             ignored_writes: None,
         }
+    }
+
+    /// Set a verbatim refusal explanation. The producer must obey
+    /// [`REFUSAL_DETAIL_MAX_BYTES`] and exclude secrets and credential material;
+    /// this setter does not validate or truncate the detail.
+    pub fn with_refusal_detail(mut self, refusal_detail: impl Into<String>) -> Self {
+        self.refusal_detail = Some(refusal_detail.into());
+        self
+    }
+
+    /// Read the verbatim refusal explanation, if reported.
+    pub fn refusal_detail(&self) -> Option<&str> {
+        self.refusal_detail.as_deref()
+    }
+
+    /// Set a transient-refusal retry hint in milliseconds. Callers must ignore
+    /// it for other outcomes and cap their wait at their remaining budget.
+    pub fn with_retry_after_ms(mut self, retry_after_ms: u64) -> Self {
+        self.retry_after_ms = Some(retry_after_ms);
+        self
+    }
+
+    /// Read the retry hint, if reported. This does not check the outcome or cap
+    /// the hint to the caller's remaining budget.
+    pub fn retry_after_ms(&self) -> Option<u64> {
+        self.retry_after_ms
     }
 
     /// Record why a command was killed.
@@ -678,6 +871,97 @@ impl Output {
     }
 }
 
+/// A mapping between caller paths and the paths used by a runner.
+///
+/// A runner that rewrites paths sends `host_prefix` in the caller's form (for
+/// example, `/`) and `guest_prefix` (for example, `C:\m`). A caller path P
+/// maps to `guest_prefix` + P with `/` turned into `\`. When a job starts,
+/// any path that cannot be mapped is refused. In output, only paths inside the
+/// mapped folder are translated back; anything else is passed through
+/// unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PathMapping {
+    pub host_prefix: String,
+    pub guest_prefix: String,
+}
+
+impl PathMapping {
+    /// Describe the caller and runner prefixes used to rewrite paths.
+    pub fn new(host_prefix: impl Into<String>, guest_prefix: impl Into<String>) -> Self {
+        Self {
+            host_prefix: host_prefix.into(),
+            guest_prefix: guest_prefix.into(),
+        }
+    }
+
+    pub fn with_host_prefix(mut self, host_prefix: impl Into<String>) -> Self {
+        self.host_prefix = host_prefix.into();
+        self
+    }
+
+    pub fn with_guest_prefix(mut self, guest_prefix: impl Into<String>) -> Self {
+        self.guest_prefix = guest_prefix.into();
+        self
+    }
+
+    pub fn host_prefix(&self) -> &str {
+        &self.host_prefix
+    }
+
+    pub fn guest_prefix(&self) -> &str {
+        &self.guest_prefix
+    }
+}
+
+/// The job has taken runner capacity and begun running.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Started {
+    /// Replay sequence number for this stream record.
+    pub seq: u64,
+    /// Time spent waiting for runner capacity, measured by the runner.
+    pub queue_wait_ms: u64,
+    /// Runner wall-clock Unix time in milliseconds; use for display only.
+    pub started_at_ms: u64,
+    /// Path prefixes used by the runner, absent when it does not rewrite paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_mapping: Option<PathMapping>,
+}
+
+impl Started {
+    /// Record the moment the job began running.
+    pub fn new(seq: u64, queue_wait_ms: u64, started_at_ms: u64) -> Self {
+        Self {
+            seq,
+            queue_wait_ms,
+            started_at_ms,
+            path_mapping: None,
+        }
+    }
+
+    pub fn with_path_mapping(mut self, path_mapping: PathMapping) -> Self {
+        self.path_mapping = Some(path_mapping);
+        self
+    }
+
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub fn queue_wait_ms(&self) -> u64 {
+        self.queue_wait_ms
+    }
+
+    pub fn started_at_ms(&self) -> u64 {
+        self.started_at_ms
+    }
+
+    pub fn path_mapping(&self) -> Option<&PathMapping> {
+        self.path_mapping.as_ref()
+    }
+}
+
 /// Durable acceptance of a run and its queue position.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -690,6 +974,16 @@ pub struct Accepted {
     /// absent list means "not reported", not "everything was forwarded".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_not_forwarded: Option<Vec<String>>,
+    /// Network access the runner actually granted. `None` means the runner
+    /// predates this field, so the caller cannot assume access. If a caller asked
+    /// for [`Network::Outbound`] and this is not `Some(Network::Outbound)`, the
+    /// job runs offline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<Network>,
+    /// Execution platform the runner will use. Runners that understand the
+    /// request must fill this with the platform they will actually use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
 }
 
 impl Accepted {
@@ -698,6 +992,8 @@ impl Accepted {
             job_id,
             queue_position,
             env_not_forwarded: None,
+            network: None,
+            platform: None,
         }
     }
 
@@ -705,6 +1001,28 @@ impl Accepted {
     pub fn with_env_not_forwarded(mut self, names: Vec<String>) -> Self {
         self.env_not_forwarded = Some(names);
         self
+    }
+
+    /// Report the network access actually granted by the runner.
+    pub fn with_network(mut self, network: Network) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    /// Network access actually granted, or `None` when not acknowledged.
+    pub fn network(&self) -> Option<&Network> {
+        self.network.as_ref()
+    }
+
+    /// Report the execution platform the runner will actually use.
+    pub fn with_platform(mut self, platform: Platform) -> Self {
+        self.platform = Some(platform);
+        self
+    }
+
+    /// Execution platform the runner will use, or `None` when not acknowledged.
+    pub fn platform(&self) -> Option<&Platform> {
+        self.platform.as_ref()
     }
 }
 
@@ -791,6 +1109,18 @@ impl<'de> Deserialize<'de> for PrepareOutcome {
 pub struct PrepareReply {
     pub transfer_id: Uuid,
     pub outcome: PrepareOutcome,
+    /// Human-readable refusal explanation for quoting verbatim, never parsing.
+    /// Producers must keep it within [`REFUSAL_DETAIL_MAX_BYTES`] UTF-8 bytes and
+    /// exclude secrets, tokens and credential material. Decoders preserve longer
+    /// received values. `None` means no detail was reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_detail: Option<String>,
+    /// Millisecond hint that a refusal is transient. Ignore this field unless
+    /// `outcome` is [`PrepareOutcome::RefusedBeforeStart`]; wait at most the smaller
+    /// of this hint and the caller's remaining budget before retrying. `None`
+    /// means no hint was reported, not proof that a refusal is permanent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 impl PrepareReply {
@@ -798,7 +1128,35 @@ impl PrepareReply {
         Self {
             transfer_id,
             outcome,
+            refusal_detail: None,
+            retry_after_ms: None,
         }
+    }
+
+    /// Set a verbatim refusal explanation. The producer must obey
+    /// [`REFUSAL_DETAIL_MAX_BYTES`] and exclude secrets and credential material;
+    /// this setter does not validate or truncate the detail.
+    pub fn with_refusal_detail(mut self, refusal_detail: impl Into<String>) -> Self {
+        self.refusal_detail = Some(refusal_detail.into());
+        self
+    }
+
+    /// Read the verbatim refusal explanation, if reported.
+    pub fn refusal_detail(&self) -> Option<&str> {
+        self.refusal_detail.as_deref()
+    }
+
+    /// Set a transient-refusal retry hint in milliseconds. Callers must ignore
+    /// it for other outcomes and cap their wait at their remaining budget.
+    pub fn with_retry_after_ms(mut self, retry_after_ms: u64) -> Self {
+        self.retry_after_ms = Some(retry_after_ms);
+        self
+    }
+
+    /// Read the retry hint, if reported. This does not check the outcome or cap
+    /// the hint to the caller's remaining budget.
+    pub fn retry_after_ms(&self) -> Option<u64> {
+        self.retry_after_ms
     }
 }
 
@@ -1018,6 +1376,15 @@ impl StatusReply {
 #[allow(clippy::large_enum_variant)]
 pub enum StreamRecord {
     Accepted(Accepted),
+    /// Emitted once after acceptance when the job takes runner capacity, before
+    /// its first output or terminal record. A job refused before starting never
+    /// has this record. The runner's command timeout runs from this moment, not
+    /// from acceptance. A caller can use `Started` to report that the job is now
+    /// running instead of waiting for capacity. It must not start a timeout of
+    /// its own from it. Older runners may omit this record, so callers retain
+    /// their existing behavior when it is absent. This is progress, never a
+    /// terminal record.
+    Started(Started),
     Output(Output),
     Terminal(TerminalRecord),
     /// An unrecognised record. Skip it and keep reading, counting its sequence
@@ -1039,6 +1406,7 @@ pub enum StreamRecord {
 #[allow(clippy::large_enum_variant)]
 enum KnownStreamRecord {
     Accepted(Accepted),
+    Started(Started),
     Output(Output),
     Terminal(TerminalRecord),
 }
@@ -1074,6 +1442,7 @@ impl Serialize for StreamRecord {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let known = match self {
             Self::Accepted(accepted) => KnownStreamRecord::Accepted(accepted.clone()),
+            Self::Started(started) => KnownStreamRecord::Started(started.clone()),
             Self::Output(output) => KnownStreamRecord::Output(output.clone()),
             Self::Terminal(terminal) => KnownStreamRecord::Terminal(terminal.clone()),
             Self::Unknown { kind, seq } => {
@@ -1095,7 +1464,10 @@ impl<'de> Deserialize<'de> for StreamRecord {
         let known = match StreamRecordInput::deserialize(deserializer)? {
             StreamRecordInput::Known(known) => known,
             StreamRecordInput::Tag(StreamRecordTag { kind, seq }) => {
-                if matches!(kind.as_str(), "accepted" | "output" | "terminal") {
+                if matches!(
+                    kind.as_str(),
+                    "accepted" | "started" | "output" | "terminal"
+                ) {
                     return Err(serde::de::Error::custom(format!(
                         "malformed fields for known stream record tag {kind}"
                     )));
@@ -1105,6 +1477,7 @@ impl<'de> Deserialize<'de> for StreamRecord {
         };
         Ok(match known {
             KnownStreamRecord::Accepted(accepted) => Self::Accepted(accepted),
+            KnownStreamRecord::Started(started) => Self::Started(started),
             KnownStreamRecord::Output(output) => Self::Output(output),
             KnownStreamRecord::Terminal(terminal) => Self::Terminal(terminal),
         })

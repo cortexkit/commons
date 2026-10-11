@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.2**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.6**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -18,10 +18,55 @@ sibling path-dependency consumers.
 | `workspace.drop` | `DropRequest` | `DropReply` |
 
 `StreamRecord` is internally tagged by `type`: known records are `accepted`,
-`output`, or `terminal`, with fields inline beside the discriminator. `Output`
-retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
+`started`, `output`, or `terminal`, with fields inline beside the discriminator.
+`Started` is emitted once after acceptance when the job takes runner capacity,
+before its first output or terminal; a job refused before start never has one.
+The runner's command timeout runs from this moment, not from acceptance. A
+caller can report that the job is now running instead of waiting for capacity,
+but must not start a timeout of its own from `Started`. Older runners may omit
+it, so callers keep their existing behavior when it is absent. It is progress,
+never a terminal record. Its `seq` counts toward the attach resume cursor;
+`queue_wait_ms` is measured by the runner and `started_at_ms` is for display only.
+
+`Output` retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
 character, so decoding never converts its payload to a string.
+
+### Network access
+
+Runs stay offline unless the caller requests `RunRequest::with_network(Network::Outbound)`.
+`Network::Outbound` serializes as `"outbound"` and means the job may open outbound
+connections to the internet, for example to install packages. It never grants
+access to the caller's machine or local network; the runner must enforce that
+isolation. This crate only carries the request and acknowledgement.
+
+The runner reports the access actually granted through `Accepted::with_network`.
+If a caller asked for `Outbound` and `Accepted.network` is not `Some(Outbound)`,
+the job runs offline. `None` means the runner predates the field, not that access
+was granted. Both fields are omitted when absent, preserving existing bytes.
+
+Future strings round-trip as `Network::Unknown(String)`. A runner receiving an
+unrecognised request must refuse before start with the non-transient
+`RefusalReason::NetworkUnsupported` (`"network_unsupported"`), never downgrade or
+upgrade access. A job granted outbound access may have had outside effects, so
+the caller must not automatically rerun it after an unknown outcome.
+
+### Execution platform
+
+`RunRequest::with_platform` requests `Platform::Linux` (`"linux"`) or
+`Platform::Windows` (`"windows"`). An absent platform means Linux and is omitted
+from the request, preserving bytes for existing callers. Unknown platform strings
+round-trip as `Platform::Unknown`.
+
+A runner that understands this field always acknowledges the platform it will
+actually use in `Accepted.platform`. An older runner may ignore the request field
+and omit the acknowledgement. If a caller requested a non-Linux platform, it
+must cancel the job and must not trust its result unless `Accepted.platform`
+exactly matches the request. Unknown or unavailable platforms are refused before
+start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`); the
+requested platform's wire name is reported in `refusal_detail`.
+
+### Terminal reports
 
 The terminal's `ran`, `tree_hash`, and `workspace_changes` are explicit `Option`s
 and always serialize, including as JSON null. `Some(Ran::None)` encodes the
@@ -64,6 +109,8 @@ tags into a catch-all with a stated grading:**
 | Enum | Catch-all | Caller grading |
 |---|---|---|
 | `RefusalReason` | `Unknown(String)` | Inside `refused_before_start`, the command still did not start. |
+| `Network` | `Unknown(String)` | Never assume outbound access from an unknown acknowledgement. Runners must refuse unknown requests before start. |
+| `Platform` | `Unknown(String)` | Runners must refuse unknown requests before start. Callers requesting non-Linux platforms must require an exact acknowledgement or cancel without trusting the result. |
 | `Outcome` | `Unknown { kind: String }` | Grade like `outcome_unknown`: never assume the command did not run, and never re-run it locally. |
 | `StreamRecord` | `Unknown { kind: String, seq: Option<u64> }` | Skip and keep reading; count its seq toward the resume cursor; never treat it as terminal. |
 | `Killed` | `Unknown(String)` | The command was killed for a reason this version does not recognise. |
@@ -107,13 +154,26 @@ for byte from the executor's own test corpus, so caller and executor pin the
 same bytes:
 
 - **20 outcomes**: complete `{request, stream}` cases covering every known
-  outcome/refusal reason, both kills, pipeline status, lost running/queued jobs,
+  original outcome/refusal reason, both kills, pipeline status, lost running/queued jobs,
   and pre-snapshot rejection.
 - **14 replies**: prepare (success plus seven refusal reasons), drop, cancel,
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Fourteen **crate-local additions**, written in this crate rather than copied from the executor's corpus, cover the cases below:
+Twenty-six **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
+
+- `outcomes/crate-local-network-outbound`: an outbound request and acknowledged
+  grant; 0.2.4-shaped request and accepted decoders ignore the additive fields.
+- `outcomes/crate-local-unknown-network`: a future network string retained as
+  `Unknown`, with a before-start refusal rather than an offline downgrade.
+- `outcomes/crate-local-network-unsupported`: the known `network_unsupported`
+  refusal reason for a runner that cannot grant the requested access.
+- `outcomes/crate-local-platform-linux` and `outcomes/crate-local-platform-windows`:
+  explicit platform requests and acknowledgements.
+- `outcomes/crate-local-platform-unsupported`: a Windows request refused before
+  start, with its wire name in `refusal_detail`.
+- `outcomes/crate-local-unknown-platform`: an unrecognised platform retained on
+  the request and refused before start with its wire name in `refusal_detail`.
 
 - `outcomes/crate-local-unknown-refusal`: a before-start refusal carrying the raw
   `future_refusal` reason tag.
@@ -135,7 +195,13 @@ Fourteen **crate-local additions**, written in this crate rather than copied fro
   `unknown-fields` (inside each new struct), `detached-head`,
   `truncated-untracked`, and `unchanged` (all reports present with no changes).
 
-Totals: **32 outcome pairs and 16 reply pairs**. Runner `frames/` and pretty
+- `outcomes/crate-local-refusal-hints` and
+  `replies/crate-local-prepare-refusal-hints`: optional refusal detail and retry
+  hints on the terminal and prepare containers, accepted by 0.2.2 decoders.
+- `outcomes/crate-local-runner-draining` and `outcomes/crate-local-runner-disk-full`:
+  the newly recognised transient refusal reasons.
+
+Totals: **43 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent

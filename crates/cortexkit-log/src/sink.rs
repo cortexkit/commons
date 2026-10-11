@@ -139,6 +139,13 @@ fn prepare_parent(path: &Path, enforce_directory_mode: bool) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "log path has no parent"))?;
     let existed = parent.exists();
+    #[cfg(windows)]
+    if enforce_directory_mode || !existed {
+        cortexkit_lease::create_private_dir(parent)?;
+    } else {
+        fs::create_dir_all(parent)?;
+    }
+    #[cfg(not(windows))]
     fs::create_dir_all(parent)?;
 
     #[cfg(unix)]
@@ -146,9 +153,7 @@ fn prepare_parent(path: &Path, enforce_directory_mode: bool) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
     }
-    // Windows has no mode bits to enforce; the per-user data directory's ACL is
-    // inherited. The inputs exist only for the Unix arm above.
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let _ = (enforce_directory_mode, existed);
 
     Ok(())
@@ -163,6 +168,9 @@ fn open_active(path: &Path) -> io::Result<File> {
         options.mode(0o600);
     }
     let file = options.open(path)?;
+
+    #[cfg(windows)]
+    cortexkit_lease::protect_file(path)?;
 
     #[cfg(unix)]
     if file.metadata()?.file_type().is_file() {

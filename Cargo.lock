@@ -182,6 +182,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
+dependencies = [
+ "memchr",
+ "serde_core",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -350,7 +360,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortexkit-bus-inmemory"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "cortexkit-bus-naming",
@@ -364,7 +374,7 @@ version = "0.2.0"
 
 [[package]]
 name = "cortexkit-bus-nats"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -378,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-trait"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "sha2 0.10.9",
@@ -394,8 +404,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexkit-cow"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cortexkit-cow",
+ "libc",
+ "parking_lot",
+ "similar",
+ "subc-os",
+ "tempfile",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "cortexkit-exec-remote-types"
-version = "0.2.2"
+version = "0.2.7"
 dependencies = [
  "base64",
  "serde",
@@ -407,16 +432,18 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-lease"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "fs2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "cortexkit-log"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "chrono",
+ "cortexkit-lease",
  "cortexkit-store-types",
  "regex",
  "serde",
@@ -436,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-mutate"
-version = "0.9.4"
+version = "0.10.0"
 dependencies = [
  "clap",
  "ctrlc",
@@ -446,17 +473,18 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "toml",
 ]
 
 [[package]]
 name = "cortexkit-paths"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "cortexkit-provider-usage"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -490,7 +518,7 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "sha2 0.10.9",
- "subc-protocol",
+ "subc-protocol 0.30.0",
 ]
 
 [[package]]
@@ -503,17 +531,19 @@ dependencies = [
  "serde",
  "serde_jcs",
  "serde_json",
- "subc-protocol",
+ "subc-protocol 0.30.0",
  "tokio",
 ]
 
 [[package]]
 name = "cortexkit-role-compaction-provider"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cortexkit-role-llm-runner",
+ "cortexkit-role-step-transform-provider",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -543,14 +573,14 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
- "subc-protocol",
+ "subc-protocol 0.30.0",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "cortexkit-role-step-transform-provider"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -559,32 +589,32 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.5.1"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_jcs",
  "serde_json",
  "sha2 0.10.9",
- "subc-protocol",
+ "subc-protocol 0.31.0",
 ]
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.5.1"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
  "cortexkit-role-tool-provider",
  "futures-util",
  "serde_json",
- "subc-protocol",
+ "subc-protocol 0.31.0",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "cortexkit-store"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "cortexkit-lease",
  "cortexkit-store-types",
@@ -606,6 +636,16 @@ version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cortexkit-test-support"
+version = "0.1.3"
+dependencies = [
+ "rustix",
+ "sha2 0.10.9",
+ "subc-os",
+ "tokio",
 ]
 
 [[package]]
@@ -2041,6 +2081,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2102,10 +2151,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
-name = "subc-protocol"
-version = "0.29.0"
+name = "subc-os"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d65caff6df13f6ccbc6fc855e9826af4cbcd13fcaf26ae9ce26871ed4429e471"
+checksum = "deaa591b1073aed5dcc9af687eb2bf45839bd3296a04b598b29cc2bee1bfe8d9"
+dependencies = [
+ "libc",
+ "rustix",
+ "tokio",
+]
+
+[[package]]
+name = "subc-protocol"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bd344068abd716d996c0b0adb897085d14b19e648951564256028a44498e780"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "subc-protocol"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b6252f827f7763153d01487298f9163d26a58432c5a5d6acba7303ad2390dc2"
 dependencies = [
  "serde",
  "serde_json",

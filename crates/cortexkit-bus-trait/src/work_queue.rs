@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::{BusResult, ContentDigest, Headers, Message, PublishAck, Stream};
+use crate::{BusResult, ContentDigest, Headers, Message, PublishReceipt, Stream};
 
 pub const DEAD_LETTER_REASON_MAX_DELIVERIES: &str = "max_deliveries_exceeded";
 
@@ -77,19 +77,22 @@ pub fn effect_dead_subject(account: &str) -> String {
 }
 
 /// Publishes a persistent dead-letter record before terminating the exhausted delivery.
+/// Returns the publish receipt, including duplicates, as described by [`Stream::publish`].
+/// A duplicate is also followed by termination; use a separate dead-letter stream
+/// so its message ids do not collide with the original work items.
 pub async fn terminally_dispose<S, Q>(
     stream: &S,
     queue: &Q,
     account: &str,
     exhausted: &MaxDeliveriesExceeded,
     dead_letter_digest: ContentDigest,
-) -> BusResult<PublishAck>
+) -> BusResult<PublishReceipt>
 where
     S: Stream,
     Q: WorkQueue,
 {
     let record = DeadLetterRecord::from_exhaustion(exhausted);
-    let ack = stream
+    let receipt = stream
         .publish(
             &effect_dead_subject(account),
             &record.message_id,
@@ -98,5 +101,5 @@ where
         )
         .await?;
     queue.term(exhausted.item.token).await?;
-    Ok(ack)
+    Ok(receipt)
 }

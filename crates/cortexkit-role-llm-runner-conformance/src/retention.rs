@@ -1,4 +1,4 @@
-//! Retention cases use real elapsed time and real routes. An expired read alone cannot
+//! Retention cases check expiry and deletion against one clock. An expired read alone cannot
 //! prove deletion: the runner's content-free expiry record (its tombstone) makes content
 //! unreadable before the content is erased.
 
@@ -28,6 +28,7 @@ use crate::{
 };
 
 const MARGIN_MS: u64 = 300;
+const MAX_REAL_WAIT_MS: u64 = 30_000;
 const STATUS: &str = "run.status";
 
 fn wait_duration(seconds: u64, deletion_ms: u64) -> Result<Duration, String> {
@@ -37,6 +38,50 @@ fn wait_duration(seconds: u64, deletion_ms: u64) -> Result<Duration, String> {
         .and_then(|n| n.checked_add(MARGIN_MS))
         .ok_or("retention wait overflows milliseconds")?;
     Ok(Duration::from_millis(ms))
+}
+
+fn case_wait_ms(name: &str, seconds: u64, deletion_ms: u64) -> Result<u64, String> {
+    let one_wait = u64::try_from(wait_duration(seconds, deletion_ms)?.as_millis())
+        .map_err(|_| "retention wait overflows milliseconds")?;
+    match name {
+        "retention_shorten_continues_lineage" => one_wait
+            .checked_add(1300)
+            .ok_or("retention wait overflows milliseconds".into()),
+        "retention_equal_noop" | "retention_run_status_expired" | "retention_no_content_served" => {
+            Ok(one_wait)
+        }
+        "retention_honoured" | "retention_active_run_never_expires" => one_wait
+            .checked_mul(2)
+            .ok_or("retention wait overflows milliseconds".into()),
+        "crash_at_RetentionTombstoned" => {
+            let deletion_wait = u64::try_from(wait_duration(0, deletion_ms)?.as_millis())
+                .map_err(|_| "retention wait overflows milliseconds")?;
+            one_wait
+                .checked_add(deletion_wait)
+                .ok_or("retention wait overflows milliseconds".into())
+        }
+        _ => Ok(0),
+    }
+}
+
+fn skip_long_real_wait(
+    declared: &BTreeSet<Capability>,
+    name: &str,
+    seconds: u64,
+    deletion_ms: u64,
+) -> Result<Option<Ending>, String> {
+    if declared.contains(&Capability::RetentionClock) {
+        return Ok(None);
+    }
+    let wait_ms = case_wait_ms(name, seconds, deletion_ms)?;
+    if wait_ms <= MAX_REAL_WAIT_MS {
+        return Ok(None);
+    }
+    let wait_seconds = wait_ms.div_ceil(1000);
+    Ok(Some(Ending::Skipped {
+        missing: vec![Capability::RetentionClock],
+        reason: format!("needs advance_retention_clock; real wait would be {wait_seconds} s"),
+    }))
 }
 
 async fn describe<R: RunnerRoute>(route: &R) -> Result<RoleDescribe, String> {
@@ -133,6 +178,18 @@ where
         Ok((described, limits))
     }
 
+    async fn wait_retention_time(&self, session: &str, milliseconds: u64) -> Result<(), String> {
+        if self.declared.contains(&Capability::RetentionClock) {
+            self.subject
+                .advance_retention_clock(session, milliseconds)
+                .await
+                .map_err(|error| format!("advancing retention clock for {session}: {error}"))
+        } else {
+            tokio::time::sleep(Duration::from_millis(milliseconds)).await;
+            Ok(())
+        }
+    }
+
     async fn retained_send(
         &self,
         session: &mut Session<S::Route>,
@@ -223,10 +280,16 @@ where
     ) -> Result<(), String> {
         // Check immediately after expiry as well as after the deletion bound:
         // delete_within_ms is not an extra period of readable retention.
-        tokio::time::sleep(wait_duration(seconds, 0)?).await;
+        self.wait_retention_time(
+            &seed.session.name,
+            u64::try_from(wait_duration(seconds, 0)?.as_millis())
+                .map_err(|_| "retention wait overflows milliseconds")?,
+        )
+        .await?;
         let expected = expiry(seed.last_activity, seconds)?;
         expired_reads(&seed.session.route, self.declared, &seed.run_id, expected).await?;
-        tokio::time::sleep(Duration::from_millis(limits.delete_within_ms)).await;
+        self.wait_retention_time(&seed.session.name, limits.delete_within_ms)
+            .await?;
         expired_reads(&seed.session.route, self.declared, &seed.run_id, expected).await?;
         deletion(self.subject, self.handle, &seed.session.name).await
     }
@@ -335,9 +398,14 @@ where
                 } else {
                     1
                 };
+                if let Some(skipped) =
+                    skip_long_real_wait(self.declared, name, seconds, cap.delete_within_ms)?
+                {
+                    return Ok(skipped);
+                }
                 let mut seed = self.retention_seed(Some(initial), false).await?;
                 if name == "retention_shorten_continues_lineage" {
-                    tokio::time::sleep(Duration::from_millis(1300)).await;
+                    self.wait_retention_time(&seed.session.name, 1300).await?;
                 }
                 // The idle lineage is still inside its OLD retention. A new send
                 // must preserve it, even if the new policy is shorter.
@@ -368,6 +436,11 @@ where
                 self.wait_expired(&seed, seconds, cap).await?;
             }
             "retention_honoured" => {
+                if let Some(skipped) =
+                    skip_long_real_wait(self.declared, name, short, cap.delete_within_ms)?
+                {
+                    return Ok(skipped);
+                }
                 let mut seed = self.retention_seed(Some(short), false).await?;
                 self.wait_expired(&seed, short, cap).await?;
                 // Check both answers together: an expired session refuses `expired`, while
@@ -401,7 +474,12 @@ where
                     .await?,
                 )?;
                 expect_code("old lineage read", &error, errors::LINEAGE_CHANGED)?;
-                tokio::time::sleep(wait_duration(short, cap.delete_within_ms)?).await;
+                self.wait_retention_time(
+                    &seed.session.name,
+                    u64::try_from(wait_duration(short, cap.delete_within_ms)?.as_millis())
+                        .map_err(|_| "retention wait overflows milliseconds")?,
+                )
+                .await?;
                 if head(&seed.session.route).await?.lineage_id != meta.lineage_id {
                     return Err("fresh lineage inherited old retention".into());
                 }
@@ -412,6 +490,11 @@ where
                         "the runner does not advertise run.status".into(),
                     ));
                 }
+                if let Some(skipped) =
+                    skip_long_real_wait(self.declared, name, short, cap.delete_within_ms)?
+                {
+                    return Ok(skipped);
+                }
                 let seed = self.retention_seed(Some(short), false).await?;
                 self.wait_expired(&seed, short, cap).await?;
                 check_expired(
@@ -421,11 +504,23 @@ where
                 )?;
             }
             "retention_no_content_served" => {
+                if let Some(skipped) =
+                    skip_long_real_wait(self.declared, name, short, cap.delete_within_ms)?
+                {
+                    return Ok(skipped);
+                }
                 let seed = self.retention_seed(Some(short), true).await?;
                 self.wait_expired(&seed, short, cap).await?;
                 self.no_content(&seed, &described).await?;
             }
-            "retention_active_run_never_expires" => self.retention_held(short, cap).await?,
+            "retention_active_run_never_expires" => {
+                if let Some(skipped) =
+                    skip_long_real_wait(self.declared, name, short, cap.delete_within_ms)?
+                {
+                    return Ok(skipped);
+                }
+                self.retention_held(short, cap).await?;
+            }
             _ => return Err(format!("unknown retention case {name}")),
         }
         Ok(Ending::Passed)
@@ -563,7 +658,12 @@ where
                 if RunState::parse(&last.state).is_terminal() {
                     return Err("held run is already terminal".into());
                 }
-                tokio::time::sleep(wait_duration(seconds, cap.delete_within_ms)?).await;
+                self.wait_retention_time(
+                    &session.name,
+                    u64::try_from(wait_duration(seconds, cap.delete_within_ms)?.as_millis())
+                        .map_err(|_| "retention wait overflows milliseconds")?,
+                )
+                .await?;
                 let after = head(&session.route).await?;
                 let run = run_result(&session.route, &last.run_id).await?;
                 if after.lineage_id != before.lineage_id || run.run_state().is_terminal() {
@@ -607,7 +707,7 @@ pub(crate) async fn crash<S>(
     work_dir: &Path,
     declared: &BTreeSet<Capability>,
     mint: &Mint,
-) -> Result<(), String>
+) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
@@ -633,6 +733,14 @@ where
         .map_err(|e| e.to_string())?;
     let cap = limits(&describe(&route).await?)?;
     let seconds = cap.max_seconds.min(2);
+    if let Some(skipped) = skip_long_real_wait(
+        declared,
+        "crash_at_RetentionTombstoned",
+        seconds,
+        cap.delete_within_ms,
+    )? {
+        return Ok(skipped);
+    }
     let mut params = send_params(
         subject,
         &name,
@@ -652,8 +760,20 @@ where
         .updated_at
         .ok_or("crash session has no activity")?;
     let wait = wait_duration(seconds, cap.delete_within_ms)?;
+    let retention_clock = declared.contains(&Capability::RetentionClock);
     let trigger: Trigger<'_> = Box::pin(async {
-        tokio::time::sleep(wait).await;
+        if retention_clock {
+            let milliseconds = u64::try_from(wait.as_millis()).unwrap();
+            if subject
+                .advance_retention_clock(&name, milliseconds)
+                .await
+                .is_err()
+            {
+                return;
+            }
+        } else {
+            tokio::time::sleep(wait).await;
+        }
         // A runner that expires sessions on demand performs the expiry, and so meets the
         // kill, when this read arrives. A runner that expires them in a background task has
         // already been killed by the harness; this read then only observes the result.
@@ -680,7 +800,16 @@ where
         expiry(last_activity, seconds)?,
     )
     .await?;
-    tokio::time::sleep(wait_duration(0, cap.delete_within_ms)?).await;
+    if declared.contains(&Capability::RetentionClock) {
+        let milliseconds = u64::try_from(wait_duration(0, cap.delete_within_ms)?.as_millis())
+            .map_err(|_| "retention wait overflows milliseconds")?;
+        subject
+            .advance_retention_clock(&name, milliseconds)
+            .await
+            .map_err(|error| format!("advancing retention clock for {name}: {error}"))?;
+    } else {
+        tokio::time::sleep(wait_duration(0, cap.delete_within_ms)?).await;
+    }
     deletion(subject, &handle, &name).await?;
     let kill = driver
         .ledger()
@@ -692,5 +821,5 @@ where
             "RetentionTombstoned requires a real process kill between tombstone and delete".into(),
         );
     }
-    Ok(())
+    Ok(Ending::Passed)
 }

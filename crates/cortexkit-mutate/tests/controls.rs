@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use cortexkit_mutate::*;
 use std::{
     fs,
@@ -15,6 +17,7 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        support::isolate_fixture_environment();
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("src")).unwrap();
         fs::write(
@@ -82,6 +85,7 @@ impl Fixture {
     fn control(&self) -> Control {
         Control {
             id: "guard".into(),
+            source: RowSource::default(),
             guards: "zero is rejected".into(),
             file: Some("src/lib.rs".into()),
             old: Some("value > 0".into()),
@@ -472,6 +476,7 @@ impl CommandFixture {
     fn control(&self) -> Control {
         Control {
             id: "command-guard".into(),
+            source: RowSource::default(),
             guards: "the rig observes the guard".into(),
             file: Some("guard.py".into()),
             old: Some("ENABLED = True".into()),
@@ -945,7 +950,11 @@ fn command_load_rejects_invalid_ids_without_normalizing_dotted_ids() {
     )
     .unwrap();
     let loaded = load(&path).unwrap();
-    assert_eq!(loaded.control[0], c);
+    assert_eq!(
+        toml::to_string(&loaded.control[0]).unwrap(),
+        toml::to_string(&c).unwrap()
+    );
+    assert_eq!(loaded.control[0].source.file, ".git/valid.toml");
     // Check mode does not invent a Cargo or test-list invocation for command rows.
     check(f.root(), &loaded, &AtomicBool::new(false)).unwrap();
     assert!(!f.root().join(".git/command-log").exists());
@@ -1286,7 +1295,10 @@ fn command_v090_breadth_fields_and_report_paths_fail_closed() {
     let c = junit_control(&f, "missing");
     let path = f.root().join(".git/audit.toml");
     append_control(&path, &c).unwrap();
-    assert_eq!(load(&path).unwrap().control[0], c);
+    assert_eq!(
+        toml::to_string(&load(&path).unwrap().control[0]).unwrap(),
+        toml::to_string(&c).unwrap()
+    );
     let mut file_template = c.clone();
     file_template.broad_id = Some("{file}:{name}".into());
     let file_template_path = f.root().join(".git/file-template.toml");
@@ -1751,7 +1763,10 @@ fn long_run_retains_expected_and_collateral_failures_for_both_runners() {
         let out = f.cli(&["run", "--all", "--report", ".git/failures.json"]);
         assert!(!out.status.success());
         let text = String::from_utf8_lossy(&out.stdout);
-        assert!(text.contains("guard: WRONG_TEST"), "{text}");
+        assert!(
+            text.contains("guard (mutations.toml:2): WRONG_TEST"),
+            "{text}"
+        );
         assert!(text.contains("  unexpected red: tests::waits\n"), "{text}");
         assert!(text.contains("collateral invariant failed"), "{text}");
         assert!(
@@ -1839,7 +1854,7 @@ sys.exit(1 if mutated else 0)
     assert!(!out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("command-guard: RED_FOR_ANOTHER_REASON"),
+        text.contains("command-guard (mutations.toml:2): RED_FOR_ANOTHER_REASON"),
         "{text}"
     );
     for id in [COMMAND_GUARD, COMMAND_OTHER] {
@@ -1941,7 +1956,10 @@ fn message_and_signal_fields_validate_and_round_trip() {
     c.expect_message = Some("/assertion failed/".into());
     c.signal_is_catch = Some("Intentional abort guard".into());
     append_control(&f.root().join("new.toml"), &c).unwrap();
-    assert_eq!(load(&f.root().join("new.toml")).unwrap().control, [c]);
+    assert_eq!(
+        toml::to_string(&load(&f.root().join("new.toml")).unwrap().control[0]).unwrap(),
+        toml::to_string(&c).unwrap()
+    );
 }
 
 #[test]
@@ -2067,7 +2085,7 @@ fn breadth_cross_target_catch_is_caught_broadly() {
         ])
     );
     assert!(
-        stdout.contains("guard: CAUGHT_BROADLY (warning; collateral: 4"),
+        stdout.contains("guard (mutations.toml:2): CAUGHT_BROADLY (warning; collateral: 4"),
         "{stdout}"
     );
     assert!(stdout.contains("1 CAUGHT_BROADLY (warning)"), "{stdout}");
@@ -2139,16 +2157,20 @@ fn hub_load(fields: &str) -> std::result::Result<Catalogue, String> {
         ),
     )
     .unwrap();
-    load(&path)
+    let result = load(&path);
+    if let Err(error) = &result {
+        assert!(
+            error.contains("guard (") && error.contains("mutations.toml:3"),
+            "{error}"
+        );
+    }
+    result
 }
 
 #[test]
 fn hub_load_refuses_missing_reason_naming_row() {
     let error = hub_load("hub_targets = [\"capacity\"]").err().unwrap();
-    assert!(
-        error.contains("guard: HUB requires a hub reason"),
-        "{error}"
-    );
+    assert!(error.contains("HUB requires a hub reason"), "{error}");
 }
 
 #[test]
@@ -2157,13 +2179,13 @@ fn hub_load_refuses_short_trimmed_reason_naming_row() {
         .err()
         .unwrap();
     assert!(
-        error.contains("guard: HUB reason must be at least 20 characters after trimming"),
+        error.contains("HUB reason must be at least 20 characters after trimming"),
         "{error}"
     );
     let error = hub_load("hub = ' '\nhub_targets = ['capacity']")
         .err()
         .unwrap();
-    assert!(error.contains("guard: HUB reason"), "{error}");
+    assert!(error.contains("HUB reason"), "{error}");
     let catalogue =
         hub_load("hub = '  twenty characters!!!  '\nhub_targets = ['capacity']").unwrap();
     assert_eq!(
@@ -2178,7 +2200,7 @@ fn hub_load_refuses_empty_targets_naming_row() {
         .err()
         .unwrap();
     assert!(
-        error.contains("guard: HUB requires non-empty hub_targets"),
+        error.contains("HUB requires non-empty hub_targets"),
         "{error}"
     );
 }
@@ -2189,7 +2211,7 @@ fn hub_load_refuses_missing_targets_naming_row() {
         .err()
         .unwrap();
     assert!(
-        error.contains("guard: HUB requires non-empty hub_targets"),
+        error.contains("HUB requires non-empty hub_targets"),
         "{error}"
     );
 }
@@ -2208,7 +2230,7 @@ fn hub_load_refuses_other_recorded_dispositions() {
         .err()
         .unwrap();
         assert!(
-            error.contains("guard: hub, equivalent and unreachable are exclusive"),
+            error.contains("hub, equivalent and unreachable are exclusive"),
             "{error}"
         );
     }
@@ -2242,7 +2264,10 @@ fn hub_broad_equal_targets_counts_as_hub() {
         rows[0]["collateral"]["targets"],
         serde_json::json!(["capacity", "mutation_fixture", "readers"])
     );
-    assert!(stdout.contains("guard: HUB (collateral: 4"), "{stdout}");
+    assert!(
+        stdout.contains("guard (mutations.toml:2): HUB (collateral: 4"),
+        "{stdout}"
+    );
     assert!(stdout.contains("0 CAUGHT_BROADLY (warning)"), "{stdout}");
 }
 
@@ -2302,7 +2327,9 @@ fn hub_summary_counts_and_lists_reviewed_reasons() {
         "{stdout}"
     );
     assert!(
-        stdout.contains(&format!("HUB rows (1):\n  guard: {HUB_REASON}")),
+        stdout.contains(&format!(
+            "HUB rows (1):\n  guard (mutations.toml:2): {HUB_REASON}"
+        )),
         "{stdout}"
     );
 }
@@ -2361,7 +2388,10 @@ fn hub_append_refuses_without_writing() {
     let c = load(&path).unwrap().control.remove(0);
     let before = fs::read(&path).unwrap();
     let error = append_control(&path, &c).unwrap_err();
-    assert!(error.contains("guard: cannot append HUB"), "{error}");
+    assert!(
+        error.contains("guard (mutations.toml:2): cannot append HUB"),
+        "{error}"
+    );
     assert_eq!(fs::read(&path).unwrap(), before);
     let absent = f.root().join("new-catalogue.toml");
     assert!(append_control(&absent, &c).is_err());
@@ -2437,7 +2467,7 @@ fn prove_reports_cross_target_collateral_without_broad_grading() {
     assert_eq!(targets.len(), 3, "two capacity tests share a single target");
     assert_eq!(targets, ["capacity", "mutation_fixture", "readers"]);
     assert!(
-        stdout.contains("broad: CAUGHT (collateral: 4 tests in targets:"),
+        stdout.contains("broad (mutations.toml): CAUGHT (collateral: 4 tests in targets:"),
         "{stdout}"
     );
     assert!(stdout.contains("breadth not observed"), "{stdout}");
@@ -2656,7 +2686,9 @@ fn unreachable_requires_reason_is_recorded_and_listed_separately() {
         "{stdout}"
     );
     assert!(
-        stdout.contains(&format!("UNREACHABLE rows (1):\n  dead-guard: {reason}")),
+        stdout.contains(&format!(
+            "UNREACHABLE rows (1):\n  dead-guard (mutations.toml): {reason}"
+        )),
         "{stdout}"
     );
     let rows = report_json(&f, "unreachable.json");
@@ -2673,7 +2705,8 @@ fn unreachable_requires_reason_is_recorded_and_listed_separately() {
     assert!(f.cli(&["check"]).status.success());
     let run = f.cli(&["run", "--only", "dead-guard"]);
     assert!(run.status.success());
-    assert!(String::from_utf8_lossy(&run.stdout).contains("UNREACHABLE rows (1):\n  dead-guard:"));
+    assert!(String::from_utf8_lossy(&run.stdout)
+        .contains("UNREACHABLE rows (1):\n  dead-guard (mutations.toml:"));
 }
 
 #[test]
@@ -3329,8 +3362,8 @@ fn run_reports_in_sorted_id_order_whatever_the_execution_order() {
     );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "a-other: CAUGHT (breadth not observed; use run --broad to audit)\n\
-         guard: CAUGHT (breadth not observed; use run --broad to audit)\n"
+        "a-other (mutations.toml:18): CAUGHT (breadth not observed; use run --broad to audit)\n\
+         guard (mutations.toml:2): CAUGHT (breadth not observed; use run --broad to audit)\n"
     );
     let json = report_json(&f, "order.json");
     assert_eq!(json[0]["id"], "a-other");
@@ -3391,7 +3424,7 @@ fn prove_call_site_removal_prints_no_call_site_hint() {
     // hint to print: its stdout must be the report line and nothing else.
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "caller-reaches-guard: CAUGHT (breadth not observed; use run --broad to audit)\n"
+        "caller-reaches-guard (mutations.toml): CAUGHT (breadth not observed; use run --broad to audit)\n"
     );
     assert_eq!(
         load(&f.root().join("mutations.toml"))
@@ -3761,7 +3794,10 @@ fn explore_catches_and_lists_every_red_test_by_full_name() {
         "{stdout}\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(stdout.contains("explore: CAUGHT"), "{stdout}");
+    assert!(
+        stdout.contains("explore (mutations.toml): CAUGHT"),
+        "{stdout}"
+    );
     assert!(
         stdout.contains("  tests::guard_accepts_positive\n"),
         "{stdout}"
@@ -3813,7 +3849,10 @@ fn explore_survivor_prints_diagnosis_and_never_appends() {
         "{stdout}\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(stdout.contains("vacuous-explored: SURVIVED"), "{stdout}");
+    assert!(
+        stdout.contains("vacuous-explored (mutations.toml): SURVIVED"),
+        "{stdout}"
+    );
     assert!(stdout.contains("unscoped by design"), "{stdout}");
     assert!(stdout.contains("Three causes"), "{stdout}");
     assert!(stdout.contains("The mutant is equivalent"), "{stdout}");
@@ -4362,7 +4401,8 @@ fn caught_equivalent_is_equivalent_caught_and_fails() {
     f.commit();
     let out = f.cli(&["run", "--all"]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("guard: EQUIVALENT_CAUGHT"));
+    assert!(String::from_utf8_lossy(&out.stdout)
+        .contains("guard (mutations.toml:2): EQUIVALENT_CAUGHT"));
 }
 
 fn output_control(f: &Fixture, probe: &str) -> Control {

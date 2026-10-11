@@ -40,6 +40,108 @@ pub enum Hook {
     PostTool,
 }
 
+/// A hook subject whose output was not served, in the enclosing call's lineage.
+/// Unknown fields are ignored, but the hook discriminant remains strict.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct UnservedSubject {
+    pub subject_mid: String,
+    pub hook: Hook,
+    /// The opaque tool part id, not the display-only tool call id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_part: Option<String>,
+}
+
+impl UnservedSubject {
+    pub fn new(subject_mid: impl Into<String>, hook: Hook) -> Self {
+        Self {
+            subject_mid: subject_mid.into(),
+            hook,
+            subject_part: None,
+        }
+    }
+
+    pub fn with_subject_part(mut self, subject_part: impl Into<String>) -> Self {
+        self.subject_part = Some(subject_part.into());
+        self
+    }
+}
+
+/// Maximum UTF-8 byte length of an opaque host subject part id.
+pub const MAX_SUBJECT_PART_BYTES: usize = 256;
+
+/// A malformed part id. Refuse with `invalid_params`, naming [`Self::field`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SubjectPartProblem {
+    SubjectPart,
+    UnservedSubjectPart { index: usize },
+}
+
+impl SubjectPartProblem {
+    pub fn field(self) -> String {
+        match self {
+            Self::SubjectPart => "subject_part".into(),
+            Self::UnservedSubjectPart { index } => {
+                format!("unserved_subjects[{index}].subject_part")
+            }
+        }
+    }
+}
+
+pub(crate) fn check_subject_part(part: Option<&str>) -> Result<(), SubjectPartProblem> {
+    if part.is_some_and(|part| part.is_empty() || part.len() > MAX_SUBJECT_PART_BYTES) {
+        return Err(SubjectPartProblem::SubjectPart);
+    }
+    Ok(())
+}
+
+/// Validate burn-entry parts before any promotion or burning. This checks only
+/// request-local byte limits, not admission, held history or provider state.
+pub fn validate_unserved_subjects(subjects: &[UnservedSubject]) -> Result<(), SubjectPartProblem> {
+    for (index, subject) in subjects.iter().enumerate() {
+        check_subject_part(subject.subject_part.as_deref())
+            .map_err(|_| SubjectPartProblem::UnservedSubjectPart { index })?;
+    }
+    Ok(())
+}
+
+/// A plan parameter value reserved for an OpenCode host acting as a runner
+/// (`serializer_profile: "opencode-aisdk"` or `observation: "answer"`). A
+/// registered runner such as Broca must not send one, because these values
+/// select the host lane's relaxed admission rules.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RunnerParamsProblem {
+    SerializerProfile,
+    Observation,
+}
+
+impl RunnerParamsProblem {
+    /// The `detail.field` of the `invalid_params` refusal.
+    pub fn field(self) -> &'static str {
+        match self {
+            Self::SerializerProfile => "params.serializer_profile",
+            Self::Observation => "params.observation",
+        }
+    }
+}
+
+/// Refuse those host-only values when they arrive on Setup or a declaration
+/// from a registered runner. The caller decides it is talking to a runner from
+/// the daemon-verified route (the module that opened it), never from the
+/// `harness` field in the request body. This only refuses a runner; it does not
+/// admit a host.
+pub fn check_runner_params(params: &Map<String, Value>) -> Result<(), RunnerParamsProblem> {
+    if params.get("serializer_profile").and_then(Value::as_str) == Some("opencode-aisdk") {
+        return Err(RunnerParamsProblem::SerializerProfile);
+    }
+    if params.get("observation").and_then(Value::as_str) == Some("answer") {
+        return Err(RunnerParamsProblem::Observation);
+    }
+    Ok(())
+}
+
 impl Hook {
     pub const ALL: [Hook; 4] = [
         Hook::PreUser,
@@ -238,6 +340,12 @@ pub struct DeclareRequest {
 }
 
 impl DeclareRequest {
+    /// Refuse host-only plan values. Call this only once the route shows the
+    /// caller is a registered runner.
+    pub fn check_runner_params(&self) -> Result<(), RunnerParamsProblem> {
+        check_runner_params(&self.params)
+    }
+
     pub fn new(params: Map<String, Value>) -> Self {
         Self {
             preset: None,

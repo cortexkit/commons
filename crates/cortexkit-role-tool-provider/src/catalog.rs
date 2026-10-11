@@ -8,9 +8,11 @@
 //! Tools the project disables are omitted. Tool names and argument schemas
 //! never depend on the composition; descriptions and system text may.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+
+use crate::CallMode;
 
 /// The result operations a hook may apply to a tool's result. A tool that
 /// does not list `result_ops` accepts all three.
@@ -210,6 +212,19 @@ pub struct CatalogTool {
     /// The tool's behaviour version, bumped when its behaviour changes without
     /// a schema change. A call's schema pin names it.
     pub semantics: u64,
+    /// Call modes this tool serves. Absent means classic only. Providers
+    /// validate this with [`check_modes`] and check every call with
+    /// [`serves_call_mode`] against the mode on its route bind, not its body.
+    ///
+    /// Decoding an explicit `["classic"]` normalizes it to `None`; encoding
+    /// either representation omits the member. Hash the encoded catalog so
+    /// explicitly writing the default cannot change its content digest.
+    #[serde(
+        default,
+        deserialize_with = "decode_modes",
+        skip_serializing_if = "is_default_modes"
+    )]
+    pub modes: Option<Vec<CallMode>>,
     /// The result operations the tool accepts from hooks; `None` means all
     /// of [`RESULT_OPS_ALL`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -221,6 +236,10 @@ pub struct CatalogTool {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Per-tool reply deadline metadata, frozen with the catalog at admission.
+    /// Absent metadata leaves the runner's fallback unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<Reply>,
     /// The argument schema, which must be flat (see [`check_flat_schema`]).
     pub input_schema: Value,
 }
@@ -248,6 +267,13 @@ impl CatalogTool {
         self
     }
 
+    /// Set the call modes this tool serves. The classic-only default is
+    /// normalized to absence. Validate other lists with [`check_modes`].
+    pub fn with_modes(mut self, modes: Vec<CallMode>) -> Self {
+        self.modes = Some(modes).filter(|modes| modes.as_slice() != [CallMode::Classic]);
+        self
+    }
+
     /// Set the tool's capability tags.
     pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
         self.capabilities = capabilities;
@@ -260,10 +286,137 @@ impl CatalogTool {
         self
     }
 
+    /// Set the tool's reply deadline metadata. Validate with [`check_reply`].
+    pub fn with_reply(mut self, reply: Reply) -> Self {
+        self.reply = Some(reply);
+        self
+    }
+
     pub fn effective_result_ops(&self) -> Vec<&str> {
         match &self.result_ops {
             Some(ops) => ops.iter().map(String::as_str).collect(),
             None => RESULT_OPS_ALL.to_vec(),
+        }
+    }
+}
+
+fn is_default_modes(modes: &Option<Vec<CallMode>>) -> bool {
+    modes
+        .as_ref()
+        .is_none_or(|modes| modes.as_slice() == [CallMode::Classic])
+}
+
+fn decode_modes<'de, D: Deserializer<'de>>(decoder: D) -> Result<Option<Vec<CallMode>>, D::Error> {
+    let modes = Option::<Vec<CallMode>>::deserialize(decoder)?;
+    Ok(modes.filter(|modes| modes.as_slice() != [CallMode::Classic]))
+}
+
+/// The tool, member and reason reported for invalid mode declarations:
+/// an empty list, a duplicate, or an unknown mode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModesProblem {
+    pub tool: String,
+    /// The member path within the tool.
+    pub member: &'static str,
+    pub reason: &'static str,
+}
+
+impl std::fmt::Display for ModesProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}: {}", self.tool, self.member, self.reason)
+    }
+}
+
+impl std::error::Error for ModesProblem {}
+
+/// Validate a provider's own mode declarations. A runner refuses a failing
+/// catalog as `invalid_answer`, naming the tool and `modes`, just as it does
+/// for invalid reply metadata. Unknown strings survive decoding for forward
+/// compatibility, but a provider may declare only modes it understands.
+pub fn check_modes(tool: &CatalogTool) -> Result<(), ModesProblem> {
+    let Some(modes) = &tool.modes else {
+        return Ok(());
+    };
+    let problem = |reason| ModesProblem {
+        tool: tool.name.clone(),
+        member: "modes",
+        reason,
+    };
+    if modes.is_empty() {
+        return Err(problem("must not be empty"));
+    }
+    for (index, mode) in modes.iter().enumerate() {
+        if matches!(mode, CallMode::Unknown(_)) {
+            return Err(problem("must contain only known call modes"));
+        }
+        if modes[..index].contains(mode) {
+            return Err(problem("must not contain duplicate call modes"));
+        }
+    }
+    Ok(())
+}
+
+/// Whether this tool serves a call stamped with `mode` on its route bind.
+/// Providers must check this on every tool call before executing it. Absence
+/// means classic only; unknown modes are never served, even if an invalid
+/// catalog lists the same unknown string.
+pub fn serves_call_mode(tool: &CatalogTool, mode: &CallMode) -> bool {
+    if matches!(mode, CallMode::Unknown(_)) {
+        return false;
+    }
+    match &tool.modes {
+        Some(modes) => modes.contains(mode),
+        None => *mode == CallMode::Classic,
+    }
+}
+
+/// The longest reply time a provider declares for one tool, in milliseconds.
+/// This is catalog metadata, never part of the argument schema or schema pin.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Reply {
+    /// From receiving the request to sending its terminal frame: 1..=86,400,000.
+    pub max_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_argument: Option<HoldArgument>,
+}
+
+impl Reply {
+    /// Declare a fixed maximum reply time. Validate with [`check_reply`].
+    pub fn new(max_ms: u64) -> Self {
+        Self {
+            max_ms,
+            hold_argument: None,
+        }
+    }
+
+    /// Derive the deadline from a numeric hold argument, plus reply grace.
+    pub fn with_hold_argument(mut self, hold_argument: HoldArgument) -> Self {
+        self.hold_argument = Some(hold_argument);
+        self
+    }
+}
+
+/// A top-level numeric argument that determines how long a tool holds a call.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HoldArgument {
+    /// A property declared with type `integer` or `number` in `input_schema`.
+    pub name: String,
+    /// Used when the call's argument is absent or not an integral number >= 1.
+    pub default_ms: u64,
+    /// Time allowed for the reply to arrive after the hold.
+    pub grace_ms: u64,
+}
+
+impl HoldArgument {
+    /// Both times must be positive and at most the enclosing [`Reply::max_ms`].
+    pub fn new(name: impl Into<String>, default_ms: u64, grace_ms: u64) -> Self {
+        Self {
+            name: name.into(),
+            default_ms,
+            grace_ms,
         }
     }
 }
@@ -358,6 +511,98 @@ pub fn check_flat_schema(schema: &Value) -> Result<(), FlatnessProblem> {
         return Err(FlatnessProblem::RootTypeArray);
     }
     Ok(())
+}
+
+/// Why a tool's reply metadata makes a catalog answer invalid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReplyProblem {
+    pub tool: String,
+    /// The member path within the tool, such as `reply.max_ms`.
+    pub member: &'static str,
+    pub reason: &'static str,
+}
+
+impl std::fmt::Display for ReplyProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}: {}", self.tool, self.member, self.reason)
+    }
+}
+
+impl std::error::Error for ReplyProblem {}
+
+/// Validate per-tool reply metadata. A runner refuses a failing catalog as
+/// `invalid_answer`, naming the tool and the member this check reports.
+pub fn check_reply(tool: &CatalogTool) -> Result<(), ReplyProblem> {
+    let Some(reply) = &tool.reply else {
+        return Ok(());
+    };
+    let problem = |member, reason| ReplyProblem {
+        tool: tool.name.clone(),
+        member,
+        reason,
+    };
+    if !(1..=86_400_000).contains(&reply.max_ms) {
+        return Err(problem("reply.max_ms", "must be between 1 and 86,400,000"));
+    }
+    if let Some(hold) = &reply.hold_argument {
+        for (member, ms) in [
+            ("reply.hold_argument.default_ms", hold.default_ms),
+            ("reply.hold_argument.grace_ms", hold.grace_ms),
+        ] {
+            if ms == 0 || ms > reply.max_ms {
+                return Err(problem(member, "must be between 1 and reply.max_ms"));
+            }
+        }
+        let property = tool
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get(&hold.name));
+        let Some(property) = property else {
+            return Err(problem(
+                "reply.hold_argument.name",
+                "must name a top-level input_schema property",
+            ));
+        };
+        if !matches!(
+            property.get("type").and_then(Value::as_str),
+            Some("integer" | "number")
+        ) {
+            return Err(problem(
+                "reply.hold_argument.name",
+                "input_schema property must declare type integer or number",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Compute how long a runner waits for one call's terminal frame, using frozen,
+/// validated reply metadata and the call's coerced arguments. This never changes
+/// the arguments or the provider's limits, and never lowers the runner's fallback.
+pub fn reply_deadline_ms(reply: Option<&Reply>, arguments: &Value, runner_fallback_ms: u64) -> u64 {
+    let Some(reply) = reply else {
+        return runner_fallback_ms;
+    };
+    let deadline = match &reply.hold_argument {
+        None => reply.max_ms,
+        Some(hold) => {
+            let ms = arguments
+                .get(&hold.name)
+                .and_then(|value| {
+                    value.as_u64().filter(|ms| *ms >= 1).or_else(|| {
+                        value
+                            .as_f64()
+                            .filter(|ms| ms.is_finite() && *ms >= 1.0 && ms.fract() == 0.0)
+                            .map(|ms| ms as u64)
+                    })
+                })
+                .unwrap_or(hold.default_ms);
+            ms.saturating_add(hold.grace_ms).min(reply.max_ms)
+        }
+    };
+    deadline.max(runner_fallback_ms)
 }
 
 /// Schema keywords whose value is one subschema.

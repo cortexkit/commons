@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.10.0
+
+- Add directory catalogues: `mutations.d/` or `--catalogue <dir>` loads visible,
+  direct `*.toml` fragments in filename byte order. Refuse both default forms
+  being present and shared top-level settings defined in multiple fragments.
+- Behaviour change: every catalogue load now refuses duplicate control ids,
+  including in a single file, with every definition's source file and line.
+- Include repository-relative source files in JSON/text reports and row errors.
+  `--diff` selection compares rows by id between the base revision and the working
+  tree, whichever form each side uses, so moving rows from `mutations.toml` into
+  `mutations.d/` does not mark them changed;
+  `prove` and `explore --append` create id-named fragments for directories.
+
+## 0.9.8
+
+- Tests: build every throwaway Cargo fixture into its own `target` directory.
+  The fixture copies share names and layouts, so under an inherited shared
+  `CARGO_TARGET_DIR` (as remote build runners export) parallel tests overwrote
+  each other's fixture binaries, and Cargo's modification-time freshness check
+  could reuse another test's mutated binary for a clean-tree baseline. Under CPU
+  contention that surfaced as `baseline red: tests::guard_rejects_zero` and
+  short collateral counts. The tests also drop an inherited
+  `NEXTEST_TEST_THREADS`, which overrode a fixture's own `test-threads = 1`
+  and let the order of that fixture's output depend on machine load. The
+  runner itself is unchanged.
+
+## 0.9.7
+
+- Prepare report, broad-report, and catalogue output paths before running work;
+  write JSON reports atomically so a late report error cannot leave a partial file.
+
+## 0.9.6
+
+- Use Git status to check target cleanliness, honoring line-ending and filter
+  conversions so clean CRLF checkouts with `core.autocrlf=true` are accepted.
+  Staged and unstaged edits still require `--allow-dirty`; restoration still
+  writes back the saved local bytes unchanged.
+
+## 0.9.5
+
+- Move the per-worktree lock and stdout/stderr capture files out of `.git`
+  into the host's temporary directory, so mutation proofs work when Git metadata
+  is read-only (including Linux remote build jobs). Canonical worktree paths share
+  one lock across aliases; captures are removed on success and error.
+
 ## 0.9.4
 
 - Cache test listings for each runner, package, target, feature and ignored-test

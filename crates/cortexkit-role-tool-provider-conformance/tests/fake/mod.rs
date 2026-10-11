@@ -35,7 +35,10 @@ use cortexkit_role_tool_provider_conformance::{
     },
     wire::{
         call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
-        catalog::{composition_digest, schema_digest, system_text_digest, CatalogRequest},
+        catalog::{
+            composition_digest, schema_digest, serves_call_mode, system_text_digest,
+            CatalogRequest, CatalogTool,
+        },
         errors,
         late_results::{
             check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
@@ -47,8 +50,9 @@ use cortexkit_role_tool_provider_conformance::{
             check_record_scope, parse_withdraw_request, resolve_carrier, CallerProblem,
             CarrierResolution, CompletedResult, StartedOutcome, WithdrawAnswer,
         },
+        CallMode,
     },
-    CallSpec, Capability, Exchange, ObservedFrame, RouteFailure, ScopedPrincipals,
+    CallModeProbe, CallSpec, Capability, Exchange, ObservedFrame, RouteFailure, ScopedPrincipals,
     ToolProviderSubject, ToolRoute,
 };
 use serde_json::{json, Map, Value};
@@ -102,6 +106,14 @@ pub struct Defects {
     pub run_held_calls_on_restart: bool,
     /// The held tool's argument schema is a root-level union.
     pub root_union_schema: bool,
+    /// The quick tool declares a zero maximum reply time.
+    pub invalid_reply: bool,
+    /// The quick tool declares an empty list of modes.
+    pub invalid_modes: bool,
+    /// Calls execute without checking the route's bind mode.
+    pub ignore_call_mode: bool,
+    /// The echo tool lists flow, but the provider wrongly refuses flow calls.
+    pub refuse_served_mode: bool,
     /// Acks are accepted but forgotten, so acked entries are served again.
     pub forget_acks: bool,
     /// `tool.catalog` answers with its default variant for any preset,
@@ -369,6 +381,12 @@ impl Module {
         for tool in &mut tools {
             tool["schema_digest"] = json!(schema_digest(&tool["input_schema"]).unwrap());
         }
+        tools[0]["reply"] = json!({"max_ms": if self.defects.invalid_reply { 0 } else { 120_000 }});
+        tools[0]["modes"] = if self.defects.invalid_modes {
+            json!([])
+        } else {
+            json!(["flow", "classic"])
+        };
         tools
     }
 
@@ -479,7 +497,12 @@ impl Module {
         item
     }
 
-    fn handle(&self, stamp: &RouteStamp, body: Value) -> Result<Vec<ObservedFrame>, RouteFailure> {
+    fn handle(
+        &self,
+        stamp: &RouteStamp,
+        mode: &CallMode,
+        body: Value,
+    ) -> Result<Vec<ObservedFrame>, RouteFailure> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(RouteFailure::new("module is gone"));
         }
@@ -507,7 +530,18 @@ impl Module {
             Err(refusal) => return Ok(error(refusal)),
         };
         let current = self.tools().into_iter().find(|tool| tool["name"] == name);
-        if let (Some(pin), Some(current)) = (&pin, current) {
+        if let Some(current) = &current {
+            let tool: CatalogTool = serde_json::from_value(current.clone()).unwrap();
+            if !self.defects.ignore_call_mode && !serves_call_mode(&tool, mode)
+                || self.defects.refuse_served_mode && *mode == CallMode::Flow
+            {
+                return Ok(error(errors::invalid_request(
+                    "call_mode",
+                    "tool does not serve this mode",
+                )));
+            }
+        }
+        if let (Some(pin), Some(current)) = (&pin, &current) {
             if pin.schema_digest != current["schema_digest"] {
                 return Ok(error(ErrorBody::new(
                     errors::TOOL_SCHEMA_CHANGED,
@@ -689,13 +723,14 @@ impl Drop for FakeHandle {
 pub struct FakeRoute {
     module: Arc<Module>,
     stamp: RouteStamp,
+    mode: CallMode,
 }
 
 #[async_trait]
 impl ToolRoute for FakeRoute {
     async fn request(&self, body: Value) -> Result<Exchange, RouteFailure> {
         Ok(Exchange {
-            frames: self.module.handle(&self.stamp, body)?,
+            frames: self.module.handle(&self.stamp, &self.mode, body)?,
         })
     }
 
@@ -720,6 +755,7 @@ pub struct FakeSubject {
     pub defects: Defects,
     pub capabilities: BTreeSet<Capability>,
     pub system_text_arguments: Option<Value>,
+    pub mode_probe: Option<CallModeProbe>,
     live: Mutex<Option<Arc<Module>>>,
 }
 
@@ -737,12 +773,17 @@ impl FakeSubject {
                 Capability::ApprovalExecution,
                 Capability::LateResults,
                 Capability::SystemText,
+                Capability::CallModes,
             ]
             .into(),
             system_text_arguments: Some(json!({
                 "params": {}, "preset": DEFAULT_PRESET,
                 "system_text": { "preset": DEFAULT_PRESET, "params": {} },
             })),
+            mode_probe: Some(CallModeProbe {
+                call: (QUICK.into(), json!({ "text": "hi" })),
+                unlisted_mode: CallMode::Codemode,
+            }),
             live: Mutex::new(None),
         }
     }
@@ -790,6 +831,7 @@ impl Harness for FakeSubject {
         Ok(FakeRoute {
             module: handle.0.clone(),
             stamp: stamp.clone(),
+            mode: CallMode::Classic,
         })
     }
 
@@ -860,6 +902,23 @@ impl ToolProviderSubject for FakeSubject {
 
     fn quick_call(&self) -> CallSpec {
         (QUICK.into(), json!({ "text": "hi" }))
+    }
+
+    fn call_mode_probe(&self) -> Option<CallModeProbe> {
+        self.mode_probe.clone()
+    }
+
+    async fn route_with_mode(
+        &self,
+        handle: &FakeHandle,
+        stamp: &RouteStamp,
+        mode: &CallMode,
+    ) -> Result<FakeRoute, HarnessError> {
+        Ok(FakeRoute {
+            module: handle.0.clone(),
+            stamp: stamp.clone(),
+            mode: mode.clone(),
+        })
     }
 
     fn slow_call(&self) -> Option<CallSpec> {

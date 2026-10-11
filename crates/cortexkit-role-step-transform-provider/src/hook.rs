@@ -15,6 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::subscription::{Hook, Phase};
+pub use crate::subscription::{SubjectPartProblem, UnservedSubject};
 
 /// History inherited by a new lineage, through the given ordinal inclusive.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -77,6 +78,21 @@ pub struct HookCall {
     /// must hold the named lineage through this ordinal, never guess it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub descends_from: Option<DescendsFrom>,
+    /// Previous durably served watermark in this lineage. Absence is not zero
+    /// and grants no ordinal-confirmed promotion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_through_ordinal: Option<u64>,
+    /// Subjects whose pending output must burn before promotion. Omit an empty
+    /// list; admission and idempotent burning are the provider's responsibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unserved_subjects: Option<Vec<UnservedSubject>>,
+    /// Opaque part identity on a host tool subject, not its tool call id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_part: Option<String>,
+    /// Scheduling hint on the last hook of a pass, never an acknowledgement.
+    /// Hosts omit it unless true; omitted or false signals no barrier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_complete: Option<bool>,
     /// The plan item's preset, verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
@@ -97,6 +113,10 @@ impl HookCall {
             subject_ordinal: None,
             message: None,
             descends_from: None,
+            served_through_ordinal: None,
+            unserved_subjects: None,
+            subject_part: None,
+            pass_complete: None,
             preset: None,
             params: Map::new(),
             subject,
@@ -122,6 +142,36 @@ impl HookCall {
     pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
         self.descends_from = Some(descends_from);
         self
+    }
+
+    pub fn with_served_through_ordinal(mut self, ordinal: u64) -> Self {
+        self.served_through_ordinal = Some(ordinal);
+        self
+    }
+
+    pub fn with_unserved_subjects(mut self, subjects: Vec<UnservedSubject>) -> Self {
+        self.unserved_subjects = Some(subjects);
+        self
+    }
+
+    pub fn with_subject_part(mut self, subject_part: impl Into<String>) -> Self {
+        self.subject_part = Some(subject_part.into());
+        self
+    }
+
+    pub fn with_pass_complete(mut self, pass_complete: bool) -> Self {
+        self.pass_complete = Some(pass_complete);
+        self
+    }
+
+    /// Validate non-empty, at-most-256-byte part ids without normalisation.
+    /// Also call [`Self::check_host_fields`] for subject/message pairing. These
+    /// checks do not establish host admission or watermark monotonicity.
+    pub fn validate(&self) -> Result<(), SubjectPartProblem> {
+        crate::subscription::check_subject_part(self.subject_part.as_deref())?;
+        crate::subscription::validate_unserved_subjects(
+            self.unserved_subjects.as_deref().unwrap_or_default(),
+        )
     }
 
     /// Validate before interpreting or ingesting host-supplied history.

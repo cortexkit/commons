@@ -1114,3 +1114,81 @@ fn emit_at_writes_into_the_segment_its_instant_names() {
         handle.path().display()
     );
 }
+
+#[cfg(windows)]
+use cortexkit_lease::test_support as windows;
+
+#[cfg(windows)]
+#[test]
+fn windows_segments_narrow_existing_broad_directories_and_files() {
+    let temp = TempDir::new().unwrap();
+    windows::grant_everyone(temp.path());
+    let parent_before = windows::read_acl(temp.path());
+    let logs = temp.path().join("logs");
+    fs::create_dir(&logs).unwrap();
+    windows::assert_broad_inherited(&logs);
+    let path = logs.join("insula.2026-09-05.log");
+    fs::write(&path, b"").unwrap();
+    windows::assert_broad_inherited(&path);
+    let capture = CaptureWriter::default();
+    let (layer, handle) = build_test_layer(config(logs.clone(), "insula"), &capture);
+    let dispatcher = dispatch(layer);
+    tracing::dispatcher::with_default(&dispatcher, || tracing::info!("private"));
+    assert_eq!(handle.path(), path);
+    assert!(fs::read_to_string(&path).unwrap().contains("private"));
+    windows::assert_owner_only(&logs, true, true);
+    windows::assert_owner_only(&path, false, true);
+    assert_eq!(windows::read_acl(temp.path()), parent_before);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_new_segment_directories_and_files_are_owner_only() {
+    let temp = TempDir::new().unwrap();
+    windows::grant_everyone(temp.path());
+    let logs = temp.path().join("new").join("logs");
+    let capture = CaptureWriter::default();
+    let (_layer, handle) = build_test_layer(config(logs.clone(), "insula"), &capture);
+    assert!(
+        handle.path().is_file(),
+        "must inspect a real segment, not the stderr fallback"
+    );
+    windows::assert_owner_only(&temp.path().join("new"), true, true);
+    windows::assert_owner_only(&logs, true, true);
+    windows::assert_owner_only(&handle.path(), false, true);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_line_sink_protects_files_without_narrowing_an_existing_parent() {
+    let temp = TempDir::new().unwrap();
+    windows::grant_everyone(temp.path());
+    let before = windows::read_acl(temp.path());
+    let path = temp.path().join("stderr.log");
+    fs::write(&path, b"").unwrap();
+    windows::assert_broad_inherited(&path);
+    let mut sink =
+        LineSink::open_at(&path, Retention::default(), fixed_time(FIXED_NOW_MS)).unwrap();
+    sink.write_line_at(b"private", fixed_time(FIXED_NOW_MS))
+        .unwrap();
+    windows::assert_owner_only(&path, false, true);
+    assert_eq!(windows::read_acl(temp.path()), before);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_line_sink_creates_private_directories_and_rotation_files() {
+    let temp = TempDir::new().unwrap();
+    windows::grant_everyone(temp.path());
+    let parent = temp.path().join("new").join("logs");
+    let path = parent.join("stderr.log");
+    let now = fixed_time(FIXED_NOW_MS);
+    let mut sink =
+        LineSink::open_at(&path, Retention::from_bytes_for_testing(8, 2, 14), now).unwrap();
+    sink.write_line_at(b"first", now).unwrap();
+    sink.write_line_at(b"second", now).unwrap();
+    windows::assert_owner_only(&temp.path().join("new"), true, true);
+    windows::assert_owner_only(&parent, true, true);
+    windows::assert_owner_only(&path, false, true);
+    windows::assert_owner_only(&sink::rotated_path(&path, 1), false, true);
+}

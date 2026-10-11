@@ -1,11 +1,18 @@
-//! Shared path canonicalization primitives for CortexKit tooling.
+//! Shared path and user-directory primitives for CortexKit tooling.
 //!
-//! This crate deliberately owns only the dependency-light project-root identity
-//! primitive: resolving an existing filesystem path into a canonical path-backed
-//! [`ProjectRootId`]. It does not perform workspace discovery, Git inspection,
-//! transport serialization, or operation-target fallback handling.
+//! [`ProjectRootId`] resolves filesystem paths into canonical project identities.
+//! [`dirs`] resolves absolute user directories with injectable environment inputs.
+//! The crate does not perform workspace discovery, Git inspection, transport
+//! serialization, or operation-target fallback handling.
 
 #![forbid(unsafe_code)]
+
+pub mod dirs;
+pub use dirs::{
+    cache_home, config_home, connection_file_candidates, cortexkit_cache_dir, cortexkit_config_dir,
+    cortexkit_data_dir, cortexkit_run_dir, cortexkit_state_dir, data_home, env_absolute_path, home,
+    state_home, with_env, xdg_data_home, Dirs, EnvSource, PathsError, SystemEnv,
+};
 
 use std::{
     error::Error,

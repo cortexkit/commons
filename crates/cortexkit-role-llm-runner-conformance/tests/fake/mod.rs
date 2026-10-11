@@ -25,7 +25,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -90,7 +90,8 @@ pub enum RetentionDefect {
     WithoutGroupIgnored,
     ExpireHeld,
     ClockNotRestarted,
-    DeleteIncomplete,
+    /// Moves its retention clock forward but never deletes a session's content once it expires.
+    NeverPurge,
     TombstoneForgotten,
     TitleLeak,
     PromptLeak,
@@ -202,7 +203,9 @@ pub enum StepRecovery {
 /// its kills.
 struct World {
     retention_defect: RetentionDefect,
+    retention_delete_ms: u64,
     epoch: tokio::time::Instant,
+    retention_clock_advanced_ms: AtomicU64,
     held_paused: bool,
     advertise_status: bool,
     defects: Defects,
@@ -226,11 +229,17 @@ struct World {
     transcript_calls: AtomicUsize,
     /// Every `run.result` request received, served or not.
     run_result_calls: AtomicUsize,
+    /// How many `run.result` reads of an ended run still answer `active`,
+    /// modelling a runner that reports the run as ended only a moment after
+    /// the send returns.
+    late_seal_reads: AtomicUsize,
 }
 
 impl World {
     fn now(&self) -> u64 {
-        1_790_000_000_000 + self.epoch.elapsed().as_millis() as u64
+        1_790_000_000_000
+            + self.epoch.elapsed().as_millis() as u64
+            + self.retention_clock_advanced_ms.load(Ordering::SeqCst)
     }
     fn serves(&self, group: &str) -> bool {
         self.groups.iter().any(|served| served == group)
@@ -440,7 +449,7 @@ impl Module {
         };
         if state.expired_at.is_none()
             || state.deleted
-            || self.world.retention_defect == RetentionDefect::DeleteIncomplete
+            || self.world.retention_defect == RetentionDefect::NeverPurge
         {
             return;
         }
@@ -562,6 +571,9 @@ impl Module {
             .collect();
         for (session, run_id) in cut {
             self.commit(&session, json!({ "kind": "resume" }))?;
+            if self.seal_compaction_setup_crash(&session, &run_id)? {
+                continue;
+            }
             let open: Vec<String> = self.sessions.lock().unwrap()[&session]
                 .calls
                 .iter()
@@ -1055,7 +1067,7 @@ impl Module {
             describe = describe.with_steer_receipt("confirm");
         }
         if self.world.serves(groups::RETENTION) {
-            describe = describe.with_retention(RETENTION_MAX, RETENTION_DELETE_MS);
+            describe = describe.with_retention(RETENTION_MAX, self.world.retention_delete_ms);
         }
         respond(describe)
     }
@@ -1218,7 +1230,7 @@ impl Module {
         let cap = self
             .world
             .serves(groups::RETENTION)
-            .then(|| Retention::new(RETENTION_MAX, RETENTION_DELETE_MS));
+            .then(|| Retention::new(RETENTION_MAX, self.world.retention_delete_ms));
         let previous = existing.as_ref().map(|s| s.retention);
         let accept_bad = match defect {
             RetentionDefect::ZeroAccepted => request.retention == Some(0),
@@ -1560,6 +1572,15 @@ impl Module {
         let Some(run) = sessions.get(session).and_then(|s| s.run(&request.run_id)) else {
             return refuse(errors::UNKNOWN_RUN, None);
         };
+        let sealed_late = run.state != "active"
+            && self
+                .world
+                .late_seal_reads
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok();
+        if sealed_late {
+            return respond(RunResult::new(&run.run_id, "active"));
+        }
         let mut result = RunResult::new(
             &run.run_id,
             if self.world.held_paused
@@ -1670,12 +1691,17 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    /// The first `late_seal_reads` `run.result` reads of an ended run answer
+    /// `active`, as if the runner reported the end late.
+    pub late_seal_reads: usize,
     pub retention_defect: RetentionDefect,
+    pub retention_delete_ms: u64,
     pub held_paused: bool,
     pub advertise_status: bool,
     pub defects: Defects,
     pub step_recovery: StepRecovery,
     pub capabilities: BTreeSet<Capability>,
+    pub seal_compaction_setup_crash: bool,
     pub kill_points: Vec<&'static str>,
     /// Report every kill as a real process kill, which this in-process fake
     /// cannot make. Only for tests of the verdict.
@@ -1734,12 +1760,15 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            late_seal_reads: 0,
             retention_defect: RetentionDefect::None,
+            retention_delete_ms: RETENTION_DELETE_MS,
             held_paused: false,
             advertise_status: false,
             defects,
             step_recovery: StepRecovery::Resume,
             capabilities: served(),
+            seal_compaction_setup_crash: false,
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
@@ -1765,7 +1794,9 @@ impl FakeSubject {
                     } else {
                         RetentionDefect::None
                     },
+                    retention_delete_ms: self.retention_delete_ms,
                     epoch: tokio::time::Instant::now(),
+                    retention_clock_advanced_ms: AtomicU64::new(0),
                     held_paused: self.held_paused,
                     advertise_status: self.advertise_status,
                     defects: self.defects,
@@ -1783,12 +1814,15 @@ impl FakeSubject {
                         .map(str::to_owned)
                         .collect(),
                     scripts: Mutex::new(BTreeMap::new()),
-                    compaction: Mutex::new(compaction::Providers::default()),
+                    compaction: Mutex::new(compaction::Providers::new(
+                        self.seal_compaction_setup_crash,
+                    )),
                     invocations: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),
                     transcript_calls: AtomicUsize::new(0),
                     run_result_calls: AtomicUsize::new(0),
+                    late_seal_reads: AtomicUsize::new(self.late_seal_reads),
                 })
             })
             .clone()
@@ -1830,6 +1864,7 @@ impl FakeSubject {
 
     pub fn enable_retention(&mut self) {
         self.capabilities.insert(Capability::Retention);
+        self.capabilities.insert(Capability::RetentionClock);
         self.advertise_status = true;
     }
 }
@@ -1997,6 +2032,23 @@ impl LlmRunnerSubject for FakeSubject {
         milliseconds: u64,
     ) -> Result<(), HarnessError> {
         self.advance_compaction(session, milliseconds)
+    }
+    async fn advance_retention_clock(
+        &self,
+        session: &str,
+        milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .retention_clock_advanced_ms
+            .fetch_add(milliseconds, Ordering::SeqCst);
+        for module in self.modules.lock().unwrap().clone() {
+            if module.alive.load(Ordering::SeqCst) {
+                module.sweep(session).map_err(|Killed| {
+                    HarnessError::new("module was killed while advancing retention clock")
+                })?;
+            }
+        }
+        Ok(())
     }
     async fn answer_compaction(
         &self,

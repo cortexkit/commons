@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use async_trait::async_trait;
 use cortexkit_role_harness::{Harness, HarnessError, RouteStamp};
-use cortexkit_role_tool_provider::scope::ScopeIdentity;
+use cortexkit_role_tool_provider::{scope::ScopeIdentity, CallMode};
 use serde_json::Value;
 
 /// A capability a conformance case requires of the provider or its harness.
@@ -42,6 +42,12 @@ pub enum Capability {
     /// The provider serves system text alongside its catalog. See
     /// [`ToolProviderSubject::system_text_catalog_arguments`].
     SystemText,
+    /// The harness can open real routes with known bind modes, and the
+    /// subject supplies a restricted tool probe. Omit this when no tool
+    /// excludes a known mode; the mode case is then skipped, never passed.
+    /// See [`ToolProviderSubject::call_mode_probe`] and
+    /// [`ToolProviderSubject::route_with_mode`].
+    CallModes,
 }
 
 impl Capability {
@@ -57,6 +63,7 @@ impl Capability {
             Self::ApprovalExecution => "approval_execution",
             Self::LateResults => "late_results",
             Self::SystemText => "system_text",
+            Self::CallModes => "call_modes",
         }
     }
 }
@@ -103,6 +110,14 @@ fn stamp_under(principal: &str, scope: &ScopeIdentity) -> RouteStamp {
 /// A tool call as `(tool name, arguments)`.
 pub type CallSpec = (String, Value);
 
+/// A prompt, successful tool call and a known mode its catalog entry does
+/// not list. The suite chooses a served mode from that same entry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallModeProbe {
+    pub call: CallSpec,
+    pub unlisted_mode: CallMode,
+}
+
 /// A live tool provider under test: its harness plus the few facts the
 /// runner cannot know about it. Every call the runner makes still goes over
 /// the harness's real route; nothing here answers on the module's behalf.
@@ -138,6 +153,27 @@ pub trait ToolProviderSubject: Harness {
     /// A call that completes promptly and successfully. Its tool must be in
     /// the catalog.
     fn quick_call(&self) -> CallSpec;
+
+    /// A tool probe for both mode acceptance and refusal. Required by
+    /// [`Capability::CallModes`]. If every tool lists all known modes, omit
+    /// that capability or return `None`; either reports a skip rather than
+    /// a vacuous pass.
+    fn call_mode_probe(&self) -> Option<CallModeProbe> {
+        None
+    }
+
+    /// Open a real route whose daemon-stamped bind mode is `mode`. Required by
+    /// [`Capability::CallModes`]. The adapter must arrange the appropriate
+    /// live scope (plain, run or flow); it must not put a caller-selected mode
+    /// in a request body or bypass the daemon to invoke provider code.
+    async fn route_with_mode(
+        &self,
+        _handle: &Self::Handle,
+        _stamp: &RouteStamp,
+        _mode: &CallMode,
+    ) -> Result<Self::Route, HarnessError> {
+        Err(HarnessError::new("no call-mode route adapter supplied"))
+    }
 
     /// A call that keeps running until cancelled. Required by
     /// [`Capability::Cancellation`].

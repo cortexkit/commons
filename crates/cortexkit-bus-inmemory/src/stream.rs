@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use cortexkit_bus_trait::{
-    BusError, BusResult, ContentDigest, DurableOwner, Headers, Message, PublishAck, Stream,
+    BusError, BusResult, ContentDigest, DurableOwner, Headers, Message, PublishReceipt, Stream,
     StreamCursor, StreamDelivery,
 };
 
@@ -32,7 +32,7 @@ impl Stream for InMemoryBus {
         id: &str,
         digest: ContentDigest,
         headers: Headers,
-    ) -> BusResult<PublishAck> {
+    ) -> BusResult<PublishReceipt> {
         let mut state = self.inner.lock().expect("in-memory bus poisoned");
         if state.config.denied_subjects.contains(subject) {
             state
@@ -45,6 +45,15 @@ impl Stream for InMemoryBus {
                 subject,
                 "fixture-configured publish denial",
             ));
+        }
+
+        let now = (self.deduplication_clock)();
+        let window = state.config.deduplication_window;
+        state
+            .seen_ids
+            .retain(|_, (_, stored_at)| now.duration_since(*stored_at) < window);
+        if let Some(&(stream_seq, _)) = state.seen_ids.get(id) {
+            return Ok(PublishReceipt::new(stream_seq, true));
         }
 
         let message = Message {
@@ -71,6 +80,7 @@ impl Stream for InMemoryBus {
 
         let stream_seq = state.next_stream_seq;
         state.next_stream_seq += 1;
+        state.seen_ids.insert(id.into(), (stream_seq, now));
         state.stream_messages.push(StoredMessage {
             stream_seq,
             message: message.clone(),
@@ -95,7 +105,7 @@ impl Stream for InMemoryBus {
             subject: subject.into(),
             id: id.into(),
         });
-        Ok(PublishAck { stream_seq })
+        Ok(PublishReceipt::new(stream_seq, false))
     }
 
     async fn consumer(&self, owner: DurableOwner<'_>) -> BusResult<Self::Cursor> {
@@ -284,14 +294,16 @@ mod tests {
         let bus = InMemoryBus::new(
             InMemoryConfig::default().with_durable(DurableOwner::Module("prefrontal-core")),
         );
-        bus.publish(
-            "ck.box.room.room_a.post",
-            "room:room_a:1",
-            ContentDigest::of_bytes(b"post"),
-            Headers::new(),
-        )
-        .await
-        .expect("publish");
+        assert!(!bus
+            .publish(
+                "ck.box.room.room_a.post",
+                "room:room_a:1",
+                ContentDigest::of_bytes(b"post"),
+                Headers::new(),
+            )
+            .await
+            .expect("publish")
+            .duplicate());
 
         let mut cursor = bus
             .consumer(DurableOwner::Module("prefrontal-core"))

@@ -52,7 +52,9 @@ async fn publish_ack_sequence() -> Result<(), String> {
         .await
         .map_err(debug)?;
     require(
-        second.stream_seq > first.stream_seq,
+        !first.duplicate()
+            && !second.duplicate()
+            && second.stream_sequence() > first.stream_sequence(),
         "publish sequence did not increase",
     )
 }
@@ -60,14 +62,16 @@ async fn publish_ack_sequence() -> Result<(), String> {
 async fn replay_from_cursor() -> Result<(), String> {
     let bus =
         InMemoryBus::new(InMemoryConfig::default().with_durable(DurableOwner::Agent("agent")));
-    bus.publish(
-        "ck.box.peer.agent.s.deliver",
-        "m1",
-        digest("m1"),
-        Headers::new(),
-    )
-    .await
-    .map_err(debug)?;
+    let receipt = bus
+        .publish(
+            "ck.box.peer.agent.s.deliver",
+            "m1",
+            digest("m1"),
+            Headers::new(),
+        )
+        .await
+        .map_err(debug)?;
+    require(!receipt.duplicate(), "unexpected duplicate publish")?;
     let expected = bus
         .consumer(DurableOwner::Agent("agent"))
         .await
@@ -97,9 +101,11 @@ const STREAM_SUBJECT: &str = "ck.box.peer.agent.s.deliver";
 async fn stream_delivery_count() -> Result<(), String> {
     let bus =
         InMemoryBus::new(InMemoryConfig::default().with_durable(DurableOwner::Agent("agent")));
-    bus.publish(STREAM_SUBJECT, "m1", digest("m1"), Headers::new())
+    let receipt = bus
+        .publish(STREAM_SUBJECT, "m1", digest("m1"), Headers::new())
         .await
         .map_err(debug)?;
+    require(!receipt.duplicate(), "unexpected duplicate publish")?;
     let mut cursor = bus
         .consumer(DurableOwner::Agent("agent"))
         .await
@@ -128,9 +134,11 @@ async fn stream_term() -> Result<(), String> {
     let bus =
         InMemoryBus::new(InMemoryConfig::default().with_durable(DurableOwner::Agent("agent")));
     for id in ["m1", "m2"] {
-        bus.publish(STREAM_SUBJECT, id, digest(id), Headers::new())
+        let receipt = bus
+            .publish(STREAM_SUBJECT, id, digest(id), Headers::new())
             .await
             .map_err(debug)?;
+        require(!receipt.duplicate(), "unexpected duplicate publish")?;
     }
     let mut cursor = bus
         .consumer(DurableOwner::Agent("agent"))
@@ -181,9 +189,11 @@ async fn stream_in_progress() -> Result<(), String> {
             .with_stream_ack_wait(ack_wait),
     );
     for id in ["m1", "m2"] {
-        bus.publish(STREAM_SUBJECT, id, digest(id), Headers::new())
+        let receipt = bus
+            .publish(STREAM_SUBJECT, id, digest(id), Headers::new())
             .await
             .map_err(debug)?;
+        require(!receipt.duplicate(), "unexpected duplicate publish")?;
     }
     let mut slow = bus
         .consumer(DurableOwner::Agent("agent"))
@@ -282,14 +292,16 @@ async fn register_watch() -> Result<(), String> {
 
 async fn work_redelivery() -> Result<(), String> {
     let bus = queue_bus(3, 4_096);
-    bus.publish(
-        "ck.box.effect.a.s.intent",
-        "m1",
-        digest("m1"),
-        Headers::new(),
-    )
-    .await
-    .map_err(debug)?;
+    let receipt = bus
+        .publish(
+            "ck.box.effect.a.s.intent",
+            "m1",
+            digest("m1"),
+            Headers::new(),
+        )
+        .await
+        .map_err(debug)?;
+    require(!receipt.duplicate(), "unexpected duplicate publish")?;
     let first = item(bus.claim().await.map_err(debug)?)?;
     bus.nak(first.token, Duration::ZERO).await.map_err(debug)?;
     let second = item(bus.claim().await.map_err(debug)?)?;
@@ -302,14 +314,16 @@ async fn work_redelivery() -> Result<(), String> {
 
 async fn cap_exhaustion() -> Result<(), String> {
     let bus = queue_bus(1, 4_096);
-    bus.publish(
-        "ck.box.effect.a.s.intent",
-        "m1",
-        digest("m1"),
-        Headers::new(),
-    )
-    .await
-    .map_err(debug)?;
+    let receipt = bus
+        .publish(
+            "ck.box.effect.a.s.intent",
+            "m1",
+            digest("m1"),
+            Headers::new(),
+        )
+        .await
+        .map_err(debug)?;
+    require(!receipt.duplicate(), "unexpected duplicate publish")?;
     let first = item(bus.claim().await.map_err(debug)?)?;
     bus.nak(first.token, Duration::ZERO).await.map_err(debug)?;
     let exhausted = match bus.claim().await.map_err(debug)? {
@@ -320,34 +334,82 @@ async fn cap_exhaustion() -> Result<(), String> {
             ))
         }
     };
-    terminally_dispose(&bus, &bus, "box", &exhausted, digest("dead-record"))
-        .await
-        .map_err(debug)?;
-    let events = bus.events();
-    let published = events.iter().position(|event| {
-        matches!(event, BackendEvent::Published { subject, .. } if subject == "ck.box.effect.dead")
-    });
-    let terminated = events
-        .iter()
-        .position(|event| matches!(event, BackendEvent::Terminated { .. }));
-    require(
-        published
-            .zip(terminated)
-            .is_some_and(|(publish, term)| publish < term),
-        "dead-letter publish did not precede term",
+    let dead_stream = InMemoryBus::new(InMemoryConfig::default());
+    let queue = DeadLetterObservedQueue {
+        queue: &bus,
+        dead_stream: &dead_stream,
+    };
+    let receipt = terminally_dispose(
+        &dead_stream,
+        &queue,
+        "box",
+        &exhausted,
+        digest("dead-record"),
     )
+    .await
+    .map_err(debug)?;
+    require(!receipt.duplicate(), "dead letter was not stored")?;
+    require(
+        bus.events()
+            .iter()
+            .any(|event| matches!(event, BackendEvent::Terminated { .. })),
+        "exhausted delivery was not terminated",
+    )
+}
+
+/// Observes the separate dead-letter stream at termination time, so the probe
+/// still detects a termination that incorrectly precedes the publish.
+struct DeadLetterObservedQueue<'a> {
+    queue: &'a InMemoryBus,
+    dead_stream: &'a InMemoryBus,
+}
+
+#[async_trait]
+impl WorkQueue for DeadLetterObservedQueue<'_> {
+    async fn claim(&self) -> cortexkit_bus_trait::BusResult<ClaimOutcome> {
+        self.queue.claim().await
+    }
+
+    async fn ack(
+        &self,
+        token: cortexkit_bus_trait::DeliveryToken,
+    ) -> cortexkit_bus_trait::BusResult<()> {
+        self.queue.ack(token).await
+    }
+
+    async fn nak(
+        &self,
+        token: cortexkit_bus_trait::DeliveryToken,
+        delay: Duration,
+    ) -> cortexkit_bus_trait::BusResult<()> {
+        self.queue.nak(token, delay).await
+    }
+
+    async fn term(
+        &self,
+        token: cortexkit_bus_trait::DeliveryToken,
+    ) -> cortexkit_bus_trait::BusResult<()> {
+        if !self.dead_stream.events().iter().any(|event| {
+            matches!(event, BackendEvent::Published { subject, .. } if subject == "ck.box.effect.dead")
+        }) {
+            return Err(BusError::denied("ck.box.effect.dead", "dead-letter publish did not precede term"));
+        }
+        self.queue.term(token).await
+    }
 }
 
 async fn full_queue() -> Result<(), String> {
     let bus = queue_bus(5, 150);
-    bus.publish(
-        "ck.box.effect.a.s.intent",
-        "first",
-        digest("first"),
-        Headers::new(),
-    )
-    .await
-    .map_err(debug)?;
+    let receipt = bus
+        .publish(
+            "ck.box.effect.a.s.intent",
+            "first",
+            digest("first"),
+            Headers::new(),
+        )
+        .await
+        .map_err(debug)?;
+    require(!receipt.duplicate(), "unexpected duplicate publish")?;
     let error = bus
         .publish(
             "ck.box.effect.a.s.intent",
@@ -383,14 +445,16 @@ async fn error_taxonomy() -> Result<(), String> {
         matches!(bus.get("missing").await, Err(BusError::Absent { .. })),
         "missing register key was not Absent",
     )?;
-    bus.publish(
-        "ck.box.effect.a.s.intent",
-        "work",
-        digest("work"),
-        Headers::new(),
-    )
-    .await
-    .map_err(debug)?;
+    let receipt = bus
+        .publish(
+            "ck.box.effect.a.s.intent",
+            "work",
+            digest("work"),
+            Headers::new(),
+        )
+        .await
+        .map_err(debug)?;
+    require(!receipt.duplicate(), "unexpected duplicate publish")?;
     let claimed = item(bus.claim().await.map_err(debug)?)?;
     require(
         matches!(

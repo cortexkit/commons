@@ -14,8 +14,8 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    ApprovalExecution, CallKey, Cancellation, DisableTool, HeldCalls, LateResults, SchemaPin,
-    ScopeStamp, SystemText,
+    ApprovalExecution, CallKey, CallModes, Cancellation, DisableTool, HeldCalls, LateResults,
+    SchemaPin, ScopeStamp, SystemText,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -50,6 +50,21 @@ pub const CASES: &[CaseSpec] = &[
         name: "catalog_schemas_flat",
         requires: &[],
         checks: "every catalog tool has a schema_digest, a flat input_schema and only defined or namespaced capability tags, no role op is listed as a tool, and the quick call's tool is listed",
+    },
+    CaseSpec {
+        name: "catalog_reply_valid",
+        requires: &[],
+        checks: "every catalog tool's optional reply metadata passes check_reply, with a bounded max_ms, positive bounded hold times and a declared numeric hold argument",
+    },
+    CaseSpec {
+        name: "catalog_modes_valid",
+        requires: &[],
+        checks: "every catalog tool's optional modes passes check_modes: nonempty, unique, and containing only known modes",
+    },
+    CaseSpec {
+        name: "call_mode_matches_catalog",
+        requires: &[CallModes],
+        checks: "the restricted probe is refused on a route with a known bind mode its catalog entry does not list, and served on a route with a listed mode",
     },
     CaseSpec {
         name: "catalog_schema_digest_stable",

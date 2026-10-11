@@ -63,6 +63,13 @@ pub struct SetupRequest {
 }
 
 impl SetupRequest {
+    /// Check host-only plan values only after authenticating a runner principal.
+    pub fn check_runner_params(
+        &self,
+    ) -> Result<(), cortexkit_role_step_transform_provider::subscription::RunnerParamsProblem> {
+        cortexkit_role_step_transform_provider::subscription::check_runner_params(&self.params)
+    }
+
     pub fn new(
         session: impl Into<String>,
         harness: impl Into<String>,
