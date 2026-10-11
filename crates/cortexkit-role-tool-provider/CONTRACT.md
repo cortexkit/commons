@@ -516,12 +516,14 @@ CI against its real module over a real route; never against a double.
 | `late_results_incarnation_change_refused` | `late_results`, `scope_stamp` |
 | `crash_after_prepared_not_started`, `crash_after_authorized_not_started` | `approval_execution`, `held_calls`, `scope_stamp`, `call_key`, `late_results` |
 
-The result case infers its `content/v1` requirement from the catalog, not a
-subject opt-out flag. It checks replies from `content_v1_calls` probes for
-every declared tool by decoding and validating the bodies, including the
-whole serialized body's size. The default probe is `quick_call`; subjects
-use that promptly completing `(tool name, arguments)` call as a test input,
-override it when other tools opt in, and may supply multiple inputs per tool.
+The result case infers its `content/v1` requirement from the catalog, not
+from an opt-out flag on the subject (the adapter a provider writes to run
+this suite against itself). For every tool that declares `content/v1`, it
+makes the calls the subject lists in `content_v1_calls` and decodes and
+validates each reply body, including the whole serialized body's size. By
+default `content_v1_calls` is the subject's `quick_call`, a `(tool name,
+arguments)` pair that completes promptly; a subject overrides it when other
+tools declare `content/v1`, and may list several calls per tool.
 Missing probes for a declared tool fail by tool name. With no declared tool,
 `tool_result_content_v1_valid` is skipped by name with missing `content/v1`,
 never passed. Unknown result formats do not opt in.
