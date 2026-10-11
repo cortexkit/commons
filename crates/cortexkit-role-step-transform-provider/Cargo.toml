@@ -18,7 +18,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Wire contract of the CortexKit step-transform-provider/v1 role: the subscription declaration, the four hooks, their operations and the PreTool phases."
-publish = false
+publish = true
 
 [dependencies]
 # The runner role's crate, for the names and types both sides of the

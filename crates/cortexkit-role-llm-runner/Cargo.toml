@@ -17,7 +17,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Wire contract of the CortexKit llm-runner/v1 role: role.describe, transcript reads, run results, subscriptions, owner sends and the session baseline."
-publish = false
+publish = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

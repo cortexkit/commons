@@ -17,7 +17,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Wire contract of the CortexKit compaction-provider/v1 role: Setup, the per-step status, CompactionMessage, WAIT, REFUSE, the request fence and compaction.ready."
-publish = false
+publish = true
 
 [dependencies]
 # The runner role's crate, for the names and types both sides of the
