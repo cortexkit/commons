@@ -330,8 +330,8 @@ A tool declaring `result_format: "content/v1"` returns the following body
   - `{"type": "text", "text": "..."}`: text the model sees verbatim.
   - `{"type": "image", "mimeType": "image/png", "data": "AA==", "width": 1,
     "height": 1, "alt": "...", "id": "..."}`: `data` is raw standard base64,
-    not a URL. Refuse a value starting with `data:` or invalid base64
-    (including an invalid alphabet, padding or trailing bits). `mimeType`
+    not a URL. Refuse an empty value, a value starting with `data:` and invalid
+    base64 (including an invalid alphabet, padding or trailing bits). `mimeType`
     must be `image/png`, `image/jpeg`, `image/webp` or `image/gif`. `width` and
     `height` are positive integer pixel dimensions. Optional `alt` is the
     provider's own wording for a consumer that cannot deliver the image to

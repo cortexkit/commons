@@ -154,7 +154,7 @@ fn builders_use_mcp_wire_names_and_keep_optional_members_absent() {
 
 #[test]
 fn base64_alphabet_padding_and_trailing_bits_are_checked() {
-    for data in ["AA==", "AAA=", "AAAA", "+/8=", "", "aGVsbG8="] {
+    for data in ["AA==", "AAA=", "AAAA", "+/8=", "aGVsbG8="] {
         let result = ToolResult::new(vec![ContentPart::image(ImageContent::new(
             "image/png",
             data,
@@ -164,7 +164,7 @@ fn base64_alphabet_padding_and_trailing_bits_are_checked() {
         assert_eq!(validate(&result), Ok(()), "{data}");
     }
     for data in [
-        "A", "AA", "AAA", "A===", "====", "AA=A", "AB==", "AAB=", "AA-_", "AA==\n", "éé",
+        "", "A", "AA", "AAA", "A===", "====", "AA=A", "AB==", "AAB=", "AA-_", "AA==\n", "éé",
     ] {
         let result = ToolResult::new(vec![ContentPart::image(ImageContent::new(
             "image/png",

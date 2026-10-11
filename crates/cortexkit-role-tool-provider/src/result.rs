@@ -236,6 +236,9 @@ pub fn validate(result: &ToolResult) -> Result<(), ResultProblem> {
         match part {
             ContentPart::Text { .. } => {}
             ContentPart::Image(image) => {
+                if image.data.is_empty() {
+                    return Err(problem(member("data"), "must not be empty"));
+                }
                 if image.data.starts_with("data:") {
                     return Err(problem(member("data"), "must not have a data: URL prefix"));
                 }
