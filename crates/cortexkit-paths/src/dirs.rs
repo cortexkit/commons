@@ -39,17 +39,20 @@ pub trait EnvSource {
     /// Read a variable without losing non-Unicode path characters.
     fn var_os(&self, key: &str) -> Option<OsString>;
 
-    /// Whether a legacy or local data directory already exists.
+    /// Whether `path` exists. The resolver uses it to tell an existing
+    /// installation's data directory from one that has never been created.
     fn path_exists(&self, path: &Path) -> bool {
         path.exists()
     }
 
-    /// The temporary directory used by connection-file discovery.
+    /// The system temporary directory. It holds the last fallback location of
+    /// the daemon's connection file (see [`Dirs::connection_file_candidates`]).
     fn temp_dir(&self) -> PathBuf {
         env::temp_dir()
     }
 
-    /// Base for an explicit relative connection-file argument.
+    /// The process's current directory, which a relative path given explicitly
+    /// by the user (for example a `--subc ./conn.json` argument) is joined to.
     fn current_dir(&self) -> io::Result<PathBuf> {
         env::current_dir()
     }
@@ -403,7 +406,8 @@ fn require_absolute(path: PathBuf, source: &str) -> Result<PathBuf, PathsError> 
     }
 }
 
-/// Read a consumer's own path variable without consulting the process environment.
+/// Read a path-valued variable, such as an application's own home override, from
+/// `env` (pass [`SystemEnv`] for the process environment, or a test double).
 /// Unset or empty values return `None`; absolute values are preserved verbatim.
 /// A relative value is an error naming `variable`, unlike XDG directory resolution,
 /// which ignores relative overrides and tries the home-directory fallback.

@@ -606,9 +606,11 @@ fn missing_directories_report_all_tried_variables() {
     }
 }
 
-// Reference: subconscious/crates/subc-daemon/src/daemon_config.rs,
-// default_data_home() and daemon_run_dir(). The older ladder accepts relative
-// XDG values; the run-directory wrapper rejects relative results.
+// A copy of how the subc daemon resolves its run directory before it adopts this
+// crate: XDG_DATA_HOME, then on Windows APPDATA or USERPROFILE\AppData\Roaming,
+// then HOME/.local/share, plus cortexkit/run, refusing a relative result. It
+// honours a relative XDG value, which this crate ignores. The test below proves
+// the two agree wherever their policies are meant to.
 fn daemon_run_reference(env: &TestEnv, platform: Platform) -> Option<PathBuf> {
     let non_empty = |key: &str| {
         env.var_os(key)
@@ -635,8 +637,9 @@ fn run_dir_matches_daemon_ladder_when_policies_agree() {
     for platform in [Platform::Unix, Platform::Windows] {
         for value in [Value::Set, Value::Empty, Value::Unset] {
             let mut env = windows_env();
-            // Old and new Windows policies agree when local and roaming roots
-            // coincide. Relative XDG values deliberately differ from the daemon.
+            // The daemon's copy uses roaming APPDATA for data and this crate uses
+            // LOCALAPPDATA, so point both at one root to compare them. Relative
+            // XDG values are left out because the two deliberately differ there.
             env.set("LOCALAPPDATA", absolute("roaming"));
             input(&mut env, "XDG_DATA_HOME", value, &absolute("xdg"));
             assert_eq!(
