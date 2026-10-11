@@ -8,7 +8,9 @@
 - Behaviour change: every catalogue load now refuses duplicate control ids,
   including in a single file, with every definition's source file and line.
 - Include repository-relative source files in JSON/text reports and row errors.
-  Diff selection reads both catalogue forms, including a manual migration;
+  `--diff` selection compares rows by id between the base revision and the working
+  tree, whichever form each side uses, so moving rows from `mutations.toml` into
+  `mutations.d/` does not mark them changed;
   `prove` and `explore --append` create id-named fragments for directories.
 
 ## 0.9.8
