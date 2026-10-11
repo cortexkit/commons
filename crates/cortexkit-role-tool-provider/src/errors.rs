@@ -38,6 +38,12 @@ pub const CAPABILITY_NOT_ADMITTED: &str = "capability_not_admitted";
 /// A call to a tool the provider does not serve at all.
 pub const UNKNOWN_TOOL: &str = "unknown_tool";
 
+/// A call to a tool in a call mode the tool does not serve: `serves_call_mode`
+/// returned false for the route's bind mode, including an `Unknown` mode.
+/// Detail: `{tool, mode}`, with the mode's wire spelling. Terminal; never
+/// re-dispatched.
+pub const CALL_MODE_UNSUPPORTED: &str = "call_mode_unsupported";
+
 /// A `tool.withdraw` caller may not withdraw the call it addressed: the call
 /// is under a different scope than the route's stamp. A route error, never a
 /// withdraw answer; terminal for the caller.

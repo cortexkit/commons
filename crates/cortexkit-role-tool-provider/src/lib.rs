@@ -73,7 +73,8 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     "code.read/v1",
     // Changes files in the workspace.
     "code.edit/v1",
-    // Finds code by text, regular expression or meaning.
+    // Finds code in the session's own workspace by text, regular expression
+    // or meaning. Searching code hosted elsewhere is code.search.public/v1.
     "code.search/v1",
     // Lists or finds files by path pattern.
     "code.files/v1",
@@ -96,6 +97,15 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     // diffs between revisions. Read-only; how revisions are named and what
     // the output looks like are the provider's own.
     "git.history/v1",
+    // Searches the general web and returns results. How results are ranked
+    // and what each one carries are the provider's own.
+    "web.search/v1",
+    // Reads GitHub issues, pull requests and repository data without changing
+    // anything on GitHub.
+    "github.read/v1",
+    // Searches code across public code hosts, outside the session's own
+    // workspace.
+    "code.search.public/v1",
 ];
 
 /// Why a capability tag is not acceptable in a catalog.

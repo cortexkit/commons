@@ -127,8 +127,10 @@ to them. Nothing here names a particular implementation.
       daemon's mode on every route bind. The daemon derives it from scope;
       a request body cannot choose it. Absent bind mode means classic.
       `serves_call_mode` checks every tool call against that bind mode before
-      execution: an unlisted mode or `Unknown` is never served. The provider
-      owns the refusal code and wording; refusal is a terminal `ERROR` frame.
+      execution: an unlisted mode or `Unknown` is never served. The refusal is
+      a terminal `ERROR` frame with code `call_mode_unsupported`
+      (`errors::CALL_MODE_UNSUPPORTED`) and detail `{tool, mode}`, so every
+      caller handles it the same way; the wording is the provider's own.
     - Nondefault lists are catalog content, covered by `catalog_digest`, not
       the argument schema digest or schema pin. The optional default emits no
       new bytes, preserving existing catalog digests.
@@ -152,7 +154,7 @@ to them. Nothing here names a particular implementation.
     | `shell.exec/v1` | runs a shell command in the session's workspace and returns its output and exit status |
     | `code.read/v1` | returns file contents, whole or by range |
     | `code.edit/v1` | changes files in the workspace |
-    | `code.search/v1` | finds code by text, regular expression or meaning |
+    | `code.search/v1` | finds code in the session's own workspace by text, regular expression or meaning |
     | `code.files/v1` | lists or finds files by path pattern |
     | `code.outline/v1` | returns the structure of a file or directory (symbols, headings) |
     | `code.callgraph/v1` | answers caller, callee and impact questions about code |
@@ -160,6 +162,9 @@ to them. Nothing here names a particular implementation.
     | `browser.use/v1` | drives a web browser session: navigates, reads the page and acts on it |
     | `computer.use/v1` | drives desktop applications: reads their state and acts on them |
     | `git.history/v1` | reads repository history: commits, file contents at a revision, and diffs between revisions, without changing the repository |
+    | `web.search/v1` | searches the general web and returns results |
+    | `github.read/v1` | reads GitHub issues, pull requests and repository data, without changing anything on GitHub |
+    | `code.search.public/v1` | searches code across public code hosts, outside the session's own workspace |
 
     A defined tag promises only the activity in its row. Everything else is
     the provider's own: its arguments, permission grants, consent flow,

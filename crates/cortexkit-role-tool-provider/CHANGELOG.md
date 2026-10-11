@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.2
+
+- Define three more unprefixed capability tags, so a consumer can ask for
+  the activity without naming a provider: `web.search/v1` (general web
+  search), `github.read/v1` (read-only GitHub issues, pull requests and
+  repository data) and `code.search.public/v1` (code search across public code
+  hosts).
+- Standardize the refusal for a tool called in a mode it does not serve:
+  `call_mode_unsupported` (`errors::CALL_MODE_UNSUPPORTED`), detail
+  `{tool, mode}`. Before, each provider chose its own code.
+- `code.search/v1` now says what it always meant: it searches the session's
+  own workspace. Code hosted elsewhere is `code.search.public/v1`.
+
 ## 0.7.1
 
 - Add optional per-tool `result_format` and the open `ResultFormat` vocabulary

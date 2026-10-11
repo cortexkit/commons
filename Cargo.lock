@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "serde",
  "serde_jcs",
