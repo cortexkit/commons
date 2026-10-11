@@ -689,10 +689,19 @@ fn source_file(path: &Path) -> String {
     if let Ok(absolute) = fs::canonicalize(parent) {
         for ancestor in absolute.ancestors() {
             if let Ok(bytes) = git(ancestor, &["rev-parse", "--show-toplevel"]) {
+                // Canonicalize git's answer too: on Windows it prints `C:/...` while
+                // `canonicalize` gives `\\?\C:\...` (and expands short names such
+                // as `RUNNER~1`), so the two only compare equal in the same form.
                 let root = PathBuf::from(String::from_utf8_lossy(&bytes).trim());
+                let root = fs::canonicalize(&root).unwrap_or(root);
                 if let Some(name) = path.file_name() {
                     if let Ok(relative) = absolute.join(name).strip_prefix(&root) {
-                        return relative.to_string_lossy().into_owned();
+                        // Reports name files the same way on every OS.
+                        let parts: Vec<_> = relative
+                            .components()
+                            .map(|part| part.as_os_str().to_string_lossy())
+                            .collect();
+                        return parts.join("/");
                     }
                 }
             }
