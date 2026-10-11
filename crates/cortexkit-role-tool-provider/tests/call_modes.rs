@@ -39,7 +39,8 @@ fn classic_default_omission_preserves_catalog_digest() {
     assert!(absent.tools.iter().all(|tool| tool.modes.is_none()));
     let mut explicit = absent.clone();
     for tool in &mut explicit.tools {
-        // Direct assignment must omit the default too, not just the builder.
+        // A classic-only list assigned directly to the field, bypassing
+        // `with_modes`, must still be omitted on the wire.
         tool.modes = Some(vec![CallMode::Classic]);
     }
     for catalog in [absent, explicit] {

@@ -45,6 +45,8 @@ Declaring the capability with a probe but without a working route adapter
 also fails the case. This suite capability describes the available test
 fixture, not the provider's manifest declaration of `call-modes/v1`.
 
-The current daemon generates only known bind modes. Preservation and refusal
-of `CallMode::Unknown` are checked by the wire crate's helper tests rather
-than by manufacturing a caller-selected mode on a live route.
+The subc daemon writes the mode on a route bind itself, and today it only
+ever writes one of the three known modes, so a live route cannot carry an
+unknown one. Preservation and refusal of `CallMode::Unknown` are therefore
+checked by the role crate's own tests of `serves_call_mode`, not by this
+suite.
