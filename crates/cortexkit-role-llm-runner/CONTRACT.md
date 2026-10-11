@@ -132,11 +132,7 @@ shipping runner with this document.
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel` and `retract` are each declared on
   their own: a runner may serve any of them without the others, and
-  without `run_ops` or `transcript_reads`. This crate does not yet list
-  them in `capabilities::GROUPS` or carry their op names and types, so
-  `check_describe` does not check their ops; until it does, a consumer
-  checks that the major lists the op (`Major::serves`) as well as that the
-  group is declared (`RoleDescribe::declares`).
+  without `run_ops` or `transcript_reads`.
 - [pinned] `session.warm` has no role group. A `session_warm` group waits
   until a second consumer exists.
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue

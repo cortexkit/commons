@@ -22,6 +22,6 @@ publish = false
 [dependencies]
 # The runner role's crate, for the names and types both sides of the
 # interface share, so they cannot drift apart.
-cortexkit-role-llm-runner = { version = "0.1.0", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.2.0", path = "../cortexkit-role-llm-runner" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

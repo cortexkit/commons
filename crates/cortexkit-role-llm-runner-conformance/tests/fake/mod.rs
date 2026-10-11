@@ -116,6 +116,18 @@ const READ_FIELDS: &[&str] = &[
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     pub compaction: CompactionDefect,
+    /// Omit run attribution from messages whose run is recorded.
+    pub attribution_missing_run: bool,
+    /// Mark the first message final, even before a durable terminal exists.
+    pub attribution_wrong_final: bool,
+    /// Mark a running run's newest message final before its terminal is durable.
+    pub attribution_running_final: bool,
+    /// Only an assistant message can be final, losing a tool-result terminal.
+    pub attribution_assistant_only_final: bool,
+    /// Invent a run for a historical record with no run identity.
+    pub attribution_invent_run: bool,
+    pub attribution_fixture_missing: bool,
+    pub attribution_cannot_hold_unattributable: bool,
     /// A read with no cursor answers the oldest page instead of the newest.
     pub tail_returns_oldest: bool,
     /// A call's key is minted from the model's tool_call_id, so a model id
@@ -288,6 +300,7 @@ struct RunRec {
     final_ordinal: Option<u64>,
     final_text: Option<String>,
     error: Option<Value>,
+    cancel_requested: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -669,6 +682,18 @@ impl Module {
             sess.last_activity = record["at"].as_u64().unwrap_or_default();
         }
         match kind.as_str() {
+            "cancel" => {
+                if let Some(run) = sess.run_mut(&text("run_id")) {
+                    run.cancel_requested = true;
+                }
+            }
+            "unattributed" => {
+                sess.push(
+                    json!({"role":"user", "text":text("marker")}),
+                    "",
+                    Vec::new(),
+                );
+            }
             "tombstone" => {
                 sess.expired_at = record["expired_at_ms"].as_u64();
             }
@@ -712,6 +737,7 @@ impl Module {
                         final_ordinal: None,
                         final_text: None,
                         error: None,
+                        cancel_requested: false,
                     });
                 }
             }
@@ -828,6 +854,12 @@ impl Module {
             if sess.run(run_id).is_none_or(|run| run.state != "active") {
                 return Ok(());
             }
+            if sess.run(run_id).is_some_and(|run| run.cancel_requested) {
+                return self.commit(
+                    session,
+                    json!({"kind":"terminal", "run_id":run_id, "state":"cancelled"}),
+                );
+            }
             // The model consumed a turn even if recovery removed it from history.
             let turn_index = sess.events.iter().filter(|kind| *kind == "step").count();
             if !self.prepare_compaction(session, run_id, turn_index)? {
@@ -923,7 +955,11 @@ impl Module {
             .map_err(|Killed| RouteFailure::new("the module was killed"))?;
         if matches!(
             method,
-            ops::SESSION_READ | ops::SESSION_HEAD | ops::RUN_RESULT | "run.status"
+            ops::SESSION_READ
+                | ops::SESSION_HEAD
+                | ops::RUN_RESULT
+                | ops::RUN_CANCEL
+                | "run.status"
         ) {
             if let Some(reply) = self.expiry_reply(session) {
                 if method != "run.status" || self.world.retention_defect != RetentionDefect::Status
@@ -950,6 +986,9 @@ impl Module {
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
             ops::SESSION_SEND => self.send(stamp, session, params),
+            ops::RUN_CANCEL if self.world.serves(groups::RUN_CANCEL) => {
+                self.cancel(stamp, session, params)
+            }
             ops::RUN_RESULT => {
                 self.world.run_result_calls.fetch_add(1, Ordering::SeqCst);
                 if self.world.serves(groups::RUN_OPS) {
@@ -963,6 +1002,29 @@ impl Module {
             other => Ok(refuse("unknown_method", Some(json!({ "method": other })))),
         };
         reply.map_err(|Killed| RouteFailure::new("the module was killed"))
+    }
+
+    fn cancel(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        let request: cortexkit_role_llm_runner::run::RunCancelRequest =
+            match serde_json::from_value(params) {
+                Ok(request) => request,
+                Err(_) => return Ok(invalid("run_id")),
+            };
+        let sess = self.sessions.lock().unwrap().get(session).cloned();
+        let Some(sess) = sess else {
+            return Ok(respond("not_active"));
+        };
+        if stamp.principal != sess.owner {
+            return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+        }
+        if sess.run(&request.run_id).is_none_or(|run| {
+            cortexkit_role_llm_runner::run::RunState::parse(&run.state).is_terminal()
+        }) {
+            return Ok(respond("not_active"));
+        }
+        self.commit(session, json!({"kind":"cancel", "run_id":request.run_id}))?;
+        self.drive(session, &request.run_id)?;
+        Ok(respond("ack"))
     }
 
     fn describe(&self) -> Reply {
@@ -1383,7 +1445,15 @@ impl Module {
 
     fn read_message(&self, sess: &Sess, m: &Msg) -> ReadMessage {
         let run = sess.run(&m.run_id);
-        let is_final = run.is_some_and(|run| run.final_ordinal == Some(m.ordinal));
+        let is_final = run.is_some_and(|run| {
+            cortexkit_role_llm_runner::run::RunState::parse(&run.state).is_terminal()
+                && sess
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.run_id == m.run_id)
+                    .is_some_and(|last| last.ordinal == m.ordinal)
+        });
         let tool_calls = m
             .calls
             .iter()
@@ -1408,13 +1478,42 @@ impl Module {
                 entry
             })
             .collect();
-        ReadMessage::new(m.ordinal, &m.mid, m.body.clone())
-            .with_run(RunAttribution {
+        let mut message =
+            ReadMessage::new(m.ordinal, &m.mid, m.body.clone()).with_tool_calls(tool_calls);
+        if !m.run_id.is_empty() && !self.world.defects.attribution_missing_run {
+            let is_final = if self.world.defects.attribution_wrong_final {
+                sess.messages
+                    .iter()
+                    .find(|message| message.run_id == m.run_id)
+                    .is_some_and(|first| first.ordinal == m.ordinal)
+            } else if self.world.defects.attribution_running_final
+                && run.is_some_and(|r| {
+                    !cortexkit_role_llm_runner::run::RunState::parse(&r.state).is_terminal()
+                })
+            {
+                sess.messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.run_id == m.run_id)
+                    .is_some_and(|last| last.ordinal == m.ordinal)
+            } else if self.world.defects.attribution_assistant_only_final {
+                is_final && m.body["role"] == "assistant"
+            } else {
+                is_final
+            };
+            message = message.with_run(RunAttribution {
                 run_id: m.run_id.clone(),
                 episode: "episode-1".into(),
                 is_final,
-            })
-            .with_tool_calls(tool_calls)
+            });
+        } else if m.run_id.is_empty() && self.world.defects.attribution_invent_run {
+            message = message.with_run(RunAttribution {
+                run_id: sess.runs.last().unwrap().run_id.clone(),
+                episode: "episode-1".into(),
+                is_final: false,
+            });
+        }
+        message
     }
 
     fn head(&self, session: &str, params: &Value) -> Reply {
@@ -1482,7 +1581,7 @@ impl Module {
             });
         }
         if let Some(error) = &run.error {
-            result = result.with_error(error.clone());
+            result = result.with_error(serde_json::from_value(error.clone()).unwrap());
         }
         respond(result)
     }
@@ -1607,6 +1706,7 @@ pub fn served() -> BTreeSet<Capability> {
     [
         Capability::TranscriptReads,
         Capability::RunOps,
+        Capability::RunCancel,
         Capability::DispatchAttribution,
         Capability::Streaming,
         Capability::Compaction,
@@ -1844,6 +1944,27 @@ impl LlmRunnerSubject for FakeSubject {
             .unwrap()
             .insert(session.to_owned(), script);
         Ok(())
+    }
+
+    async fn install_attribution_fixture(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<cortexkit_role_llm_runner_conformance::AttributionFixture, HarnessError> {
+        use cortexkit_role_llm_runner_conformance::AttributionFixture;
+        if self.defects.attribution_fixture_missing {
+            return Ok(AttributionFixture::NotSupported);
+        }
+        if self.defects.attribution_cannot_hold_unattributable {
+            return Ok(AttributionFixture::CannotHoldUnattributable);
+        }
+        let ordinal = handle.0.sessions.lock().unwrap()[session].messages.len() as u64;
+        let marker = format!("{session}-legacy-unknown-origin");
+        handle
+            .0
+            .commit(session, json!({"kind":"unattributed", "marker":marker}))
+            .map_err(|Killed| HarnessError::new("killed installing attribution fixture"))?;
+        Ok(AttributionFixture::Installed { ordinal, marker })
     }
 
     async fn tool_invocations(&self, arguments: &Value) -> usize {

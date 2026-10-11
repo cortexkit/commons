@@ -328,6 +328,34 @@ mod tests {
     }
 
     #[test]
+    fn new_management_groups_are_independent_and_never_partial() {
+        for (group, op) in [
+            (capabilities::RUN_STATUS, crate::ops::RUN_STATUS),
+            (capabilities::RUN_CANCEL, crate::ops::RUN_CANCEL),
+            (capabilities::RETRACT, crate::ops::SESSION_RETRACT),
+        ] {
+            let mut major = Major::new(
+                crate::PROVIDES,
+                crate::REQUIRED_OPS.iter().map(|s| s.to_string()).collect(),
+                "alpha",
+            );
+            let describe = RoleDescribe::new(vec![major.clone()], "0.2.0")
+                .with_capabilities(vec![group.into()])
+                .with_session_capabilities_from("baseline");
+            let problems = check_describe(&serde_json::to_value(&describe).unwrap()).unwrap_err();
+            assert!(problems.iter().any(|problem| matches!(problem, DescribeProblem::GroupIncomplete { capability: g, op: missing } if *g == group && *missing == op)), "{group}: {problems:?}");
+            major.ops.push(op.into());
+            let describe = RoleDescribe::new(vec![major], "0.2.0")
+                .with_capabilities(vec![group.into()])
+                .with_session_capabilities_from("baseline");
+            assert!(
+                check_describe(&serde_json::to_value(&describe).unwrap()).is_ok(),
+                "{group}"
+            );
+        }
+    }
+
+    #[test]
     fn describe_vectors_check_as_recorded() {
         let file = vectors::load("role-describe.json");
         for case in vectors::cases(&file, "accepted") {

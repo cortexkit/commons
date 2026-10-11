@@ -96,7 +96,8 @@ pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, C
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
-    Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn,
+    AttributionFixture, Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall,
+    ScriptedTurn,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

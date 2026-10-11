@@ -30,6 +30,22 @@ vocabulary section and identifies the governing contract sections.
   the number of assistant messages in the request's history, and its scripted tool
   provider (serving `SCRIPTED_TOOL`) answers each call with its scripted
   result, counts invocations, and can hold a call until released.
+- For `run_attribution_per_message`, a held scripted tool call and
+  `install_attribution_fixture(handle, session)`. The case creates two runs
+  through the real route, reads while the second is held, then releases it
+  and checks durable finals. If `run_cancel` is declared, it cancels that held
+  run over the real route before release. The hook is only for the
+  unknown-origin rule: install one native persistent historical/imported
+  message in the existing session whose run and episode cannot be recovered.
+  Return `AttributionFixture::Installed { ordinal, marker }`, with its
+  ordinal and a unique body marker determined by fixture construction,
+  **never** by `session.read`. Every check still reads the real route.
+  `NotSupported` (including the default hook) fails the case by name.
+  `CannotHoldUnattributable` is an explicit **claim by the runner's adapter**,
+  usable only when every native write path names a run and the runner truly
+  cannot hold such a message. Route-producible rules still run; only the
+  unknown-origin rule is reported not applicable by declaration, with its
+  reason, through `CaseOutcome::PassedWithInapplicableRule`, never a plain pass.
 - For `retention`, an unpaused Tokio runtime, and
   `retention_deletion_finished`: inspect the runner's durable completion
   report and runner-held transcript/derived stores, never infer deletion
@@ -86,6 +102,7 @@ from `session.baseline` has no admission reply to compare.
 | `tail_read_is_newest_page`, `range_read_stops_by_count`, `range_read_stops_by_bytes`, `oversize_message_alone_on_its_page`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `head_has_no_bodies` | `transcript_reads`, `queue` |
 | `unknown_read_field_refused`, `never_written_session_empty_page`, `never_written_session_empty_head` | `transcript_reads` |
 | `run_result_completed_final_text`, `run_result_text_parts_joined_unchanged`, `run_result_completed_no_text_is_empty` | `run_ops`, `queue` |
+| `run_attribution_per_message` | `run_ops`, `queue`, `transcript_reads`, `hold_tool_calls`; needs the native fixture hook or explicit `CannotHoldUnattributable` declaration (missing hook fails, not skips) |
 | `run_result_interrupted_not_cancelled` | `run_ops`, `queue`, `transcript_reads`, kill point `DispatchIntent` |
 | `dispatched_to_per_call`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution`, `queue`, `transcript_reads` |
 | `indeterminate_until_closed` | `dispatch_attribution`, `queue`, `transcript_reads`, `hold_tool_calls` |
@@ -207,5 +224,6 @@ subset:
   `refresh_policy_superseded_refused`,
   `refresh_policy_already_applied_refused`, `flush_prefix_applies_pending`,
   and `crash_at_FoldRecorded`;
-- also `baseline_not_yet_before_first_request` and
-  `run_attribution_per_message`.
+- also `baseline_not_yet_before_first_request`;
+- `run_status_undelivered_steers_present_when_clean` is planned and not
+  implemented; it requires `run_status` and `queue`.

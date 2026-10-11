@@ -27,6 +27,7 @@ pub mod describe;
 pub mod errors;
 pub mod points;
 pub mod read;
+pub mod retract;
 pub mod run;
 pub mod send;
 pub mod subscribe;
@@ -60,6 +61,12 @@ pub mod ops {
     pub const SESSION_HEAD: &str = "session.head";
     /// A run's terminal state and final message. In `run_ops`.
     pub const RUN_RESULT: &str = "run.result";
+    /// A run's current state without reading its transcript. In `run_status`.
+    pub const RUN_STATUS: &str = "run.status";
+    /// Stop an active or paused run. In `run_cancel`.
+    pub const RUN_CANCEL: &str = "run.cancel";
+    /// Withdraw a submission that has not started. In `retract`.
+    pub const SESSION_RETRACT: &str = "session.retract";
     /// The session's event stream, attachable at a page's `head`. In
     /// `streaming`.
     pub const SESSION_SUBSCRIBE: &str = "session.subscribe";
@@ -91,6 +98,12 @@ pub mod capabilities {
     pub const TRANSCRIPT_READS: &str = "transcript_reads";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
+    /// Poll a run's current state, independent of transcript reads.
+    pub const RUN_STATUS: &str = "run_status";
+    /// Cancel an active or paused run.
+    pub const RUN_CANCEL: &str = "run_cancel";
+    /// Withdraw a queued submission or a pending steer on a confirm runner.
+    pub const RETRACT: &str = "retract";
     /// Per tool call: the module it was dispatched to, its `call_key`, and
     /// whether it is still indeterminate.
     pub const DISPATCH_ATTRIBUTION: &str = "dispatch_attribution";
@@ -136,6 +149,9 @@ pub mod capabilities {
     pub const GROUPS: &[(&str, &[&str])] = &[
         (TRANSCRIPT_READS, &[ops::SESSION_READ, ops::SESSION_HEAD]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
+        (RUN_STATUS, &[ops::RUN_STATUS]),
+        (RUN_CANCEL, &[ops::RUN_CANCEL]),
+        (RETRACT, &[ops::SESSION_RETRACT]),
         (DISPATCH_ATTRIBUTION, &[ops::SESSION_READ]),
         (STREAMING, &[ops::SESSION_READ, ops::SESSION_SUBSCRIBE]),
         (MODEL_VIEW, &[ops::SESSION_READ]),
@@ -354,6 +370,9 @@ mod tests {
             ops::SESSION_READ,
             ops::SESSION_HEAD,
             ops::RUN_RESULT,
+            ops::RUN_STATUS,
+            ops::RUN_CANCEL,
+            ops::SESSION_RETRACT,
             ops::SESSION_SUBSCRIBE,
             ops::SESSION_SEND,
             ops::SESSION_REFRESH,
