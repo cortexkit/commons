@@ -1,0 +1,71 @@
+{
+  "_about": "Per-tool call modes. Absence and an explicit classic-only list encode without modes. Digests here are SHA-256 over JCS of the encoded catalog excluding catalog_digest, one provider-defined scheme; existing catalog-answers.json remains unchanged. Unknown strings decode losslessly but are invalid in a provider's own catalog.",
+  "digests": [
+    {
+      "name": "existing_catalog_without_modes",
+      "catalog": {
+        "generation": "g-2026-09-30.4",
+        "composition_digest": "sha256:c0",
+        "capabilities": {"late_results": true},
+        "tools": [
+          {
+            "name": "read",
+            "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
+            "semantics": 1,
+            "result_ops": ["prepend", "append"],
+            "capabilities": ["code.read/v1", "acme:code.read-lines/v1"],
+            "description": "Read a file.",
+            "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
+          },
+          {
+            "name": "grep",
+            "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+            "semantics": 3,
+            "capabilities": [],
+            "input_schema": {"type": "object"}
+          }
+        ],
+        "catalog_digest": "sha256:cat4"
+      },
+      "content_digest": "c4c7292016bf1ee24942b7ee601958ddd51fcd43b0ef1d722220ade52541b2da"
+    },
+    {
+      "name": "classic_and_codemode",
+      "catalog": {
+        "generation": "modes-1",
+        "catalog_digest": "opaque",
+        "tools": [{
+          "name": "read",
+          "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "semantics": 1,
+          "capabilities": [],
+          "modes": ["classic", "codemode"],
+          "input_schema": {"type": "object"}
+        }]
+      },
+      "content_digest": "8f04157e3d025de01cd739116242562804d143ecf40cd42b8f960bebbe45c598"
+    },
+    {
+      "name": "flow_only",
+      "catalog": {
+        "generation": "modes-2",
+        "catalog_digest": "opaque",
+        "tools": [{
+          "name": "transform",
+          "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "semantics": 1,
+          "capabilities": [],
+          "modes": ["flow"],
+          "input_schema": {"type": "object"}
+        }]
+      },
+      "content_digest": "51f52772f8a995e89da9cbdf7a4090f14446661ff33b0741998da6900de3d609"
+    }
+  ],
+  "invalid": [
+    {"name": "empty", "modes": [], "reason": "must not be empty"},
+    {"name": "duplicate_classic", "modes": ["classic", "classic"], "reason": "must not contain duplicate call modes"},
+    {"name": "duplicate_codemode", "modes": ["codemode", "flow", "codemode"], "reason": "must not contain duplicate call modes"},
+    {"name": "unknown", "modes": ["classic", "future-mode"], "reason": "must contain only known call modes"}
+  ]
+}

@@ -8,9 +8,11 @@
 //! Tools the project disables are omitted. Tool names and argument schemas
 //! never depend on the composition; descriptions and system text may.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+
+use crate::CallMode;
 
 /// The result operations a hook may apply to a tool's result. A tool that
 /// does not list `result_ops` accepts all three.
@@ -210,6 +212,19 @@ pub struct CatalogTool {
     /// The tool's behaviour version, bumped when its behaviour changes without
     /// a schema change. A call's schema pin names it.
     pub semantics: u64,
+    /// Call modes this tool serves. Absent means classic only. Providers
+    /// validate this with [`check_modes`] and check every call with
+    /// [`serves_call_mode`] against the mode on its route bind, not its body.
+    ///
+    /// Decoding an explicit `["classic"]` normalizes it to `None`; encoding
+    /// either representation omits the member. Hash the encoded catalog so
+    /// explicitly writing the default cannot change its content digest.
+    #[serde(
+        default,
+        deserialize_with = "decode_modes",
+        skip_serializing_if = "is_default_modes"
+    )]
+    pub modes: Option<Vec<CallMode>>,
     /// The result operations the tool accepts from hooks; `None` means all
     /// of [`RESULT_OPS_ALL`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -252,6 +267,13 @@ impl CatalogTool {
         self
     }
 
+    /// Set the call modes this tool serves. The classic-only default is
+    /// normalized to absence. Validate other lists with [`check_modes`].
+    pub fn with_modes(mut self, modes: Vec<CallMode>) -> Self {
+        self.modes = Some(modes).filter(|modes| modes.as_slice() != [CallMode::Classic]);
+        self
+    }
+
     /// Set the tool's capability tags.
     pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
         self.capabilities = capabilities;
@@ -275,6 +297,77 @@ impl CatalogTool {
             Some(ops) => ops.iter().map(String::as_str).collect(),
             None => RESULT_OPS_ALL.to_vec(),
         }
+    }
+}
+
+fn is_default_modes(modes: &Option<Vec<CallMode>>) -> bool {
+    modes
+        .as_ref()
+        .is_none_or(|modes| modes.as_slice() == [CallMode::Classic])
+}
+
+fn decode_modes<'de, D: Deserializer<'de>>(decoder: D) -> Result<Option<Vec<CallMode>>, D::Error> {
+    let modes = Option::<Vec<CallMode>>::deserialize(decoder)?;
+    Ok(modes.filter(|modes| modes.as_slice() != [CallMode::Classic]))
+}
+
+/// The tool, member and reason reported for invalid mode declarations:
+/// an empty list, a duplicate, or an unknown mode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModesProblem {
+    pub tool: String,
+    /// The member path within the tool.
+    pub member: &'static str,
+    pub reason: &'static str,
+}
+
+impl std::fmt::Display for ModesProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}: {}", self.tool, self.member, self.reason)
+    }
+}
+
+impl std::error::Error for ModesProblem {}
+
+/// Validate a provider's own mode declarations. A runner refuses a failing
+/// catalog as `invalid_answer`, naming the tool and `modes`, just as it does
+/// for invalid reply metadata. Unknown strings survive decoding for forward
+/// compatibility, but a provider may declare only modes it understands.
+pub fn check_modes(tool: &CatalogTool) -> Result<(), ModesProblem> {
+    let Some(modes) = &tool.modes else {
+        return Ok(());
+    };
+    let problem = |reason| ModesProblem {
+        tool: tool.name.clone(),
+        member: "modes",
+        reason,
+    };
+    if modes.is_empty() {
+        return Err(problem("must not be empty"));
+    }
+    for (index, mode) in modes.iter().enumerate() {
+        if matches!(mode, CallMode::Unknown(_)) {
+            return Err(problem("must contain only known call modes"));
+        }
+        if modes[..index].contains(mode) {
+            return Err(problem("must not contain duplicate call modes"));
+        }
+    }
+    Ok(())
+}
+
+/// Whether this tool serves a call stamped with `mode` on its route bind.
+/// Providers must check this on every tool call before executing it. Absence
+/// means classic only; unknown modes are never served, even if an invalid
+/// catalog lists the same unknown string.
+pub fn serves_call_mode(tool: &CatalogTool, mode: &CallMode) -> bool {
+    if matches!(mode, CallMode::Unknown(_)) {
+        return false;
+    }
+    match &tool.modes {
+        Some(modes) => modes.contains(mode),
+        None => *mode == CallMode::Classic,
     }
 }
 

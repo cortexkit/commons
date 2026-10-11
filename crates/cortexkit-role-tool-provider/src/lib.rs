@@ -27,6 +27,10 @@ pub mod points;
 pub mod scope;
 pub mod withdraw;
 
+/// The daemon's bind-mode vocabulary and the manifest capability promising
+/// that a provider reads it on every bind.
+pub use subc_protocol::call_mode::{CallMode, CALL_MODES_CAPABILITY};
+
 /// The role name as `role.describe` reports it.
 pub const ROLE: &str = "tool-provider";
 

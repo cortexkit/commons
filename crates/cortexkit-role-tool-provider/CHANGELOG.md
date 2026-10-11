@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0
+
+- Requires subc-protocol 0.31. The re-exported tool-call and `CallMode` types
+  make this a breaking dependency move: use 0.7.x with protocol 0.31, and
+  0.6.x with protocol 0.30.
+- Add optional per-tool `CatalogTool.modes`, `with_modes`, `check_modes` and
+  `serves_call_mode`. Providers check the bind mode before every tool call;
+  unknown modes are never served. Re-export `CallMode` and
+  `CALL_MODES_CAPABILITY` for provider implementations.
+- Normalize explicit `["classic"]` to absence when decoding and building;
+  omit it on encoding even after direct assignment. Existing catalog bytes
+  and digests stay unchanged. Add pinned catalog-content digests for the
+  default and for nondefault mode lists, plus validation and unknown-mode tests.
+
 ## 0.6.0
 
 - Requires subc-protocol 0.30. This crate re-exports subc-protocol's tool-call

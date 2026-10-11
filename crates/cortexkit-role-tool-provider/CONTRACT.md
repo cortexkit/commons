@@ -105,13 +105,35 @@ to them. Nothing here names a particular implementation.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
-  capabilities, description?, input_schema, reply?}`.
+  capabilities, description?, input_schema, reply?, modes?}`.
   - `name` is the exact name the user tier disables the tool by.
   - `schema_digest` is the digest of the **structure** of `input_schema`
     (see "Schema digest" below): 64 lowercase hex characters. Description
     text never changes it.
   - `semantics` is an integer, bumped whenever the tool's behaviour changes
     without a schema change.
+  - `modes` lists the call modes this tool serves: `classic`, `codemode` and
+    `flow`. Absent means `["classic"]`. An explicit `["classic"]` decodes to
+    absence (`None`), and both forms encode without `modes`, including a
+    directly assigned default list. A provider hashes the encoded catalog,
+    not a raw input spelling, so writing the default explicitly cannot change
+    its digest. Other lists retain their order and spelling; unknown strings
+    decode as `CallMode::Unknown` and round-trip unchanged.
+    - A provider declares only modes it handles: `check_modes` rejects empty
+      lists, duplicates and unknown modes. A consumer refuses an invalid
+      provider catalog as `invalid_answer`, naming the tool and `modes`, as
+      with invalid reply metadata.
+    - A provider declaring `CALL_MODES_CAPABILITY` (`call-modes/v1`) reads the
+      daemon's mode on every route bind. The daemon derives it from scope;
+      a request body cannot choose it. Absent bind mode means classic.
+      `serves_call_mode` checks every tool call against that bind mode before
+      execution: an unlisted mode or `Unknown` is never served. The provider
+      owns the refusal code and wording; refusal is a terminal `ERROR` frame.
+    - Nondefault lists are catalog content, covered by `catalog_digest`, not
+      the argument schema digest or schema pin. The optional default emits no
+      new bytes, preserving existing catalog digests.
+    - `test-vectors/tool-provider-v1/call-modes.json` pins invalid declarations
+      and default/nondefault content digests for one provider-defined scheme.
   - `result_ops` lists the hook result operations the tool accepts, from
     `prepend`, `append`, `replace`. Absent means all three.
   - `capabilities` lists capability tags: unprefixed (`code.outline/v1`,
@@ -418,7 +440,8 @@ CI against its real module over a real route; never against a double.
 | Case | Requires |
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
-| `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
@@ -437,6 +460,16 @@ requests must return the same `item_digest` and the same `preflight_digest`,
 but the provider-defined `preflight_digest` need not equal the text digest.
 There is no digest-only comparison of `preflight_digest`: a `digest_only`
 answer carries only `generation` and `catalog_digest`, not `system_text`.
+
+The `call_modes` case requires a restricted tool probe and a harness that
+opens real routes with known bind modes. The subject supplies the call and
+one known mode its tool does not list; the suite chooses a listed mode from
+the catalog. The same body must be refused on the unlisted-mode route and
+served on the listed-mode route. If no restricted tool fixture exists,
+`call_mode_matches_catalog` is skipped with missing `call_modes`, never
+passed. See the conformance crate's README for the subject hooks. The current
+daemon stamps only known bind modes; unknown-mode refusal is checked in the
+helper's unit tests instead.
 
 Caller-side rules that no live provider can be made to exercise (an unknown
 withdraw `answer`, an unknown late-result `kind`, the withdraw caller policy)
