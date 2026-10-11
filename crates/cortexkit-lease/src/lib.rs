@@ -531,11 +531,17 @@ mod tests {
         LeaseKey::new("test-module", "sqlite", scope)
     }
 
+    /// A fresh directory per call. A counter makes it unique: tests run in
+    /// parallel in one process, and two calls in the same clock tick would
+    /// otherwise share a directory that one test deletes while another still
+    /// uses it. On Windows that deleted directory stays pending deletion, so
+    /// the other test's next open fails with "path not found".
     fn tmp_store() -> (FileLeaseStore, PathBuf) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "cortexkit-lease-{}-{}",
             std::process::id(),
-            fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         (FileLeaseStore::new(&dir), dir)
     }
