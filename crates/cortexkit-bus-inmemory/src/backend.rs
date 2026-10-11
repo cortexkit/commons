@@ -32,6 +32,9 @@ impl WorkQueueConfig {
 /// consumers use 30 seconds.
 pub const DEFAULT_STREAM_ACK_WAIT: Duration = Duration::from_secs(30);
 
+/// JetStream's default message-id deduplication window.
+pub const DEFAULT_DEDUPLICATION_WINDOW: Duration = Duration::from_secs(120);
+
 #[derive(Debug, Clone)]
 pub struct InMemoryConfig {
     /// Durable names, `c_{agent_id}` or `m_{module_id}`.
@@ -39,6 +42,7 @@ pub struct InMemoryConfig {
     pub(crate) denied_subjects: BTreeSet<String>,
     pub(crate) work_queue: Option<WorkQueueConfig>,
     pub(crate) stream_ack_wait: Duration,
+    pub(crate) deduplication_window: Duration,
 }
 
 impl Default for InMemoryConfig {
@@ -48,11 +52,19 @@ impl Default for InMemoryConfig {
             denied_subjects: BTreeSet::new(),
             work_queue: None,
             stream_ack_wait: DEFAULT_STREAM_ACK_WAIT,
+            deduplication_window: DEFAULT_DEDUPLICATION_WINDOW,
         }
     }
 }
 
 impl InMemoryConfig {
+    /// Sets the message-id deduplication window for this bus's single stream.
+    /// Use the production stream's window to reproduce its retry behavior.
+    pub fn with_deduplication_window(mut self, window: Duration) -> Self {
+        self.deduplication_window = window;
+        self
+    }
+
     /// How long a stream delivery may stay unsettled before another cursor on
     /// the same durable receives it again; applies to every durable.
     pub fn with_stream_ack_wait(mut self, ack_wait: Duration) -> Self {
@@ -122,10 +134,21 @@ pub enum BackendEvent {
 #[derive(Clone)]
 pub struct InMemoryBus {
     pub(crate) inner: Arc<Mutex<State>>,
+    pub(crate) deduplication_clock: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl InMemoryBus {
     pub fn new(config: InMemoryConfig) -> Self {
+        Self::new_with_deduplication_clock(config, Instant::now)
+    }
+
+    /// Injects a monotonic clock for deduplication without waiting in tests.
+    /// Delivery leases and work-queue delays still use the real clock.
+    /// Each bus has one stream; clones share its ids, while separate buses do not.
+    pub fn new_with_deduplication_clock(
+        config: InMemoryConfig,
+        clock: impl Fn() -> Instant + Send + Sync + 'static,
+    ) -> Self {
         let durable_cursors = config
             .durables
             .iter()
@@ -137,6 +160,7 @@ impl InMemoryBus {
                 config,
                 next_stream_seq: 1,
                 stream_messages: Vec::new(),
+                seen_ids: HashMap::new(),
                 durable_cursors,
                 register_revision: 0,
                 register_values: BTreeMap::new(),
@@ -146,6 +170,7 @@ impl InMemoryBus {
                 events: Vec::new(),
                 permission_violations: VecDeque::new(),
             })),
+            deduplication_clock: Arc::new(clock),
         }
     }
 
@@ -184,6 +209,7 @@ pub(crate) struct State {
     pub config: InMemoryConfig,
     pub next_stream_seq: u64,
     pub stream_messages: Vec<StoredMessage>,
+    pub seen_ids: HashMap<String, (u64, Instant)>,
     pub durable_cursors: HashMap<String, DurableState>,
     pub register_revision: u64,
     pub register_values: BTreeMap<String, RegisterValue>,

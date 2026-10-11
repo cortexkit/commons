@@ -4,9 +4,32 @@ use async_trait::async_trait;
 
 use crate::{BusResult, ContentDigest, Headers, Message};
 
+/// The server's decision about a publish, including deduplicated retries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PublishAck {
-    pub stream_seq: u64,
+#[non_exhaustive]
+#[must_use = "check duplicate() to distinguish a stored message from an idempotent retry or an id collision"]
+pub struct PublishReceipt {
+    stream_sequence: u64,
+    duplicate: bool,
+}
+
+impl PublishReceipt {
+    pub fn new(stream_sequence: u64, duplicate: bool) -> Self {
+        Self {
+            stream_sequence,
+            duplicate,
+        }
+    }
+
+    /// The stored message's sequence, or the original sequence for a duplicate.
+    pub fn stream_sequence(&self) -> u64 {
+        self.stream_sequence
+    }
+
+    /// Whether this id was already stored within the stream's deduplication window.
+    pub fn duplicate(&self) -> bool {
+        self.duplicate
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,13 +88,20 @@ pub enum DurableOwner<'a> {
 pub trait Stream: Send + Sync {
     type Cursor: StreamCursor;
 
+    /// Publishes a message, returning whether it was stored or deduplicated.
+    ///
+    /// A duplicate means the stream already stored this id within its
+    /// deduplication window; the receipt carries that original message's sequence
+    /// and no new message was stored. Callers may accept it as an idempotent retry,
+    /// or treat it as an id collision when a new message was intended. Use distinct
+    /// ids for distinct messages, even across subjects in the same stream.
     async fn publish(
         &self,
         subject: &str,
         id: &str,
         digest: ContentDigest,
         headers: Headers,
-    ) -> BusResult<PublishAck>;
+    ) -> BusResult<PublishReceipt>;
 
     /// Attaches to the owner's durable, created separately; this client cannot
     /// create workload consumers.

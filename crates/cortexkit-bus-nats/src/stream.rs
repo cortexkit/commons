@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use cortexkit_bus_naming::AccountNames;
 use cortexkit_bus_trait::{
-    BusError, BusResult, ContentDigest, DurableOwner, Headers, PublishAck, Stream, StreamCursor,
-    StreamDelivery,
+    BusError, BusResult, ContentDigest, DurableOwner, Headers, PublishReceipt, Stream,
+    StreamCursor, StreamDelivery,
 };
 use futures_util::StreamExt;
 
@@ -53,7 +53,7 @@ impl Stream for NatsStream {
         id: &str,
         digest: ContentDigest,
         headers: Headers,
-    ) -> BusResult<PublishAck> {
+    ) -> BusResult<PublishReceipt> {
         let headers = encode_headers(id, digest, headers)?;
         let mut events = self.connection.event_receiver();
         let ack = self
@@ -64,9 +64,7 @@ impl Stream for NatsStream {
             .map_err(|error| map_operation_error(subject, error, &mut events))?
             .await
             .map_err(|error| map_operation_error(subject, error, &mut events))?;
-        Ok(PublishAck {
-            stream_seq: ack.sequence,
-        })
+        Ok(PublishReceipt::new(ack.sequence, ack.duplicate))
     }
 
     async fn consumer(&self, owner: DurableOwner<'_>) -> BusResult<Self::Cursor> {
