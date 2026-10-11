@@ -124,6 +124,10 @@ pub struct Defects {
     pub undefined_unprefixed_tag: bool,
     /// Return malformed system text without changing the other catalog cases.
     pub system_text: Option<SystemTextDefect>,
+    /// Keep the quick tool's legacy opaque reply and omit its format declaration.
+    pub opaque_result: bool,
+    /// The content/v1 tool replies with structured data but no content parts.
+    pub malformed_result: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -382,6 +386,9 @@ impl Module {
             tool["schema_digest"] = json!(schema_digest(&tool["input_schema"]).unwrap());
         }
         tools[0]["reply"] = json!({"max_ms": if self.defects.invalid_reply { 0 } else { 120_000 }});
+        if !self.defects.opaque_result {
+            tools[0]["result_format"] = json!("content/v1");
+        }
         tools[0]["modes"] = if self.defects.invalid_modes {
             json!([])
         } else {
@@ -558,6 +565,13 @@ impl Module {
         Ok(match name {
             ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(Self::describe())],
             ops::TOOL_CATALOG => reply(self.catalog(&request.arguments)),
+            QUICK if !self.defects.opaque_result => {
+                vec![ObservedFrame::Response(if self.defects.malformed_result {
+                    json!({"content": [], "structuredContent": {"only": "program data"}})
+                } else {
+                    json!({"content": [{"type": "text", "text": request.arguments["text"].as_str().unwrap_or_default()}]})
+                })]
+            }
             QUICK | SLOW => vec![ObservedFrame::Response(
                 json!({ "content": request.arguments }),
             )],

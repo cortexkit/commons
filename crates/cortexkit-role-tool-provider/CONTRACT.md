@@ -105,7 +105,7 @@ to them. Nothing here names a particular implementation.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
-  capabilities, description?, input_schema, reply?, modes?}`.
+  result_format?, capabilities, description?, input_schema, reply?, modes?}`.
   - `name` is the exact name the user tier disables the tool by.
   - `schema_digest` is the digest of the **structure** of `input_schema`
     (see "Schema digest" below): 64 lowercase hex characters. Description
@@ -136,6 +136,12 @@ to them. Nothing here names a particular implementation.
       and default/nondefault content digests for one provider-defined scheme.
   - `result_ops` lists the hook result operations the tool accepts, from
     `prepend`, `append`, `replace`. Absent means all three.
+  - `result_format` opts this tool into a reply body format. It is an open
+    string enum (`ResultFormat`), with known value `"content/v1"`; unknown
+    strings decode and round-trip unchanged. Absence leaves today's opaque
+    provider JSON body unchanged and emits no new catalog bytes, preserving
+    existing catalogs and digests. A present format is catalog content,
+    covered by `catalog_digest`, never by `schema_digest` or the schema pin.
   - `capabilities` lists capability tags: unprefixed (`code.outline/v1`,
     defined only by this document) or namespaced (`acme:code.callgraph/v1`,
     free for anyone). Data in this answer only. This document defines these
@@ -297,6 +303,62 @@ to them. Nothing here names a particular implementation.
   checks them. Scope, owner and agent are never arguments; they come from the
   route's stamp.
 
+## 4.1. Opt-in tool results: `content/v1`
+
+A tool declaring `result_format: "content/v1"` returns the following body
+(`result::ToolResult`), with MCP's CallToolResult member names exactly:
+
+```json
+{
+  "content": [{"type": "text", "text": "Model-facing result."}],
+  "structuredContent": {"program_facing": "data"},
+  "isError": true,
+  "errorCode": "provider_error"
+}
+```
+
+- `content` is required and must hold at least one `ContentPart`. A reply
+  with only `structuredContent` is malformed, even if that object is useful.
+- `structuredContent` is an optional object for programs. Consumers build
+  model input from `content` only, **never** from `structuredContent`.
+- `isError` is an optional boolean. When it is true, `errorCode` is required:
+  a stable snake_case code owned by the provider (lowercase letters and
+  digits in nonempty underscore-separated words, starting with a letter).
+  `isError: true` without a code is malformed. A code without `isError: true`
+  is malformed too, including with an absent or false `isError`.
+- Content parts are tagged by `type`:
+  - `{"type": "text", "text": "..."}`: text the model sees verbatim.
+  - `{"type": "image", "mimeType": "image/png", "data": "AA==", "width": 1,
+    "height": 1, "alt": "...", "id": "..."}`: `data` is raw standard base64,
+    not a URL. Refuse a value starting with `data:` or invalid base64
+    (including an invalid alphabet, padding or trailing bits). `mimeType`
+    must be `image/png`, `image/jpeg`, `image/webp` or `image/gif`. `width` and
+    `height` are positive integer pixel dimensions. Optional `alt` is the
+    provider's own wording for a consumer that cannot deliver the image to
+    its model. Optional `id` is an opaque provider string, unique among image
+    IDs in the reply when present.
+  - Any other string `type` is preserved as raw JSON (`ContentPart::Unknown`).
+    A consumer renders it as a one-line "unsupported content" note and never
+    drops it silently.
+- Order is significant: consumers keep the exact order of `content`. Any
+  number of image parts is allowed. Harness-specific layouts (one text plus
+  attachments versus separate blocks, for example) are the consumer's
+  mapping, never the provider's.
+- The entire serialized reply must be **under 3 MiB** (3 × 1024 × 1024 bytes),
+  counting every member, including structured and unknown content. This
+  leaves headroom under the daemon's 4 MiB per-connection limit, as for
+  step-transform hooks. A provider that would exceed the bound downsizes or
+  refuses by name; it never truncates silently.
+- Providers validate before sending; consumers decode and validate on receipt.
+  `result::validate` returns a typed `ResultProblem` naming the member path
+  and reason. Missing required fields or wrong JSON member types do not
+  decode. Tools without the opt-in keep their opaque bodies; consumers never
+  guess `content/v1` from a reply's appearance.
+
+`test-vectors/tool-provider-v1/content-v1.json` pins valid and malformed bodies.
+The existing catalog vectors pin unchanged encoded bytes and digests when
+`result_format` is absent.
+
 ## 5. `tool.withdraw`
 
 Served by a provider that can hold a call past its reply.
@@ -445,6 +507,7 @@ CI against its real module over a real route; never against a double.
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
+| `tool_result_content_v1_valid` | a catalog tool declaring `result_format: "content/v1"` |
 | `terminal_frame_on_cancel` | `cancellation` |
 | `call_key_malformed_refused`, `call_key_well_formed_accepted` | `call_key` |
 | `schema_pin_current_accepted`, `schema_pin_malformed_refused` | `schema_pin` |
@@ -452,6 +515,16 @@ CI against its real module over a real route; never against a double.
 | `late_results_cursor_round_trip`, `late_results_ack` | `late_results`, `scope_stamp`, `held_calls`, `call_key`, `approval_execution` |
 | `late_results_incarnation_change_refused` | `late_results`, `scope_stamp` |
 | `crash_after_prepared_not_started`, `crash_after_authorized_not_started` | `approval_execution`, `held_calls`, `scope_stamp`, `call_key`, `late_results` |
+
+The result case infers its `content/v1` requirement from the catalog, not a
+subject opt-out flag. It checks replies from `content_v1_calls` probes for
+every declared tool by decoding and validating the bodies, including the
+whole serialized body's size. The default probe is `quick_call`; subjects
+use that promptly completing `(tool name, arguments)` call as a test input,
+override it when other tools opt in, and may supply multiple inputs per tool.
+Missing probes for a declared tool fail by tool name. With no declared tool,
+`tool_result_content_v1_valid` is skipped by name with missing `content/v1`,
+never passed. Unknown result formats do not opt in.
 
 The `system_text` cases request full catalog answers. They check `item_digest`
 against the returned text's exact UTF-8 bytes, both digests' 64-lowercase-hex

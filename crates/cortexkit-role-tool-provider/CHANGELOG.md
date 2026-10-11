@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+- Add optional per-tool `result_format` and the open `ResultFormat` vocabulary
+  with `content/v1`. Omission preserves all existing catalog bytes and digests.
+- Add `ToolResult`, ordered `ContentPart` and `ImageContent` builders with
+  MCP wire names, raw unknown-part preservation, and shared `validate` errors
+  naming the member and reason. Check error-code coupling, image base64,
+  media types, dimensions and IDs, nonempty content and the strict 3 MiB bound.
+- Pin reply vectors and document consumer rendering: content only for model
+  input, exact order, unsupported-part notes, and consumer-owned layouts.
+
 ## 0.7.0
 
 - Requires subc-protocol 0.31. The re-exported tool-call and `CallMode` types

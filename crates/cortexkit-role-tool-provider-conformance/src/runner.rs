@@ -20,6 +20,7 @@ use cortexkit_role_tool_provider::{
     errors,
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
     ops, points,
+    result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
     CallMode, PROVIDES,
 };
@@ -116,6 +117,35 @@ where
         .spawn(&work_dir.join("main"))
         .await
         .map_err(|e| format!("spawning the provider failed: {e}"));
+
+    // Catalog declarations, not a subject flag, decide whether result checks
+    // apply. A catalog/setup error must fail the case rather than hide as a skip.
+    let has_content_v1 = match &main {
+        Err(_) => true,
+        Ok(handle) => {
+            let case = Case {
+                subject,
+                driver: &driver,
+                handle,
+                work_dir,
+                capabilities: &capabilities,
+            };
+            match case.plain_route().await {
+                Err(_) => true,
+                Ok(route) => match case.catalog(&route).await {
+                    Err(_) => true,
+                    Ok(catalog) => catalog
+                        .tools
+                        .iter()
+                        .any(|tool| tool.result_format == Some(ResultFormat::ContentV1)),
+                },
+            }
+        }
+    };
+    capabilities.remove(&Capability::ContentV1);
+    if has_content_v1 {
+        capabilities.insert(Capability::ContentV1);
+    }
 
     let mut cases = Vec::with_capacity(CASES.len());
     for spec in CASES {
@@ -244,6 +274,7 @@ where
             "catalog_disabled_tool_absent" => self.catalog_disabled_tool_absent().await,
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
+            "tool_result_content_v1_valid" => self.tool_result_content_v1_valid().await,
             "terminal_frame_on_refusal" => self.terminal_frame_on_refusal().await,
             "terminal_frame_on_cancel" => self.terminal_frame_on_cancel().await,
             "call_key_malformed_refused" => self.call_key_malformed_refused().await,
@@ -325,6 +356,49 @@ where
 
     async fn catalog(&self, route: &S::Route) -> Result<CatalogAnswer, String> {
         self.catalog_with(route, false).await
+    }
+
+    async fn tool_result_content_v1_valid(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        let calls = self.subject.content_v1_calls();
+        let tools: Vec<_> = catalog
+            .tools
+            .iter()
+            .filter(|tool| tool.result_format == Some(ResultFormat::ContentV1))
+            .collect();
+        if tools.is_empty() {
+            return Err("content/v1 catalog declaration disappeared during the run".into());
+        }
+        for tool in tools {
+            let probes: Vec<_> = calls
+                .iter()
+                .filter(|(name, _)| name == &tool.name)
+                .collect();
+            if probes.is_empty() {
+                return Err(format!(
+                    "{}: no content_v1_calls probe for declared content/v1 tool",
+                    tool.name
+                ));
+            }
+            for (name, arguments) in probes {
+                let body = expect_response(
+                    name,
+                    request(&route, call_body(name, arguments.clone(), None)).await?,
+                )?;
+                let bytes = serde_json::to_vec(&body)
+                    .map_err(|e| format!("{name}: reply serialization: {e}"))?;
+                if bytes.len() >= MAX_RESULT_BYTES {
+                    return Err(format!(
+                        "{name}: reply: serialized reply must be under 3 MiB"
+                    ));
+                }
+                let result: ToolResult = serde_json::from_value(body)
+                    .map_err(|e| format!("{name}: content/v1 reply does not decode: {e}"))?;
+                validate(&result).map_err(|e| format!("{name}: {e}"))?;
+            }
+        }
+        Ok(())
     }
 
     async fn role_describe_shape(&self) -> CaseResult {

@@ -10,6 +10,23 @@ The suite's case inventory and role contract are in the wire crate's
 [`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Versions 0.7.x
 pair with subc-protocol 0.31; versions 0.6.x pair with protocol 0.30.
 
+## Opt-in `content/v1` results
+
+`tool_result_content_v1_valid` runs when the catalog declares at least one
+tool with `result_format: "content/v1"`. `Capability::ContentV1` is inferred
+from that catalog, not controlled by the subject's capability flags. No
+declaration produces a named `SKIP` with missing `content/v1`, never a pass;
+unknown format strings do not opt in.
+
+`content_v1_calls()` supplies promptly completing `(tool name, arguments)`
+probes for every declared tool. The default is `[quick_call()]`; override it
+when other tools opt in, and supply multiple probes to check success and
+tool-level error bodies. A missing probe fails by tool name. The case uses
+the real route, decodes each reply as `ToolResult`, and runs `validate`;
+it also checks the entire serialized JSON body's size before decoding so
+unmodeled extensions cannot evade the 3 MiB bound. Malformed replies fail
+by case, tool and member, not as an opaque success.
+
 ## Per-tool call modes
 
 `catalog_modes_valid` runs for every provider, checking each tool with

@@ -48,6 +48,9 @@ pub enum Capability {
     /// See [`ToolProviderSubject::call_mode_probe`] and
     /// [`ToolProviderSubject::route_with_mode`].
     CallModes,
+    /// At least one catalog tool declares `result_format: "content/v1"`.
+    /// Inferred by the runner, not an opt-out subject flag.
+    ContentV1,
 }
 
 impl Capability {
@@ -64,6 +67,7 @@ impl Capability {
             Self::LateResults => "late_results",
             Self::SystemText => "system_text",
             Self::CallModes => "call_modes",
+            Self::ContentV1 => "content/v1",
         }
     }
 }
@@ -153,6 +157,14 @@ pub trait ToolProviderSubject: Harness {
     /// A call that completes promptly and successfully. Its tool must be in
     /// the catalog.
     fn quick_call(&self) -> CallSpec;
+
+    /// Prompt calls covering every tool that declares `content/v1`. Multiple
+    /// probes per tool may exercise success and tool-level error bodies.
+    /// The default reuses `quick_call`; override when other tools opt in.
+    /// Missing probes for a declared tool fail the case, rather than skip it.
+    fn content_v1_calls(&self) -> Vec<CallSpec> {
+        vec![self.quick_call()]
+    }
 
     /// A tool probe for both mode acceptance and refusal. Required by
     /// [`Capability::CallModes`]. If every tool lists all known modes, omit

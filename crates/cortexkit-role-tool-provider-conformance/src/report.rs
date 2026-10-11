@@ -14,8 +14,8 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    ApprovalExecution, CallKey, CallModes, Cancellation, DisableTool, HeldCalls, LateResults,
-    SchemaPin, ScopeStamp, SystemText,
+    ApprovalExecution, CallKey, CallModes, Cancellation, ContentV1, DisableTool, HeldCalls,
+    LateResults, SchemaPin, ScopeStamp, SystemText,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -105,6 +105,11 @@ pub const CASES: &[CaseSpec] = &[
         name: "terminal_frame_on_success",
         requires: &[],
         checks: "a successful call gets exactly one terminal frame, not an error",
+    },
+    CaseSpec {
+        name: "tool_result_content_v1_valid",
+        requires: &[ContentV1],
+        checks: "every tool declaring result_format content/v1 has probes whose replies decode and validate, including the serialized size bound",
     },
     CaseSpec {
         name: "terminal_frame_on_refusal",

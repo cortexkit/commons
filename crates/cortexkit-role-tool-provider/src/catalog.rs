@@ -229,6 +229,10 @@ pub struct CatalogTool {
     /// of [`RESULT_OPS_ALL`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_ops: Option<Vec<String>>,
+    /// Opt-in reply body format. Absence keeps the provider's opaque JSON body
+    /// and emits no new catalog bytes. Unknown formats round-trip unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_format: Option<crate::result::ResultFormat>,
     /// Capability tags naming what the tool does, for example
     /// `code.outline/v1` or `acme:code.callgraph/v1`. Data only; never in the
     /// module's HELLO manifest.
@@ -264,6 +268,12 @@ impl CatalogTool {
     /// Set the result operations accepted from hooks.
     pub fn with_result_ops(mut self, result_ops: Vec<String>) -> Self {
         self.result_ops = Some(result_ops);
+        self
+    }
+
+    /// Declare the tool's reply body format.
+    pub fn with_result_format(mut self, result_format: crate::result::ResultFormat) -> Self {
+        self.result_format = Some(result_format);
         self
     }
 

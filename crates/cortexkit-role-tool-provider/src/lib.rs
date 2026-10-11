@@ -24,6 +24,7 @@ pub mod describe;
 pub mod errors;
 pub mod late_results;
 pub mod points;
+pub mod result;
 pub mod scope;
 pub mod withdraw;
 

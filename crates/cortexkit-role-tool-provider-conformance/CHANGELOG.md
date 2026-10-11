@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+- Require cortexkit-role-tool-provider 0.7.1 and add the catalog-gated
+  `tool_result_content_v1_valid` case. No declaring tool yields a named skip,
+  never a pass; declarations cannot be opted out of by a subject flag.
+- Add `Capability::ContentV1` (inferred from the catalog) and additive
+  `content_v1_calls` probes, defaulting to `quick_call`. Validate each declared
+  tool's probed replies and the whole serialized body's 3 MiB bound.
+- Test a deliberately malformed provider reply failing by case/tool/member
+  and legacy opaque tools skipping the case.
+
 ## 0.7.0
 
 - Requires subc-protocol 0.31 and cortexkit-role-tool-provider 0.7: use 0.7.x

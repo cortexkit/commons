@@ -118,6 +118,52 @@ async fn an_invalid_reply_fails_the_catalog_reply_case_by_tool_and_member() {
 }
 
 #[tokio::test]
+async fn malformed_content_v1_reply_fails_by_case_tool_and_member() {
+    let report = run(&FakeSubject::new(Defects {
+        malformed_result: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "tool_result_content_v1_valid");
+    assert!(reason.contains(fake::QUICK), "{reason}");
+    assert!(
+        reason.contains("content: must contain at least one part"),
+        "{reason}"
+    );
+    assert_passed(&report, "catalog_schemas_flat");
+    assert_passed(&report, "terminal_frame_on_success");
+}
+
+#[tokio::test]
+async fn opaque_tools_skip_content_v1_by_name_never_pass() {
+    let mut subject = FakeSubject::new(Defects {
+        opaque_result: true,
+        ..Defects::default()
+    });
+    // Even a manually supplied flag cannot substitute for the catalog declaration.
+    subject.capabilities.insert(Capability::ContentV1);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("tool_result_content_v1_valid"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::ContentV1],
+        })
+    );
+    assert!(report
+        .render()
+        .contains("SKIP tool_result_content_v1_valid"));
+    assert_passed(&report, "terminal_frame_on_success");
+}
+
+#[tokio::test]
+async fn catalog_content_v1_declaration_cannot_be_opted_out_of() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::ContentV1);
+    let report = run(&subject).await;
+    assert_passed(&report, "tool_result_content_v1_valid");
+}
+
+#[tokio::test]
 async fn invalid_modes_fail_the_catalog_case_by_tool_and_member() {
     let report = run(&FakeSubject::new(Defects {
         invalid_modes: true,

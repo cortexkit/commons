@@ -1,0 +1,44 @@
+{
+  "_about": "Opt-in content/v1 tool replies, using MCP CallToolResult member names. Content order is significant. Oversize uses expand_text to repeat the indicated part's text before serialization and decoding; it avoids storing a multi-MiB fixture. Every vector has a named decode-and-validate test in the wire crate.",
+  "valid": [
+    {"name": "text_only", "body": {"content": [{"type": "text", "text": "Verbatim model text.\nSecond line."}]}},
+    {"name": "text_two_images_in_order", "body": {"content": [
+      {"type": "text", "text": "Before the images."},
+      {"type": "image", "mimeType": "image/png", "data": "iVBORw0KGgo=", "width": 640, "height": 480, "alt": "First image, in provider wording.", "id": "first"},
+      {"type": "image", "mimeType": "image/jpeg", "data": "/9j/", "width": 320, "height": 240, "alt": "Second image.", "id": "second"}
+    ]}},
+    {"name": "error_with_code", "body": {"content": [{"type": "text", "text": "The file does not exist."}], "isError": true, "errorCode": "file_not_found"}},
+    {"name": "structured_content", "body": {"content": [{"type": "text", "text": "Found two matches."}], "structuredContent": {"matches": [{"line": 3}, {"line": 9}]}, "isError": false}},
+    {"name": "unknown_part", "body": {"content": [{"type": "future/audio", "data": {"samples": [1, 2]}, "future": true}, {"type": "text", "text": "After unsupported content."}]}},
+    {"name": "images_without_text", "body": {"content": [
+      {"type": "image", "mimeType": "image/webp", "data": "AA==", "width": 1, "height": 1},
+      {"type": "image", "mimeType": "image/gif", "data": "AAA=", "width": 1, "height": 1}
+    ]}}
+  ],
+  "invalid": [
+    {"name": "empty_content", "body": {"content": []}, "member": "content", "reason": "must contain at least one part"},
+    {"name": "structured_only", "body": {"content": [], "structuredContent": {"answer": 42}}, "member": "content", "reason": "must contain at least one part"},
+    {"name": "error_missing_code", "body": {"content": [{"type": "text", "text": "Failed."}], "isError": true}, "member": "errorCode", "reason": "required when isError is true"},
+    {"name": "code_without_error", "body": {"content": [{"type": "text", "text": "Success."}], "errorCode": "file_not_found"}, "member": "errorCode", "reason": "requires isError to be true"},
+    {"name": "code_with_false_error", "body": {"content": [{"type": "text", "text": "Success."}], "isError": false, "errorCode": "file_not_found"}, "member": "errorCode", "reason": "requires isError to be true"},
+    {"name": "code_not_snake_case", "body": {"content": [{"type": "text", "text": "Failed."}], "isError": true, "errorCode": "FileNotFound"}, "member": "errorCode", "reason": "must be a nonempty snake_case code"},
+    {"name": "data_url", "body": {"content": [{"type": "image", "mimeType": "image/png", "data": "data:image/png;base64,AA==", "width": 1, "height": 1}]}, "member": "content[0].data", "reason": "must not have a data: URL prefix"},
+    {"name": "bad_base64", "body": {"content": [{"type": "image", "mimeType": "image/png", "data": "not base64!", "width": 1, "height": 1}]}, "member": "content[0].data", "reason": "must be raw standard base64"},
+    {"name": "bad_mime", "body": {"content": [{"type": "image", "mimeType": "image/svg+xml", "data": "AA==", "width": 1, "height": 1}]}, "member": "content[0].mimeType", "reason": "must be image/png, image/jpeg, image/webp or image/gif"},
+    {"name": "zero_width", "body": {"content": [{"type": "image", "mimeType": "image/png", "data": "AA==", "width": 0, "height": 1}]}, "member": "content[0].width", "reason": "must be positive pixels"},
+    {"name": "zero_height", "body": {"content": [{"type": "image", "mimeType": "image/png", "data": "AA==", "width": 1, "height": 0}]}, "member": "content[0].height", "reason": "must be positive pixels"},
+    {"name": "duplicate_image_id", "body": {"content": [
+      {"type": "image", "mimeType": "image/png", "data": "AA==", "width": 1, "height": 1, "id": "same"},
+      {"type": "image", "mimeType": "image/gif", "data": "AAA=", "width": 1, "height": 1, "id": "same"}
+    ]}, "member": "content[1].id", "reason": "must be unique within the reply"},
+    {"name": "oversize", "body": {"content": [{"type": "text", "text": "x"}]}, "expand_text": {"part": 0, "repeat": 3145728}, "member": "reply", "reason": "serialized reply must be under 3 MiB"}
+  ],
+  "decode_invalid": [
+    {"name": "missing_content", "body": {"structuredContent": {"answer": 42}}, "member": "content"},
+    {"name": "structured_not_object", "body": {"content": [{"type": "text", "text": "Text."}], "structuredContent": [42]}, "member": "map"},
+    {"name": "missing_image_dimension", "body": {"content": [{"type": "image", "mimeType": "image/png", "data": "AA==", "width": 1}]}, "member": "height"},
+    {"name": "missing_text", "body": {"content": [{"type": "text"}]}, "member": "text"},
+    {"name": "missing_type", "body": {"content": [{"future": true}]}, "member": "type"},
+    {"name": "nonstring_type", "body": {"content": [{"type": 7}]}, "member": "type"}
+  ]
+}
