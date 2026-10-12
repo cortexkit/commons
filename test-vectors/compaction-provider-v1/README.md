@@ -47,3 +47,18 @@ regenerate the fixture from the provider rather than editing it.
 Every canonical vector round-trips: decoding it and encoding the result gives
 back the same JSON. Changing a vector changes the contract: bump the role
 crate's version and say why in the commit.
+
+`claude-code.json` adds native endpoints/frozen raw views and page replies,
+geometry/fill and explicit notice-id receipts. `CLAUDE_CODE_SHA256SUMS` pins this
+new fixture separately; all older vectors and `SHA256SUMS` remain unchanged.
+The capability bundle is shared from step-transform's new fixture and contains
+only synthetic epoch/version identities. Trusted caller and connection state
+are test inputs outside the wire object; serde round-trips alone never prove
+lane admission, native endpoint safety or actual provider dispatch.
+
+`claude-code-native-ingress.json` covers noncanonical member order, scalar
+escapes, signed/redacted thinking and opaque tool-input cache members.
+`claude-code-bootstrap.json` pins typed completion, incomplete ingress and
+missing-original refusal; its source digest frames each raw UTF-8 message with
+an 8-byte big-endian byte length. The source includes literal multibyte text
+and a Unicode escape. Both are included in `CLAUDE_CODE_SHA256SUMS`.

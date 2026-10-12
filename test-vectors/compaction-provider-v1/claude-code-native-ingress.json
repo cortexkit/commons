@@ -1,0 +1,31 @@
+{
+  "messages": [
+    {
+      "name": "noncanonical_scalar_and_escapes",
+      "message": {
+        "ordinal": 0,
+        "mid": "native-user",
+        "message": {"role": "user", "content": "A\n\"", "opaque": {"cache_control": {"type": "keep"}}},
+        "raw_message": "{ \"content\":\"\\u0041\\n\\\"\",\"opaque\":{\"cache_control\":{\"type\":\"keep\"}}, \"role\":\"user\" }"
+      }
+    },
+    {
+      "name": "signed_thinking_and_redacted_bytes",
+      "message": {
+        "ordinal": 1,
+        "mid": "native-assistant",
+        "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "chain\nthought", "signature": "sig+/"}, {"type": "redacted_thinking", "data": "opaque=="}]},
+        "raw_message": "{\"content\":[{\"signature\":\"sig\\u002B\\/\",\"thinking\":\"chain\\nthought\",\"type\":\"thinking\"},{\"data\":\"opaque==\",\"type\":\"redacted_thinking\"}],\"role\":\"assistant\"}"
+      }
+    },
+    {
+      "name": "opaque_tool_input_cache_control_is_not_transport",
+      "message": {
+        "ordinal": 2,
+        "mid": "native-tool-use",
+        "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "call1", "name": "demo", "input": {"cache_control": {"type": "opaque"}, "nested": [{"type": "text", "cache_control": {"opaque": true}}]}}]},
+        "raw_message": "{\"content\":[{\"input\":{\"cache_control\":{\"type\":\"opaque\"},\"nested\":[{\"type\":\"text\",\"cache_control\":{\"opaque\":true}}]},\"name\":\"demo\",\"id\":\"call1\",\"type\":\"tool_use\"}],\"role\":\"assistant\"}"
+      }
+    }
+  ]
+}

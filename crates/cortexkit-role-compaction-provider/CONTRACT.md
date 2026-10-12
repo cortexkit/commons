@@ -674,24 +674,31 @@ if no kill ended a real process.
 
 ## 18. Host runner lane
 
-This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
-(`opencode2`), not a change to ordinary runner admission or observation.
+This lane is an explicit exception for OpenCode 1 (`opencode`), OpenCode 2
+(`opencode2`) and the attested Claude Code gateway described in §19, not a
+change to ordinary runner admission or observation.
 
 ### 18.1 Admission and observation
 
 - [pinned] Admission is keyed only on the frozen plan item's params and the
   route's bind `(project_root, session, harness)` under the route's
-  authenticated principal. The bind harness must be `opencode` or `opencode2`
-  and the principal a `direct` caller bound to that conversation. Neither the
+  authenticated principal. For direct callers, the bind harness must be
+  `opencode` or `opencode2` and the principal a `direct` caller bound to that
+  conversation. The other admitted pair is daemon-attested
+  `reserved:thalamus` on its own connection with a `claude-code` bind harness
+  and the frozen `claude_code` capability bundle (§19). Neither the
   body `harness` field nor body params select this exception or confer
-  authority. The conversation key remains the §1 triple; params select
-  behaviour, never another conversation.
-- [pinned] The frozen plan opts in with `params.serializer_profile:
+  authority. The §1 triple remains the canonical external conversation identity
+  and the legacy-lane provider key. Claude Code provider state (engine namespace,
+  locks, message ledgers, cursors, views and receipts) is additionally scoped by
+  the frozen provider generation and profile generation. Params never select
+  another canonical conversation or change its project/session/agent ownership.
+- [pinned] For the direct OpenCode callers, the frozen plan opts in with `params.serializer_profile:
   "opencode-aisdk"`. Answer observation additionally requires
   `params.observation: "answer"`; both opt-ins and host admission are required
   for §18.2–§18.4. Missing or unrecognised required opt-ins grant no exception.
   The same frozen params are passed on declaration, Setup and hooks.
-- [pinned] Only this admitted direct caller may use an empty runner-group set
+- [pinned] Only an admitted caller in this section may use an empty runner-group set
   without `transcript_reads` or a `compaction.ready` service, an exception to
   §2–§3, not a global change to `role.describe.runner_groups`. It grants no
   runner-only operation, runner/Broca transcript read or other session.
@@ -700,8 +707,8 @@ This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
   runner admission, including the all-or-nothing `compaction` group and
   ready service. A runner principal with body `harness: "opencode"` and host
   params does not enter this exception, even if its route claims a host bind.
-- [pinned] This exception is no stronger than today's local direct-caller
-  trust for full-request transform. It requires the daemon caller-identity
+- [pinned] The direct-caller exception is no stronger than today's local
+  direct-caller trust for full-request transform. It requires the daemon caller-identity
   stamp once that stamp lands; body fields are never a substitute for it.
 - [pinned] From a runner principal, either host-only plan value,
   `observation: "answer"` or `serializer_profile: "opencode-aisdk"`, on
@@ -880,3 +887,267 @@ date against this contract and should be changed to match it:
 Versions and ordinals are unsigned 64-bit integers, not bounded to the
 exact-integer range of JSON readers that use doubles. Such readers must
 preserve integer precision rather than round ids, cursors or versions.
+
+## 19. Optional native Claude Code publication
+
+### 19.1 Frozen capability and attested connection
+
+- [pinned] `role.describe` and Setup requests gain optional typed `claude_code`
+  data, the shared `ClaudeCodeCapabilities` bundle specified in
+  step-transform-provider/v1 §14. The same bundle is selected and echoed in
+  `transform.declare`, frozen in the plan and echoed unchanged in Setup.
+  Existing members keep their meaning; absent optional extensions keep their
+  previous wire bytes. Existing vectors and SHA256SUMS are unchanged.
+- [pinned] The following lane-only rules activate only when BOTH the caller is
+  daemon-attested as `reserved:thalamus` on its own bound connection AND its
+  frozen plan declares `claude-code-step/v1`. A plan selecting the bundle on
+  another principal refuses `invalid_params` naming `claude_code` at
+  admission/declare. The bind harness must be `claude-code`, with resolved
+  project/session/agent and `observation=answer`. Body harnesses, params, tags
+  and plan fields never attest identity or lend authority across connections.
+  An attested but undeclared connection behaves as before. Missing extensions
+  off the lane are never a refusal; ordinary runner admission is unchanged.
+- [pinned] This pair extends §18 host admission: answer observation, no
+  transcript reads even on restart/bootstrap, no ready-service requirement,
+  immediate contiguous ingress paging only when `more=true`, and a fresh
+  request fence for each page. A final-page history gap refuses
+  `history_unreadable`, not a wait or transcript read. Ingress paging is
+  independent of optional raw replacement retrieval. Required groups are
+  relaxed only for this admitted connection, not globally in discovery.
+- [pinned] Bundle data includes profiles/generations, revision/package/wire
+  pins, epochs, exact endpoint semantics, partial-cut support, envelope/page/
+  single-message caps, raw retrieval/digest, cache revision, canonical reduction
+  and guidance, notice dispatch acknowledgement and bootstrap completion support.
+  The identifier is `claude-code-step/v1`, using the daemon `<name>/v<N>`
+  grammar. Epochs and generations are fields, never capability name suffixes.
+  Unsupported required attachment capabilities fail attachment by name; no
+  managed-to-raw fallback. Generation-aware identity, bootstrap validation and
+  persistence belong to the provider/gateway, not these serde types.
+
+### 19.2 Exact endpoints and immutable raw replacements
+
+- [pinned] `coverage` gains optional `endpoint: {message_id, part_index}`.
+  It names an exact inclusive original native top-level content-block endpoint,
+  with zero-based `part_index`; scalar content is one part at index zero without
+  changing scalar form. Remove through that complete block and retain later
+  blocks in order. It is not a `<mid>#<part>` string, nested tool-result child
+  coordinate, opaque hook `subject_part`, range endpoint or inferred summary
+  marker. `coverage.end_mid` agrees with `endpoint.message_id`.
+- [pinned] `CompactionMessage` gains optional `raw_view: FrozenView`. Freeze
+  `view_id`, `version`, `byte_length`, lowercase hexadecimal `sha256`, `profile`,
+  `profile_generation`, `provider_generation`, `lineage_id`, `endpoint` and
+  `payload` as one immutable object. `payload` is either
+  `{kind: "inline", bytes: <UTF-8 JSON string>}` preserving the raw replacement
+  bytes without parse/re-encode, or `{kind: "reference", view: ViewRef}`.
+  A reference is valid only when the frozen bundle selected `raw_view_read`;
+  otherwise publication refuses `invalid_params` naming `raw_view`, and the
+  provider must supply inline bytes. Selected references, including a hook's
+  head reference, must remain resolvable in the frozen connection, generation
+  and lineage for the lifetime of that view.
+  `ViewRef` is `{view_id, version, byte_length, sha256}`; the payload reference
+  agrees with the frozen view. Digest and length are over decoded raw UTF-8
+  bytes, not the enclosing JSON string's escapes. A later view never changes
+  those bytes or metadata. The raw view's version agrees with the compaction
+  version, and its endpoint agrees with coverage. Provider admission validates
+  the endpoint against the original native part map and signed/tool-run fences.
+- [pinned] Raw role replacement bytes stand for the existing `[from,to)` range,
+  not automatically only the head removed by a native hook cut. For a hook cut,
+  additionally freeze `cut_replacement_ref: ViewRef` for the exact head and
+  `retained_tail: [{endpoint: NativeEndpoint, engine_handle}]`, the retained
+  native-part identity map. Both are supplied together; an empty retained tail
+  is explicit. Without the mapping the gateway declines the hook cut, retains
+  the host transcript and does not acknowledge application. It must not infer
+  a head from text or assume the first two messages are special slots.
+- [pinned] Partial cuts require the frozen `partial_message_cut` capability.
+  Unknown parts, digest/view conflicts or invalid signed/tool runs fence
+  publication. An unrepresentable endpoint records
+  `last_not_applied.reason=structural` for that exact view. Never snap earlier,
+  flatten or discard the remainder. A boundary just after signed thinking is
+  not automatically a valid complete tool/reasoning run. A separate admissible
+  prior managed view is required to continue without applying the cut.
+
+### 19.3 Optional view retrieval and size refusals
+
+- [pinned] `compaction.view.read` is an optional provider-served operation a
+  runner MAY call; it is not a required op and MUST NOT be a prerequisite to
+  applying an answer. A runner that already holds verified frozen bytes can
+  skip retrieval; existing inline replacements need no new call. A runner must
+  not re-encode parsed messages as a substitute for unavailable raw bytes.
+  Existing replacements still apply inline, finished and
+  without re-hooking, with the existing range/application/request fences.
+- [pinned] Its request is `ViewReadRequest {request_id, view_id, version,
+  sha256, byte_cursor}` in the usual op envelope. Lookup is scoped to the
+  admitted connection, generation and lineage's frozen object. `byte_cursor`
+  is a zero-based offset in the raw UTF-8 bytes, initially zero; it is not a
+  message ordinal. Pages do not split UTF-8 characters. Each page echoes
+  `request_id`, `view_id`, `version`, total `byte_length`, whole-view `sha256`,
+  `byte_cursor`, `bytes` and optional `next_byte_cursor`; absence of next cursor
+  means complete. An EOF cursor may return an empty final page. Concatenating
+  pages must reproduce the exact frozen bytes and whole-view digest.
+- [pinned] `ViewReadAnswer` is typed as `answer=page` or `answer=refuse` with
+  `request_id` and a `ViewReadRefusal` code: `unknown_version`,
+  `digest_mismatch`, `invalid_cursor`, `invalid_view`, `unavailable_lane` or
+  `envelope_too_large`. An unknown id/version never silently selects latest;
+  a requested or stored digest mismatch refuses. Off-lane view reads refuse
+  `unavailable_lane`; absence of view retrieval is never a refusal. These op
+  refusals do not alter ordinary compaction refusal retryability.
+- [pinned] Every new reply envelope stays strictly below 3 MiB, reusing
+  step-transform's `DEFAULT_HOOK_CAP_BYTES` via `MAX_ENVELOPE_BYTES`. Raw page
+  size alone is not enough: account for envelope and JSON escaping overhead.
+  Declared `caps.view_page_bytes` also bounds raw bytes per page. The same
+  bundle declares ingress/hook/single-message caps (§14.2 of step-transform).
+  An unrepresentable single message refuses `invalid_params` naming `messages`
+  (status) or `message` (hook), classified by the host as
+  `provider_message_too_large`, never truncated or raw-forwarded. The ordinary
+  paging helper's oversized-first-message allowance is not this lane's policy.
+
+### 19.4 Current-request geometry and attributed fill
+
+- [pinned] `StepStatus` gains optional typed `geometry: {usable_soft,
+  usable_hard, absolute_wall, derivation}`, `output_reserve: u64`,
+  `mid_turn: bool`, and `fill: {input_tokens, basis, observed_request_id?}`.
+  Geometry/fill token values are `u64`; derivation and basis are open strings
+  for attribution, never discriminants on which readers branch. Examples are
+  `derivation="provider-observed"`, `basis="provider-observed"`,
+  `basis="measured"` and `basis="estimate"`.
+  `observed_request_id` is the provider's request id of the response whose input
+  was measured, not the compaction status's request id.
+  Existing usage, estimate and output-limit members retain their meaning.
+- [pinned] On the negotiated attested lane, geometry is required:
+  `0 < usable_soft <= usable_hard <= absolute_wall`, and
+  `absolute_wall <= context_window` when the model window is known. Missing or
+  contradictory geometry refuses `invalid_params` naming `geometry`. Everywhere
+  else geometry is optional, and if supplied it is accepted without lane
+  validation, never refused. Lane validation is separate from ordinary status
+  decoding and message/burn validation.
+- [pinned] When `output_reserve` is present, additionally require
+  `usable_hard + output_reserve <= absolute_wall`, without integer overflow.
+  On the negotiated attested lane a violation refuses `invalid_params` naming
+  `geometry`. The runner derives `usable_hard` as `absolute_wall` minus the
+  request's own `max_tokens`; `output_reserve` is that actual planned request
+  reservation, not catalog `output_limit`. Never subtract the reserve twice.
+  Use soft for bands and hard for hard-fit/refusal evidence; preserve
+  independent protected-token/tool and signed arc gates, evaluated against the
+  current status model/variant and actual window. `mid_turn` is explicit native
+  continuation evidence, not an alias for `step_kind` or permission to finalize
+  a streaming tail.
+- [pinned] Fill describes the current request's causally anchored measured input
+  or an explicitly labeled estimate. The gateway owns overlapping-response
+  sequencing and byte/request matching; the provider validates measured fill
+  against admitted request/generation evidence rather than fabricating history
+  from an unrelated last response. `fill` is optional even on this lane. The
+  runner omits it on the first turn, after a cut-off or unmeasured stream, or
+  whenever no measurement is available; it never sends a guessed zero.
+  Absence means no reading, never zero input or 0% fill and never a refusal.
+  The existing explicitly labeled estimate remains available; no model window
+  or measurement is guessed. Required geometry remains required.
+
+### 19.5 Notice dispatch acknowledgement
+
+- [pinned] Applicable `noop` and `compaction_message` replies gain optional
+  `channel2_directive: {directive_id, text, armed_at_ms}`. Next status gains
+  optional `channel2_delivered_id` and `channel2_receipt: DispatchReceipt`,
+  supplied together when acknowledging. Receipt fields are
+  `{provider_generation, lineage_id, request_id, dispatch_id,
+  applied_view: {view_id, version}, final_wire_sha256}`. The wire digest is
+  lowercase hex SHA-256 over the actual final provider-request bytes.
+- [pinned] Match the explicit notice id, never queue position, a part id, ordinal
+  watermark or `pass_complete`. Bind receipt to generation, lineage, admitted
+  request/dispatch identity, applied view and final-wire digest. Unknown ids
+  refuse `invalid_params` naming `channel2_delivered_id`; cross-generation,
+  stale or conflicting receipts refuse naming `channel2_receipt`, without
+  clearing another notice. Providers validate publication fences using their
+  durable state before accepting the receipt.
+- [pinned] A repeated acknowledgement carrying the same receipt is accepted as
+  a no-op: no refusal and no second effect. A conflicting replay refuses
+  `invalid_params` naming `channel2_receipt`. No additional reply member is
+  defined. The typed acknowledgement helper returns the original receipt;
+  integrations persist its pending state and receipts transactionally before
+  replying, so lost responses replay the same effect across restart.
+- [pinned] The runner MUST acknowledge only after the provider returned 2xx
+  response headers for the request carrying the directive. A transport error,
+  or any 4xx or 5xx response (including 529), is not dispatch and leaves the
+  notice pending. Status ingestion, answer commit, local append, a hook cut,
+  WAL intent and merely sending the request are not acknowledgement events.
+  The provider trusts the attested caller's dispatch receipt; it does
+  not independently observe the network event. An absent acknowledgement keeps
+  the exact pending notice armed and re-serves it unchanged. There is no
+  implicit expiry or position-based clearing in this extension. A separately
+  agreed explicit lease/rearm policy must not clear a different notice or
+  manufacture delivery; no such policy is negotiated by these fields.
+- [pinned] Pending notices are never armed off the attested, negotiated lane.
+  Off-lane absence is valid. Selecting the notice capability in a plan without
+  the attested principal refuses `invalid_params` naming `claude_code` at
+  admission; emitting a directive off lane refuses naming `channel2_directive`.
+  The optional extension cannot grant reduction authority, weaken protection
+  gates or imply delivery from ordinary subject service evidence.
+
+### 19.6 Native ingress raw-message provenance
+
+- [pinned] Each `StatusMessage` gains optional `raw_message: String`; hooks
+  carry the same optional member in `HookCall`. Absence off the admitted Claude
+  Code lane keeps legacy bytes and behavior unchanged. On the admitted lane,
+  each ingressed message and hook requires a nonempty sidecar that parses as
+  JSON; absence, empty bytes or invalid JSON refuses `invalid_params` naming
+  `raw_message`. Parsing for validation MUST NOT rewrite the sidecar.
+- [pinned] `raw_message` is the message's JSON bytes exactly as the harness
+  (Claude Code) sent the message to the runner, minus `cache_control` removed
+  only at Anthropic transport positions.
+  Those positions are the top level of `text`, `image`, `document`, `thinking`,
+  `redacted_thinking`, `tool_use` and `tool_result` blocks, and of `text`, `image`
+  and `document` blocks nested in `tool_result.content`. Never remove members
+  inside `tool_use.input`, and never inside opaque data. Preserve every other
+  byte, including member order, whitespace, string escapes, scalar content,
+  signatures and redacted thinking payloads.
+- [pinned] The provider MUST verify that `raw_message`, with `cache_control`
+  removed only at the listed positions, equals `message`, and refuse
+  `invalid_params` naming `raw_message` if not. The provider codec owns that
+  equivalence check, native block spans and signed-byte safety; the common
+  helper checks presence and JSON syntax without normalizing bytes. Sidecar
+  bytes and their enclosing JSON escaping count toward the existing declared
+  single-message and full-envelope caps; oversize refuses by `messages` or
+  `message` as already specified, never by truncating the sidecar.
+
+### 19.7 Explicit bootstrap completion and replay
+
+- [pinned] Applicable final ingress `noop` and `compaction_message` answers gain
+  optional `bootstrap_complete: BootstrapReceipt`. This is lane-only: require
+  the frozen bundle's `bootstrap_complete` support flag, or refuse
+  `invalid_params` naming `bootstrap_complete`. Absence off the lane is valid.
+  The former discovery string `bootstrap_receipt_format` is replaced by that
+  support flag; the format tag appears only inside the receipt.
+- [pinned] The receipt is `{format: "native-bootstrap-receipt/v1", resume_id,
+  provider_generation, profile_generation, lineage_id, source_frontier?,
+  message_count, source_sha256, frozen_bundle, initial_view}`. The source
+  frontier is `{ordinal, mid}`, the newest fully admitted original; it is
+  absent only when `message_count` is zero. `source_sha256` is computed over
+  admitted original messages in ordinal order: for each message, append the
+  8-byte unsigned big-endian length of its `raw_message` UTF-8 bytes, followed
+  by those exact bytes, to one SHA-256 stream. Rendered summaries and inferred
+  head text never enter this stream. Encode the digest as lowercase hex; an
+  empty source hashes the empty stream. The typed `bootstrap::source_sha256`
+  helper computes this framing and refuses unordered or missing raw sources.
+  `initial_view` is `{view_id, version}` for the safely applied initial view.
+- [pinned] `frozen_bundle` embeds the complete typed capability selection. It
+  MUST be exactly equal as a typed value, including the byte values of every
+  string, to the bundle frozen at admission; its typed serialization therefore
+  has identical bytes. A replay with a differing bundle refuses as a conflict,
+  `invalid_params` naming `bootstrap_complete`. The resume identity is scoped
+  by provider generation, profile generation and lineage, never by rewriting
+  the canonical project/session/agent or memory owner.
+- [pinned] First completion requires fully admitted contiguous originals,
+  verified source frontier/count/digest, validated raw provenance and a safely
+  applied initial view. `more=true` cannot return completion; neither Setup
+  ready, noop without the receipt nor `more=false` alone proves completion.
+  Missing originals refuse `history_unreadable`, not an invented transcript.
+  The provider persists completion atomically with the source/view state before
+  replying; the gateway keeps native managed publication fenced until it
+  durably records this explicit completion receipt.
+- [pinned] Repeating final ingress after a lost reply resumes the same scoped
+  bootstrap and returns the identical receipt, even with a fresh request fence.
+  Changed resume identity, source, bundle or initial view refuses
+  `invalid_params` naming `bootstrap_complete`, without replacing the original
+  receipt. `BootstrapLedger` is a reference persistence/replay helper, not proof
+  of source admission or signed-prefix safety; the provider verifies those
+  preconditions before calling it. Old-generation state remains readable for
+  rollback and is not overwritten by the new native ledger.

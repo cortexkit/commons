@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0
+
+- Preserve native ingress/hook JSON with optional raw-message sidecars, required
+  and syntax-checked only on the admitted Claude Code lane (CONTRACT.md §19.1).
+  The provider must verify that `raw_message`, with `cache_control` removed only
+  at the Anthropic transport positions listed in CONTRACT.md §19.6, equals the
+  parsed `message`. Raw bytes and JSON escaping count toward payload byte caps.
+- Reject raw payload references without selected retrieval. Add typed bootstrap completion receipts with generation-scoped replay/conflict checks, exact frozen bundle identity and length-prefixed raw-source SHA-256 framing; a final page alone is not completion.
+- Add optional typed native endpoints, frozen raw replacements and bounded, optional `compaction.view.read` with typed digest/version refusals. Inline replacements still apply without retrieval; declared single-message caps refuse rather than truncate.
+- Add typed optional geometry, output reserve, native continuation and attributed fill. Geometry is required and validated only for an attested connection whose frozen declaration selects Claude Code. Off-lane absence and supplied geometry preserve old behavior.
+- Clarify the gateway geometry invariant: a present output reserve must fit under the absolute wall with the hard input ceiling; omitted fill means no reading. Notice dispatch acknowledgement requires successful 2xx response headers, not merely sending a request.
+- Add optional notice directives and explicit next-status notice-id dispatch receipts, with an idempotent reference acknowledgement helper and conflict refusals. Pending notices remain unchanged until acknowledged; only real provider dispatch authorizes acknowledgement.
+- Publish and echo the shared optional capability bundle at describe/setup. Existing vectors and SHA256SUMS remain byte-identical; new vectors have separate checksums.
+- Minor package bump: optional fields on previously exhaustive `StatusMessage`, `CompactionMessage` and `StepAnswer` variants break Rust struct/variant literals. The wire major remains v1. Update the workspace conformance consumer's dependency range accordingly.
+
 ## 0.1.2
 
 - Step statuses gain two optional host-lane fields: `served_through_ordinal`, the highest message ordinal the host has durably served, and `unserved_subjects`, the hook answers the host never served. The subject-part check is shared with the step-transform crate, and tests now load the host-lane vectors.

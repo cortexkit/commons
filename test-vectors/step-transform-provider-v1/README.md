@@ -38,3 +38,17 @@ request is refused, naming the missing field.
 Every canonical vector round-trips: decoding it and encoding the result gives
 back the same JSON. Changing a vector changes the contract: bump the role
 crate's version and say why in the commit.
+
+`claude-code.json` adds optional native-lane vectors without changing any older
+vector or `SHA256SUMS`. `CLAUDE_CODE_SHA256SUMS` pins this new file separately.
+The bundle fragment is combined with the describe/declare base fragments to
+form their wire objects; all epochs, generations, revisions and builds in this
+fixture are synthetic, not release claims. Admission cases keep trusted
+principal metadata outside the request. The paired compaction fixture covers
+native endpoints, raw pages, geometry and explicit notice dispatch receipts.
+
+`claude-code-native-ingress.json` pins the same native raw-byte cases on hooks,
+including noncanonical order/escapes and signed/redacted blocks. The updated
+unreleased capability bundle advertises typed bootstrap completion support;
+the receipt format tag is carried only in the compaction completion receipt.
+Both Claude Code files are pinned in `CLAUDE_CODE_SHA256SUMS`.

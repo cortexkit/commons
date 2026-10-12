@@ -1,0 +1,34 @@
+{
+  "final_status": {
+    "session": "s", "harness": "claude-code", "request_id": "bootstrap-final", "lineage_id": "l1", "step_id": "step1", "step_kind": "user_turn", "model": "synthetic-model",
+    "estimate": {"request_tokens": 1}, "newest": {"ordinal": 1, "mid": "original1"},
+    "messages": [
+      {"ordinal": 0, "mid": "original0", "message": {"role": "user", "content": "original"}, "raw_message": "{\"role\":\"user\",\"content\":\"original\"}"},
+      {"ordinal": 1, "mid": "original1", "message": {"role": "user", "content": "é☺"}, "raw_message": "{ \"content\":\"é\\u263A\", \"role\":\"user\" }"}
+    ],
+    "now": 42, "geometry": {"usable_soft": 150000, "usable_hard": 180000, "absolute_wall": 200000, "derivation": "provider-observed"}
+  },
+  "answer": {
+    "answer": "noop", "request_id": "bootstrap-final",
+    "bootstrap_complete": {
+      "format": "native-bootstrap-receipt/v1", "resume_id": "resume-1",
+      "provider_generation": "synthetic-provider-generation", "profile_generation": "synthetic-profile-generation", "lineage_id": "l1",
+      "source_frontier": {"ordinal": 1, "mid": "original1"}, "message_count": 2,
+      "source_sha256": "eebbdc4cce4dd27c27653a2e95b5f461ab0decdd956aeacf99b8f09a94466cf5",
+      "frozen_bundle": {
+        "capability": "claude-code-step/v1", "principal": "reserved:thalamus", "harness": "claude-code", "profile": "claude-code-anthropic",
+        "profile_generation": "synthetic-profile-generation", "provider_generation": "synthetic-provider-generation", "observation": "answer", "commons_revision": "synthetic-commons-revision",
+        "wire_majors": {"compaction-provider": "v1", "step-transform-provider": "v1"},
+        "package_versions": {"compaction-provider": "0.2.0", "step-transform-provider": "0.2.0"},
+        "epochs": {"codec": 1, "raw_provenance": 1, "render": 1, "tagger": 1, "memory": 1, "compartment": 1},
+        "exact_endpoint": "native_top_level_inclusive", "partial_message_cut": false,
+        "caps": {"ingress_envelope_bytes": 3145728, "hook_envelope_bytes": 3145728, "single_message_bytes": 1048576, "view_page_bytes": 1024},
+        "raw_view_read": true, "digest": "sha256", "cache_policy_revision": "synthetic-cache-policy", "canonical_reduce": true, "guidance": true, "notice_dispatch_ack": true, "bootstrap_complete": true,
+        "capabilities": ["immutable-view-read/v1", "notice-dispatch-ack/v1"]
+      },
+      "initial_view": {"view_id": "initial-view", "version": 1}
+    }
+  },
+  "incomplete": {"more": true, "field": "bootstrap_complete"},
+  "missing_originals": {"answer": "refuse", "request_id": "bootstrap-final", "code": "history_unreadable", "reason": "Bootstrap originals are incomplete."}
+}

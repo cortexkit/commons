@@ -42,15 +42,19 @@ pub struct MessageRef {
     pub mid: String,
 }
 
-/// One message the status carries: its ordinal, its id and its body in the
-/// runner's message schema, with its final values (what later steps render
-/// and what executed). The same three members a `session.read` page gives
-/// each message; a runner may add others, which a provider ignores.
+/// One original message: `ordinal` is its position in the transcript lineage,
+/// `mid` is its stable opaque id and `message` is its parsed final body. The
+/// optional sidecar preserves original native JSON bytes instead of rebuilding
+/// them from the parsed body. Unknown fields are ignored.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct StatusMessage {
     pub ordinal: u64,
     pub mid: String,
     pub message: Value,
+    /// Original provider-message JSON bytes with only recognized transport
+    /// cache_control members removed; never reconstructed from `message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_message: Option<String>,
 }
 
 /// Token usage the previous step reported.
@@ -266,6 +270,18 @@ pub struct StepStatus {
     /// lineage. Omit an empty list. Parts use the step-transform role's shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unserved_subjects: Option<Vec<UnservedSubject>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<crate::geometry::Geometry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_reserve: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mid_turn: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<crate::geometry::Fill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel2_delivered_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel2_receipt: Option<crate::notice::DispatchReceipt>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -311,7 +327,95 @@ impl StepStatus {
             descends_from: None,
             served_through_ordinal: None,
             unserved_subjects: None,
+            geometry: None,
+            output_reserve: None,
+            mid_turn: None,
+            fill: None,
+            channel2_delivered_id: None,
+            channel2_receipt: None,
         }
+    }
+
+    pub fn with_geometry(mut self, geometry: crate::geometry::Geometry) -> Self {
+        self.geometry = Some(geometry);
+        self
+    }
+
+    pub fn with_output_reserve(mut self, tokens: u64) -> Self {
+        self.output_reserve = Some(tokens);
+        self
+    }
+
+    pub fn with_mid_turn(mut self, mid_turn: bool) -> Self {
+        self.mid_turn = Some(mid_turn);
+        self
+    }
+
+    pub fn with_fill(mut self, fill: crate::geometry::Fill) -> Self {
+        self.fill = Some(fill);
+        self
+    }
+
+    pub fn with_channel2_receipt(
+        mut self,
+        directive_id: impl Into<String>,
+        receipt: crate::notice::DispatchReceipt,
+    ) -> Self {
+        self.channel2_delivered_id = Some(directive_id.into());
+        self.channel2_receipt = Some(receipt);
+        self
+    }
+
+    /// Lane-only validation, separate from ordinary status validation. Caller
+    /// identity must come from the daemon connection, not this status's harness.
+    pub fn validate_claude_code(
+        &self,
+        lane: &cortexkit_role_step_transform_provider::claude_code::ClaudeCodeLane,
+        principal: &str,
+        connection: &str,
+    ) -> Result<(), cortexkit_role_step_transform_provider::claude_code::InvalidParams> {
+        use cortexkit_role_step_transform_provider::claude_code::InvalidParams;
+        let Some(bundle) = lane.selected_for(principal, connection)? else {
+            return Ok(());
+        };
+        if !self.geometry.as_ref().is_some_and(|geometry| {
+            geometry.is_valid(self.context_window)
+                && self.output_reserve.is_none_or(|reserve| {
+                    geometry
+                        .usable_hard
+                        .checked_add(reserve)
+                        .is_some_and(|reserved| reserved <= geometry.absolute_wall)
+                })
+        }) {
+            return Err(InvalidParams::new("geometry"));
+        }
+        if self.channel2_delivered_id.is_some() != self.channel2_receipt.is_some() {
+            return Err(InvalidParams::new("channel2_receipt"));
+        }
+        if self.channel2_receipt.is_some() && !bundle.notice_dispatch_ack {
+            return Err(InvalidParams::new("channel2_receipt"));
+        }
+        for message in &self.messages {
+            cortexkit_role_step_transform_provider::claude_code::check_raw_message(
+                message.raw_message.as_deref(),
+            )?;
+            if serde_json::to_vec(message)
+                .map_err(|_| InvalidParams::new("messages"))?
+                .len()
+                > bundle.caps.single_message_bytes
+            {
+                return Err(InvalidParams::new("messages"));
+            }
+        }
+        let envelope = crate::OpRequest::new(crate::ops::COMPACTION_STEP, self);
+        if serde_json::to_vec(&envelope)
+            .map_err(|_| InvalidParams::new("messages"))?
+            .len()
+            >= bundle.caps.ingress_envelope_bytes
+        {
+            return Err(InvalidParams::new("messages"));
+        }
+        Ok(())
     }
 
     pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
@@ -527,6 +631,7 @@ mod tests {
                 ordinal: 5,
                 mid: "m5".into(),
                 message: serde_json::json!({}),
+                raw_message: None,
             }],
         );
         let encoded = serde_json::to_value(&status).unwrap();
@@ -543,6 +648,7 @@ mod tests {
             ordinal,
             mid: format!("m{ordinal}"),
             message: serde_json::json!({"role": "user", "text": "x".repeat(text_len)}),
+            raw_message: None,
         }
     }
 
