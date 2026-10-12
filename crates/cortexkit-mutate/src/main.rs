@@ -155,6 +155,12 @@ struct Proof {
     old: String,
     #[arg(long, allow_hyphen_values = true)]
     new: String,
+    /// Require the old anchor to occur after this unique text in the file.
+    #[arg(long, allow_hyphen_values = true)]
+    scope_after: Option<String>,
+    /// End the anchor region at the first occurrence of this text.
+    #[arg(long, allow_hyphen_values = true, requires = "scope_after")]
+    scope_before: Option<String>,
     #[arg(long)]
     test_file: String,
     #[arg(long)]
@@ -226,6 +232,12 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
                 ""
             }
         );
+        if let Some(scope) = &row.scope {
+            println!(
+                "  anchor scope: after={:?}, before={:?}",
+                scope.after, scope.before
+            );
+        }
         if matches!(
             row.outcome,
             Outcome::WrongTest | Outcome::RedForAnotherReason
@@ -510,6 +522,10 @@ fn run() -> Result<bool> {
                 file: Some(p.file),
                 old: Some(p.old),
                 new: Some(p.new),
+                scope: p.scope_after.map(|after| AnchorScope {
+                    after,
+                    before: p.scope_before,
+                }),
                 edits: vec![],
                 test_file: p.test_file,
                 runner: p.runner.unwrap_or_else(|| {
@@ -654,6 +670,7 @@ fn explore(
         file: x.file,
         old: x.old,
         new: x.new,
+        scope: None,
         edits,
         test_file: x.test_file.unwrap_or_default(),
         runner: x.runner,
@@ -853,5 +870,63 @@ mod cli_tests {
         };
         assert_eq!(x.old.as_deref(), Some("--data-dir"));
         assert_eq!(x.new.as_deref(), Some("-x"));
+    }
+
+    #[test]
+    fn prove_parses_anchor_scope_options() {
+        let cli = Cli::try_parse_from([
+            "ckdev-mutate",
+            "prove",
+            "--id",
+            "scoped",
+            "--guards",
+            "the guard is in this function",
+            "--file",
+            "guard.rs",
+            "--old",
+            "value > 0",
+            "--new",
+            "value >= 0",
+            "--scope-after",
+            "fn guarded(",
+            "--scope-before",
+            "\nfn ",
+            "--test-file",
+            "tests.rs",
+            "--package",
+            "fixture",
+            "--expect-red",
+            "guard_test",
+        ])
+        .unwrap_or_else(|e| panic!("{e}"));
+        let Action::Prove(proof) = cli.command else {
+            panic!("expected prove")
+        };
+        assert_eq!(proof.scope_after.as_deref(), Some("fn guarded("));
+        assert_eq!(proof.scope_before.as_deref(), Some("\nfn "));
+
+        let missing_after = Cli::try_parse_from([
+            "ckdev-mutate",
+            "prove",
+            "--id",
+            "scoped",
+            "--guards",
+            "g",
+            "--file",
+            "guard.rs",
+            "--old",
+            "old",
+            "--new",
+            "new",
+            "--scope-before",
+            "end",
+            "--test-file",
+            "tests.rs",
+            "--package",
+            "fixture",
+            "--expect-red",
+            "guard_test",
+        ]);
+        assert!(missing_after.is_err());
     }
 }

@@ -125,6 +125,43 @@ independent red/green result; they never discard a binary to resolve ambiguity.
 Unique names remain plain in reports, and qualified expectations still work in
 a scoped replay observing only that one binary.
 
+### Anchor scope (0.12.0)
+
+An anchor can be unique in a file and still belong to the wrong function. For
+example, a row may target this guard:
+
+```rust
+fn assert_provisioner_signature_metadata(value: &str) -> bool {
+    value == "valid"
+}
+```
+
+If a refactor moves that guard into another function while identical text remains
+elsewhere, a file-wide `old` anchor can still match exactly once and edit the
+wrong behavior. Add a language-neutral `scope` to bound the edit to the intended
+region:
+
+```toml
+scope = { after = "fn assert_provisioner_signature_metadata(", before = "\nfn " }
+```
+
+`after` must occur exactly once; the region starts immediately after it. Optional
+`before` ends the region at its first occurrence after `after`. If omitted, the
+region extends to end of file. Within the region, `old` must occur exactly once.
+Without `scope`, the existing whole-file exactly-once rule remains unchanged.
+`check` reports a row-labeled error if either boundary is missing or ambiguous,
+or if `old` does not occur exactly once in the region. `after`, `before`, and
+`old` all use the existing exact-first LF-to-CRLF fallback. Replay edits only the
+scoped occurrence and restores the original source bytes exactly. Command rows
+use the same scope because it constrains the edit, not the test runner. A row
+has one scope, so a scoped row's `edits` must all be in one file; a scoped row
+that edits two files is refused. Inside a region, `old` may also appear elsewhere
+in the file: uniqueness is checked only within the region.
+
+`prove` accepts `--scope-after <text>` and optional `--scope-before <text>` and
+writes them as the row's `scope`; the before option requires after. Scoped rows
+also include their boundaries in text and JSON report evidence.
+
 ### Cargo feature selection (0.7.2)
 
 | Row field | Default | Applies to | Meaning |

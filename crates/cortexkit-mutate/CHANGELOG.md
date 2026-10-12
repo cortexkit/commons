@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0
+
+- Add optional row-level `scope = { after = "...", before = "..." }` anchors.
+  Check and replay require the `old` text to occur exactly once inside the
+  language-neutral region, preventing a surviving duplicate in another function
+  from being edited after a refactor. Both boundaries use the CRLF fallback;
+  command rows, `prove --scope-after`/`--scope-before`, and report evidence support
+  the same scope.
+
 ## 0.11.0
 
 - Add cargo/nextest run-set selections: `select = { filter = "substring" }`

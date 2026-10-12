@@ -90,6 +90,7 @@ impl Fixture {
             file: Some("src/lib.rs".into()),
             old: Some("value > 0".into()),
             new: Some("value >= 0".into()),
+            scope: None,
             edits: vec![],
             test_file: "test_contract.rs".into(),
             runner: "cargo".into(),
@@ -791,6 +792,7 @@ impl CommandFixture {
             file: Some("guard.py".into()),
             old: Some("ENABLED = True".into()),
             new: Some("ENABLED = False".into()),
+            scope: None,
             edits: vec![],
             test_file: "rig.py".into(),
             runner: "command".into(),
@@ -3324,6 +3326,247 @@ fn multiline_anchor_is_replaced_exactly_once() {
     assert_eq!(f.run(&c).outcome, Outcome::Caught);
 }
 
+fn check_scope_refusal(source: &str, old: &str, scope: AnchorScope) -> String {
+    let f = CommandFixture::new();
+    fs::write(f.root().join("guard.py"), source).unwrap();
+    let mut c = f.control();
+    c.old = Some(old.into());
+    c.new = Some("replacement".into());
+    c.scope = Some(scope);
+    let error = check(
+        f.root(),
+        &Catalogue {
+            control: vec![c.clone()],
+            ..Catalogue::default()
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(error.contains(&c.id), "{error}");
+    error
+}
+
+#[test]
+fn check_refuses_missing_scope_after_and_names_row() {
+    let error = check_scope_refusal(
+        "fn existing() { old }\n",
+        "old",
+        AnchorScope {
+            after: "fn missing".into(),
+            before: None,
+        },
+    );
+    assert!(error.contains("scope.after did not match"), "{error}");
+}
+
+#[test]
+fn check_refuses_scope_after_that_matches_twice() {
+    let error = check_scope_refusal(
+        "MARK filler\nMARK old\n",
+        "old",
+        AnchorScope {
+            after: "MARK".into(),
+            before: None,
+        },
+    );
+    assert!(
+        error.contains("scope.after matched 2 occurrences"),
+        "{error}"
+    );
+}
+
+#[test]
+fn check_refuses_scope_before_missing_after_region_start() {
+    let error = check_scope_refusal(
+        "START old\n",
+        "old",
+        AnchorScope {
+            after: "START".into(),
+            before: Some("END".into()),
+        },
+    );
+    assert!(
+        error.contains("scope.before did not occur after scope.after"),
+        "{error}"
+    );
+}
+
+#[test]
+fn check_refuses_old_anchor_outside_scope() {
+    let error = check_scope_refusal(
+        "START other END\nold\n",
+        "old",
+        AnchorScope {
+            after: "START".into(),
+            before: Some("END".into()),
+        },
+    );
+    assert!(
+        error.contains("old anchor matched 0 occurrences inside scope"),
+        "{error}"
+    );
+}
+
+#[test]
+fn check_refuses_ambiguous_old_anchor_inside_scope() {
+    let error = check_scope_refusal(
+        "START old old END\n",
+        "old",
+        AnchorScope {
+            after: "START".into(),
+            before: Some("END".into()),
+        },
+    );
+    assert!(
+        error.contains("old anchor matched 2 occurrences inside scope"),
+        "{error}"
+    );
+}
+
+#[test]
+fn catalogue_rejects_unknown_anchor_scope_fields() {
+    let error = toml::from_str::<Control>(
+        r#"
+id = "scoped"
+guards = "guard is bounded"
+file = "guard.py"
+old = "old"
+new = "new"
+test_file = "rig.py"
+runner = "command"
+expect_red = ["test"]
+scope = { after = "start", typo = "not accepted" }
+"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("unknown field `typo`"), "{error}");
+}
+
+#[test]
+fn prove_appends_scope_fields_for_a_command_row() {
+    let f = CommandFixture::new();
+    let original = fs::read(f.root().join("guard.py")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
+        .current_dir(f.root())
+        .args([
+            "prove",
+            "--id",
+            "scoped-command-guard",
+            "--guards",
+            "the guard must be edited in this region",
+            "--file",
+            "guard.py",
+            "--old",
+            "True",
+            "--new",
+            "False",
+            "--scope-after",
+            "ENABLED = ",
+            "--test-file",
+            "rig.py",
+            "--catch-on",
+            "output_differs",
+            "--command",
+            "python3",
+            "-c",
+            "from pathlib import Path; print(Path('guard.py').read_text(), end='')",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let catalogue: Catalogue =
+        toml::from_str(&fs::read_to_string(f.root().join("mutations.toml")).unwrap()).unwrap();
+    assert_eq!(
+        catalogue.control[0].scope,
+        Some(AnchorScope {
+            after: "ENABLED = ".into(),
+            before: None,
+        })
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("anchor scope: after=\"ENABLED = \""));
+    assert_eq!(fs::read(f.root().join("guard.py")).unwrap(), original);
+}
+
+fn committed_command_scope_row(f: &CommandFixture, source: &[u8]) -> Control {
+    fs::write(f.root().join("guard.py"), source).unwrap();
+    cmd(f.root(), "git", &["add", "guard.py"]);
+    cmd(f.root(), "git", &["commit", "-qm", "scoped fixture"]);
+    let mut c = f.control();
+    c.command = Some(vec![
+        "python3".into(),
+        "-c".into(),
+        "from pathlib import Path; print(Path('guard.py').read_text(), end='')".into(),
+    ]);
+    c.catch_on = Some("output_differs".into());
+    c.test_count_pattern = None;
+    c.expect_red.clear();
+    c.only = false;
+    c
+}
+
+#[test]
+fn scoped_anchor_edits_one_function_while_unscoped_anchor_is_ambiguous_and_restores() {
+    let f = CommandFixture::new();
+    let source = b"def target():\n    return 'same'\n\ndef other():\n    return 'same'\n";
+    let mut scoped = committed_command_scope_row(&f, source);
+    scoped.old = Some("return 'same'".into());
+    scoped.new = Some("return 'changed'".into());
+    scoped.scope = Some(AnchorScope {
+        after: "def target():\n".into(),
+        before: Some("\ndef ".into()),
+    });
+    let report = f.run(&scoped, false);
+    assert_eq!(report.outcome, Outcome::Caught, "{report:?}");
+    assert_eq!(report.scope, scoped.scope);
+    let evidence = serde_json::to_value(&report).unwrap();
+    assert_eq!(evidence["scope"]["after"], "def target():\n");
+    assert_eq!(evidence["scope"]["before"], "\ndef ");
+    assert!(
+        report
+            .test_tail
+            .contains("def target():\n    return 'changed'"),
+        "{}",
+        report.test_tail
+    );
+    assert!(
+        report.test_tail.contains("def other():\n    return 'same'"),
+        "{}",
+        report.test_tail
+    );
+    assert_eq!(fs::read(f.root().join("guard.py")).unwrap(), source);
+
+    let mut unscoped = scoped;
+    unscoped.id = "unscoped-guard".into();
+    unscoped.scope = None;
+    let report = f.run(&unscoped, false);
+    assert_eq!(report.outcome, Outcome::AnchorMissing, "{report:?}");
+    assert!(report.reason.unwrap().contains("replaced 2 occurrences"));
+    assert_eq!(fs::read(f.root().join("guard.py")).unwrap(), source);
+}
+
+#[test]
+fn scoped_anchor_crlf_fallback_edits_and_restores_exact_bytes() {
+    let f = CommandFixture::new();
+    let source = b"fn target() {\r\n    return 1\r\n}\r\nfn other() {\r\n    return 1\r\n}\r\n";
+    let mut c = committed_command_scope_row(&f, source);
+    c.old = Some("return 1\n".into());
+    c.new = Some("return 2\n".into());
+    c.scope = Some(AnchorScope {
+        after: "fn target() {\n".into(),
+        before: Some("\nfn ".into()),
+    });
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert_eq!(row.line_endings.as_deref(), Some("crlf"));
+    assert_eq!(fs::read(f.root().join("guard.py")).unwrap(), source);
+}
+
 #[test]
 fn crlf_multiline_anchor_check_replay_and_edits_restore_exact_bytes() {
     let f = Fixture::new();
@@ -4368,7 +4611,7 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
     for needle in [
         "Saved::new(",
         "saved.restore()",
-        "replaced(root, &edits)",
+        "replaced_scoped(root, &edits, c.scope.as_ref())",
         "command(c, \"build\", scope)",
         "command(c, \"run\", scope)",
         "parse_test_results(&tests.text",

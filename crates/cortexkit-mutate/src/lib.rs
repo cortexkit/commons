@@ -44,6 +44,14 @@ pub struct Edit {
     pub new: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorScope {
+    pub after: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Control {
@@ -55,6 +63,8 @@ pub struct Control {
     pub file: Option<String>,
     pub old: Option<String>,
     pub new: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AnchorScope>,
     #[serde(default)]
     pub edits: Vec<Edit>,
     pub test_file: String,
@@ -1345,7 +1355,74 @@ struct Replacements {
     used_crlf: bool,
 }
 
-fn replaced(root: &Path, edits: &[Edit]) -> Result<Replacements> {
+fn anchor_form(text: &str, anchor: &str) -> (String, bool) {
+    if text.contains(anchor)
+        || !text.contains("\r\n")
+        || !anchor.contains('\n')
+        || anchor.contains('\r')
+    {
+        (anchor.to_owned(), false)
+    } else {
+        (anchor.replace('\n', "\r\n"), true)
+    }
+}
+
+fn region(text: &str, file: &str, scope: &AnchorScope) -> Result<(usize, usize, bool)> {
+    let (after, after_crlf) = anchor_form(text, &scope.after);
+    let after_matches = text.match_indices(&after).collect::<Vec<_>>();
+    if after_matches.is_empty() {
+        return Err(format!(
+            "ANCHOR_SCOPE_AFTER_MISSING {file}: scope.after did not match"
+        ));
+    }
+    if after_matches.len() != 1 {
+        return Err(format!(
+            "ANCHOR_SCOPE_AFTER_AMBIGUOUS {file}: scope.after matched {} occurrences",
+            after_matches.len()
+        ));
+    }
+    let start = after_matches[0].0 + after.len();
+    let mut used_crlf = after_crlf;
+    let end = if let Some(before) = &scope.before {
+        let (mut before_form, mut before_crlf) = (before.clone(), false);
+        if !text[start..].contains(&before_form)
+            && text.contains("\r\n")
+            && before.contains('\n')
+            && !before.contains('\r')
+        {
+            before_form = before.replace('\n', "\r\n");
+            before_crlf = true;
+        }
+        let Some(offset) = text[start..].find(&before_form) else {
+            return Err(format!(
+                "ANCHOR_SCOPE_BEFORE_MISSING {file}: scope.before did not occur after scope.after"
+            ));
+        };
+        used_crlf |= before_crlf;
+        start + offset
+    } else {
+        text.len()
+    };
+    Ok((start, end, used_crlf))
+}
+
+fn replaced_scoped(
+    root: &Path,
+    edits: &[Edit],
+    scope: Option<&AnchorScope>,
+) -> Result<Replacements> {
+    // A row has one scope, and its boundaries are text inside one file, so a
+    // scoped row whose edits touch several files has no single meaning.
+    if scope.is_some() {
+        let mut names = edits.iter().map(|edit| edit.file.as_str());
+        if let Some(first) = names.next() {
+            if let Some(other) = names.find(|name| *name != first) {
+                return Err(format!(
+                    "ANCHOR_SCOPE_MULTI_FILE {first}: scope applies to one file, but the row also edits {other}"
+                ));
+            }
+        }
+    }
     let mut files = BTreeMap::new();
     let mut used_crlf = false;
     for edit in edits {
@@ -1357,24 +1434,51 @@ fn replaced(root: &Path, edits: &[Edit]) -> Result<Replacements> {
             );
         }
         let text = files.get_mut(&path).expect("inserted file");
+        let (region_start, region_end, region_crlf) = match scope {
+            Some(scope) => region(text, &edit.file, scope)?,
+            None => (0, text.len(), false),
+        };
+        used_crlf |= region_crlf;
+        let search = &text[region_start..region_end];
         let mut old = edit.old.clone();
         let mut new = edit.new.clone();
-        let mut count = text.matches(&old).count();
+        let mut positions = search.match_indices(&old).collect::<Vec<_>>();
         // Git may check out LF-authored sources as CRLF. Prefer byte-exact
         // anchors, even in mixed-ending files; never combine match counts.
-        if count == 0 && text.contains("\r\n") && old.contains('\n') && !old.contains('\r') {
+        let mut old_crlf = false;
+        if positions.is_empty()
+            && text.contains("\r\n")
+            && old.contains('\n')
+            && !old.contains('\r')
+        {
             old = old.replace('\n', "\r\n");
             new = new.replace('\n', "\r\n");
-            count = text.matches(&old).count();
-            used_crlf = true;
+            positions = search.match_indices(&old).collect();
+            old_crlf = true;
         }
-        if count != 1 {
-            return Err(format!(
-                "ANCHOR_MISSING {}: replaced {count} occurrences",
-                edit.file
-            ));
+        if positions.len() != 1 {
+            if scope.is_some() {
+                let reason = if positions.is_empty() {
+                    "ANCHOR_SCOPE_OLD_MISSING"
+                } else {
+                    "ANCHOR_SCOPE_OLD_AMBIGUOUS"
+                };
+                return Err(format!(
+                    "{reason} {}: old anchor matched {} occurrences inside scope",
+                    edit.file,
+                    positions.len()
+                ));
+            } else {
+                return Err(format!(
+                    "ANCHOR_MISSING {}: replaced {} occurrences",
+                    edit.file,
+                    positions.len()
+                ));
+            }
         }
-        *text = text.replace(&old, &new);
+        used_crlf |= old_crlf;
+        let start = region_start + positions[0].0;
+        text.replace_range(start..start + old.len(), &new);
     }
     Ok(Replacements { files, used_crlf })
 }
@@ -1427,7 +1531,10 @@ pub struct Report {
     pub id: String,
     pub source: RowSource,
     pub outcome: Outcome,
-    /// "crlf" when at least one edit used the LF-to-CRLF anchor retry.
+    /// The row's optional text boundaries, retained as evidence for the edit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AnchorScope>,
+    /// "crlf" when an old anchor or scope boundary used the LF-to-CRLF fallback.
     /// Absent when every anchor matched byte-exactly.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_endings: Option<String>,
@@ -1481,6 +1588,7 @@ impl Report {
             id: c.id.clone(),
             source: c.source.clone(),
             outcome: Outcome::Error,
+            scope: c.scope.clone(),
             line_endings: None,
             timed_out_phase: None,
             red: vec![],
@@ -3788,9 +3896,9 @@ fn replay(
         Err(e) => return Err(e),
     };
     let work = (|| -> Result<()> {
-        let replacement = match replaced(root, &edits) {
+        let replacement = match replaced_scoped(root, &edits, c.scope.as_ref()) {
             Ok(f) => f,
-            Err(e) if e.starts_with("ANCHOR_MISSING") => {
+            Err(e) if e.starts_with("ANCHOR_") => {
                 report.outcome = Outcome::AnchorMissing;
                 report.reason = Some(e);
                 return Ok(());
@@ -4252,7 +4360,8 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
     let rows: Vec<_> = catalogue.control.iter().collect();
     let mut session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
     for c in &catalogue.control {
-        replaced(root, &c.edits()?).map_err(|e| format!("{}: {e}", c.label()))?;
+        replaced_scoped(root, &c.edits()?, c.scope.as_ref())
+            .map_err(|e| format!("{}: {e}", c.label()))?;
         // Unreachable rows have no names to discover. Command rows have no list
         // protocol: replay verifies their expected ids with a fresh baseline.
         if !c.matches_platform()
@@ -4737,16 +4846,48 @@ mod line_ending_tests {
     fn apply(bytes: &[u8], old: &str, new: &str) -> Result<Replacements> {
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("source.rs"), bytes).unwrap();
-        let result = replaced(
+        let result = replaced_scoped(
             root.path(),
             &[Edit {
                 file: "source.rs".into(),
                 old: old.into(),
                 new: new.into(),
             }],
+            None,
         );
         assert_eq!(fs::read(root.path().join("source.rs")).unwrap(), bytes);
         result
+    }
+
+    #[test]
+    fn scoped_rows_refuse_edits_in_more_than_one_file() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("a.rs"), "fn a() { x }\n").unwrap();
+        fs::write(root.path().join("b.rs"), "fn a() { x }\n").unwrap();
+        let edit = |file: &str| Edit {
+            file: file.into(),
+            old: "x".into(),
+            new: "y".into(),
+        };
+        let scope = AnchorScope {
+            after: "fn a()".into(),
+            before: None,
+        };
+        let error = replaced_scoped(root.path(), &[edit("a.rs"), edit("b.rs")], Some(&scope))
+            .err()
+            .expect("a scoped row editing two files is refused");
+        assert!(error.starts_with("ANCHOR_SCOPE_MULTI_FILE a.rs"), "{error}");
+        // Two scoped edits in the same file stay allowed.
+        fs::write(root.path().join("a.rs"), "fn a() { x; z }\n").unwrap();
+        let same_file = [
+            edit("a.rs"),
+            Edit {
+                file: "a.rs".into(),
+                old: "z".into(),
+                new: "w".into(),
+            },
+        ];
+        assert!(replaced_scoped(root.path(), &same_file, Some(&scope)).is_ok());
     }
 
     #[test]
@@ -5489,6 +5630,7 @@ mod order_tests {
             file: Some(file.into()),
             old: Some("a".into()),
             new: Some("b".into()),
+            scope: None,
             edits: vec![],
             test_file: file.into(),
             runner: "cargo".into(),
