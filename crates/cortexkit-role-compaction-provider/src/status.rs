@@ -42,15 +42,19 @@ pub struct MessageRef {
     pub mid: String,
 }
 
-/// One message the status carries: its ordinal, its id and its body in the
-/// runner's message schema, with its final values (what later steps render
-/// and what executed). The same three members a `session.read` page gives
-/// each message; a runner may add others, which a provider ignores.
+/// One original message: `ordinal` is its position in the transcript lineage,
+/// `mid` is its stable opaque id and `message` is its parsed final body. The
+/// optional sidecar preserves original native JSON bytes instead of rebuilding
+/// them from the parsed body. Unknown fields are ignored.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct StatusMessage {
     pub ordinal: u64,
     pub mid: String,
     pub message: Value,
+    /// Original provider-message JSON bytes with only recognized transport
+    /// cache_control members removed; never reconstructed from `message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_message: Option<String>,
 }
 
 /// Token usage the previous step reported.
@@ -392,6 +396,9 @@ impl StepStatus {
             return Err(InvalidParams::new("channel2_receipt"));
         }
         for message in &self.messages {
+            cortexkit_role_step_transform_provider::claude_code::check_raw_message(
+                message.raw_message.as_deref(),
+            )?;
             if serde_json::to_vec(message)
                 .map_err(|_| InvalidParams::new("messages"))?
                 .len()
@@ -624,6 +631,7 @@ mod tests {
                 ordinal: 5,
                 mid: "m5".into(),
                 message: serde_json::json!({}),
+                raw_message: None,
             }],
         );
         let encoded = serde_json::to_value(&status).unwrap();
@@ -640,6 +648,7 @@ mod tests {
             ordinal,
             mid: format!("m{ordinal}"),
             message: serde_json::json!({"role": "user", "text": "x".repeat(text_len)}),
+            raw_message: None,
         }
     }
 

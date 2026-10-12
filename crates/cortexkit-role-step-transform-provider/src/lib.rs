@@ -100,6 +100,7 @@ pub(crate) mod vectors {
     /// Every vector file. A test checks this list against the directory, so
     /// a new file cannot land without a test reading it.
     pub const FILES: &[&str] = &[
+        "claude-code-native-ingress.json",
         "claude-code.json",
         "declare.json",
         "errors.json",

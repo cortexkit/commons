@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 pub mod answer;
+pub mod bootstrap;
 pub mod describe;
 pub mod errors;
 pub mod fence;
@@ -106,6 +107,8 @@ pub(crate) mod vectors {
     /// Every vector file. A test checks this list against the directory, so
     /// a new file cannot land without a test reading it.
     pub const FILES: &[&str] = &[
+        "claude-code-bootstrap.json",
+        "claude-code-native-ingress.json",
         "claude-code.json",
         "answers.json",
         "errors.json",

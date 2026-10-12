@@ -65,7 +65,7 @@ pub struct ClaudeCodeCapabilities {
     pub canonical_reduce: bool,
     pub guidance: bool,
     pub notice_dispatch_ack: bool,
-    pub bootstrap_receipt_format: String,
+    pub bootstrap_complete: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
 }
@@ -79,15 +79,21 @@ impl ClaudeCodeCapabilities {
                 .capabilities
                 .iter()
                 .any(|id| !is_valid_capability_identifier(id))
-            || !is_valid_capability_identifier(&self.bootstrap_receipt_format)
             || self.principal != PRINCIPAL
             || self.harness != "claude-code"
             || self.observation != "answer"
             || self.commons_revision.is_empty()
             || self.cache_policy_revision.is_empty()
-            || ["codec", "raw_provenance", "render"]
-                .iter()
-                .any(|epoch| !self.epochs.contains_key(*epoch))
+            || [
+                "codec",
+                "raw_provenance",
+                "render",
+                "tagger",
+                "memory",
+                "compartment",
+            ]
+            .iter()
+            .any(|epoch| !self.epochs.contains_key(*epoch))
             || ["compaction-provider", "step-transform-provider"]
                 .iter()
                 .any(|role| {
@@ -201,4 +207,17 @@ pub fn is_valid_capability_identifier(identifier: &str) -> bool {
         return false;
     }
     matches!(version.parse::<u64>(), Ok(value) if (1..=u64::from(u32::MAX)).contains(&value))
+}
+
+/// Check presence and JSON syntax without re-encoding the sidecar. The native
+/// provider codec separately verifies equality to the parsed message after
+/// removing only Anthropic transport-level `cache_control` members at the
+/// positions listed in this crate's CONTRACT.md §14.3.
+pub fn check_raw_message(raw_message: Option<&str>) -> Result<(), InvalidParams> {
+    let raw = raw_message
+        .filter(|raw| !raw.is_empty())
+        .ok_or_else(|| InvalidParams::new("raw_message"))?;
+    serde_json::from_str::<serde_json::Value>(raw)
+        .map_err(|_| InvalidParams::new("raw_message"))?;
+    Ok(())
 }

@@ -74,6 +74,10 @@ pub struct HookCall {
         deserialize_with = "present_message"
     )]
     pub message: Option<Value>,
+    /// Exact provider-message JSON bytes after removing only recognized
+    /// transport cache markers, not a serialization of the parsed message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_message: Option<String>,
     /// On the first hook of a lineage, the history it continues. A provider
     /// must hold the named lineage through this ordinal, never guess it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,14 +120,24 @@ impl HookCall {
         let Some(bundle) = lane.selected_for(principal, connection)? else {
             return Ok(());
         };
-        if let Some(message) = &self.message {
-            if serde_json::to_vec(message)
-                .map_err(|_| InvalidParams::new("message"))?
-                .len()
-                > bundle.caps.single_message_bytes
-            {
-                return Err(InvalidParams::new("message"));
-            }
+        crate::claude_code::check_raw_message(self.raw_message.as_deref())?;
+        #[derive(Serialize)]
+        struct MessageAndRawBytes<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            message: Option<&'a Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            raw_message: Option<&'a str>,
+        }
+        let message = MessageAndRawBytes {
+            message: self.message.as_ref(),
+            raw_message: self.raw_message.as_deref(),
+        };
+        if serde_json::to_vec(&message)
+            .map_err(|_| InvalidParams::new("message"))?
+            .len()
+            > bundle.caps.single_message_bytes
+        {
+            return Err(InvalidParams::new("message"));
         }
         let envelope = crate::OpRequest::new(crate::ops::TRANSFORM_HOOK, self);
         if serde_json::to_vec(&envelope)
@@ -144,6 +158,7 @@ impl HookCall {
             subject_mid: None,
             subject_ordinal: None,
             message: None,
+            raw_message: None,
             descends_from: None,
             served_through_ordinal: None,
             unserved_subjects: None,
@@ -163,6 +178,11 @@ impl HookCall {
     pub fn with_subject_identity(mut self, mid: impl Into<String>, ordinal: u64) -> Self {
         self.subject_mid = Some(mid.into());
         self.subject_ordinal = Some(ordinal);
+        self
+    }
+
+    pub fn with_raw_message(mut self, raw_message: impl Into<String>) -> Self {
+        self.raw_message = Some(raw_message.into());
         self
     }
 

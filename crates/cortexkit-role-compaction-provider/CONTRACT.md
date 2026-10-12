@@ -688,8 +688,11 @@ change to ordinary runner admission or observation.
   `reserved:thalamus` on its own connection with a `claude-code` bind harness
   and the frozen `claude_code` capability bundle (§19). Neither the
   body `harness` field nor body params select this exception or confer
-  authority. The conversation key remains the §1 triple; params select
-  behaviour, never another conversation.
+  authority. The §1 triple remains the canonical external conversation identity
+  and the legacy-lane provider key. Claude Code provider state (engine namespace,
+  locks, message ledgers, cursors, views and receipts) is additionally scoped by
+  the frozen provider generation and profile generation. Params never select
+  another canonical conversation or change its project/session/agent ownership.
 - [pinned] For the direct OpenCode callers, the frozen plan opts in with `params.serializer_profile:
   "opencode-aisdk"`. Answer observation additionally requires
   `params.observation: "answer"`; both opt-ins and host admission are required
@@ -914,7 +917,7 @@ preserve integer precision rather than round ids, cursors or versions.
 - [pinned] Bundle data includes profiles/generations, revision/package/wire
   pins, epochs, exact endpoint semantics, partial-cut support, envelope/page/
   single-message caps, raw retrieval/digest, cache revision, canonical reduction
-  and guidance, notice dispatch acknowledgement and bootstrap receipt format.
+  and guidance, notice dispatch acknowledgement and bootstrap completion support.
   The identifier is `claude-code-step/v1`, using the daemon `<name>/v<N>`
   grammar. Epochs and generations are fields, never capability name suffixes.
   Unsupported required attachment capabilities fail attachment by name; no
@@ -936,6 +939,11 @@ preserve integer precision rather than round ids, cursors or versions.
   `payload` as one immutable object. `payload` is either
   `{kind: "inline", bytes: <UTF-8 JSON string>}` preserving the raw replacement
   bytes without parse/re-encode, or `{kind: "reference", view: ViewRef}`.
+  A reference is valid only when the frozen bundle selected `raw_view_read`;
+  otherwise publication refuses `invalid_params` naming `raw_view`, and the
+  provider must supply inline bytes. Selected references, including a hook's
+  head reference, must remain resolvable in the frozen connection, generation
+  and lineage for the lifetime of that view.
   `ViewRef` is `{view_id, version, byte_length, sha256}`; the payload reference
   agrees with the frozen view. Digest and length are over decoded raw UTF-8
   bytes, not the enclosing JSON string's escapes. A later view never changes
@@ -962,7 +970,10 @@ preserve integer precision rather than round ids, cursors or versions.
 
 - [pinned] `compaction.view.read` is an optional provider-served operation a
   runner MAY call; it is not a required op and MUST NOT be a prerequisite to
-  applying an answer. Existing replacements still apply inline, finished and
+  applying an answer. A runner that already holds verified frozen bytes can
+  skip retrieval; existing inline replacements need no new call. A runner must
+  not re-encode parsed messages as a substitute for unavailable raw bytes.
+  Existing replacements still apply inline, finished and
   without re-hooking, with the existing range/application/request fences.
 - [pinned] Its request is `ViewReadRequest {request_id, view_id, version,
   sha256, byte_cursor}` in the usual op envelope. Lookup is scoped to the
@@ -1070,3 +1081,72 @@ preserve integer precision rather than round ids, cursors or versions.
   admission; emitting a directive off lane refuses naming `channel2_directive`.
   The optional extension cannot grant reduction authority, weaken protection
   gates or imply delivery from ordinary subject service evidence.
+
+### 19.6 Native ingress raw-message provenance
+
+- [pinned] Each `StatusMessage` gains optional `raw_message: String`; hooks
+  carry the same optional member in `HookCall`. Absence off the admitted Claude
+  Code lane keeps legacy bytes and behavior unchanged. On the admitted lane,
+  each ingressed message and hook requires a nonempty sidecar that parses as
+  JSON; absence, empty bytes or invalid JSON refuses `invalid_params` naming
+  `raw_message`. Parsing for validation MUST NOT rewrite the sidecar.
+- [pinned] `raw_message` is the message's JSON bytes exactly as sent to the
+  provider, minus `cache_control` removed only at Anthropic transport positions.
+  Those positions are the top level of `text`, `image`, `document`, `thinking`,
+  `redacted_thinking`, `tool_use` and `tool_result` blocks, and of `text`, `image`
+  and `document` blocks nested in `tool_result.content`. Never remove members
+  inside `tool_use.input`, and never inside opaque data. Preserve every other
+  byte, including member order, whitespace, string escapes, scalar content,
+  signatures and redacted thinking payloads.
+- [pinned] The provider MUST verify that `raw_message`, with `cache_control`
+  removed only at the listed positions, equals `message`, and refuse
+  `invalid_params` naming `raw_message` if not. The provider codec owns that
+  equivalence check, native block spans and signed-byte safety; the common
+  helper checks presence and JSON syntax without normalizing bytes. Sidecar
+  bytes and their enclosing JSON escaping count toward the existing declared
+  single-message and full-envelope caps; oversize refuses by `messages` or
+  `message` as already specified, never by truncating the sidecar.
+
+### 19.7 Explicit bootstrap completion and replay
+
+- [pinned] Applicable final ingress `noop` and `compaction_message` answers gain
+  optional `bootstrap_complete: BootstrapReceipt`. This is lane-only: require
+  the frozen bundle's `bootstrap_complete` support flag, or refuse
+  `invalid_params` naming `bootstrap_complete`. Absence off the lane is valid.
+  The former discovery string `bootstrap_receipt_format` is replaced by that
+  support flag; the format tag appears only inside the receipt.
+- [pinned] The receipt is `{format: "native-bootstrap-receipt/v1", resume_id,
+  provider_generation, profile_generation, lineage_id, source_frontier?,
+  message_count, source_sha256, frozen_bundle, initial_view}`. The source
+  frontier is `{ordinal, mid}`, the newest fully admitted original; it is
+  absent only when `message_count` is zero. `source_sha256` is computed over
+  admitted original messages in ordinal order: for each message, append the
+  8-byte unsigned big-endian length of its `raw_message` UTF-8 bytes, followed
+  by those exact bytes, to one SHA-256 stream. Rendered summaries and inferred
+  head text never enter this stream. Encode the digest as lowercase hex; an
+  empty source hashes the empty stream. The typed `bootstrap::source_sha256`
+  helper computes this framing and refuses unordered or missing raw sources.
+  `initial_view` is `{view_id, version}` for the safely applied initial view.
+- [pinned] `frozen_bundle` embeds the complete typed capability selection. It
+  MUST be exactly equal as a typed value, including the byte values of every
+  string, to the bundle frozen at admission; its typed serialization therefore
+  has identical bytes. A replay with a differing bundle refuses as a conflict,
+  `invalid_params` naming `bootstrap_complete`. The resume identity is scoped
+  by provider generation, profile generation and lineage, never by rewriting
+  the canonical project/session/agent or memory owner.
+- [pinned] First completion requires fully admitted contiguous originals,
+  verified source frontier/count/digest, validated raw provenance and a safely
+  applied initial view. `more=true` cannot return completion; neither Setup
+  ready, noop without the receipt nor `more=false` alone proves completion.
+  Missing originals refuse `history_unreadable`, not an invented transcript.
+  The provider persists completion atomically with the source/view state before
+  replying; the gateway keeps native managed publication fenced until it
+  durably records this explicit completion receipt.
+- [pinned] Repeating final ingress after a lost reply resumes the same scoped
+  bootstrap and returns the identical receipt, even with a fresh request fence.
+  Changed resume identity, source, bundle or initial view refuses
+  `invalid_params` naming `bootstrap_complete`, without replacing the original
+  receipt. `BootstrapLedger` is a reference persistence/replay helper, not proof
+  of source admission or signed-prefix safety; the provider verifies those
+  preconditions before calling it. Old-generation state remains readable for
+  rollback and is not overwritten by the new native ledger.

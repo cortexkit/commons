@@ -65,6 +65,7 @@ fn summary_coverage_round_trip() {
         compaction: CompactionMessage::new("c", 2, Range::new(0, 1), vec![]),
         coverage: Some(Coverage::new("m0", 0)),
         channel2_directive: None,
+        bootstrap_complete: None,
     };
     assert_eq!(
         serde_json::to_value(answer).unwrap()["coverage"],
@@ -164,6 +165,7 @@ fn absent_answer_fields_preserve_legacy_bytes() {
             compaction: CompactionMessage::new("c", 1, Range::new(0, 0), vec![]),
             coverage: None,
             channel2_directive: None,
+            bootstrap_complete: None,
         })
         .unwrap(),
         r#"{"answer":"compaction_message","request_id":"r1","compaction":{"compaction_id":"c","version":1,"range":{"from":0,"to":0},"replacement":[]}}"#

@@ -46,3 +46,9 @@ form their wire objects; all epochs, generations, revisions and builds in this
 fixture are synthetic, not release claims. Admission cases keep trusted
 principal metadata outside the request. The paired compaction fixture covers
 native endpoints, raw pages, geometry and explicit notice dispatch receipts.
+
+`claude-code-native-ingress.json` pins the same native raw-byte cases on hooks,
+including noncanonical order/escapes and signed/redacted blocks. The updated
+unreleased capability bundle advertises typed bootstrap completion support;
+the receipt format tag is carried only in the compaction completion receipt.
+Both Claude Code files are pinned in `CLAUDE_CODE_SHA256SUMS`.

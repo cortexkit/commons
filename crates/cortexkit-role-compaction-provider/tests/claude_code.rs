@@ -113,6 +113,7 @@ fn off_lane_absence_and_supplied_geometry_preserve_old_behavior() {
         let answer = StepAnswer::Noop {
             request_id: "r".into(),
             channel2_directive: None,
+            bootstrap_complete: None,
         };
         assert_eq!(
             answer.validate_claude_code(&lane, principal, "connection1"),
@@ -499,6 +500,7 @@ fn oversized_single_message_refuses_by_name_without_truncation() {
         mid: "m0".into(),
         ordinal: 0,
         message: message.clone(),
+        raw_message: Some(serde_json::to_string(&message).unwrap()),
     }];
     let before = status.messages.clone();
     let refusal = status
@@ -562,7 +564,14 @@ fn new_vector_checksums_pin_both_role_fixtures() {
             );
             checked += 1;
         }
-        assert_eq!(checked, 1);
+        assert_eq!(
+            checked,
+            if role == "compaction-provider-v1" {
+                3
+            } else {
+                2
+            }
+        );
     }
 }
 
@@ -615,4 +624,332 @@ fn lane_status_without_fill_is_no_reading_and_accepted() {
         decoded.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
         Ok(())
     );
+}
+
+fn native_vectors() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../test-vectors/compaction-provider-v1/claude-code-native-ingress.json"
+    ))
+    .unwrap()
+}
+fn bootstrap_vectors() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../test-vectors/compaction-provider-v1/claude-code-bootstrap.json"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn raw_message_sidecars_round_trip_exact_native_bytes() {
+    assert_eq!(native_vectors()["messages"].as_array().unwrap().len(), 3);
+    let fingerprints = [
+        "22df092521ad964b451d420181020792da30ed998bc199ad8fe639e09ac819cc",
+        "46a6dba3e6a8f3805f212b32e9e09437c22a86dd3a61ea8550bed4547172cdf0",
+        "2d1eef46f965378bba443f945f5b55bf5244595f7ae78a6a182174f1c0b1b3a1",
+    ];
+    for (case, fingerprint) in native_vectors()["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(fingerprints)
+    {
+        let message: StatusMessage = round_trip(&case["message"]);
+        assert_eq!(
+            sha256(message.raw_message.as_ref().unwrap().as_bytes()),
+            fingerprint
+        );
+        let decoded: StatusMessage =
+            serde_json::from_slice(&serde_json::to_vec(&message).unwrap()).unwrap();
+        assert_eq!(
+            decoded.raw_message.as_ref().unwrap().as_bytes(),
+            case["message"]["raw_message"].as_str().unwrap().as_bytes()
+        );
+        let mut status = status();
+        status.messages = vec![message];
+        assert_eq!(
+            status.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
+            Ok(())
+        );
+    }
+}
+
+#[test]
+fn raw_message_required_and_json_valid_on_admitted_status() {
+    let message: StatusMessage =
+        serde_json::from_value(native_vectors()["messages"][0]["message"].clone()).unwrap();
+    for raw in [None, Some(String::new()), Some("not-json".into())] {
+        let mut status = status();
+        let mut message = message.clone();
+        message.raw_message = raw;
+        status.messages = vec![message];
+        let refusal = status
+            .validate_claude_code(&lane(), PRINCIPAL, "connection1")
+            .unwrap_err();
+        assert_eq!(refusal.field, "raw_message");
+        assert_eq!(refusal.code(), "invalid_params");
+        let off = ClaudeCodeLane::admit(PRINCIPAL, "connection1", None).unwrap();
+        assert_eq!(
+            status.validate_claude_code(&off, PRINCIPAL, "connection1"),
+            Ok(())
+        );
+    }
+}
+
+#[test]
+fn raw_sidecar_counts_toward_status_single_message_cap() {
+    let mut status = status();
+    let mut message: StatusMessage =
+        serde_json::from_value(native_vectors()["messages"][0]["message"].clone()).unwrap();
+    message.raw_message = Some(format!(
+        "{}{}",
+        " ".repeat(bundle().caps.single_message_bytes),
+        message.raw_message.unwrap()
+    ));
+    status.messages = vec![message];
+    assert_eq!(
+        status
+            .validate_claude_code(&lane(), PRINCIPAL, "connection1")
+            .unwrap_err()
+            .field,
+        "messages"
+    );
+}
+
+#[test]
+fn reference_payload_requires_selected_view_retrieval() {
+    let mut wire = vectors()["replacement"].clone();
+    wire["compaction"]["raw_view"]["payload"] = json!({"kind": "reference", "view": view().view});
+    let answer: StepAnswer = round_trip(&wire);
+    assert_eq!(
+        answer.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
+        Ok(())
+    );
+    let mut selected = bundle();
+    selected.raw_view_read = false;
+    let without_read = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(selected)).unwrap();
+    assert_eq!(
+        answer
+            .validate_claude_code(&without_read, PRINCIPAL, "connection1")
+            .unwrap_err()
+            .field,
+        "raw_view"
+    );
+    let inline: StepAnswer = serde_json::from_value(vectors()["replacement"].clone()).unwrap();
+    assert_eq!(
+        inline.validate_claude_code(&without_read, PRINCIPAL, "connection1"),
+        Ok(())
+    );
+}
+
+fn bootstrap_receipt() -> cortexkit_role_compaction_provider::bootstrap::BootstrapReceipt {
+    serde_json::from_value(bootstrap_vectors()["answer"]["bootstrap_complete"].clone()).unwrap()
+}
+fn bootstrap_status() -> StepStatus {
+    serde_json::from_value(bootstrap_vectors()["final_status"].clone()).unwrap()
+}
+fn bootstrap_ledger() -> cortexkit_role_compaction_provider::bootstrap::BootstrapLedger {
+    cortexkit_role_compaction_provider::bootstrap::BootstrapLedger::new(
+        "synthetic-provider-generation",
+        "synthetic-profile-generation",
+        "l1",
+    )
+}
+
+#[test]
+fn bootstrap_receipt_round_trip_and_lost_reply_replay_are_identical() {
+    use cortexkit_role_compaction_provider::bootstrap::{BootstrapLedger, BootstrapReceipt};
+    let answer: StepAnswer = round_trip(&bootstrap_vectors()["answer"]);
+    round_trip::<StepStatus>(&bootstrap_vectors()["final_status"]);
+    round_trip::<BootstrapReceipt>(&bootstrap_vectors()["answer"]["bootstrap_complete"]);
+    assert_eq!(
+        answer.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
+        Ok(())
+    );
+    let mut ledger = bootstrap_ledger();
+    let first = ledger
+        .complete(
+            &lane(),
+            PRINCIPAL,
+            "connection1",
+            &bootstrap_status(),
+            bootstrap_receipt(),
+        )
+        .unwrap();
+    let mut restarted: BootstrapLedger =
+        serde_json::from_slice(&serde_json::to_vec(&ledger).unwrap()).unwrap();
+    let mut retry = bootstrap_status();
+    retry.request_id = "fresh-retry-fence".into();
+    let again = restarted
+        .complete(
+            &lane(),
+            PRINCIPAL,
+            "connection1",
+            &retry,
+            bootstrap_receipt(),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&again).unwrap(),
+        serde_json::to_vec(&first).unwrap()
+    );
+}
+
+#[test]
+fn bootstrap_conflicting_replay_refuses_by_receipt_name() {
+    let mut ledger = bootstrap_ledger();
+    ledger
+        .complete(
+            &lane(),
+            PRINCIPAL,
+            "connection1",
+            &bootstrap_status(),
+            bootstrap_receipt(),
+        )
+        .unwrap();
+    for field in [
+        "resume_id",
+        "message_count",
+        "source_sha256",
+        "initial_view",
+    ] {
+        let mut wire = serde_json::to_value(bootstrap_receipt()).unwrap();
+        wire[field] = match field {
+            "message_count" => json!(3),
+            "source_sha256" => json!("0".repeat(64)),
+            "initial_view" => json!({"view_id": "different", "version": 2}),
+            _ => json!("different"),
+        };
+        let refusal = ledger
+            .complete(
+                &lane(),
+                PRINCIPAL,
+                "connection1",
+                &bootstrap_status(),
+                serde_json::from_value(wire).unwrap(),
+            )
+            .unwrap_err();
+        assert_eq!(refusal.code(), "invalid_params");
+        assert_eq!(refusal.field, "bootstrap_complete");
+    }
+    assert_eq!(
+        ledger.complete(
+            &lane(),
+            PRINCIPAL,
+            "connection1",
+            &bootstrap_status(),
+            bootstrap_receipt()
+        ),
+        Ok(bootstrap_receipt())
+    );
+}
+
+#[test]
+fn bootstrap_bundle_conflict_and_premature_or_off_lane_completion_refuse() {
+    let mut ledger = bootstrap_ledger();
+    let mut receipt = bootstrap_receipt();
+    receipt.frozen_bundle.epochs.insert("memory".into(), 99);
+    assert_eq!(
+        ledger
+            .complete(
+                &lane(),
+                PRINCIPAL,
+                "connection1",
+                &bootstrap_status(),
+                receipt
+            )
+            .unwrap_err()
+            .field,
+        "bootstrap_complete"
+    );
+    let mut status = bootstrap_status();
+    status.more = true;
+    assert_eq!(
+        ledger
+            .complete(
+                &lane(),
+                PRINCIPAL,
+                "connection1",
+                &status,
+                bootstrap_receipt()
+            )
+            .unwrap_err()
+            .field,
+        "bootstrap_complete"
+    );
+    let off = ClaudeCodeLane::admit(PRINCIPAL, "connection1", None).unwrap();
+    let answer: StepAnswer = serde_json::from_value(bootstrap_vectors()["answer"].clone()).unwrap();
+    assert_eq!(
+        answer
+            .validate_claude_code(&off, PRINCIPAL, "connection1")
+            .unwrap_err()
+            .field,
+        "bootstrap_complete"
+    );
+    let missing: StepAnswer = round_trip(&bootstrap_vectors()["missing_originals"]);
+    assert_eq!(missing.name(), "refuse");
+}
+
+#[test]
+fn canonical_conversation_preserves_identity_but_generations_isolate_receipts() {
+    let original_status = bootstrap_status();
+    let mut selected = bundle();
+    selected.provider_generation = "new-provider-generation".into();
+    selected.profile_generation = "new-profile-generation".into();
+    let new_lane = ClaudeCodeLane::admit(PRINCIPAL, "connection2", Some(selected.clone())).unwrap();
+    let mut receipt = bootstrap_receipt();
+    receipt.provider_generation = selected.provider_generation.clone();
+    receipt.profile_generation = selected.profile_generation.clone();
+    receipt.frozen_bundle = selected.clone();
+    let mut old = bootstrap_ledger();
+    assert_eq!(
+        old.complete(
+            &new_lane,
+            PRINCIPAL,
+            "connection2",
+            &original_status,
+            receipt.clone()
+        )
+        .unwrap_err()
+        .field,
+        "bootstrap_complete"
+    );
+    let mut new = cortexkit_role_compaction_provider::bootstrap::BootstrapLedger::new(
+        selected.provider_generation,
+        selected.profile_generation,
+        "l1",
+    );
+    assert_eq!(
+        new.complete(
+            &new_lane,
+            PRINCIPAL,
+            "connection2",
+            &original_status,
+            receipt.clone()
+        ),
+        Ok(receipt)
+    );
+    assert_eq!(original_status.session, "s");
+    assert_eq!(original_status.harness, "claude-code");
+}
+
+#[test]
+fn bootstrap_source_digest_uses_length_prefixed_utf8_bytes_in_ordinal_order() {
+    use cortexkit_role_compaction_provider::bootstrap::source_sha256;
+    let status = bootstrap_status();
+    assert_eq!(status.messages.len(), 2);
+    assert_eq!(status.messages[1].raw_message.as_ref().unwrap().len(), 39);
+    assert_eq!(
+        source_sha256(&status.messages).unwrap(),
+        bootstrap_receipt().source_sha256
+    );
+    assert_eq!(
+        source_sha256(&[]).unwrap(),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    let mut unordered = status.messages.clone();
+    unordered.reverse();
+    assert_eq!(source_sha256(&unordered).unwrap_err().field, "messages");
+    let mut missing = status.messages;
+    missing[0].raw_message = None;
+    assert_eq!(source_sha256(&missing).unwrap_err().field, "raw_message");
 }

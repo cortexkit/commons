@@ -542,8 +542,11 @@ change to ordinary runner admission or observation.
   `reserved:thalamus` on its own connection with a `claude-code` bind harness
   and the frozen `claude_code` capability bundle (§14). Neither the
   body `harness` field nor body params select this exception or confer
-  authority. The conversation key remains the §1 triple; params select
-  behaviour, never another conversation.
+  authority. The §1 triple remains the canonical external conversation identity
+  and the legacy-lane provider key. Claude Code provider state (engine namespace,
+  locks, message ledgers, cursors, views and receipts) is additionally scoped by
+  the frozen provider generation and profile generation. Params never select
+  another canonical conversation or change its project/session/agent ownership.
 - [pinned] For the direct OpenCode callers, the frozen plan opts in with `params.serializer_profile:
   "opencode-aisdk"`. Answer observation additionally requires
   `params.observation: "answer"`; both opt-ins and host admission are required
@@ -727,17 +730,21 @@ change to ordinary runner admission or observation.
   `commons_revision`, `wire_majors`, `package_versions`, `epochs`,
   `exact_endpoint`, `partial_message_cut`, `caps`, `raw_view_read`, `digest`,
   `cache_policy_revision`, `canonical_reduce`, `guidance`, `notice_dispatch_ack`,
-  `bootstrap_receipt_format` and optional further `capabilities`. Epochs label
-  codec, raw provenance and rendering (including tagger, memory and compartment
-  epochs); no codec epoch is implied by this contract or by synthetic vectors.
+  `bootstrap_complete` and optional further `capabilities`. The `epochs` object
+  MUST contain `codec`, `raw_provenance`, `render`, `tagger`, `memory` and
+  `compartment`, even when tagging is inactive. Missing any component refuses
+  `invalid_params` naming `claude_code`; a `render` epoch is not a substitute
+  for component pins. Actual supported values must match provider discovery.
+  No codec epoch is implied by this contract or by synthetic vectors.
   Profile/provider generations are separate data fields, not session-id edits.
-  Bootstrap receipt format names a generation/lineage-scoped resumable receipt
-  containing source frontier/count/digest, the selected profile/epoch bundle
-  and applied initial view. Setup ready or compaction noop alone never proves
-  bootstrap complete. Publication remains fenced until complete native source
-  admission and safe view validation. Durable memory ownership is unchanged.
+  `bootstrap_complete` advertises support for the typed completion receipt in
+  compaction-provider/v1 §19.7. The format identifier belongs inside that
+  receipt, not in the discovery bundle. Setup ready or compaction noop alone
+  never proves bootstrap complete. Publication remains fenced until complete
+  native source admission and safe view validation. Durable memory ownership
+  is unchanged.
 - [pinned] Capability identifiers, including the bundle identifier, further
-  capability identifiers and bootstrap receipt format, use the daemon grammar
+  capability identifiers and a completion receipt's format tag, use the daemon grammar
   `<name>/v<N>`: ASCII lowercase letter first, lowercase letters/digits/hyphens,
   at most 64 name bytes, no adjacent hyphens and no trailing hyphen. `N` is
   decimal 1 through 4294967295 without leading zeros. Whitespace is invalid.
@@ -785,3 +792,34 @@ change to ordinary runner admission or observation.
   never armed off the negotiated, attested lane; a plan requesting the notice
   capability without that attestation refuses `invalid_params` naming
   `claude_code`, and an off-lane directive refuses naming `channel2_directive`.
+
+### 14.3 Native raw-message sidecars and generation scope
+
+- [pinned] `HookCall` gains optional `raw_message: String`, also carried by each
+  compaction `StatusMessage`. Absence off the admitted Claude Code lane keeps
+  legacy bytes and behavior unchanged. On the admitted lane every native hook
+  requires a nonempty sidecar that parses as JSON; absent, empty or invalid
+  JSON refuses `invalid_params` naming `raw_message`. Validation does not
+  rewrite its bytes. Both the raw sidecar and its JSON escaping count toward
+  the existing single-message and full-envelope caps.
+- [pinned] `raw_message` is the message's JSON bytes exactly as sent to the
+  provider, minus `cache_control` removed only at Anthropic transport positions.
+  Those positions are the top level of `text`, `image`, `document`, `thinking`,
+  `redacted_thinking`, `tool_use` and `tool_result` blocks, and of `text`, `image`
+  and `document` blocks nested in `tool_result.content`. Never remove members
+  inside `tool_use.input`, and never inside opaque data. Preserve every other
+  byte, including member order, whitespace, string escapes, scalar content,
+  signatures and redacted thinking payloads.
+- [pinned] The provider MUST verify that `raw_message`, with `cache_control`
+  removed only at the listed positions, equals `message`, and refuse
+  `invalid_params` naming `raw_message` if not. The common helper checks only
+  presence and JSON syntax; native equivalence, block spans and signed-byte
+  safety are provider codec obligations, not permission for generic recursive
+  cache-marker stripping.
+- [pinned] The canonical external identity remains the project/session/harness
+  triple with resolved agent ownership. Claude Code provider state, including
+  namespace, locks, ingest ledgers, views and receipts, is additionally scoped
+  by provider generation and profile generation. A new native generation never
+  overwrites old state or changes memory ownership; bootstrap resumes within
+  the same generation and lineage. Its typed final-ingress completion receipt,
+  source evidence and conflict/replay rules are compaction-provider/v1 §19.7.

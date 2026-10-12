@@ -20,7 +20,7 @@
     "canonical_reduce": true,
     "guidance": true,
     "notice_dispatch_ack": true,
-    "bootstrap_receipt_format": "native-bootstrap-receipt/v1",
+    "bootstrap_complete": true,
     "capabilities": ["immutable-view-read/v1", "notice-dispatch-ack/v1"]
   },
   "describe_base": {

@@ -136,9 +136,6 @@ fn capability_identifiers_follow_daemon_grammar_and_epochs_are_fields() {
     let mut bundle = bundle();
     bundle.capabilities = vec!["bad_name/v1".into()];
     assert_eq!(bundle.validate().unwrap_err().field, "claude_code");
-    bundle.capabilities.clear();
-    bundle.bootstrap_receipt_format = "receipt/epoch3/v1".into();
-    assert_eq!(bundle.validate().unwrap_err().field, "claude_code");
 }
 
 #[test]
@@ -181,7 +178,7 @@ fn capability_caps_and_admission_claims_refuse_when_inconsistent() {
 #[test]
 fn hook_single_message_caps_refuse_by_name_only_on_selected_lane() {
     let lane = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(bundle())).unwrap();
-    let wire = json!({"session": "s", "harness": "claude-code", "params": {}, "hook": "pre_user", "blocks": ["x"], "message": {"content": "x".repeat(bundle().caps.single_message_bytes)}});
+    let wire = json!({"session": "s", "harness": "claude-code", "params": {}, "hook": "pre_user", "blocks": ["x"], "raw_message": "{\"content\":\"x\"}", "message": {"content": "x".repeat(bundle().caps.single_message_bytes)}});
     let hook: HookCall = serde_json::from_value(wire).unwrap();
     assert_eq!(
         hook.validate_claude_code(&lane, PRINCIPAL, "connection1")
@@ -241,4 +238,92 @@ fn capability_identifier_grammar_matches_daemon() {
             "unexpected daemon grammar for {identifier:?}"
         );
     }
+}
+
+fn native_vectors() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../test-vectors/step-transform-provider-v1/claude-code-native-ingress.json"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn hook_raw_message_round_trips_exact_native_bytes() {
+    assert_eq!(native_vectors()["hooks"].as_array().unwrap().len(), 3);
+    for case in native_vectors()["hooks"].as_array().unwrap() {
+        let hook: HookCall = round_trip(&case["request"]);
+        let encoded = serde_json::to_vec(&hook).unwrap();
+        let decoded: HookCall = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(
+            decoded.raw_message.as_ref().unwrap().as_bytes(),
+            case["request"]["raw_message"].as_str().unwrap().as_bytes()
+        );
+        let lane = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(bundle())).unwrap();
+        assert_eq!(
+            decoded.validate_claude_code(&lane, PRINCIPAL, "connection1"),
+            Ok(())
+        );
+    }
+}
+
+#[test]
+fn hook_raw_message_required_and_json_valid_only_on_admitted_lane() {
+    let hook: HookCall =
+        serde_json::from_value(native_vectors()["hooks"][0]["request"].clone()).unwrap();
+    for raw in [None, Some(String::new()), Some("not-json".into())] {
+        let mut hook = hook.clone();
+        hook.raw_message = raw;
+        let lane = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(bundle())).unwrap();
+        let refusal = hook
+            .validate_claude_code(&lane, PRINCIPAL, "connection1")
+            .unwrap_err();
+        assert_eq!(refusal.code(), "invalid_params");
+        assert_eq!(refusal.field, "raw_message");
+        let off = ClaudeCodeLane::admit(PRINCIPAL, "connection1", None).unwrap();
+        assert_eq!(
+            hook.validate_claude_code(&off, PRINCIPAL, "connection1"),
+            Ok(())
+        );
+    }
+}
+
+#[test]
+fn hook_raw_sidecar_counts_toward_single_message_cap() {
+    let mut hook: HookCall =
+        serde_json::from_value(native_vectors()["hooks"][0]["request"].clone()).unwrap();
+    hook.raw_message = Some(format!(
+        "{}{}",
+        " ".repeat(bundle().caps.single_message_bytes),
+        hook.raw_message.unwrap()
+    ));
+    let lane = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(bundle())).unwrap();
+    assert_eq!(
+        hook.validate_claude_code(&lane, PRINCIPAL, "connection1")
+            .unwrap_err()
+            .field,
+        "message"
+    );
+}
+
+fn assert_epoch_required(epoch: &str) {
+    let mut selected = bundle();
+    selected.epochs.remove(epoch);
+    let refusal = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(selected)).unwrap_err();
+    assert_eq!(refusal.field, "claude_code");
+    assert_eq!(refusal.code(), "invalid_params");
+}
+
+#[test]
+fn capability_requires_tagger_epoch() {
+    assert_epoch_required("tagger");
+}
+
+#[test]
+fn capability_requires_memory_epoch() {
+    assert_epoch_required("memory");
+}
+
+#[test]
+fn capability_requires_compartment_epoch() {
+    assert_epoch_required("compartment");
 }

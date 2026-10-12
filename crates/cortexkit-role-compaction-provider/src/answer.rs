@@ -182,6 +182,8 @@ pub enum StepAnswer {
         request_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel2_directive: Option<crate::notice::Channel2Directive>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bootstrap_complete: Option<Box<crate::bootstrap::BootstrapReceipt>>,
     },
     /// Replace the working range with this CompactionMessage.
     CompactionMessage {
@@ -194,6 +196,8 @@ pub enum StepAnswer {
         coverage: Option<Coverage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel2_directive: Option<crate::notice::Channel2Directive>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bootstrap_complete: Option<Box<crate::bootstrap::BootstrapReceipt>>,
     },
     /// Hold this step while the provider works, up to `bound_ms`. The
     /// provider sends `compaction.ready` when it is done.
@@ -256,6 +260,18 @@ impl StepAnswer {
                 return Err(InvalidParams::new("channel2_directive"));
             }
         }
+        let receipt = match self {
+            Self::Noop {
+                bootstrap_complete, ..
+            }
+            | Self::CompactionMessage {
+                bootstrap_complete, ..
+            } => bootstrap_complete.as_deref(),
+            _ => None,
+        };
+        if let Some(receipt) = receipt {
+            receipt.validate(bundle.ok_or_else(|| InvalidParams::new("bootstrap_complete"))?)?;
+        }
         let Some(bundle) = bundle else {
             return Ok(());
         };
@@ -267,6 +283,8 @@ impl StepAnswer {
         {
             if let Some(view) = &compaction.raw_view {
                 if view.validate().is_err()
+                    || (matches!(&view.payload, crate::view::RawPayload::Reference { .. })
+                        && !bundle.raw_view_read)
                     || view.view.version != compaction.version
                     || view.provider_generation != bundle.provider_generation
                     || view.profile_generation != bundle.profile_generation
