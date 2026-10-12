@@ -30,7 +30,10 @@ pub mod read;
 pub mod retract;
 pub mod run;
 pub mod send;
+pub mod session_ref;
 pub mod subscribe;
+
+pub use session_ref::session_ref;
 
 /// The role name as `role.describe` reports it.
 pub const ROLE: &str = "llm-runner";
@@ -278,6 +281,7 @@ pub(crate) mod vectors {
         "run-result.json",
         "send.json",
         "session-change.json",
+        "session-ref.json",
         "subscribe.json",
     ];
 

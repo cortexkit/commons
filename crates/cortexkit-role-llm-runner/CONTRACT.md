@@ -1128,7 +1128,11 @@ real process kill.
   provider, a backup or move participant) derives the same `session_ref`
   from the same bind identity, without asking the runner.
   `test-vectors/llm-runner-v1/session-ref.json` pins the derivation,
-  including a trailing slash and non-ASCII escaping.
+  including a trailing slash and non-ASCII escaping, and the crate's
+  `session_ref` function implements it.
+- [pinned] `session_ref` is a correlation key, not proof of identity: a
+  direct caller chooses its own bind fields. Authorization still rests on
+  the daemon-stamped principal and scope.
 
 ## 15. Conformance suite (planned)
 
