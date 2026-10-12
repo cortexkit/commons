@@ -349,7 +349,8 @@ fn prepare_root(root: &Path, forbidden_access: u32) -> io::Result<()> {
 
 /// Creates a private root and refuses one that group or other users can access.
 /// `/tmp` is shared, so every entry in this directory must belong to this user.
-#[cfg(unix)]
+/// Only the macOS scratch root uses it outside tests.
+#[cfg(any(target_os = "macos", all(unix, test)))]
 pub(crate) fn prepare_private_root(root: &Path) -> io::Result<()> {
     prepare_root(root, 0o077)
 }
