@@ -38,8 +38,7 @@ pub struct RoleDescribe {
     pub majors: Vec<Major>,
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
-    /// Module-level capabilities. This role defines none yet; the member is
-    /// here so one can be added without a new shape.
+    /// Module-level capability identifiers. Existing entries keep their meaning.
     #[serde(default)]
     pub capabilities: Vec<String>,
     /// The `llm-runner/v1` capability groups this provider needs from the
@@ -50,6 +49,10 @@ pub struct RoleDescribe {
     /// ([`RoleDescribe::unmet_runner_groups`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runner_groups: Vec<String>,
+    /// Advertised Claude Code capabilities. Discovery alone does not authorize
+    /// the caller to use Claude Code operations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_code: Option<crate::claude_code::ClaudeCodeCapabilities>,
 }
 
 fn alpha() -> String {
@@ -88,6 +91,11 @@ impl RoleDescribe {
             implementation_version: implementation_version.into(),
             ..Self::default()
         }
+    }
+
+    pub fn with_claude_code(mut self, bundle: crate::claude_code::ClaudeCodeCapabilities) -> Self {
+        self.claude_code = Some(bundle);
+        self
     }
 
     /// Set the runner groups the provider needs.

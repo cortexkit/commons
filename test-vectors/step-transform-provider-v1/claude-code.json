@@ -1,0 +1,56 @@
+{
+  "bundle": {
+    "capability": "claude-code-step/v1",
+    "principal": "reserved:thalamus",
+    "harness": "claude-code",
+    "profile": "claude-code-anthropic",
+    "profile_generation": "synthetic-profile-generation",
+    "provider_generation": "synthetic-provider-generation",
+    "observation": "answer",
+    "commons_revision": "synthetic-commons-revision",
+    "wire_majors": {"compaction-provider": "v1", "step-transform-provider": "v1"},
+    "package_versions": {"compaction-provider": "0.2.0", "step-transform-provider": "0.2.0"},
+    "epochs": {"codec": 1, "raw_provenance": 1, "render": 1, "tagger": 1, "memory": 1, "compartment": 1},
+    "exact_endpoint": "native_top_level_inclusive",
+    "partial_message_cut": false,
+    "caps": {"ingress_envelope_bytes": 3145728, "hook_envelope_bytes": 3145728, "single_message_bytes": 1048576, "view_page_bytes": 1024},
+    "raw_view_read": true,
+    "digest": "sha256",
+    "cache_policy_revision": "synthetic-cache-policy",
+    "canonical_reduce": true,
+    "guidance": true,
+    "notice_dispatch_ack": true,
+    "bootstrap_receipt_format": "native-bootstrap-receipt/v1",
+    "capabilities": ["immutable-view-read/v1", "notice-dispatch-ack/v1"]
+  },
+  "describe_base": {
+    "majors": [{"version": "step-transform-provider/v1", "ops": ["role.describe", "transform.declare", "transform.hook"], "stability": "alpha"}],
+    "implementation_version": "synthetic-build",
+    "capabilities": ["claude-code-step/v1"]
+  },
+  "declare_request_base": {"params": {}},
+  "declaration_base": {"subscriptions": []},
+  "admission": [
+    {"name": "attested_and_declared", "principal": "reserved:thalamus", "declared": true, "active": true},
+    {"name": "declared_without_attestation", "principal": "reserved:other", "declared": true, "code": "invalid_params", "field": "claude_code"},
+    {"name": "attested_without_declaration", "principal": "reserved:thalamus", "declared": false, "active": false},
+    {"name": "ordinary_absence", "principal": "reserved:broca", "declared": false, "active": false}
+  ],
+  "identifier_cases": [
+    {"id": "a/v1", "valid": true},
+    {"id": "claude-code-step/v1", "valid": true},
+    {"id": "a1/v4294967295", "valid": true},
+    {"id": "claude-code-step-v1", "valid": false},
+    {"id": "claude-code-step/v1/epoch3", "valid": false},
+    {"id": "A/v1", "valid": false},
+    {"id": "a--b/v1", "valid": false},
+    {"id": "a-/v1", "valid": false},
+    {"id": "a/v0", "valid": false},
+    {"id": "a/v01", "valid": false},
+    {"id": "a/v4294967296", "valid": false},
+    {"id": "a/v18446744073709551616", "valid": false},
+    {"id": "a_b/v1", "valid": false},
+    {"id": "é/v1", "valid": false},
+    {"id": " a/v1", "valid": false}
+  ]
+}

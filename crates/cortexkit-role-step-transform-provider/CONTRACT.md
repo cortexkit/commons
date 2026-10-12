@@ -528,25 +528,29 @@ the vectors in this crate.
 
 ## 13. Host runner lane
 
-This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
-(`opencode2`), not a change to ordinary runner admission or observation.
+This lane is an explicit exception for OpenCode 1 (`opencode`), OpenCode 2
+(`opencode2`) and the attested Claude Code gateway described in §14, not a
+change to ordinary runner admission or observation.
 
 ### 13.1 Admission and observation
 
 - [pinned] Admission is keyed only on the frozen plan item's params and the
   route's bind `(project_root, session, harness)` under the route's
-  authenticated principal. The bind harness must be `opencode` or `opencode2`
-  and the principal a `direct` caller bound to that conversation. Neither the
+  authenticated principal. For direct callers, the bind harness must be
+  `opencode` or `opencode2` and the principal a `direct` caller bound to that
+  conversation. The other admitted pair is daemon-attested
+  `reserved:thalamus` on its own connection with a `claude-code` bind harness
+  and the frozen `claude_code` capability bundle (§14). Neither the
   body `harness` field nor body params select this exception or confer
   authority. The conversation key remains the §1 triple; params select
   behaviour, never another conversation.
-- [pinned] The frozen plan opts in with `params.serializer_profile:
+- [pinned] For the direct OpenCode callers, the frozen plan opts in with `params.serializer_profile:
   "opencode-aisdk"`. Answer observation additionally requires
   `params.observation: "answer"`; both opt-ins and host admission are required
   for the promote-and-burn protocol below and the compaction departures in
   §13.4. Missing or unrecognised required opt-ins grant no exception. The
   same frozen params are passed on declaration, Setup and hooks.
-- [pinned] Only this admitted direct caller may use an empty runner-group set
+- [pinned] Only an admitted caller in this section may use an empty runner-group set
   without `transcript_reads` or a `compaction.ready` service. This grants no
   runner-only operation, runner/Broca transcript read or other session.
   A cross-session request refuses `invalid_params`, naming `session` (or
@@ -554,8 +558,8 @@ This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
   runner admission, including their required groups and ready service; a
   runner-principal call with body `harness: "opencode"` and host params does
   not enter this exception.
-- [pinned] This exception is no stronger than today's local direct-caller
-  trust for full-request transform. It requires the daemon caller-identity
+- [pinned] The direct-caller exception is no stronger than today's local
+  direct-caller trust for full-request transform. It requires the daemon caller-identity
   stamp once that stamp lands; body fields are never a substitute for it.
   It does not globally publish empty runner requirements in `role.describe`.
 - [pinned] From a runner principal, either host-only plan value,
@@ -688,3 +692,96 @@ This lane is an explicit exception for OpenCode 1 (`opencode`) and OpenCode 2
   deny cancels the run itself.
 - A rule language. A rules engine is a module that answers hooks.
 - Hooks on reasoning, signatures or tool-call blocks.
+
+## 14. Optional native Claude Code capability
+
+### 14.1 Publication and admission
+
+- [pinned] `role.describe`, `transform.declare` requests and declarations gain
+  optional typed `claude_code: ClaudeCodeCapabilities`. Every existing member
+  keeps its meaning. Absence preserves the existing behavior and bytes for
+  all runners; absence off this lane is never a refusal. Discovery alone is
+  not permission to use the lane. An attested caller that does not select the
+  capability also retains the existing behavior.
+- [pinned] Activation requires BOTH the daemon-attested principal
+  `reserved:thalamus` on its bound connection AND the frozen declaration's
+  `claude_code.capability: "claude-code-step/v1"`. A declaration selecting this
+  bundle from any other principal refuses `invalid_params`, with
+  `detail.field: "claude_code"`, at admission/declare. The bind must resolve the
+  project, session and agent, with `harness=claude-code`; the bundle's harness,
+  principal and profile are compatibility data, never authentication. Body
+  `harness`, params, tags and plan values cannot supply the attestation. Another
+  connection cannot borrow the admitted connection's bundle. There is no
+  authority inherited from another gateway or harness identity.
+- [pinned] Select only a supported advertised bundle before managed traffic;
+  echo it unchanged at declaration, freeze it in the admitted plan and pass it
+  unchanged to compaction Setup. Bundle drift refuses `invalid_params` naming
+  `claude_code`. An absent or unsupported capability required by a proposed
+  managed attachment fails attachment by name (`invalid_params`, or
+  `misconfigured` for provider configuration); it never enables legacy
+  whole-array transform or raw fallback. `ClaudeCodeLane` is non-wire state:
+  its admission and per-call checks take trusted transport identity. Providers
+  must additionally enforce the bound conversation, profile and observation.
+- [pinned] The bundle contains `capability`, admitted `principal`, `harness`,
+  `profile`, `profile_generation`, `provider_generation`, `observation`,
+  `commons_revision`, `wire_majors`, `package_versions`, `epochs`,
+  `exact_endpoint`, `partial_message_cut`, `caps`, `raw_view_read`, `digest`,
+  `cache_policy_revision`, `canonical_reduce`, `guidance`, `notice_dispatch_ack`,
+  `bootstrap_receipt_format` and optional further `capabilities`. Epochs label
+  codec, raw provenance and rendering (including tagger, memory and compartment
+  epochs); no codec epoch is implied by this contract or by synthetic vectors.
+  Profile/provider generations are separate data fields, not session-id edits.
+  Bootstrap receipt format names a generation/lineage-scoped resumable receipt
+  containing source frontier/count/digest, the selected profile/epoch bundle
+  and applied initial view. Setup ready or compaction noop alone never proves
+  bootstrap complete. Publication remains fenced until complete native source
+  admission and safe view validation. Durable memory ownership is unchanged.
+- [pinned] Capability identifiers, including the bundle identifier, further
+  capability identifiers and bootstrap receipt format, use the daemon grammar
+  `<name>/v<N>`: ASCII lowercase letter first, lowercase letters/digits/hyphens,
+  at most 64 name bytes, no adjacent hyphens and no trailing hyphen. `N` is
+  decimal 1 through 4294967295 without leading zeros. Whitespace is invalid.
+  Epochs, revisions and profile generations never enter capability names.
+  Existing capability identifiers and runner-group strings keep their meaning.
+- [pinned] `observation` is `answer`, `exact_endpoint` is
+  `native_top_level_inclusive` and `digest` is `sha256`. Partial cuts are a
+  separately advertised boolean, never inferred from the presence of an
+  endpoint. An initial whole-message-only gateway advertises
+  `partial_message_cut: false`. Reduction and guidance flags describe the
+  canonical, actually served tool/system surfaces frozen in the plan; tags
+  alone never grant reduction authority. Cache-policy revision is a pin, not
+  a second cache expiry scheduler.
+
+### 14.2 Host departures and payload limits
+
+- [pinned] The admitted pair uses the §13 answer-observation protocol: no
+  transcript reads, including restart/bootstrap, and no `compaction.ready`
+  service requirement. It may use an empty runner-group set locally, without
+  globally changing `role.describe.runner_groups`. Ingress `more=true` fences
+  view execution and immediately requests the next contiguous page with a
+  fresh request ID. This is not replacement retrieval. A final-page history
+  gap refuses `history_unreadable`, never an unbounded wait or transcript read.
+  Ordinary runner/group admission and the direct OpenCode exception are
+  unchanged.
+- [pinned] `caps` declares `ingress_envelope_bytes`, `hook_envelope_bytes`,
+  `single_message_bytes` and `view_page_bytes`. Full encoded ingress/hook
+  envelopes, including raw bytes' JSON escaping and sidecar overhead, must
+  be strictly below their declared envelope caps and below 3 MiB of headroom
+  (`MAX_ENVELOPE_BYTES`, the same `DEFAULT_HOOK_CAP_BYTES` constant). Caps must
+  be positive; envelope caps cannot exceed that constant, and the single
+  message cap must be smaller than each envelope cap. `view_page_bytes` caps
+  raw bytes per page and must be smaller than the constant; encoded page
+  envelopes remain strictly below it as well.
+- [pinned] A single message that cannot fit refuses `invalid_params` naming
+  `messages` on a status or `message` on a hook. The host terminal classification
+  is `provider_message_too_large`. Never truncate, raw-forward or use the
+  ordinary compaction paging helper's oversized-first-message behavior on this
+  negotiated lane. Larger ingress requires a separately negotiated chunked
+  immutable payload capability, not view retrieval. None is implied here.
+- [pinned] Native endpoint/raw replacement retrieval, required geometry and
+  notice dispatch acknowledgements follow compaction-provider/v1 §19. The
+  `pass_complete` scheduling barrier and ordinal service watermark are not
+  notice acknowledgements and do not prove HTTP dispatch. A pending notice is
+  never armed off the negotiated, attested lane; a plan requesting the notice
+  capability without that attestation refuses `invalid_params` naming
+  `claude_code`, and an off-lane directive refuses naming `channel2_directive`.

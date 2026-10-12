@@ -60,6 +60,11 @@ pub struct SetupRequest {
     pub newest: Option<MessageRef>,
     /// The runner's clock, in milliseconds since the Unix epoch.
     pub now: u64,
+    /// Optional Claude Code capabilities selected at transform.declare. Copy
+    /// that selection unchanged; setup cannot change the connection's plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_code:
+        Option<cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities>,
 }
 
 impl SetupRequest {
@@ -92,7 +97,16 @@ impl SetupRequest {
             output_limit: None,
             newest: None,
             now,
+            claude_code: None,
         }
+    }
+
+    pub fn with_claude_code(
+        mut self,
+        bundle: cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities,
+    ) -> Self {
+        self.claude_code = Some(bundle);
+        self
     }
 
     /// Set the plan item's preset and params.

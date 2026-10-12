@@ -337,6 +337,10 @@ pub struct DeclareRequest {
     /// Absent on a preflight call, made before the composition exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Map<String, Value>>,
+    /// Claude Code capabilities selected from role.describe. The daemon's
+    /// caller identity, not these fields, authorizes use of those capabilities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_code: Option<crate::claude_code::ClaudeCodeCapabilities>,
 }
 
 impl DeclareRequest {
@@ -351,7 +355,25 @@ impl DeclareRequest {
             preset: None,
             params,
             composition: None,
+            claude_code: None,
         }
+    }
+
+    pub fn with_claude_code(mut self, bundle: crate::claude_code::ClaudeCodeCapabilities) -> Self {
+        self.claude_code = Some(bundle);
+        self
+    }
+
+    pub fn admit_claude_code(
+        &self,
+        attested_principal: &str,
+        connection_id: &str,
+    ) -> Result<crate::claude_code::ClaudeCodeLane, crate::claude_code::InvalidParams> {
+        crate::claude_code::ClaudeCodeLane::admit(
+            attested_principal,
+            connection_id,
+            self.claude_code.clone(),
+        )
     }
 
     pub fn with_preset(mut self, preset: impl Into<String>) -> Self {
@@ -365,12 +387,15 @@ impl DeclareRequest {
     }
 }
 
-/// The `transform.declare` answer. A pure function of the request and the
-/// provider's configuration: the same inputs give the same bytes, and no
-/// scope, agent or session identity enters it.
+/// The `transform.declare` answer. Subscriptions depend only on the item's
+/// preset, params, composition and provider configuration, not caller identity.
+/// Optional Claude Code capabilities copy the selection from role.describe
+/// unchanged. Transport admission is separate and must authenticate the caller.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Declaration {
     pub subscriptions: Vec<DeclaredSubscription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_code: Option<crate::claude_code::ClaudeCodeCapabilities>,
 }
 
 /// Why a subscription, declared or planned, is malformed or out of bounds.

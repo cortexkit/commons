@@ -24,10 +24,13 @@ pub mod answer;
 pub mod describe;
 pub mod errors;
 pub mod fence;
+pub mod geometry;
+pub mod notice;
 pub mod points;
 pub mod ready;
 pub mod setup;
 pub mod status;
+pub mod view;
 
 /// The op envelope of every request in this role, `{method, params}`:
 /// `method` is the op's name ([`ops`]) and `params` its request.
@@ -58,6 +61,8 @@ pub const PROVIDES: &str = "compaction-provider/v1";
 
 /// Names of the ops, as the `method` of the request that carries them.
 pub mod ops {
+    /// Optional provider op, never a prerequisite to applying an answer.
+    pub const COMPACTION_VIEW_READ: &str = "compaction.view.read";
     /// Discovery before use: the role's majors, ops and capabilities.
     /// Required.
     pub const ROLE_DESCRIBE: &str = "role.describe";
@@ -101,6 +106,7 @@ pub(crate) mod vectors {
     /// Every vector file. A test checks this list against the directory, so
     /// a new file cannot land without a test reading it.
     pub const FILES: &[&str] = &[
+        "claude-code.json",
         "answers.json",
         "errors.json",
         "fence.json",

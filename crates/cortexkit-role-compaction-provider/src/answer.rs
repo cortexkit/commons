@@ -17,13 +17,21 @@ use serde_json::Value;
 pub struct Coverage {
     pub end_mid: String,
     pub ordinal: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<crate::view::NativeEndpoint>,
 }
 
 impl Coverage {
+    pub fn with_endpoint(mut self, endpoint: crate::view::NativeEndpoint) -> Self {
+        self.endpoint = Some(endpoint);
+        self
+    }
+
     pub fn new(end_mid: impl Into<String>, ordinal: u64) -> Self {
         Self {
             end_mid: end_mid.into(),
             ordinal,
+            endpoint: None,
         }
     }
 }
@@ -89,6 +97,8 @@ pub struct CompactionMessage {
     /// (the schema `session.read` pages carry). The runner does not run step
     /// transforms over them.
     pub replacement: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_view: Option<Box<crate::view::FrozenView>>,
 }
 
 /// Why a CompactionMessage is malformed on its own, before any comparison
@@ -120,7 +130,13 @@ impl CompactionMessage {
             version,
             range,
             replacement,
+            raw_view: None,
         }
+    }
+
+    pub fn with_raw_view(mut self, view: crate::view::FrozenView) -> Self {
+        self.raw_view = Some(Box::new(view));
+        self
     }
 
     /// Check the message on its own. The runner records a message that
@@ -162,7 +178,11 @@ impl CompactionMessage {
 pub enum StepAnswer {
     /// Nothing changes. The runner records it, so the cursor advances past
     /// the messages the status carried.
-    Noop { request_id: String },
+    Noop {
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel2_directive: Option<crate::notice::Channel2Directive>,
+    },
     /// Replace the working range with this CompactionMessage.
     CompactionMessage {
         request_id: String,
@@ -172,6 +192,8 @@ pub enum StepAnswer {
         /// ignores it; absence leaves existing view handling unchanged.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         coverage: Option<Coverage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel2_directive: Option<crate::notice::Channel2Directive>,
     },
     /// Hold this step while the provider works, up to `bound_ms`. The
     /// provider sends `compaction.ready` when it is done.
@@ -206,6 +228,71 @@ pub enum StepAnswer {
 }
 
 impl StepAnswer {
+    /// Validate optional publication data only for a negotiated, attested lane.
+    /// Notice directives are never armed on an undeclared connection.
+    pub fn validate_claude_code(
+        &self,
+        lane: &cortexkit_role_step_transform_provider::claude_code::ClaudeCodeLane,
+        principal: &str,
+        connection: &str,
+    ) -> Result<(), cortexkit_role_step_transform_provider::claude_code::InvalidParams> {
+        use cortexkit_role_step_transform_provider::claude_code::{
+            InvalidParams, MAX_ENVELOPE_BYTES,
+        };
+        let bundle = lane.selected_for(principal, connection)?;
+        let directive = match self {
+            Self::Noop {
+                channel2_directive, ..
+            }
+            | Self::CompactionMessage {
+                channel2_directive, ..
+            } => channel2_directive.as_ref(),
+            _ => None,
+        };
+        if let Some(directive) = directive {
+            if !bundle.is_some_and(|bundle| bundle.notice_dispatch_ack)
+                || directive.directive_id.is_empty()
+            {
+                return Err(InvalidParams::new("channel2_directive"));
+            }
+        }
+        let Some(bundle) = bundle else {
+            return Ok(());
+        };
+        if let Self::CompactionMessage {
+            compaction,
+            coverage,
+            ..
+        } = self
+        {
+            if let Some(view) = &compaction.raw_view {
+                if view.validate().is_err()
+                    || view.view.version != compaction.version
+                    || view.provider_generation != bundle.provider_generation
+                    || view.profile_generation != bundle.profile_generation
+                    || view.profile != bundle.profile
+                    || coverage
+                        .as_ref()
+                        .and_then(|coverage| coverage.endpoint.as_ref())
+                        != Some(&view.endpoint)
+                    || coverage
+                        .as_ref()
+                        .is_some_and(|coverage| coverage.end_mid != view.endpoint.message_id)
+                {
+                    return Err(InvalidParams::new("raw_view"));
+                }
+            }
+        }
+        if serde_json::to_vec(self)
+            .map_err(|_| InvalidParams::new("answer"))?
+            .len()
+            >= MAX_ENVELOPE_BYTES
+        {
+            return Err(InvalidParams::new("answer"));
+        }
+        Ok(())
+    }
+
     /// The first missing ordinal, only for a retryable history refusal. A
     /// hint on another code is ignored and never changes retryability.
     pub fn history_gap_from(&self) -> Option<u64> {
@@ -222,7 +309,7 @@ impl StepAnswer {
     /// The request this answer answers.
     pub fn request_id(&self) -> &str {
         match self {
-            Self::Noop { request_id }
+            Self::Noop { request_id, .. }
             | Self::CompactionMessage { request_id, .. }
             | Self::Wait { request_id, .. }
             | Self::Refuse { request_id, .. } => request_id,

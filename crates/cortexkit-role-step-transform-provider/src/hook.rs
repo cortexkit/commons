@@ -104,6 +104,38 @@ pub struct HookCall {
 }
 
 impl HookCall {
+    /// Enforce message and envelope byte caps only for a daemon-attested
+    /// connection whose frozen plan selects the Claude Code capability.
+    pub fn validate_claude_code(
+        &self,
+        lane: &crate::claude_code::ClaudeCodeLane,
+        principal: &str,
+        connection: &str,
+    ) -> Result<(), crate::claude_code::InvalidParams> {
+        use crate::claude_code::InvalidParams;
+        let Some(bundle) = lane.selected_for(principal, connection)? else {
+            return Ok(());
+        };
+        if let Some(message) = &self.message {
+            if serde_json::to_vec(message)
+                .map_err(|_| InvalidParams::new("message"))?
+                .len()
+                > bundle.caps.single_message_bytes
+            {
+                return Err(InvalidParams::new("message"));
+            }
+        }
+        let envelope = crate::OpRequest::new(crate::ops::TRANSFORM_HOOK, self);
+        if serde_json::to_vec(&envelope)
+            .map_err(|_| InvalidParams::new("message"))?
+            .len()
+            >= bundle.caps.hook_envelope_bytes
+        {
+            return Err(InvalidParams::new("message"));
+        }
+        Ok(())
+    }
+
     pub fn new(session: impl Into<String>, harness: impl Into<String>, subject: Subject) -> Self {
         Self {
             session: session.into(),
