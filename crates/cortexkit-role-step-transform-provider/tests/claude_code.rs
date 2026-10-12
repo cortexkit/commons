@@ -195,3 +195,50 @@ fn hook_single_message_caps_refuse_by_name_only_on_selected_lane() {
         Ok(())
     );
 }
+
+#[test]
+fn capability_identifier_grammar_matches_daemon() {
+    // This independent checker is the daemon's HELLO admission gate. Compare
+    // both acceptance and rejection boundaries whenever its dependency changes.
+    let mut cases = vec![
+        ("a/v1".to_owned(), true),
+        ("claude-code-step/v1".to_owned(), true),
+        ("a1-b2/v2".to_owned(), true),
+        ("a/v4294967295".to_owned(), true),
+        ("a/v4294967296".to_owned(), false),
+        ("a/v18446744073709551616".to_owned(), false),
+        ("a/v0".to_owned(), false),
+        ("a/v1alpha1".to_owned(), false),
+        ("a/v01".to_owned(), false),
+        ("a/v".to_owned(), false),
+        ("a/v-1".to_owned(), false),
+        ("a/v+1".to_owned(), false),
+        ("claude.code/v1".to_owned(), false),
+        ("-a/v1".to_owned(), false),
+        ("a-/v1".to_owned(), false),
+        ("a--b/v1".to_owned(), false),
+        ("a_b/v1".to_owned(), false),
+        ("A/v1".to_owned(), false),
+        ("1a/v1".to_owned(), false),
+        ("é/v1".to_owned(), false),
+        ("a/v1/epoch3".to_owned(), false),
+        ("a/v1/v2".to_owned(), false),
+        ("/v1".to_owned(), false),
+        ("a".to_owned(), false),
+        ("".to_owned(), false),
+        (" a/v1".to_owned(), false),
+        ("a/v1 ".to_owned(), false),
+        ("a/v1\n".to_owned(), false),
+    ];
+    cases.push((format!("{}/v1", "a".repeat(64)), true));
+    cases.push((format!("{}/v1", "a".repeat(65)), false));
+    for (identifier, expected) in cases {
+        let local = is_valid_capability_identifier(&identifier);
+        let daemon = subc_protocol::manifest::is_valid_capability_identifier(&identifier);
+        assert_eq!(local, daemon, "checker drift for {identifier:?}");
+        assert_eq!(
+            daemon, expected,
+            "unexpected daemon grammar for {identifier:?}"
+        );
+    }
+}

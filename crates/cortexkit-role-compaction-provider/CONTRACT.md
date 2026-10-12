@@ -997,7 +997,10 @@ preserve integer precision rather than round ids, cursors or versions.
   `mid_turn: bool`, and `fill: {input_tokens, basis, observed_request_id?}`.
   Geometry/fill token values are `u64`; derivation and basis are open strings
   for attribution, never discriminants on which readers branch. Examples are
-  `derivation="provider-observed"`, `basis="measured"` and `basis="estimate"`.
+  `derivation="provider-observed"`, `basis="provider-observed"`,
+  `basis="measured"` and `basis="estimate"`.
+  `observed_request_id` is the provider's request id of the response whose input
+  was measured, not the compaction status's request id.
   Existing usage, estimate and output-limit members retain their meaning.
 - [pinned] On the negotiated attested lane, geometry is required:
   `0 < usable_soft <= usable_hard <= absolute_wall`, and
@@ -1006,19 +1009,27 @@ preserve integer precision rather than round ids, cursors or versions.
   else geometry is optional, and if supplied it is accepted without lane
   validation, never refused. Lane validation is separate from ordinary status
   decoding and message/burn validation.
-- [pinned] Ceilings already represent usable input after native allowances and
-  the actual planned `output_reserve`; never subtract reserve twice or treat
-  catalog `output_limit` as that reserve. Use soft for bands and hard for hard
-  fit/refusal evidence; preserve independent protected-token/tool and signed
-  arc gates, evaluated against the current status model/variant and actual
-  window. `mid_turn` is explicit native continuation evidence, not an alias
-  for `step_kind` or permission to finalize a streaming tail.
+- [pinned] When `output_reserve` is present, additionally require
+  `usable_hard + output_reserve <= absolute_wall`, without integer overflow.
+  On the negotiated attested lane a violation refuses `invalid_params` naming
+  `geometry`. The runner derives `usable_hard` as `absolute_wall` minus the
+  request's own `max_tokens`; `output_reserve` is that actual planned request
+  reservation, not catalog `output_limit`. Never subtract the reserve twice.
+  Use soft for bands and hard for hard-fit/refusal evidence; preserve
+  independent protected-token/tool and signed arc gates, evaluated against the
+  current status model/variant and actual window. `mid_turn` is explicit native
+  continuation evidence, not an alias for `step_kind` or permission to finalize
+  a streaming tail.
 - [pinned] Fill describes the current request's causally anchored measured input
   or an explicitly labeled estimate. The gateway owns overlapping-response
   sequencing and byte/request matching; the provider validates measured fill
   against admitted request/generation evidence rather than fabricating history
-  from an unrelated last response. Missing measurement falls back to the
-  labeled estimate, not a guessed model window.
+  from an unrelated last response. `fill` is optional even on this lane. The
+  runner omits it on the first turn, after a cut-off or unmeasured stream, or
+  whenever no measurement is available; it never sends a guessed zero.
+  Absence means no reading, never zero input or 0% fill and never a refusal.
+  The existing explicitly labeled estimate remains available; no model window
+  or measurement is guessed. Required geometry remains required.
 
 ### 19.5 Notice dispatch acknowledgement
 
@@ -1042,9 +1053,12 @@ preserve integer precision rather than round ids, cursors or versions.
   defined. The typed acknowledgement helper returns the original receipt;
   integrations persist its pending state and receipts transactionally before
   replying, so lost responses replay the same effect across restart.
-- [pinned] The runner MUST acknowledge only after actual provider dispatch,
-  never after status ingestion, answer commit, local append, a hook cut or WAL
-  intent. The provider trusts the attested caller's dispatch receipt; it does
+- [pinned] The runner MUST acknowledge only after the provider returned 2xx
+  response headers for the request carrying the directive. A transport error,
+  or any 4xx or 5xx response (including 529), is not dispatch and leaves the
+  notice pending. Status ingestion, answer commit, local append, a hook cut,
+  WAL intent and merely sending the request are not acknowledgement events.
+  The provider trusts the attested caller's dispatch receipt; it does
   not independently observe the network event. An absent acknowledgement keeps
   the exact pending notice armed and re-serves it unchanged. There is no
   implicit expiry or position-based clearing in this extension. A separately

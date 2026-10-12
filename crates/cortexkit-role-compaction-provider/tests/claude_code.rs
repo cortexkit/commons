@@ -565,3 +565,54 @@ fn new_vector_checksums_pin_both_role_fixtures() {
         assert_eq!(checked, 1);
     }
 }
+
+#[test]
+fn geometry_output_reserve_must_fit_absolute_wall() {
+    let mut status = status();
+    status.output_reserve = Some(20000);
+    assert_eq!(
+        status.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
+        Ok(())
+    );
+    status.output_reserve = Some(20001);
+    let refusal = status
+        .validate_claude_code(&lane(), PRINCIPAL, "connection1")
+        .unwrap_err();
+    assert_eq!(refusal.code(), "invalid_params");
+    assert_eq!(refusal.field, "geometry");
+    let off = ClaudeCodeLane::admit(PRINCIPAL, "connection1", None).unwrap();
+    assert_eq!(
+        status.validate_claude_code(&off, PRINCIPAL, "connection1"),
+        Ok(())
+    );
+    status.context_window = None;
+    status.geometry.as_mut().unwrap().usable_hard = u64::MAX;
+    status.geometry.as_mut().unwrap().absolute_wall = u64::MAX;
+    status.output_reserve = Some(1);
+    assert_eq!(
+        status
+            .validate_claude_code(&lane(), PRINCIPAL, "connection1")
+            .unwrap_err()
+            .field,
+        "geometry"
+    );
+}
+
+#[test]
+fn lane_status_without_fill_is_no_reading_and_accepted() {
+    let mut status = status();
+    status.fill = None;
+    assert!(status.geometry.is_some());
+    assert_eq!(
+        status.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
+        Ok(())
+    );
+    let wire = serde_json::to_value(&status).unwrap();
+    assert!(wire.get("fill").is_none());
+    let decoded: StepStatus = round_trip(&wire);
+    assert!(decoded.fill.is_none());
+    assert_eq!(
+        decoded.validate_claude_code(&lane(), PRINCIPAL, "connection1"),
+        Ok(())
+    );
+}

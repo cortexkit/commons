@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Update the compaction-provider dependency to 0.2.0, which adds optional native endpoints, immutable view retrieval, context geometry and notice receipts for Claude Code. Publish this dependency change under a new patch version; existing conformance cases and behavior are unchanged.
+
 ## 0.1.4
 
 - The compaction cases that assert how a run ended now wait for it to end

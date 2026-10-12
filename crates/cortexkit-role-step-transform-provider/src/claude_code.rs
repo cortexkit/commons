@@ -174,6 +174,8 @@ impl ClaudeCodeLane {
 
 /// The daemon's `<name>/v<N>` grammar: an ASCII kebab name up to 64 bytes
 /// and a positive, non-zero-padded version bounded by `u32::MAX`.
+/// A dev-only parity test compares this checker with subc-protocol's HELLO
+/// validator so a dependency update cannot silently change admission behavior.
 pub fn is_valid_capability_identifier(identifier: &str) -> bool {
     if identifier.chars().any(char::is_whitespace) {
         return false;

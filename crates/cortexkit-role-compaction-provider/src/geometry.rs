@@ -21,11 +21,14 @@ impl Geometry {
     }
 }
 
+/// A measured or explicitly estimated input count and its source. Omit the
+/// entire status field when there is no reading; do not manufacture zero fill.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Fill {
     pub input_tokens: u64,
     /// Open attribution label, for example `measured` or `estimate`.
     pub basis: String,
+    /// The provider's request id for the response whose input was measured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_request_id: Option<String>,
 }

@@ -374,11 +374,15 @@ impl StepStatus {
         let Some(bundle) = lane.selected_for(principal, connection)? else {
             return Ok(());
         };
-        if !self
-            .geometry
-            .as_ref()
-            .is_some_and(|geometry| geometry.is_valid(self.context_window))
-        {
+        if !self.geometry.as_ref().is_some_and(|geometry| {
+            geometry.is_valid(self.context_window)
+                && self.output_reserve.is_none_or(|reserve| {
+                    geometry
+                        .usable_hard
+                        .checked_add(reserve)
+                        .is_some_and(|reserved| reserved <= geometry.absolute_wall)
+                })
+        }) {
             return Err(InvalidParams::new("geometry"));
         }
         if self.channel2_delivered_id.is_some() != self.channel2_receipt.is_some() {

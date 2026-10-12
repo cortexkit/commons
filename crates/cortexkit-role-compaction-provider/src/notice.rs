@@ -1,6 +1,7 @@
 //! Receipts for notices sent in a real provider request. The daemon verifies
 //! the runner's identity; that runner, not the compaction provider, observes
-//! the HTTP dispatch and reports its exact request bytes and identities.
+//! the successful 2xx response headers and reports the exact request bytes
+//! and identities. Transport failures and non-2xx responses are not dispatch.
 
 use std::collections::BTreeMap;
 
