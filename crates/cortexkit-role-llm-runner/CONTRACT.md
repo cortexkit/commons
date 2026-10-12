@@ -1114,6 +1114,22 @@ meaningful reaches these points with a fault hook followed by a real process
 kill, and declares that. A suite run fails unless at least one kill was a
 real process kill.
 
+## 14.1 Session reference
+
+- [pinned] A session's `session_ref` is the first 16 bytes of SHA-256 over
+  the RFC 8785 (JCS) bytes of `{"harness", "project_root", "session"}`, the
+  bind identity exactly as the route bind carried it. It is written as 32
+  lowercase hexadecimal characters.
+- [pinned] `project_root` is not normalised: no realpath, no symlink
+  resolution, no trailing-slash removal. Two binds whose roots differ by a
+  single byte are different sessions, because a runner keys its durable state
+  by those same bytes.
+- [pinned] Any module that keeps state for a runner session (a compaction
+  provider, a backup or move participant) derives the same `session_ref`
+  from the same bind identity, without asking the runner.
+  `test-vectors/llm-runner-v1/session-ref.json` pins the derivation,
+  including a trailing slash and non-ASCII escaping.
+
 ## 15. Conformance suite (planned)
 
 A separate `cortexkit-role-llm-runner-conformance` crate, run by each runner

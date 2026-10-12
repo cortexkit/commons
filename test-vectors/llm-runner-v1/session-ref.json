@@ -1,0 +1,45 @@
+{
+  "description": "session_ref: the first 16 bytes (32 lowercase hex characters) of SHA-256 over the RFC 8785 (JCS) bytes of {\"harness\",\"project_root\",\"session\"} exactly as the bind carried them. project_root is NOT normalised: no realpath, no trailing-slash removal.",
+  "cases": [
+    {
+      "name": "plain",
+      "bind": {
+        "project_root": "/Users/ufukaltinok/Work/Projects/CortexKit/broca",
+        "harness": "alfonso",
+        "session": "bg_0123456789abcdef"
+      },
+      "jcs": "{\"harness\":\"alfonso\",\"project_root\":\"/Users/ufukaltinok/Work/Projects/CortexKit/broca\",\"session\":\"bg_0123456789abcdef\"}",
+      "session_ref": "0ed3e544820e70a2988faa4522cb7717"
+    },
+    {
+      "name": "trailing slash is part of the bytes",
+      "bind": {
+        "project_root": "/tmp/project/",
+        "harness": "runner",
+        "session": "s1"
+      },
+      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/project/\",\"session\":\"s1\"}",
+      "session_ref": "58710a071e777b22bf1b3734b691ef7d"
+    },
+    {
+      "name": "no trailing slash",
+      "bind": {
+        "project_root": "/tmp/project",
+        "harness": "runner",
+        "session": "s1"
+      },
+      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/project\",\"session\":\"s1\"}",
+      "session_ref": "fb99bd3a001d05d029c607bd048ed5a1"
+    },
+    {
+      "name": "escaping and non-ASCII",
+      "bind": {
+        "project_root": "/tmp/p",
+        "harness": "runner",
+        "session": "session \"quoted\" é"
+      },
+      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/p\",\"session\":\"session \\\"quoted\\\" é\"}",
+      "session_ref": "ffe9f09a57cbb91f59379771fe9f3326"
+    }
+  ]
+}
