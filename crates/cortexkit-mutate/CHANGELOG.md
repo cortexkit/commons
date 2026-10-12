@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0
+
+- Add cargo/nextest run-set selections: `select = { filter = "substring" }`
+  matches full test names literally, and `select = { tests = ["exact::name", ...] }`
+  runs an exact list. Both require every expected red and at least one
+  expected-green sibling; `only = true` rejects other failures within that set.
+- Validate run-set membership during `check`, keep baselines and listing caches
+  separate across selections, and retain narrow scope even under `--broad`.
+  Breadth remains unobserved; `hub` and `hub_targets` are refused.
+- Add `prove --select-filter <text>` and `prove --select-tests a,b`, preserving
+  the selection in appended rows. Existing `select = "expected"` and `explore`
+  behavior are unchanged.
+
 ## 0.10.0
 
 - Add directory catalogues: `mutations.d/` or `--catalogue <dir>` loads visible,

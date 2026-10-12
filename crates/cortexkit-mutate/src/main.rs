@@ -122,7 +122,22 @@ struct Exploration {
     report: Option<PathBuf>,
 }
 #[derive(Args)]
+struct ProofSelection {
+    /// Run only the exact --expect-red tests on the baseline and mutant.
+    #[arg(long, value_name = "SELECTION", value_parser = ["expected"], conflicts_with_all = ["only", "select_filter", "select_tests"])]
+    select: Option<String>,
+    /// Run tests whose full harness name contains this literal substring.
+    #[arg(long, value_name = "TEXT", conflicts_with_all = ["select", "select_tests", "command"])]
+    select_filter: Option<String>,
+    /// Run these exact full harness names, including expected-green siblings.
+    #[arg(long, value_delimiter = ',', num_args = 1, conflicts_with_all = ["select", "select_filter", "command"])]
+    select_tests: Option<Vec<String>>,
+}
+
+#[derive(Args)]
 struct Proof {
+    #[command(flatten)]
+    selection: Box<ProofSelection>,
     #[command(flatten)]
     feature_selection: FeatureSelection,
     #[arg(long = "platform")]
@@ -169,9 +184,6 @@ struct Proof {
     signal_is_catch: Option<String>,
     #[arg(long)]
     only: bool,
-    /// Run only the exact --expect-red tests on the baseline and mutant.
-    #[arg(long, value_name = "SELECTION", value_parser = ["expected"], conflicts_with = "only")]
-    select: Option<String>,
     #[arg(long, default_value_t = 600)]
     timeout_s: u64,
     /// Bounds the mutant's build; --timeout-s bounds only the test run.
@@ -488,6 +500,7 @@ fn run() -> Result<bool> {
             Ok(!stop.load(Ordering::SeqCst) && rows.iter().all(Report::passes))
         }
         Action::Prove(p) => {
+            let selection = *p.selection;
             prepare_optional_output(p.report.as_deref())?;
             prepare_output_path(&control_destination(&catalogue_path, &p.id)?)?;
             let c = Control {
@@ -514,7 +527,12 @@ fn run() -> Result<bool> {
                 no_default_features: p.feature_selection.no_default_features.then_some(true),
                 all_features: p.feature_selection.all_features.then_some(true),
                 ignored: ignored_selection(p.feature_selection.ignored.as_deref()),
-                select: p.select.as_deref().map(|_| TestSelection::Expected),
+                select: selection
+                    .select
+                    .as_deref()
+                    .map(|_| TestSelection::Expected)
+                    .or_else(|| selection.select_filter.map(TestSelection::Filter))
+                    .or_else(|| selection.select_tests.map(TestSelection::Tests)),
                 command: p.command,
                 broad_command: None,
                 broad_report: None,
@@ -546,9 +564,9 @@ fn run() -> Result<bool> {
             let mut session =
                 ReplaySession::prepare(&root, &catalogue.prebuild, &[&c], p.allow_dirty, &stop)?;
             if c.select.is_some() {
-                // Expected-only proofs use the same target-and-test baseline as
-                // a normal selected row. Wider survivor diagnosis cannot broaden
-                // this explicit selection, so it is skipped below as well.
+                // A selected proof runs its chosen target and test set even if
+                // the mutant survives. Replaying the whole package to diagnose
+                // that survivor would still run this set, so skip that replay.
                 session.baselines(&root, &[&c], p.allow_dirty, &stop)?;
             } else {
                 session.package_baselines(&root, &[&c], p.allow_dirty, &stop)?;

@@ -520,6 +520,62 @@ If a repo folds test binaries or changes module structure, update its rows.
 Names duplicated across binaries are ambiguous and fail closed rather than
 being silently combined. Ignored tests do not count as having run.
 
+### Run-set selection (0.11.0)
+
+Cargo and nextest rows can run a group narrower than the target but wider than
+`expect_red`, checking that the mutant breaks its own test while siblings stay
+green:
+
+```toml
+[[control]]
+id = "trust-roster-rejects-unknown"
+guards = "unknown peers are rejected without breaking known-peer handling"
+file = "src/trust.rs"
+old = "roster.contains(peer)"
+new = "true"
+test_file = "src/trust.rs"
+runner = "cargo"
+package = "trust-service"
+target = "--lib"
+expect_red = ["tests::trust_roster_rejects_unknown"]
+select = { filter = "trust_roster_" }
+only = true
+```
+
+`select = { filter = "trust_roster_" }` runs tests whose **full harness name
+contains that literal substring**, not a regex. Cargo passes it as a positional
+libtest filter without `--exact`; nextest uses the equivalent escaped
+`test(~...)` contains matcher. Alternatively, use an exact list:
+
+```toml
+select = { tests = ["tests::trust_roster_rejects_unknown", "tests::trust_roster_accepts_known"] }
+```
+
+The exact list uses the same exact-name runner machinery as `select = "expected"`.
+Use full harness names, not binary-qualified report aliases. `check` validates
+the run set against the cached target listing: every `expect_red` must be in the
+set and every explicit name must exist and be runnable. Missing expected names
+are ERROR naming the test. An empty set or zero executed matches is ERROR. At
+least one test **outside `expect_red` must execute**; otherwise use
+`select = "expected"`. Ignored tests count only when the row's `ignored` setting
+runs them.
+
+`only = true` means no test **inside the run set** other than `expect_red` may
+fail; a failing sibling grades WRONG_TEST. With `only = false`, grading is the
+same as an ordinary row, within the set. Tests outside the set do not run and
+cannot affect the result. Package breadth stays unobserved: the report says
+`selection was narrowed to a run set; breadth not observed`, and `--broad` never
+widens it. `hub` and `hub_targets` are refused, as are selections on command rows.
+Baselines and listing cache entries are keyed by the exact filter text or list,
+so different selections never share a baseline.
+
+`prove --select-filter trust_roster_ --only` and
+`prove --select-tests tests::trust_roster_rejects_unknown,tests::trust_roster_accepts_known --only`
+write the matching row field. These options are mutually exclusive with each
+other and `--select expected`; selected proofs do not attempt an unscoped
+survivor diagnosis. `explore` is unchanged. `select = "expected"` keeps its
+existing behavior, including refusal of `only = true`.
+
 ### Exact expected-test selection (0.9.0)
 
 Cargo and nextest rows may opt into **`select = "expected"`** when a target

@@ -73,7 +73,7 @@ pub struct Control {
     /// tests that are not ignored, as Cargo does by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignored: Option<IgnoredSelection>,
-    /// Run only exact expected test names rather than the whole target.
+    /// Narrow the target to expected names, a substring, or an exact run set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub select: Option<TestSelection>,
     /// An argv template, not a shell string; substitutes one expected test id.
@@ -143,10 +143,35 @@ pub enum IgnoredSelection {
     Only,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TestSelection {
     Expected,
+    Filter(String),
+    Tests(Vec<String>),
+}
+
+impl TestSelection {
+    fn exact_names<'a>(&'a self, expected: &'a [String]) -> Option<&'a [String]> {
+        match self {
+            Self::Expected => Some(expected),
+            Self::Tests(names) => Some(names),
+            Self::Filter(_) => None,
+        }
+    }
+
+    fn contains(&self, name: &str, expected: &[String]) -> bool {
+        match self {
+            Self::Filter(filter) => name.contains(filter),
+            Self::Expected => expected.iter().any(|test| test == name),
+            Self::Tests(names) => names.iter().any(|test| test == name),
+        }
+    }
+
+    fn key(&self, expected: &[String]) -> String {
+        // Include the variant and string boundaries, not just joined names.
+        serde_json::to_string(&(self, self.exact_names(expected))).unwrap()
+    }
 }
 
 impl IgnoredSelection {
@@ -225,11 +250,24 @@ impl Control {
                     "is supported only for cargo/nextest rows",
                 ));
             }
-            if self.only || self.hub.is_some() || self.hub_targets.is_some() {
+            if self.select == Some(TestSelection::Expected)
+                && (self.only || self.hub.is_some() || self.hub_targets.is_some())
+            {
                 return Err(invalid("select = expected", "cannot be combined with only = true, hub or hub_targets: breadth is not observed"));
             }
+            if self.hub.is_some() || self.hub_targets.is_some() {
+                return Err(invalid(
+                    "select",
+                    "cannot be combined with hub or hub_targets: breadth is not observed",
+                ));
+            }
             if self.expect_red.is_empty() {
-                return Err(invalid("select = expected", "requires nonempty expect_red"));
+                let field = if self.select == Some(TestSelection::Expected) {
+                    "select = expected"
+                } else {
+                    "select"
+                };
+                return Err(invalid(field, "requires nonempty expect_red"));
             }
         }
         let broad_fields = [
@@ -1524,7 +1562,7 @@ enum Scope {
 }
 
 fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
-    // Expected-only rows never widen their target or named-test selection,
+    // Selected rows never widen their target or named-test selection,
     // including when a caller asks for an expensive breadth pass.
     let scope = if c.select.is_some() {
         Scope::Row
@@ -1581,8 +1619,13 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
         _ if c.runner == "cargo" => {
             cmd.args(["--no-fail-fast", "--", "--test-threads=1"]);
             cmd.args(c.ignored.map(IgnoredSelection::libtest_arg));
-            if c.select.is_some() {
-                cmd.arg("--exact").args(&c.expect_red);
+            if let Some(selection) = &c.select {
+                if let Some(names) = selection.exact_names(&c.expect_red) {
+                    cmd.arg("--exact").args(names);
+                } else if let TestSelection::Filter(filter) = selection {
+                    // End harness options so a leading '-' remains filter text.
+                    cmd.arg("--").arg(filter);
+                }
             }
         }
         _ => {
@@ -1590,31 +1633,37 @@ fn command(c: &Control, mode: &str, scope: Scope) -> Result<Command> {
             if let Some(ignored) = c.ignored {
                 cmd.args(["--run-ignored", ignored.nextest_value()]);
             }
-            if c.select.is_some() {
-                let expression = c
-                    .expect_red
-                    .iter()
-                    .map(|name| {
-                        let mut escaped = String::new();
-                        for ch in name.chars() {
-                            match ch {
-                                '\\' | '/' | ')' | ',' => {
-                                    escaped.push('\\');
-                                    escaped.push(ch);
-                                }
-                                '\n' => escaped.push_str("\\n"),
-                                '\r' => escaped.push_str("\\r"),
-                                '\t' => escaped.push_str("\\t"),
-                                c if c.is_control() => {
-                                    escaped.push_str(&format!("\\u{{{:X}}}", c as u32))
-                                }
-                                _ => escaped.push(ch),
+            if let Some(selection) = &c.select {
+                let escape = |name: &str| {
+                    let mut escaped = String::new();
+                    for ch in name.chars() {
+                        match ch {
+                            '\\' | '/' | ')' | ',' => {
+                                escaped.push('\\');
+                                escaped.push(ch);
                             }
+                            '\n' => escaped.push_str("\\n"),
+                            '\r' => escaped.push_str("\\r"),
+                            '\t' => escaped.push_str("\\t"),
+                            c if c.is_control() => {
+                                escaped.push_str(&format!("\\u{{{:X}}}", c as u32))
+                            }
+                            _ => escaped.push(ch),
                         }
-                        format!("test(={escaped})")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | ");
+                    }
+                    escaped
+                };
+                let expression = if let Some(names) = selection.exact_names(&c.expect_red) {
+                    names
+                        .iter()
+                        .map(|name| format!("test(={})", escape(name)))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                } else if let TestSelection::Filter(filter) = selection {
+                    format!("test(~{})", escape(filter))
+                } else {
+                    unreachable!()
+                };
                 cmd.args(["-E", &expression]);
             }
             let help = Command::new("cargo")
@@ -2561,10 +2610,63 @@ fn validate_baseline(c: &Control, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
-fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()> {
-    if c.select.is_none() {
+fn validate_run_set(c: &Control, results: &TestResults) -> Result<()> {
+    let Some(selection @ (TestSelection::Filter(_) | TestSelection::Tests(_))) = &c.select else {
         return Ok(());
+    };
+    for name in &c.expect_red {
+        if !selection.contains(name, &c.expect_red) {
+            return Err(format!(
+                "{}: expect_red test {name:?} is outside the selected run set",
+                c.label()
+            ));
+        }
+        if !results.names.values().any(|actual| actual == name) {
+            return Err(format!(
+                "{}: expect_red test {name:?} does not exist or is skipped in the run set",
+                c.label()
+            ));
+        }
     }
+    if let TestSelection::Tests(names) = selection {
+        for name in names {
+            if !results.names.values().any(|actual| actual == name) {
+                return Err(format!(
+                    "{}: selected run-set test {name:?} does not exist or is skipped",
+                    c.label()
+                ));
+            }
+        }
+    }
+    let selected: Vec<_> = results
+        .names
+        .values()
+        .filter(|name| selection.contains(name, &c.expect_red))
+        .collect();
+    if selected.is_empty() {
+        return Err(format!(
+            "{}: selected run set has zero matching tests",
+            c.label()
+        ));
+    }
+    if !selected.iter().any(|name| !c.expect_red.contains(name)) {
+        return Err(format!(
+            "{}: run set must include a test outside expect_red; use select = \"expected\"",
+            c.label()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()> {
+    let Some(selection) = &c.select else {
+        return Ok(());
+    };
+    let label = if *selection == TestSelection::Expected {
+        "select = expected"
+    } else {
+        "selected run-set"
+    };
     for name in &c.expect_red {
         // Match each expected name against the name the test harness itself
         // printed, not the report id that is prefixed with the test binary. A
@@ -2573,7 +2675,7 @@ fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()>
             actual == name && (results.red.contains(id) || results.green.contains(id))
         }) {
             return Err(format!(
-                "{}: select = expected test {name:?} did not execute (zero matching tests)",
+                "{}: {label} test {name:?} did not execute (zero matching tests)",
                 c.label()
             ));
         }
@@ -2581,14 +2683,16 @@ fn validate_selected_execution(c: &Control, results: &TestResults) -> Result<()>
     if let Some(name) = results
         .names
         .values()
-        .find(|name| !c.expect_red.contains(name))
+        .find(|name| !selection.contains(name, &c.expect_red))
     {
-        return Err(format!(
-            "{}: select = expected ran unlisted test {name:?}",
-            c.label()
-        ));
+        return Err(format!("{}: {label} ran unlisted test {name:?}", c.label()));
     }
-    Ok(())
+    // Skipped events do not establish that an expected-green sibling ran.
+    let mut executed = results.clone();
+    executed
+        .names
+        .retain(|id, _| results.red.contains(id) || results.green.contains(id));
+    validate_run_set(c, &executed)
 }
 
 fn exclude_baseline_red(c: &Control, report: &Report, results: &mut TestResults) {
@@ -3326,9 +3430,8 @@ impl ReplaySession {
                     "ignored={}",
                     c.ignored.map_or("none", IgnoredSelection::as_str)
                 ));
-                if c.select.is_some() {
-                    key.push("select=expected".into());
-                    key.extend(c.expect_red.iter().cloned());
+                if let Some(selection) = &c.select {
+                    key.push(selection.key(&c.expect_red));
                 }
                 key
             } else {
@@ -3424,6 +3527,9 @@ impl ReplaySession {
                 }
                 let validation = names
                     .and_then(|names| resolve_listed(c, &names).map(|_| ()))
+                    .and_then(|()| {
+                        validate_selected_execution(c, report.baseline_results.as_ref().unwrap())
+                    })
                     .and_then(|()| validate_baseline(c, &mut report));
                 if let Err(e) = validation {
                     report.outcome = Outcome::Error;
@@ -3892,7 +3998,11 @@ fn replay(
     }
     report.prebuild_tail = tail(&report.prebuild_tail);
     if c.select.is_some() && !baseline_only {
-        let selection = "selection was expected-only; breadth not observed";
+        let selection = if c.select == Some(TestSelection::Expected) {
+            "selection was expected-only; breadth not observed"
+        } else {
+            "selection was narrowed to a run set; breadth not observed"
+        };
         report.reason = Some(report.reason.map_or_else(
             || selection.to_owned(),
             |reason| format!("{reason}; {selection}"),
@@ -3921,10 +4031,17 @@ struct ListingKey {
 
 impl ListingKey {
     fn new(c: &Control, scope: Scope, clean_tree: bool) -> Result<Self> {
-        let args = command(c, "list", scope)?
+        let mut args: Vec<String> = command(c, "list", scope)?
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
+        // Listings cover the target so membership can be checked before running.
+        // Filter and explicit-list selections cache one listing per run set,
+        // independently of each row's expected reds. Expected-only rows still
+        // share the target listing because their sets are just those reds.
+        if let Some(selection @ (TestSelection::Filter(_) | TestSelection::Tests(_))) = &c.select {
+            args.push(selection.key(&c.expect_red));
+        }
         Ok(Self { args, clean_tree })
     }
 }
@@ -4112,6 +4229,7 @@ fn list_results(root: &Path, c: &Control, scope: Scope, stop: &AtomicBool) -> Re
 /// Resolve a row's expected names against its listing, refusing by name an
 /// expected test that exists only as an `#[ignore]`d test the row skips.
 fn resolve_listed(c: &Control, listing: &Listing) -> Result<Vec<String>> {
+    validate_run_set(c, &listing.results)?;
     let resolved = resolve_expected(c, &listing.results)?;
     for (expected, identity) in c.expect_red.iter().zip(&resolved) {
         if listing.results.names.contains_key(identity) {
@@ -4701,6 +4819,58 @@ mod line_ending_tests {
 #[cfg(test)]
 mod broad_command_tests {
     use super::*;
+
+    #[test]
+    fn run_set_commands_use_literal_contains_or_exact_names_and_separate_listing_keys() {
+        let mut row =
+            toml::from_str::<Catalogue>(include_str!("../tests/fixture/mutations-v0.1.toml"))
+                .unwrap()
+                .control
+                .remove(0);
+        row.expect_red = vec!["tests::guard".into()];
+        let filter = "-a.*),b\\c/\n\r\t\u{1}";
+        for runner in ["cargo", "nextest"] {
+            row.runner = runner.into();
+            row.select = Some(TestSelection::Filter(filter.into()));
+            let cmd = command(&row, "run", Scope::Broad).unwrap();
+            let args: Vec<_> = cmd.get_args().map(|arg| arg.to_str().unwrap()).collect();
+            assert!(args.contains(&"--lib") && !args.contains(&"--tests"));
+            if runner == "cargo" {
+                assert!(args.ends_with(&["--", filter]));
+                assert!(!args.contains(&"--exact"));
+            } else {
+                assert!(
+                    args.windows(2)
+                        .any(|args| args == ["-E", "test(~-a.*\\)\\,b\\\\c\\/\\n\\r\\t\\u{1})"]),
+                    "{args:?}"
+                );
+            }
+            let first = ListingKey::new(&row, Scope::Row, true).unwrap();
+            assert_eq!(first, ListingKey::new(&row, Scope::Broad, true).unwrap());
+            row.select = Some(TestSelection::Filter("other".into()));
+            assert_ne!(first, ListingKey::new(&row, Scope::Row, true).unwrap());
+            row.select = Some(TestSelection::Tests(vec![
+                "tests::guard".into(),
+                "tests::sibling".into(),
+            ]));
+            let tests_key = ListingKey::new(&row, Scope::Row, true).unwrap();
+            assert_ne!(first, tests_key);
+            let cmd = command(&row, "run", Scope::Row).unwrap();
+            let args: Vec<_> = cmd.get_args().map(|arg| arg.to_str().unwrap()).collect();
+            if runner == "cargo" {
+                assert!(args.ends_with(&["--exact", "tests::guard", "tests::sibling"]));
+            } else {
+                assert!(args
+                    .windows(2)
+                    .any(|args| args == ["-E", "test(=tests::guard) | test(=tests::sibling)"]));
+            }
+            row.select = Some(TestSelection::Tests(vec![
+                "tests::guard".into(),
+                "tests::other".into(),
+            ]));
+            assert_ne!(tests_key, ListingKey::new(&row, Scope::Row, true).unwrap());
+        }
+    }
 
     #[test]
     fn expected_selection_builds_exact_libtest_and_nextest_filters_without_widening() {

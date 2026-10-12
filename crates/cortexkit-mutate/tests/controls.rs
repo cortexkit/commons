@@ -230,6 +230,316 @@ fn selection_runners() -> Vec<&'static str> {
     }
 }
 
+fn run_set_selections() -> [TestSelection; 2] {
+    [
+        TestSelection::Filter("tests::guard_".into()),
+        TestSelection::Tests(vec![
+            "tests::guard_rejects_zero".into(),
+            "tests::guard_accepts_positive".into(),
+        ]),
+    ]
+}
+
+fn run_set_fixture(fail_sibling: bool) -> Fixture {
+    let f = Fixture::new();
+    let path = f.root().join("src/lib.rs");
+    let mut source = fs::read_to_string(&path).unwrap().replace(
+        "assert!(super::unrelated());",
+        "panic!(\"outside the run set must not execute\");",
+    );
+    if fail_sibling {
+        source = source.replace(
+            "assert!(super::guarded(1));",
+            "assert!(!super::guarded(0));",
+        );
+    }
+    fs::write(path, source).unwrap();
+    f.commit();
+    f
+}
+
+#[test]
+fn run_set_only_rejects_failing_siblings_inside_selection() {
+    let f = run_set_fixture(true);
+    for runner in selection_runners() {
+        for selection in run_set_selections() {
+            let mut c = f.control();
+            c.runner = runner.into();
+            c.select = Some(selection);
+            let row = f.run(&c);
+            assert_eq!(row.outcome, Outcome::WrongTest, "{runner}: {row:?}");
+            assert!(row.failures.contains_key("tests::guard_accepts_positive"));
+            assert_eq!(row.red.len(), 2);
+            c.only = false;
+            assert_eq!(f.run(&c).outcome, Outcome::Caught);
+        }
+    }
+}
+
+#[test]
+fn run_set_excludes_failing_siblings_outside_selection_even_under_broad() {
+    let f = run_set_fixture(false);
+    for runner in selection_runners() {
+        for selection in run_set_selections() {
+            let mut c = f.control();
+            c.runner = runner.into();
+            c.select = Some(selection);
+            let catalogue = Catalogue {
+                control: vec![c.clone()],
+                ..Catalogue::default()
+            };
+            check(f.root(), &catalogue, &AtomicBool::new(false)).unwrap();
+            for broad in [false, true] {
+                let row = if broad {
+                    run_broad_row(f.root(), &c, false, &AtomicBool::new(false)).unwrap()
+                } else {
+                    f.run(&c)
+                };
+                assert_eq!(row.outcome, Outcome::Caught, "{runner}: {row:?}");
+                assert_eq!(row.red, ["tests::guard_rejects_zero"]);
+                assert_eq!(row.green, ["tests::guard_accepts_positive"]);
+                assert!(row.baseline_red.is_empty());
+                assert!(!row.breadth_observed);
+                assert!(row.reason.unwrap().contains("selection was narrowed"));
+                assert!(!row.test_tail.contains("outside the run set"));
+            }
+        }
+    }
+}
+
+#[test]
+fn run_set_check_rejects_expected_names_outside_selection() {
+    let f = Fixture::new();
+    for runner in selection_runners() {
+        for selection in run_set_selections() {
+            let mut c = f.control();
+            c.runner = runner.into();
+            c.select = Some(selection);
+            c.expect_red = vec!["tests::unrelated_test".into()];
+            let catalogue = Catalogue {
+                control: vec![c.clone()],
+                ..Catalogue::default()
+            };
+            let error = check(f.root(), &catalogue, &AtomicBool::new(false)).unwrap_err();
+            assert!(
+                error.contains("tests::unrelated_test") && error.contains("outside"),
+                "{error}"
+            );
+            let row = f.run(&c);
+            assert_eq!(row.outcome, Outcome::Error, "{runner}: {row:?}");
+            assert!(row.reason.unwrap().contains("tests::unrelated_test"));
+        }
+    }
+}
+
+#[test]
+fn run_set_check_rejects_empty_selections() {
+    let f = Fixture::new();
+    for runner in selection_runners() {
+        for selection in [
+            TestSelection::Filter("no_such_test".into()),
+            TestSelection::Tests(vec![]),
+        ] {
+            let mut c = f.control();
+            c.runner = runner.into();
+            c.select = Some(selection);
+            let catalogue = Catalogue {
+                control: vec![c.clone()],
+                ..Catalogue::default()
+            };
+            assert!(check(f.root(), &catalogue, &AtomicBool::new(false)).is_err());
+            assert_eq!(f.run(&c).outcome, Outcome::Error);
+        }
+    }
+}
+
+#[test]
+fn run_set_requires_an_executing_expected_green_sibling() {
+    let f = Fixture::new();
+    for runner in selection_runners() {
+        for selection in [
+            TestSelection::Filter("guard_rejects_zero".into()),
+            TestSelection::Tests(vec!["tests::guard_rejects_zero".into()]),
+            TestSelection::Tests(vec![
+                "tests::guard_rejects_zero".into(),
+                "tests::daemon_contract".into(),
+            ]),
+        ] {
+            let mut c = f.control();
+            c.runner = runner.into();
+            c.select = Some(selection);
+            let catalogue = Catalogue {
+                control: vec![c.clone()],
+                ..Catalogue::default()
+            };
+            let error = check(f.root(), &catalogue, &AtomicBool::new(false)).unwrap_err();
+            assert!(
+                error.contains("select = \"expected\"") || error.contains("skipped"),
+                "{error}"
+            );
+            assert_eq!(f.run(&c).outcome, Outcome::Error);
+        }
+    }
+}
+
+#[test]
+fn run_set_baselines_are_not_shared_across_filters_or_lists() {
+    for runner in selection_runners() {
+        let f = Fixture::new();
+        let path = f.root().join("src/lib.rs");
+        let source = fs::read_to_string(&path).unwrap().replace(
+            "assert!(!super::guarded(0));",
+            "{ use std::io::Write; writeln!(std::fs::OpenOptions::new().create(true).append(true).open(\".git/baseline-runs\").unwrap(), \"guard\").unwrap(); } assert!(!super::guarded(0));",
+        );
+        fs::write(path, source).unwrap();
+        f.commit();
+        let selections = [
+            run_set_selections()[0].clone(),
+            TestSelection::Filter("tests::".into()),
+            run_set_selections()[1].clone(),
+            TestSelection::Tests(vec![
+                "tests::guard_rejects_zero".into(),
+                "tests::unrelated_test".into(),
+            ]),
+            run_set_selections()[0].clone(),
+        ];
+        let rows: Vec<_> = selections
+            .into_iter()
+            .enumerate()
+            .map(|(i, selection)| {
+                let mut c = f.control();
+                c.id = format!("selection-{i}");
+                c.runner = runner.into();
+                c.select = Some(selection);
+                c
+            })
+            .collect();
+        let refs: Vec<_> = rows.iter().collect();
+        let stop = AtomicBool::new(false);
+        let mut session = ReplaySession::prepare(f.root(), &[], &refs, false, &stop).unwrap();
+        session.baselines(f.root(), &refs, false, &stop).unwrap();
+        let runs = fs::read_to_string(f.root().join(".git/baseline-runs")).unwrap();
+        assert_eq!(
+            runs.lines().count(),
+            4,
+            "{runner}: different run sets need separate baselines; identical selections share one"
+        );
+    }
+}
+
+#[test]
+fn run_set_shapes_round_trip_and_refuse_unknown_shapes_hubs_and_commands() {
+    let f = Fixture::new();
+    let path = f.root().join("selection.toml");
+    for selection in run_set_selections() {
+        let mut c = f.control();
+        c.select = Some(selection.clone());
+        let text = toml::to_string(&Catalogue {
+            control: vec![c.clone()],
+            ..Catalogue::default()
+        })
+        .unwrap();
+        fs::write(&path, &text).unwrap();
+        assert_eq!(load(&path).unwrap().control[0].select, Some(selection));
+        for kind in ["hub", "hub_targets", "command"] {
+            let mut bad = c.clone();
+            match kind {
+                "hub" => {
+                    bad.hub = Some("shared guard across several test binaries".into());
+                    bad.hub_targets = Some(vec!["Other".into()]);
+                }
+                "hub_targets" => bad.hub_targets = Some(vec!["Other".into()]),
+                _ => bad.runner = "command".into(),
+            }
+            fs::write(
+                &path,
+                toml::to_string(&Catalogue {
+                    control: vec![bad],
+                    ..Catalogue::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            let error = load(&path).err().unwrap();
+            assert!(
+                error.contains("select") && error.contains("guard"),
+                "{error}"
+            );
+        }
+    }
+    let mut c = f.control();
+    c.select = None;
+    let text = toml::to_string(&Catalogue {
+        control: vec![c],
+        ..Catalogue::default()
+    })
+    .unwrap();
+    for shape in [
+        "{ unknown = 'x' }",
+        "{ filter = 'guard', tests = ['a'] }",
+        "{ tests = 'a' }",
+        "['a']",
+        "{ filter = 'guard', extra = true }",
+    ] {
+        fs::write(&path, format!("{text}\nselect = {shape}\n")).unwrap();
+        let error = load(&path).err().unwrap();
+        assert!(
+            error.contains("guard") && error.contains("select"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn prove_run_set_options_preserve_selection_and_allow_only() {
+    for (option, value, selection) in [
+        (
+            "--select-filter",
+            "tests::guard_",
+            run_set_selections()[0].clone(),
+        ),
+        (
+            "--select-tests",
+            "tests::guard_rejects_zero,tests::guard_accepts_positive",
+            run_set_selections()[1].clone(),
+        ),
+    ] {
+        let f = run_set_fixture(false);
+        let output = f.cli(&[
+            "prove",
+            "--id",
+            "run-set-proof",
+            "--guards",
+            "zero is rejected with green siblings",
+            "--package",
+            "mutation-fixture",
+            "--file",
+            "src/lib.rs",
+            "--old",
+            "value > 0",
+            "--new",
+            "value >= 0",
+            "--test-file",
+            "test_contract.rs",
+            "--target=--lib",
+            "--expect-red",
+            "tests::guard_rejects_zero",
+            "--only",
+            option,
+            value,
+        ]);
+        assert!(output.status.success(), "{output:?}");
+        let catalogue = load(&f.root().join("mutations.toml")).unwrap();
+        let appended = catalogue
+            .control
+            .iter()
+            .find(|row| row.id == "run-set-proof")
+            .unwrap();
+        assert_eq!(appended.select, Some(selection));
+        assert!(appended.only);
+    }
+}
+
 #[test]
 fn select_expected_prefix_runs_only_named_tests() {
     let f = selection_fixture(false);
