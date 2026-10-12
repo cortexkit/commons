@@ -24,17 +24,34 @@ pub fn scratch_root() -> PathBuf {
     .clone()
 }
 
-/// Shared root under the system temp directory. Initialization sweeps stale fixtures.
+/// Shared root for scratch fixtures. Initialization sweeps stale fixtures.
 pub fn shared_scratch_root() -> PathBuf {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
-        let root = std::env::temp_dir().join("cortexkit-tests");
+        let root = shared_scratch_root_path();
+        #[cfg(target_os = "macos")]
+        crate::binaries::prepare_private_root(&root).expect("create test scratch root");
+        #[cfg(not(target_os = "macos"))]
         std::fs::create_dir_all(&root).expect("create test scratch root");
         real_directory(&root);
         sweep(&root);
         root
     })
     .clone()
+}
+
+fn shared_scratch_root_path() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from(format!(
+            "/tmp/cortexkit-tests-{}",
+            rustix::process::getuid().as_raw()
+        ))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::temp_dir().join("cortexkit-tests")
+    }
 }
 
 fn real_directory(path: &Path) {
@@ -234,6 +251,23 @@ mod tests {
             )
             .unwrap();
     }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_scratch_root_uses_tmp_not_system_temp_dir() {
+        let root = shared_scratch_root_path();
+        assert!(
+            root.starts_with("/tmp"),
+            "scratch root is {}",
+            root.display()
+        );
+        assert!(
+            !root.starts_with(std::env::temp_dir()),
+            "scratch root {} is under system temp directory {}",
+            root.display(),
+            std::env::temp_dir().display()
+        );
+    }
+
     #[test]
     fn success_drop_removes_the_tree() {
         let dir = ScratchDir::new("normal");

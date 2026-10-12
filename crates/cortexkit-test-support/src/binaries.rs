@@ -253,7 +253,7 @@ fn content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
 
 fn publish(built: &Path, dev_name: &str, root: &Path) -> io::Result<PathBuf> {
     let digest = content_digest(built, dev_name)?;
-    prepare_root(root)?;
+    prepare_root(root, 0o022)?;
     let dir = root.join(&digest);
     let placed = dir.join(dev_name);
     if dir.exists() {
@@ -316,9 +316,9 @@ fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<(
     }
 }
 
-/// Creates the publish root, and refuses one this user does not own or that
-/// others can write: `/tmp` is shared, and a planted file there would be run.
-fn prepare_root(root: &Path) -> io::Result<()> {
+/// Creates and verifies a real root. On Unix, `forbidden_access` is the mask
+/// of group and other permission bits that must be absent.
+fn prepare_root(root: &Path, forbidden_access: u32) -> io::Result<()> {
     if !root.exists() {
         fs::create_dir_all(root)?;
         #[cfg(unix)]
@@ -329,20 +329,29 @@ fn prepare_root(root: &Path) -> io::Result<()> {
     }
     let metadata = fs::symlink_metadata(root)?;
     if !metadata.is_dir() || metadata.is_symlink() {
-        return Err(io::Error::other("publish root must be a real directory"));
+        return Err(io::Error::other("root must be a real directory"));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         let uid = rustix::process::getuid().as_raw();
-        if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o022 != 0 {
+        if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & forbidden_access != 0 {
             return Err(io::Error::other(format!(
-                "{} must be a directory owned by uid {uid} and writable by no one else",
+                "{} must be a directory owned by uid {uid} and writable by no one else, with no group or other permission bits in mask {forbidden_access:#o}",
                 root.display()
             )));
         }
     }
+    #[cfg(not(unix))]
+    let _ = forbidden_access;
     Ok(())
+}
+
+/// Creates a private root and refuses one that group or other users can access.
+/// `/tmp` is shared, so every entry in this directory must belong to this user.
+#[cfg(unix)]
+pub(crate) fn prepare_private_root(root: &Path) -> io::Result<()> {
+    prepare_root(root, 0o077)
 }
 
 #[cfg(unix)]
@@ -449,6 +458,23 @@ fn copy_executable(src: &Path, dst: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn private_root_refuses_group_or_other_access() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = crate::ScratchDir::new("private-root-mode");
+        let root = scratch.join("root");
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let error = prepare_private_root(&root).unwrap_err();
+        assert!(
+            error.to_string().contains("group or other permission bits"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn staged_child_fixture() {

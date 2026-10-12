@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4
+
+- On macOS, `ScratchDir` now lives under `/tmp/cortexkit-tests-<uid>/` (mode
+  0700, owned by the current user) instead of the per-user `$TMPDIR`. Tests that
+  copy a freshly built executable into a scratch folder and run it could stall
+  there for 30 seconds or more while macOS assessed the new binary; under `/tmp`
+  it starts at once. A pre-existing root that isn't a real directory owned by
+  this user with no group or other access is refused by name. Linux and Windows
+  keep their previous root.
+
 ## 0.1.3
 
 - Add `process_liveness(pid)`, which returns alive, dead or unknown (Linux
