@@ -27,7 +27,8 @@ unknown is never considered gone (including unsupported platforms).
 ## Executables and spawn guard
 
 `ckdev_binary(built)` publishes a content-addressed, read-only **copy**, never a
-hard link. `ckdev_file_name` maps `ck-example` to `ckdev-example`, `ck` to
+hard link, including for a binary already named `ckdev-*`, so a test never runs
+an executable from its build folder. `ckdev_file_name` maps `ck-example` to `ckdev-example`, `ck` to
 `ckdev-ck`, and preserves `.exe`. Windows staging ensures an `.exe` suffix.
 `stage_test_binary` is the narrower compatibility helper: only `ck-*` names
 are staged; other names pass through.

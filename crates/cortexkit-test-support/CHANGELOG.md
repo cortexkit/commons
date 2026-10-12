@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- `ckdev_binary` copies a binary that is already named `ckdev-*` too, instead of returning its build path. A bin target with that name was run straight from its build folder. When that folder is on an external volume, macOS shows a privacy prompt before a test daemon starts it as a module under its own privacy identity, and the test waits on that prompt.
+
 ## 0.1.4
 
 - On macOS, `ScratchDir` now lives under `/tmp/cortexkit-tests-<uid>/` (mode

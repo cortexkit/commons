@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-test-support"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "rustix",
  "sha2 0.10.9",

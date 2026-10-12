@@ -182,7 +182,7 @@ fn strip_exe_suffix(name: &str) -> (&str, &str) {
 }
 
 /// Publish a built executable under a content-addressed `ckdev-*` name.
-/// Already-dev-named paths pass through. Unix copies live under `/tmp`, never
+/// A binary already named `ckdev-*` is copied as well. Unix copies live under `/tmp`, never
 /// `$TMPDIR`, to avoid per-user temporary-directory execution assessment delays.
 /// A child writes a private staging copy, then an atomic rename publishes it.
 /// This avoids hard-link execution failures and writable descriptors inherited
@@ -221,9 +221,10 @@ fn ckdev_binary_at(built: &Path, root: &Path) -> PathBuf {
     } else {
         format!("{dev_name}.exe")
     };
-    if dev_name == file_name {
-        return built.to_path_buf();
-    }
+    // A binary already named `ckdev-*` is copied too, never run from where it
+    // was built. Its build folder can sit on an external volume. There, macOS
+    // shows a privacy prompt before a test daemon starts a module that runs
+    // under its own privacy identity, and the test waits on that prompt.
     let placed = publish(built, &dev_name, root).unwrap_or_else(|error| {
         panic!(
             "could not publish {} as {dev_name} under {}: {error}",
@@ -889,11 +890,24 @@ mod tests {
         );
     }
 
+    /// A bin target already named `ckdev-*` is still copied out of its build
+    /// folder, under the same name.
+    #[cfg(unix)]
     #[test]
-    fn an_already_ckdev_binary_is_returned_unchanged() {
-        let name = format!("/nonexistent/ckdev-subc{}", std::env::consts::EXE_SUFFIX);
-        let built = Path::new(&name);
-        assert_eq!(ckdev_binary(built), built);
+    fn an_already_ckdev_binary_is_copied_out_of_its_build_folder() {
+        let build = crate::ScratchDir::new("ckdev-named-build");
+        let root = PublishRoot::new("ckdev-named-root");
+        let built = build.join("ckdev-fixture");
+        write_script(&built, "#!/bin/sh\necho fixture\n");
+        let placed = ckdev_binary_at(&built, &root.path());
+        assert_ne!(placed, built);
+        assert_eq!(placed.file_name().unwrap(), "ckdev-fixture");
+        assert_eq!(
+            placed.parent().and_then(Path::parent),
+            Some(root.path().as_path())
+        );
+        let output = dev_command(&placed).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "fixture\n");
     }
 
     /// Writes through a staging file and a `cp` child, so this multi-threaded
