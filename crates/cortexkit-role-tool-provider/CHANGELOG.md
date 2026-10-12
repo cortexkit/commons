@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3
+
+- Add a route-bind capability constant and helper for detecting consumers that
+  declare support for `content/v1` result bodies.
+- Require providers to choose a tool's `content/v1` or legacy result body from
+  the route bind, and document the consumer's matching declaration.
+
 ## 0.7.2
 
 - Define three more unprefixed capability tags, so a consumer can ask for

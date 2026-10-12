@@ -41,6 +41,21 @@ pub const VERSION: &str = "v1";
 /// The string a provider lists in its manifest's `capabilities.provides`.
 pub const PROVIDES: &str = "tool-provider/v1";
 
+/// The route-bind capability a consumer declares when it decodes `content/v1` results.
+pub const CONTENT_V1_CAPABILITY: &str = "content/v1";
+
+/// Whether a route's bind says that its consumer decodes `content/v1` results.
+///
+/// Providers use this bind-scoped declaration, together with the tool's
+/// catalog `result_format`, to choose the result body for each route.
+pub fn consumer_reads_content_v1(consumer_capabilities: Option<&[String]>) -> bool {
+    consumer_capabilities.is_some_and(|capabilities| {
+        capabilities
+            .iter()
+            .any(|capability| capability == CONTENT_V1_CAPABILITY)
+    })
+}
+
 /// Names of the role's ops, as the `name` of the request that carries them.
 pub mod ops {
     /// Discovery before use: the role's version, stability and ops. Required.
@@ -60,6 +75,33 @@ pub mod ops {
 /// Ops every `tool-provider/v1` module must list in `role.describe`. A
 /// consumer refuses a module missing any of them before routing anything.
 pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::TOOL_CATALOG];
+
+#[cfg(test)]
+mod consumer_capability_tests {
+    use super::{consumer_reads_content_v1, CONTENT_V1_CAPABILITY};
+
+    #[test]
+    fn absent_capabilities_do_not_declare_content_v1() {
+        assert!(!consumer_reads_content_v1(None));
+    }
+
+    #[test]
+    fn empty_capabilities_do_not_declare_content_v1() {
+        assert!(!consumer_reads_content_v1(Some(&[])));
+    }
+
+    #[test]
+    fn other_capabilities_do_not_declare_content_v1() {
+        let capabilities = vec!["other/v1".to_owned(), "content/v2".to_owned()];
+        assert!(!consumer_reads_content_v1(Some(&capabilities)));
+    }
+
+    #[test]
+    fn content_v1_capability_declares_support() {
+        let capabilities = vec!["other/v1".to_owned(), CONTENT_V1_CAPABILITY.to_owned()];
+        assert!(consumer_reads_content_v1(Some(&capabilities)));
+    }
+}
 
 /// The unprefixed capability tags this role defines. Each is a promise any
 /// provider can make about a tool, so a preset or peer can match the tag

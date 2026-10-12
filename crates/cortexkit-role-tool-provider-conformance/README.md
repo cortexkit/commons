@@ -21,11 +21,20 @@ unknown format strings do not opt in.
 `content_v1_calls()` supplies promptly completing `(tool name, arguments)`
 probes for every declared tool. The default is `[quick_call()]`; override it
 when other tools opt in, and supply multiple probes to check success and
-tool-level error bodies. A missing probe fails by tool name. The case uses
-the real route, decodes each reply as `ToolResult`, and runs `validate`;
-it also checks the entire serialized JSON body's size before decoding so
-unmodeled extensions cannot evade the 3 MiB bound. Malformed replies fail
-by case, tool and member, not as an opaque success.
+tool-level error bodies. A missing probe fails by tool name. For every probe,
+the case makes the same call over a route with no consumer declaration and
+over a route whose bind declares `content/v1`. The first reply must not decode
+as `ToolResult`; the second must decode and pass `validate`. The opted-in route
+must still list `result_format: "content/v1"` in its catalog. The case also
+checks the entire serialized JSON body's size before decoding so unmodeled
+extensions cannot evade the 3 MiB bound. Malformed replies fail by case, tool
+and member, not as an opaque success.
+
+Subjects with a catalog tool that opts into `content/v1` must implement
+`route_with_consumer_capabilities()` to open the declared route through the
+real route-opening path. The method receives the exact consumer capability
+list to send when opening the route; it must not add that declaration to a
+call body.
 
 ## Per-tool call modes
 

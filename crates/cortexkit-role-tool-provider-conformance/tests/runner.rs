@@ -135,6 +135,18 @@ async fn malformed_content_v1_reply_fails_by_case_tool_and_member() {
 }
 
 #[tokio::test]
+async fn content_v1_is_sent_only_to_a_route_that_declares_support() {
+    let report = run(&FakeSubject::new(Defects {
+        ignore_consumer_capabilities: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "tool_result_content_v1_valid");
+    assert!(reason.contains("without consumer declaration"), "{reason}");
+    assert_passed(&report, "terminal_frame_on_success");
+}
+
+#[tokio::test]
 async fn opaque_tools_skip_content_v1_by_name_never_pass() {
     let mut subject = FakeSubject::new(Defects {
         opaque_result: true,

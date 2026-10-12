@@ -39,7 +39,7 @@ use cortexkit_role_tool_provider_conformance::{
             composition_digest, schema_digest, serves_call_mode, system_text_digest,
             CatalogRequest, CatalogTool,
         },
-        errors,
+        consumer_reads_content_v1, errors,
         late_results::{
             check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
             LateResultsRequest,
@@ -128,6 +128,8 @@ pub struct Defects {
     pub opaque_result: bool,
     /// The content/v1 tool replies with structured data but no content parts.
     pub malformed_result: bool,
+    /// Send content/v1 even when the route's bind does not declare support.
+    pub ignore_consumer_capabilities: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -508,6 +510,7 @@ impl Module {
         &self,
         stamp: &RouteStamp,
         mode: &CallMode,
+        consumer_capabilities: Option<&[String]>,
         body: Value,
     ) -> Result<Vec<ObservedFrame>, RouteFailure> {
         if !self.alive.load(Ordering::SeqCst) {
@@ -565,7 +568,11 @@ impl Module {
         Ok(match name {
             ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(Self::describe())],
             ops::TOOL_CATALOG => reply(self.catalog(&request.arguments)),
-            QUICK if !self.defects.opaque_result => {
+            QUICK
+                if !self.defects.opaque_result
+                    && (self.defects.ignore_consumer_capabilities
+                        || consumer_reads_content_v1(consumer_capabilities)) =>
+            {
                 vec![ObservedFrame::Response(if self.defects.malformed_result {
                     json!({"content": [], "structuredContent": {"only": "program data"}})
                 } else {
@@ -738,13 +745,19 @@ pub struct FakeRoute {
     module: Arc<Module>,
     stamp: RouteStamp,
     mode: CallMode,
+    consumer_capabilities: Option<Vec<String>>,
 }
 
 #[async_trait]
 impl ToolRoute for FakeRoute {
     async fn request(&self, body: Value) -> Result<Exchange, RouteFailure> {
         Ok(Exchange {
-            frames: self.module.handle(&self.stamp, &self.mode, body)?,
+            frames: self.module.handle(
+                &self.stamp,
+                &self.mode,
+                self.consumer_capabilities.as_deref(),
+                body,
+            )?,
         })
     }
 
@@ -846,6 +859,7 @@ impl Harness for FakeSubject {
             module: handle.0.clone(),
             stamp: stamp.clone(),
             mode: CallMode::Classic,
+            consumer_capabilities: None,
         })
     }
 
@@ -932,6 +946,21 @@ impl ToolProviderSubject for FakeSubject {
             module: handle.0.clone(),
             stamp: stamp.clone(),
             mode: mode.clone(),
+            consumer_capabilities: None,
+        })
+    }
+
+    async fn route_with_consumer_capabilities(
+        &self,
+        handle: &FakeHandle,
+        stamp: &RouteStamp,
+        consumer_capabilities: &[String],
+    ) -> Result<FakeRoute, HarnessError> {
+        Ok(FakeRoute {
+            module: handle.0.clone(),
+            stamp: stamp.clone(),
+            mode: CallMode::Classic,
+            consumer_capabilities: Some(consumer_capabilities.to_vec()),
         })
     }
 

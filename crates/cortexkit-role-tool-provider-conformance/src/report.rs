@@ -109,7 +109,7 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "tool_result_content_v1_valid",
         requires: &[ContentV1],
-        checks: "every tool declaring result_format content/v1 has probes whose replies decode and validate, including the serialized size bound",
+        checks: "each declared content/v1 tool returns an opaque legacy body to an undeclared route and a valid content/v1 body to a route whose consumer declares support",
     },
     CaseSpec {
         name: "terminal_frame_on_refusal",

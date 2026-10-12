@@ -310,7 +310,25 @@ to them. Nothing here names a particular implementation.
 
 ## 4.1. Opt-in tool results: `content/v1`
 
-A tool declaring `result_format: "content/v1"` returns the following body
+A consumer that decodes `content/v1` result bodies declares the string
+`content/v1` in its `route.open` `consumer_capabilities`. The daemon relays
+that list verbatim on the provider's route bind as
+`RouteBindRequest.consumer_capabilities`. This declaration is the consumer's
+unverified statement; it grants no permission or other authority.
+
+For a tool whose catalog entry declares `result_format: "content/v1"`, a
+provider sends a `content/v1` body only on a route whose bind declared
+`content/v1`. On every other route, including one whose bind has no
+`consumer_capabilities`, the provider sends that tool's legacy body exactly as
+before. The decision is made separately for each route from its bind, never
+from anything in a call. The catalog lists `result_format` regardless of who
+asks: it does not change schema digests, and older consumers ignore it.
+
+A consumer must not decode a body as `content/v1` unless it both declared
+`content/v1` on that route and the tool's catalog entry opts in with
+`result_format: "content/v1"`.
+
+On a route with both declarations, the tool returns the following body
 (`result::ToolResult`), with MCP's CallToolResult member names exactly:
 
 ```json
@@ -524,14 +542,18 @@ CI against its real module over a real route; never against a double.
 The result case infers its `content/v1` requirement from the catalog, not
 from an opt-out flag on the subject (the adapter a provider writes to run
 this suite against itself). For every tool that declares `content/v1`, it
-makes the calls the subject lists in `content_v1_calls` and decodes and
-validates each reply body, including the whole serialized body's size. By
-default `content_v1_calls` is the subject's `quick_call`, a `(tool name,
-arguments)` pair that completes promptly; a subject overrides it when other
-tools declare `content/v1`, and may list several calls per tool.
-Missing probes for a declared tool fail by tool name. With no declared tool,
-`tool_result_content_v1_valid` is skipped by name with missing `content/v1`,
-never passed. Unknown result formats do not opt in.
+makes the calls the subject lists in `content_v1_calls` on a route with no
+consumer declaration and on a route whose bind declares `content/v1`. The
+first reply must not decode as `content/v1`; the second must decode and
+validate, including the whole serialized body's size. The catalog must list
+`result_format: "content/v1"` on both routes. By default `content_v1_calls`
+is the subject's `quick_call`, a `(tool name, arguments)` pair that completes
+promptly; a subject overrides it when other tools declare `content/v1`, and
+may list several calls per tool. Subjects must open the declared route through
+their real route-opening path. Missing probes for a declared tool fail by
+tool name. With no declared tool, `tool_result_content_v1_valid` is skipped by
+name with missing `content/v1`, never passed. Unknown result formats do not
+opt in.
 
 The `system_text` cases request full catalog answers. They check `item_digest`
 against the returned text's exact UTF-8 bytes, both digests' 64-lowercase-hex

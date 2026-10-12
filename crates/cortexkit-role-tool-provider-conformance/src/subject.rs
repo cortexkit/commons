@@ -135,6 +135,21 @@ pub trait ToolProviderSubject: Harness {
     /// `tool.catalog` and plain calls.
     fn plain_stamp(&self) -> RouteStamp;
 
+    /// Open a real route whose bind declares the supplied consumer
+    /// capabilities. The adapter must put this list on `route.open` exactly
+    /// as provided; it must not infer the declaration from a call body.
+    /// Required when the catalog declares a `content/v1` tool.
+    async fn route_with_consumer_capabilities(
+        &self,
+        _handle: &Self::Handle,
+        _stamp: &RouteStamp,
+        _consumer_capabilities: &[String],
+    ) -> Result<Self::Route, HarnessError> {
+        Err(HarnessError::new(
+            "no consumer-capability route adapter supplied",
+        ))
+    }
+
     /// The identities for the scoped cases. Required by
     /// [`Capability::ScopeStamp`].
     fn scoped_principals(&self) -> Option<ScopedPrincipals>;

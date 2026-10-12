@@ -22,7 +22,7 @@ use cortexkit_role_tool_provider::{
     ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    CallMode, PROVIDES,
+    CallMode, CONTENT_V1_CAPABILITY, PROVIDES,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -326,6 +326,14 @@ where
         self.route(&self.subject.plain_stamp()).await
     }
 
+    async fn consumer_route(&self, consumer_capabilities: &[String]) -> Result<S::Route, String> {
+        let stamp = self.subject.plain_stamp();
+        self.subject
+            .route_with_consumer_capabilities(self.handle.inner(), &stamp, consumer_capabilities)
+            .await
+            .map_err(|e| format!("opening a route with consumer capabilities: {e}"))
+    }
+
     fn principals(&self) -> Result<ScopedPrincipals, String> {
         principals(self.subject)
     }
@@ -359,8 +367,8 @@ where
     }
 
     async fn tool_result_content_v1_valid(&self) -> CaseResult {
-        let route = self.plain_route().await?;
-        let catalog = self.catalog(&route).await?;
+        let legacy_route = self.plain_route().await?;
+        let catalog = self.catalog(&legacy_route).await?;
         let calls = self.subject.content_v1_calls();
         let tools: Vec<_> = catalog
             .tools
@@ -370,7 +378,18 @@ where
         if tools.is_empty() {
             return Err("content/v1 catalog declaration disappeared during the run".into());
         }
+        let capabilities = vec![CONTENT_V1_CAPABILITY.to_owned()];
+        let content_v1_route = self.consumer_route(&capabilities).await?;
+        let opted_in_catalog = self.catalog(&content_v1_route).await?;
         for tool in tools {
+            if !opted_in_catalog.tools.iter().any(|listed| {
+                listed.name == tool.name && listed.result_format == Some(ResultFormat::ContentV1)
+            }) {
+                return Err(format!(
+                    "{}: catalog did not list result_format content/v1 on the declared route",
+                    tool.name
+                ));
+            }
             let probes: Vec<_> = calls
                 .iter()
                 .filter(|(name, _)| name == &tool.name)
@@ -382,10 +401,16 @@ where
                 ));
             }
             for (name, arguments) in probes {
-                let body = expect_response(
-                    name,
-                    request(&route, call_body(name, arguments.clone(), None)).await?,
-                )?;
+                let call = call_body(name, arguments.clone(), None);
+                let legacy_body =
+                    expect_response(name, request(&legacy_route, call.clone()).await?)?;
+                if serde_json::from_value::<ToolResult>(legacy_body).is_ok() {
+                    return Err(format!(
+                        "{name}: route without consumer declaration returned a body decodable as content/v1"
+                    ));
+                }
+
+                let body = expect_response(name, request(&content_v1_route, call).await?)?;
                 let bytes = serde_json::to_vec(&body)
                     .map_err(|e| format!("{name}: reply serialization: {e}"))?;
                 if bytes.len() >= MAX_RESULT_BYTES {

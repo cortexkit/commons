@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2
+
+- Require cortexkit-role-tool-provider 0.7.3 and verify content/v1 results are
+  sent only on routes whose consumer declares that format.
+- Exercise the same content/v1 tool call over legacy and content/v1 routes;
+  reject content/v1 bodies sent to consumers that did not declare support.
+
 ## 0.7.1
 
 - Require cortexkit-role-tool-provider 0.7.1 and add the catalog-gated
