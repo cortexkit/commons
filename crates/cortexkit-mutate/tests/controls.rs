@@ -3501,7 +3501,9 @@ fn committed_command_scope_row(f: &CommandFixture, source: &[u8]) -> Control {
     c.command = Some(vec![
         "python3".into(),
         "-c".into(),
-        "from pathlib import Path; print(Path('guard.py').read_text(), end='')".into(),
+        // Write the raw bytes: text-mode stdout on Windows would turn each \n
+        // into \r\n, and the assertions compare the output with LF source text.
+        "import sys; from pathlib import Path; sys.stdout.buffer.write(Path('guard.py').read_bytes())".into(),
     ]);
     c.catch_on = Some("output_differs".into());
     c.test_count_pattern = None;
