@@ -1,0 +1,220 @@
+{
+  "ops": [
+    {
+      "op": "describe",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable"
+      ]
+    },
+    {
+      "op": "busy",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "unknown_ref"
+      ]
+    },
+    {
+      "op": "status",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable"
+      ]
+    },
+    {
+      "op": "prepare",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "id_reused",
+        "unknown_ref",
+        "invalid_state",
+        "busy",
+        "not_exportable"
+      ]
+    },
+    {
+      "op": "export",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "id_reused",
+        "unknown_ref",
+        "invalid_state",
+        "cut_unknown"
+      ]
+    },
+    {
+      "op": "diverged",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "external_not_present",
+        "cut_not_ready",
+        "incompatible_version"
+      ]
+    },
+    {
+      "op": "import",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "id_reused",
+        "invalid_state",
+        "cut_not_ready",
+        "incompatible_version",
+        "digest_mismatch",
+        "busy",
+        "local_advanced"
+      ]
+    },
+    {
+      "op": "activate",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "id_reused",
+        "invalid_state",
+        "cut_unknown",
+        "external_not_present",
+        "busy",
+        "local_advanced"
+      ]
+    },
+    {
+      "op": "abort",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "id_reused",
+        "invalid_state"
+      ]
+    },
+    {
+      "op": "release",
+      "codes": [
+        "caller_forbidden",
+        "invalid_request",
+        "unavailable",
+        "id_reused",
+        "unknown_ref",
+        "invalid_state",
+        "cut_unknown"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "activate may refuse busy",
+      "op": "activate",
+      "code": "busy",
+      "allowed": true
+    },
+    {
+      "name": "prepare may refuse busy",
+      "op": "prepare",
+      "code": "busy",
+      "allowed": true
+    },
+    {
+      "name": "export may not refuse busy",
+      "op": "export",
+      "code": "busy",
+      "allowed": false
+    },
+    {
+      "name": "import may refuse busy",
+      "op": "import",
+      "code": "busy",
+      "allowed": true
+    },
+    {
+      "name": "release may not refuse busy",
+      "op": "release",
+      "code": "busy",
+      "allowed": false
+    },
+    {
+      "name": "abort may not refuse busy",
+      "op": "abort",
+      "code": "busy",
+      "allowed": false
+    },
+    {
+      "name": "status never refuses unknown_ref",
+      "op": "status",
+      "code": "unknown_ref",
+      "allowed": false
+    },
+    {
+      "name": "abort never refuses unknown_ref",
+      "op": "abort",
+      "code": "unknown_ref",
+      "allowed": false
+    },
+    {
+      "name": "diverged may refuse cut_not_ready",
+      "op": "diverged",
+      "code": "cut_not_ready",
+      "allowed": true
+    },
+    {
+      "name": "diverged may refuse incompatible_version",
+      "op": "diverged",
+      "code": "incompatible_version",
+      "allowed": true
+    },
+    {
+      "name": "reads never refuse id_reused",
+      "op": "diverged",
+      "code": "id_reused",
+      "allowed": false
+    },
+    {
+      "name": "activate may refuse external_not_present",
+      "op": "activate",
+      "code": "external_not_present",
+      "allowed": true
+    },
+    {
+      "name": "a code outside the closed set is in no row",
+      "op": "activate",
+      "code": "acme_quota",
+      "allowed": false
+    },
+    {
+      "name": "import may refuse local_advanced",
+      "op": "import",
+      "code": "local_advanced",
+      "allowed": true
+    },
+    {
+      "name": "activate may refuse local_advanced",
+      "op": "activate",
+      "code": "local_advanced",
+      "allowed": true
+    },
+    {
+      "name": "diverged may not refuse local_advanced",
+      "op": "diverged",
+      "code": "local_advanced",
+      "allowed": false
+    },
+    {
+      "name": "prepare may not refuse local_advanced",
+      "op": "prepare",
+      "code": "local_advanced",
+      "allowed": false
+    }
+  ]
+}

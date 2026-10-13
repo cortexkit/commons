@@ -1,0 +1,374 @@
+{
+  "refusals": [
+    {
+      "name": "caller_forbidden",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "caller_forbidden",
+        "message": "only reserved:entorhinal may call agent-data/v1"
+      }
+    },
+    {
+      "name": "invalid_request",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "invalid_request",
+        "message": "unknown field `force`"
+      }
+    },
+    {
+      "name": "unknown_ref",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "unknown_ref",
+        "message": "this participant does not hold that ref",
+        "detail": {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZC"
+        }
+      }
+    },
+    {
+      "name": "id_reused",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "id_reused",
+        "message": "prepare already ran for this cutId with other refs"
+      }
+    },
+    {
+      "name": "invalid_state",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "invalid_state",
+        "message": "release before export",
+        "detail": {
+          "step": "prepared"
+        }
+      }
+    },
+    {
+      "name": "invalid_state for another ref set, naming the expected refs",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "invalid_state",
+        "message": "activate names other refs than import staged",
+        "detail": {
+          "step": "imported",
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "cut_unknown",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "cut_unknown",
+        "message": "no state for this cutId"
+      }
+    },
+    {
+      "name": "cut_not_ready",
+      "driver": "retry_within_step",
+      "retryable": true,
+      "named": true,
+      "body": {
+        "code": "cut_not_ready",
+        "message": "the cut is not readable through the door yet"
+      }
+    },
+    {
+      "name": "busy",
+      "driver": "retry_later",
+      "retryable": true,
+      "named": true,
+      "body": {
+        "code": "busy",
+        "message": "a turn is in flight",
+        "detail": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA",
+              "reason_code": "turn_in_flight",
+              "reason": "a turn is in flight"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB",
+              "reason": "approval card open"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "busy, refused by activate while the staged data can't go live",
+      "driver": "retry_later",
+      "retryable": true,
+      "named": true,
+      "op": "activate",
+      "body": {
+        "code": "busy",
+        "message": "a turn is in flight",
+        "detail": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA",
+              "reason_code": "turn_in_flight",
+              "reason": "a turn is in flight on this Mac"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "busy, refused by import after a run started on the receiver",
+      "driver": "retry_later",
+      "retryable": true,
+      "named": true,
+      "op": "import",
+      "body": {
+        "code": "busy",
+        "message": "a run started on this Mac",
+        "detail": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA",
+              "reason_code": "run_active",
+              "reason": "a run started on this Mac after diverged"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "not_exportable",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "not_exportable",
+        "message": "session has caller-chosen retention"
+      }
+    },
+    {
+      "name": "incompatible_version",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "incompatible_version",
+        "message": "store cannot accept this cut",
+        "detail": {
+          "found": "broca-wal/4",
+          "required": "broca-wal/3"
+        }
+      }
+    },
+    {
+      "name": "digest_mismatch",
+      "driver": "abort",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "digest_mismatch",
+        "message": "imported bytes do not hash to the cut's digest"
+      }
+    },
+    {
+      "name": "local_advanced",
+      "driver": "terminal_for_step",
+      "retryable": false,
+      "named": true,
+      "op": "activate",
+      "body": {
+        "code": "local_advanced",
+        "message": "this Mac's copy gained data after diverged answered at_cut"
+      }
+    },
+    {
+      "name": "local_advanced, refused by import",
+      "driver": "terminal_for_step",
+      "retryable": false,
+      "named": true,
+      "op": "import",
+      "body": {
+        "code": "local_advanced",
+        "message": "this Mac's copy gained data after diverged answered at_cut"
+      }
+    },
+    {
+      "name": "external_not_present",
+      "driver": "retry_after_operator",
+      "retryable": true,
+      "named": true,
+      "body": {
+        "code": "external_not_present",
+        "message": "host data not on this Mac yet",
+        "detail": {
+          "note": "Claude Code session transcript: copy it with the project"
+        }
+      }
+    },
+    {
+      "name": "unavailable",
+      "driver": "retry",
+      "retryable": true,
+      "named": true,
+      "body": {
+        "code": "unavailable",
+        "message": "store busy, try again"
+      }
+    },
+    {
+      "name": "a code outside the set",
+      "driver": "abort",
+      "retryable": false,
+      "named": false,
+      "body": {
+        "code": "acme_quota",
+        "message": "made-up code"
+      }
+    },
+    {
+      "name": "a code outside the set that sounds retryable",
+      "driver": "abort",
+      "retryable": false,
+      "named": false,
+      "body": {
+        "code": "temporarily_unavailable",
+        "message": "made-up code"
+      }
+    }
+  ],
+  "tolerated": [
+    {
+      "name": "an extra member on the ERROR body is ignored",
+      "body": {
+        "code": "cut_unknown",
+        "message": "no state",
+        "trace": "t-1"
+      },
+      "decodes_as": {
+        "code": "cut_unknown",
+        "message": "no state"
+      }
+    }
+  ],
+  "detail_refused": [
+    {
+      "name": "invalid_state without detail",
+      "body": {
+        "code": "invalid_state",
+        "message": "out of order"
+      }
+    },
+    {
+      "name": "invalid_state detail with an unknown member",
+      "body": {
+        "code": "invalid_state",
+        "message": "out of order",
+        "detail": {
+          "step": "prepared",
+          "since": 3
+        }
+      }
+    },
+    {
+      "name": "invalid_state detail naming a step outside the set",
+      "body": {
+        "code": "invalid_state",
+        "message": "out of order",
+        "detail": {
+          "step": "resumed"
+        }
+      }
+    },
+    {
+      "name": "busy detail ref without reason",
+      "body": {
+        "code": "busy",
+        "message": "busy",
+        "detail": {
+          "refs": [
+            {
+              "ref_kind": "k",
+              "ref": "r"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "incompatible_version without required",
+      "body": {
+        "code": "incompatible_version",
+        "message": "x",
+        "detail": {
+          "found": "a"
+        }
+      }
+    },
+    {
+      "name": "unknown_ref detail without ref",
+      "body": {
+        "code": "unknown_ref",
+        "message": "x",
+        "detail": {
+          "ref_kind": "k"
+        }
+      }
+    },
+    {
+      "name": "external_not_present detail without note",
+      "body": {
+        "code": "external_not_present",
+        "message": "x",
+        "detail": {}
+      }
+    },
+    {
+      "name": "invalid_state detail refs entry with an unknown member",
+      "body": {
+        "code": "invalid_state",
+        "message": "x",
+        "detail": {
+          "step": "imported",
+          "refs": [
+            {
+              "ref_kind": "k",
+              "ref": "r",
+              "why": "x"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

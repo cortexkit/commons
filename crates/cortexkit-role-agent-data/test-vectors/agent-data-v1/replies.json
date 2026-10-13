@@ -1,0 +1,390 @@
+{
+  "replies": [
+    {
+      "name": "describe, no external data",
+      "method": "agent_data.describe",
+      "reply": {
+        "ref_kinds": [
+          "broca.session"
+        ],
+        "stores": [
+          {
+            "name": "broca.wal",
+            "sync_class": "agent"
+          }
+        ],
+        "external": false
+      }
+    },
+    {
+      "name": "describe, external data and an opaque detail",
+      "method": "agent_data.describe",
+      "reply": {
+        "ref_kinds": [
+          "thalamus.claude_code"
+        ],
+        "stores": [
+          {
+            "name": "thalamus.bindings",
+            "sync_class": "agent"
+          }
+        ],
+        "external": true,
+        "detail": {
+          "hosts": [
+            "claude_code"
+          ],
+          "newer": {
+            "nested": true
+          }
+        }
+      }
+    },
+    {
+      "name": "busy, in request order",
+      "method": "agent_data.busy",
+      "reply": {
+        "refs": [
+          {
+            "state": "idle"
+          },
+          {
+            "state": "busy",
+            "reason_code": "turn_in_flight",
+            "reason": "a turn is in flight"
+          }
+        ]
+      }
+    },
+    {
+      "name": "busy, unknown with text only, and a reason code outside the examples",
+      "method": "agent_data.busy",
+      "reply": {
+        "refs": [
+          {
+            "state": "unknown",
+            "reason": "lock holder not answering"
+          },
+          {
+            "state": "busy",
+            "reason_code": "acme_indexing"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status of a cutId never seen",
+      "method": "agent_data.status",
+      "reply": {
+        "step": "none"
+      }
+    },
+    {
+      "name": "status after prepare",
+      "method": "agent_data.status",
+      "reply": {
+        "step": "prepared"
+      }
+    },
+    {
+      "name": "prepare, frozen, no external data",
+      "method": "agent_data.prepare",
+      "reply": {
+        "items": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA",
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "stream": "reserved:broca",
+            "endOffset": 48213,
+            "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
+            "format": "broca-wal/3",
+            "frozen": true
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB",
+            "sessionRef": "895e0666f7bb9d4039958519b858fdc8",
+            "stream": "reserved:broca",
+            "endOffset": 0,
+            "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "format": "broca-wal/3",
+            "frozen": true
+          }
+        ],
+        "external": []
+      }
+    },
+    {
+      "name": "prepare, not frozen, with an external entry and an opaque check",
+      "method": "agent_data.prepare",
+      "reply": {
+        "items": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA",
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "stream": "reserved:broca",
+            "endOffset": 48213,
+            "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
+            "format": "opaque text: v3 \u00e9",
+            "frozen": false
+          }
+        ],
+        "external": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA",
+            "note": "Claude Code session transcript: copy it with the project",
+            "check": {
+              "host_session": "cc_7d41e09a",
+              "last_row": 40211,
+              "transcript_digest": "5f2b8e1d0c3a4f6e7d9b2a1c0e8f7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
+              "host_extra": {
+                "anything": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "export",
+      "method": "agent_data.export",
+      "reply": {
+        "items": [
+          {
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "endOffset": 48213
+          },
+          {
+            "sessionRef": "895e0666f7bb9d4039958519b858fdc8",
+            "endOffset": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "diverged, at_cut and advanced",
+      "method": "agent_data.diverged",
+      "reply": {
+        "refs": [
+          {
+            "state": "at_cut"
+          },
+          {
+            "state": "advanced"
+          }
+        ]
+      }
+    },
+    {
+      "name": "diverged, unknown",
+      "method": "agent_data.diverged",
+      "reply": {
+        "refs": [
+          {
+            "state": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "name": "import",
+      "method": "agent_data.import",
+      "reply": {
+        "items": [
+          {
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "endOffset": 48213,
+            "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8"
+          },
+          {
+            "sessionRef": "895e0666f7bb9d4039958519b858fdc8",
+            "endOffset": 0,
+            "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ]
+      }
+    },
+    {
+      "name": "activate",
+      "method": "agent_data.activate",
+      "reply": {}
+    },
+    {
+      "name": "abort",
+      "method": "agent_data.abort",
+      "reply": {}
+    },
+    {
+      "name": "release, later local writes refused",
+      "method": "agent_data.release",
+      "reply": {
+        "enforced": true
+      }
+    },
+    {
+      "name": "release, writes not blocked",
+      "method": "agent_data.release",
+      "reply": {
+        "enforced": false
+      }
+    },
+    {
+      "name": "the largest endOffset",
+      "method": "agent_data.export",
+      "reply": {
+        "items": [
+          {
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "endOffset": 18446744073709551615
+          }
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "describe with an unknown top-level field",
+      "method": "agent_data.describe",
+      "reply": {
+        "ref_kinds": [],
+        "stores": [],
+        "external": false,
+        "version": 2
+      }
+    },
+    {
+      "name": "describe store with an unknown member",
+      "method": "agent_data.describe",
+      "reply": {
+        "ref_kinds": [],
+        "stores": [
+          {
+            "name": "s",
+            "sync_class": "agent",
+            "size": 1
+          }
+        ],
+        "external": false
+      }
+    },
+    {
+      "name": "busy state outside the set",
+      "method": "agent_data.busy",
+      "reply": {
+        "refs": [
+          {
+            "state": "paused"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status step outside the set",
+      "method": "agent_data.status",
+      "reply": {
+        "step": "resumed"
+      }
+    },
+    {
+      "name": "prepare item with an unknown member",
+      "method": "agent_data.prepare",
+      "reply": {
+        "items": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA",
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "stream": "reserved:broca",
+            "endOffset": 1,
+            "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
+            "format": "f",
+            "frozen": true,
+            "streams": 2
+          }
+        ],
+        "external": []
+      }
+    },
+    {
+      "name": "prepare item without format",
+      "method": "agent_data.prepare",
+      "reply": {
+        "items": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA",
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "stream": "reserved:broca",
+            "endOffset": 1,
+            "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
+            "frozen": true
+          }
+        ],
+        "external": []
+      }
+    },
+    {
+      "name": "external entry without check",
+      "method": "agent_data.prepare",
+      "reply": {
+        "items": [],
+        "external": [
+          {
+            "ref_kind": "k",
+            "ref": "r",
+            "note": "n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "negative endOffset",
+      "method": "agent_data.export",
+      "reply": {
+        "items": [
+          {
+            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "endOffset": -1
+          }
+        ]
+      }
+    },
+    {
+      "name": "diverged state outside the set",
+      "method": "agent_data.diverged",
+      "reply": {
+        "refs": [
+          {
+            "state": "behind"
+          }
+        ]
+      }
+    },
+    {
+      "name": "activate reply with a member",
+      "method": "agent_data.activate",
+      "reply": {
+        "ok": true
+      }
+    },
+    {
+      "name": "release reply without enforced",
+      "method": "agent_data.release",
+      "reply": {}
+    },
+    {
+      "name": "release reply with enforced not a bool",
+      "method": "agent_data.release",
+      "reply": {
+        "enforced": "yes"
+      }
+    }
+  ]
+}

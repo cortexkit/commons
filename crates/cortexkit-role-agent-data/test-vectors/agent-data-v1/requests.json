@@ -1,0 +1,434 @@
+{
+  "requests": [
+    {
+      "name": "describe takes an empty object",
+      "method": "agent_data.describe",
+      "params": {}
+    },
+    {
+      "name": "busy names refs and no cutId",
+      "method": "agent_data.busy",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ]
+      }
+    },
+    {
+      "name": "busy with no refs",
+      "method": "agent_data.busy",
+      "params": {
+        "refs": []
+      }
+    },
+    {
+      "name": "the same handle under two kinds is two refs",
+      "method": "agent_data.busy",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "magic_context.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status",
+      "method": "agent_data.status",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "prepare",
+      "method": "agent_data.prepare",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "prepare at the cap of 256 refs",
+      "method": "agent_data.prepare",
+      "params": {
+        "refs": [],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "expand_refs": 256
+    },
+    {
+      "name": "export",
+      "method": "agent_data.export",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "diverged, one ref the receiver does not hold yet",
+      "method": "agent_data.diverged",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "import",
+      "method": "agent_data.import",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "activate",
+      "method": "agent_data.activate",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "abort",
+      "method": "agent_data.abort",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      }
+    },
+    {
+      "name": "release names the new holder",
+      "method": "agent_data.release",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+        "holder": "ada-mbp-7c1e"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "describe with a member",
+      "method": "agent_data.describe",
+      "params": {
+        "verbose": true
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "unknown top-level field",
+      "method": "agent_data.prepare",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+        "force": true
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "257 refs",
+      "method": "agent_data.prepare",
+      "params": {
+        "refs": [],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "expand_refs": 257,
+      "code": "invalid_request"
+    },
+    {
+      "name": "257 refs on busy",
+      "method": "agent_data.busy",
+      "params": {
+        "refs": []
+      },
+      "expand_refs": 257,
+      "code": "invalid_request"
+    },
+    {
+      "name": "uppercase cutId",
+      "method": "agent_data.prepare",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7F3A9C2E5B8D41F6A0C3E9B7D2F84A15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "cutId of 31 characters",
+      "method": "agent_data.status",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a1"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "cutId with a non-hex character",
+      "method": "agent_data.import",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a1g"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "cutId missing",
+      "method": "agent_data.export",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ]
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "busy carrying a cutId",
+      "method": "agent_data.busy",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "release without holder",
+      "method": "agent_data.release",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "a ref with an unknown member",
+      "method": "agent_data.abort",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA",
+            "note": "x"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "a ref with an empty handle",
+      "method": "agent_data.activate",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": ""
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "refs not a list",
+      "method": "agent_data.diverged",
+      "params": {
+        "refs": {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "unknown op",
+      "method": "agent_data.resume",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "duplicate ref",
+      "method": "agent_data.prepare",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "duplicate ref on busy",
+      "method": "agent_data.busy",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZB"
+          }
+        ]
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "duplicate ref on release",
+      "method": "agent_data.release",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          },
+          {
+            "ref_kind": "broca.session",
+            "ref": "ses_01J9ZA"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+        "holder": "ada-mbp-7c1e"
+      },
+      "code": "invalid_request"
+    }
+  ]
+}

@@ -1,0 +1,383 @@
+{
+  "transitions": [
+    {
+      "op": "prepare",
+      "from": "none",
+      "to": "prepared"
+    },
+    {
+      "op": "prepare",
+      "from": "prepared",
+      "refused": "invalid_state",
+      "step": "prepared"
+    },
+    {
+      "op": "prepare",
+      "from": "exported",
+      "refused": "invalid_state",
+      "step": "exported"
+    },
+    {
+      "op": "prepare",
+      "from": "imported",
+      "refused": "invalid_state",
+      "step": "imported"
+    },
+    {
+      "op": "prepare",
+      "from": "activated",
+      "refused": "invalid_state",
+      "step": "activated"
+    },
+    {
+      "op": "prepare",
+      "from": "aborted",
+      "refused": "invalid_state",
+      "step": "aborted"
+    },
+    {
+      "op": "prepare",
+      "from": "released",
+      "refused": "invalid_state",
+      "step": "released"
+    },
+    {
+      "op": "export",
+      "from": "none",
+      "refused": "cut_unknown"
+    },
+    {
+      "op": "export",
+      "from": "prepared",
+      "to": "exported"
+    },
+    {
+      "op": "export",
+      "from": "exported",
+      "refused": "invalid_state",
+      "step": "exported"
+    },
+    {
+      "op": "export",
+      "from": "imported",
+      "refused": "invalid_state",
+      "step": "imported"
+    },
+    {
+      "op": "export",
+      "from": "activated",
+      "refused": "invalid_state",
+      "step": "activated"
+    },
+    {
+      "op": "export",
+      "from": "aborted",
+      "refused": "invalid_state",
+      "step": "aborted"
+    },
+    {
+      "op": "export",
+      "from": "released",
+      "refused": "invalid_state",
+      "step": "released"
+    },
+    {
+      "op": "import",
+      "from": "none",
+      "to": "imported"
+    },
+    {
+      "op": "import",
+      "from": "prepared",
+      "refused": "invalid_state",
+      "step": "prepared"
+    },
+    {
+      "op": "import",
+      "from": "exported",
+      "refused": "invalid_state",
+      "step": "exported"
+    },
+    {
+      "op": "import",
+      "from": "imported",
+      "refused": "invalid_state",
+      "step": "imported"
+    },
+    {
+      "op": "import",
+      "from": "activated",
+      "refused": "invalid_state",
+      "step": "activated"
+    },
+    {
+      "op": "import",
+      "from": "aborted",
+      "refused": "invalid_state",
+      "step": "aborted"
+    },
+    {
+      "op": "import",
+      "from": "released",
+      "refused": "invalid_state",
+      "step": "released"
+    },
+    {
+      "op": "activate",
+      "from": "none",
+      "refused": "cut_unknown"
+    },
+    {
+      "op": "activate",
+      "from": "prepared",
+      "refused": "invalid_state",
+      "step": "prepared"
+    },
+    {
+      "op": "activate",
+      "from": "exported",
+      "refused": "invalid_state",
+      "step": "exported"
+    },
+    {
+      "op": "activate",
+      "from": "imported",
+      "to": "activated"
+    },
+    {
+      "op": "activate",
+      "from": "activated",
+      "refused": "invalid_state",
+      "step": "activated"
+    },
+    {
+      "op": "activate",
+      "from": "aborted",
+      "refused": "invalid_state",
+      "step": "aborted"
+    },
+    {
+      "op": "activate",
+      "from": "released",
+      "refused": "invalid_state",
+      "step": "released"
+    },
+    {
+      "op": "abort",
+      "from": "none",
+      "to": "aborted"
+    },
+    {
+      "op": "abort",
+      "from": "prepared",
+      "to": "aborted"
+    },
+    {
+      "op": "abort",
+      "from": "exported",
+      "to": "aborted"
+    },
+    {
+      "op": "abort",
+      "from": "imported",
+      "to": "aborted"
+    },
+    {
+      "op": "abort",
+      "from": "activated",
+      "refused": "invalid_state",
+      "step": "activated"
+    },
+    {
+      "op": "abort",
+      "from": "aborted",
+      "to": "aborted"
+    },
+    {
+      "op": "abort",
+      "from": "released",
+      "refused": "invalid_state",
+      "step": "released"
+    },
+    {
+      "op": "release",
+      "from": "none",
+      "refused": "cut_unknown"
+    },
+    {
+      "op": "release",
+      "from": "prepared",
+      "refused": "invalid_state",
+      "step": "prepared"
+    },
+    {
+      "op": "release",
+      "from": "exported",
+      "to": "released"
+    },
+    {
+      "op": "release",
+      "from": "imported",
+      "refused": "invalid_state",
+      "step": "imported"
+    },
+    {
+      "op": "release",
+      "from": "activated",
+      "refused": "invalid_state",
+      "step": "activated"
+    },
+    {
+      "op": "release",
+      "from": "aborted",
+      "refused": "invalid_state",
+      "step": "aborted"
+    },
+    {
+      "op": "release",
+      "from": "released",
+      "refused": "invalid_state",
+      "step": "released"
+    },
+    {
+      "op": "describe",
+      "from": "none",
+      "to": "none"
+    },
+    {
+      "op": "describe",
+      "from": "prepared",
+      "to": "prepared"
+    },
+    {
+      "op": "describe",
+      "from": "exported",
+      "to": "exported"
+    },
+    {
+      "op": "describe",
+      "from": "imported",
+      "to": "imported"
+    },
+    {
+      "op": "describe",
+      "from": "activated",
+      "to": "activated"
+    },
+    {
+      "op": "describe",
+      "from": "aborted",
+      "to": "aborted"
+    },
+    {
+      "op": "describe",
+      "from": "released",
+      "to": "released"
+    },
+    {
+      "op": "busy",
+      "from": "none",
+      "to": "none"
+    },
+    {
+      "op": "busy",
+      "from": "prepared",
+      "to": "prepared"
+    },
+    {
+      "op": "busy",
+      "from": "exported",
+      "to": "exported"
+    },
+    {
+      "op": "busy",
+      "from": "imported",
+      "to": "imported"
+    },
+    {
+      "op": "busy",
+      "from": "activated",
+      "to": "activated"
+    },
+    {
+      "op": "busy",
+      "from": "aborted",
+      "to": "aborted"
+    },
+    {
+      "op": "busy",
+      "from": "released",
+      "to": "released"
+    },
+    {
+      "op": "status",
+      "from": "none",
+      "to": "none"
+    },
+    {
+      "op": "status",
+      "from": "prepared",
+      "to": "prepared"
+    },
+    {
+      "op": "status",
+      "from": "exported",
+      "to": "exported"
+    },
+    {
+      "op": "status",
+      "from": "imported",
+      "to": "imported"
+    },
+    {
+      "op": "status",
+      "from": "activated",
+      "to": "activated"
+    },
+    {
+      "op": "status",
+      "from": "aborted",
+      "to": "aborted"
+    },
+    {
+      "op": "status",
+      "from": "released",
+      "to": "released"
+    },
+    {
+      "op": "diverged",
+      "from": "none",
+      "to": "none"
+    },
+    {
+      "op": "diverged",
+      "from": "prepared",
+      "to": "prepared"
+    },
+    {
+      "op": "diverged",
+      "from": "exported",
+      "to": "exported"
+    },
+    {
+      "op": "diverged",
+      "from": "imported",
+      "to": "imported"
+    },
+    {
+      "op": "diverged",
+      "from": "activated",
+      "to": "activated"
+    },
+    {
+      "op": "diverged",
+      "from": "aborted",
+      "to": "aborted"
+    },
+    {
+      "op": "diverged",
+      "from": "released",
+      "to": "released"
+    }
+  ]
+}
