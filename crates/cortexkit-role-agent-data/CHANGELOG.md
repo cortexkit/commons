@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Document the closed set of `sync_class` values (`agent`,
+  `shared_one_writer`, `shared_merged`, `machine_local`) in CONTRACT.md §7.1,
+  and add `describe::sync_class` constants for their spellings. The wire is
+  unchanged: `sync_class` stays a plain string.
+
 ## 0.1.0
 
 - First version of the `agent-data/v1` contract: CONTRACT.md, typed requests

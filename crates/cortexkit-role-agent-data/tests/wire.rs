@@ -496,3 +496,34 @@ fn session_refs_are_the_llm_runner_function() {
     assert!(!used.is_empty());
     assert!(used.is_subset(&derived), "{used:?} not all in {derived:?}");
 }
+
+/// Every store a vector declares uses one of the closed `sync_class`
+/// spellings, so the vectors can't drift from the documented set.
+#[test]
+fn every_vector_store_uses_a_listed_sync_class() {
+    let mut seen = 0;
+    for file in ["replies.json", "requests.json"] {
+        let mut stack = vec![load(file)];
+        while let Some(value) = stack.pop() {
+            match value {
+                Value::Object(map) => {
+                    if let Some(Value::String(class)) = map.get("sync_class") {
+                        assert!(
+                            cortexkit_role_agent_data::describe::sync_class::ALL
+                                .contains(&class.as_str()),
+                            "{file}: sync_class {class:?} is not in the closed set"
+                        );
+                        seen += 1;
+                    }
+                    stack.extend(map.into_values());
+                }
+                Value::Array(items) => stack.extend(items),
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        seen > 0,
+        "no vector declares a sync_class, so this test checks nothing"
+    );
+}

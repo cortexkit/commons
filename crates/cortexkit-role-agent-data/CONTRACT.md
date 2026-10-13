@@ -82,8 +82,8 @@ The crate's source files use these words as defined here.
   (§7.1).
 - **AGENT_SYNC**: the CortexKit agent sync design, owned by the fleet's
   agent-sync work. It defines per-agent sync classes and the data-ownership
-  questions this contract leaves out (§10). `sync_class` values are opaque
-  strings to this crate, which only carries them.
+  questions this contract leaves out (§10). It defines the four
+  `sync_class` values listed in §7.1.
 
 ## 1. Identity and addressing
 
@@ -298,8 +298,18 @@ code outside the closed set is in no row.
   bool, detail?}` (`describe::DescribeReply`).
   - `ref_kinds`: the ref kinds this participant holds.
   - `stores`: its per-agent stores, each with the `sync_class` AGENT_SYNC
-    assigns it (Terms). The values are opaque strings to this contract,
-    which carries them unchanged and does not list them.
+    assigns it (Terms). The set is closed; a store declares exactly one of:
+
+    | `sync_class` | AGENT_SYNC class |
+    |---|---|
+    | `agent` | 1, owned by one agent |
+    | `shared_one_writer` | 2, shared, with one writer |
+    | `shared_merged` | 3, shared and merged |
+    | `machine_local` | 4, local to this Mac |
+
+    On the wire it is a plain string, and the crate's `sync_class`
+    constants give the spellings. What each class means for a move is
+    AGENT_SYNC's to define.
   - `external`: true when part of an agent's data is a file another program
     owns and ships itself. Today that is only the Claude Code transcripts
     behind THALAMUS's harness. A participant whose data a door item can

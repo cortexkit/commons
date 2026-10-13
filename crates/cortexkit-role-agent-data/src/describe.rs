@@ -66,8 +66,8 @@ impl DescribeReply {
 
 /// One per-agent store: `{name, sync_class}`. `sync_class` is the class the
 /// CortexKit agent sync design (AGENT_SYNC in CONTRACT.md's Terms) assigns
-/// the store. Its values are opaque strings to this crate, which only
-/// carries them.
+/// the store: one of the [`sync_class`] constants. The wire carries it as a
+/// plain string.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -83,4 +83,19 @@ impl Store {
             sync_class: sync_class.into(),
         }
     }
+}
+
+/// The closed set of `sync_class` spellings (CONTRACT.md §7.1). AGENT_SYNC
+/// defines what each class means for a move.
+pub mod sync_class {
+    /// Class 1: owned by one agent.
+    pub const AGENT: &str = "agent";
+    /// Class 2: shared, with one writer.
+    pub const SHARED_ONE_WRITER: &str = "shared_one_writer";
+    /// Class 3: shared and merged.
+    pub const SHARED_MERGED: &str = "shared_merged";
+    /// Class 4: local to this Mac.
+    pub const MACHINE_LOCAL: &str = "machine_local";
+    /// Every class, in class order.
+    pub const ALL: [&str; 4] = [AGENT, SHARED_ONE_WRITER, SHARED_MERGED, MACHINE_LOCAL];
 }
