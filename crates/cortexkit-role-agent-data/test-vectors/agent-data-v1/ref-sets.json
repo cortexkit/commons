@@ -1,0 +1,370 @@
+{
+  "cases": [
+    {
+      "name": "export with prepare's refs",
+      "op": "export",
+      "step": "prepared",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "export with prepare's refs reordered",
+      "op": "export",
+      "step": "prepared",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "export leaving a ref out",
+      "op": "export",
+      "step": "prepared",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        }
+      ],
+      "outcome": {
+        "code": "invalid_state",
+        "detail": {
+          "step": "prepared",
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "release adding a ref",
+      "op": "release",
+      "step": "exported",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZC"
+        }
+      ],
+      "outcome": {
+        "code": "invalid_state",
+        "detail": {
+          "step": "exported",
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "release with prepare's refs",
+      "op": "release",
+      "step": "exported",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "source abort with another set",
+      "op": "abort",
+      "step": "exported",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZC"
+        }
+      ],
+      "outcome": {
+        "code": "invalid_state",
+        "detail": {
+          "step": "exported",
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "activate with import's refs reordered",
+      "op": "activate",
+      "step": "imported",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "activate leaving a ref out",
+      "op": "activate",
+      "step": "imported",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "outcome": {
+        "code": "invalid_state",
+        "detail": {
+          "step": "imported",
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "receiver abort with another set",
+      "op": "abort",
+      "step": "imported",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        }
+      ],
+      "refs": [],
+      "outcome": {
+        "code": "invalid_state",
+        "detail": {
+          "step": "imported",
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "abort of a cutId never seen, any refs",
+      "op": "abort",
+      "step": "none",
+      "started_with": null,
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZC"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "prepare starts the set",
+      "op": "prepare",
+      "step": "none",
+      "started_with": null,
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "import starts the set",
+      "op": "import",
+      "step": "none",
+      "started_with": null,
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "status is a read and not checked",
+      "op": "status",
+      "step": "prepared",
+      "started_with": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZA"
+        },
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZB"
+        }
+      ],
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZC"
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "name": "diverged is a read and not checked",
+      "op": "diverged",
+      "step": "none",
+      "started_with": null,
+      "refs": [
+        {
+          "ref_kind": "broca.session",
+          "ref": "ses_01J9ZC"
+        }
+      ],
+      "outcome": "ok"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# cortexkit-role-agent-data — the wire contract of `agent-data/v1`, the
+# capability entorhinal calls to move an agent's data from one Mac to another.
+# Every module that holds part of an agent's data (a participant) serves it.
+# This crate holds the typed requests and replies of its ten ops, the closed
+# refusal codes, the cutId and ref checks, the per-cutId step machine, the
+# idempotency comparison, and CONTRACT.md, which states every rule as pinned.
+# Pure serde plus small checks; no transport, no runtime.
+#
+# The test vectors ship inside the crate (`test-vectors/`, listed in
+# `include`), and the `test-vectors` feature exposes their bytes through the
+# public `vectors` module, so a participant that pins this crate by version
+# can test against the same bytes without a checkout of this repository.
+[package]
+name = "cortexkit-role-agent-data"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit agent-data/v1 capability: the ten participant ops entorhinal calls to move an agent between Macs, their refusal codes, the step machine and test vectors."
+publish = true
+include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "src/**", "tests/**", "test-vectors/**"]
+
+[features]
+# Compiles the test vectors into the crate as the public `vectors` module.
+test-vectors = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The vectors' sessionRef values are checked against
+# cortexkit_role_llm_runner::session_ref, the function that defines them,
+# without adding a production dependency.
+cortexkit-role-llm-runner = { version = "0.2.1", path = "../cortexkit-role-llm-runner" }
+# An independent RFC 8785 (JCS) implementation, so the round-trip test
+# compares canonical bytes rather than this crate's own encoding.
+serde_json_canonicalizer = "0.3"
+sha2 = "0.10"
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

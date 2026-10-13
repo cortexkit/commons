@@ -1,0 +1,448 @@
+{
+  "cases": [
+    {
+      "name": "identical prepare replays",
+      "first": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "replay"
+    },
+    {
+      "name": "member order on the wire does not matter",
+      "first": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.prepare",
+        "params": {
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "refs": [
+            {
+              "ref": "ses_01J9ZA",
+              "ref_kind": "broca.session"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      },
+      "outcome": "replay"
+    },
+    {
+      "name": "prepare with fewer refs",
+      "first": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "id_reused"
+    },
+    {
+      "name": "reordered refs are the same request",
+      "first": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "replay"
+    },
+    {
+      "name": "release with another holder",
+      "first": {
+        "method": "agent_data.release",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "holder": "ada-mbp-7c1e"
+        }
+      },
+      "again": {
+        "method": "agent_data.release",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "holder": "ada-mini-02aa"
+        }
+      },
+      "outcome": "id_reused"
+    },
+    {
+      "name": "identical release replays",
+      "first": {
+        "method": "agent_data.release",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "holder": "ada-mbp-7c1e"
+        }
+      },
+      "again": {
+        "method": "agent_data.release",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "holder": "ada-mbp-7c1e"
+        }
+      },
+      "outcome": "replay"
+    },
+    {
+      "name": "release with refs reordered replays",
+      "first": {
+        "method": "agent_data.release",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "holder": "ada-mbp-7c1e"
+        }
+      },
+      "again": {
+        "method": "agent_data.release",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+          "holder": "ada-mbp-7c1e"
+        }
+      },
+      "outcome": "replay"
+    },
+    {
+      "name": "import with other refs",
+      "first": {
+        "method": "agent_data.import",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.import",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "id_reused"
+    },
+    {
+      "name": "abort with another cutId",
+      "first": {
+        "method": "agent_data.abort",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.abort",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "0b1c2d3e4f5a69788796a5b4c3d2e1f0"
+        }
+      },
+      "outcome": "new_key"
+    },
+    {
+      "name": "another op on the same cutId",
+      "first": {
+        "method": "agent_data.prepare",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.export",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "new_key"
+    },
+    {
+      "name": "status is a read",
+      "first": {
+        "method": "agent_data.status",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.status",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "exempt"
+    },
+    {
+      "name": "diverged is a read",
+      "first": {
+        "method": "agent_data.diverged",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            },
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "again": {
+        "method": "agent_data.diverged",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ],
+          "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+        }
+      },
+      "outcome": "exempt"
+    },
+    {
+      "name": "busy is a read",
+      "first": {
+        "method": "agent_data.busy",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZA"
+            }
+          ]
+        }
+      },
+      "again": {
+        "method": "agent_data.busy",
+        "params": {
+          "refs": [
+            {
+              "ref_kind": "broca.session",
+              "ref": "ses_01J9ZB"
+            }
+          ]
+        }
+      },
+      "outcome": "exempt"
+    },
+    {
+      "name": "describe is a read",
+      "first": {
+        "method": "agent_data.describe",
+        "params": {}
+      },
+      "again": {
+        "method": "agent_data.describe",
+        "params": {}
+      },
+      "outcome": "exempt"
+    }
+  ]
+}
