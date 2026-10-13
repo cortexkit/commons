@@ -66,7 +66,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, retention?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -94,7 +94,7 @@ shipping runner with this document.
   relies on is checked strictly (`check_describe`): the `llm-runner/v1`
   major, its required ops, every op of each declared group, the
   session-capability source, and the byte cap when `transcript_reads` is
-  declared.
+  declared, and optional cancellation-point metadata (§3).
 - [pinned] The answer describes the runner build, never a session. A consumer
   may cache it for as long as it talks to the same module incarnation.
 - [pinned] Stability is data, never part of a capability name. Each major
@@ -133,6 +133,13 @@ shipping runner with this document.
 - [pinned] `run_status`, `run_cancel` and `retract` are each declared on
   their own: a runner may serve any of them without the others, and
   without `run_ops` or `transcript_reads`.
+- [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
+  advertises cancellation points (§6.2). Absence means `now` only.
+  `check_describe` refuses by name a `run_cancel` member without the
+  `run_cancel` group (`run_cancel_undeclared`), an empty `at` list
+  (`empty_run_cancel_at`), a list omitting `now` (`missing_run_cancel_now`),
+  or duplicates (`duplicate_run_cancel_at`). Unknown values are tolerated
+  for forward compatibility; consumers use only values they know.
 - [pinned] `session.warm` has no role group. A `session_warm` group waits
   until a second consumer exists.
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue
@@ -367,7 +374,12 @@ state, polled without reading the transcript.
 A runner that declares `run_cancel` serves `run.cancel`: a caller stops a
 run.
 
-- [pinned] The request is `{run_id}`. The answer is a JSON string, decoded
+- [pinned] The request is `{run_id, at?}`. `at` is `now` by default,
+  preserving immediate cancellation. `step_boundary` finishes the current
+  model step and that step's entire tool batch, recording the tool results,
+  starts no further model step, and ends the run `cancelled`. The session
+  remains available for an ordinary `session.send` to continue later.
+  The answer is a JSON string, decoded
   open: `ack` or `not_active`.
   - `ack`: the runner accepted the cancellation. The run still reaches
     exactly one terminal state (§6): `cancelled`, or the terminal state it
@@ -376,8 +388,22 @@ run.
   - `not_active`: the runner did not cancel the run, because it has
     already ended or the session has no such run. Nothing is written.
   A consumer treats any other answer as not confirming a cancellation.
+- [pinned] A caller sends `at` only when the runner's `role.describe`
+  lists that value in `run_cancel.at`. Today's runners decode cancellation
+  params leniently: they would ignore `at` and cancel immediately, losing
+  an in-flight step instead of waiting for its boundary.
+- [pinned] A runner that lists `run_cancel.at` refuses an `at` value not
+  in its list with `invalid_params {field: "at"}`, changing nothing.
+  This includes unknown values; omission still means `now`.
 - [pinned] A paused run is cancellable: `run.cancel` MUST accept its
-  cancellation with `ack`.
+  cancellation with `ack`. It is already at a boundary, so `step_boundary`
+  ends it `cancelled` with no further step, just like `now`.
+- [pinned] While a `step_boundary` cancellation waits, a second
+  `step_boundary` is idempotent and answers `ack`; a second cancellation
+  with `now` escalates to immediate cancellation and answers `ack`.
+- [pinned] If the current step completes the run anyway, the first
+  terminal reached wins, including `completed`, `max_steps` or `error`.
+  The existing single-terminal rule applies: `ack` does not say which won.
 - [pinned] Owner-only: admitted only from one of the session's owner
   principals. On a scoped session those are two: the daemon-attested
   principal that opened the route which froze the scope (which may be a
@@ -1038,6 +1064,8 @@ provider codes.
   naming the field. `retention` is a recognized field even on a runner without
   its group, and is refused there (§9.1), never treated as an unknown extra.
   `view` on `session.read` is strict the same way.
+  `run.cancel` remains lenient on fields, but a runner that advertises
+  `run_cancel.at` refuses unlisted `at` values (§6.2).
 - [pinned] A capability is declared only by being listed (`role.describe`)
   or by the value `true` (`session_capabilities`); any other value declares
   nothing.
@@ -1145,6 +1173,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 
 | Case | Requires |
 |---|---|
+| `run_cancel_step_boundary_finishes_tool_batch` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model/tool calls; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; owner-only, idempotent repeat, recorded tool results and no further model step |
+| `run_cancel_unlisted_at_refused` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; `invalid_params` naming `at`, no state or transcript change |
+| `run_cancel_step_boundary_escalates_to_now` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; terminal reached without releasing the model |
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `FoldRecorded` (initial answer/fold durable before first model call) |
 | `compaction_fence_crash_replays_model_view` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `CompactionApplied` (step answer durable before fold) |
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; live head insertion precedes/travels with message zero, summaries stay whole on their first page, and the exclusive-end message survives |

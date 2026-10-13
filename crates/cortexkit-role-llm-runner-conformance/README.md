@@ -240,3 +240,22 @@ subset:
   implemented. It will check that `run.status` on an ended run lists the
   steering messages that were never delivered, and lists none when every
   steer was delivered. It requires `run_status` and `queue`.
+
+## Step-boundary cancellation
+
+The `run_cancel_step_boundary_finishes_tool_batch`,
+`run_cancel_unlisted_at_refused` and
+`run_cancel_step_boundary_escalates_to_now` cases run only when the live
+`role.describe.run_cancel.at` lists `step_boundary`. Otherwise the report
+names each skipped case and the missing cancellation point, never a pass.
+The cases also require their listed read/run/send capabilities; the batch
+case requires held tool calls.
+
+An adapter for a runner advertising this point implements the defaulted
+`hold_next_model_step`, `await_model_step`, `release_model_step` and
+`model_invocations` hooks. The hold is in the scripted model, after it has
+received an actual request, not a runner-side pause before a step starts.
+Count requests at the model independently of transcript reads so a discarded
+extra model answer cannot hide a violation. The batch case cancels while the
+model is held, then releases its answer and an entire two-call tool batch;
+escalation keeps the model held until `now` has ended the run.

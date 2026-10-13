@@ -1,0 +1,78 @@
+{
+  "canonical": [
+    {
+      "name": "legacy run_cancel group without cancellation point metadata",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.1",
+        "capabilities": ["run_cancel"],
+        "session_capabilities_from": "baseline"
+      }
+    },
+    {
+      "name": "both known cancellation points advertised",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.2",
+        "capabilities": ["run_cancel"],
+        "session_capabilities_from": "baseline",
+        "run_cancel": {"at": ["now", "step_boundary"]}
+      }
+    },
+    {
+      "name": "unknown points tolerated without implying consumer support",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.2",
+        "capabilities": ["run_cancel"],
+        "session_capabilities_from": "baseline",
+        "run_cancel": {"at": ["now", "future_point"]}
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "cancellation point metadata without run_cancel group",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.2",
+        "session_capabilities_from": "baseline",
+        "run_cancel": {"at": ["now", "step_boundary"]}
+      },
+      "problem": "run_cancel_undeclared"
+    },
+    {
+      "name": "empty cancellation point list",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.2",
+        "capabilities": ["run_cancel"],
+        "session_capabilities_from": "baseline",
+        "run_cancel": {"at": []}
+      },
+      "problem": "empty_run_cancel_at"
+    },
+    {
+      "name": "required now cancellation point omitted",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.2",
+        "capabilities": ["run_cancel"],
+        "session_capabilities_from": "baseline",
+        "run_cancel": {"at": ["step_boundary"]}
+      },
+      "problem": "missing_run_cancel_now"
+    },
+    {
+      "name": "duplicate cancellation point",
+      "answer": {
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "implementation_version": "0.2.2",
+        "capabilities": ["run_cancel"],
+        "session_capabilities_from": "baseline",
+        "run_cancel": {"at": ["now", "step_boundary", "step_boundary"]}
+      },
+      "problem": "duplicate_run_cancel_at"
+    }
+  ]
+}

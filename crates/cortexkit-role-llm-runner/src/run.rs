@@ -344,16 +344,44 @@ impl RunStatus {
     }
 }
 
+/// Known cancellation points. Requests decode these as open strings.
+pub mod cancel_at {
+    /// Cancel immediately; the default when `at` is absent.
+    pub const NOW: &str = "now";
+    /// Finish the current model step and its tool batch, then cancel.
+    pub const STEP_BOUNDARY: &str = "step_boundary";
+}
+
 /// Stop the named active or paused run, under the session owner's scope.
+///
+/// Non-exhaustive so a later optional field is additive: build one with
+/// [`RunCancelRequest::new`] and [`RunCancelRequest::with_at`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct RunCancelRequest {
     pub run_id: String,
+    /// Cancellation point: `now` or `step_boundary` ([`cancel_at`]). Send this
+    /// field only if the runner's discovery answer lists the value in
+    /// `role.describe.run_cancel.at`; older runners would ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
 }
 impl RunCancelRequest {
     pub fn new(run_id: impl Into<String>) -> Self {
         Self {
             run_id: run_id.into(),
+            at: None,
         }
+    }
+
+    pub fn with_at(mut self, at: impl Into<String>) -> Self {
+        self.at = Some(at.into());
+        self
+    }
+
+    /// Omission preserves immediate cancellation.
+    pub fn at(&self) -> &str {
+        self.at.as_deref().unwrap_or(cancel_at::NOW)
     }
 }
 
@@ -505,6 +533,41 @@ mod tests {
                 reply
             );
             assert_eq!(serde_json::to_string(&reply).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn run_cancel_vectors_preserve_bytes_defaults_and_open_points() {
+        let file = vectors::load("run-cancel.json");
+        for case in vectors::cases(&file, "canonical") {
+            let name = case["name"].as_str().unwrap();
+            let request: RunCancelRequest = vectors::round_trip(name, &case["params"]);
+            assert_eq!(request.at(), case["at"].as_str().unwrap(), "{name}");
+            assert_eq!(
+                serde_json::to_string(&request).unwrap(),
+                case["bytes"].as_str().unwrap(),
+                "{name}"
+            );
+        }
+        for case in vectors::cases(&file, "edges") {
+            let name = case["name"].as_str().unwrap();
+            let initial: RunResult = vectors::round_trip(name, &case["initial"]);
+            let terminal: RunResult = vectors::round_trip(name, &case["terminal"]);
+            assert!(terminal.run_state().is_terminal(), "{name}");
+            assert!(terminal.final_message_consistent(), "{name}");
+            let requests = case["requests"].as_array().unwrap();
+            let answers = case["answers"].as_array().unwrap();
+            assert_eq!(requests.len(), answers.len(), "{name}");
+            for (params, answer) in requests.iter().zip(answers) {
+                let request: RunCancelRequest = vectors::round_trip(name, params);
+                let reply: RunCancelReply = vectors::round_trip(name, answer);
+                assert_eq!(request.run_id, initial.run_id, "{name}");
+                assert_eq!(request.run_id, terminal.run_id, "{name}");
+                assert!(
+                    matches!(reply, RunCancelReply::Ack | RunCancelReply::NotActive),
+                    "{name}"
+                );
+            }
         }
     }
 

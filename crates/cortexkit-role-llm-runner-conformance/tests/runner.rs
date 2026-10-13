@@ -1269,3 +1269,71 @@ async fn compaction_cases_wait_for_a_run_reported_ended_late() {
     let report = run(&subject).await;
     assert_passed(&report, "compaction_unavailable_distinct_from_refuse");
 }
+
+const BOUNDARY_CANCEL_CASES: &[&str] = &[
+    "run_cancel_step_boundary_finishes_tool_batch",
+    "run_cancel_unlisted_at_refused",
+    "run_cancel_step_boundary_escalates_to_now",
+];
+
+#[tokio::test]
+async fn boundary_cancel_cases_pass_for_a_faithful_runner() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in BOUNDARY_CANCEL_CASES {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn boundary_cancel_cases_skip_by_name_when_discovery_omits_the_point() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.cancel_step_boundary = false;
+    let report = run(&subject).await;
+    for name in BOUNDARY_CANCEL_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::SkippedWithReason {
+                missing: vec![Capability::RunCancel],
+                reason: "role.describe.run_cancel.at does not list step_boundary".into(),
+            }),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn boundary_cancel_case_rejects_a_runner_starting_another_step() {
+    let report = run(&FakeSubject::new(Defects {
+        cancel_starts_next_step: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "run_cancel_step_boundary_finishes_tool_batch");
+    assert!(reason.contains("another model step"), "{reason}");
+    assert_others_passed(&report, &["run_cancel_step_boundary_finishes_tool_batch"]);
+}
+
+#[tokio::test]
+async fn unlisted_cancel_case_rejects_a_runner_ignoring_at() {
+    let report = run(&FakeSubject::new(Defects {
+        cancel_accepts_unlisted_at: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "run_cancel_unlisted_at_refused");
+    assert!(reason.contains("not refused"), "{reason}");
+    assert_others_passed(&report, &["run_cancel_unlisted_at_refused"]);
+}
+
+#[tokio::test]
+async fn escalation_cancel_case_rejects_a_runner_ignoring_now() {
+    let report = run(&FakeSubject::new(Defects {
+        cancel_ignores_escalation: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "run_cancel_step_boundary_escalates_to_now");
+    assert!(reason.contains("did not end"), "{reason}");
+    assert_others_passed(&report, &["run_cancel_step_boundary_escalates_to_now"]);
+}

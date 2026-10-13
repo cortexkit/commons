@@ -117,6 +117,13 @@ const READ_FIELDS: &[&str] = &[
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     pub compaction: CompactionDefect,
+    /// Continue to a new model step after a boundary cancellation.
+    pub cancel_starts_next_step: bool,
+    /// Accept an unlisted cancellation point instead of refusing it.
+    pub cancel_accepts_unlisted_at: bool,
+    /// Keep waiting for the step boundary when a second cancel asks for
+    /// `now`, instead of cancelling immediately.
+    pub cancel_ignores_escalation: bool,
     /// Omit run attribution from messages whose run is recorded.
     pub attribution_missing_run: bool,
     /// Mark the first message final, even before a durable terminal exists.
@@ -208,6 +215,7 @@ struct World {
     retention_clock_advanced_ms: AtomicU64,
     held_paused: bool,
     advertise_status: bool,
+    cancel_step_boundary: bool,
     defects: Defects,
     step_recovery: StepRecovery,
     queue_receipt_pending_then_unknown: bool,
@@ -220,6 +228,9 @@ struct World {
     held_steer_break_answers: AtomicUsize,
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
+    model_calls: Mutex<BTreeSet<(String, String, usize)>>,
+    pending_model_holds: Mutex<BTreeSet<String>>,
+    held_models: Mutex<BTreeMap<String, String>>,
     compaction: Mutex<compaction::Providers>,
     invocations: Mutex<BTreeMap<String, usize>>,
     held: Mutex<BTreeSet<String>>,
@@ -310,6 +321,7 @@ struct RunRec {
     final_text: Option<String>,
     error: Option<Value>,
     cancel_requested: bool,
+    cancel_at: String,
 }
 
 #[derive(Clone, Debug)]
@@ -697,6 +709,7 @@ impl Module {
             "cancel" => {
                 if let Some(run) = sess.run_mut(&text("run_id")) {
                     run.cancel_requested = true;
+                    run.cancel_at = text("cancel_at");
                 }
             }
             "unattributed" => {
@@ -750,6 +763,7 @@ impl Module {
                         final_text: None,
                         error: None,
                         cancel_requested: false,
+                        cancel_at: String::new(),
                     });
                 }
             }
@@ -844,6 +858,9 @@ impl Module {
     fn drive(&self, session: &str, run_id: &str) -> Result<(), Killed> {
         loop {
             let sess = self.sessions.lock().unwrap()[session].clone();
+            if sess.run(run_id).is_none_or(|run| run.state != "active") {
+                return Ok(());
+            }
             let mine: Vec<(&String, &CallRec)> = sess
                 .calls
                 .iter()
@@ -866,14 +883,25 @@ impl Module {
             if sess.run(run_id).is_none_or(|run| run.state != "active") {
                 return Ok(());
             }
-            if sess.run(run_id).is_some_and(|run| run.cancel_requested) {
+            let turn_index = sess.events.iter().filter(|kind| *kind == "step").count();
+            let model_started = self.world.model_calls.lock().unwrap().contains(&(
+                session.into(),
+                run_id.into(),
+                turn_index,
+            ));
+            if !model_started
+                && sess.run(run_id).is_some_and(|run| {
+                    run.cancel_requested
+                        && !(run.cancel_at == "step_boundary"
+                            && self.world.defects.cancel_starts_next_step)
+                })
+            {
                 return self.commit(
                     session,
                     json!({"kind":"terminal", "run_id":run_id, "state":"cancelled"}),
                 );
             }
             // The model consumed a turn even if recovery removed it from history.
-            let turn_index = sess.events.iter().filter(|kind| *kind == "step").count();
             if !self.prepare_compaction(session, run_id, turn_index)? {
                 return Ok(());
             }
@@ -890,6 +918,39 @@ impl Module {
                     json!({ "kind": "terminal", "run_id": run_id, "state": "error" }),
                 );
             };
+            self.world.model_calls.lock().unwrap().insert((
+                session.into(),
+                run_id.into(),
+                turn_index,
+            ));
+            if !model_started
+                && self.world.defects.cancel_starts_next_step
+                && sess
+                    .run(run_id)
+                    .is_some_and(|run| run.cancel_requested && run.cancel_at == "step_boundary")
+            {
+                // The extra request reached the model, but its answer is discarded.
+                return self.commit(
+                    session,
+                    json!({"kind":"terminal", "run_id":run_id, "state":"cancelled"}),
+                );
+            }
+            if self
+                .world
+                .pending_model_holds
+                .lock()
+                .unwrap()
+                .remove(session)
+            {
+                self.world
+                    .held_models
+                    .lock()
+                    .unwrap()
+                    .insert(session.into(), run_id.into());
+            }
+            if self.world.held_models.lock().unwrap().contains_key(session) {
+                return Ok(());
+            }
             let ordinal = sess.messages.len();
             let mut parts = Vec::new();
             let mut calls = Vec::new();
@@ -1029,12 +1090,37 @@ impl Module {
         if stamp.principal != sess.owner {
             return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
         }
+        let at = request.at();
+        if self.world.cancel_step_boundary
+            && !matches!(at, "now" | "step_boundary")
+            && !self.world.defects.cancel_accepts_unlisted_at
+        {
+            return Ok(invalid("at"));
+        }
         if sess.run(&request.run_id).is_none_or(|run| {
             cortexkit_role_llm_runner::run::RunState::parse(&run.state).is_terminal()
         }) {
             return Ok(respond("not_active"));
         }
-        self.commit(session, json!({"kind":"cancel", "run_id":request.run_id}))?;
+        if self.world.defects.cancel_ignores_escalation
+            && at == "now"
+            && sess
+                .run(&request.run_id)
+                .is_some_and(|run| run.cancel_at == "step_boundary")
+        {
+            return Ok(respond("ack"));
+        }
+        self.commit(
+            session,
+            json!({"kind":"cancel", "run_id":request.run_id, "cancel_at":at}),
+        )?;
+        let held_model = self.world.held_models.lock().unwrap().contains_key(session);
+        if held_model && at != "step_boundary" {
+            self.commit(
+                session,
+                json!({"kind":"terminal", "run_id":request.run_id, "state":"cancelled"}),
+            )?;
+        }
         self.drive(session, &request.run_id)?;
         Ok(respond("ack"))
     }
@@ -1068,6 +1154,9 @@ impl Module {
         }
         if self.world.serves(groups::RETENTION) {
             describe = describe.with_retention(RETENTION_MAX, self.world.retention_delete_ms);
+        }
+        if self.world.serves(groups::RUN_CANCEL) && self.world.cancel_step_boundary {
+            describe = describe.with_run_cancel(vec!["now".into(), "step_boundary".into()]);
         }
         respond(describe)
     }
@@ -1698,6 +1787,7 @@ pub struct FakeSubject {
     pub retention_delete_ms: u64,
     pub held_paused: bool,
     pub advertise_status: bool,
+    pub cancel_step_boundary: bool,
     pub defects: Defects,
     pub step_recovery: StepRecovery,
     pub capabilities: BTreeSet<Capability>,
@@ -1765,6 +1855,7 @@ impl FakeSubject {
             retention_delete_ms: RETENTION_DELETE_MS,
             held_paused: false,
             advertise_status: false,
+            cancel_step_boundary: true,
             defects,
             step_recovery: StepRecovery::Resume,
             capabilities: served(),
@@ -1799,6 +1890,7 @@ impl FakeSubject {
                     retention_clock_advanced_ms: AtomicU64::new(0),
                     held_paused: self.held_paused,
                     advertise_status: self.advertise_status,
+                    cancel_step_boundary: self.cancel_step_boundary,
                     defects: self.defects,
                     step_recovery: self.step_recovery,
                     queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
@@ -1814,6 +1906,9 @@ impl FakeSubject {
                         .map(str::to_owned)
                         .collect(),
                     scripts: Mutex::new(BTreeMap::new()),
+                    model_calls: Mutex::new(BTreeSet::new()),
+                    pending_model_holds: Mutex::new(BTreeSet::new()),
+                    held_models: Mutex::new(BTreeMap::new()),
                     compaction: Mutex::new(compaction::Providers::new(
                         self.seal_compaction_setup_crash,
                     )),
@@ -2085,6 +2180,58 @@ impl LlmRunnerSubject for FakeSubject {
             tokio::task::yield_now().await;
         }
         Err(HarnessError::new("the call was never held"))
+    }
+
+    async fn hold_next_model_step(&self, session: &str) -> Result<(), HarnessError> {
+        self.world()
+            .pending_model_holds
+            .lock()
+            .unwrap()
+            .insert(session.into());
+        Ok(())
+    }
+
+    async fn await_model_step(&self, session: &str) -> Result<(), HarnessError> {
+        if self
+            .world()
+            .held_models
+            .lock()
+            .unwrap()
+            .contains_key(session)
+        {
+            Ok(())
+        } else {
+            Err(HarnessError::new("the model request was never held"))
+        }
+    }
+
+    async fn release_model_step(&self, session: &str) -> Result<(), HarnessError> {
+        let run_id = self
+            .world()
+            .held_models
+            .lock()
+            .unwrap()
+            .remove(session)
+            .ok_or_else(|| HarnessError::new("the model request is not held"))?;
+        for module in self.modules.lock().unwrap().clone() {
+            if module.alive.load(Ordering::SeqCst) {
+                module
+                    .drive(session, &run_id)
+                    .map_err(|_| HarnessError::new("runner was killed"))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn model_invocations(&self, session: &str) -> Result<usize, HarnessError> {
+        Ok(self
+            .world()
+            .model_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, _, _)| name == session)
+            .count())
     }
 
     async fn release_tool_call(&self, arguments: &Value) -> Result<(), HarnessError> {

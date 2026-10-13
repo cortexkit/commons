@@ -130,6 +130,7 @@ where
                 self.guaranteed_steer_never_pending_or_unknown().await
             }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
+            name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
             name if name.starts_with("retention_") => self.retention_case(name).await,
             name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
                 crate::compaction::run(self, name)

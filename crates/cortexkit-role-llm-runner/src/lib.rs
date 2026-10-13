@@ -279,6 +279,8 @@ pub(crate) mod vectors {
         "read-requests.json",
         "role-describe.json",
         "run-result.json",
+        "run-cancel.json",
+        "run-cancel-describe.json",
         "send.json",
         "session-change.json",
         "session-ref.json",

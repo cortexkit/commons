@@ -46,9 +46,17 @@ const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
 const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
 const COMPACTED: &[Capability] = &[Compaction, ModelView, Queue, TranscriptReads, RunOps];
+const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, RunOps];
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("run_cancel_step_boundary_finishes_tool_batch",
+        &[Capability::RunCancel, Queue, TranscriptReads, RunOps, HoldToolCalls],
+        "when describe lists step_boundary, cancellation during a held model step records the whole tool batch, accepts an idempotent second request, starts no further model step and ends cancelled"),
+    case("run_cancel_unlisted_at_refused", CANCEL,
+        "when describe lists step_boundary, an unlisted at is refused invalid_params naming at, without writes or changing the held run"),
+    case("run_cancel_step_boundary_escalates_to_now", CANCEL,
+        "when describe lists step_boundary, a second cancellation at now ends the run without waiting for the held model answer"),
     case("compaction_setup_durable_once",
         &[Compaction, ModelView, Queue, TranscriptReads, RunOps, KillAt(points::FOLD_RECORDED)],
         "Setup is durable before the first model call and never re-invoked after its recorded answer survives a crash"),

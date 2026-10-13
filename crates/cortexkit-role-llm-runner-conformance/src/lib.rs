@@ -76,6 +76,7 @@
 
 #![forbid(unsafe_code)]
 
+mod cancel;
 mod cases;
 mod compaction;
 mod crash;

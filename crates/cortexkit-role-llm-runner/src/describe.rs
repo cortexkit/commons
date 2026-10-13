@@ -25,6 +25,14 @@ pub mod steer_receipt {
     pub const CONFIRM: &str = "confirm";
 }
 
+/// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
+pub mod problem_names {
+    pub const RUN_CANCEL_UNDECLARED: &str = "run_cancel_undeclared";
+    pub const EMPTY_RUN_CANCEL_AT: &str = "empty_run_cancel_at";
+    pub const MISSING_RUN_CANCEL_NOW: &str = "missing_run_cancel_now";
+    pub const DUPLICATE_RUN_CANCEL_AT: &str = "duplicate_run_cancel_at";
+}
+
 /// The `role.describe` answer: every major of the role the module serves,
 /// each with its own ops and stability, plus the module-level capabilities.
 ///
@@ -66,6 +74,30 @@ pub struct RoleDescribe {
     /// Limits required when the `retention` capability group is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<Retention>,
+    /// Supported cancellation points; absent means only `now` is supported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_cancel: Option<RunCancel>,
+}
+
+/// Cancellation points advertised by a runner declaring `run_cancel`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RunCancel {
+    /// Plain strings rather than an enum, so a runner may list points this
+    /// crate doesn't know yet. A consumer ignores any value it doesn't
+    /// recognize and sends only points it knows and the runner lists.
+    pub at: Vec<String>,
+}
+
+impl RunCancel {
+    pub fn new(at: Vec<String>) -> Self {
+        Self { at }
+    }
+
+    pub fn with_at(mut self, at: Vec<String>) -> Self {
+        self.at = at;
+        self
+    }
 }
 
 /// Whole-session retention limits advertised by a runner.
@@ -153,6 +185,12 @@ impl RoleDescribe {
         self
     }
 
+    /// State the cancellation points (the capability must also be listed).
+    pub fn with_run_cancel(mut self, at: Vec<String>) -> Self {
+        self.run_cancel = Some(RunCancel::new(at));
+        self
+    }
+
     /// Say where session-level capabilities come from.
     pub fn with_session_capabilities_from(mut self, source: impl Into<String>) -> Self {
         self.session_capabilities_from = Some(source.into());
@@ -223,7 +261,8 @@ impl Major {
 pub enum DescribeProblem {
     /// The answer is not a JSON object.
     NotAnObject,
-    /// A required field is missing or has the wrong type.
+    /// A required field is missing or has the wrong type, or optional
+    /// cancellation metadata violates a named rule ([`problem_names`]).
     Undecodable(String),
     /// No entry in `majors` is `llm-runner/v1`.
     MissingMajor {
@@ -248,7 +287,8 @@ pub enum DescribeProblem {
 
 /// Decode `raw` and check it lists an `llm-runner/v1` major with every
 /// required op, every op of each declared group, and a session-capability
-/// source. Every problem is returned, not only the first. Unknown
+/// source, plus any advertised cancellation points. Every problem is returned,
+/// not only the first. Unknown
 /// capabilities and an unknown source value are tolerated.
 pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>> {
     if !raw.is_object() {
@@ -299,6 +339,31 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.session_capabilities_from.is_none() {
         problems.push(DescribeProblem::MissingSessionCapabilitiesSource);
     }
+    if let Some(cancel) = &describe.run_cancel {
+        if !describe.declares(capabilities::RUN_CANCEL) {
+            problems.push(DescribeProblem::Undecodable(
+                problem_names::RUN_CANCEL_UNDECLARED.into(),
+            ));
+        }
+        if cancel.at.is_empty() {
+            problems.push(DescribeProblem::Undecodable(
+                problem_names::EMPTY_RUN_CANCEL_AT.into(),
+            ));
+        }
+        if !cancel.at.iter().any(|at| at == crate::run::cancel_at::NOW) {
+            problems.push(DescribeProblem::Undecodable(
+                problem_names::MISSING_RUN_CANCEL_NOW.into(),
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for at in &cancel.at {
+            if !seen.insert(at) {
+                problems.push(DescribeProblem::Undecodable(
+                    problem_names::DUPLICATE_RUN_CANCEL_AT.into(),
+                ));
+            }
+        }
+    }
     if problems.is_empty() {
         Ok(describe)
     } else {
@@ -314,7 +379,13 @@ mod tests {
     fn problem_name(problem: &DescribeProblem) -> &'static str {
         match problem {
             DescribeProblem::NotAnObject => "not_an_object",
-            DescribeProblem::Undecodable(_) => "undecodable",
+            DescribeProblem::Undecodable(name) => match name.as_str() {
+                problem_names::RUN_CANCEL_UNDECLARED => problem_names::RUN_CANCEL_UNDECLARED,
+                problem_names::EMPTY_RUN_CANCEL_AT => problem_names::EMPTY_RUN_CANCEL_AT,
+                problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,
+                problem_names::DUPLICATE_RUN_CANCEL_AT => problem_names::DUPLICATE_RUN_CANCEL_AT,
+                _ => "undecodable",
+            },
             DescribeProblem::MissingMajor { .. } => "missing_major",
             DescribeProblem::MissingOp(_) => "missing_op",
             DescribeProblem::GroupIncomplete { .. } => "group_incomplete",
@@ -356,6 +427,54 @@ mod tests {
     }
 
     #[test]
+    fn run_cancel_discovery_validates_points_by_name() {
+        let mut ops: Vec<String> = REQUIRED_OPS.iter().map(|op| (*op).into()).collect();
+        ops.push(ops::RUN_CANCEL.into());
+        let base = RoleDescribe::new(vec![Major::new(PROVIDES, ops, "alpha")], "1")
+            .with_capabilities(vec![capabilities::RUN_CANCEL.into()])
+            .with_session_capabilities_from(source::BASELINE);
+        let check = |value: &RoleDescribe| check_describe(&serde_json::to_value(value).unwrap());
+        assert_eq!(check(&base).unwrap().run_cancel, None);
+        assert!(serde_json::to_value(&base)
+            .unwrap()
+            .get("run_cancel")
+            .is_none());
+        for (points, expected) in [
+            (vec![], problem_names::EMPTY_RUN_CANCEL_AT),
+            (vec!["step_boundary"], problem_names::MISSING_RUN_CANCEL_NOW),
+            (vec!["now", "now"], problem_names::DUPLICATE_RUN_CANCEL_AT),
+            (
+                vec!["now", "future", "future"],
+                problem_names::DUPLICATE_RUN_CANCEL_AT,
+            ),
+        ] {
+            let described = base
+                .clone()
+                .with_run_cancel(points.into_iter().map(String::from).collect());
+            let problems = check(&described).unwrap_err();
+            assert!(
+                problems.contains(&DescribeProblem::Undecodable(expected.into())),
+                "{problems:?}"
+            );
+        }
+        let described = base.clone().with_run_cancel(vec![
+            "now".into(),
+            "step_boundary".into(),
+            "future".into(),
+        ]);
+        assert_eq!(check(&described).unwrap(), described);
+        assert_eq!(
+            check(&described.with_capabilities(vec![])),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::RUN_CANCEL_UNDECLARED.into()
+            )])
+        );
+        let decoded: RunCancel =
+            serde_json::from_value(serde_json::json!({"at": ["now"], "future": true})).unwrap();
+        assert_eq!(decoded, RunCancel::new(vec![]).with_at(vec!["now".into()]));
+    }
+
+    #[test]
     fn describe_vectors_check_as_recorded() {
         let file = vectors::load("role-describe.json");
         for case in vectors::cases(&file, "accepted") {
@@ -386,6 +505,31 @@ mod tests {
             let names: Vec<&str> = problems.iter().map(problem_name).collect();
             let expected = case["problem"].as_str().unwrap();
             assert!(names.contains(&expected), "{name}: {names:?}");
+        }
+    }
+
+    #[test]
+    fn run_cancel_describe_vectors_round_trip_and_refuse_by_name() {
+        let file = vectors::load("run-cancel-describe.json");
+        for case in vectors::cases(&file, "canonical") {
+            let name = case["name"].as_str().unwrap();
+            let decoded: RoleDescribe = vectors::round_trip(name, &case["answer"]);
+            assert_eq!(check_describe(&case["answer"]).unwrap(), decoded, "{name}");
+        }
+        for case in vectors::cases(&file, "refused") {
+            let name = case["name"].as_str().unwrap();
+            let expected = match case["problem"].as_str().unwrap() {
+                problem_names::RUN_CANCEL_UNDECLARED => problem_names::RUN_CANCEL_UNDECLARED,
+                problem_names::EMPTY_RUN_CANCEL_AT => problem_names::EMPTY_RUN_CANCEL_AT,
+                problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,
+                problem_names::DUPLICATE_RUN_CANCEL_AT => problem_names::DUPLICATE_RUN_CANCEL_AT,
+                other => panic!("{name}: unknown problem {other}"),
+            };
+            let problems = check_describe(&case["answer"]).expect_err(name);
+            assert!(
+                problems.contains(&DescribeProblem::Undecodable(expected.into())),
+                "{name}: {problems:?}"
+            );
         }
     }
 

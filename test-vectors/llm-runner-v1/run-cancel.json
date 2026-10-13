@@ -1,0 +1,65 @@
+{
+  "canonical": [
+    {
+      "name": "legacy cancel omits at and means now",
+      "params": {"run_id": "r1"},
+      "bytes": "{\"run_id\":\"r1\"}",
+      "at": "now"
+    },
+    {
+      "name": "explicit immediate cancellation",
+      "params": {"run_id": "r1", "at": "now"},
+      "bytes": "{\"run_id\":\"r1\",\"at\":\"now\"}",
+      "at": "now"
+    },
+    {
+      "name": "cancellation at a model step boundary",
+      "params": {"run_id": "r1", "at": "step_boundary"},
+      "bytes": "{\"run_id\":\"r1\",\"at\":\"step_boundary\"}",
+      "at": "step_boundary"
+    },
+    {
+      "name": "unknown cancellation points decode open for runner admission",
+      "params": {"run_id": "r1", "at": "future_point"},
+      "bytes": "{\"run_id\":\"r1\",\"at\":\"future_point\"}",
+      "at": "future_point"
+    }
+  ],
+  "edges": [
+    {
+      "name": "paused run is already at a boundary and starts no further step",
+      "initial": {"run_id": "r1", "state": "paused", "reason": "auth_required"},
+      "requests": [{"run_id": "r1", "at": "step_boundary"}],
+      "answers": ["ack"],
+      "terminal": {"run_id": "r1", "state": "cancelled"}
+    },
+    {
+      "name": "a second boundary cancellation is idempotent",
+      "initial": {"run_id": "r1", "state": "active"},
+      "requests": [{"run_id": "r1", "at": "step_boundary"}, {"run_id": "r1", "at": "step_boundary"}],
+      "answers": ["ack", "ack"],
+      "terminal": {"run_id": "r1", "state": "cancelled"}
+    },
+    {
+      "name": "now escalates a waiting boundary cancellation",
+      "initial": {"run_id": "r1", "state": "active"},
+      "requests": [{"run_id": "r1", "at": "step_boundary"}, {"run_id": "r1", "at": "now"}],
+      "answers": ["ack", "ack"],
+      "terminal": {"run_id": "r1", "state": "cancelled"}
+    },
+    {
+      "name": "the finishing step reaches completed before cancellation seals",
+      "initial": {"run_id": "r1", "state": "active"},
+      "requests": [{"run_id": "r1", "at": "step_boundary"}],
+      "answers": ["ack"],
+      "terminal": {"run_id": "r1", "state": "completed", "final_message": {"ordinal": 1, "mid": "m1", "text": "done"}}
+    },
+    {
+      "name": "an ended run is not active regardless of cancellation point",
+      "initial": {"run_id": "r1", "state": "cancelled"},
+      "requests": [{"run_id": "r1", "at": "step_boundary"}],
+      "answers": ["not_active"],
+      "terminal": {"run_id": "r1", "state": "cancelled"}
+    }
+  ]
+}

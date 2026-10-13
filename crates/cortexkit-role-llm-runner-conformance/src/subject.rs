@@ -263,6 +263,37 @@ pub trait LlmRunnerSubject: Harness {
     /// answers instead, keeping that cursor across held calls and restarts.
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError>;
 
+    /// Hold the next actual model answer for this session until explicitly
+    /// released. Called before the send. Required when describe lists
+    /// `run_cancel.at: step_boundary`; do not pause the runner before it sends
+    /// the model request, since cancellation must arrive during a step.
+    async fn hold_next_model_step(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("held model step is not implemented"))
+    }
+
+    /// Resolve after the scripted model receives the held request, not merely
+    /// after installing a script or accepting a send.
+    async fn await_model_step(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "held model observation is not implemented",
+        ))
+    }
+
+    /// Release the held model answer to the runner, even if it has cancelled.
+    async fn release_model_step(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("held model release is not implemented"))
+    }
+
+    /// Count requests actually received by the scripted model for this session.
+    /// Keep the count outside the runner and its state root; do not infer it
+    /// from transcript messages or configured answers, which can hide an extra
+    /// model step whose answer was discarded after cancellation.
+    async fn model_invocations(&self, _session: &str) -> Result<usize, HarnessError> {
+        Err(HarnessError::new(
+            "model invocation observation is not implemented",
+        ))
+    }
+
     /// Install one native persistent message with no recoverable run or episode
     /// in the existing session. Return its ordinal and a unique marker stored
     /// in its body, derived from fixture construction rather than `session.read`.
