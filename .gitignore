@@ -4,5 +4,12 @@
 
 # Agent working state (context packages, prompts, drafts) -- never source.
 # A committed gather artifact answers searches with another repo's details.
-.cortexkit/
+# Internal docs live in .cortexkit/internal-docs/ (ignored); only release notes,
+# skills, rules and WORKER.md are tracked here. scripts/check-cortexkit-layout.sh
+# enforces it in CI.
+/.cortexkit/*
+!/.cortexkit/release-notes/
+!/.cortexkit/skills/
+!/.cortexkit/rules/
+!/.cortexkit/WORKER.md
 docs/private/

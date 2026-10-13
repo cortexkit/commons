@@ -39,6 +39,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: bash scripts/no-external-path-deps.test.sh
 
+      - name: Nothing internal is tracked under .cortexkit
+        run: bash scripts/check-cortexkit-layout.sh
+
       - name: Format check
         run: cargo fmt --all -- --check
 
