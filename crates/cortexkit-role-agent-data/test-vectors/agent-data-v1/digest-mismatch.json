@@ -1,0 +1,43 @@
+{
+  "description": "Additive 0.1.2 vectors: append op_additions to the corresponding op-refusals.json rows without changing the original files. Driver actions use errors::driver_action_for(op, code).",
+  "op_additions": [
+    {
+      "op": "activate",
+      "codes": ["digest_mismatch"]
+    },
+    {
+      "op": "abort",
+      "codes": ["digest_mismatch"]
+    }
+  ],
+  "refusals": [
+    {
+      "name": "activate holds as a fork on staged digest mismatch",
+      "op": "activate",
+      "driver": "terminal_for_step",
+      "retryable": false,
+      "named": true,
+      "body": {
+        "code": "digest_mismatch",
+        "message": "staged bytes no longer hash to their recorded digest; move holds as a fork",
+        "detail": {
+          "reason": "staging_digest_mismatch"
+        }
+      }
+    },
+    {
+      "name": "abort waits for operator repair of undo digest mismatch",
+      "op": "abort",
+      "driver": "retry_after_operator",
+      "retryable": true,
+      "named": true,
+      "body": {
+        "code": "digest_mismatch",
+        "message": "undo images no longer hash to their recorded digest; move stuck, source agent frozen until repair",
+        "detail": {
+          "reason": "undo_digest_mismatch"
+        }
+      }
+    }
+  ]
+}

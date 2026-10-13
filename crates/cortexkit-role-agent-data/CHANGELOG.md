@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.2
+
+- Allow `digest_mismatch` on `activate` and `abort` when a participant's own
+  staged bytes or undo images no longer match their recorded digests.
+- Add `errors::driver_action_for(op, code)`: activation holds as a fork for
+  the operator without retrying or returning the claim; abort waits for undo
+  repair before retrying, leaving the move stuck and the source agent frozen.
+  The existing `RefusalCode::driver_action()` remains unchanged.
+- Add optional `DigestMismatchDetail` with open `reason` strings and known
+  reason constants, plus separate `ErrorBody` construction and decoding
+  methods. The five required `Detail` variants remain source-compatible.
+- Ship additive `digest-mismatch.json` refusal and per-op driver-action
+  vectors. Existing vector bytes and checksum entries remain unchanged.
+
 ## 0.1.1
 
 - Document the closed set of `sync_class` values (`agent`,

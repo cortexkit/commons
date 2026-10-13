@@ -2,13 +2,15 @@
 //!
 //! A participant refuses a request with an ERROR body `{code, message,
 //! detail?}` ([`ErrorBody`]). `code` is one of the closed set in
-//! CONTRACT.md §6 ([`RefusalCode`]); each code fixes what the driver does
-//! next ([`DriverAction`]). A participant cannot invent codes: one outside
+//! CONTRACT.md §6 ([`RefusalCode`]); the op and code fix what the driver does
+//! next ([`driver_action_for`]). A participant cannot invent codes: one outside
 //! the set still decodes, as [`RefusalCode::Unknown`], so an unfamiliar
 //! code never makes the whole body undecodable, and the driver never retries
 //! it: it aborts the move and shows the code.
 //!
-//! Five codes carry a typed `detail` ([`Detail`]); the others carry none.
+//! Five codes require a typed `detail` ([`Detail`]); `digest_mismatch` may
+//! carry an optional [`DigestMismatchDetail`], decoded separately so the
+//! existing exhaustive `Detail` enum stays source-compatible.
 //!
 //! The contract terms used here (source, receiver, cut, the door, driver
 //! and the rest) are defined in the "Terms" section of `CONTRACT.md`.
@@ -63,8 +65,9 @@ pub mod codes {
     /// can't accept this cut: the cut's store version (an item's `format`)
     /// is one it cannot read, so the receiving Mac must be upgraded first.
     pub const INCOMPATIBLE_VERSION: &str = "incompatible_version";
-    /// On the receiver, the bytes read through the door don't hash to the
-    /// digest the source gave in `prepare`.
+    /// Bytes received or held by this participant don't hash to their recorded
+    /// digest: the incoming cut on `import`, or its own staged bytes or undo
+    /// images on `activate` and `abort`. See [`super::driver_action_for`].
     pub const DIGEST_MISMATCH: &str = "digest_mismatch";
     /// On the receiver, this Mac's copy of these refs gained data after
     /// `diverged` answered `at_cut`, so `import` or `activate` would
@@ -102,8 +105,8 @@ pub mod codes {
     ];
 }
 
-/// What the driver (entorhinal) does after a refusal. Each refusal `code`
-/// determines its action ([`RefusalCode::driver_action`]).
+/// What the driver (entorhinal) does after a refusal. The op and refusal code
+/// determine its action ([`driver_action_for`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DriverAction {
     /// Stop the move. Never retried.
@@ -113,7 +116,8 @@ pub enum DriverAction {
     /// Send the same request again later; the move waits.
     RetryLater,
     /// Send the same request again after the operator has copied the host's
-    /// own data to this Mac.
+    /// own data to this Mac, or repaired the participant's undo state for
+    /// `digest_mismatch` on `abort`.
     RetryAfterOperator,
     /// Send the same request again, with no condition attached (a
     /// temporary failure).
@@ -211,7 +215,9 @@ impl RefusalCode {
             .unwrap_or_else(|| Self::Unknown(code.to_owned()))
     }
 
-    /// What the driver does after this refusal (CONTRACT.md §6).
+    /// The code-only driver action, retained for existing callers. Use
+    /// [`driver_action_for`] when the op is known: `digest_mismatch` needs a
+    /// different action on `activate` and `abort` (CONTRACT.md §6).
     pub fn driver_action(&self) -> DriverAction {
         match self {
             Self::CutNotReady => DriverAction::RetryWithinStep,
@@ -267,7 +273,7 @@ impl<'de> Deserialize<'de> for RefusalCode {
 /// shape every role uses. Decoded leniently (unknown members are ignored),
 /// like the other roles' ERROR bodies, because the daemon owns this frame's
 /// shape; the `detail` objects CONTRACT.md §6.2 defines decode strictly
-/// ([`ErrorBody::typed_detail`]).
+/// ([`ErrorBody::typed_detail`], [`ErrorBody::digest_mismatch_detail`]).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ErrorBody {
@@ -298,9 +304,44 @@ impl ErrorBody {
         }
     }
 
-    /// The typed detail for this body's code. `Ok(None)` for a code that
-    /// carries none; an error when a code that carries one has none, or it
-    /// does not decode.
+    /// A `digest_mismatch` refusal with an optional reason identifying whether
+    /// the corrupted bytes belong to staging or undo images.
+    pub fn with_digest_mismatch_detail(
+        detail: DigestMismatchDetail,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: RefusalCode::DigestMismatch,
+            message: message.into(),
+            detail: Some(serde_json::to_value(detail).expect("detail is JSON")),
+        }
+    }
+
+    /// The optional reason detail for [`codes::DIGEST_MISMATCH`]. `Ok(None)` for another
+    /// code or an absent detail; an error if a present detail does not decode.
+    pub fn digest_mismatch_detail(
+        &self,
+    ) -> Result<Option<DigestMismatchDetail>, serde_json::Error> {
+        if self.code != RefusalCode::DigestMismatch {
+            return Ok(None);
+        }
+        self.detail
+            .as_ref()
+            .map(|value| {
+                if !value.is_object() {
+                    return Err(serde::de::Error::custom(
+                        "digest_mismatch detail must be an object",
+                    ));
+                }
+                serde_json::from_value(value.clone())
+            })
+            .transpose()
+    }
+
+    /// The required typed detail for the five codes represented by [`Detail`].
+    /// `Ok(None)` for other codes, including `digest_mismatch` (use
+    /// [`Self::digest_mismatch_detail`]); an error when a required detail is
+    /// absent or does not decode.
     pub fn typed_detail(&self) -> Result<Option<Detail>, serde_json::Error> {
         fn take<T: DeserializeOwned>(detail: &Option<Value>) -> Result<T, serde_json::Error> {
             match detail {
@@ -478,6 +519,48 @@ impl ExternalNotPresentDetail {
     }
 }
 
+/// Known reasons for `digest_mismatch`. The wire remains an open string so a
+/// participant can describe a more specific digest failure without a new code.
+pub mod digest_mismatch_reason {
+    /// This participant's staged bytes no longer match their recorded digest.
+    pub const STAGING_DIGEST_MISMATCH: &str = "staging_digest_mismatch";
+    /// This participant's undo images no longer match their recorded digest.
+    pub const UNDO_DIGEST_MISMATCH: &str = "undo_digest_mismatch";
+}
+
+/// Optional `digest_mismatch` detail. Kept outside [`Detail`] to preserve
+/// existing callers' exhaustive matches on its five required-detail variants.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct DigestMismatchDetail {
+    /// An open reason string; known spellings are in [`digest_mismatch_reason`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl DigestMismatchDetail {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+/// Select the driver action for an op and code (CONTRACT.md §6). A digest
+/// failure on `activate` is terminal for the step and holds as a fork for the
+/// operator. It cannot return the claim: other participants may already be
+/// live. On `abort`, retry only after the operator repairs undo state; the
+/// move is not yet aborted and the source agent remains frozen until success.
+/// All other pairs retain [`RefusalCode::driver_action`].
+pub fn driver_action_for(op: Op, code: &RefusalCode) -> DriverAction {
+    match (op, code) {
+        (Op::Activate, RefusalCode::DigestMismatch) => DriverAction::TerminalForStep,
+        (Op::Abort, RefusalCode::DigestMismatch) => DriverAction::RetryAfterOperator,
+        _ => code.driver_action(),
+    }
+}
+
 /// The codes each op may refuse with: the table in CONTRACT.md §6.3. Every
 /// op may refuse `caller_forbidden`, `invalid_request` and `unavailable`;
 /// every op that changes state may also refuse `id_reused`. A participant
@@ -542,6 +625,7 @@ pub fn allowed_refusals(op: Op) -> &'static [RefusalCode] {
             C::ExternalNotPresent,
             C::Busy,
             C::LocalAdvanced,
+            C::DigestMismatch,
         ],
         Op::Abort => &[
             C::CallerForbidden,
@@ -549,6 +633,7 @@ pub fn allowed_refusals(op: Op) -> &'static [RefusalCode] {
             C::Unavailable,
             C::IdReused,
             C::InvalidState,
+            C::DigestMismatch,
         ],
     }
 }
@@ -665,6 +750,119 @@ mod tests {
             assert_eq!(format!("agent_data.{name}"), op.method());
             let typed: Vec<&str> = allowed_refusals(op).iter().map(|c| c.as_str()).collect();
             assert_eq!(&typed, codes, "{name}");
+        }
+    }
+
+    #[test]
+    fn driver_action_for_preserves_legacy_actions_except_digest_overrides() {
+        let mut codes = RefusalCode::KNOWN.to_vec();
+        codes.push(RefusalCode::Unknown("future_code".into()));
+        let mut checked = 0;
+        for op in Op::ALL {
+            for code in &codes {
+                let expected = match (op, code) {
+                    (Op::Activate, RefusalCode::DigestMismatch) => DriverAction::TerminalForStep,
+                    (Op::Abort, RefusalCode::DigestMismatch) => DriverAction::RetryAfterOperator,
+                    _ => code.driver_action(),
+                };
+                assert_eq!(driver_action_for(op, code), expected, "{op:?} / {code}");
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 150, "all ten ops and fourteen codes plus unknown");
+        assert_eq!(
+            RefusalCode::DigestMismatch.driver_action(),
+            DriverAction::Abort
+        );
+        assert!(!RefusalCode::DigestMismatch.retryable());
+    }
+
+    #[test]
+    fn digest_mismatch_is_allowed_only_on_import_activate_and_abort() {
+        for op in Op::ALL {
+            assert_eq!(
+                may_refuse(op, &RefusalCode::DigestMismatch),
+                matches!(op, Op::Import | Op::Activate | Op::Abort),
+                "{op:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn digest_mismatch_contract_actions_are_per_op() {
+        let table = contract_table();
+        let (_, driver) = table
+            .iter()
+            .find(|(code, _)| code == codes::DIGEST_MISMATCH)
+            .unwrap();
+        let cells: Vec<_> = driver.split("; ").collect();
+        assert_eq!(cells.len(), 3);
+        for (cell, op) in cells.iter().zip([Op::Import, Op::Activate, Op::Abort]) {
+            let name = op.method().strip_prefix("agent_data.").unwrap();
+            assert!(cell.contains(&format!("`{name}`")), "{cell}");
+            assert_eq!(
+                driver_action_for(op, &RefusalCode::DigestMismatch),
+                action_from_contract(cell),
+                "{op:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn digest_mismatch_detail_is_optional_and_reasons_are_open() {
+        let mut body = ErrorBody::new(RefusalCode::DigestMismatch, "digest failed");
+        assert_eq!(body.digest_mismatch_detail().unwrap(), None);
+        body.detail = Some(serde_json::json!({}));
+        assert_eq!(
+            body.digest_mismatch_detail().unwrap(),
+            Some(DigestMismatchDetail::default())
+        );
+        for reason in [
+            digest_mismatch_reason::STAGING_DIGEST_MISMATCH,
+            digest_mismatch_reason::UNDO_DIGEST_MISMATCH,
+            "future_digest_reason",
+        ] {
+            let body = ErrorBody::with_digest_mismatch_detail(
+                DigestMismatchDetail::new(reason),
+                "digest failed",
+            );
+            assert_eq!(body.detail, Some(serde_json::json!({"reason": reason})));
+            assert_eq!(
+                body.digest_mismatch_detail()
+                    .unwrap()
+                    .unwrap()
+                    .reason
+                    .as_deref(),
+                Some(reason)
+            );
+            assert_eq!(body.typed_detail().unwrap(), None);
+        }
+        let body = ErrorBody::new(RefusalCode::Unavailable, "later");
+        assert_eq!(body.digest_mismatch_detail().unwrap(), None);
+        for code in [
+            RefusalCode::UnknownRef,
+            RefusalCode::InvalidState,
+            RefusalCode::Busy,
+            RefusalCode::IncompatibleVersion,
+            RefusalCode::ExternalNotPresent,
+        ] {
+            assert!(ErrorBody::new(code, "missing detail")
+                .typed_detail()
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn digest_mismatch_details_reject_malformed_shapes() {
+        for detail in [
+            serde_json::json!({"reason": 1}),
+            serde_json::json!({"reason": "undo_digest_mismatch", "extra": true}),
+            serde_json::json!(null),
+            serde_json::json!([]),
+        ] {
+            let mut body = ErrorBody::new(RefusalCode::DigestMismatch, "digest failed");
+            body.detail = Some(detail);
+            assert!(body.digest_mismatch_detail().is_err(), "{:?}", body.detail);
         }
     }
 

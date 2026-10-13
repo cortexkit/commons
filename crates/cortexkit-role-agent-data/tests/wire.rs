@@ -9,7 +9,9 @@ use cortexkit_role_agent_data::{
     busy::BusyReply,
     describe::DescribeReply,
     diverged::DivergedReply,
-    errors::{allowed_refusals, may_refuse, DriverAction, ErrorBody, RefusalCode},
+    errors::{
+        allowed_refusals, driver_action_for, may_refuse, DriverAction, ErrorBody, RefusalCode,
+    },
     export::ExportReply,
     idempotency::{compare, Repeat},
     import::ImportReply,
@@ -37,6 +39,7 @@ const FILES: &[&str] = &[
     "op-refusals.json",
     "session-refs.json",
     "README.md",
+    "digest-mismatch.json",
 ];
 
 fn dir() -> String {
@@ -321,6 +324,63 @@ fn every_refusal_code_round_trips_with_its_driver_action() {
 }
 
 #[test]
+fn digest_mismatch_refusal_vectors_pin_per_op_actions() {
+    let file = load("digest-mismatch.json");
+    let refusals = cases(&file, "refusals");
+    assert_eq!(refusals.len(), 2);
+    for (case, op) in refusals.iter().zip([Op::Activate, Op::Abort]) {
+        let name = name(case);
+        let body: ErrorBody = round_trip(name, &case["body"]);
+        assert_eq!(body.code, RefusalCode::DigestMismatch, "{name}");
+        assert_eq!(
+            body.code.is_known(),
+            case["named"].as_bool().unwrap(),
+            "{name}"
+        );
+        assert_eq!(
+            format!("agent_data.{}", case["op"].as_str().unwrap()),
+            op.method()
+        );
+        assert!(may_refuse(op, &body.code), "{name}");
+        let action = driver_action_for(op, &body.code);
+        assert_eq!(action, driver(case["driver"].as_str().unwrap()), "{name}");
+        assert_eq!(
+            action.retryable(),
+            case["retryable"].as_bool().unwrap(),
+            "{name}"
+        );
+        let detail = body
+            .digest_mismatch_detail()
+            .unwrap()
+            .expect("vector has detail");
+        assert_eq!(
+            jcs(&serde_json::to_value(detail).unwrap()),
+            jcs(body.detail.as_ref().unwrap()),
+            "{name}"
+        );
+        assert_eq!(
+            body.typed_detail().unwrap(),
+            None,
+            "legacy detail API remains unchanged"
+        );
+    }
+}
+
+#[test]
+fn legacy_detail_enum_still_supports_exhaustive_matches() {
+    use cortexkit_role_agent_data::errors::{BusyDetail, Detail};
+    let detail = Detail::Busy(BusyDetail::new(vec![]));
+    let code = match detail {
+        Detail::InvalidState(_) => RefusalCode::InvalidState,
+        Detail::Busy(_) => RefusalCode::Busy,
+        Detail::UnknownRef(_) => RefusalCode::UnknownRef,
+        Detail::IncompatibleVersion(_) => RefusalCode::IncompatibleVersion,
+        Detail::ExternalNotPresent(_) => RefusalCode::ExternalNotPresent,
+    };
+    assert_eq!(code, RefusalCode::Busy);
+}
+
+#[test]
 fn refusal_bodies_tolerate_extra_members_but_details_are_strict() {
     let file = load("refusals.json");
     for case in cases(&file, "tolerated") {
@@ -399,11 +459,15 @@ fn step_machine_matches_every_transition() {
     }
 }
 
-/// Which op may refuse with which code: each op's row equals
+/// Each `op-refusals.json` row plus its `digest-mismatch.json` additions equals
 /// `allowed_refusals`, and each case's answer equals `may_refuse`.
 #[test]
 fn per_op_refusals_match_every_case() {
     let file = load("op-refusals.json");
+    let amendments = load("digest-mismatch.json");
+    let additions = cases(&amendments, "op_additions");
+    assert_eq!(additions.len(), 2);
+    let mut amended = BTreeSet::new();
     let rows = cases(&file, "ops");
     assert_eq!(rows.len(), Op::ALL.len());
     for (row, op) in rows.iter().zip(Op::ALL) {
@@ -411,9 +475,27 @@ fn per_op_refusals_match_every_case() {
             format!("agent_data.{}", row["op"].as_str().unwrap()),
             op.method()
         );
-        let codes: Vec<RefusalCode> = serde_json::from_value(row["codes"].clone()).unwrap();
+        let mut codes: Vec<RefusalCode> = serde_json::from_value(row["codes"].clone()).unwrap();
+        for addition in additions
+            .iter()
+            .filter(|addition| addition["op"] == row["op"])
+        {
+            assert!(
+                amended.insert(op.method()),
+                "duplicate amendment for {op:?}"
+            );
+            let extra: Vec<RefusalCode> =
+                serde_json::from_value(addition["codes"].clone()).unwrap();
+            assert!(!extra.is_empty());
+            codes.extend(extra);
+        }
         assert_eq!(codes, allowed_refusals(op), "{op:?}");
     }
+    assert_eq!(
+        amended.len(),
+        additions.len(),
+        "every additive row was checked"
+    );
     for case in cases(&file, "cases") {
         let name = name(case);
         let op = Op::from_method(&format!("agent_data.{}", case["op"].as_str().unwrap())).unwrap();

@@ -223,7 +223,9 @@ The crate's source files use these words as defined here.
 ## 6. Refusal codes
 
 The closed set (`errors::RefusalCode`). The driver column is what entorhinal
-does next (`errors::DriverAction`).
+does next (`errors::DriverAction`, selected by `errors::driver_action_for(op,
+code)`). The code-only `RefusalCode::driver_action()` remains unchanged for
+existing callers; it returns Abort for `digest_mismatch`.
 
 | Code | Meaning | Driver |
 | --- | --- | --- |
@@ -237,7 +239,7 @@ does next (`errors::DriverAction`).
 | `busy` | The data is in use: on `prepare` it can't be cut now; on `import` a run started on the receiver since `diverged`; on `activate` the staged data can't go live now. `detail.refs` lists the refs with a reason each. | Retry later |
 | `not_exportable` | This data must never leave this Mac (for example, broca sessions with caller-chosen retention). | Abort; the move is refused |
 | `incompatible_version` | This participant's store can't accept this cut. `detail.found` and `detail.required` give both versions. | Abort; upgrade that Mac first |
-| `digest_mismatch` | Imported bytes don't hash to the cut's digest. | Abort |
+| `digest_mismatch` | Bytes this participant receives or holds don't hash to their recorded digest: on `import` the incoming cut; on `activate` and `abort` this participant's own staged bytes or undo images. Optional `detail.reason` identifies the failed bytes (§6.2). | Abort on `import`, never retry the same import; Terminal for the step on `activate`, never retry or return the claim, hold as a fork for the operator (§7.8); Retry after the operator repairs the participant's undo state on `abort`, holding the move stuck, not aborted (§7.9) |
 | `local_advanced` | Receiver side: this Mac's copy of these refs gained data after `diverged` answered `at_cut`. | Terminal for the step, never retried. After `import` the driver aborts the move and offers the fork choice; after `activate` the move holds as a fork for the operator (§7.7, §7.8) |
 | `external_not_present` | The host's own data for a ref isn't on this Mac yet, or doesn't match the cut's check. `detail.note` repeats the `note` of that ref's `prepare.external` entry. | Retry after the operator copies it |
 | `unavailable` | Temporary failure. | Retry |
@@ -259,7 +261,7 @@ safe.
   (`errors::ErrorBody`). `message` is short operator text and is never
   parsed.
 - Five codes carry a typed `detail` (`errors::Detail`), and it is required
-  for them; the other codes carry none:
+  for them:
 
   | Code | `detail` |
   | --- | --- |
@@ -268,6 +270,13 @@ safe.
   | `busy` | `{refs: [{ref_kind, ref, reason_code?, reason}]}`: the refs that are in use, each with operator text and optionally a `reason_code` from the same set the `busy` op's reply uses (§7.2). |
   | `incompatible_version` | `{found, required}`: the version the cut carries and the one this store needs, both opaque text. |
   | `external_not_present` | `{note}`: the operator note `prepare` gave for the host's data. |
+
+- `digest_mismatch` may optionally carry `{reason?}`
+  (`errors::DigestMismatchDetail`). `reason` is an open string; known values
+  are `staging_digest_mismatch` and `undo_digest_mismatch`
+  (`errors::digest_mismatch_reason`). Use
+  `ErrorBody::digest_mismatch_detail()` to decode it; `typed_detail()` keeps
+  its existing five-code behavior. The remaining codes carry no detail.
 
 ### 6.3 Which op may refuse with which code
 
@@ -284,8 +293,8 @@ code outside the closed set is in no row.
 | export | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `cut_unknown` |
 | diverged | `caller_forbidden`, `invalid_request`, `unavailable`, `external_not_present`, `cut_not_ready`, `incompatible_version` |
 | import | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_not_ready`, `incompatible_version`, `digest_mismatch`, `busy`, `local_advanced` |
-| activate | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_unknown`, `external_not_present`, `busy`, `local_advanced` |
-| abort | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state` |
+| activate | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_unknown`, `external_not_present`, `busy`, `local_advanced`, `digest_mismatch` |
+| abort | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `digest_mismatch` |
 | release | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `cut_unknown` |
 
 ## 7. Ops
@@ -482,6 +491,12 @@ On the receiver: make the staged data live.
   resolution settles it. Refusing leaves the participant's staged import
   intact and its local copy untouched (it stays at `imported`), so
   whichever side the operator picks can still be applied.
+- `digest_mismatch`: before a destructive replace, the participant checks its
+  own staged bytes and undo images against their recorded digests. A mismatch
+  refuses activation without replacing data; the participant stays at
+  `imported`. Like `local_advanced` here, it is terminal for the step: the
+  move holds as a fork for the operator, never retried and never returning the
+  claim, because other participants may already be live.
 - **Step:** `imported` → `activated`.
 
 ### 7.9 `agent_data.abort {refs, cutId}`
@@ -499,6 +514,12 @@ unfreezes and removes its durable freeze; the receiver drops its staging.
   (source), and for another ref set than the `cutId` started with
   (`prepare`'s on the source, `import`'s on the receiver; §8.1). An abort of
   a `cutId` never seen has no such set and is never refused for its refs.
+- `digest_mismatch`: the participant's own staged bytes or undo images no
+  longer match their recorded digests. The abort holds until the operator
+  repairs that participant's undo state, then the driver retries the same
+  abort. While it holds, the move is stuck, not aborted, and the participant
+  stays at its earlier step. On the source Mac the agent stays frozen because
+  the freeze could not be lifted. Never retry automatically before repair.
 - **Step:** any earlier step (`none`, `prepared`, `exported`, `imported`),
   or `aborted` itself, → `aborted`.
 
@@ -590,8 +611,10 @@ otherwise `diverged` answers `advanced`.
 
 ## 11. Test vectors
 
-`test-vectors/agent-data-v1/` in this crate; its `README.md` lists each
-file's cases and `SHA256SUMS` pins every file's bytes. Every canonical
+`test-vectors/agent-data-v1/` in this crate; its `README.md` lists the original
+files' cases. The additive `digest-mismatch.json` covers the 0.1.2 refusal
+and driver-action amendments, including additions to the original op rows.
+`SHA256SUMS` pins every file's bytes. Every canonical
 vector round-trips through the types to the same canonical (RFC 8785) bytes.
 Changing a vector changes the contract: bump this crate's version and say
 why in the commit.
