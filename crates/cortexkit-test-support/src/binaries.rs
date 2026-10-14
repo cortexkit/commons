@@ -187,8 +187,9 @@ fn strip_exe_suffix(name: &str) -> (&str, &str) {
 }
 
 /// Publish a built executable under a content-addressed `ckdev-*` name.
-/// A binary already named `ckdev-*` is copied as well. Unix copies live under `/tmp`, never
-/// `$TMPDIR`, to avoid per-user temporary-directory execution assessment delays.
+/// A binary already named `ckdev-*` is copied as well. Unix copies use the selected
+/// temporary base: worker task directories are writable in the sandbox, while macOS
+/// can delay launches of fresh copies from `/var/folders`.
 /// A child writes a private staging copy, then an atomic rename publishes it.
 /// This avoids hard-link execution failures and writable descriptors inherited
 /// by concurrently spawned children. Published files are read-only, verified
@@ -199,13 +200,13 @@ pub fn ckdev_binary(built: impl AsRef<Path>) -> PathBuf {
     ckdev_binary_at(built.as_ref(), &publish_root())
 }
 
-/// Where published `ckdev-` binaries live. `/tmp`, not `$TMPDIR`: see
-/// [`ckdev_binary`].
+/// Where published `ckdev-` binaries live. macOS can delay launches of fresh
+/// copies from `/var/folders`, so valid worker temp roots take precedence over it.
 fn publish_root() -> PathBuf {
     #[cfg(unix)]
     {
-        PathBuf::from(format!(
-            "/tmp/cortexkit-ckdev-{}",
+        crate::private_temp_base(std::env::var_os("TMPDIR").as_deref()).join(format!(
+            "cortexkit-ckdev-{}",
             rustix::process::getuid().as_raw()
         ))
     }
@@ -787,12 +788,14 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
-    fn staging_lives_under_tmp_and_other_names_pass_through() {
+    fn staging_uses_private_temp_base_and_other_names_pass_through() {
         let scratch = crate::ScratchDir::new("publish-tmp");
         let built = built_fixture(&scratch);
         let placed = stage_test_binary(&built);
         assert!(
-            placed.starts_with("/tmp"),
+            placed.starts_with(crate::private_temp_base(
+                std::env::var_os("TMPDIR").as_deref()
+            )),
             "published at {}",
             placed.display()
         );
@@ -807,6 +810,39 @@ mod tests {
             Path::new("/nonexistent/other")
         );
         checked_output(&mut fixture_command(&placed)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_private_root_is_created_0700_and_rejects_group_readability() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmpdir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("private-root-{}-{nonce}", std::process::id()));
+        fs::create_dir(&tmpdir).unwrap();
+        let base = crate::private_temp_base(Some(tmpdir.as_os_str()));
+        assert_eq!(base, tmpdir);
+        let root = base.join("cortexkit-tests-private-root");
+
+        prepare_private_root(&root).unwrap();
+        let metadata = fs::metadata(&root).unwrap();
+        assert_eq!(metadata.mode() & 0o777, 0o700);
+        assert_eq!(metadata.uid(), rustix::process::getuid().as_raw());
+
+        fs::remove_dir(&root).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o744)).unwrap();
+        let error = prepare_private_root(&root).unwrap_err();
+        assert!(
+            error.to_string().contains("group or other permission bits"),
+            "{error}"
+        );
+
+        fs::remove_dir_all(tmpdir).unwrap();
     }
     #[cfg(unix)]
     #[test]

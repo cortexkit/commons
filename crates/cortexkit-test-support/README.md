@@ -10,11 +10,18 @@ cortexkit-test-support = "0.1.0"
 
 ## Scratch fixtures
 
-`ScratchDir::new("label")` creates a unique directory beneath
-`temp_dir()/cortexkit-tests/k<PID>-<kernel-start-identity>`. Normal drop removes
-it. `keep()` and panic unwinding preserve it and print its path. Failed tests
-therefore retain their evidence. Unsupported process-identity platforms use an
-unknown start marker; such roots are never reaped on uncertain evidence.
+`ScratchDir::new("label")` creates a unique directory beneath the shared
+scratch root and a `k<PID>-<kernel-start-identity>` process directory. Normal
+drop removes it. `keep()` and panic unwinding preserve it and print its path.
+Failed tests therefore retain their evidence. Unsupported process-identity
+platforms use an unknown start marker; such roots are never reaped on uncertain
+evidence.
+
+On Unix, the `ckdev_binary` copy cache and macOS `ScratchDir` root use `$TMPDIR`
+when it is non-empty, absolute, and canonicalizes outside `/private/var/folders`;
+otherwise they use `/tmp`. Canonicalization also catches macOS paths spelled
+through `/var/folders`. This keeps worker task temp roots writable while avoiding
+macOS's assessed user-temp tree; Windows keeps its existing system-temp behavior.
 
 Initialization sweeps process roots only when `subc_os::process_identity::liveness`
 positively reports Dead. Live owners, unknown or incompatible identities,
@@ -33,9 +40,10 @@ an executable from its build folder. `ckdev_file_name` maps `ck-example` to `ckd
 `stage_test_binary` is the narrower compatibility helper: only `ck-*` names
 are staged; other names pass through.
 
-Unix staging uses a per-user root under `/tmp`, never `$TMPDIR`; Windows uses
-the system temp directory. A `cp` child writes Unix staging files so the test
-process holds no writable descriptor to an executable. Windows uses `fs::copy`.
+Unix staging uses a per-user root under the selected temporary base described
+above; Windows uses the system temp directory. A `cp` child writes Unix staging
+files so the test process holds no writable descriptor to an executable.
+Windows uses `fs::copy`.
 A private staging directory is atomically renamed into its content address;
 concurrent requests reuse one published file. Digests are checked before use,
 including reuse. Sidecar timestamps record every use without changing the binary.

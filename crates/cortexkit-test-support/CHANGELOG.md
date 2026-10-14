@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7
+
+- The Unix `ckdev_binary` cache and macOS `ScratchDir` root use `$TMPDIR` when it
+  is non-empty, absolute, and canonicalizes outside `/private/var/folders`; all
+  other values fall back to `/tmp`. Canonicalization catches the `/var/folders`
+  alias, allowing worker task temp roots without running new macOS executables
+  from its assessed user-temp tree. Windows behavior is unchanged.
+
 ## 0.1.6
 
 - Track `ckdev_binary` cache use with sidecar timestamps instead of relying on

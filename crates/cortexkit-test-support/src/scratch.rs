@@ -43,8 +43,8 @@ pub fn shared_scratch_root() -> PathBuf {
 fn shared_scratch_root_path() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
-        PathBuf::from(format!(
-            "/tmp/cortexkit-tests-{}",
+        crate::private_temp_base(std::env::var_os("TMPDIR").as_deref()).join(format!(
+            "cortexkit-tests-{}",
             rustix::process::getuid().as_raw()
         ))
     }
@@ -253,18 +253,20 @@ mod tests {
     }
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_scratch_root_uses_tmp_not_system_temp_dir() {
+    fn macos_scratch_root_uses_the_selected_private_temp_base() {
         let root = shared_scratch_root_path();
         assert!(
-            root.starts_with("/tmp"),
-            "scratch root is {}",
-            root.display()
+            root.starts_with(crate::private_temp_base(
+                std::env::var_os("TMPDIR").as_deref()
+            )),
+            "scratch root {} should use base {}",
+            root.display(),
+            crate::private_temp_base(std::env::var_os("TMPDIR").as_deref()).display()
         );
         assert!(
-            !root.starts_with(std::env::temp_dir()),
-            "scratch root {} is under system temp directory {}",
-            root.display(),
-            std::env::temp_dir().display()
+            !root.starts_with("/var/folders"),
+            "scratch root must not use macOS's assessed user-temp tree: {}",
+            root.display()
         );
     }
 
