@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- No code change. Published from the same commons revision as cortexkit-role-compaction-provider 0.2.2, because the Claude Code capability bundle records one commons revision for both roles.
+
 ## 0.2.0
 
 - Add optional Claude Code capability publication to describe/declare, frozen connection-scoped admission, daemon-compatible capability identifier validation and declared payload-cap checks. The gateway requires both a daemon-attested principal and the selected bundle; body fields never grant authority. Existing absent-field wire bytes and vector checksums are unchanged.

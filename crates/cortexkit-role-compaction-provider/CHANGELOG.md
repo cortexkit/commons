@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- No code change. Published from the same commons revision as cortexkit-role-step-transform-provider 0.2.1, because the Claude Code capability bundle records one commons revision for both roles.
+
 ## 0.2.1
 
 - Add optional `SetupRequest.descends_from`, reusing `status::DescendsFrom`,
