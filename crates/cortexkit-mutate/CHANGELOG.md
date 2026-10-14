@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.1
+
+- `check` may now refuse catalogues it previously passed: command rows with
+  `list_command` must list at least one selected test for every `expect_red`
+  pattern, catching stale anchored regexes after test renames. The command runner
+  owns matching semantics and returns a JSON array of selected names.
+- Report rows without a listing (including command rows without `list_command`)
+  as not verified, by id, instead of claiming all exact test names were verified.
+  `only = true` sibling checks are unchanged. Exact cargo/nextest selections also
+  refuse binary-qualified report aliases that cannot match a raw harness name.
+- Add `check --strict` for CI: fail and name every active command row without
+  `list_command`. Platform-mismatched, unreachable and desk-only rows are exempt;
+  the default non-strict behavior is unchanged.
+
 ## 0.12.0
 
 - Add optional row-level `scope = { after = "...", before = "..." }` anchors.

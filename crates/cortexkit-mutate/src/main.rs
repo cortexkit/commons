@@ -24,7 +24,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Action {
     /// Validate anchors and exact full test names without mutating source.
-    Check,
+    Check {
+        /// Refuse active command rows without list_command; legitimate skipped rows are exempt.
+        #[arg(long)]
+        strict: bool,
+    },
     /// Replay selected catalogue rows.
     Run {
         #[arg(long, conflicts_with = "diff")]
@@ -410,9 +414,32 @@ fn run() -> Result<bool> {
     let _lock = TreeLock::acquire(&root)?;
     let stop = signal_flag()?;
     match cli.command {
-        Action::Check => {
-            check(&root, &load(&catalogue_path)?, &stop)?;
-            println!("Catalogue anchors and exact test names verified");
+        Action::Check { strict } => {
+            let report = check(&root, &load(&catalogue_path)?, &stop)?;
+            for (id, reason) in &report.not_verified {
+                println!("{id}: test names not verified: {reason}");
+            }
+            let ids = report
+                .not_verified
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>();
+            println!(
+                "Catalogue anchors checked; verified {} rows; {} rows not verified{}",
+                report.verified.len(),
+                ids.len(),
+                if ids.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", ids.join(", "))
+                }
+            );
+            if strict && !report.missing_list_commands.is_empty() {
+                return Err(format!(
+                    "command row has no list_command: {}",
+                    report.missing_list_commands.join(", ")
+                ));
+            }
             Ok(true)
         }
         Action::Run {
@@ -550,6 +577,7 @@ fn run() -> Result<bool> {
                     .or_else(|| selection.select_filter.map(TestSelection::Filter))
                     .or_else(|| selection.select_tests.map(TestSelection::Tests)),
                 command: p.command,
+                list_command: None,
                 broad_command: None,
                 broad_report: None,
                 broad_id: None,
@@ -684,6 +712,7 @@ fn explore(
         ignored: ignored_selection(x.feature_selection.ignored.as_deref()),
         select: None,
         command: None,
+        list_command: None,
         broad_command: None,
         broad_report: None,
         broad_id: None,

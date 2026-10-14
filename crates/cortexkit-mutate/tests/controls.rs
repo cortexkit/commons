@@ -102,6 +102,7 @@ impl Fixture {
             ignored: None,
             select: None,
             command: None,
+            list_command: None,
             broad_command: None,
             broad_report: None,
             broad_id: None,
@@ -804,6 +805,7 @@ impl CommandFixture {
             ignored: None,
             select: None,
             command: Some(vec!["python3".into(), "rig.py".into(), "{test}".into()]),
+            list_command: None,
             broad_command: None,
             broad_report: None,
             broad_id: None,
@@ -884,6 +886,436 @@ impl CommandFixture {
             .args(args)
             .output()
             .unwrap()
+    }
+}
+
+const STALE_IMPORT_PATTERN: &str = r"^pi\sslot\spublished\simport\sgraph\scontains\sonly\snode\sbuiltins\sand\scommon\sauth\sfiles$";
+const RENAMED_IMPORT_PATTERN: &str = r"^pi\sslot\spublished\simport\sgraph\spermits\sonly\snode\sbuiltins,\scommon\sauth\sfiles\sand\sexternal\sWindows\sprivate-files$";
+
+fn command_listing_fixture() -> (CommandFixture, Control) {
+    let f = CommandFixture::new();
+    fs::write(
+        f.root().join("list-rig.py"),
+        include_str!("fixture/command-list.py"),
+    )
+    .unwrap();
+    cmd(f.root(), "git", &["add", "list-rig.py"]);
+    cmd(f.root(), "git", &["commit", "-qm", "listing fixture"]);
+    let mut c = f.control();
+    c.id = "pi-slot-import-graph".into();
+    c.command = Some(vec![
+        "python3".into(),
+        "list-rig.py".into(),
+        "run".into(),
+        "{test}".into(),
+    ]);
+    c.list_command = Some(vec![
+        "python3".into(),
+        "list-rig.py".into(),
+        "list".into(),
+        "{test}".into(),
+    ]);
+    c.test_file = "list-rig.py".into();
+    c.expect_red = vec![STALE_IMPORT_PATTERN.into()];
+    (f, c)
+}
+
+fn command_check_cli(f: &CommandFixture, rows: Vec<Control>) -> std::process::Output {
+    command_check_cli_options(f, rows, &[])
+}
+
+fn command_check_cli_options(
+    f: &CommandFixture,
+    rows: Vec<Control>,
+    options: &[&str],
+) -> std::process::Output {
+    fs::write(
+        f.root().join(".git/check.toml"),
+        toml::to_string(&Catalogue {
+            control: rows,
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let mut args = vec!["--catalogue", ".git/check.toml", "check"];
+    args.extend_from_slice(options);
+    f.cli(&args)
+}
+
+#[test]
+fn command_check_refuses_renamed_anchored_expect_red() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, c) = command_listing_fixture();
+    let before = f.snapshot();
+    let out = command_check_cli(&f, vec![c.clone()]);
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "a stale anchored pattern must fail check"
+    );
+    assert!(
+        error.contains(&c.id)
+            && error.contains(&format!("{:?}", STALE_IMPORT_PATTERN))
+            && error.contains("matches no listed test"),
+        "{error}"
+    );
+    assert_eq!(before, f.snapshot());
+}
+
+#[test]
+fn command_check_accepts_matching_anchored_expect_red_and_replay_agrees() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut c) = command_listing_fixture();
+    c.expect_red = vec![RENAMED_IMPORT_PATTERN.into()];
+    let out = command_check_cli(&f, vec![c.clone()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("verified 1 rows; 0 rows not verified"));
+    assert_eq!(f.run(&c, false).outcome, Outcome::Caught);
+}
+
+#[test]
+fn command_check_checks_each_expect_red_pattern() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut c) = command_listing_fixture();
+    c.expect_red.insert(0, RENAMED_IMPORT_PATTERN.into());
+    let out = command_check_cli(&f, vec![c.clone()]);
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        error.contains(&c.id)
+            && error.contains(&format!("{:?}", STALE_IMPORT_PATTERN))
+            && error.contains("matches no listed test"),
+        "{error}"
+    );
+}
+
+#[test]
+fn command_check_reports_rows_without_listing_as_unverified() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut listed) = command_listing_fixture();
+    listed.expect_red = vec![RENAMED_IMPORT_PATTERN.into()];
+    let mut unlisted = listed.clone();
+    unlisted.id = "no-list-protocol".into();
+    unlisted.list_command = None;
+    let mut desktop = listed.clone();
+    desktop.id = "desktop-only".into();
+    desktop.desk_only = Some("requires an interactive desktop".into());
+    let mut unreachable = listed.clone();
+    unreachable.id = "unreachable".into();
+    unreachable.unreachable = Some("has no caller".into());
+    let mut other_platform = listed.clone();
+    other_platform.id = "other-platform".into();
+    other_platform.platforms = Some(vec![if cfg!(target_os = "linux") {
+        "macos"
+    } else {
+        "linux"
+    }
+    .into()]);
+    let out = command_check_cli(
+        &f,
+        vec![listed, unlisted, desktop, unreachable, other_platform],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("no-list-protocol: test names not verified: command row has no list_command"),
+        "{text}"
+    );
+    assert!(text.contains("verified 1 rows; 4 rows not verified: no-list-protocol, desktop-only, unreachable, other-platform"), "{text}");
+    assert!(!text.contains("exact test names verified"), "{text}");
+}
+
+#[test]
+fn command_check_strict_refuses_each_missing_list_command_by_name() {
+    let f = CommandFixture::new();
+    let mut first = f.control();
+    first.id = "missing-list-first".into();
+    let mut second = first.clone();
+    second.id = "missing-list-second".into();
+    let before = f.snapshot();
+    let out = command_check_cli_options(&f, vec![first, second], &["--strict"]);
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "strict check must refuse missing list_command"
+    );
+    assert!(
+        error.contains("command row has no list_command")
+            && error.contains("missing-list-first")
+            && error.contains("missing-list-second"),
+        "{error}"
+    );
+    assert_eq!(before, f.snapshot());
+}
+
+#[test]
+fn command_check_strict_accepts_listed_command_rows() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut first) = command_listing_fixture();
+    first.expect_red = vec![RENAMED_IMPORT_PATTERN.into()];
+    let mut second = first.clone();
+    second.id = "second-listed-row".into();
+    let out = command_check_cli_options(&f, vec![first, second], &["--strict"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("verified 2 rows; 0 rows not verified"));
+}
+
+#[test]
+fn command_check_strict_accepts_platform_unreachable_and_desk_only_exemptions() {
+    let f = CommandFixture::new();
+    let mut platform = f.control();
+    platform.id = "platform-skipped-no-list".into();
+    platform.platforms = Some(vec![if cfg!(target_os = "linux") {
+        "macos"
+    } else {
+        "linux"
+    }
+    .into()]);
+    let mut unreachable = f.control();
+    unreachable.id = "unreachable-no-list".into();
+    unreachable.unreachable = Some("has no caller".into());
+    let mut desktop = f.control();
+    desktop.id = "desktop-no-list".into();
+    desktop.desk_only = Some("requires an interactive desktop".into());
+    let out = command_check_cli_options(&f, vec![platform, unreachable, desktop], &["--strict"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("verified 0 rows; 3 rows not verified: platform-skipped-no-list, unreachable-no-list, desktop-no-list"), "{text}");
+}
+
+#[test]
+fn command_check_rejects_invalid_listing_output_and_failures() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut c) = command_listing_fixture();
+    for script in [
+        "print('not JSON')",
+        "print('{}')",
+        "print('[42]')",
+        "print('[\"name\"]'); print('extra output')",
+        "print('[\"name\"]'); raise SystemExit(3)",
+    ] {
+        c.list_command = Some(vec![
+            "python3".into(),
+            "-c".into(),
+            script.into(),
+            "{test}".into(),
+        ]);
+        let out = command_check_cli(&f, vec![c.clone()]);
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{script}");
+        assert!(
+            error.contains(&c.id)
+                && error.contains(&format!("{:?}", STALE_IMPORT_PATTERN))
+                && error.contains("list_command"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("matches no listed test"),
+            "invalid output is not an empty match: {error}"
+        );
+    }
+    c.list_command = Some(vec!["nonexistent-listing-program".into(), "{test}".into()]);
+    let error =
+        String::from_utf8_lossy(&command_check_cli(&f, vec![c.clone()]).stderr).into_owned();
+    assert!(
+        error.contains(&c.id) && error.contains(&format!("{:?}", STALE_IMPORT_PATTERN)),
+        "{error}"
+    );
+}
+
+#[test]
+fn command_check_listing_respects_timeout() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut c) = command_listing_fixture();
+    c.timeout_s = 1;
+    c.list_command = Some(vec![
+        "python3".into(),
+        "-c".into(),
+        "import time; time.sleep(60)".into(),
+        "{test}".into(),
+    ]);
+    let out = command_check_cli(&f, vec![c.clone()]);
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        error.contains(&c.id)
+            && error.contains(&format!("{:?}", STALE_IMPORT_PATTERN))
+            && error.contains("exceeded timeout_s = 1"),
+        "{error}"
+    );
+}
+
+#[test]
+fn command_check_validates_list_command_schema() {
+    let f = CommandFixture::new();
+    for argv in [
+        vec![],
+        vec![""],
+        vec!["python3"],
+        vec!["python3", "prefix{test}"],
+        vec!["python3", "{test}", "{test}"],
+        vec!["python3", "{test}", "\0"],
+    ] {
+        let mut c = f.control();
+        c.list_command = Some(argv.into_iter().map(str::to_owned).collect());
+        f.load_error(&c, "list_command");
+    }
+    let mut c = f.control();
+    c.list_command = Some(vec!["python3".into(), "{test}".into()]);
+    c.catch_on = Some("output_differs".into());
+    f.load_error(&c, "list_command");
+    c.runner = "cargo".into();
+    c.catch_on = None;
+    f.load_error(&c, "list_command");
+}
+
+#[test]
+fn check_refuses_qualified_report_alias_for_exact_expected_selection() {
+    let f = Fixture::new();
+    for runner in selection_runners() {
+        let mut c = f.control();
+        c.runner = runner.into();
+        c.select = Some(TestSelection::Expected);
+        c.only = false;
+        c.expect_red = vec![if runner == "cargo" {
+            "mutation_fixture::tests::guard_rejects_zero"
+        } else {
+            "mutation-fixture::mutation_fixture::tests::guard_rejects_zero"
+        }
+        .into()];
+        let error = check(
+            f.root(),
+            &Catalogue {
+                control: vec![c],
+                ..Catalogue::default()
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("guard")
+                && error.contains("matches no listed test by exact harness name"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn cargo_check_refuses_renamed_expect_red_in_all_selections() {
+    let f = Fixture::new();
+    let source = fs::read_to_string(f.root().join("src/lib.rs"))
+        .unwrap()
+        .replace("fn guard_rejects_zero()", "fn guard_rejects_zero_renamed()");
+    fs::write(f.root().join("src/lib.rs"), source).unwrap();
+    f.commit();
+    for runner in selection_runners() {
+        for select in [
+            None,
+            Some(TestSelection::Expected),
+            Some(TestSelection::Filter("tests::guard_".into())),
+            Some(TestSelection::Tests(vec![
+                "tests::guard_rejects_zero".into(),
+                "tests::guard_accepts_positive".into(),
+            ])),
+        ] {
+            let mut c = f.control();
+            c.id = "pi-slot-import-graph".into();
+            c.runner = runner.into();
+            c.select = select;
+            c.only = c.select != Some(TestSelection::Expected);
+            let error = check(
+                f.root(),
+                &Catalogue {
+                    control: vec![c],
+                    ..Catalogue::default()
+                },
+                &AtomicBool::new(false),
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("pi-slot-import-graph")
+                    && error.contains("tests::guard_rejects_zero"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cargo_check_accepts_renamed_expect_red_in_all_selections() {
+    let f = Fixture::new();
+    let source = fs::read_to_string(f.root().join("src/lib.rs"))
+        .unwrap()
+        .replace("fn guard_rejects_zero()", "fn guard_rejects_zero_renamed()");
+    fs::write(f.root().join("src/lib.rs"), source).unwrap();
+    f.commit();
+    for runner in selection_runners() {
+        for select in [
+            None,
+            Some(TestSelection::Expected),
+            Some(TestSelection::Filter("tests::guard_".into())),
+            Some(TestSelection::Tests(vec![
+                "tests::guard_rejects_zero_renamed".into(),
+                "tests::guard_accepts_positive".into(),
+            ])),
+        ] {
+            let mut c = f.control();
+            c.id = "pi-slot-import-graph".into();
+            c.runner = runner.into();
+            c.expect_red = vec!["tests::guard_rejects_zero_renamed".into()];
+            c.select = select;
+            c.only = c.select != Some(TestSelection::Expected);
+            let report = check(
+                f.root(),
+                &Catalogue {
+                    control: vec![c.clone()],
+                    ..Catalogue::default()
+                },
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            assert_eq!(report.verified, ["pi-slot-import-graph"]);
+            assert!(report.not_verified.is_empty());
+            assert_eq!(f.run(&c).outcome, Outcome::Caught);
+        }
     }
 }
 

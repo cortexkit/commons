@@ -88,6 +88,10 @@ pub struct Control {
     pub select: Option<TestSelection>,
     /// An argv template, not a shell string; substitutes one expected test id.
     pub command: Option<Vec<String>>,
+    /// Lists the names selected by the same {test} argument used at replay.
+    /// Stdout must be one JSON array of strings, with diagnostics on stderr.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_command: Option<Vec<String>>,
     /// Package-wide argv run only during a breadth audit, after named tests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broad_command: Option<Vec<String>>,
@@ -253,6 +257,25 @@ impl Control {
     fn validate_runner(&self) -> Result<()> {
         self.validate_platforms()?;
         let invalid = |field: &str, reason: &str| format!("{}: {field} {reason}", self.label());
+        if let Some(argv) = &self.list_command {
+            if self.runner != "command" || self.catch_on.is_some() {
+                return Err(invalid(
+                    "list_command",
+                    "is supported only for named-test command rows",
+                ));
+            }
+            if argv.first().is_none_or(|s| s.trim().is_empty())
+                || argv.iter().any(|s| s.contains('\0'))
+                || argv
+                    .iter()
+                    .map(|s| s.matches("{test}").count())
+                    .sum::<usize>()
+                    != 1
+                || !argv.iter().any(|s| s == "{test}")
+            {
+                return Err(invalid("list_command", "requires a nonempty program, NUL-free argv and {test} exactly once as a complete argv element"));
+            }
+        }
         if self.select.is_some() {
             if !matches!(self.runner.as_str(), "cargo" | "nextest") {
                 return Err(invalid(
@@ -2039,6 +2062,16 @@ mod count_tests {
     }
 }
 
+fn named_command(argv: &[String], id: &str) -> Command {
+    let args: Vec<_> = argv
+        .iter()
+        .map(|arg| if arg == "{test}" { id } else { arg })
+        .collect();
+    let mut cmd = Command::new(args[0]);
+    cmd.args(&args[1..]);
+    cmd
+}
+
 // Both baseline and mutant commands use the same child supervisor as Cargo.
 // A failing baseline or a broken process is not evidence that a test caught a mutant.
 fn command_tests(
@@ -2061,12 +2094,7 @@ fn command_tests(
             ("mutated command", "mutated command output")
         };
         let error = |reason: String| format!("{}: {id}: {label}: {reason}", c.label());
-        let args: Vec<_> = argv
-            .iter()
-            .map(|arg| if arg == "{test}" { id } else { arg })
-            .collect();
-        let mut cmd = Command::new(args[0]);
-        cmd.args(&args[1..]);
+        let cmd = named_command(argv, id);
         let output = execute(root, cmd, c.timeout_s, stop)
             .map_err(|e| error(format!("spawn/execution failed: {e}")))?;
         if baseline {
@@ -4352,23 +4380,96 @@ fn resolve_listed(c: &Control, listing: &Listing) -> Result<Vec<String>> {
             ));
         }
     }
+    if c.select == Some(TestSelection::Expected) {
+        for expected in &c.expect_red {
+            // Exact harness selections use raw test names, not binary-qualified report ids.
+            if !listing.results.names.values().any(|name| name == expected) {
+                return Err(format!(
+                    "{}: select = expected test {expected:?} matches no listed test by exact harness name",
+                    c.label()
+                ));
+            }
+        }
+    }
     Ok(resolved)
 }
 
-pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()> {
+/// Test-name coverage established by `check`, separate from anchor validation.
+#[derive(Debug, Default)]
+pub struct CheckReport {
+    pub verified: Vec<String>,
+    /// Row id and the reason its test names were not verified.
+    pub not_verified: Vec<(String, String)>,
+    /// Active command rows without a listing protocol, for strict CLI enforcement.
+    pub missing_list_commands: Vec<String>,
+}
+
+fn check_command_listing(root: &Path, c: &Control, stop: &AtomicBool) -> Result<()> {
+    let argv = c.list_command.as_ref().ok_or("list_command is required")?;
+    for pattern in &c.expect_red {
+        let error = |reason| {
+            format!(
+                "{}: expect_red pattern {pattern:?}: list_command: {reason}",
+                c.label()
+            )
+        };
+        // The external runner owns selection semantics. Pass the pattern intact,
+        // just as replay does, instead of interpreting it with a different regex engine.
+        let output = execute_output(root, named_command(argv, pattern), c.timeout_s, stop, true)
+            .map_err(error)?;
+        if output.interrupted {
+            return Err(error("interrupted".into()));
+        }
+        if output.timeout {
+            return Err(error(format!("exceeded timeout_s = {}", c.timeout_s)));
+        }
+        if !output.success {
+            return Err(error(format!(
+                "failed (exit {:?}, signal {:?}): {}",
+                output.code,
+                output.signal,
+                tail(&output.text)
+            )));
+        }
+        let names: Vec<String> = serde_json::from_str(&output.stdout).map_err(|e| {
+            error(format!(
+                "stdout must be one JSON array of selected test names: {e}"
+            ))
+        })?;
+        if names.is_empty() {
+            return Err(error("matches no listed test".into()));
+        }
+    }
+    Ok(())
+}
+
+pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<CheckReport> {
     validate(root, catalogue)?;
     let rows: Vec<_> = catalogue.control.iter().collect();
     let mut session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
+    let mut report = CheckReport::default();
     for c in &catalogue.control {
         replaced_scoped(root, &c.edits()?, c.scope.as_ref())
             .map_err(|e| format!("{}: {e}", c.label()))?;
-        // Unreachable rows have no names to discover. Command rows have no list
-        // protocol: replay verifies their expected ids with a fresh baseline.
-        if !c.matches_platform()
-            || c.unreachable.is_some()
-            || c.desk_only.is_some()
-            || c.runner == "command"
-        {
+        let reason = if !c.matches_platform() {
+            Some("platform does not match this host")
+        } else if c.unreachable.is_some() {
+            Some("unreachable row")
+        } else if c.desk_only.is_some() {
+            Some("desk-only row")
+        } else if c.runner == "command" && c.list_command.is_none() {
+            report.missing_list_commands.push(c.id.clone());
+            Some("command row has no list_command")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            report.not_verified.push((c.id.clone(), reason.into()));
+            continue;
+        }
+        if c.runner == "command" {
+            check_command_listing(root, c, stop)?;
+            report.verified.push(c.id.clone());
             continue;
         }
         let (selected, _) = session.listings.get(root, c, Scope::Row, true, stop);
@@ -4381,8 +4482,9 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<()
                 ));
             }
         }
+        report.verified.push(c.id.clone());
     }
-    Ok(())
+    Ok(report)
 }
 
 fn git_catalogue(root: &Path, path: &str, base: &str) -> Result<Option<Catalogue>> {
@@ -5642,6 +5744,7 @@ mod order_tests {
             ignored: None,
             select: None,
             command: None,
+            list_command: None,
             broad_command: None,
             broad_report: None,
             broad_id: None,

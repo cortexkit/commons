@@ -722,8 +722,81 @@ Normally only the expected ids run: `collateral` is `{ "count": 0, "targets": []
 and `breadth_observed` is false. Without the optional JUnit fields below,
 `run --broad` still runs just those named commands; it cannot discover collateral.
 `explore` continues to refuse command rows: use `prove` to append a named proof.
-`check` validates their fields, files, and anchors, but has no test-list protocol
-to validate names; the fresh baseline during replay verifies the invocation.
+`check` validates their fields, files, and anchors. To verify their test selections
+as well, add the optional `list_command` protocol below. Without it, `check`
+reports the row id as **not verified**; replay still requires a fresh green baseline.
+
+### Command test listing (0.12.1)
+
+`list_command = [argv…]` is a per-row setting for named-test command rows, not
+output-equality rows. There are no shared command settings at catalogue level.
+It must contain `{test}` exactly once as a complete argv element, just like
+`command`. For **each** `expect_red` entry, `check` substitutes the same unchanged
+argument used at replay and invokes the listing command from the Git root on the
+unmutated tree, after any declared prebuild. Each invocation has the row's
+`timeout_s` deadline (default 600 seconds).
+
+The listing command must discover the tests in the **same files/targets and
+selection** as `command`, using that runner's own matching semantics. For a
+Bun-style regex selector, apply its JavaScript regex engine, including anchors,
+case and whitespace escapes; do not reimplement matching with another engine.
+The runner or project-supplied adapter owns discovery and filtering, not
+`ckdev-mutate`. Do not return catalogue expectations as a substitute for actual
+discovered test names.
+
+Stdout must be **exactly one JSON array of strings** containing the selected test
+names; put diagnostics on stderr. A nonzero exit, signal, spawn error, timeout,
+invalid JSON, non-array value or non-string element is a row-and-pattern-labeled
+check error. `[]` is valid output but refuses that row's `expect_red` pattern
+because it matches no listed test. Listing does not run the tests or replace
+replay's baseline and executed-count checks. The optional protocol does not
+change `only = true` sibling behavior (command rows still cannot use `only`).
+
+For example, a Bun project can supply `scripts/list-pi-slot-tests.ts`, which
+discovers the actual names from the same `tests/pi-slot.test.ts` used below and
+returns those selected by `new RegExp(process.argv[2])`. This script is a project
+adapter, **not a built-in Bun listing flag**:
+
+```toml
+[[control]]
+id = "pi-slot-import-graph"
+guards = "published imports stay inside the allowed graph"
+file = "src/pi-slot.ts"
+old = "assertAllowedImports(graph);"
+new = "void graph;"
+test_file = "tests/pi-slot.test.ts"
+runner = "command"
+command = ["bun", "test", "tests/pi-slot.test.ts", "--test-name-pattern", "{test}"]
+list_command = ["bun", "scripts/list-pi-slot-tests.ts", "{test}"]
+test_count_pattern = "Ran {count} test"
+expect_red = ['^pi\sslot\spublished\simport\sgraph\scontains\sonly\snode\sbuiltins\sand\scommon\sauth\sfiles$']
+```
+
+With the original name, the adapter prints
+`["pi slot published import graph contains only node builtins and common auth files"]`
+and `check` verifies the row. If the test is renamed to
+`pi slot published import graph permits only node builtins, common auth files and external Windows private-files`,
+the adapter prints `[]` and `check` refuses `pi-slot-import-graph` and the stale
+pattern. Updating `expect_red` to
+`'^pi\sslot\spublished\simport\sgraph\spermits\sonly\snode\sbuiltins,\scommon\sauth\sfiles\sand\sexternal\sWindows\sprivate-files$'`
+selects the renamed test and passes. Choose `test_count_pattern` from the actual
+executed-count summary of your runner/version; the count pattern above is
+separate from the JSON listing protocol.
+
+Rows without `list_command`, and rows skipped for platform, unreachable or
+desk-only reasons, are named as not verified. The final line gives the number of
+verified and unverified rows and all unverified ids, rather than claiming that
+every exact test name was verified. Missing listing support is not a check error;
+a broken declared listing command is.
+
+Use **`ckdev-mutate check --strict`** as a CI gate to require listing support.
+It exits nonzero if any active command row lacks `list_command`, reporting
+`command row has no list_command` and every offending row id. Rows skipped because
+their platform does not match, or because they are marked `unreachable` or
+`desk_only`, remain legitimate exemptions and do not fail strict mode. All active
+command rows are subject to the requirement, including output-equality rows,
+which do not support a test listing. Without `--strict`, missing listing support
+remains a named unverified row and does not change the exit status.
 
 ### JUnit breadth audits (0.9.0)
 
@@ -952,6 +1025,7 @@ selection cannot be combined with `--only` and is not supported for command rows
 
 ```sh
 ckdev-mutate check
+ckdev-mutate check --strict
 ckdev-mutate --catalogue other.toml run --all --report mutations.json
 ckdev-mutate run --diff origin/master --report mutations.json
 ckdev-mutate run --all --shard 1/4
@@ -960,8 +1034,10 @@ ckdev-mutate run --only flow-list-agent-sees-only-own
 ```
 
 `check` validates fields, files, anchors, and `expect_red` names via
-`cargo test ... -- --list` or nextest's JSON list mode. It makes no source edit;
-list mode may compile test binaries. Missing full names are reported explicitly.
+`cargo test ... -- --list`, nextest's JSON list mode, or a command row's optional
+`list_command`. It makes no source edit; list mode may compile test binaries.
+Missing full names and unmatched command patterns are reported explicitly.
+Rows whose tests cannot be listed are named as not verified in the final summary.
 
 `run --broad` is the **expensive audit pass**, intended for nightly or on-demand
 use. Each mutant runs every test target of its row's package (`-p PACKAGE --tests`,
