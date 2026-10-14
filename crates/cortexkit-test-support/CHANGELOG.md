@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6
+
+- Track `ckdev_binary` cache use with sidecar timestamps instead of relying on
+  access times. A new copy opportunistically prunes entries unused for three
+  days, then least-recently-used entries over a 10 GiB budget. The returned
+  entry and uses within 30 minutes are protected. Pruning is best-effort,
+  coordinated across processes, and limited to once per process and per hour;
+  locked executables on Windows are skipped when removal fails.
+- Explicitly unlock cache lock descriptors before closing them, so children
+  inheriting descriptors during process creation cannot extend a finished
+  operation's lock. A busy lock does not consume the process's pruning run;
+  the next new copy can attempt pruning again.
+
 ## 0.1.5
 
 - `ckdev_binary` copies a binary that is already named `ckdev-*` too, instead of returning its build path. A bin target with that name was run straight from its build folder. When that folder is on an external volume, macOS shows a privacy prompt before a test daemon starts it as a module under its own privacy identity, and the test waits on that prompt.

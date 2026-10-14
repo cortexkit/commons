@@ -5,9 +5,14 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Output},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
+    time::{Duration, SystemTime},
 };
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+static CACHE_PRUNER: CachePruner = CachePruner::new();
 
 /// Executable names a test must never run a process under.
 ///
@@ -187,7 +192,8 @@ fn strip_exe_suffix(name: &str) -> (&str, &str) {
 /// A child writes a private staging copy, then an atomic rename publishes it.
 /// This avoids hard-link execution failures and writable descriptors inherited
 /// by concurrently spawned children. Published files are read-only, verified
-/// against their digest on reuse, and pruned after three days.
+/// against their digest on reuse. New copies opportunistically prune unused
+/// builds after three days and limit the cache to 10 GiB, keeping recent uses.
 /// Use [`checked_output`] to report failed child exits, including signal names.
 pub fn ckdev_binary(built: impl AsRef<Path>) -> PathBuf {
     ckdev_binary_at(built.as_ref(), &publish_root())
@@ -253,15 +259,32 @@ fn content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
 }
 
 fn publish(built: &Path, dev_name: &str, root: &Path) -> io::Result<PathBuf> {
+    publish_with_pruner(built, dev_name, root, |placed| {
+        CACHE_PRUNER.maybe_prune(root, placed, SystemTime::now(), remove_published);
+    })
+}
+
+fn publish_with_pruner(
+    built: &Path,
+    dev_name: &str,
+    root: &Path,
+    prune: impl FnOnce(&Path),
+) -> io::Result<PathBuf> {
     let digest = content_digest(built, dev_name)?;
     prepare_root(root, 0o022)?;
+    // Shared locks cover lookup, publication and the use marker. An exclusive
+    // prune cannot delete an entry between verifying it and recording its use.
+    let cache_lock = CacheLock::shared(root);
+    if let Err(error) = &cache_lock {
+        log_cache_error(root, error);
+    }
     let dir = root.join(&digest);
     let placed = dir.join(dev_name);
     if dir.exists() {
         verify_published(&placed, dev_name, &digest)?;
+        record_use(root, &digest, SystemTime::now());
         return Ok(placed);
     }
-    prune_stale(root);
     let nonce = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let staging = root.join(format!(".staging-{}-{nonce}", std::process::id()));
     fs::create_dir(&staging)?;
@@ -279,18 +302,26 @@ fn publish(built: &Path, dev_name: &str, root: &Path) -> io::Result<PathBuf> {
         }
         seal_dir(&staging)?;
         match fs::rename(&staging, &dir) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok(true),
             // Another process published the same build first; its file is
             // checked below like any reused one.
-            Err(_) if dir.exists() => Ok(()),
+            Err(_) if dir.exists() => Ok(false),
             Err(error) => Err(error),
         }
     })();
     if staging.exists() {
-        remove_published(&staging);
+        if let Err(error) = remove_published(&staging) {
+            log_cache_error(&staging, &error);
+        }
     }
-    result?;
+    let created = result?;
     verify_published(&placed, dev_name, &digest)?;
+    record_use(root, &digest, SystemTime::now());
+    let can_prune = cache_lock.is_ok();
+    drop(cache_lock);
+    if created && can_prune {
+        prune(&placed);
+    }
     Ok(placed)
 }
 
@@ -385,51 +416,297 @@ fn seal_dir(dir: &Path) -> io::Result<()> {
 
 /// Removes a staging or published directory, restoring the write permission
 /// sealing took away.
-fn remove_published(dir: &Path) {
+fn remove_published(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     }
     #[cfg(windows)]
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            if let Ok(metadata) = entry.metadata() {
-                let mut permissions = metadata.permissions();
-                // This branch clears a Windows file attribute, not Unix mode bits.
-                #[allow(clippy::permissions_set_readonly_false)]
-                permissions.set_readonly(false);
-                let _ = fs::set_permissions(entry.path(), permissions);
+    {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let mut permissions = entry.metadata()?.permissions();
+            // This branch clears a Windows file attribute, not Unix mode bits.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(entry.path(), permissions)?;
+        }
+    }
+    let result = fs::remove_dir_all(dir);
+    if result.is_err() && dir.exists() {
+        if let Err(error) = seal_dir(dir) {
+            log_cache_error(dir, &error);
+        }
+        #[cfg(windows)]
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    let mut permissions = metadata.permissions();
+                    permissions.set_readonly(true);
+                    if let Err(error) = fs::set_permissions(entry.path(), permissions) {
+                        log_cache_error(&entry.path(), &error);
+                    }
+                }
             }
         }
     }
-    let _ = fs::remove_dir_all(dir);
+    result
 }
 
-/// Published builds are kept this long after publishing; older ones are
-/// removed when a new build is published. A process still running one keeps
-/// its open image, and asking again republishes it.
-const PUBLISHED_RETENTION: std::time::Duration = std::time::Duration::from_secs(3 * 24 * 60 * 60);
+// Three days keeps builds warm across ordinary test sessions without retaining
+// every historical build in the shared per-user cache.
+const PUBLISHED_RETENTION: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+// Half an hour protects paths handed to other test processes before they spawn.
+const RECENT_USE_GRACE: Duration = Duration::from_secs(30 * 60);
+// An hourly scan bounds filesystem work when many repositories run tests.
+const PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+// Ten GiB leaves room for large test executables without letting the shared
+// cache consume tens of GiB and crowd out builds on the same disk.
+const CACHE_SIZE_LIMIT: u64 = 10 * 1024 * 1024 * 1024;
+const LAST_PRUNE: &str = ".last-prune";
 
-fn prune_stale(root: &Path) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    let now = std::time::SystemTime::now();
-    for entry in entries.flatten() {
-        let Ok(metadata) = fs::symlink_metadata(entry.path()) else {
-            continue;
+fn cache_lock(root: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(".cache-lock"))
+}
+
+struct CacheLock {
+    file: fs::File,
+    root: PathBuf,
+}
+
+impl CacheLock {
+    fn shared(root: &Path) -> io::Result<Self> {
+        let file = cache_lock(root)?;
+        file.lock_shared()?;
+        Ok(Self {
+            file,
+            root: root.to_owned(),
+        })
+    }
+
+    fn try_exclusive(root: &Path) -> io::Result<Self> {
+        let file = cache_lock(root)?;
+        file.try_lock().map_err(|error| {
+            let error = io::Error::from(error);
+            log_cache_error(
+                root,
+                &format!(
+                    "try_lock failed: kind={:?}, raw_os_error={:?}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+            );
+            error
+        })?;
+        Ok(Self {
+            file,
+            root: root.to_owned(),
+        })
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        // A concurrent fork can inherit this open file description until exec.
+        // Closing only our descriptor would leave its flock held by the child;
+        // explicitly unlocking releases it for every inherited descriptor.
+        if let Err(error) = self.file.unlock() {
+            log_cache_error(&self.root, &error);
+        }
+    }
+}
+
+fn log_cache_error(path: &Path, error: &dyn std::fmt::Display) {
+    use std::io::Write;
+    let _ = writeln!(
+        io::stderr().lock(),
+        "ckdev cache maintenance at {}: {error}",
+        path.display()
+    );
+}
+
+fn touch_marker(path: &Path, now: SystemTime) -> io::Result<()> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?
+        .set_modified(now)
+}
+
+fn use_marker(root: &Path, digest: &str) -> PathBuf {
+    root.join(format!("{digest}.last-use"))
+}
+
+fn record_use(root: &Path, digest: &str, now: SystemTime) {
+    // Sidecars stay in the writable root; neither the sealed directory nor the
+    // executable needs to change, and filesystems need not maintain atime.
+    let marker = use_marker(root, digest);
+    if let Err(error) = touch_marker(&marker, now) {
+        log_cache_error(&marker, &error);
+    }
+}
+
+struct CachePruner {
+    completed: Mutex<bool>,
+}
+
+impl CachePruner {
+    const fn new() -> Self {
+        Self {
+            completed: Mutex::new(false),
+        }
+    }
+
+    fn maybe_prune(
+        &self,
+        root: &Path,
+        protected: &Path,
+        now: SystemTime,
+        remove: impl FnMut(&Path) -> io::Result<()>,
+    ) {
+        let mut completed = match self.completed.try_lock() {
+            Ok(completed) => completed,
+            Err(std::sync::TryLockError::WouldBlock) => return,
+            Err(error) => {
+                log_cache_error(root, &error);
+                return;
+            }
         };
-        if !metadata.is_dir() || metadata.is_symlink() {
+        if *completed {
+            return;
+        }
+        let result = (|| -> io::Result<bool> {
+            // A busy cache is skipped without consuming the process's prune,
+            // so the next new copy can try again without delaying this caller.
+            let _lock = CacheLock::try_exclusive(root)?;
+            let marker = root.join(LAST_PRUNE);
+            match fs::metadata(&marker) {
+                Ok(metadata) => {
+                    if now.duration_since(metadata.modified()?).unwrap_or_default()
+                        <= PRUNE_INTERVAL
+                    {
+                        return Ok(false);
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            // Record the attempt while locked, even if individual removals fail.
+            touch_marker(&marker, now)?;
+            prune_entries(root, protected, now, CACHE_SIZE_LIMIT, remove);
+            Ok(true)
+        })();
+        match result {
+            Ok(pruned) => *completed = pruned,
+            Err(error) => log_cache_error(root, &error),
+        }
+    }
+}
+
+struct CacheEntry {
+    path: PathBuf,
+    marker: PathBuf,
+    last_use: SystemTime,
+    bytes: u64,
+}
+
+fn cache_entry(root: &Path, entry: fs::DirEntry) -> io::Result<Option<CacheEntry>> {
+    let name = entry.file_name();
+    let Some(digest) = name.to_str().filter(|name| {
+        name.len() == 32
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    }) else {
+        // Never collect staging directories, locks, markers or unrelated files.
+        return Ok(None);
+    };
+    let path = entry.path();
+    let metadata = fs::symlink_metadata(&path)?;
+    if !metadata.is_dir() || metadata.is_symlink() {
+        return Ok(None);
+    }
+    let marker = use_marker(root, digest);
+    let last_use = match fs::symlink_metadata(&marker) {
+        Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => metadata.modified()?,
+        Ok(_) => return Err(io::Error::other("last-use marker must be a regular file")),
+        // Existing caches predate use markers. Their directory mtime records
+        // publication and is the only available age until the next cache hit.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => metadata.modified()?,
+        Err(error) => return Err(error),
+    };
+    let mut bytes = 0u64;
+    for file in fs::read_dir(&path)? {
+        let metadata = fs::symlink_metadata(file?.path())?;
+        if metadata.is_file() {
+            bytes = bytes.saturating_add(metadata.len());
+        }
+    }
+    Ok(Some(CacheEntry {
+        path,
+        marker,
+        last_use,
+        bytes,
+    }))
+}
+
+fn prune_entries(
+    root: &Path,
+    protected: &Path,
+    now: SystemTime,
+    size_limit: u64,
+    mut remove: impl FnMut(&Path) -> io::Result<()>,
+) {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            log_cache_error(root, &error);
+            return;
+        }
+    };
+    let mut candidates = Vec::new();
+    for entry in entries {
+        match entry.and_then(|entry| cache_entry(root, entry)) {
+            Ok(Some(entry)) => candidates.push(entry),
+            Ok(None) => {}
+            Err(error) => log_cache_error(root, &error),
+        }
+    }
+    candidates.sort_by(|a, b| {
+        a.last_use
+            .cmp(&b.last_use)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    let mut total = candidates
+        .iter()
+        .fold(0u64, |total, entry| total.saturating_add(entry.bytes));
+    for entry in candidates {
+        let age = now.duration_since(entry.last_use).unwrap_or_default();
+        if protected.parent() == Some(entry.path.as_path()) || age <= RECENT_USE_GRACE {
             continue;
         }
-        let stale = Ok::<_, io::Error>(metadata)
-            .and_then(|metadata| metadata.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > PUBLISHED_RETENTION);
-        if stale {
-            remove_published(&entry.path());
+        if age <= PUBLISHED_RETENTION && total <= size_limit {
+            continue;
+        }
+        match remove(&entry.path) {
+            Ok(()) => {
+                total = total.saturating_sub(entry.bytes);
+                if let Err(error) = fs::remove_file(&entry.marker) {
+                    if error.kind() != io::ErrorKind::NotFound {
+                        log_cache_error(&entry.marker, &error);
+                    }
+                }
+            }
+            // In particular, Windows refuses deletion of an executing image.
+            // Leave it in the cache and continue with the next candidate.
+            Err(error) => log_cache_error(&entry.path, &error),
         }
     }
 }
@@ -604,29 +881,329 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
-    fn three_day_prune_keeps_recent_and_symlink_entries() {
+    fn three_day_prune_keeps_recent_returned_and_symlink_entries() {
         let root = PublishRoot::new("publish-prune");
-        let old = root.path().join("old");
-        let recent = root.path().join("recent");
-        for path in [&old, &recent] {
-            fs::create_dir(path).unwrap();
-            fs::write(path.join("payload"), "keep").unwrap();
-        }
-        fs::File::open(&old)
-            .unwrap()
-            .set_times(fs::FileTimes::new().set_modified(
-                std::time::SystemTime::now()
-                    - PUBLISHED_RETENTION
-                    - std::time::Duration::from_secs(10),
-            ))
-            .unwrap();
-        std::os::unix::fs::symlink(&old, root.path().join("link")).unwrap();
-        prune_stale(&root.path());
+        let now = SystemTime::now();
+        let old_time = now - PUBLISHED_RETENTION - Duration::from_secs(10);
+        let old = cache_fixture(&root.path(), 1, old_time, Some(old_time), 4);
+        let recent = cache_fixture(&root.path(), 2, now, Some(now), 4);
+        let returned = cache_fixture(&root.path(), 3, old_time, Some(old_time), 4);
+        let staging = root.path().join(".staging-live");
+        fs::create_dir(&staging).unwrap();
+        std::os::unix::fs::symlink(
+            old.parent().unwrap(),
+            root.path().join(format!("{:032x}", 4)),
+        )
+        .unwrap();
+        prune_entries(
+            &root.path(),
+            &returned,
+            now,
+            CACHE_SIZE_LIMIT,
+            remove_published,
+        );
         assert!(!old.exists());
-        assert!(recent.join("payload").exists());
-        assert!(fs::symlink_metadata(root.path().join("link"))
+        assert!(recent.exists());
+        assert!(returned.exists());
+        assert!(staging.exists());
+        assert!(
+            fs::symlink_metadata(root.path().join(format!("{:032x}", 4)))
+                .unwrap()
+                .is_symlink()
+        );
+    }
+
+    #[cfg(unix)]
+    fn cache_fixture(
+        root: &Path,
+        id: u32,
+        published: SystemTime,
+        last_use: Option<SystemTime>,
+        bytes: usize,
+    ) -> PathBuf {
+        let digest = format!("{id:032x}");
+        let dir = root.join(&digest);
+        fs::create_dir(&dir).unwrap();
+        let binary = dir.join("ckdev-fixture");
+        fs::write(&binary, vec![0; bytes]).unwrap();
+        fs::set_permissions(&binary, published_permissions(&binary).unwrap()).unwrap();
+        fs::File::open(&dir)
             .unwrap()
-            .is_symlink());
+            .set_modified(published)
+            .unwrap();
+        seal_dir(&dir).unwrap();
+        if let Some(last_use) = last_use {
+            touch_marker(&use_marker(root, &digest), last_use).unwrap();
+        }
+        binary
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_uses_last_use_marker_not_publication_time() {
+        let root = PublishRoot::new("prune-last-use");
+        let now = SystemTime::now();
+        let old = now - PUBLISHED_RETENTION - Duration::from_secs(1);
+        let used = cache_fixture(&root.path(), 1, old, Some(now), 4);
+        let unused = cache_fixture(&root.path(), 2, old, Some(old), 4);
+        prune_entries(
+            &root.path(),
+            Path::new(""),
+            now,
+            CACHE_SIZE_LIMIT,
+            remove_published,
+        );
+        assert!(
+            used.exists(),
+            "a recent use must keep an old publication alive"
+        );
+        assert!(!unused.exists(), "unused old entries must be collected");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn size_cap_removes_least_recently_used_first() {
+        let root = PublishRoot::new("prune-size-order");
+        let now = SystemTime::now();
+        let oldest = cache_fixture(
+            &root.path(),
+            1,
+            now,
+            Some(now - Duration::from_secs(3 * 3600)),
+            4,
+        );
+        let middle = cache_fixture(
+            &root.path(),
+            2,
+            now,
+            Some(now - Duration::from_secs(2 * 3600)),
+            4,
+        );
+        let newest = cache_fixture(
+            &root.path(),
+            3,
+            now,
+            Some(now - Duration::from_secs(3600)),
+            4,
+        );
+        prune_entries(&root.path(), Path::new(""), now, 8, remove_published);
+        assert!(!oldest.exists(), "the oldest use should be evicted first");
+        assert!(middle.exists());
+        assert!(newest.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn size_cap_keeps_recent_and_returned_entries_even_over_budget() {
+        let root = PublishRoot::new("prune-size-grace");
+        let now = SystemTime::now();
+        let old = now - Duration::from_secs(3600);
+        let returned = cache_fixture(&root.path(), 1, old, Some(old), 4);
+        let recent = cache_fixture(&root.path(), 2, old, Some(now - RECENT_USE_GRACE), 4);
+        let unused = cache_fixture(&root.path(), 3, old, Some(old), 4);
+        prune_entries(&root.path(), &returned, now, 1, remove_published);
+        assert!(returned.exists());
+        assert!(recent.exists(), "the grace interval includes its boundary");
+        assert!(!unused.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pruning_is_hourly_and_at_most_once_per_process() {
+        let root = PublishRoot::new("prune-interval");
+        let now = SystemTime::now();
+        let old_time = now - PUBLISHED_RETENTION - Duration::from_secs(1);
+        let first = cache_fixture(&root.path(), 1, old_time, Some(old_time), 4);
+        let pruner = CachePruner::new();
+        pruner.maybe_prune(&root.path(), Path::new(""), now, remove_published);
+        assert!(!first.exists());
+        let next = cache_fixture(&root.path(), 2, old_time, Some(old_time), 4);
+        let waiting = CachePruner::new();
+        waiting.maybe_prune(
+            &root.path(),
+            Path::new(""),
+            now + PRUNE_INTERVAL,
+            remove_published,
+        );
+        assert!(next.exists(), "another process cannot prune within an hour");
+        let later = now + PRUNE_INTERVAL + Duration::from_secs(1);
+        pruner.maybe_prune(&root.path(), Path::new(""), later, remove_published);
+        assert!(next.exists(), "one process cannot prune twice");
+        waiting.maybe_prune(&root.path(), Path::new(""), later, remove_published);
+        assert!(
+            !next.exists(),
+            "an hour-gated process may retry after the hour"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_legacy_entry_is_actually_deleted() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = PublishRoot::new("prune-sealed-legacy");
+        let now = SystemTime::now();
+        let old = cache_fixture(
+            &root.path(),
+            1,
+            now - PUBLISHED_RETENTION - Duration::from_secs(1),
+            None,
+            4,
+        );
+        let dir = old.parent().unwrap();
+        assert_eq!(
+            fs::metadata(dir).unwrap().permissions().mode() & 0o777,
+            0o555
+        );
+        assert!(fs::metadata(&old).unwrap().permissions().readonly());
+        prune_entries(
+            &root.path(),
+            Path::new(""),
+            now,
+            CACHE_SIZE_LIMIT,
+            remove_published,
+        );
+        assert!(!dir.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_deletion_does_not_fail_publication_or_stop_pruning() {
+        let root = PublishRoot::new("prune-failure");
+        let build = crate::ScratchDir::new("prune-failure-build");
+        let built = build.join("ck-fixture");
+        write_script(&built, "#!/bin/sh\necho retained\n");
+        let now = SystemTime::now();
+        let old_time = now - PUBLISHED_RETENTION - Duration::from_secs(1);
+        let failed = cache_fixture(&root.path(), 1, old_time, Some(old_time), 4);
+        let removed = cache_fixture(&root.path(), 2, old_time, Some(old_time), 4);
+        let mut attempts = 0;
+        let placed = publish_with_pruner(&built, "ckdev-fixture", &root.path(), |placed| {
+            CachePruner::new().maybe_prune(&root.path(), placed, now, |dir| {
+                attempts += 1;
+                if Some(dir) == failed.parent() {
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "injected deletion failure",
+                    ))
+                } else {
+                    remove_published(dir)
+                }
+            });
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+        assert!(failed.exists());
+        assert!(!removed.exists());
+        assert!(placed.exists());
+        checked_output(&mut dev_command(&placed)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_records_use_on_copy_and_hit_but_only_copy_prunes() {
+        let root = PublishRoot::new("prune-publish-use");
+        let build = crate::ScratchDir::new("prune-publish-use-build");
+        let built = build.join("ck-fixture");
+        write_script(&built, "#!/bin/sh\necho used\n");
+        let mut prunes = 0;
+        let placed =
+            publish_with_pruner(&built, "ckdev-fixture", &root.path(), |_| prunes += 1).unwrap();
+        assert_eq!(prunes, 1);
+        let digest = placed
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let marker = use_marker(&root.path(), digest);
+        assert!(marker.is_file());
+        let old_time = SystemTime::now() - PUBLISHED_RETENTION - Duration::from_secs(1);
+        touch_marker(&marker, old_time).unwrap();
+        let before = SystemTime::now();
+        let reused = publish_with_pruner(&built, "ckdev-fixture", &root.path(), |_| {
+            panic!("cache hits must not prune")
+        })
+        .unwrap();
+        assert_eq!(reused, placed);
+        assert!(fs::metadata(marker).unwrap().modified().unwrap() >= before);
+        assert!(fs::metadata(placed).unwrap().permissions().readonly());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_lock_skips_busy_publishers_and_other_pruners() {
+        let root = PublishRoot::new("prune-lock");
+        let now = SystemTime::now();
+        let old_time = now - PUBLISHED_RETENTION - Duration::from_secs(1);
+        let old = cache_fixture(&root.path(), 1, old_time, Some(old_time), 4);
+        let lock = CacheLock::shared(&root.path()).unwrap();
+        let pruner = CachePruner::new();
+        pruner.maybe_prune(&root.path(), Path::new(""), now, remove_published);
+        assert!(old.exists());
+        assert!(!root.path().join(LAST_PRUNE).exists());
+        lock.file.unlock().unwrap();
+        lock.file.lock().unwrap();
+        pruner.maybe_prune(&root.path(), Path::new(""), now, remove_published);
+        assert!(old.exists());
+        assert!(!root.path().join(LAST_PRUNE).exists());
+        drop(lock);
+        pruner.maybe_prune(&root.path(), Path::new(""), now, remove_published);
+        assert!(!old.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_cache_lock_unlocks_inherited_file_description() {
+        let root = PublishRoot::new("prune-inherited-lock");
+        let shared = CacheLock::shared(&root.path()).unwrap();
+        // A duplicated descriptor shares the same open file description and
+        // flock as a descriptor inherited by a child between fork and exec.
+        let inherited = shared.file.try_clone().unwrap();
+        drop(shared);
+        let exclusive = CacheLock::try_exclusive(&root.path());
+        drop(inherited);
+        assert!(
+            exclusive.is_ok(),
+            "inherited descriptor retained the lock: {exclusive_error:?}",
+            exclusive_error = exclusive.as_ref().err()
+        );
+        let exclusive = exclusive.unwrap();
+        let inherited = exclusive.file.try_clone().unwrap();
+        drop(exclusive);
+        let released = CacheLock::try_exclusive(&root.path());
+        drop(inherited);
+        assert!(
+            released.is_ok(),
+            "inherited prune descriptor retained its lock"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_use_marker_update_does_not_fail_a_cache_hit() {
+        let root = PublishRoot::new("prune-marker-failure");
+        let build = crate::ScratchDir::new("prune-marker-failure-build");
+        let built = build.join("ck-fixture");
+        write_script(&built, "#!/bin/sh\necho used\n");
+        let placed = publish_with_pruner(&built, "ckdev-fixture", &root.path(), |_| {}).unwrap();
+        let digest = placed
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let marker = use_marker(&root.path(), digest);
+        fs::remove_file(&marker).unwrap();
+        fs::create_dir(&marker).unwrap();
+        let reused = publish_with_pruner(&built, "ckdev-fixture", &root.path(), |_| {
+            panic!("cache hits must not prune")
+        })
+        .unwrap();
+        assert_eq!(reused, placed);
+        assert_eq!(fs::read(&built).unwrap(), fs::read(&placed).unwrap());
+        assert!(fs::metadata(placed).unwrap().permissions().readonly());
     }
 
     #[test]
@@ -759,7 +1336,7 @@ mod tests {
         fn drop(&mut self) {
             if let Ok(entries) = fs::read_dir(self.path()) {
                 for entry in entries.flatten() {
-                    remove_published(&entry.path());
+                    let _ = remove_published(&entry.path());
                 }
             }
         }
@@ -852,7 +1429,11 @@ mod tests {
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
             .collect();
-        assert_eq!(entries, [dir.file_name().unwrap()]);
+        assert!(entries.iter().any(|name| name == dir.file_name().unwrap()));
+        assert!(entries
+            .iter()
+            .all(|name| !name.to_string_lossy().starts_with(".staging-")));
+        assert!(use_marker(&root.path(), dir.file_name().unwrap().to_str().unwrap()).is_file());
     }
 
     /// A published file that no longer matches its address is refused, not

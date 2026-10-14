@@ -38,7 +38,12 @@ the system temp directory. A `cp` child writes Unix staging files so the test
 process holds no writable descriptor to an executable. Windows uses `fs::copy`.
 A private staging directory is atomically renamed into its content address;
 concurrent requests reuse one published file. Digests are checked before use,
-including reuse. Publications older than three days are pruned on a new build.
+including reuse. Sidecar timestamps record every use without changing the binary.
+A new build opportunistically prunes entries unused for three days, then the
+least recently used entries until the cache is at most 10 GiB. The returned
+entry and entries used within 30 minutes are kept even over that budget.
+Pruning runs at most once per process and per hour across processes; errors
+are logged without failing publication, including locked Windows executables.
 Do not modify a publication. A source rebuild receives a different path.
 
 ```no_run
