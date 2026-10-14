@@ -2,7 +2,9 @@
 
 use clap::{Args, Parser, Subcommand};
 use cortexkit_mutate::*;
+use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -37,8 +39,14 @@ enum Action {
         diff: Option<String>,
         #[arg(long)]
         shard: Option<String>,
+        /// Assign rows by estimated cost. Every shard job must read the same report file.
+        #[arg(long, value_name = "REPORT.json")]
+        shard_weights: Option<PathBuf>,
         #[arg(long)]
         only: Option<String>,
+        /// List selected row ids without building or running tests.
+        #[arg(long)]
+        list: bool,
         /// Expensive audit: run every package test target and grade broad catches.
         #[arg(long)]
         broad: bool,
@@ -368,6 +376,141 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct ReplayTiming {
+    id: String,
+    build_ms: u128,
+    test_ms: u128,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ShardPlan {
+    rows: Vec<Vec<usize>>,
+    loads: Vec<u128>,
+}
+
+fn read_shard_weights(path: &Path) -> Result<BTreeMap<String, u128>> {
+    let bytes = fs::read(path)
+        .map_err(|e| format!("cannot read shard weight report {}: {e}", path.display()))?;
+    let report: Vec<ReplayTiming> = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("invalid shard weight report {}: {e}", path.display()))?;
+    let mut weights = BTreeMap::new();
+    for row in report {
+        let weight = row
+            .build_ms
+            .checked_add(row.test_ms)
+            .ok_or_else(|| format!("shard weight overflows for row {}", row.id))?;
+        if weights.insert(row.id.clone(), weight).is_some() {
+            return Err(format!(
+                "duplicate row id {} in shard weight report {}",
+                row.id,
+                path.display()
+            ));
+        }
+    }
+    Ok(weights)
+}
+
+fn median_weight(weights: &BTreeMap<String, u128>) -> u128 {
+    let mut sorted: Vec<_> = weights.values().copied().collect();
+    if sorted.is_empty() {
+        return 1;
+    }
+    sorted.sort_unstable();
+    let middle = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        sorted[middle]
+    } else {
+        let low = sorted[middle - 1];
+        low + (sorted[middle] - low) / 2
+    }
+}
+
+fn weights_for_selection(
+    report_weights: &BTreeMap<String, u128>,
+    row_ids: &[String],
+) -> (BTreeMap<String, u128>, usize) {
+    let median = median_weight(report_weights);
+    let mut missing = 0;
+    let selected = row_ids
+        .iter()
+        .map(|id| {
+            let weight = report_weights.get(id).copied().unwrap_or_else(|| {
+                missing += 1;
+                median
+            });
+            (id.clone(), weight)
+        })
+        .collect();
+    (selected, missing)
+}
+
+fn shard_plan(
+    row_ids: &[String],
+    count: usize,
+    weights: Option<&BTreeMap<String, u128>>,
+) -> Result<ShardPlan> {
+    let mut rows = vec![Vec::new(); count];
+    let mut loads = vec![0u128; count];
+    if let Some(weights) = weights {
+        let mut order: Vec<_> = (0..row_ids.len()).collect();
+        order.sort_by(|&left, &right| {
+            weights[&row_ids[right]]
+                .cmp(&weights[&row_ids[left]])
+                .then_with(|| row_ids[left].cmp(&row_ids[right]))
+        });
+        for row in order {
+            let shard = (0..count)
+                .min_by_key(|&shard| (loads[shard], shard))
+                .ok_or("shard count must be greater than zero")?;
+            loads[shard] = loads[shard]
+                .checked_add(weights[&row_ids[row]])
+                .ok_or("estimated shard weight overflows")?;
+            rows[shard].push(row);
+        }
+        for shard in &mut rows {
+            shard.sort_unstable();
+        }
+    } else {
+        if count == 0 {
+            return Err("shard count must be greater than zero".into());
+        }
+        for row in 0..row_ids.len() {
+            rows[row % count].push(row);
+        }
+    }
+    Ok(ShardPlan { rows, loads })
+}
+
+fn weighted_summary(plan: &ShardPlan, index: usize, missing: usize) -> String {
+    let estimates = plan
+        .loads
+        .iter()
+        .enumerate()
+        .map(|(shard, load)| {
+            format!(
+                "{}/{}={:.2} min",
+                shard + 1,
+                plan.loads.len(),
+                *load as f64 / 60_000.0
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let note = if missing > 0 {
+        format!("; {missing} selected row(s) missing from report, assigned the median weight")
+    } else {
+        String::new()
+    };
+    format!(
+        "Shard {}/{}: {} rows, estimated {:.2} minutes; estimates: {estimates}{note}",
+        index + 1,
+        plan.rows.len(),
+        plan.rows[index].len(),
+        plan.loads[index] as f64 / 60_000.0,
+    )
+}
+
 fn output_parent(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -446,12 +589,16 @@ fn run() -> Result<bool> {
             all,
             diff,
             shard,
+            shard_weights,
             only,
+            list,
             broad,
             allow_dirty,
             report,
         } => {
-            prepare_optional_output(report.as_deref())?;
+            if !list {
+                prepare_optional_output(report.as_deref())?;
+            }
             if !all && diff.is_none() && only.is_none() {
                 return Err("select --all, --diff <base>, or --only <id>".into());
             }
@@ -496,12 +643,35 @@ fn run() -> Result<bool> {
                 })
                 .collect();
             controls.sort_by(|a, b| a.id.cmp(&b.id));
-            let shard: Vec<&Control> = controls
-                .into_iter()
-                .enumerate()
-                .filter(|(i, _)| i % count == index)
-                .map(|(_, c)| c)
-                .collect();
+            let row_ids: Vec<_> = controls.iter().map(|control| control.id.clone()).collect();
+            let (weights, missing_weights) = if let Some(path) = shard_weights.as_deref() {
+                let report_weights = read_shard_weights(path)?;
+                let (weights, missing) = weights_for_selection(&report_weights, &row_ids);
+                (Some(weights), missing)
+            } else {
+                (None, 0)
+            };
+            let plan = shard_plan(&row_ids, count, weights.as_ref())?;
+            let shard: Vec<&Control> = plan.rows[index].iter().map(|&row| controls[row]).collect();
+            if list {
+                for control in &shard {
+                    println!("{}", control.id);
+                }
+                if weights.is_some() {
+                    eprintln!("{}", weighted_summary(&plan, index, missing_weights));
+                } else {
+                    eprintln!(
+                        "Listed {} selected row(s) for shard {}/{}",
+                        shard.len(),
+                        index + 1,
+                        count
+                    );
+                }
+                return Ok(true);
+            }
+            if weights.is_some() {
+                eprintln!("{}", weighted_summary(&plan, index, missing_weights));
+            }
             if broad {
                 for control in &shard {
                     if let Some(name) = &control.broad_report {
@@ -957,5 +1127,110 @@ mod cli_tests {
             "guard_test",
         ]);
         assert!(missing_after.is_err());
+    }
+}
+
+#[cfg(test)]
+mod shard_tests {
+    use super::*;
+
+    fn ids(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn weighted_shards_use_report_costs_and_cover_selection() {
+        let row_ids = ids(&["alpha", "bravo", "charlie", "delta", "echo"]);
+        let weights = BTreeMap::from([
+            ("alpha".into(), 70),
+            ("bravo".into(), 60),
+            ("charlie".into(), 50),
+            ("delta".into(), 40),
+            ("echo".into(), 30),
+        ]);
+        let plan = shard_plan(&row_ids, 3, Some(&weights)).unwrap();
+        assert_eq!(plan, shard_plan(&row_ids, 3, Some(&weights)).unwrap());
+        let assigned: Vec<_> = plan
+            .rows
+            .iter()
+            .flat_map(|shard| shard.iter().map(|&row| row_ids[row].as_str()))
+            .collect();
+        assert_eq!(assigned, ["alpha", "bravo", "echo", "charlie", "delta"]);
+        assert_eq!(plan.loads, [70, 90, 90]);
+        let all_rows: Vec<_> = plan.rows.iter().flatten().copied().collect();
+        let unique_rows: std::collections::BTreeSet<_> = all_rows.iter().copied().collect();
+        assert_eq!(unique_rows.len(), row_ids.len());
+        assert_eq!(unique_rows, (0..row_ids.len()).collect());
+    }
+
+    #[test]
+    fn weighted_ties_go_to_lowest_shard_index() {
+        let row_ids = ids(&["alpha", "bravo", "charlie"]);
+        let weights = BTreeMap::from([
+            ("alpha".into(), 10),
+            ("bravo".into(), 10),
+            ("charlie".into(), 10),
+        ]);
+        let plan = shard_plan(&row_ids, 2, Some(&weights)).unwrap();
+        assert_eq!(plan.rows, [vec![0, 2], vec![1]]);
+        assert_eq!(plan.loads, [20, 10]);
+    }
+
+    #[test]
+    fn lpt_balances_one_hundred_and_ten_ten_minute_rows_exactly() {
+        let mut row_ids = vec!["00-heavy".to_owned()];
+        row_ids.extend((1..=10).map(|i| format!("{i:02}-small")));
+        let weights = row_ids
+            .iter()
+            .map(|id| {
+                (
+                    id.clone(),
+                    if id == "00-heavy" { 6_000_000 } else { 600_000 },
+                )
+            })
+            .collect();
+        let plan = shard_plan(&row_ids, 2, Some(&weights)).unwrap();
+        assert_eq!(plan.rows[0], [0]);
+        assert_eq!(plan.rows[1], (1..=10).collect::<Vec<_>>());
+        assert_eq!(plan.loads, [6_000_000, 6_000_000]);
+    }
+
+    #[test]
+    fn missing_report_rows_use_median_or_one_for_an_empty_report() {
+        let report = BTreeMap::from([("known-a".into(), 100), ("known-b".into(), 300)]);
+        let (weights, missing) = weights_for_selection(
+            &report,
+            &ids(&["known-a", "unknown-a", "known-b", "unknown-b"]),
+        );
+        assert_eq!(missing, 2);
+        assert_eq!(weights["unknown-a"], 200);
+        assert_eq!(weights["unknown-b"], 200);
+
+        let (weights, missing) = weights_for_selection(&BTreeMap::new(), &ids(&["unknown"]));
+        assert_eq!(missing, 1);
+        assert_eq!(weights["unknown"], 1);
+    }
+
+    #[test]
+    fn unweighted_shards_keep_round_robin_for_fixed_sorted_catalogue() {
+        let row_ids = ids(&["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]);
+        let plan = shard_plan(&row_ids, 3, None).unwrap();
+        assert_eq!(
+            plan.rows,
+            [vec![0, 3], vec![1, 4], vec![2, 5]],
+            "the no-weight option preserves the fixed catalogue's old index sharding"
+        );
+        assert_eq!(plan.loads, [0, 0, 0]);
+    }
+
+    #[test]
+    fn report_rows_supply_build_plus_test_costs() {
+        let path = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            path.path(),
+            r#"[{"id":"alpha","build_ms":125,"test_ms":75}]"#,
+        )
+        .unwrap();
+        assert_eq!(read_shard_weights(path.path()).unwrap()["alpha"], 200);
     }
 }

@@ -4309,6 +4309,102 @@ fn cli_report_shard_equivalent_and_prove_append() {
 }
 
 #[test]
+fn list_only_prints_ids_without_running_prebuild_and_succeeds_when_empty() {
+    if !Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        eprintln!("skipping list-only hook test: python3 is not installed");
+        return;
+    }
+    let f = Fixture::new();
+    let mut rows = Vec::new();
+    for id in ["alpha", "bravo", "charlie", "delta"] {
+        let mut row = f.control();
+        row.id = id.into();
+        rows.push(row);
+    }
+    fs::write(
+        f.root().join("mutations.toml"),
+        toml::to_string(&Catalogue {
+            control: rows,
+            prebuild: vec![Prebuild {
+                name: "list-hook".into(),
+                command: vec![
+                    "python3".into(),
+                    "-c".into(),
+                    "from pathlib import Path; Path('.git/list-prebuild-ran').write_text('ran')"
+                        .into(),
+                ],
+                timeout_s: 10,
+            }],
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    f.commit();
+
+    for (args, expected) in [
+        (
+            vec!["run", "--all", "--list"],
+            "alpha\nbravo\ncharlie\ndelta\n",
+        ),
+        (vec!["run", "--only", "bravo", "--list"], "bravo\n"),
+        (
+            vec!["run", "--all", "--list", "--shard", "2/2"],
+            "bravo\ndelta\n",
+        ),
+    ] {
+        let output = f.cli(&args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+        assert!(
+            !f.root().join(".git/list-prebuild-ran").exists(),
+            "list-only invoked a prebuild hook"
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stderr).lines().count(), 1);
+    }
+
+    fs::write(
+        f.root().join(".git/weights.json"),
+        serde_json::json!([
+            {"id": "alpha", "build_ms": 6_000_000, "test_ms": 0},
+            {"id": "bravo", "build_ms": 4_800_000, "test_ms": 0},
+            {"id": "charlie", "build_ms": 1_200_000, "test_ms": 0},
+            {"id": "delta", "build_ms": 600_000, "test_ms": 0}
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let weighted = f.cli(&[
+        "run",
+        "--all",
+        "--list",
+        "--shard",
+        "1/2",
+        "--shard-weights",
+        ".git/weights.json",
+    ]);
+    assert!(weighted.status.success(), "{weighted:?}");
+    assert_eq!(String::from_utf8_lossy(&weighted.stdout), "alpha\ndelta\n");
+    let summary = String::from_utf8_lossy(&weighted.stderr);
+    assert_eq!(summary.lines().count(), 1);
+    assert!(summary.contains("110.00 minutes") && summary.contains("2/2=100.00 min"));
+    assert!(!f.root().join(".git/list-prebuild-ran").exists());
+
+    let empty = f.cli(&["run", "--diff", "HEAD", "--list"]);
+    assert!(empty.status.success(), "{empty:?}");
+    assert!(empty.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&empty.stderr).contains("0 selected row"));
+    assert!(!f.root().join(".git/list-prebuild-ran").exists());
+}
+
+#[test]
 fn run_reports_in_sorted_id_order_whatever_the_execution_order() {
     let f = Fixture::new();
     let lib = format!("{}\npub mod other;\n", include_str!("fixture/src/lib.rs"));

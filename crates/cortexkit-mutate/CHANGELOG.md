@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.2
+
+- Add deterministic cost-weighted `run --shard-weights` assignment using replay
+  report build and test timings, with estimated per-shard totals and median
+  estimates for rows missing from the shared report.
+- Add `run --list` to print selected row ids without running prebuilds, builds or
+  tests; an empty selection exits successfully.
+
 ## 0.12.1
 
 - `check` may now refuse catalogues it previously passed: command rows with

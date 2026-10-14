@@ -12,6 +12,40 @@ its Git root, even when `--catalogue` overrides the default `mutations.toml`.
 Cargo/nextest repositories must already have a current `Cargo.lock`: every build, test and
 list invocation uses `--locked`. The runner never stages or checks out files.
 
+## Selecting rows and sharding
+
+`run --list` applies the normal selection flags (`--all`, `--diff <ref>` or
+`--only <id>`) and prints the selected row ids, one per line on stdout, without
+running prebuilds, builds or tests. Its one-line summary is written to stderr,
+and an empty selection exits successfully, which lets CI skip work when no ids
+are returned:
+
+```sh
+rows=$(ckdev-mutate run --diff origin/main --list)
+```
+
+`--shard i/n` divides the selected, id-sorted rows into the same round-robin
+shards as before. For more balanced CI jobs, pass `--shard-weights <report.json>`
+with a replay report created by `run --report`. Each row's weight is its reported
+`build_ms + test_ms`; rows absent from the report use the median weight of the
+reported rows (or 1 ms when the report has no rows). Assignment uses
+deterministic longest-processing-time greedy: heavier rows first, id ascending
+for equal weights, then the least-loaded shard, with lower shard index breaking
+load ties. Selection filters are applied before either sharding algorithm.
+The output reports the selected shard's row count and estimated minutes, plus
+the estimate for every shard.
+
+Every job in a shard set **must use the same report file** with
+`--shard-weights`. Do not select a latest report independently in each job: if
+jobs read different timings, their full assignments can differ and leave gaps or
+overlap. The whole selected-row list for one weighted shard can be previewed
+without running tests:
+
+```sh
+ckdev-mutate run --diff origin/main --shard 2/4 \
+  --shard-weights reports/replay.json --list
+```
+
 ## Catalogue
 
 ### Single file or directory (0.10.0)
