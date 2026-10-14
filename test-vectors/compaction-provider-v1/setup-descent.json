@@ -1,0 +1,128 @@
+{
+  "describe": [
+    {
+      "name": "setup descent support absent",
+      "answer": {"majors": [{"version": "compaction-provider/v1", "ops": ["role.describe", "compaction.setup", "compaction.step"], "stability": "alpha"}], "implementation_version": "synthetic-provider", "capabilities": []}
+    },
+    {
+      "name": "setup descent support declared",
+      "answer": {"majors": [{"version": "compaction-provider/v1", "ops": ["role.describe", "compaction.setup", "compaction.step"], "stability": "alpha"}], "implementation_version": "synthetic-provider", "capabilities": [], "setup_descends_from": true}
+    }
+  ],
+  "requests": [
+    {
+      "name": "setup descent absent",
+      "method": "compaction.setup",
+      "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "params": {}, "composition": {}, "model": "m", "now": 1}
+    },
+    {
+      "name": "setup descent present",
+      "method": "compaction.setup",
+      "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}
+    }
+  ],
+  "checks": [
+    {
+      "name": "setup_descent_parent_unknown",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "unknown", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}, "refusal": {"code": "history_unreadable"}, "saved_descends_from": null, "history_checks": 1}
+      ]
+    },
+    {
+      "name": "setup_descent_cut_not_held",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 3}, "params": {}, "composition": {}, "model": "m", "now": 1}, "refusal": {"code": "history_unreadable"}, "saved_descends_from": null, "history_checks": 1}
+      ]
+    },
+    {
+      "name": "setup_descent_prefix_gap",
+      "provider_state": {"parents": {"parent": [0, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}, "refusal": {"code": "history_unreadable"}, "saved_descends_from": null, "history_checks": 1}
+      ]
+    },
+    {
+      "name": "setup_descent_conflict_parent",
+      "provider_state": {"parents": {"parent": [0, 1, 2], "other": [0, 1, 2]}, "descends_from": {"lineage_id": "parent", "through_ordinal": 2}},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "other", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}, "refusal": {"code": "invalid_params", "detail": {"field": "lineage_id"}}, "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "setup_descent_conflict_cut",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": {"lineage_id": "parent", "through_ordinal": 2}},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 1}, "params": {}, "composition": {}, "model": "m", "now": 1}, "refusal": {"code": "invalid_params", "detail": {"field": "lineage_id"}}, "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "setup_descent_repeat_and_later_step_omits",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 1},
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "repeat", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 2}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0},
+        {"method": "compaction.step", "request": {"session": "s", "harness": "opencode", "request_id": "step", "lineage_id": "child", "step_id": "step", "step_kind": "user_turn", "model": "m", "estimate": {"request_tokens": 1}, "messages": [], "now": 3}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "step_only_descent",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": null, "history_checks": 0},
+        {"method": "compaction.step", "request": {"session": "s", "harness": "opencode", "request_id": "step", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "step_id": "step", "step_kind": "user_turn", "model": "m", "estimate": {"request_tokens": 1}, "messages": [], "now": 2}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 1}
+      ]
+    },
+    {
+      "name": "setup_and_step_agree",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 1},
+        {"method": "compaction.step", "request": {"session": "s", "harness": "opencode", "request_id": "step", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "step_id": "step", "step_kind": "user_turn", "model": "m", "estimate": {"request_tokens": 1}, "messages": [], "now": 2}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "setup_and_step_conflict",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 1},
+        {"method": "compaction.step", "request": {"session": "s", "harness": "opencode", "request_id": "step", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 1}, "step_id": "step", "step_kind": "user_turn", "model": "m", "estimate": {"request_tokens": 1}, "messages": [], "now": 2}, "refusal": {"code": "invalid_params", "detail": {"field": "lineage_id"}}, "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "hook_first_descent_and_repeat",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": null, "history_checks": 0},
+        {"method": "transform.hook", "request": {"session": "s", "harness": "opencode", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "hook": "pre_user", "blocks": ["next"]}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 1},
+        {"method": "transform.hook", "request": {"session": "s", "harness": "opencode", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "hook": "pre_user", "blocks": ["next"]}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "step_conflicts_with_hook_descent",
+      "provider_state": {"parents": {"parent": [0, 1, 2], "other": [0, 1, 2]}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": null, "history_checks": 0},
+        {"method": "transform.hook", "request": {"session": "s", "harness": "opencode", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "params": {}, "hook": "pre_user", "blocks": ["next"]}, "outcome": "accepted", "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 1},
+        {"method": "compaction.step", "request": {"session": "s", "harness": "opencode", "request_id": "step", "lineage_id": "child", "descends_from": {"lineage_id": "other", "through_ordinal": 2}, "step_id": "step", "step_kind": "user_turn", "model": "m", "estimate": {"request_tokens": 1}, "messages": [], "now": 2}, "refusal": {"code": "invalid_params", "detail": {"field": "lineage_id"}}, "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "hook_conflicts_with_setup_descent",
+      "provider_state": {"parents": {"parent": [0, 1, 2]}, "descends_from": {"lineage_id": "parent", "through_ordinal": 2}},
+      "calls": [
+        {"method": "transform.hook", "request": {"session": "s", "harness": "opencode", "lineage_id": "child", "descends_from": {"lineage_id": "parent", "through_ordinal": 1}, "params": {}, "hook": "pre_user", "blocks": ["next"]}, "refusal": {"code": "invalid_params", "detail": {"field": "lineage_id"}}, "saved_descends_from": {"lineage_id": "parent", "through_ordinal": 2}, "history_checks": 0}
+      ]
+    },
+    {
+      "name": "never_declared_stays_root",
+      "provider_state": {"parents": {}, "descends_from": null},
+      "calls": [
+        {"method": "compaction.setup", "request": {"session": "s", "harness": "opencode", "request_id": "setup", "lineage_id": "child", "params": {}, "composition": {}, "model": "m", "now": 1}, "outcome": "accepted", "saved_descends_from": null, "history_checks": 0},
+        {"method": "compaction.step", "request": {"session": "s", "harness": "opencode", "request_id": "step", "lineage_id": "child", "step_id": "step", "step_kind": "user_turn", "model": "m", "estimate": {"request_tokens": 1}, "messages": [], "now": 2}, "outcome": "accepted", "saved_descends_from": null, "history_checks": 0},
+        {"method": "transform.hook", "request": {"session": "s", "harness": "opencode", "lineage_id": "child", "params": {}, "hook": "pre_user", "blocks": ["next"]}, "outcome": "accepted", "saved_descends_from": null, "history_checks": 0}
+      ]
+    }
+  ]
+}

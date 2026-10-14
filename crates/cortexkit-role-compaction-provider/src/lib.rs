@@ -26,6 +26,7 @@ pub mod describe;
 pub mod errors;
 pub mod fence;
 pub mod geometry;
+pub mod lineage;
 pub mod notice;
 pub mod points;
 pub mod ready;
@@ -118,6 +119,7 @@ pub(crate) mod vectors {
         "ready.json",
         "role-describe.json",
         "setup.json",
+        "setup-descent.json",
         "status.json",
     ];
 
@@ -250,6 +252,21 @@ mod tests {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect()
+    }
+
+    #[test]
+    fn setup_descent_fixture_matches_sha256sum() {
+        let sums = std::fs::read_to_string(format!("{}/SETUP_DESCENT_SHA256SUMS", vectors::dir()))
+            .unwrap();
+        let lines: Vec<_> = sums.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let (digest, name) = lines[0].split_once("  ").unwrap();
+        assert_eq!(name, "setup-descent.json");
+        assert_eq!(
+            sha256(&std::fs::read(format!("{}/{name}", vectors::dir())).unwrap()),
+            digest,
+            "{name}"
+        );
     }
 
     #[test]

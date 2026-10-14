@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.1
+
+- Add optional `SetupRequest.descends_from`, reusing `status::DescendsFrom`,
+  and a matching builder. Setup decoding is lenient and the request is
+  non-exhaustive, so this is an additive patch with wire major v1 unchanged.
+- Advertise setup descent with optional describe flag `setup_descends_from`.
+  Callers send setup `descends_from` only when the flag is true; otherwise
+  they declare descent on the first step or hook. Absent/false means
+  unsupported, avoiding silent loss through older lenient setup decoders.
+- Pin parent/cut validation, durable descent links, idempotent repeats and
+  `invalid_params` / `lineage_id` conflicts across setup, step and hook.
+  Setup without descent leaves the lineage undeclared: first-step and
+  first-hook declarations remain valid, and no declaration leaves a root.
+- Add a provider-owned `lineage::DescentLink` reference check and shared
+  setup/step/hook descent vectors, separately pinned without changing any
+  existing vector bytes. The planned
+  `cortexkit-role-compaction-provider-conformance` crate will exercise real
+  provider modules over routes (CONTRACT.md §17); it is not implemented yet.
+
 ## 0.2.0
 
 - Preserve native ingress/hook JSON with optional raw-message sidecars, required

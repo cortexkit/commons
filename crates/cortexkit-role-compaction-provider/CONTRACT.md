@@ -71,7 +71,7 @@ refusals keep their existing bytes and meaning.
 ## 2. `role.describe`
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
-  implementation_version, capabilities, runner_groups?}` (`RoleDescribe`),
+  implementation_version, capabilities, runner_groups?, setup_descends_from?}` (`RoleDescribe`),
   the shape `tool-provider/v1` and `llm-runner/v1` use. `version` is spelled
   as in the manifest, `compaction-provider/v1`.
 - [pinned] Stability is data, never part of a name: `alpha`, `beta` or
@@ -83,7 +83,15 @@ refusals keep their existing bytes and meaning.
 - [pinned] The answer describes the provider build, never a session, so a
   consumer may cache it for as long as it talks to the same module
   incarnation.
-- [pinned] This role defines no module-level capabilities yet.
+- [pinned] This role defines no identifiers for the `capabilities` list yet;
+  optional support is advertised by named describe members.
+- [pinned] Optional boolean `role.describe.setup_descends_from: true`
+  declares support for setup-level descent (§4). Absent or false means
+  unsupported; false is omitted when encoded. A provider advertising true
+  implements every descent rule in §4: parent/cut and retained-history
+  validation, durable links, later omission, identical repeats and conflict
+  refusals across setup, step and hook. `RoleDescribe` is non-exhaustive,
+  so the default-false declaration is additive.
 - [pinned] The provider declares what it needs from the runner in
   `role.describe.runner_groups`: the runner groups it needs besides
   `compaction`, such as `transcript_reads` for a provider
@@ -142,13 +150,46 @@ the session and freezes that plan for use.
   answered last time (kill point `SetupRecorded`).
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
   preset?, params, composition, model, variant?, context_window?, output_limit?,
-  newest?, lineage_id?, now}`. `model` is a string; `variant`,
+  newest?, lineage_id?, descends_from?, now}`. `model` is a string; `variant`,
   `context_window` and `output_limit` are sibling fields, not a nested
   model object. `params` defaults to `{}`; an absent `preset` selects the
   provider's default. `composition` is an opaque object passed verbatim.
   `newest` is `{ordinal, mid}` when a message is already written;
   `lineage_id` is absent when no lineage exists. `now` is milliseconds
   since the Unix epoch.
+- [pinned] Setup-level `descends_from` is optional and uses exactly the
+  step status's `DescendsFrom` (§6): `{lineage_id, through_ordinal}` names
+  the parent and an inclusive cut in the same conversation. Before accepting
+  a first declaration, the provider validates that the parent and cut exist
+  and that it holds every retained message through that cut. An unknown
+  parent, a cut it does not hold, or a gap in the retained prefix answers
+  `refuse` with `history_unreadable`; it never guesses missing history or
+  saves a link from a refused declaration.
+- [pinned] The provider durably saves an accepted descent link for that
+  session's lineage before replying. Later steps or hooks may omit
+  `descends_from` and continue using the saved link. A repeated setup, step
+  or hook with the same parent and cut is an idempotent no-op, not a second
+  inheritance. A declaration with a different parent or cut conflicts with
+  the saved link and is refused with `invalid_params`, field `lineage_id`
+  (§14); the saved link remains unchanged. Setup and step declarations, when
+  both are present, must agree. The reference check is
+  `lineage::DescentLink`; providers still validate and persist their own
+  retained history and link.
+- [pinned] Setup without `descends_from` preserves today's behavior and
+  does not fix the lineage as a root. Its first step or hook that declares
+  descent may establish the link once, with the same parent/cut validation.
+  Once established it is fixed across setup, step and hook: the same
+  declaration is a no-op and a later contradictory declaration is refused
+  with `invalid_params`, field `lineage_id`. A lineage that never declares
+  descent stays a root. The existing first-step-only declaration path is
+  unchanged.
+- [pinned] A caller sends setup `descends_from` only when the provider's
+  `role.describe.setup_descends_from` is true (§2). Otherwise it declares
+  descent on the first step or hook, as today. Setup params decode leniently
+  (§15), so an older provider can silently ignore an unknown setup member
+  and treat the lineage as a root if later calls omit descent. Successful
+  setup decoding is not a declaration of support. `SetupRequest` is
+  non-exhaustive and the optional member remains additive within v1.
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
   initial, stability?, call_when?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§11).
@@ -223,6 +264,10 @@ The status (`StepStatus`) carries:
   prefix through the named ordinal or answer `refuse` with
   `history_unreadable`, optionally naming its first missing ordinal in
   `detail.history_gap_from` (§11). It never guesses ancestry or history.
+  Setup may already have established the link (§4); omission here uses it,
+  agreement is a no-op and contradiction is `invalid_params`, field
+  `lineage_id`. Without a setup declaration, the first declaring step or
+  hook establishes descent as before; setup absence does not lock a root.
 - [pinned] The step: `step_id` (opaque) and `step_kind`, `user_turn` or
   `tool_step`, decoded open.
 - [pinned] `model` and `variant`; `context_window` and `output_limit` when
@@ -656,6 +701,9 @@ serves `session.read` from a scripted transcript, and receives
 | `role_describe_shape`, `role_describe_cacheable`, `extra_op_still_admitted` | §2 |
 | `setup_once_initial_well_formed`, `setup_repeat_after_failure` | §4 |
 | `setup_declarations_pure` | §13: two Setups with the same inputs and different `session` give the same `stability` and `call_when` |
+| `setup_descent_parent_unknown`, `setup_descent_cut_not_held`, `setup_descent_prefix_gap` | §4: refuse missing retained history without saving a link |
+| `setup_descent_conflict`, `setup_descent_repeat`, `setup_descent_later_step_omits` | §4: fixed durable link, idempotent repeat and omitted later declarations |
+| `step_only_descent`, `setup_and_step_agree`, `hook_first_descent`, `step_conflicts_with_hook_descent` | §4: setup absence leaves descent open; first step or hook establishes it and all later declarations must agree |
 | `answer_names_request`, `answer_known_value` | §7 |
 | `version_rises`, `version_resumes_above_last_applied` | §9 |
 | `range_within_newest`, `range_never_splits_tool_pair` | §8 |

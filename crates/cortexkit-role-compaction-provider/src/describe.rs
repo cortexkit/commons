@@ -49,10 +49,21 @@ pub struct RoleDescribe {
     /// ([`RoleDescribe::unmet_runner_groups`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runner_groups: Vec<String>,
+    /// True declares the setup descent rules in CONTRACT.md §4: validate the
+    /// inherited history, persist its parent lineage and inclusive cut, and
+    /// refuse a later declaration that contradicts that saved ancestry.
+    /// Callers may send setup `descends_from` only when this is true;
+    /// absent or false means use the first step or hook instead.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub setup_descends_from: bool,
     /// Optional Claude Code capabilities, also selected at transform.declare.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_code:
         Option<cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 fn alpha() -> String {
@@ -91,6 +102,11 @@ impl RoleDescribe {
             implementation_version: implementation_version.into(),
             ..Self::default()
         }
+    }
+
+    pub fn with_setup_descends_from(mut self) -> Self {
+        self.setup_descends_from = true;
+        self
     }
 
     pub fn with_claude_code(
@@ -209,6 +225,39 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn setup_descent_support_survives_decode() {
+        let file = vectors::load("setup-descent.json");
+        let case = &vectors::cases(&file, "describe")[1];
+        let name = case["name"].as_str().unwrap();
+        let describe = vectors::round_trip::<RoleDescribe>(name, &case["answer"]);
+        assert!(describe.setup_descends_from, "{name}");
+        assert!(check_describe(&case["answer"]).unwrap().setup_descends_from);
+        let mut baseline = case["answer"].clone();
+        baseline
+            .as_object_mut()
+            .unwrap()
+            .remove("setup_descends_from");
+        let built = check_describe(&baseline)
+            .unwrap()
+            .with_setup_descends_from();
+        assert_eq!(built, describe);
+    }
+
+    #[test]
+    fn setup_descent_support_absence_is_unsupported() {
+        let file = vectors::load("setup-descent.json");
+        let case = &vectors::cases(&file, "describe")[0];
+        let name = case["name"].as_str().unwrap();
+        let describe = vectors::round_trip::<RoleDescribe>(name, &case["answer"]);
+        assert!(!describe.setup_descends_from, "{name}");
+        assert!(!check_describe(&case["answer"]).unwrap().setup_descends_from);
+        assert!(!RoleDescribe::new(Vec::new(), "synthetic").setup_descends_from);
+        let mut explicit_false = case["answer"].clone();
+        explicit_false["setup_descends_from"] = serde_json::Value::Bool(false);
+        assert_eq!(check_describe(&explicit_false).unwrap(), describe);
+    }
 
     #[test]
     fn describe_vectors_check_as_recorded() {

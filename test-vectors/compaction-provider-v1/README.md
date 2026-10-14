@@ -9,6 +9,7 @@ draft: these vectors change with the contract until it is reviewed.
 |---|---|---|
 | `role-describe.json` | canonical answers, answers a runner accepts (a missing `stability` read as `alpha`, unknown fields and ops tolerated, the runner groups a provider needs met or unmet), and answers it refuses with the problem: not an object, no majors, no `compaction-provider/v1` major, a missing required op | the wire crate's describe test |
 | `setup.json` | `compaction.setup` requests (fresh, and with a first message already written), `ready` answers (a two-message head before every message with stability ranks (how rarely each of the provider's own messages changes, which the runner uses to place cache breakpoints) and `call_when` (the share of the model's context window at which the runner calls the provider, with per-model overrides), an empty view, an unknown condition kind), `refuse` answers (plain, with the provider's own `provider_code`, and with a code the role does not name, each with the retryability fixed by its code), a `refuse` still carrying the removed `retryable` member (tolerated and ignored), answers that do not decode (unknown answer, no initial message, no request id, a `refuse` without a code, a negative rank), model matching for `call_when.models` (exact id, then the longest trailing-`*` pattern, then `default`), and `call_when` shares out of range | the wire crate's setup test |
+| `setup-descent.json` | absent/present describe support declaration, optional setup descent wire bytes; unknown parent, unheld cut, prefix gap, fixed-link conflicts, idempotent repeats, later omission, step-only descent, setup/step agreement, first-hook descent, cross-operation contradictions and undeclared roots | the wire crate's describe, setup and lineage tests |
 | `status.json` | `compaction.step` statuses (first call with no cursor, a tool step with usage, after an overflow, a prefix rebuild (the runner re-sending the conversation from the start), a refused last answer, a byte-capped message list) with the next version a provider may use; runner extras a provider ignores; statuses that do not decode; statuses whose messages break the cursor rules | the wire crate's status test |
 | `answers.json` | each answer (`noop`, two CompactionMessages, `wait`, four `refuse`s, each with the retryability fixed by its code, one with a `provider_code` and one with a code the role does not name, opaque ids and the largest `u64` version), unknown fields tolerated (including a `refuse` still carrying the removed `retryable`, which never decides retry), answers that do not decode (unknown or uppercase `answer`, no request id, no version, a range named by message ids, a negative version, `wait` without a bound, `refuse` without a code), an inverted range, and the model-view `source` each CompactionMessage maps to: `llm-runner/v1`'s half-open replacement source, an insertion for an empty range (Setup's head is `[0, 0)`), none for an inverted range | the wire crate's answer and model-view tests |
 | `fence.json` | the runner's decision for an answer given its newest request, last applied version and newest ordinal: act, `superseded_request` for every answer that names any request but the newest issued (each kind of delayed answer, one with a higher version, and one naming a request never issued), `late` for an answer to the newest request at or after its call deadline (with an in-time twin that acts), `stale_version`, `range_beyond_newest`, `range_inverted` | the wire crate's fence test |
@@ -62,3 +63,17 @@ escapes, signed/redacted thinking and opaque tool-input cache members.
 missing-original refusal; its source digest frames each raw UTF-8 message with
 an 8-byte big-endian byte length. The source includes literal multibyte text
 and a Unicode escape. Both are included in `CLAUDE_CODE_SHA256SUMS`.
+
+`setup-descent.json` follows the named `requests` and stateful `checks`
+format, plus named `describe` answers with and without setup descent support.
+Callers send setup descent only when describe's `setup_descends_from` is
+true; without that declaration they use the first step or hook instead.
+Each check's `provider_state` supplies durable parent ordinals and a
+saved link; `calls` are ordered concrete setup, step or hook wire params.
+Literal `refusal`/`outcome`, `saved_descends_from` and `history_checks`
+expectations live outside those params. The wire tests exercise the common
+descent reference check, not a live provider or a transport. A provider must
+still validate its actual retained originals and durably persist the descent
+link from the session's current lineage to its parent and inclusive cut.
+`SETUP_DESCENT_SHA256SUMS` pins this fixture separately; existing vector
+bytes and checksum manifests are unchanged.

@@ -13,7 +13,11 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{answer::CompactionMessage, errors::RefuseCode, status::MessageRef};
+use crate::{
+    answer::CompactionMessage,
+    errors::RefuseCode,
+    status::{DescendsFrom, MessageRef},
+};
 
 /// The `compaction.setup` request. Decoded leniently.
 ///
@@ -37,6 +41,10 @@ pub struct SetupRequest {
     /// The session's lineage, absent when nothing has been written yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
+    /// Optional inherited prefix, with the same meaning as on a step status.
+    /// Absence leaves descent undeclared; a later step or hook may declare it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descends_from: Option<DescendsFrom>,
     /// The compaction item's preset, verbatim from the plan. Absent means
     /// the provider's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,6 +96,7 @@ impl SetupRequest {
             harness: harness.into(),
             request_id: request_id.into(),
             lineage_id: None,
+            descends_from: None,
             preset: None,
             params: Map::new(),
             composition,
@@ -118,6 +127,11 @@ impl SetupRequest {
 
     pub fn with_lineage(mut self, lineage_id: impl Into<String>) -> Self {
         self.lineage_id = Some(lineage_id.into());
+        self
+    }
+
+    pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
+        self.descends_from = Some(descends_from);
         self
     }
 
@@ -286,6 +300,38 @@ impl SetupAnswer {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn setup_descent_round_trips_without_dropping_the_field() {
+        let file = vectors::load("setup-descent.json");
+        let case = &vectors::cases(&file, "requests")[1];
+        let request =
+            vectors::round_trip::<SetupRequest>(case["name"].as_str().unwrap(), &case["request"]);
+        assert_eq!(request.descends_from, Some(DescendsFrom::new("parent", 2)));
+        let built = SetupRequest::new("s", "opencode", "setup", Map::new(), "m", 1)
+            .with_lineage("child")
+            .with_descends_from(DescendsFrom::new("parent", 2));
+        assert_eq!(built, request);
+    }
+
+    #[test]
+    fn setup_descent_absence_and_lenient_decode_are_unchanged() {
+        let file = vectors::load("setup-descent.json");
+        let case = &vectors::cases(&file, "requests")[0];
+        let request =
+            vectors::round_trip::<SetupRequest>(case["name"].as_str().unwrap(), &case["request"]);
+        assert_eq!(request.descends_from, None);
+        let mut extended = case["request"].clone();
+        extended["future_extension"] = serde_json::json!({"unknown": true});
+        assert_eq!(
+            serde_json::from_value::<SetupRequest>(extended).unwrap(),
+            request
+        );
+        assert_eq!(
+            SetupRequest::new("s", "opencode", "setup", Map::new(), "m", 1).descends_from,
+            None
+        );
+    }
 
     #[test]
     fn setup_vectors_round_trip() {
