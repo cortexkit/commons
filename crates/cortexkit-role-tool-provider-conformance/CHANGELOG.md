@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- Requires subc-protocol 0.32 and cortexkit-role-tool-provider 0.8.0. Consumers
+  must upgrade the conformance crate and provider together because public route
+  errors and the `wire` re-export expose their protocol-bound types; no test
+  adapter source changes are otherwise required.
+
 ## 0.7.2
 
 - Require cortexkit-role-tool-provider 0.7.3 and verify content/v1 results are

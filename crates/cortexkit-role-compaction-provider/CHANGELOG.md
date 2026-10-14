@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3
+
+- Require cortexkit-role-step-transform-provider 0.2.2 and publish both crates
+  from the same commons revision because the Claude Code capability bundle
+  records one revision for both roles. The protocol 0.32 update is confined to
+  the step-transform provider's dev-only parity test; no consumer source or
+  wire changes are required.
+
 ## 0.2.2
 
 - No code change. Published from the same commons revision as cortexkit-role-step-transform-provider 0.2.1, because the Claude Code capability bundle records one commons revision for both roles.

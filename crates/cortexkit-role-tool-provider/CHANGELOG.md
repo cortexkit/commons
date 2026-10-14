@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Requires subc-protocol 0.32. Consumers must upgrade together so the public
+  `CallMode` and `ErrorBody` types come from the same protocol version; no
+  source changes are otherwise required.
+
 ## 0.7.3
 
 - Add a route-bind capability constant and helper for detecting consumers that

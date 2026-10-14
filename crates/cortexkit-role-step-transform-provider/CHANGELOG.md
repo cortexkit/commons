@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- Update the dev-only capability-identifier parity test to subc-protocol 0.32.
+  The provider's public API and wire behavior are unchanged, so consumers need
+  no source changes. Published from the same commons revision as
+  cortexkit-role-compaction-provider 0.2.3, which records this pair's shared
+  Claude Code capability revision.
+
 ## 0.2.1
 
 - No code change. Published from the same commons revision as cortexkit-role-compaction-provider 0.2.2, because the Claude Code capability bundle records one commons revision for both roles.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Requires subc-protocol 0.32 and cortexkit-role-compaction-provider 0.2.3.
+  Consumers must use the new conformance major with protocol 0.32 because its
+  public route errors expose `ErrorBody`; update the paired compaction provider
+  dependency as well. No conformance behavior changes.
+
 ## 0.2.2
 
 - Add discovery-gated boundary cancellation, unlisted-point refusal and immediate escalation cases. Missing `step_boundary` support is reported as named skips, never passes. The boundary case also checks owner-only admission and idempotent repeats.
