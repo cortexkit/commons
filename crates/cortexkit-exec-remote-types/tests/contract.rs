@@ -50,6 +50,9 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-platform-windows",
     "crate-local-platform-unsupported",
     "crate-local-unknown-platform",
+    "crate-local-lost-to-restart",
+    "crate-local-request-rejected",
+    "crate-local-runner-authentication-failed",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -247,9 +250,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 23);
+    assert_eq!(LOCAL_OUTCOMES.len(), 26);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 60);
+    assert_eq!(cases().len(), 63);
 }
 
 #[test]
@@ -1736,4 +1739,115 @@ fn network_fields_are_ignored_by_0_2_4_decoders() {
         round_trip::<Accepted024>(&serde_json::to_vec(&accepted).unwrap()),
         serde_json_canonicalizer::to_vec(&old_accepted).unwrap()
     );
+}
+
+#[test]
+fn recovery_and_request_refusal_vectors_pin_before_start_details() {
+    for (name, reason, detail) in [
+        (
+            "crate-local-lost-to-restart",
+            RefusalReason::LostToRestart,
+            None,
+        ),
+        (
+            "crate-local-request-rejected",
+            RefusalReason::RequestRejected,
+            Some("direct_timeout_refused"),
+        ),
+        (
+            "crate-local-runner-authentication-failed",
+            RefusalReason::RunnerAuthenticationFailed,
+            Some("credentials_unavailable"),
+        ),
+    ] {
+        let vector = bytes("outcomes", name);
+        let case: OutcomeCase = serde_json::from_slice(&vector).unwrap();
+        let [StreamRecord::Terminal(terminal)] = case.stream.as_slice() else {
+            panic!("each refusal vector pins a single terminal record")
+        };
+        assert_eq!(terminal.outcome, Outcome::RefusedBeforeStart { reason });
+        assert_eq!(terminal.ran, Some(Ran::None));
+        assert_eq!(terminal.refusal_detail(), detail);
+        assert_eq!(round_trip::<OutcomeCase>(&vector), vector);
+    }
+}
+
+#[test]
+fn additive_refusal_reason_tags_decode_to_typed_variants() {
+    for (tag, reason) in [
+        ("lost_to_restart", RefusalReason::LostToRestart),
+        ("request_rejected", RefusalReason::RequestRejected),
+        (
+            "runner_authentication_failed",
+            RefusalReason::RunnerAuthenticationFailed,
+        ),
+    ] {
+        assert_eq!(RefusalReason::from(tag.to_owned()), reason);
+        assert_eq!(
+            serde_json::from_str::<RefusalReason>(&format!("\"{tag}\"")).unwrap(),
+            reason
+        );
+    }
+}
+
+#[test]
+fn additive_refusal_reason_variants_serialize_to_exact_tags() {
+    for (reason, tag) in [
+        (RefusalReason::LostToRestart, "lost_to_restart"),
+        (RefusalReason::RequestRejected, "request_rejected"),
+        (
+            RefusalReason::RunnerAuthenticationFailed,
+            "runner_authentication_failed",
+        ),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&reason).unwrap(),
+            format!("\"{tag}\"")
+        );
+        assert_eq!(String::from(reason), tag);
+    }
+}
+
+#[test]
+fn additive_refusal_reason_future_unknown_tag_round_trips() {
+    let tag = "future_policy_refusal";
+    let json = format!("\"{tag}\"");
+    let reason: RefusalReason = serde_json::from_str(&json).unwrap();
+    assert_eq!(reason, RefusalReason::Unknown(tag.to_owned()));
+    assert_eq!(serde_json::to_string(&reason).unwrap(), json);
+    assert_eq!(String::from(reason), tag);
+}
+
+#[test]
+fn additive_refusal_reason_tags_remain_unknown_to_older_reader() {
+    fn decode_as_older_reader(reason: String) -> RefusalReason {
+        match reason.as_str() {
+            "unreachable" => RefusalReason::Unreachable,
+            "runner_version_mismatch" => RefusalReason::RunnerVersionMismatch,
+            "snapshot_failed" => RefusalReason::SnapshotFailed,
+            "workspace_key_rejected" => RefusalReason::WorkspaceKeyRejected,
+            "runner_full" => RefusalReason::RunnerFull,
+            "runner_draining" => RefusalReason::RunnerDraining,
+            "runner_disk_full" => RefusalReason::RunnerDiskFull,
+            "queue_wait_exceeded" => RefusalReason::QueueWaitExceeded,
+            "transfer_interrupted" => RefusalReason::TransferInterrupted,
+            "tree_hash_mismatch" => RefusalReason::TreeHashMismatch,
+            "bundle_rejected" => RefusalReason::BundleRejected,
+            "workspace_setup_failed" => RefusalReason::WorkspaceSetupFailed,
+            "network_unsupported" => RefusalReason::NetworkUnsupported,
+            "platform_unsupported" => RefusalReason::PlatformUnsupported,
+            _ => RefusalReason::Unknown(reason),
+        }
+    }
+
+    for tag in [
+        "lost_to_restart",
+        "request_rejected",
+        "runner_authentication_failed",
+    ] {
+        let json = format!("\"{tag}\"");
+        let reason = decode_as_older_reader(serde_json::from_str(&json).unwrap());
+        assert_eq!(reason, RefusalReason::Unknown(tag.to_owned()));
+        assert_eq!(serde_json::to_string(&reason).unwrap(), json);
+    }
 }

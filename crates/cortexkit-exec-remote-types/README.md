@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.6**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.8**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -65,6 +65,28 @@ must cancel the job and must not trust its result unless `Accepted.platform`
 exactly matches the request. Unknown or unavailable platforms are refused before
 start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`); the
 requested platform's wire name is reported in `refusal_detail`.
+
+### Recovery and request refusals
+
+- `RefusalReason::LostToRestart` (`"lost_to_restart"`): an admission that had not
+  started was lost during runner recovery. The caller may resubmit fresh under
+  its own time budget. The tag alone does not prove the job never started; that
+  guarantee comes only from the existing refused-before-start contract.
+- `RefusalReason::RequestRejected` (`"request_rejected"`): the operation or its
+  parameters are not permitted. Correct or avoid the request rather than retry
+  it unchanged. `refusal_detail` carries the specific code, for example
+  `prepare_unsupported` or `direct_timeout_refused`.
+- `RefusalReason::RunnerAuthenticationFailed`
+  (`"runner_authentication_failed"`): the executor could not authenticate the
+  job to its runner because credentials were unavailable, a grant was refused,
+  the agent or signing failed, or SSH configuration was invalid. The job's caller
+  cannot fix this, and a retry is not expected to help. `refusal_detail` carries
+  a safe fault code, never credential material.
+
+These descriptions do not add retry policy to the types. Refusal detail remains
+human-only: callers may quote it verbatim but must never parse it for decisions.
+Older readers retain these tags as `RefusalReason::Unknown(String)`, preserving
+the raw strings on serialization; all existing tags and wire shapes are unchanged.
 
 ### Terminal reports
 
@@ -160,7 +182,7 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Twenty-six **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
+Twenty-nine **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
 
 - `outcomes/crate-local-network-outbound`: an outbound request and acknowledged
   grant; 0.2.4-shaped request and accepted decoders ignore the additive fields.
@@ -200,8 +222,12 @@ Twenty-six **crate-local additions** were written in this crate, rather than cop
   hints on the terminal and prepare containers, accepted by 0.2.2 decoders.
 - `outcomes/crate-local-runner-draining` and `outcomes/crate-local-runner-disk-full`:
   the newly recognised transient refusal reasons.
+- `outcomes/crate-local-lost-to-restart`, `outcomes/crate-local-request-rejected`,
+  and `outcomes/crate-local-runner-authentication-failed`: the recovery, request
+  rejection, and runner authentication refusals, with human-only detail codes
+  where reported. An older reader retains their reason strings as `Unknown`.
 
-Totals: **43 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
+Totals: **46 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent

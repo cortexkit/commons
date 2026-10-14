@@ -262,6 +262,22 @@ pub enum RefusalReason {
     /// The runner does not support the requested platform. The job was refused
     /// before start; `refusal_detail` carries the requested platform wire name.
     PlatformUnsupported,
+    /// An admission that had not started was lost during runner recovery. The
+    /// caller may resubmit fresh under its own time budget. The tag alone does
+    /// not prove the job never started; that guarantee comes only from the
+    /// refused-before-start contract.
+    LostToRestart,
+    /// The operation or its parameters are not permitted. The caller should
+    /// correct or avoid the request rather than retry it unchanged.
+    /// `refusal_detail` carries a specific human-only code, such as
+    /// `prepare_unsupported` or `direct_timeout_refused`.
+    RequestRejected,
+    /// The executor could not authenticate the job to its runner: credentials
+    /// were unavailable, a grant was refused, the agent or signing failed, or
+    /// SSH configuration was invalid. The job's caller cannot fix this, and a
+    /// retry is not expected to help. `refusal_detail` carries a safe human-only
+    /// fault code, never credential material.
+    RunnerAuthenticationFailed,
     /// A refusal tag this version does not recognise. The refused command
     /// still did not start.
     Unknown(String),
@@ -284,6 +300,9 @@ impl From<String> for RefusalReason {
             "workspace_setup_failed" => Self::WorkspaceSetupFailed,
             "network_unsupported" => Self::NetworkUnsupported,
             "platform_unsupported" => Self::PlatformUnsupported,
+            "lost_to_restart" => Self::LostToRestart,
+            "request_rejected" => Self::RequestRejected,
+            "runner_authentication_failed" => Self::RunnerAuthenticationFailed,
             _ => Self::Unknown(reason),
         }
     }
@@ -306,6 +325,9 @@ impl From<RefusalReason> for String {
             RefusalReason::WorkspaceSetupFailed => "workspace_setup_failed".into(),
             RefusalReason::NetworkUnsupported => "network_unsupported".into(),
             RefusalReason::PlatformUnsupported => "platform_unsupported".into(),
+            RefusalReason::LostToRestart => "lost_to_restart".into(),
+            RefusalReason::RequestRejected => "request_rejected".into(),
+            RefusalReason::RunnerAuthenticationFailed => "runner_authentication_failed".into(),
             RefusalReason::Unknown(reason) => reason,
         }
     }

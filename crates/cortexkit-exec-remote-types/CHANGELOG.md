@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.8
+
+- Add `RefusalReason::LostToRestart` (`"lost_to_restart"`) for an admission that
+  had not started and was lost during runner recovery. The caller may resubmit
+  fresh under its own time budget; only the refused-before-start contract, not
+  the tag alone, guarantees that the job never started.
+- Add `RefusalReason::RequestRejected` (`"request_rejected"`) for an operation or
+  parameters that are not permitted. Correct or avoid the request rather than
+  retry it unchanged. `refusal_detail` carries the specific human-only code,
+  such as `prepare_unsupported` or `direct_timeout_refused`.
+- Add `RefusalReason::RunnerAuthenticationFailed`
+  (`"runner_authentication_failed"`) when the executor cannot authenticate the
+  job to its runner. The job's caller cannot fix this, and a retry is not expected
+  to help. `refusal_detail` carries a safe human-only fault code, never credential
+  material.
+- Existing variants, constructors, wire bytes and `Unknown(String)` round-trips
+  are unchanged. Older readers retain all three tags as unknown strings. Three
+  appended golden vectors pin the new refusals without changing existing vectors;
+  the types describe the reasons but do not enforce retry policy.
+
 ## 0.2.7
 
 - `Outcome::WindowsExit` carries the full unsigned Windows process exit code.

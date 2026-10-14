@@ -2,7 +2,7 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The twenty-six `crate-local-*` cases documented below were
+pin the same bytes. The twenty-nine `crate-local-*` cases documented below were
 written in this crate rather than copied from the executor's vectors, to pin
 caller-side cases the executor's set does not cover. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
@@ -54,9 +54,9 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These twenty-three outcome cases (46 files: one `.jcs`/`.sha256` pair each) and
+These twenty-six outcome cases (52 files: one `.jcs`/`.sha256` pair each) and
 three reply cases (six files) extend the caller corpus described above. The
-resulting corpus contains 43 outcome cases and 17 reply cases:
+resulting corpus contains 46 outcome cases and 17 reply cases:
 
 - `outcomes/crate-local-network-outbound`: a request with `network: "outbound"`
   and an `accepted` record acknowledging `network: "outbound"`. The runner must
@@ -156,6 +156,21 @@ Four vector pairs (each a `.jcs` canonical record and its `.sha256`) fix the exa
 - `outcomes/crate-local-runner-draining` and `outcomes/crate-local-runner-disk-full`:
   `runner_draining` and `runner_disk_full`, each decoded to its known variant and
   round-tripped through the public string conversions.
+
+Three more outcome pairs pin additive refusal reasons:
+
+- `outcomes/crate-local-lost-to-restart`: `lost_to_restart`, an admission lost
+  during runner recovery before it started. The before-start guarantee comes
+  from `refused_before_start`, not from the reason tag alone.
+- `outcomes/crate-local-request-rejected`: `request_rejected`, with the specific
+  human-only detail code `direct_timeout_refused`.
+- `outcomes/crate-local-runner-authentication-failed`:
+  `runner_authentication_failed`, with the safe human-only fault code
+  `credentials_unavailable`, never credential material.
+
+All three decode to known variants and round-trip their wire strings. A reader
+with only the older refusal match arms keeps these strings as `Unknown`.
+Existing vector pairs are unchanged.
 
 Removing both metadata fields from the hint vectors produces the unchanged
 `outcomes/runner_full` and `replies/prepare-unreachable` bytes. Tests also decode
