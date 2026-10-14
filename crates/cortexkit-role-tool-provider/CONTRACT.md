@@ -46,9 +46,13 @@ to them. Nothing here names a particular implementation.
 
 - Request: `{params, preset?, composition?, system_text?, digest_only?}`
   (`CatalogRequest`).
-  - `params` is the plan item's params: the shared vocabulary (`behavior`,
-    `scope`, `tool_descs`, `exclude`) plus the provider's own axes. An unknown
-    value is refused, never guessed.
+  - `params` is the plan item's params, and every key in it is per-provider:
+    a provider accepts only the keys it documents, and refuses any other key
+    or value, never guessing. A consumer sends a provider only the params of
+    that provider's own plan item, never another provider's. `behavior`,
+    `scope`, `tool_descs` and `exclude` are conventional names a provider
+    reuses when it supports that axis, so the same idea is spelled the same
+    way across providers; none is required of every provider.
   - `preset` is the plan item's named variant, defined by the provider. It
     sits beside `params`, not inside it, so it never collides with a
     provider's own axis, and mirrors `system_text`'s `{preset, params}`.

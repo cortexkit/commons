@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1
+
+- Contract wording: every `tool.catalog` params key is per-provider. A provider
+  accepts only the keys it documents and refuses others, and a consumer sends
+  each provider only its own plan item's params. `behavior`, `scope`,
+  `tool_descs` and `exclude` are conventional names, not keys every provider
+  must accept. No code or wire change.
+
 ## 0.8.0
 
 - Requires subc-protocol 0.32. Consumers must upgrade together so the public

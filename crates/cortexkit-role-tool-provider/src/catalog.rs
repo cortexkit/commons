@@ -42,9 +42,11 @@ pub const ROOT_UNION_KEYWORDS: &[&str] = &["anyOf", "oneOf", "allOf"];
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct CatalogRequest {
-    /// The plan item's params: the shared vocabulary (`behavior`, `scope`,
-    /// `tool_descs`, `exclude`) plus any axes of the provider's own. A value
-    /// the provider does not know is refused, never guessed.
+    /// The plan item's params. Every key is per-provider: a provider accepts
+    /// only the keys it documents and refuses any other key or value, never
+    /// guessing. `behavior`, `scope`, `tool_descs` and `exclude` are
+    /// conventional names for axes a provider may support, not keys every
+    /// provider must accept.
     #[serde(default)]
     pub params: Map<String, Value>,
     /// The plan item's named variant, defined by the provider. Absent means
