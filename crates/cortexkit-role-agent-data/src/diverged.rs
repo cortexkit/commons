@@ -16,13 +16,16 @@
 //! The contract terms used here (source, receiver, cut, the door, driver
 //! and the rest) are defined in the "Terms" section of `CONTRACT.md`.
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+
+/// Maximum UTF-8 byte length of a diverged-entry reason.
+pub const REASON_MAX_BYTES: usize = 256;
 
 /// The `diverged` request: `{refs, cutId}`.
 pub type DivergedRequest = crate::request::CutRequest;
 
-/// The `diverged` reply: `{refs: [{state}]}`, one entry per request ref, in
-/// request order.
+/// The `diverged` reply: `{refs: [{state, reason?}]}`, one entry per request
+/// ref, in request order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -50,17 +53,79 @@ impl DivergedReply {
 }
 
 /// One ref's answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DivergedEntry {
     pub state: DivergedState,
+    /// Optional human-readable explanation shown in move status. It is
+    /// allowed only for `unknown` or `advanced` and must be short plain text.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reason: Option<String>,
 }
 
 impl DivergedEntry {
     pub fn new(state: DivergedState) -> Self {
-        Self { state }
+        Self {
+            state,
+            reason: None,
+        }
     }
+
+    /// Build an entry with a human-readable explanation.
+    ///
+    /// Returns an error naming the rule the reason violates: reasons are not
+    /// allowed with `at_cut`, must be non-empty, must not exceed
+    /// [`REASON_MAX_BYTES`] UTF-8 bytes, and must not contain control
+    /// characters.
+    pub fn with_reason(
+        state: DivergedState,
+        reason: impl Into<String>,
+    ) -> Result<Self, &'static str> {
+        let reason = reason.into();
+        validate_reason(state, &reason)?;
+        Ok(Self {
+            state,
+            reason: Some(reason),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for DivergedEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawDivergedEntry {
+            state: DivergedState,
+            #[serde(default)]
+            reason: Option<String>,
+        }
+
+        let raw = RawDivergedEntry::deserialize(deserializer)?;
+        match raw.reason {
+            Some(reason) => Self::with_reason(raw.state, reason).map_err(D::Error::custom),
+            None => Ok(Self::new(raw.state)),
+        }
+    }
+}
+
+fn validate_reason(state: DivergedState, reason: &str) -> Result<(), &'static str> {
+    if state == DivergedState::AtCut {
+        return Err("reason is not allowed with state `at_cut`");
+    }
+    if reason.is_empty() {
+        return Err("reason must be non-empty");
+    }
+    if reason.len() > REASON_MAX_BYTES {
+        return Err("reason must be at most 256 UTF-8 bytes");
+    }
+    if reason.chars().any(char::is_control) {
+        return Err("reason must not contain control characters");
+    }
+    Ok(())
 }
 
 /// `at_cut`, `advanced` or `unknown`.

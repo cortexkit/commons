@@ -1,0 +1,76 @@
+{
+  "valid": [
+    {
+      "name": "unknown with reason",
+      "reply": {
+        "refs": [
+          {
+            "state": "unknown",
+            "reason": "cut failed verify_failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "advanced with reason",
+      "reply": {
+        "refs": [
+          {
+            "state": "advanced",
+            "reason": "sealed sha mismatch"
+          }
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "at_cut reason",
+      "rule": "at_cut",
+      "reply": {
+        "refs": [
+          {
+            "state": "at_cut",
+            "reason": "not allowed here"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty reason",
+      "rule": "non-empty",
+      "reply": {
+        "refs": [
+          {
+            "state": "unknown",
+            "reason": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "reason over 256 bytes",
+      "rule": "256 UTF-8 bytes",
+      "reply": {
+        "refs": [
+          {
+            "state": "advanced",
+            "reason": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reason with newline",
+      "rule": "control characters",
+      "reply": {
+        "refs": [
+          {
+            "state": "unknown",
+            "reason": "bad\nreason"
+          }
+        ]
+      }
+    }
+  ]
+}

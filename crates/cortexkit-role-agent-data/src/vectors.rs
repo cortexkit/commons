@@ -52,6 +52,10 @@ pub const FILES: &[(&str, &str)] = &[
         "digest-mismatch.json",
         include_str!("../test-vectors/agent-data-v1/digest-mismatch.json"),
     ),
+    (
+        "diverged-reasons.json",
+        include_str!("../test-vectors/agent-data-v1/diverged-reasons.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.

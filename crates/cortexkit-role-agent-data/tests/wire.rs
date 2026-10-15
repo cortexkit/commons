@@ -40,6 +40,7 @@ const FILES: &[&str] = &[
     "session-refs.json",
     "README.md",
     "digest-mismatch.json",
+    "diverged-reasons.json",
 ];
 
 fn dir() -> String {
@@ -257,6 +258,78 @@ fn every_refused_reply_does_not_decode() {
             name(case)
         );
     }
+}
+
+#[test]
+fn diverged_reason_vectors_validate_and_name_each_refused_rule() {
+    use cortexkit_role_agent_data::diverged::{DivergedEntry, DivergedState, REASON_MAX_BYTES};
+
+    let file = load("diverged-reasons.json");
+    let valid = cases(&file, "valid");
+    assert_eq!(
+        valid.len(),
+        2,
+        "one reason vector for each reportable state"
+    );
+    let states: BTreeSet<&str> = valid
+        .iter()
+        .map(|case| case["reply"]["refs"][0]["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(states, BTreeSet::from(["unknown", "advanced"]));
+    for case in valid {
+        let _: DivergedReply = round_trip(name(case), &case["reply"]);
+    }
+    let refused = cases(&file, "refused");
+    let rules: BTreeSet<&str> = refused
+        .iter()
+        .map(|case| case["rule"].as_str().expect("each refusal names its rule"))
+        .collect();
+    assert_eq!(
+        rules,
+        BTreeSet::from([
+            "at_cut",
+            "non-empty",
+            "256 UTF-8 bytes",
+            "control characters"
+        ])
+    );
+    for case in refused {
+        let case_name = name(case);
+        let err = serde_json::from_value::<DivergedReply>(case["reply"].clone())
+            .expect_err(case_name)
+            .to_string();
+        let rule = case["rule"].as_str().expect("each refusal names its rule");
+        assert!(
+            err.contains(rule),
+            "{case_name}: expected error naming {rule:?}, got {err:?}"
+        );
+    }
+
+    let null_reason: DivergedReply = serde_json::from_value(json!({
+        "refs": [{"state": "unknown", "reason": null}]
+    }))
+    .expect("null reason decodes as absent");
+    assert_eq!(null_reason.refs[0].reason, None);
+    assert_eq!(
+        serde_json::to_value(null_reason).unwrap(),
+        json!({"refs": [{"state": "unknown"}]})
+    );
+
+    assert_eq!(DivergedEntry::new(DivergedState::Unknown).reason, None);
+    assert!(DivergedEntry::with_reason(DivergedState::Unknown, "cause").is_ok());
+    assert!(
+        DivergedEntry::with_reason(DivergedState::Unknown, "é".repeat(REASON_MAX_BYTES / 2))
+            .is_ok()
+    );
+    assert!(DivergedEntry::with_reason(
+        DivergedState::Unknown,
+        "é".repeat(REASON_MAX_BYTES / 2 + 1)
+    )
+    .unwrap_err()
+    .contains("256 UTF-8 bytes"));
+    assert!(DivergedEntry::with_reason(DivergedState::AtCut, "cause")
+        .unwrap_err()
+        .contains("at_cut"));
 }
 
 fn driver(action: &str) -> DriverAction {

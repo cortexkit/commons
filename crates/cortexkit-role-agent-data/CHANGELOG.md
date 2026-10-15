@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Breaking: `DivergedEntry` is no longer `Copy` and gains an optional,
+  validated human-readable `reason` for `unknown` and `advanced` replies.
+- Add diverged-reason validation vectors; the wire version remains
+  `agent-data/v1` and entries without a reason keep their previous bytes.
+
 ## 0.1.3
 
 - Contract wording only (§7.7), no code, wire or vector change: an import's

@@ -413,7 +413,7 @@ through the door (`session.admit` on engram's `session-door` service).
 On the receiver, before import: compare this Mac's copy with the cut.
 
 - Request: `{refs, cutId}`.
-- Reply: `{refs: [{state}]}`, in request order (`diverged::DivergedReply`).
+- Reply: `{refs: [{state, reason?}]}`, in request order (`diverged::DivergedReply`).
   - `at_cut`: this Mac has nothing for these refs that the cut doesn't
     contain. For an append-only stream that is the byte-prefix rule: this
     Mac's bytes are a prefix of the cut's. For a row store, its newest rows
@@ -423,6 +423,13 @@ On the receiver, before import: compare this Mac's copy with the cut.
     contain. That includes host data past an external `check`.
   - `unknown`: the participant cannot tell whether this Mac's copy is at
     or past the cut (for example, it could not read its copy).
+- Each entry may carry `reason`, a human-readable explanation for move
+  status. Programs never match on this text. It is allowed only with
+  `unknown` or `advanced`, must be non-empty, at most 256 UTF-8 bytes, and
+  contain no control characters (Unicode category Cc). A reply that breaks
+  any of these rules is a contract violation; the driver stops the step as
+  for an unknown refusal code. A participant sends `reason` only after the
+  driver (Entorhinal) has announced that it decodes agent-data 0.2.
 - `advanced` anywhere stops the move and shows the operator the fork
   choice. `unknown` blocks too, and is never read as `at_cut`.
 - May refuse `external_not_present`, and `cut_not_ready` (retried within
