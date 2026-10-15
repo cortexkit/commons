@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- No change to this crate. Published from the same commons revision as
+  cortexkit-role-compaction-provider 0.2.4, because the Claude Code capability
+  bundle records one revision for both roles.
+
 ## 0.2.2
 
 - Update the dev-only capability-identifier parity test to subc-protocol 0.32.

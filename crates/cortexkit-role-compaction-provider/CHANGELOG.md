@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4
+
+- Contract wording only (§6 and §19.2), no code or wire change. For a native
+  publication outside a declared partial cut, `coverage` and `endpoint` name the
+  replacement boundary exactly: `coverage.ordinal` is `range.to - 1` and
+  `endpoint` is the last native block of that message. Only a hook cut's head
+  endpoint with its `retained_tail` keeps later blocks of the range. Requires
+  cortexkit-role-step-transform-provider 0.2.3, published from the same
+  revision.
+
 ## 0.2.3
 
 - Require cortexkit-role-step-transform-provider 0.2.2 and publish both crates

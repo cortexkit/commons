@@ -351,6 +351,10 @@ The status (`StepStatus`) carries:
   superseded or otherwise unapplied answer. A runner that does not need
   coverage ignores it. Coverage does not change the replacement range or
   bypass any application check; absence leaves view handling unchanged.
+  For a native publication (one carrying `raw_view`, §19.2) outside a declared
+  partial cut, "covers" means "replaces": with a non-empty range,
+  `coverage.ordinal` is `range.to - 1`, so the summary covers exactly the
+  messages the replacement removes.
 - [pinned] A call has a budget of about 2 s for `noop` and
   `compaction_message`. On a timeout the runner records it and proceeds with
   the last applied CompactionMessage; one always exists, because Setup's is
@@ -981,6 +985,11 @@ preserve integer precision rather than round ids, cursors or versions.
   blocks in order. It is not a `<mid>#<part>` string, nested tool-result child
   coordinate, opaque hook `subject_part`, range endpoint or inferred summary
   marker. `coverage.end_mid` agrees with `endpoint.message_id`.
+  Outside a declared partial cut, `endpoint` is the last native top-level block
+  of the message at ordinal `range.to - 1`, so the endpoint, coverage and range
+  all name the same removal boundary. A hook cut's head endpoint with its
+  `retained_tail` is the only case where later blocks of the range are
+  retained.
 - [pinned] `CompactionMessage` gains optional `raw_view: FrozenView`. Freeze
   `view_id`, `version`, `byte_length`, lowercase hexadecimal `sha256`, `profile`,
   `profile_generation`, `provider_generation`, `lineage_id`, `endpoint` and
