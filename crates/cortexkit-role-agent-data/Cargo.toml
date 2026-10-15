@@ -13,7 +13,7 @@
 # can test against the same bytes without a checkout of this repository.
 [package]
 name = "cortexkit-role-agent-data"
-version = "0.1.2"
+version = "0.1.3"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

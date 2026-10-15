@@ -2,8 +2,10 @@
 //! through the door (`cut.read`, then `session.read` with the `cutId`,
 //! which needs no lease) into staging, and check every digest.
 //!
-//! Each item's `format` is checked before anything is read
-//! (`incompatible_version`). A cut not yet readable through the door is
+//! Compatibility is decided from the cut's authenticated bytes, reading only
+//! as far as needed (typically the first frame); on `incompatible_version`
+//! the private staging is discarded and nothing is installed. A cut not yet
+//! readable through the door is
 //! `cut_not_ready`, which the driver retries within the step. The
 //! receiving Mac isn't frozen, so a run may start on the same session
 //! between `diverged` and `import`: that is `busy`, retried later. The

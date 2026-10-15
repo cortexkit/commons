@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Contract wording only (§7.7), no code, wire or vector change: an import's
+  receiver decides `incompatible_version` from the cut's authenticated bytes,
+  reading only as far as it needs to decide, because `import` carries no
+  `format`. It stages privately and installs nothing on that refusal.
+
 ## 0.1.2
 
 - Allow `digest_mismatch` on `activate` and `abort` when a participant's own

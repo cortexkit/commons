@@ -451,8 +451,12 @@ check every digest.
 - **A released copy here:** if this Mac holds a released (tombstoned) copy
   of the same refs, which happens on a move back, the import replaces it.
   That's the expected case.
-- **Refusals:** `incompatible_version` (each item's `format` is checked
-  first, before anything is read or staged), `cut_not_ready` (the cut isn't
+- **Compatibility:** the receiver decides compatibility from the cut's
+  authenticated bytes, reading only as far as it needs to decide (typically
+  the first frame). It stages privately, and on `incompatible_version` it
+  discards the staging and installs nothing; nothing becomes visible before
+  the decision.
+- **Refusals:** `incompatible_version` (decided as above), `cut_not_ready` (the cut isn't
   readable through the door yet; the driver retries it within the step),
   `digest_mismatch`, `busy` and `local_advanced`.
   - `busy`: the receiving Mac isn't frozen, so a run can start on the same
