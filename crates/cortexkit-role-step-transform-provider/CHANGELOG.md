@@ -2,9 +2,12 @@
 
 ## 0.2.3
 
-- No change to this crate. Published from the same commons revision as
-  cortexkit-role-compaction-provider 0.2.4, because the Claude Code capability
-  bundle records one revision for both roles.
+- Contract wording only (§13.2), no code or wire change: the host advances
+  `served_through_ordinal` past an ordinal only after a model request carrying
+  it completed cleanly at the provider, never when the ordinal is committed
+  before sending or on response headers. Published from the same commons
+  revision as cortexkit-role-compaction-provider 0.2.4, because the Claude Code
+  capability bundle records one revision for both roles.
 
 ## 0.2.2
 

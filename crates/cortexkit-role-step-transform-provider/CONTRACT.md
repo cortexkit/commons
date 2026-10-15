@@ -584,6 +584,16 @@ change to ordinary runner admission or observation.
   pass carry the previous committed watermark; a compaction step carries the
   watermark after that pass's append transaction. Absence means no
   ordinal-confirmed promotion, neither zero nor the newest ordinal.
+- [pinned] The host advances the watermark past an ordinal only after a model
+  request carrying that ordinal has completed cleanly at the provider: the
+  response status was 2xx, its final stream event arrived (for Anthropic,
+  `message_stop`), and the connection ended with no transport error.
+  Committing the ordinal before the request is sent, or on receiving response
+  headers, never advances it. A request that fails, is cancelled or is cut off
+  leaves the watermark where it was. A complete response counts as clean
+  whatever its stop reason, a model refusal included, because the model read
+  the request; a provider error status or an in-stream error event is never
+  clean, even after a 2xx status.
 - [pinned] Per lineage the watermark moves only forward, except for a revert
   clamp to the revert target in the same durable transaction. A lower value
   without that revert refuses `invalid_params {field:
