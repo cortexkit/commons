@@ -5,7 +5,7 @@ Licensed under MIT. This crate contains no application-store dependencies.
 
 ```toml
 [dev-dependencies]
-cortexkit-test-support = "0.1.0"
+cortexkit-test-support = "0.1.8"
 ```
 
 ## Scratch fixtures
@@ -46,7 +46,10 @@ files so the test process holds no writable descriptor to an executable.
 Windows uses `fs::copy`.
 A private staging directory is atomically renamed into its content address;
 concurrent requests reuse one published file. Digests are checked before use,
-including reuse. Sidecar timestamps record every use without changing the binary.
+including reuse. Within a process, the source digest and successful published-copy
+check are memoized by device, inode, length, and full-nanosecond modification time;
+an identity change triggers a fresh hash. Sidecar timestamps record every use
+without changing the binary.
 A new build opportunistically prunes entries unused for three days, then the
 least recently used entries until the cache is at most 10 GiB. The returned
 entry and entries used within 30 minutes are kept even over that budget.

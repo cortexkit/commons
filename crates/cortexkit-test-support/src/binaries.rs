@@ -1,18 +1,90 @@
 //! Content-addressed executable copies and production-name guards.
 
 use std::{
+    collections::{HashMap, HashSet},
     ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Output},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex,
+        Mutex, OnceLock,
     },
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 static CACHE_PRUNER: CachePruner = CachePruner::new();
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct FileIdentity {
+    device: u64,
+    inode: u128,
+    len: u64,
+    modified_before_epoch: bool,
+    modified_nanos: u128,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ContentDigestKey {
+    identity: FileIdentity,
+    dev_name: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct PublishedVerificationKey {
+    identity: FileIdentity,
+    dev_name: String,
+    digest: String,
+}
+
+fn content_digest_memo() -> &'static Mutex<HashMap<ContentDigestKey, String>> {
+    static MEMO: OnceLock<Mutex<HashMap<ContentDigestKey, String>>> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn published_verification_memo() -> &'static Mutex<HashSet<PublishedVerificationKey>> {
+    static MEMO: OnceLock<Mutex<HashSet<PublishedVerificationKey>>> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+#[cfg(test)]
+thread_local! {
+    static HASH_COUNTS: std::cell::Cell<(usize, usize, usize, usize)> = const {
+        std::cell::Cell::new((0, 0, 0, 0))
+    };
+}
+
+#[cfg(test)]
+fn record_hash_attempt() {
+    HASH_COUNTS.with(|counts| {
+        let (total, built, published, staged) = counts.get();
+        counts.set((total + 1, built, published, staged));
+    });
+}
+
+#[cfg(test)]
+fn record_built_hash() {
+    HASH_COUNTS.with(|counts| {
+        let (total, built, published, staged) = counts.get();
+        counts.set((total, built + 1, published, staged));
+    });
+}
+
+#[cfg(test)]
+fn record_published_hash() {
+    HASH_COUNTS.with(|counts| {
+        let (total, built, published, staged) = counts.get();
+        counts.set((total, built, published + 1, staged));
+    });
+}
+
+#[cfg(test)]
+fn record_staged_hash() {
+    HASH_COUNTS.with(|counts| {
+        let (total, built, published, staged) = counts.get();
+        counts.set((total, built, published, staged + 1));
+    });
+}
 
 /// Executable names a test must never run a process under.
 ///
@@ -247,6 +319,8 @@ fn ckdev_binary_at(built: &Path, root: &Path) -> PathBuf {
 /// published name, a NUL, and the file's bytes.
 fn content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
     use sha2::{Digest, Sha256};
+    #[cfg(test)]
+    record_hash_attempt();
     let mut hasher = Sha256::new();
     hasher.update(dev_name.as_bytes());
     hasher.update([0u8]);
@@ -256,6 +330,82 @@ fn content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
+    Ok(digest)
+}
+
+fn file_identity(path: &Path) -> io::Result<FileIdentity> {
+    let metadata = fs::metadata(path)?;
+    #[cfg(unix)]
+    let (device, inode) = {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.dev(), u128::from(metadata.ino()))
+    };
+    #[cfg(windows)]
+    let (device, inode) = match file_id::get_file_id(path)? {
+        file_id::FileId::Inode {
+            device_id,
+            inode_number,
+        } => (device_id, u128::from(inode_number)),
+        file_id::FileId::LowRes {
+            volume_serial_number,
+            file_index,
+        } => (u64::from(volume_serial_number), u128::from(file_index)),
+        file_id::FileId::HighRes {
+            volume_serial_number,
+            file_id,
+        } => (volume_serial_number, file_id),
+    };
+    #[cfg(not(any(unix, windows)))]
+    let (device, inode) = return Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "file identity is unavailable on this platform",
+    ));
+    let modified = metadata.modified()?;
+    let (modified_before_epoch, modified_nanos) = match modified.duration_since(UNIX_EPOCH) {
+        Ok(duration) => (false, duration.as_nanos()),
+        Err(error) => (true, error.duration().as_nanos()),
+    };
+    Ok(FileIdentity {
+        device,
+        inode,
+        len: metadata.len(),
+        modified_before_epoch,
+        modified_nanos,
+    })
+}
+
+fn memoized_content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
+    let identity = match file_identity(path) {
+        Ok(identity) => identity,
+        Err(_) => {
+            #[cfg(test)]
+            record_built_hash();
+            return content_digest(path, dev_name);
+        }
+    };
+    let key = ContentDigestKey {
+        identity,
+        dev_name: dev_name.to_owned(),
+    };
+    let cached = {
+        content_digest_memo()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .cloned()
+    };
+    if let Some(digest) = cached {
+        return Ok(digest);
+    }
+    #[cfg(test)]
+    record_built_hash();
+    let digest = content_digest(path, dev_name)?;
+    if matches!(file_identity(path), Ok(identity) if identity == key.identity) {
+        content_digest_memo()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key, digest.clone());
+    }
     Ok(digest)
 }
 
@@ -271,7 +421,7 @@ fn publish_with_pruner(
     root: &Path,
     prune: impl FnOnce(&Path),
 ) -> io::Result<PathBuf> {
-    let digest = content_digest(built, dev_name)?;
+    let digest = memoized_content_digest(built, dev_name)?;
     prepare_root(root, 0o022)?;
     // Shared locks cover lookup, publication and the use marker. An exclusive
     // prune cannot delete an entry between verifying it and recording its use.
@@ -295,6 +445,8 @@ fn publish_with_pruner(
         // Permissions are set by path (chmod), so no writable descriptor is
         // held; on Unix the published file is read-only and executable.
         fs::set_permissions(&staged, published_permissions(built)?)?;
+        #[cfg(test)]
+        record_staged_hash();
         if content_digest(&staged, dev_name)? != digest {
             return Err(io::Error::other(format!(
                 "{} changed while it was being published",
@@ -336,6 +488,59 @@ fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<(
             "publication must be a real directory and regular file",
         ));
     }
+    let key = PublishedVerificationKey {
+        identity: match file_identity(placed) {
+            Ok(identity) => identity,
+            Err(_) => {
+                return verify_published_bytes(placed, dev_name, digest);
+            }
+        },
+        dev_name: dev_name.to_owned(),
+        digest: digest.to_owned(),
+    };
+    let verified = {
+        published_verification_memo()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&key)
+    };
+    if verified {
+        return Ok(());
+    }
+    #[cfg(test)]
+    record_published_hash();
+    let found = content_digest(placed, dev_name)?;
+    let identity_unchanged = match file_identity(placed) {
+        Ok(identity) if identity == key.identity => true,
+        Ok(_) => {
+            return Err(io::Error::other(format!(
+                "published {} changed while it was being verified",
+                placed.display()
+            )));
+        }
+        Err(_) => false,
+    };
+    if found == digest {
+        if identity_unchanged {
+            published_verification_memo()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(key);
+        }
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "published {} does not match its content address {digest} (found {found}); \
+             remove {} to republish it",
+            placed.display(),
+            placed.parent().unwrap_or(placed).display()
+        )))
+    }
+}
+
+fn verify_published_bytes(placed: &Path, dev_name: &str, digest: &str) -> io::Result<()> {
+    #[cfg(test)]
+    record_published_hash();
     let found = content_digest(placed, dev_name)?;
     if found == digest {
         Ok(())
@@ -1429,6 +1634,127 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&output.stdout), "one\n");
     }
 
+    #[cfg(unix)]
+    fn reset_hash_counts() {
+        HASH_COUNTS.with(|counts| counts.set((0, 0, 0, 0)));
+    }
+
+    #[cfg(unix)]
+    fn hash_counts() -> (usize, usize, usize, usize) {
+        HASH_COUNTS.with(std::cell::Cell::get)
+    }
+
+    #[cfg(unix)]
+    fn set_modified(path: &Path, modified: SystemTime) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_calls_hash_the_same_build_and_publication_once() {
+        let build = crate::ScratchDir::new("ckdev-memo-count-build");
+        let root = PublishRoot::new("ckdev-memo-count-root");
+        let built = build.join("ck-subc");
+        write_script(&built, "#!/bin/sh\necho memo-count\n");
+        set_modified(
+            &built,
+            UNIX_EPOCH + Duration::from_secs(1_800_000_000) + Duration::from_nanos(101),
+        );
+        reset_hash_counts();
+
+        let first = ckdev_binary_at(&built, &root.path());
+        for _ in 0..7 {
+            assert_eq!(ckdev_binary_at(&built, &root.path()), first);
+        }
+
+        assert_eq!(hash_counts(), (3, 1, 1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rebuilding_a_file_with_a_new_mtime_rehashes_it() {
+        let build = crate::ScratchDir::new("ckdev-memo-rebuild");
+        let built = build.join("ck-subc");
+        write_script(&built, "#!/bin/sh\necho rebuilt\n");
+        let initial_time =
+            UNIX_EPOCH + Duration::from_secs(1_800_000_010) + Duration::from_nanos(203);
+        set_modified(&built, initial_time);
+        reset_hash_counts();
+
+        let first = memoized_content_digest(&built, "ckdev-subc").unwrap();
+        let first_identity = file_identity(&built).unwrap();
+        set_modified(&built, initial_time + Duration::from_secs(1));
+        let second_identity = file_identity(&built).unwrap();
+        assert_ne!(first_identity, second_identity);
+
+        let second = memoized_content_digest(&built, "ckdev-subc").unwrap();
+        assert_eq!(first, second);
+        assert_eq!(hash_counts(), (2, 2, 0, 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nanosecond_mtime_changes_file_identity() {
+        let build = crate::ScratchDir::new("ckdev-memo-nanos");
+        let built = build.join("ck-subc");
+        write_script(&built, "#!/bin/sh\necho nanoseconds\n");
+        let modified =
+            UNIX_EPOCH + Duration::from_secs(1_800_000_020) + Duration::from_nanos(123_456_789);
+        set_modified(&built, modified);
+        let first = file_identity(&built).unwrap();
+
+        set_modified(&built, modified + Duration::from_nanos(1));
+        let second = file_identity(&built).unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changed_publication_identity_is_reverified_and_corruption_refused() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let build = crate::ScratchDir::new("ckdev-memo-published-build");
+        let root = PublishRoot::new("ckdev-memo-published-root");
+        let built = build.join("ck-bus");
+        write_script(&built, "#!/bin/sh\necho genuine\n");
+        set_modified(
+            &built,
+            UNIX_EPOCH + Duration::from_secs(1_800_000_030) + Duration::from_nanos(307),
+        );
+        let placed = ckdev_binary_at(&built, &root.path());
+        let old_identity = file_identity(&placed).unwrap();
+
+        let directory = placed.parent().unwrap();
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&placed, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(&placed, "#!/bin/sh\necho planted\n").unwrap();
+        set_modified(
+            &placed,
+            UNIX_EPOCH + Duration::from_secs(1_900_000_000) + Duration::from_nanos(409),
+        );
+        assert_eq!(
+            fs::metadata(&placed).unwrap().len(),
+            fs::metadata(&built).unwrap().len()
+        );
+        assert_ne!(old_identity, file_identity(&placed).unwrap());
+
+        reset_hash_counts();
+        let error = publish(&built, "ckdev-bus", &root.path()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("does not match its content address"),
+            "{error}"
+        );
+        assert_eq!(hash_counts(), (1, 0, 1, 0));
+    }
+
     /// The published file is a read-only copy in a read-only directory: its
     /// own inode, the same bytes, executable, and no staging left behind.
     #[cfg(unix)]
@@ -1525,6 +1851,29 @@ mod tests {
         );
         let output = dev_command(&placed).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout), "fixture\n");
+    }
+
+    /// Measures the common repeated-launch path with the test harness as the
+    /// built binary. Run explicitly with `--ignored --nocapture` when timing it.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "manual repeated-launch timing test"]
+    fn repeated_ckdev_launches_of_one_binary() {
+        use std::time::Instant;
+
+        const LAUNCHES: usize = 20;
+        let build = crate::ScratchDir::new("ckdev-repeat-build");
+        let root = PublishRoot::new("ckdev-repeat-root");
+        let built = built_fixture(&build);
+        let started = Instant::now();
+        for _ in 0..LAUNCHES {
+            let placed = ckdev_binary_at(&built, &root.path());
+            checked_output(&mut fixture_command(&placed)).unwrap();
+        }
+        eprintln!(
+            "{LAUNCHES} repeated ckdev launches: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
     }
 
     /// Writes through a staging file and a `cp` child, so this multi-threaded

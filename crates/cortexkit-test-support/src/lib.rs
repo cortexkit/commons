@@ -2,6 +2,9 @@
 //!
 //! Scratch fixtures preserve failure evidence, executables are published as
 //! immutable `ckdev-*` copies, and daemon builders enforce an ambient-root fence.
+//! `ckdev_binary` memoizes source digests and successful publication checks by
+//! device, inode, length, and full-nanosecond modification time; an identity change
+//! causes the bytes to be hashed again.
 #![forbid(unsafe_code)]
 
 #[cfg(unix)]

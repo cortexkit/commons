@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+- Memoize built-binary digests and successful published-copy verification within
+  each process, keyed by device, inode, length, and full-nanosecond modification
+  time. Replaced or otherwise changed files are hashed again.
+
 ## 0.1.7
 
 - The Unix `ckdev_binary` cache and macOS `ScratchDir` root use `$TMPDIR` when it
