@@ -20,6 +20,7 @@ reviewed.
 | `fence.json` | provider-answer fence cases matching `compaction-provider/v1`: a stale request is superseded, an answer to the newest request exactly at its deadline is late, and one just before applies | `compaction_answer_fence_vectors_round_trip` checks metadata round-tripping only; these document §11.1 cases, not executable application checks in this crate. Answer shapes belong to the provider's role; a runner implements the fence |
 | `session-change.json` | the `session_change` group's refusals (`rung_unsupported`, `pending_superseded`, `already_applied`), each with the op that gets it and its retryability | the wire crate's session-change test |
 | `errors.json` | every refusal code the role defines, plus one it does not, with whether a caller retries it | the wire crate's retryability test |
+| `reply-too-large.json` | terminal `reply_too_large` refusals for an oversized raw message and model-view atomic group, identifying each without content | `reply_too_large_is_named_terminal_and_carries_only_safe_details` |
 
 The following admission fixtures are copied byte-for-byte from the prefrontal
 repository's `test-vectors/fetch-plan-v1/admission/` at commit `7079a4025`. The wire tests

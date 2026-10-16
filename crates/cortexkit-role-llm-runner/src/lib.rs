@@ -277,6 +277,7 @@ pub(crate) mod vectors {
         "plans.json",
         "read-pages.json",
         "read-requests.json",
+        "reply-too-large.json",
         "role-describe.json",
         "run-result.json",
         "run-cancel.json",

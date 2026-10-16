@@ -13,6 +13,10 @@
       "retryable": false
     },
     {
+      "code": "reply_too_large",
+      "retryable": false
+    },
+    {
       "code": "unknown_run",
       "retryable": false
     },

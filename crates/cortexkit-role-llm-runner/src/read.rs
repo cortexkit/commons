@@ -195,7 +195,10 @@ pub struct ReadPage {
     /// Present whenever the page stopped before the end of the transcript,
     /// by count or by bytes: the ordinal to read from next. A single message
     /// larger than the byte cap comes alone on its page, over the cap, with
-    /// this set if more follow; a message is never truncated.
+    /// this set if more follow; a message is never truncated. The complete
+    /// encoded reply is served only if it fits the 4,194,304-byte transport
+    /// frame limit including the 21-byte header; otherwise it is refused
+    /// `reply_too_large`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
     /// The position of the last durable event covered by the same snapshot
@@ -267,10 +270,16 @@ pub struct ModelPage {
     /// absent only for a session never written, whose page is empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
-    /// The transcript ordinal to read from next, when the page stopped
-    /// early. Past the anchored entry: at least A + 1 for a message at A,
-    /// or the replacement's exclusive end. Insertions share that entry's
-    /// page, even over the caps; tail insertions have no next cursor.
+    /// The transcript ordinal from which the next page should continue,
+    /// present when this page stopped early. For an entry anchored at ordinal
+    /// A, the cursor is at least A + 1 for a message, or the replacement's
+    /// exclusive end. All insertions at A travel with that anchored entry,
+    /// even if doing so exceeds the requested count or byte cap; tail
+    /// insertions have no next cursor. The complete encoded reply is served
+    /// only if it fits the 4,194,304-byte transport frame limit including the
+    /// 21-byte header. Otherwise the reply is refused `reply_too_large`; on a
+    /// model-view page, its detail identifies the group of insertions and
+    /// their anchored entry by that entry's `source`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
     /// The position of the last durable event covered by the same snapshot

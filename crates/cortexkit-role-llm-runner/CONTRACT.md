@@ -206,9 +206,12 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   absent `lineage_id` means exactly that.
 - [pinned] A page is limited by message count and by bytes, and carries
   `next_from_ordinal` whenever it stops before the end of the transcript.
-- [pinned] A single message larger than the byte cap comes alone on its
-  page, over the cap, with `next_from_ordinal` set if more follow. A message
-  is never truncated, and its size is never a reason to refuse the read.
+- [pinned] A single message larger than the requested byte cap comes alone
+  on its page, over the cap, with `next_from_ordinal` set if more follow. It
+  is never truncated: the complete encoded reply is served whole when it fits
+  the transport frame limit of 4,194,304 bytes, including the 21-byte header.
+  Otherwise the runner refuses `reply_too_large`, naming the message by its
+  session and ordinal (§12).
 - [pinned] A page is an ordinal range and nothing more. It is not aligned to
   turns, runs or tool-call boundaries: a tool call and its result may arrive
   on different pages.
@@ -483,13 +486,19 @@ run.
 - [pinned] Tail and range reads apply, keyed on transcript ordinals. A
   replacement is returned whole, exactly once, on the page holding its
   `from_ordinal`: it is never split, and a later page that intersects its
-  range does not repeat it.
+  range does not repeat it. The complete encoded reply is served only when it
+  fits the 4,194,304-byte transport frame limit, including its 21-byte header;
+  otherwise the runner refuses `reply_too_large`, naming the model-view group
+  by its anchored entry source (§12).
 - [pinned] An insertion at anchor A travels on the same page as the entry
   anchored at A: the message holding ordinal A or a replacement whose
   `from_ordinal` is A. Several insertions at one anchor travel together, in
   order. The page may exceed its count or byte cap to keep this group whole,
   like the oversize single-message rule; it never ends between an insertion
-  and its anchored entry.
+  and its anchored entry. The complete encoded reply is served whole only
+  when it fits the 4,194,304-byte transport frame limit, including its
+  21-byte header; otherwise the runner refuses `reply_too_large`, naming the
+  group by its anchored entry source (§12).
 - [pinned] That page's `next_from_ordinal` is past the anchored entry: A + 1
   for a message, or the replacement's exclusive `to_ordinal`. An insertion
   past the last ordinal goes on the last page, with no cursor.
@@ -950,6 +959,7 @@ treats it as a terminal refusal of that one request.
 | `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
+| `reply_too_large` | the complete encoded `session.read` reply exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}` or `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`); no message content | no: terminal for this request; lowering `max_bytes` cannot shrink a message or atomic group |
 | `unknown_run` | `run.result` names no run of the session | — | no |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode | `field` when the runner can identify it | no |
@@ -974,8 +984,7 @@ treats it as a terminal refusal of that one request.
 - [pinned] Only the codes marked retryable are retried with the same request
   (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
   meets the same refusal.
-- [pinned] `send_retracted` is not yet in `errors::CODES`; it is not
-  retryable, which `errors::is_retryable` already answers for it.
+- [pinned] `send_retracted` is in `errors::CODES` and is not retryable.
 - [pinned] Route refusals the daemon classifies as retryable on open (module
   reloading or warming, target unavailable) are retried by the caller's
   transport under the daemon's own list; this role does not restate them.
@@ -1263,7 +1272,10 @@ the decision; the items it governs are pinned above.
 - **Q6. The byte cap.** Settled: the request member is `max_bytes`; the
   runner states its default and maximum in `role.describe`; a single message
   larger than the cap comes alone on its page, over the cap, with
-  `next_from_ordinal` set, and is never truncated or refused (§2, §4).
+  `next_from_ordinal` set, and is never truncated. It is served whole only
+  when the complete encoded reply fits the 4,194,304-byte transport frame
+  limit, including the 21-byte header; otherwise it is refused
+  `reply_too_large` (§2, §4, §12).
 - **Q7. The message body.** Settled: the runner's own schema, opaque to the
   role. A neutral schema is not in v1.
 - **Q8. The model view.** Settled, in the compaction provider's role
@@ -1274,7 +1286,9 @@ the decision; the items it governs are pinned above.
   tie. Tail and range reads apply, keyed on transcript ordinals; a
   replacement is returned
   whole, once, on the page holding its `from_ordinal` (tail insertions on
-  the last page). `after_mid` with
+  the last page) when the complete encoded reply fits the 4,194,304-byte
+  transport frame limit, including the 21-byte header; otherwise the reply
+  is refused `reply_too_large` (§12). `after_mid` with
   `view: "model"` is refused `invalid_params {field: "view"}` in v1. The page
   names the compaction state it reflects, `compaction_id` and `version`,
   both absent before any compaction (§8).

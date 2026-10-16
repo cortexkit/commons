@@ -26,6 +26,46 @@ pub const LINEAGE_CHANGED: &str = "lineage_changed";
 /// A read's `after_mid` names no message in the lineage the read named.
 pub const UNKNOWN_MID: &str = "unknown_mid";
 
+/// The complete encoded `session.read` reply exceeds the transport frame
+/// limit. Terminal: retrying with a smaller `max_bytes` cannot shrink a
+/// single message or atomic model-view group. `detail` is
+/// [`ReplyTooLargeDetail`].
+pub const REPLY_TOO_LARGE: &str = "reply_too_large";
+
+/// Safe identity and size details for a `reply_too_large` refusal. The
+/// subject names a message or a model-view group without carrying its content.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ReplyTooLargeDetail {
+    /// Length of the complete encoded reply frame, including its header.
+    pub bytes: u64,
+    /// Maximum encoded frame length accepted by the transport.
+    pub limit: u64,
+    pub subject: ReplyTooLargeSubject,
+}
+
+impl ReplyTooLargeDetail {
+    pub fn new(bytes: u64, limit: u64, subject: ReplyTooLargeSubject) -> Self {
+        Self {
+            bytes,
+            limit,
+            subject,
+        }
+    }
+}
+
+/// The indivisible item that made a `session.read` reply too large.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ReplyTooLargeSubject {
+    /// A raw transcript message, identified by its session and ordinal.
+    Message { session: String, ordinal: u64 },
+    /// An atomic model-view group, identified by the existing source of its
+    /// anchored entry.
+    ModelGroup { source: crate::read::EntrySource },
+}
+
 /// `run.result` names a run the session does not have.
 pub const UNKNOWN_RUN: &str = "unknown_run";
 
@@ -180,6 +220,7 @@ pub const CODES: &[&str] = &[
     INVALID_PARAMS,
     LINEAGE_CHANGED,
     UNKNOWN_MID,
+    REPLY_TOO_LARGE,
     UNKNOWN_RUN,
     EXPIRED,
     SEND_ID_REUSE,
@@ -370,6 +411,28 @@ mod tests {
         assert_eq!(provider_codes::normalize("future-code"), "future-code");
         assert!(CODES.contains(&"send_retracted"));
         assert!(!is_retryable("send_retracted"));
+    }
+
+    #[test]
+    fn reply_too_large_is_named_terminal_and_carries_only_safe_details() {
+        assert!(CODES.contains(&REPLY_TOO_LARGE));
+        assert!(!is_retryable(REPLY_TOO_LARGE));
+
+        let file = vectors::load("reply-too-large.json");
+        for case in vectors::cases(&file, "refusals") {
+            let refusal = &case["refusal"];
+            assert_eq!(refusal["code"], REPLY_TOO_LARGE);
+            let detail: ReplyTooLargeDetail =
+                serde_json::from_value(refusal["detail"].clone()).unwrap();
+            assert_eq!(detail.limit, 4_194_304);
+            assert!(detail.bytes > detail.limit);
+            assert_eq!(
+                serde_json::to_value(detail).unwrap(),
+                refusal["detail"],
+                "{}",
+                case["name"]
+            );
+        }
     }
 
     #[test]

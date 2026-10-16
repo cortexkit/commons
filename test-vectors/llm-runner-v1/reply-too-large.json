@@ -1,0 +1,48 @@
+{
+  "refusals": [
+    {
+      "name": "raw message exceeds the transport frame limit",
+      "request": {
+        "from_ordinal": 7
+      },
+      "refusal": {
+        "code": "reply_too_large",
+        "message": "the session.read reply exceeds the transport frame limit",
+        "detail": {
+          "bytes": 4194305,
+          "limit": 4194304,
+          "subject": {
+            "kind": "message",
+            "session": "ses_01J9Z8Y7X6W5V4U3T2S1R0Q9P8",
+            "ordinal": 7
+          }
+        }
+      }
+    },
+    {
+      "name": "model-view atomic group exceeds the transport frame limit",
+      "request": {
+        "from_ordinal": 5,
+        "view": "model"
+      },
+      "refusal": {
+        "code": "reply_too_large",
+        "message": "the session.read reply exceeds the transport frame limit",
+        "detail": {
+          "bytes": 4194305,
+          "limit": 4194304,
+          "subject": {
+            "kind": "model_group",
+            "source": {
+              "kind": "replacement",
+              "compaction_id": "cmp-1",
+              "version": 4,
+              "from_ordinal": 5,
+              "to_ordinal": 10
+            }
+          }
+        }
+      }
+    }
+  ]
+}

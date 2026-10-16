@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Require cortexkit-role-llm-runner 0.2.3, which adds the terminal `reply_too_large` refusal and its frame-size detail.
+
 ## 0.3.0
 
 - Requires subc-protocol 0.32 and cortexkit-role-compaction-provider 0.2.3.

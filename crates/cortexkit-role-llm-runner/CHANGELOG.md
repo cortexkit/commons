@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Add the terminal `reply_too_large` refusal and safe size/subject detail. Bound whole-message and atomic model-view-group replies by the 4,194,304-byte transport frame limit; replies that exceed it are refused, never truncated.
+
 ## 0.2.2
 
 - Add optional `run.cancel.at` (`now` by default, or `step_boundary`) and open-string constants. Pin discovery gating, whole-step/tool-batch completion, paused cancellation, escalation, idempotence, terminal races and unchanged owner-only admission.
