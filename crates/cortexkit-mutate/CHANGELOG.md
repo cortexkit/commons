@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.3
+
+- Add `run --narrow` for push/main replays, reusing expected-only selection and
+  its baseline cache. Preserve explicit selections, `only` sibling checks, hub
+  row scopes and command runners; reject `--narrow --broad`. HUB breadth grading
+  still requires a separate broad audit.
+- Mark narrow text/JSON reports with selection counts and per-row reasons.
+  Narrow JSON reports wrap `rows` in a run-level object; shard weights accept
+  both that object and the existing broad/default report array. Keep nightly
+  sweeps broad: narrowed rows cannot detect WRONG_TEST or collateral failures.
+
 ## 0.12.2
 
 - Add deterministic cost-weighted `run --shard-weights` assignment using replay

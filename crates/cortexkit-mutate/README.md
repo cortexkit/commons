@@ -46,6 +46,37 @@ ckdev-mutate run --diff origin/main --shard 2/4 \
   --shard-weights reports/replay.json --list
 ```
 
+## Narrow push/main replays
+
+Use `ckdev-mutate run --all --narrow --report reports/push.json` for push/main
+replays (`--diff`, `--only`, `--shard` and `--shard-weights` work unchanged).
+Cargo/nextest rows without a selection run as `select = "expected"`, using the
+same exact-name selection and per-selection baselines. Narrow and broad
+baselines are separate; an explicit expected-only row shares a baseline with
+an otherwise identical narrowed row.
+
+The narrow override leaves these rows unchanged (the first matching reason is counted):
+
+- Rows with their own `select` keep it, whether expected, filter or tests.
+- `only = true` rows without their own selection stay broad to verify that sibling
+  tests stay green; an existing filter/tests selection still limits that check.
+- Command-runner rows keep their commands; no new command selection is invented.
+- Hub rows (`hub`/`hub_targets`) keep their full row scope. HUB breadth grading
+  still requires a separate `--broad` audit; a narrow run is not that audit.
+
+Platform-mismatched, unreachable and desk-only rows remain skipped, not narrowed.
+Keep the nightly sweep broad (omit `--narrow`; use `--broad` for a package-wide
+audit). A narrowed row is still CAUGHT (killed) when its expected tests fail and
+SURVIVED when they do not, but cannot detect WRONG_TEST or collateral failures
+because siblings did not run. `--narrow --broad` is refused by name.
+
+The text summary identifies a NARROW run and counts narrowed and unchanged rows
+by reason. Narrow JSON reports are objects with `narrow: true`, `selection_counts`,
+per-row `selections`, and the usual report array in `rows`, including for empty
+runs. Counts describe reported row selections; skipped rows are `not_run`.
+Without `--narrow`, the existing JSON array format is unchanged.
+`--shard-weights` accepts either report format; every shard must use the same file.
+
 ## Catalogue
 
 ### Single file or directory (0.10.0)

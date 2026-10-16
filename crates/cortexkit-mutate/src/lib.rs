@@ -165,6 +165,21 @@ pub enum TestSelection {
     Tests(Vec<String>),
 }
 
+/// What `run --narrow` did to one catalogue row. Narrowing runs only the tests a
+/// row lists in `expect_red` (the tests its mutant must turn red) instead of the
+/// row's whole test target; every other variant names why the row was left as
+/// written.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NarrowSelection {
+    Narrowed,
+    OwnSelect,
+    Only,
+    CommandRunner,
+    Hub,
+    NotRun,
+}
+
 impl TestSelection {
     fn exact_names<'a>(&'a self, expected: &'a [String]) -> Option<&'a [String]> {
         match self {
@@ -224,6 +239,29 @@ pub fn default_build_timeout() -> u64 {
 }
 
 impl Control {
+    /// Narrow this row to `select = expected` unless doing so would change what the
+    /// row asserts. Left as written: rows with their own `select`; `only = true`
+    /// rows, which assert that every other test in the target stays green; command
+    /// rows, which have no test selection to narrow; and `hub` rows, which assert
+    /// that the mutant breaks tests across the listed `hub_targets`. Rows that will
+    /// be skipped may list no expected tests, so they are left unchanged too.
+    pub fn narrow(&mut self) -> NarrowSelection {
+        if !self.matches_platform() || self.unreachable.is_some() || self.desk_only.is_some() {
+            NarrowSelection::NotRun
+        } else if self.select.is_some() {
+            NarrowSelection::OwnSelect
+        } else if self.only {
+            NarrowSelection::Only
+        } else if self.runner == "command" {
+            NarrowSelection::CommandRunner
+        } else if self.hub.is_some() || self.hub_targets.is_some() {
+            NarrowSelection::Hub
+        } else {
+            self.select = Some(TestSelection::Expected);
+            NarrowSelection::Narrowed
+        }
+    }
+
     pub fn label(&self) -> String {
         format!("{} ({})", self.id, self.source.location())
     }
@@ -5828,5 +5866,93 @@ expect_red = ["other::same_name"]
             exclude_baseline_red(&c, &report, &mut results);
             assert_eq!(results.red, ["other::same_name"]);
         }
+    }
+}
+
+#[cfg(test)]
+mod narrow_tests {
+    use super::*;
+
+    fn row() -> Control {
+        toml::from_str(
+            r#"
+id = "guard"
+guards = "reject zero"
+file = "src/lib.rs"
+old = "value > 0"
+new = "value >= 0"
+test_file = "src/lib.rs"
+runner = "cargo"
+package = "fixture"
+target = "--lib"
+expect_red = ["tests::expected", "tests::other_expected"]
+"#,
+        )
+        .unwrap()
+    }
+
+    fn args(c: &Control) -> Vec<String> {
+        command(c, "run", Scope::Row)
+            .unwrap()
+            .get_args()
+            .map(|arg| arg.to_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn run_wide_narrow_reuses_exact_expected_runner_arguments() {
+        let mut c = row();
+        assert_eq!(c.narrow(), NarrowSelection::Narrowed);
+        assert_eq!(
+            args(&c),
+            [
+                "test",
+                "--locked",
+                "-p",
+                "fixture",
+                "--lib",
+                "--no-fail-fast",
+                "--",
+                "--test-threads=1",
+                "--exact",
+                "tests::expected",
+                "tests::other_expected"
+            ]
+        );
+        let mut explicit = row();
+        explicit.select = Some(TestSelection::Expected);
+        assert_eq!(args(&c), args(&explicit));
+        assert_eq!(
+            c.select.as_ref().unwrap().key(&c.expect_red),
+            explicit.select.as_ref().unwrap().key(&explicit.expect_red)
+        );
+    }
+
+    #[test]
+    fn run_wide_narrow_preserves_all_own_selection_forms_and_skips() {
+        for selection in [
+            TestSelection::Expected,
+            TestSelection::Filter("tests::".into()),
+            TestSelection::Tests(vec!["tests::expected".into(), "tests::sibling".into()]),
+        ] {
+            let mut c = row();
+            c.select = Some(selection.clone());
+            let before = args(&c);
+            assert_eq!(c.narrow(), NarrowSelection::OwnSelect);
+            assert_eq!(c.select, Some(selection));
+            assert_eq!(args(&c), before);
+        }
+        let mut only = row();
+        only.only = true;
+        let before = args(&only);
+        assert_eq!(only.narrow(), NarrowSelection::Only);
+        assert_eq!(args(&only), before);
+        assert!(!args(&only).contains(&"--exact".into()));
+
+        let mut skipped = row();
+        skipped.desk_only = Some("needs interactive desktop".into());
+        skipped.expect_red.clear();
+        assert_eq!(skipped.narrow(), NarrowSelection::NotRun);
+        assert_eq!(skipped.select, None);
     }
 }

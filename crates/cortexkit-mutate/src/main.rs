@@ -2,7 +2,7 @@
 
 use clap::{Args, Parser, Subcommand};
 use cortexkit_mutate::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs,
@@ -50,6 +50,10 @@ enum Action {
         /// Expensive audit: run every package test target and grade broad catches.
         #[arg(long)]
         broad: bool,
+        /// Run only each row's expect_red tests. Rows with their own select, `only = true`
+        /// rows (sibling tests must stay green), hub rows and command rows run as written.
+        #[arg(long, conflicts_with = "broad")]
+        narrow: bool,
         #[arg(long)]
         allow_dirty: bool,
         #[arg(long)]
@@ -212,7 +216,62 @@ struct Proof {
     #[arg(long)]
     report: Option<PathBuf>,
 }
-fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
+#[derive(Default, Serialize)]
+struct NarrowCounts {
+    narrowed: usize,
+    own_select: usize,
+    only: usize,
+    command_runner: usize,
+    hub: usize,
+    not_run: usize,
+}
+
+#[derive(Serialize)]
+struct NarrowReport<'a> {
+    narrow: bool,
+    selection_counts: NarrowCounts,
+    selections: BTreeMap<&'a str, NarrowSelection>,
+    rows: &'a [Report],
+}
+
+impl<'a> NarrowReport<'a> {
+    fn new(rows: &'a [Report], selections: &BTreeMap<String, NarrowSelection>) -> Self {
+        let mut report = Self {
+            narrow: true,
+            selection_counts: NarrowCounts::default(),
+            selections: BTreeMap::new(),
+            rows,
+        };
+        for row in rows {
+            let selection = selections[&row.id];
+            report.selections.insert(&row.id, selection);
+            let count = match selection {
+                NarrowSelection::Narrowed => &mut report.selection_counts.narrowed,
+                NarrowSelection::OwnSelect => &mut report.selection_counts.own_select,
+                NarrowSelection::Only => &mut report.selection_counts.only,
+                NarrowSelection::CommandRunner => &mut report.selection_counts.command_runner,
+                NarrowSelection::Hub => &mut report.selection_counts.hub,
+                NarrowSelection::NotRun => &mut report.selection_counts.not_run,
+            };
+            *count += 1;
+        }
+        report
+    }
+}
+
+fn write_report(
+    path: Option<PathBuf>,
+    rows: &[Report],
+    selections: Option<&BTreeMap<String, NarrowSelection>>,
+) -> Result<()> {
+    let narrow_report = selections.map(|selections| NarrowReport::new(rows, selections));
+    if let Some(report) = &narrow_report {
+        let counts = &report.selection_counts;
+        println!(
+            "NARROW run summary (reported row selections): {} narrowed; unchanged: own select {}, only {}, command runner {}, hub {}; not run {}. Narrowed rows cannot detect WRONG_TEST or collateral failures.",
+            counts.narrowed, counts.own_select, counts.only, counts.command_runner, counts.hub, counts.not_run
+        );
+    }
     for row in rows {
         println!(
             "{}: {}{}{}{}",
@@ -359,7 +418,12 @@ fn write_report(path: Option<PathBuf>, rows: &[Report]) -> Result<()> {
         rows.iter().map(|r| r.baseline_prebuild_ms).sum::<u128>()
     );
     if let Some(path) = path {
-        let bytes = serde_json::to_vec_pretty(rows).map_err(|e| e.to_string())?;
+        let bytes = if let Some(report) = narrow_report {
+            serde_json::to_vec_pretty(&report)
+        } else {
+            serde_json::to_vec_pretty(rows)
+        }
+        .map_err(|e| e.to_string())?;
         let mut temporary = tempfile::NamedTempFile::new_in(output_parent(&path))
             .map_err(|e| format!("cannot write report {}: {e}", path.display()))?;
         temporary
@@ -390,9 +454,14 @@ struct ShardPlan {
 }
 
 fn read_shard_weights(path: &Path) -> Result<BTreeMap<String, u128>> {
+    #[derive(Deserialize)]
+    struct WrappedTimings {
+        rows: Vec<ReplayTiming>,
+    }
     let bytes = fs::read(path)
         .map_err(|e| format!("cannot read shard weight report {}: {e}", path.display()))?;
     let report: Vec<ReplayTiming> = serde_json::from_slice(&bytes)
+        .or_else(|_| serde_json::from_slice::<WrappedTimings>(&bytes).map(|report| report.rows))
         .map_err(|e| format!("invalid shard weight report {}: {e}", path.display()))?;
     let mut weights = BTreeMap::new();
     for row in report {
@@ -593,6 +662,7 @@ fn run() -> Result<bool> {
             only,
             list,
             broad,
+            narrow,
             allow_dirty,
             report,
         } => {
@@ -672,6 +742,16 @@ fn run() -> Result<bool> {
             if weights.is_some() {
                 eprintln!("{}", weighted_summary(&plan, index, missing_weights));
             }
+            // Apply narrow selection only after row assignment so sharding is unchanged.
+            // Both baselines and mutants must receive the same effective controls.
+            let mut effective: Vec<Control> = shard.iter().map(|c| (*c).clone()).collect();
+            let selections = narrow.then(|| {
+                effective
+                    .iter_mut()
+                    .map(|c| (c.id.clone(), c.narrow()))
+                    .collect::<BTreeMap<_, _>>()
+            });
+            let shard: Vec<&Control> = effective.iter().collect();
             if broad {
                 for control in &shard {
                     if let Some(name) = &control.broad_report {
@@ -705,7 +785,7 @@ fn run() -> Result<bool> {
             let mut rows: Vec<Report> = slots.into_iter().flatten().collect();
             session.finish(&root, &mut rows, allow_dirty)?;
             work?;
-            write_report(report, &rows)?;
+            write_report(report, &rows, selections.as_ref())?;
             Ok(!stop.load(Ordering::SeqCst) && rows.iter().all(Report::passes))
         }
         Action::Prove(p) => {
@@ -827,7 +907,7 @@ fn run() -> Result<bool> {
                     }
                 }
             }
-            write_report(p.report, &rows)?;
+            write_report(p.report, &rows, None)?;
             Ok(!stop.load(Ordering::SeqCst)
                 && (recorded || rows[0].outcome == Outcome::SkippedPlatform))
         }
@@ -950,7 +1030,7 @@ fn explore(
     }
     let outcome = row.outcome.clone();
     let red = row.red.clone();
-    write_report(x.report, &[row])?;
+    write_report(x.report, &[row], None)?;
     if !x.append {
         return Ok(recorded || skipped);
     }
@@ -987,6 +1067,25 @@ fn main() {
 #[cfg(test)]
 mod cli_tests {
     use super::*;
+
+    #[test]
+    fn narrow_conflicts_with_broad_by_name() {
+        let error = Cli::try_parse_from(["ckdev-mutate", "run", "--all", "--narrow", "--broad"])
+            .err()
+            .expect("narrow and broad must conflict")
+            .to_string();
+        assert!(error.contains("--narrow"), "{error}");
+        assert!(error.contains("--broad"), "{error}");
+        for selection in [
+            vec!["--all"],
+            vec!["--diff", "HEAD"],
+            vec!["--only", "guard"],
+        ] {
+            let mut args = vec!["ckdev-mutate", "run", "--narrow"];
+            args.extend(selection);
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+    }
 
     // Mutation text is source code, which often starts with `--` (a flag in a
     // shell script, a SQL comment). It must parse as the value, not as an
