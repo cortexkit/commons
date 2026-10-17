@@ -1,84 +1,52 @@
 # cortexkit/commons
 
-Shared building blocks for [CortexKit](https://github.com/cortexkit) —
-small, dependency-light Rust crates used across the CortexKit daemons and
-tools. Nothing here belongs to a single product; everything here is meant to
-be boring, stable, and safe to depend on.
+Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role contracts and conformance suites, mutation testing, test support, leases and private files, bus and store adapters, and model catalog types.
 
 ## Crates
 
-| crate | what it does |
-|---|---|
-| `cortexkit-paths` | canonical project-root identity across platforms (case, symlinks, Windows verbatim paths) |
-| `cortexkit-store` / `cortexkit-store-types` | managed SQLite store layout, path derivation, and single-writer lease |
-| `cortexkit-lease` | advisory-lock + epoch fence primitive backing the store |
-| `cortexkit-store-postgres` | Postgres flavor of the store contract |
-| `cortexkit-provider-usage` | provider quota/usage wire types shared by producers and renderers |
-| `cortexkit-push-seal` | HPKE sealing for push-notification payloads |
-| `cortexkit-log` | fleet logging: canonical line format, `CK_LOG` levels and tags, module-owned files with rotation and retention, redaction |
-| `cortexkit-cache-core` | cache-policy primitives |
-| `cortexkit-model-catalog` | model catalog wire types (transitioning to the fusiform-served schema) |
-| `cortexkit-role-harness` | the crash-cut harness trait every role implementation supplies to its conformance suite: spawn on a state root, kill at a named durable point, restart on the same root |
-| `cortexkit-role-tool-provider` | the `tool-provider/v1` role: wire types and `CONTRACT.md`, which marks every item pinned or open |
-| `cortexkit-role-tool-provider-conformance` | the `tool-provider/v1` conformance runner, driving a live provider through its harness |
+| Crate | Purpose | crates.io |
+|---|---|---|
+| [cortexkit-bus-inmemory](crates/cortexkit-bus-inmemory/README.md) | Deterministic, process-local implementation of the bus traits. | [0.3.0](https://crates.io/crates/cortexkit-bus-inmemory) |
+| [cortexkit-bus-naming](crates/cortexkit-bus-naming/README.md) | Validation of message-plane names, topology limits, and grants. | [0.2.0](https://crates.io/crates/cortexkit-bus-naming) |
+| [cortexkit-bus-nats](crates/cortexkit-bus-nats/README.md) | NATS and JetStream backend for the bus traits. | [0.3.0](https://crates.io/crates/cortexkit-bus-nats) |
+| [cortexkit-bus-trait](crates/cortexkit-bus-trait/README.md) | NATS-shaped message, register, stream, and work-queue interfaces. | [0.3.0](https://crates.io/crates/cortexkit-bus-trait) |
+| [cortexkit-cache-core](crates/cortexkit-cache-core/README.md) | Prompt-cache stability state machine for freezing and replaying content. | Not published |
+| [cortexkit-cow](crates/cortexkit-cow/README.md) | Copy-on-write workspace isolation and change capture. | [0.1.0](https://crates.io/crates/cortexkit-cow) |
+| [cortexkit-exec-remote-types](crates/cortexkit-exec-remote-types/README.md) | Caller-facing types and vectors for `exec-remote/v1`. | [0.2.8](https://crates.io/crates/cortexkit-exec-remote-types) |
+| [cortexkit-lease](crates/cortexkit-lease/README.md) | Durable single-writer leases and owner-only file/directory helpers. | [0.1.3](https://crates.io/crates/cortexkit-lease) |
+| [cortexkit-log](crates/cortexkit-log/README.md) | Logging format, filtering, redaction, rotation, and retention. | [0.3.5](https://crates.io/crates/cortexkit-log) |
+| [cortexkit-model-catalog](crates/cortexkit-model-catalog/README.md) | Model catalog wire types and exact integer pricing conversion. | Not published |
+| [cortexkit-mutate](crates/cortexkit-mutate/README.md) | The `ckdev-mutate` mutation-testing CLI. | Not published |
+| [cortexkit-paths](crates/cortexkit-paths/README.md) | Canonical project-root identities and absolute user-directory paths. | [0.1.2](https://crates.io/crates/cortexkit-paths) |
+| [cortexkit-provider-usage](crates/cortexkit-provider-usage/README.md) | Provider usage, quota windows, and reset metadata wire types. | [0.11.0](https://crates.io/crates/cortexkit-provider-usage) |
+| [cortexkit-push-seal](crates/cortexkit-push-seal/README.md) | HPKE encryption of push-notification payloads for a recipient device. | Not published |
+| [cortexkit-resource-busy](crates/cortexkit-resource-busy/README.md) | Shared refusal detail for exclusive resources held by another caller. | Not published |
+| [cortexkit-role-agent-data](crates/cortexkit-role-agent-data/README.md) | Wire contract and vectors for the `agent-data/v1` capability. | [0.2.0](https://crates.io/crates/cortexkit-role-agent-data) |
+| [cortexkit-role-classifier](crates/cortexkit-role-classifier/README.md) | Wire contract and vectors for `classifier/v1`. | Not published |
+| [cortexkit-role-classifier-conformance](crates/cortexkit-role-classifier-conformance/README.md) | Conformance runner for a live classifier implementation. | Not published |
+| [cortexkit-role-compaction-provider](crates/cortexkit-role-compaction-provider/README.md) | Wire contract and vectors for `compaction-provider/v1`. | [0.2.4](https://crates.io/crates/cortexkit-role-compaction-provider) |
+| [cortexkit-role-harness](crates/cortexkit-role-harness/README.md) | Spawn, kill, restart, and routing interface for role conformance suites. | [0.1.0](https://crates.io/crates/cortexkit-role-harness) |
+| [cortexkit-role-llm-runner](crates/cortexkit-role-llm-runner/README.md) | Wire contract and vectors for `llm-runner/v1`. | [0.2.3](https://crates.io/crates/cortexkit-role-llm-runner) |
+| [cortexkit-role-llm-runner-conformance](crates/cortexkit-role-llm-runner-conformance/README.md) | Conformance runner for a live LLM runner with a scripted model. | [0.3.1](https://crates.io/crates/cortexkit-role-llm-runner-conformance) |
+| [cortexkit-role-step-transform-provider](crates/cortexkit-role-step-transform-provider/README.md) | Wire contract and vectors for step-transform hooks and operations. | [0.2.3](https://crates.io/crates/cortexkit-role-step-transform-provider) |
+| [cortexkit-role-tool-provider](crates/cortexkit-role-tool-provider/README.md) | Wire contract and vectors for tool catalogs, calls, results, and withdrawal. | [0.8.1](https://crates.io/crates/cortexkit-role-tool-provider) |
+| [cortexkit-role-tool-provider-conformance](crates/cortexkit-role-tool-provider-conformance/README.md) | Conformance runner for a live tool provider. | [0.8.0](https://crates.io/crates/cortexkit-role-tool-provider-conformance) |
+| [cortexkit-store](crates/cortexkit-store/README.md) | SQLite storage opening, migrations, and single-writer ownership. | [0.3.0](https://crates.io/crates/cortexkit-store) |
+| [cortexkit-store-postgres](crates/cortexkit-store-postgres/README.md) | PostgreSQL storage opening, migrations, and single-writer leases. | Not published |
+| [cortexkit-store-types](crates/cortexkit-store-types/README.md) | Dependency-light storage descriptors and isolation types. | [0.2.2](https://crates.io/crates/cortexkit-store-types) |
+| [cortexkit-test-support](crates/cortexkit-test-support/README.md) | Portable scratch storage, executable staging, and daemon fencing. | [0.1.8](https://crates.io/crates/cortexkit-test-support) |
 
-### SQLite database ownership
+## Use a crate
 
-`cortexkit-store` records a file-backed database's `(module_id, storage_namespace)`
-owner in `cortexkit_owner` on its first writer open, before acquiring a lease.
-Concurrent first opens are serialized with an immediate transaction. Opening the
-same database under a different owner, including through a symlink or hard link,
-returns `StoreError::OwnershipMismatch` with both identities. Existing databases
-without an owner row are claimed automatically; matching owners can reopen.
-Read-only operations (`with_read` and its pool) do not claim or check ownership,
-and in-memory databases and SQLite URIs are exempt. `open_sqlite` and
-`open_sqlite_with` are writer opens, even if the caller only plans to read.
+Add a published crate to your `Cargo.toml`:
 
-The first ownership claim attempts a WAL checkpoint to publish the row in the
-main file. This is best effort: a busy or incomplete checkpoint emits a warning
-but does not prevent startup. Until a later checkpoint completes, a hard-link
-alias may not see that new owner. An open for an already-recorded owner only
-reads the row, with no checkpoint and no write lock. So a module restarting while
-another process holds a read snapshot still opens its store, and a second process
-with the same owner still gets the lease refusal, even mid-write.
-
-An intentional ownership change requires clearing the `cortexkit_owner` row while
-all writers are stopped. There is no API for transferring ownership. Version
-0.3.0 adds an error variant to the exhaustive (not `#[non_exhaustive]`)
-`StoreError` enum, so downstream exhaustive matches must be updated.
-
-## Module roles
-
-Each module role (`tool-provider`, `llm-runner`, `compaction-provider`, …)
-lives here as one crate, `cortexkit-role-<name>`, holding its wire types and a
-`CONTRACT.md` role document, with its test vectors under
-`test-vectors/<name>-v<N>/` and its conformance runner in a sibling
-`cortexkit-role-<name>-conformance` crate. The runner is a separate crate, not
-a feature, so a module's production build never compiles the suite and a
-plain `cargo test --workspace` here tests it. Every runner drives the real
-module over a real route through the module's `cortexkit-role-harness`
-implementation; a role crate's own tests may use an in-process fake only to
-test its runner. The role crates are not published: implementations and
-consumers use them as path dependencies.
-
-Some crates are published to crates.io; most are consumed as path
-dependencies by sibling CortexKit repositories. A crate is published only
-when an external consumer genuinely cannot use a path dependency — publishing
-creates a second distribution path, and one is usually enough.
-
-## Versioning
-
-Path-dependency consumers see no checksum for these crates, so the version
-number is the entire change signal: any change to observable behavior or
-emitted bytes bumps the version, comment-only changes do not.
-
-## Build
-
+```toml
+[dependencies]
+cortexkit-paths = "0.1.2"
 ```
-cargo build --workspace
-cargo test --workspace
-```
+
+Crate READMEs above describe usage; unpublished crates are used from a source checkout. See [role contracts and conformance](docs/role-contracts.md) for the contract/vector/runner pattern, [CONTRIBUTING](CONTRIBUTING.md) for checks and releases, and [SECURITY](SECURITY.md) to report a vulnerability.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE).
