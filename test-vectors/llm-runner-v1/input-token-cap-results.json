@@ -1,0 +1,7 @@
+{
+  "canonical": [
+    {"name":"exact limit", "result":{"run_id":"r1","state":"budget_exhausted","detail":{"limit":6,"spent":6,"cause":"limit_reached"}}, "status":{"state":"budget_exhausted","detail":{"limit":6,"spent":6,"cause":"limit_reached"}}},
+    {"name":"crossing step overshoots at face value", "result":{"run_id":"r1","state":"budget_exhausted","detail":{"limit":10,"spent":13,"cause":"limit_reached"}}, "status":{"state":"budget_exhausted","detail":{"limit":10,"spent":13,"cause":"limit_reached"}}},
+    {"name":"unreported step excluded from measured sum", "result":{"run_id":"r1","state":"budget_exhausted","detail":{"limit":10,"spent":3,"cause":"usage_unreported"}}, "status":{"state":"budget_exhausted","detail":{"limit":10,"spent":3,"cause":"usage_unreported"}}}
+  ]
+}

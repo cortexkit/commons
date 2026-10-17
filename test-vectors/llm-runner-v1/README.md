@@ -47,3 +47,13 @@ back the same JSON. Changing a vector changes the contract: say why in the
 commit. These admission shapes align the unpublished `cortexkit-role-llm-runner`
 0.1.0 draft with prefrontal's fetch-plan consumer; the crate remains
 `publish = false` until review.
+# Session input-token caps
+
+`input-token-cap.json` pins accepted sends and every cap/member refusal,
+including scoped closed nudge elements and malformed accessor values. Its
+legacy budget fixture pins the bytes retained in `SendRequest.runner_params`
+and read through the typed accessor. `input-token-cap-results.json` pins
+`run.result` and `run.status` for both exhaustion causes and overshoot.
+`input-token-cap-describe.json` pins independent optional-group discovery and
+the missing-op refusal. Tool-result bodies remain runner-specific; the live
+conformance adapter decodes the runner's existing hard-stop result shape.

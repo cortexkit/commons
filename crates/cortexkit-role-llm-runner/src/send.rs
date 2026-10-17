@@ -160,6 +160,80 @@ where
     crate::strict::optional(deserializer, "retention", "u64 seconds")
 }
 
+/// Role budget fields. Existing runner-specific values are kept verbatim;
+/// only runners advertising `input_token_cap` apply the closed-member check.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Budget {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_input_cap"
+    )]
+    pub max_input_tokens: Option<u64>,
+    #[serde(flatten)]
+    pub runner_params: Map<String, Value>,
+}
+
+fn deserialize_input_cap<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    let value: u64 = Deserialize::deserialize(deserializer).map_err(|_| {
+        serde::de::Error::custom("budget.max_input_tokens must be a u64 of at least 1")
+    })?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "budget.max_input_tokens must be at least 1",
+        ));
+    }
+    Ok(Some(value))
+}
+
+impl Budget {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_max_input_tokens(mut self, limit: u64) -> Self {
+        self.max_input_tokens = Some(limit);
+        self
+    }
+
+    /// Validate before writing a send. `frozen` is the existing session cap;
+    /// `None` means unlimited, including sessions first sent without a cap.
+    /// Returns the field for an `invalid_params` refusal. Non-advertisers
+    /// retain their previous rules for other budget members.
+    pub fn check(&self, advertised: bool, frozen: Option<u64>) -> Result<(), String> {
+        if let Some(limit) = self.max_input_tokens {
+            if !advertised || limit == 0 || frozen.is_some_and(|old| limit > old) {
+                return Err("budget.max_input_tokens".into());
+            }
+        }
+        if advertised {
+            for member in self.runner_params.keys() {
+                if !matches!(
+                    member.as_str(),
+                    "nudges" | "finalize_at_tool_calls" | "finalize_text"
+                ) {
+                    return Err(format!("budget.{member}"));
+                }
+            }
+            if let Some(nudges) = self.runner_params.get("nudges").and_then(Value::as_array) {
+                for (index, nudge) in nudges.iter().enumerate() {
+                    if let Some(members) = nudge.as_object() {
+                        for member in members.keys() {
+                            if !matches!(member.as_str(), "at_tool_calls" | "text") {
+                                return Err(format!("budget.nudges[{index}].{member}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The role's fields of a `session.send` request.
 ///
 /// Lenient on unknown fields: a runner's own send parameters (model,
@@ -229,6 +303,33 @@ impl SendRequest {
     pub fn with_retention(mut self, seconds: u64) -> Self {
         self.retention = Some(seconds);
         self
+    }
+
+    /// Replace the raw `runner_params["budget"]` value with this budget.
+    pub fn with_budget(mut self, budget: Budget) -> Self {
+        self.runner_params.insert(
+            "budget".into(),
+            serde_json::to_value(budget).expect("Budget contains only JSON values"),
+        );
+        self
+    }
+
+    /// Read a typed budget without moving or changing its raw value in
+    /// `runner_params`. Returns the field path for an `invalid_params` refusal;
+    /// decoding a send alone leaves legacy runner parameters untouched.
+    pub fn budget(&self) -> Result<Option<Budget>, String> {
+        let Some(raw) = self.runner_params.get("budget") else {
+            return Ok(None);
+        };
+        let members = raw.as_object().ok_or_else(|| "budget".to_owned())?;
+        if let Some(limit) = members.get("max_input_tokens") {
+            if limit.as_u64().is_none_or(|limit| limit == 0) {
+                return Err("budget.max_input_tokens".into());
+            }
+        }
+        serde_json::from_value(raw.clone())
+            .map(Some)
+            .map_err(|_| "budget".into())
     }
 
     /// Validate retention before writing anything. `previous` is `None`
@@ -727,5 +828,95 @@ mod retention_tests {
         assert!(SendRequest::new("p", "s")
             .check_retention(None, Some(Some(5)))
             .is_ok());
+    }
+}
+
+#[cfg(test)]
+mod input_cap_tests {
+    use super::*;
+    use crate::{errors, vectors};
+
+    #[test]
+    fn legacy_budget_stays_in_runner_params_byte_for_byte() {
+        let file = vectors::load("input-token-cap.json");
+        let case = &file["legacy_budget"];
+        let expected_bytes = case["budget_bytes"].as_str().unwrap().as_bytes();
+        let request: SendRequest = vectors::round_trip("legacy budget", &case["params"]);
+        // Legacy consumers read this exact map entry, not the typed accessor.
+        assert_eq!(
+            serde_json::to_vec(&request.runner_params["budget"]).unwrap(),
+            expected_bytes
+        );
+        let budget = request.budget().unwrap().unwrap();
+        assert_eq!(budget.max_input_tokens, None);
+        assert_eq!(budget.runner_params["finalize_text"], "x");
+        assert_eq!(
+            budget.runner_params["nudges"],
+            serde_json::json!([{"at_tool_calls":1,"text":"hint"}])
+        );
+        assert_eq!(serde_json::to_vec(&budget).unwrap(), expected_bytes);
+        assert_eq!(
+            serde_json::to_vec(&request.runner_params["budget"]).unwrap(),
+            expected_bytes
+        );
+    }
+
+    #[test]
+    fn with_budget_replaces_raw_value_without_duplicate_keys() {
+        let mut request = SendRequest::new("prompt", "key");
+        assert_eq!(request.budget().unwrap(), None);
+        request
+            .runner_params
+            .insert("budget".into(), serde_json::json!({"finalize_text":"old"}));
+        let budget = Budget::new().with_max_input_tokens(7);
+        let request = request.with_budget(budget.clone());
+        assert_eq!(request.budget().unwrap(), Some(budget));
+        assert_eq!(
+            request.runner_params["budget"],
+            serde_json::json!({"max_input_tokens":7})
+        );
+        let encoded = serde_json::to_string(&request).unwrap();
+        assert_eq!(encoded.matches("\"budget\":").count(), 1, "{encoded}");
+        assert!(!encoded.contains("old"));
+    }
+
+    #[test]
+    fn input_cap_send_vectors_accept_and_refuse_by_field() {
+        let file = vectors::load("input-token-cap.json");
+        for case in vectors::cases(&file, "accept") {
+            let request: SendRequest =
+                vectors::round_trip(case["name"].as_str().unwrap(), &case["params"]);
+            request
+                .budget()
+                .unwrap()
+                .unwrap()
+                .check(
+                    case["advertised"].as_bool().unwrap(),
+                    case["frozen"].as_u64(),
+                )
+                .unwrap();
+        }
+        for case in vectors::cases(&file, "refuse") {
+            let field = case["error"]["detail"]["field"].as_str().unwrap();
+            assert_eq!(case["error"]["code"], errors::INVALID_PARAMS);
+            let request: SendRequest =
+                vectors::round_trip(case["name"].as_str().unwrap(), &case["params"]);
+            let result = request.budget().and_then(|budget| {
+                budget.unwrap().check(
+                    case["advertised"].as_bool().unwrap(),
+                    case["frozen"].as_u64(),
+                )
+            });
+            assert_eq!(result, Err(field.into()), "{}", case["name"]);
+        }
+        assert!(Budget::new()
+            .with_max_input_tokens(0)
+            .check(true, None)
+            .is_err());
+        assert!(SendRequest::new("prompt", "key")
+            .with_budget(Budget::new().with_max_input_tokens(1))
+            .budget()
+            .unwrap()
+            .is_some());
     }
 }

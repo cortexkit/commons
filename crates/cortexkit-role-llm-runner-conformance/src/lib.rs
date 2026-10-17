@@ -81,6 +81,7 @@ mod cases;
 mod compaction;
 mod crash;
 mod drive;
+mod input_token_cap;
 mod report;
 mod retention;
 mod route;
@@ -98,7 +99,7 @@ pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
     AttributionFixture, Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall,
-    ScriptedTurn,
+    ScriptedTurn, ScriptedUsage, ToolResultObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

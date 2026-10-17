@@ -47,9 +47,22 @@ const SENDS: &[Capability] = &[Queue, TranscriptReads];
 const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
 const COMPACTED: &[Capability] = &[Compaction, ModelView, Queue, TranscriptReads, RunOps];
 const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, RunOps];
+const INPUT_CAP: &[Capability] = &[Capability::InputTokenCap, Queue, TranscriptReads, RunOps];
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("input_token_cap_at_limit", INPUT_CAP,
+        "input plus both cache counts reach exactly the cap, output is excluded, and an omitted cap starts no model step in the next episode"),
+    case("input_token_cap_crossing_tools", INPUT_CAP,
+        "a step may overshoot without estimation, but none of its sibling calls dispatch and every call has a never-executed budget_exhausted result"),
+    case("input_token_cap_restart_between_episodes", INPUT_CAP,
+        "the frozen cap and measured sum survive a harness restart between episodes"),
+    case("input_token_cap_raise_refused", INPUT_CAP,
+        "a raise is refused invalid_params naming budget.max_input_tokens without writes; a lower cap takes effect before the next step"),
+    case("input_token_cap_closed_members", INPUT_CAP,
+        "unknown budget and nudge-element members are refused invalid_params naming their paths without writes"),
+    case("input_token_cap_usage_unreported", INPUT_CAP,
+        "unreported completed-step input ends budget_exhausted usage_unreported with spent excluding that step, without dispatching its calls"),
     case("run_cancel_step_boundary_finishes_tool_batch",
         &[Capability::RunCancel, Queue, TranscriptReads, RunOps, HoldToolCalls],
         "when describe lists step_boundary, cancellation during a held model step records the whole tool batch, accepts an idempotent second request, starts no further model step and ends cancelled"),

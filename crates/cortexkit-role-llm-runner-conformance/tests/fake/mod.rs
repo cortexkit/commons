@@ -320,6 +320,7 @@ struct RunRec {
     final_ordinal: Option<u64>,
     final_text: Option<String>,
     error: Option<Value>,
+    detail: Option<Value>,
     cancel_requested: bool,
     cancel_at: String,
 }
@@ -337,6 +338,9 @@ struct CallRec {
 struct Sess {
     compaction: compaction::State,
     retention: Option<u64>,
+    input_cap: Option<u64>,
+    input_spent: u64,
+    input_unreported: bool,
     last_activity: u64,
     expired_at: Option<u64>,
     deleted: bool,
@@ -731,6 +735,9 @@ impl Module {
                 sess.title = record["title"].as_str().map(str::to_owned);
             }
             "send" | "steer" => {
+                if let Some(limit) = record["input_cap"].as_u64() {
+                    sess.input_cap = Some(limit);
+                }
                 if let Some(retention) = record["retention"].as_u64() {
                     sess.retention = Some(retention);
                 }
@@ -762,12 +769,22 @@ impl Module {
                         final_ordinal: None,
                         final_text: None,
                         error: None,
+                        detail: None,
                         cancel_requested: false,
                         cancel_at: String::new(),
                     });
                 }
             }
             "step" => {
+                if let Some(spent) = record["input_spent"]
+                    .as_u64()
+                    .filter(|_| !sess.input_unreported)
+                {
+                    sess.input_spent = spent;
+                }
+                if record["input_spent"].is_null() {
+                    sess.input_unreported = true;
+                }
                 let run_id = text("run_id");
                 let mut keys = Vec::new();
                 for call in record["calls"].as_array().into_iter().flatten() {
@@ -833,6 +850,18 @@ impl Module {
             }
             "terminal" => {
                 let run_id = text("run_id");
+                for blocked in record["blocked"].as_array().into_iter().flatten() {
+                    let key = blocked["call_key"].as_str().unwrap();
+                    if let Some(call) = sess.calls.get_mut(key) {
+                        call.result = true;
+                    }
+                    sess.push(
+                        json!({"role":"tool", "tool_call_id":blocked["tool_call_id"],
+                        "content":{"executed":false,"error":{"code":"budget_exhausted"}}}),
+                        &run_id,
+                        Vec::new(),
+                    );
+                }
                 let final_ordinal = sess
                     .messages
                     .iter()
@@ -842,6 +871,7 @@ impl Module {
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
                     run.error = record.get("error").cloned();
+                    run.detail = record.get("detail").cloned();
                     if run.state == "completed" {
                         run.final_ordinal = final_ordinal;
                         run.final_text = record["final_text"].as_str().map(str::to_owned);
@@ -860,6 +890,16 @@ impl Module {
             let sess = self.sessions.lock().unwrap()[session].clone();
             if sess.run(run_id).is_none_or(|run| run.state != "active") {
                 return Ok(());
+            }
+            if let Some(limit) = sess.input_cap {
+                if sess.input_unreported {
+                    return self.commit(session, json!({"kind":"terminal", "run_id":run_id,
+                        "state":"budget_exhausted", "detail":{"limit":limit,"spent":sess.input_spent,"cause":"usage_unreported"}}));
+                }
+                if sess.input_spent >= limit {
+                    return self.commit(session, json!({"kind":"terminal", "run_id":run_id,
+                        "state":"budget_exhausted", "detail":{"limit":limit,"spent":sess.input_spent,"cause":"limit_reached"}}));
+                }
             }
             let mine: Vec<(&String, &CallRec)> = sess
                 .calls
@@ -974,10 +1014,28 @@ impl Module {
                 }
             }
             let no_calls = calls.is_empty();
+            let input_spent = turn.usage.as_ref().map(|usage| {
+                sess.input_spent
+                    .saturating_add(usage.input_tokens)
+                    .saturating_add(usage.cache_read_tokens)
+                    .saturating_add(usage.cache_write_tokens)
+            });
             self.commit(
                 session,
-                json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls }),
+                json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls, "input_spent":input_spent }),
             )?;
+            if let Some(limit) = sess.input_cap {
+                let cause = match input_spent {
+                    None => Some("usage_unreported"),
+                    Some(spent) if spent >= limit => Some("limit_reached"),
+                    Some(_) => None,
+                };
+                if let Some(cause) = cause {
+                    return self.commit(session, json!({"kind":"terminal", "run_id":run_id,
+                        "state":"budget_exhausted", "blocked":calls,
+                        "detail":{"limit":limit,"spent":input_spent.unwrap_or(sess.input_spent),"cause":cause}}));
+                }
+            }
             if no_calls {
                 let text: String = turn.text_parts().collect();
                 return self.commit(
@@ -1312,6 +1370,18 @@ impl Module {
         let delivery = request.delivery().as_str().to_owned();
         let old = self.sessions.lock().unwrap().get(session).cloned();
         let mut existing = old.clone().filter(|s| s.expired_at.is_none());
+        let budget = match request.budget() {
+            Ok(budget) => budget,
+            Err(field) => return Ok(invalid(&field)),
+        };
+        if let Some(budget) = &budget {
+            if let Err(field) = budget.check(
+                self.world.serves(groups::INPUT_TOKEN_CAP),
+                existing.as_ref().and_then(|s| s.input_cap),
+            ) {
+                return Ok(invalid(&field));
+            }
+        }
         let defect = self.world.retention_defect;
         if defect == RetentionDefect::WithoutGroupIgnored && !self.world.serves(groups::RETENTION) {
             request.retention = None;
@@ -1403,7 +1473,8 @@ impl Module {
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
                             "prompt": request.prompt, "delivery": delivery,
-                            "run_id": run.run_id, "admitted": false, "retention":request.retention }),
+                            "run_id": run.run_id, "admitted": false, "retention":request.retention,
+                            "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
                 )?;
                 if self.world.defects.held_steer_ends_run {
                     self.world
@@ -1444,7 +1515,8 @@ impl Module {
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt,
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
-                    "retention":request.retention, "title":request.runner_params.get("title") }),
+                    "retention":request.retention, "title":request.runner_params.get("title"),
+                    "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
         )?;
         self.drive(session, &run_id)?;
         let send = self.sessions.lock().unwrap()[session].sends[&request.send_id].clone();
@@ -1692,6 +1764,9 @@ impl Module {
         }
         if let Some(error) = &run.error {
             result = result.with_error(serde_json::from_value(error.clone()).unwrap());
+        }
+        if let Some(detail) = &run.detail {
+            result = result.with_detail(serde_json::from_value(detail.clone()).unwrap());
         }
         respond(result)
     }
@@ -2105,6 +2180,22 @@ impl LlmRunnerSubject for FakeSubject {
             .get(&arguments.to_string())
             .copied()
             .unwrap_or(0)
+    }
+
+    fn not_executed_tool_result(
+        &self,
+        message: &Value,
+        tool_call_id: &str,
+    ) -> Option<cortexkit_role_llm_runner_conformance::ToolResultObservation> {
+        if message["tool_call_id"].as_str()? != tool_call_id {
+            return None;
+        }
+        Some(
+            cortexkit_role_llm_runner_conformance::ToolResultObservation::new(
+                message["content"]["executed"].as_bool()?,
+                message["content"]["error"]["code"].as_str()?,
+            ),
+        )
     }
 
     async fn install_compaction_script(

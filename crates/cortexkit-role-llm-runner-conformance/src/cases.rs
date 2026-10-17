@@ -131,6 +131,9 @@ where
             }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
+            name if name.starts_with("input_token_cap_") => crate::input_token_cap::run(self, name)
+                .await
+                .map(|()| Ending::Passed),
             name if name.starts_with("retention_") => self.retention_case(name).await,
             name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
                 crate::compaction::run(self, name)
@@ -272,7 +275,7 @@ where
         let mut prompts = Vec::new();
         for _ in 0..3 {
             let (part, marker) = self.mint.text("answer");
-            turns.push(ScriptedTurn { parts: vec![part] });
+            turns.push(ScriptedTurn::new(vec![part]));
             markers.push(marker);
             let prompt = self.mint.next("prompt");
             markers.push(prompt.clone());
@@ -464,7 +467,7 @@ where
         self.open(
             label,
             Script {
-                turns: vec![ScriptedTurn { parts: vec![part] }],
+                turns: vec![ScriptedTurn::new(vec![part])],
             },
         )
         .await
@@ -633,8 +636,8 @@ where
                 "oversize",
                 Script {
                     turns: vec![
-                        ScriptedTurn { parts: vec![small] },
-                        ScriptedTurn { parts: vec![after] },
+                        ScriptedTurn::new(vec![small]),
+                        ScriptedTurn::new(vec![after]),
                     ],
                 },
             )
@@ -868,10 +871,8 @@ where
             .completed_result(
                 "final-text",
                 vec![
-                    ScriptedTurn {
-                        parts: vec![interim, ScriptedPart::ToolCall(call)],
-                    },
-                    ScriptedTurn { parts: vec![last] },
+                    ScriptedTurn::new(vec![interim, ScriptedPart::ToolCall(call)]),
+                    ScriptedTurn::new(vec![last]),
                 ],
             )
             .await?;
@@ -895,14 +896,12 @@ where
         let result = self
             .completed_result(
                 "joined",
-                vec![ScriptedTurn {
-                    parts: vec![
-                        ScriptedPart::Text(parts[0].clone()),
-                        ScriptedPart::Reasoning(reasoning.clone()),
-                        ScriptedPart::Text(parts[1].clone()),
-                        ScriptedPart::Text(parts[2].clone()),
-                    ],
-                }],
+                vec![ScriptedTurn::new(vec![
+                    ScriptedPart::Text(parts[0].clone()),
+                    ScriptedPart::Reasoning(reasoning.clone()),
+                    ScriptedPart::Text(parts[1].clone()),
+                    ScriptedPart::Text(parts[2].clone()),
+                ])],
             )
             .await?;
         let text = final_text(&result)?;
@@ -925,9 +924,7 @@ where
         let result = self
             .completed_result(
                 "no-text",
-                vec![ScriptedTurn {
-                    parts: vec![ScriptedPart::Reasoning(reasoning)],
-                }],
+                vec![ScriptedTurn::new(vec![ScriptedPart::Reasoning(reasoning)])],
             )
             .await?;
         let text = final_text(&result)?;
@@ -955,15 +952,9 @@ where
                 "attribution",
                 Script {
                     turns: vec![
-                        ScriptedTurn {
-                            parts: vec![ScriptedPart::Text("first-final".into())],
-                        },
-                        ScriptedTurn {
-                            parts: vec![ScriptedPart::ToolCall(held)],
-                        },
-                        ScriptedTurn {
-                            parts: vec![ScriptedPart::Text("second-final".into())],
-                        },
+                        ScriptedTurn::new(vec![ScriptedPart::Text("first-final".into())]),
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(held)]),
+                        ScriptedTurn::new(vec![ScriptedPart::Text("second-final".into())]),
                     ],
                 },
             )
@@ -1073,16 +1064,12 @@ where
             .dispatched(
                 "dispatched",
                 vec![
-                    ScriptedTurn {
-                        parts: vec![
-                            ScriptedPart::ToolCall(calls[0].clone()),
-                            ScriptedPart::ToolCall(calls[1].clone()),
-                        ],
-                    },
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::ToolCall(calls[2].clone())],
-                    },
-                    ScriptedTurn { parts: vec![done] },
+                    ScriptedTurn::new(vec![
+                        ScriptedPart::ToolCall(calls[0].clone()),
+                        ScriptedPart::ToolCall(calls[1].clone()),
+                    ]),
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(calls[2].clone())]),
+                    ScriptedTurn::new(vec![done]),
                 ],
             )
             .await?;
@@ -1137,10 +1124,8 @@ where
                 "indeterminate",
                 Script {
                     turns: vec![
-                        ScriptedTurn {
-                            parts: vec![ScriptedPart::ToolCall(held.clone())],
-                        },
-                        ScriptedTurn { parts: vec![done] },
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+                        ScriptedTurn::new(vec![done]),
                     ],
                 },
             )
@@ -1213,13 +1198,11 @@ where
             .dispatched(
                 "siblings",
                 vec![
-                    ScriptedTurn {
-                        parts: vec![
-                            ScriptedPart::ToolCall(first.clone()),
-                            ScriptedPart::ToolCall(second.clone()),
-                        ],
-                    },
-                    ScriptedTurn { parts: vec![done] },
+                    ScriptedTurn::new(vec![
+                        ScriptedPart::ToolCall(first.clone()),
+                        ScriptedPart::ToolCall(second.clone()),
+                    ]),
+                    ScriptedTurn::new(vec![done]),
                 ],
             )
             .await?;
@@ -1239,13 +1222,9 @@ where
             .dispatched(
                 "recurring",
                 vec![
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::ToolCall(first)],
-                    },
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::ToolCall(second)],
-                    },
-                    ScriptedTurn { parts: vec![done] },
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(first)]),
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(second)]),
+                    ScriptedTurn::new(vec![done]),
                 ],
             )
             .await?;
@@ -1299,10 +1278,7 @@ where
             .open(
                 "subscribe",
                 Script {
-                    turns: vec![
-                        ScriptedTurn { parts: vec![one] },
-                        ScriptedTurn { parts: vec![two] },
-                    ],
+                    turns: vec![ScriptedTurn::new(vec![one]), ScriptedTurn::new(vec![two])],
                 },
             )
             .await?;
@@ -1353,8 +1329,8 @@ where
                 label,
                 Script {
                     turns: vec![
-                        ScriptedTurn { parts: vec![part] },
-                        ScriptedTurn { parts: vec![part2] },
+                        ScriptedTurn::new(vec![part]),
+                        ScriptedTurn::new(vec![part2]),
                     ],
                 },
             )
@@ -1446,7 +1422,7 @@ where
             .open(
                 label,
                 Script {
-                    turns: vec![ScriptedTurn { parts: vec![part] }],
+                    turns: vec![ScriptedTurn::new(vec![part])],
                 },
             )
             .await?;
@@ -1733,10 +1709,8 @@ where
                 "steer-guaranteed",
                 Script {
                     turns: vec![
-                        ScriptedTurn {
-                            parts: vec![ScriptedPart::ToolCall(held.clone())],
-                        },
-                        ScriptedTurn { parts: vec![done] },
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+                        ScriptedTurn::new(vec![done]),
                     ],
                 },
             )

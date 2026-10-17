@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4
+
+- Add discovery-gated, durable, lower-only `budget.max_input_tokens`, budget/nudge closed-member checks, budget-exhaustion detail and cause constants, and the `budget_exhausted` result code. Cache reads/writes count at face value across all session episodes; missing usage fails closed.
+- Keep `budget` in `SendRequest.runner_params` unchanged for existing consumers. The typed `budget()` accessor parses a copy and returns the offending field path on malformed data; `with_budget(...)` replaces that raw map entry, avoiding duplicate wire keys. No typed `SendRequest.budget` field is added.
+- When a run ends at `max_steps`, `stop_when` or `budget_exhausted`, every tool call the model asked for that has not run gets a never-executed result, written in the same commit as the run's end state, so a transcript never holds a tool call without a result. The result uses the runner's own format; the contract adds no shared tool-result body.
+- Keep states open. The exhaustive public `RunState` enum retains `Other(String)` for `budget_exhausted`; `RUN_STATE_BUDGET_EXHAUSTED`, `is_budget_exhausted()` and `is_terminal()` recognize it without breaking downstream exhaustive matches. At the next breaking release, make `RunState` non-exhaustive and promote this state to a variant.
+- Patch release: new fields are confined to already non-exhaustive run reply structs with constructors; send budgets remain in the existing flattened map. New `Budget` and `BudgetExhaustedDetail` are non-exhaustive from introduction.
+
 ## 0.2.3
 
 - Add the terminal `reply_too_large` refusal and safe size/subject detail. Bound whole-message and atomic model-view-group replies by the 4,194,304-byte transport frame limit; replies that exceed it are refused, never truncated.

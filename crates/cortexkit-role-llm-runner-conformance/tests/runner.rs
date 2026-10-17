@@ -24,6 +24,13 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if report.outcome(case)
+        == Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::InputTokenCap],
+        })
+    {
+        return;
+    }
     // Legacy fake configurations intentionally do not declare retention.
     // Assert the named skip, never count it as a passed retention case.
     if CASES
@@ -115,6 +122,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.claim_process_kill = true;
     subject.enable_retention();
+    subject.capabilities.insert(Capability::InputTokenCap);
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -361,6 +369,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                 &vec![
                     Capability::Streaming,
                     Capability::Retention,
+                    Capability::InputTokenCap,
                     Capability::HoldToolCalls
                 ]
             );
@@ -704,7 +713,11 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
         SuiteVerdict::ConformingForDeclaredCapabilities { skipped, .. } => {
             assert_eq!(
                 skipped,
-                &vec![Capability::RunOps, Capability::Retention],
+                &vec![
+                    Capability::RunOps,
+                    Capability::Retention,
+                    Capability::InputTokenCap
+                ],
                 "{}",
                 report.render()
             );
@@ -927,6 +940,7 @@ async fn retention_paused_non_terminal_run_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.enable_retention();
     subject.claim_process_kill = true;
+    subject.capabilities.insert(Capability::InputTokenCap);
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
@@ -938,6 +952,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.enable_retention();
     subject.claim_process_kill = true;
+    subject.capabilities.insert(Capability::InputTokenCap);
     subject.advertise_status = false;
     let report = run(&subject).await;
     assert!(
@@ -1336,4 +1351,65 @@ async fn escalation_cancel_case_rejects_a_runner_ignoring_now() {
     let reason = failed(&report, "run_cancel_step_boundary_escalates_to_now");
     assert!(reason.contains("did not end"), "{reason}");
     assert_others_passed(&report, &["run_cancel_step_boundary_escalates_to_now"]);
+}
+
+const INPUT_CAP_CASES: &[&str] = &[
+    "input_token_cap_at_limit",
+    "input_token_cap_crossing_tools",
+    "input_token_cap_restart_between_episodes",
+    "input_token_cap_raise_refused",
+    "input_token_cap_closed_members",
+    "input_token_cap_usage_unreported",
+];
+
+async fn input_cap_case(name: &str) {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::InputTokenCap);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{name}: {:?}",
+        report.outcome(name)
+    );
+}
+
+#[tokio::test]
+async fn input_token_cap_at_limit() {
+    input_cap_case("input_token_cap_at_limit").await;
+}
+#[tokio::test]
+async fn input_token_cap_crossing_tools() {
+    input_cap_case("input_token_cap_crossing_tools").await;
+}
+#[tokio::test]
+async fn input_token_cap_restart_between_episodes() {
+    input_cap_case("input_token_cap_restart_between_episodes").await;
+}
+#[tokio::test]
+async fn input_token_cap_raise_refused() {
+    input_cap_case("input_token_cap_raise_refused").await;
+}
+#[tokio::test]
+async fn input_token_cap_closed_members() {
+    input_cap_case("input_token_cap_closed_members").await;
+}
+#[tokio::test]
+async fn input_token_cap_usage_unreported() {
+    input_cap_case("input_token_cap_usage_unreported").await;
+}
+
+#[tokio::test]
+async fn input_token_cap_undeclared_cases_skip_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in INPUT_CAP_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::InputTokenCap]
+            }),
+            "{name}"
+        );
+        assert!(report.render().contains(&format!("SKIP {name}")));
+    }
 }

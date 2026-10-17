@@ -33,6 +33,8 @@ pub mod send;
 pub mod session_ref;
 pub mod subscribe;
 
+pub use run::RUN_STATE_BUDGET_EXHAUSTED;
+
 pub use session_ref::session_ref;
 
 /// The role name as `role.describe` reports it.
@@ -141,6 +143,8 @@ pub mod capabilities {
     /// Caller-chosen whole-session transcript retention, with limits in
     /// `role.describe.retention`.
     pub const RETENTION: &str = "retention";
+    /// Durable, lower-only session input-token budgets on `session.send`.
+    pub const INPUT_TOKEN_CAP: &str = "input_token_cap";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -163,6 +167,7 @@ pub mod capabilities {
         (INTERRUPT, &[ops::SESSION_SEND]),
         (PLANS, &[ops::SESSION_SEND]),
         (RETENTION, &[ops::SESSION_SEND]),
+        (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -274,6 +279,9 @@ pub(crate) mod vectors {
         "errors.json",
         "fence.json",
         "head.json",
+        "input-token-cap.json",
+        "input-token-cap-results.json",
+        "input-token-cap-describe.json",
         "plans.json",
         "read-pages.json",
         "read-requests.json",

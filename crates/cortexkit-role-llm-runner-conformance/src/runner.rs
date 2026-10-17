@@ -96,6 +96,16 @@ where
                     )
                     .await
                     .map(|()| Ending::Passed)
+                } else if spec.name == "input_token_cap_restart_between_episodes" {
+                    crate::input_token_cap::restart(
+                        subject,
+                        &mut driver,
+                        work_dir,
+                        &declared,
+                        &mint,
+                    )
+                    .await
+                    .map(|()| Ending::Passed)
                 } else if spec.name == "crash_at_RetentionTombstoned" {
                     retention::crash(subject, &mut driver, work_dir, &declared, &mint).await
                 } else if let Some(point) = crash::point_of(spec.name) {

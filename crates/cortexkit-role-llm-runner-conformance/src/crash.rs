@@ -76,7 +76,7 @@ pub fn point_of(case: &str) -> Option<&'static str> {
 }
 
 fn turn(parts: Vec<ScriptedPart>) -> ScriptedTurn {
-    ScriptedTurn { parts }
+    ScriptedTurn::new(parts)
 }
 
 /// Run the scenario for `point` on a fresh root.

@@ -1,0 +1,33 @@
+{
+  "legacy_budget": {
+    "params":{"prompt":"legacy budget","send_id":"s1","budget":{"finalize_text":"x","nudges":[{"at_tool_calls":1,"text":"hint"}]}},
+    "budget_bytes":"{\"finalize_text\":\"x\",\"nudges\":[{\"at_tool_calls\":1,\"text\":\"hint\"}]}"
+  },
+  "accept": [
+    {"name":"first cap", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":10}}},
+    {"name":"lower frozen cap", "advertised":true, "frozen":10, "params":{"prompt":"next","send_id":"s2","budget":{"max_input_tokens":6}}},
+    {"name":"repeat cap", "advertised":true, "frozen":10, "params":{"prompt":"next","send_id":"s2","budget":{"max_input_tokens":10}}},
+    {"name":"omission preserves frozen cap", "advertised":true, "frozen":10, "params":{"prompt":"next","send_id":"s2","budget":{}}},
+    {"name":"late cap from unlimited", "advertised":true, "frozen":null, "params":{"prompt":"later episode","send_id":"s2","budget":{"max_input_tokens":1}}},
+    {"name":"u64 maximum and known members", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":18446744073709551615,"nudges":[{"at_tool_calls":3,"text":"finish"}],"finalize_at_tool_calls":4,"finalize_text":"done"}}},
+    {"name":"nonadvertiser retains open legacy budget", "advertised":false, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"legacy":1,"nudges":[{"foo":1}]}}}
+  ],
+  "refuse": [
+    {"name":"budget must be an object", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":[]}, "error":{"code":"invalid_params","detail":{"field":"budget"}}},
+    {"name":"null budget is malformed when accessed", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":null}, "error":{"code":"invalid_params","detail":{"field":"budget"}}},
+    {"name":"numeric budget is malformed when accessed", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":1}, "error":{"code":"invalid_params","detail":{"field":"budget"}}},
+    {"name":"string budget is malformed when accessed", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":"legacy"}, "error":{"code":"invalid_params","detail":{"field":"budget"}}},
+    {"name":"boolean budget is malformed when accessed", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":true}, "error":{"code":"invalid_params","detail":{"field":"budget"}}},
+    {"name":"zero", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":0}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"null is not omission", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":null}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"negative", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":-1}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"fraction", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":1.5}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"string", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":"10"}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"boolean", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":true}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"u64 overflow", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":18446744073709551616}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"raise", "advertised":true, "frozen":10, "params":{"prompt":"next","send_id":"s2","budget":{"max_input_tokens":11}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"undeclared cap", "advertised":false, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"max_input_tokens":10}}, "error":{"code":"invalid_params","detail":{"field":"budget.max_input_tokens"}}},
+    {"name":"unknown budget member", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"foo":1}}, "error":{"code":"invalid_params","detail":{"field":"budget.foo"}}},
+    {"name":"unknown nudge member", "advertised":true, "frozen":null, "params":{"prompt":"start","send_id":"s1","budget":{"nudges":[{"at_tool_calls":1,"text":"hint","foo":1}]}}, "error":{"code":"invalid_params","detail":{"field":"budget.nudges[0].foo"}}}
+  ]
+}

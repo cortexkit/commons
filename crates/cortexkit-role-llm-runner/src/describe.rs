@@ -642,3 +642,24 @@ mod retention_tests {
         assert_eq!(decoded, Retention::new(3, 100));
     }
 }
+
+#[cfg(test)]
+mod input_cap_tests {
+    use super::*;
+    use crate::vectors;
+
+    #[test]
+    fn input_token_cap_describe_group_requires_send_and_no_other_optional_group() {
+        let file = vectors::load("input-token-cap-describe.json");
+        let answer: RoleDescribe = vectors::round_trip("cap describe", &file["accept"]);
+        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
+        assert!(answer.declares(capabilities::INPUT_TOKEN_CAP));
+        assert_eq!(
+            check_describe(&file["refuse"]),
+            Err(vec![DescribeProblem::GroupIncomplete {
+                capability: capabilities::INPUT_TOKEN_CAP,
+                op: crate::ops::SESSION_SEND
+            }])
+        );
+    }
+}

@@ -231,18 +231,12 @@ where
             tool.result = json!({"marker":marker});
             markers.push(marker);
             vec![
-                ScriptedTurn {
-                    parts: vec![ScriptedPart::ToolCall(tool)],
-                },
-                ScriptedTurn {
-                    parts: vec![self.mint.text("retention-answer").0],
-                },
+                ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool)]),
+                ScriptedTurn::new(vec![self.mint.text("retention-answer").0]),
             ]
         } else {
             (0..4)
-                .map(|_| ScriptedTurn {
-                    parts: vec![self.mint.text("retention-answer").0],
-                })
+                .map(|_| ScriptedTurn::new(vec![self.mint.text("retention-answer").0]))
                 .collect()
         };
         let mut session = self.open("retention", Script { turns }).await?;
@@ -627,12 +621,8 @@ where
                 "retention-held",
                 Script {
                     turns: vec![
-                        ScriptedTurn {
-                            parts: vec![ScriptedPart::ToolCall(held.clone())],
-                        },
-                        ScriptedTurn {
-                            parts: vec![self.mint.text("held-final").0],
-                        },
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+                        ScriptedTurn::new(vec![self.mint.text("held-final").0]),
                     ],
                 },
             )
@@ -720,9 +710,7 @@ where
         .install_script(
             &name,
             Script {
-                turns: vec![ScriptedTurn {
-                    parts: vec![mint.text("retention-crash-text").0],
-                }],
+                turns: vec![ScriptedTurn::new(vec![mint.text("retention-crash-text").0])],
             },
         )
         .await

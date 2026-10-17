@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- Require runner 0.2.4 and add input-token cap cases, run only when the subject advertises `input_token_cap` (otherwise each is reported as skipped, by name). They check that:
+  - a step does not start once consumed input equals the cap;
+  - when a step crosses the cap, none of its tool calls run, and each gets a never-executed result;
+  - the cap and the running total survive a runner restart between episodes;
+  - a later send can lower the cap but not raise it;
+  - unknown members of `budget` and of a nudge are refused;
+  - a step with no reported usage ends the run as `budget_exhausted` with cause `usage_unreported`.
+- Breaking: `ScriptedTurn` gains optional per-step `ScriptedUsage` and becomes non-exhaustive. Replace struct literals with `ScriptedTurn::new(parts)` and `.with_usage(...)`; absence deliberately omits usage. Report input/cache-read/cache-write/output exactly as scripted, without estimates.
+- Input-cap adapters must implement external `model_invocations` observations and decode native not-executed results through `not_executed_tool_result`. The suite does not impose a shared tool-result body.
+- The fake runner reads typed budget copies through `SendRequest::budget()` while preserving raw `runner_params["budget"]`; malformed budget refusals retain their field paths.
+
 ## 0.3.1
 
 - Require cortexkit-role-llm-runner 0.2.3, which adds the terminal `reply_too_large` refusal and its frame-size detail.

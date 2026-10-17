@@ -19,6 +19,10 @@ use serde_json::Value;
 /// excludes. `detail.field` names it.
 pub const INVALID_PARAMS: &str = "invalid_params";
 
+/// A session input-token cap stopped a tool call before dispatch. Not a
+/// retryable request refusal; the run ends in the state of the same name.
+pub const BUDGET_EXHAUSTED: &str = "budget_exhausted";
+
 /// A read's `lineage_id` is not the session's current lineage. The caller
 /// re-reads from the tail; it never retries the same cursor.
 pub const LINEAGE_CHANGED: &str = "lineage_changed";
@@ -263,6 +267,8 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
 /// Reasons a runner writes on a tool call's error result. Where the reason
 /// sits inside a message body is the runner's message schema.
 pub mod tool_result_reasons {
+    /// The session input-token cap stopped the call before dispatch.
+    pub const BUDGET_EXHAUSTED: &str = super::BUDGET_EXHAUSTED;
     /// The call had a durable dispatch intent and no result when the runner
     /// restarted: it may or may not have run. Never re-dispatched.
     pub const OUTCOME_UNKNOWN: &str = "outcome_unknown";

@@ -46,6 +46,8 @@ pub enum Capability {
     SessionChange,
     /// Whole-session retention with limits from `role.describe.retention`.
     Retention,
+    /// The durable session input-token cap on `session.send.budget`.
+    InputTokenCap,
     /// The runner under test can move its retention clock forward on request, so expiry and deletion happen without waiting in real time. For tests only; release builds must not offer it.
     RetentionClock,
     /// The runner adapter's scripted tool provider can hold a received call
@@ -78,6 +80,7 @@ impl Capability {
         Self::Compaction,
         Self::SessionChange,
         Self::Retention,
+        Self::InputTokenCap,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -111,6 +114,7 @@ impl Capability {
             Self::Compaction => groups::COMPACTION,
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
+            Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
             Self::HoldToolCalls | Self::RetentionClock | Self::KillAt(_) => return None,
         })
     }
@@ -135,8 +139,55 @@ pub struct Script {
 
 /// One assistant turn: its parts, in the order the model emits them.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ScriptedTurn {
     pub parts: Vec<ScriptedPart>,
+    /// Report exactly these counts, or omit input usage entirely for `None`.
+    /// Adapters must not fill in missing usage with an estimate or zero.
+    pub usage: Option<ScriptedUsage>,
+}
+
+/// Usage reported by one completed model request, at face value.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScriptedUsage {
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Decoded facts from a native tool-result body, not a shared wire shape.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ToolResultObservation {
+    pub executed: bool,
+    pub code: String,
+}
+
+impl ToolResultObservation {
+    pub fn new(executed: bool, code: impl Into<String>) -> Self {
+        Self {
+            executed,
+            code: code.into(),
+        }
+    }
+}
+
+impl ScriptedUsage {
+    pub fn new(
+        input_tokens: u64,
+        cache_read_tokens: u64,
+        cache_write_tokens: u64,
+        output_tokens: u64,
+    ) -> Self {
+        Self {
+            input_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            output_tokens,
+        }
+    }
 }
 
 /// One part of an assistant turn.
@@ -183,6 +234,15 @@ impl Script {
 }
 
 impl ScriptedTurn {
+    pub fn new(parts: Vec<ScriptedPart>) -> Self {
+        Self { parts, usage: None }
+    }
+
+    pub fn with_usage(mut self, usage: ScriptedUsage) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
     /// The turn's text parts, in order.
     pub fn text_parts(&self) -> impl Iterator<Item = &str> {
         self.parts.iter().filter_map(|part| match part {
@@ -425,6 +485,19 @@ pub trait LlmRunnerSubject: Harness {
     /// reset by every kill, and the at-most-once crash checks would then pass
     /// whatever the runner does.
     async fn tool_invocations(&self, arguments: &Value) -> usize;
+
+    /// Decode a not-executed result for this model call id from a real
+    /// `session.read` message body. Override only to locate the native call id
+    /// and result content; never infer results from scripts or terminal state.
+    /// There is no shared body layout; the default recognizes no results and
+    /// therefore cannot pass the input-cap tool-result case.
+    fn not_executed_tool_result(
+        &self,
+        _message: &Value,
+        _tool_call_id: &str,
+    ) -> Option<ToolResultObservation> {
+        None
+    }
 
     /// Resolve once the scripted tool provider holds the call with
     /// `arguments`. Required by [`Capability::HoldToolCalls`].

@@ -137,18 +137,12 @@ where
             "cancel-boundary",
             Script {
                 turns: vec![
-                    ScriptedTurn {
-                        parts: vec![
-                            ScriptedPart::ToolCall(first.clone()),
-                            ScriptedPart::ToolCall(second.clone()),
-                        ],
-                    },
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::ToolCall(forbidden.clone())],
-                    },
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::Text("unexpected next step".into())],
-                    },
+                    ScriptedTurn::new(vec![
+                        ScriptedPart::ToolCall(first.clone()),
+                        ScriptedPart::ToolCall(second.clone()),
+                    ]),
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(forbidden.clone())]),
+                    ScriptedTurn::new(vec![ScriptedPart::Text("unexpected next step".into())]),
                 ],
             },
         )
@@ -249,14 +243,10 @@ where
             "cancel-unlisted",
             Script {
                 turns: vec![
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::ToolCall(tool)],
-                    },
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::Text(
-                            "unlisted cancel left the run intact".into(),
-                        )],
-                    },
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool)]),
+                    ScriptedTurn::new(vec![ScriptedPart::Text(
+                        "unlisted cancel left the run intact".into(),
+                    )]),
                 ],
             },
         )
@@ -309,11 +299,9 @@ where
         .open(
             "cancel-escalation",
             Script {
-                turns: vec![ScriptedTurn {
-                    parts: vec![ScriptedPart::Text(
-                        "held model must not need to finish".into(),
-                    )],
-                }],
+                turns: vec![ScriptedTurn::new(vec![ScriptedPart::Text(
+                    "held model must not need to finish".into(),
+                )])],
             },
         )
         .await?;

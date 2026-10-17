@@ -159,9 +159,7 @@ fn summary(marker: &str, version: u64, to: u64) -> CompactionMessage {
 }
 
 fn text(value: &str) -> ScriptedTurn {
-    ScriptedTurn {
-        parts: vec![ScriptedPart::Text(value.into())],
-    }
+    ScriptedTurn::new(vec![ScriptedPart::Text(value.into())])
 }
 
 async fn observation<S: LlmRunnerSubject>(
@@ -754,9 +752,7 @@ where
             script,
             Script {
                 turns: vec![
-                    ScriptedTurn {
-                        parts: vec![ScriptedPart::ToolCall(tool)],
-                    },
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool)]),
                     text("late-final"),
                 ],
             },
@@ -903,9 +899,7 @@ where
         ];
         Script {
             turns: vec![
-                ScriptedTurn {
-                    parts: vec![ScriptedPart::ToolCall(mint.call("fence-tool"))],
-                },
+                ScriptedTurn::new(vec![ScriptedPart::ToolCall(mint.call("fence-tool"))]),
                 text("fence-final"),
             ],
         }

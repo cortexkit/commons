@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const RUN_STATE_BUDGET_EXHAUSTED: &str = "budget_exhausted";
+
 /// Run state names. A state not listed here decodes as [`RunState::Other`],
 /// keeping its name, and a consumer treats it as unclassified.
 pub mod states {
@@ -17,6 +19,8 @@ pub mod states {
     pub const COMPLETED: &str = "completed";
     /// The run ended at its step limit.
     pub const MAX_STEPS: &str = "max_steps";
+    /// The session's input-token cap was reached, or usage was unreported.
+    pub const BUDGET_EXHAUSTED: &str = super::RUN_STATE_BUDGET_EXHAUSTED;
     /// A caller cancelled the run.
     pub const CANCELLED: &str = "cancelled";
     /// The run ended with an error, carried in `error`.
@@ -52,13 +56,44 @@ impl RunState {
         }
     }
 
-    /// Whether the state is terminal. An unknown state is not known to be
-    /// terminal, so this answers `false` for it.
+    pub fn is_budget_exhausted(&self) -> bool {
+        matches!(self, Self::Other(state) if state == RUN_STATE_BUDGET_EXHAUSTED)
+    }
+
+    /// Whether the state is terminal. Unrecognized strings answer `false`;
+    /// budget exhaustion is recognized without adding an enum variant.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
             Self::Completed | Self::MaxSteps | Self::Cancelled | Self::Error | Self::Interrupted
-        )
+        ) || self.is_budget_exhausted()
+    }
+}
+
+/// Causes of a `budget_exhausted` terminal state, decoded as open strings.
+pub mod budget_exhausted_causes {
+    pub const LIMIT_REACHED: &str = "limit_reached";
+    pub const USAGE_UNREPORTED: &str = "usage_unreported";
+}
+
+/// Detail carried by both `run.result` and `run.status` on budget exhaustion.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct BudgetExhaustedDetail {
+    pub limit: u64,
+    /// Measured input + cache-read + cache-write tokens across the session.
+    /// With `usage_unreported`, excludes the unreported step entirely.
+    pub spent: u64,
+    pub cause: String,
+}
+
+impl BudgetExhaustedDetail {
+    pub fn new(limit: u64, spent: u64, cause: impl Into<String>) -> Self {
+        Self {
+            limit,
+            spent,
+            cause: cause.into(),
+        }
     }
 }
 
@@ -89,6 +124,8 @@ pub struct RunResult {
     /// The run's state, one of [`states`]; any other value decodes as a
     /// plain string.
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<BudgetExhaustedDetail>,
     /// Why the run ended, where the runner names a reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -107,6 +144,7 @@ impl RunResult {
         Self {
             run_id: run_id.into(),
             state: state.into(),
+            detail: None,
             reason: None,
             error: None,
             final_message: None,
@@ -115,6 +153,11 @@ impl RunResult {
 
     pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
         self.reason = Some(reason.into());
+        self
+    }
+
+    pub fn with_detail(mut self, detail: BudgetExhaustedDetail) -> Self {
+        self.detail = Some(detail);
         self
     }
 
@@ -310,6 +353,8 @@ impl From<RunReason> for String {
 pub struct RunStatus {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<BudgetExhaustedDetail>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<RunReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<RunError>,
@@ -322,6 +367,7 @@ impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
         Self {
             state: state.into(),
+            detail: None,
             reason: None,
             error: None,
             undelivered_steers: None,
@@ -329,6 +375,10 @@ impl RunStatus {
     }
     pub fn with_reason(mut self, reason: RunReason) -> Self {
         self.reason = Some(reason);
+        self
+    }
+    pub fn with_detail(mut self, detail: BudgetExhaustedDetail) -> Self {
+        self.detail = Some(detail);
         self
     }
     pub fn with_error(mut self, error: RunError) -> Self {
@@ -648,6 +698,55 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<RunResult>(encoded).unwrap(),
             result
+        );
+    }
+}
+
+#[cfg(test)]
+mod input_cap_tests {
+    use super::*;
+    use crate::{errors, vectors};
+
+    #[test]
+    fn input_cap_result_vectors_preserve_detail_and_open_states() {
+        let file = vectors::load("input-token-cap-results.json");
+        let mut causes = std::collections::BTreeSet::new();
+        for case in vectors::cases(&file, "canonical") {
+            let result: RunResult = vectors::round_trip("result", &case["result"]);
+            let status: RunStatus = vectors::round_trip("status", &case["status"]);
+            assert_eq!(result.detail, status.detail);
+            assert!(result.run_state().is_budget_exhausted());
+            assert!(status.run_state().is_terminal());
+            assert!(matches!(result.run_state(), RunState::Other(_)));
+            causes.insert(result.detail.unwrap().cause);
+        }
+        assert_eq!(
+            causes,
+            [
+                budget_exhausted_causes::LIMIT_REACHED.into(),
+                budget_exhausted_causes::USAGE_UNREPORTED.into()
+            ]
+            .into()
+        );
+        assert!(!RunState::parse("future_budget_state").is_terminal());
+        assert_eq!(errors::BUDGET_EXHAUSTED, states::BUDGET_EXHAUSTED);
+        assert_eq!(
+            errors::tool_result_reasons::BUDGET_EXHAUSTED,
+            states::BUDGET_EXHAUSTED
+        );
+        assert!(!errors::is_retryable(errors::BUDGET_EXHAUSTED));
+        let detail = BudgetExhaustedDetail::new(10, 10, budget_exhausted_causes::LIMIT_REACHED);
+        assert_eq!(
+            RunResult::new("r1", states::BUDGET_EXHAUSTED)
+                .with_detail(detail.clone())
+                .detail,
+            Some(detail.clone())
+        );
+        assert_eq!(
+            RunStatus::new(states::BUDGET_EXHAUSTED)
+                .with_detail(detail.clone())
+                .detail,
+            Some(detail)
         );
     }
 }

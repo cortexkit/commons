@@ -127,12 +127,16 @@ shipping runner with this document.
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `retract` | `session.retract` | §9.2 |
+| `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
-- [pinned] `run_status`, `run_cancel` and `retract` are each declared on
+- [pinned] `run_status`, `run_cancel`, `retract` and `input_token_cap` are each declared on
   their own: a runner may serve any of them without the others, and
   without `run_ops` or `transcript_reads`.
+- [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
+  advertises `input_token_cap`. Like the other optional groups, it is checked
+  by `check_describe` for its required op; it adds no discovery metadata.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -269,7 +273,7 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   run's state. For a completed run it also returns the final assistant
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
-  [pinned] The answer is `{run_id, state, reason?, error?, final_message?:
+  [pinned] The answer is `{run_id, state, reason?, error?, detail?, final_message?:
   {ordinal, mid, text}}` (`RunResult`), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
@@ -287,10 +291,26 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   it a second. `interrupted` (the runner stopped or crashed under the run) is
   distinct from `cancelled` (a caller stopped it).
 - [pinned] States (`run::states`): `active` and `paused`, which are not
-  terminal, and the terminal states `completed`, `max_steps`, `cancelled`,
+  terminal, and the terminal states `completed`, `max_steps`, `budget_exhausted`, `cancelled`,
   `error` and `interrupted`. States are decoded open: a runner's own state
   (broca's `transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
+- [pinned] `budget_exhausted` is not retryable within the run. A caller needing
+  more input opens a new session, not another episode on the exhausted one.
+  Both `run.result` and `run.status` carry `detail: {limit, spent, cause}`
+  (`BudgetExhaustedDetail`): `limit` is the frozen u64 session cap, `spent` is
+  the session's measured input sum (§9.3), and `cause` is `limit_reached` or
+  `usage_unreported`. Under `usage_unreported`, `spent` is the sum of measured
+  steps before the unreported step; that step is never counted as zero.
+- [pinned] A hard stop (`max_steps`, `stop_when`, or `budget_exhausted`) leaves
+  no dangling tool calls: every pending, undispatched call receives the
+  runner's native not-executed result in the same durable commit as the run's
+  terminal state. `stop_when` names a runner's hard-stop condition, not an
+  additional role state. The result is the same refusal-before-dispatch shape
+  used for hook denials such as `pre_tool_denied`; body layout stays
+  runner-specific (§12.3). For `budget_exhausted`, its refusal code is
+  `budget_exhausted` wherever that runner places a refusal code. No dispatch
+  intent is recorded for these calls.
 - [pinned] A run error (`RunResult::error`) is `{class, message,
   provider_code, status?, retry_after_secs?, resets_at_ms?, account_ref?,
   provider?, reason?, provider_detail_code?}`. `class`, `message` and
@@ -338,7 +358,7 @@ state, polled without reading the transcript.
 - [pinned] The request is `{run_id?}`, strict: an unknown field is refused
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
-- [pinned] The answer is `{state, reason?, error?, undelivered_steers?}`,
+- [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason`, `usage` and
   `retries_used` stay runner members, not pinned.
@@ -351,6 +371,7 @@ state, polled without reading the transcript.
   - `error`: on a run that ended `error`, the same run error `run.result`
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
+  - `detail`: on `budget_exhausted`, exactly the detail `run.result` carries (§6).
 - [pinned] `undelivered_steers` is the list of `send_id`s of the steers
   this run accepted and never rendered to the model before it ended, in
   the order they were accepted. On the status of a run that has ended:
@@ -566,7 +587,8 @@ run.
   unkeyed non-owner sends, without retry idempotency; otherwise any other
   caller is refused `scope_owner_mismatch`.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
-  `delivery`, never read as `queue`. The rest of the request is lenient: a
+  `delivery`, never read as `queue`. Except for the scoped closed `budget`
+  rules on an `input_token_cap` runner (§9.3), the request is lenient: a
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
 - [pinned] A `steer` or `interrupt` into an existing session takes every
@@ -719,6 +741,61 @@ joined, and `session.retract` does not withdraw it.
   `send_id_reuse` as in §9.
 - [pinned] On an expired session, `session.retract` answers `expired` and
   writes nothing (§9.1).
+
+### 9.3 `input_token_cap`: durable session input budget
+
+- [pinned] `session.send.budget.max_input_tokens` (`SendRequest::budget()`,
+  `Budget::max_input_tokens`) is optional, a u64 of at least 1. A runner
+  advertising `input_token_cap` enforces it over **every model step in every
+  episode of the session**: sum each completed step's reported input tokens
+  + cache-read tokens + cache-write tokens, all at face value. Output tokens
+  do not count. Cache tokens are neither discounted nor deduplicated against
+  another reported counter. Both the cap and the running sum are durable
+  session state and survive runner restarts. Usage is accumulated even before
+  a session first receives a cap.
+- [pinned] The Rust `SendRequest` keeps the complete raw `budget` object in
+  `runner_params["budget"]`, as before; it has no separate typed budget field.
+  Existing consumers reading `nudges` or `finalize_*` through that map retain
+  the same data. `budget()` returns a typed copy without changing the raw
+  object: `Ok(None)` when absent, or an offending field path when malformed
+  (`budget` for a non-object, `budget.max_input_tokens` for an invalid cap).
+  `with_budget(Budget)` replaces the existing map entry, so serialization
+  emits one `budget` key, never separate raw and typed copies. Validation is
+  explicit; decoding a send alone preserves even malformed legacy parameters.
+- [pinned] The cap is frozen and lower-only. A later send may lower it or
+  repeat it, never raise it. A raise is refused `invalid_params` with
+  `detail.field: "budget.max_input_tokens"` and writes nothing. Omitting the
+  field preserves the frozen value. A session without a cap is unlimited and
+  accepts a cap later (lowering from unlimited). Zero, null, a non-integer,
+  a negative number or an out-of-u64 value is refused `invalid_params` naming
+  `budget.max_input_tokens`.
+- [pinned] Before **each** model step, if consumed input is **≥ limit**, the
+  step MUST NOT start and the run ends `budget_exhausted`, `cause:
+  "limit_reached"`. A cap of N stops at exactly N, not only above it.
+  Immediately after a completed step, **before any of its tool calls
+  dispatch**, the runner adds its reported usage and checks again. If the
+  sum is **≥ limit**, none of that step's tool calls dispatch. Every one gets
+  the same not-executed result used for a hard stop (`max_steps`/`stop_when`),
+  with code `budget_exhausted`, atomically with the terminal (§6).
+- [pinned] A step that starts under the cap may overshoot within itself.
+  Runners MUST NOT pre-estimate input usage to stop such a step. Report the
+  measured sum, including the crossing step, as `spent`.
+- [pinned] If a completed step's input usage is unreported, fail closed: end
+  the run `budget_exhausted` with `cause: "usage_unreported"` before dispatching
+  any of that step's calls, giving each the same not-executed result. `spent`
+  contains only the measured steps before that step. An unmeasured step is
+  never treated as zero. If usage was unreported before a cap was installed,
+  the session cannot establish a measured total; the capped run must likewise
+  fail closed before starting another step.
+- [pinned] Only a runner advertising `input_token_cap` applies these closed
+  member rules: `budget` knows exactly `nudges`, `finalize_at_tool_calls`,
+  `finalize_text`, and `max_input_tokens`. Each `budget.nudges[]` element knows
+  exactly `at_tool_calls` and `text`. Any unknown member is refused
+  `invalid_params` naming its full path, such as `budget.foo` or
+  `budget.nudges[0].foo`, without writes. This crate preserves the existing
+  runner-specific values of the three older budget members verbatim; only
+  their member names are pinned here. Non-advertising runners retain their
+  existing budget behavior unchanged.
 
 ## 10. `session.baseline` and the admission reply
 
@@ -1051,6 +1128,9 @@ provider codes.
   withheld; the error text says so.
 - [pinned] `route_drained`: the call was never sent, because its route closed
   under a drained scope.
+- [pinned] `budget_exhausted`: the session input cap stopped the call before
+  dispatch (§9.3). It is marked not executed, with no dispatch intent, using
+  the same native result as other hard stops (§6).
 - [pinned] Where the reason sits in a message body is the runner's message
   schema.
 
