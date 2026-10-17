@@ -487,6 +487,9 @@ fn flow_engine_reads_its_own_durable_and_replays_through_ephemeral_consumers_onl
         format!("$JS.API.CONSUMER.INFO.{stream}.server_named_ephemeral"),
         format!("$JS.FC.{stream}.server_named_ephemeral.1.2"),
         account.effect_dead(),
+        account
+            .event_subject("basal", "flow_instance_created", 1)
+            .unwrap(),
     ] {
         assert!(
             may(Operation::Publish, &subject),
@@ -502,7 +505,7 @@ fn flow_engine_reads_its_own_durable_and_replays_through_ephemeral_consumers_onl
         format!("$JS.API.CONSUMER.CREATE.{stream}.m_basal"),
         format!("$JS.API.CONSUMER.DELETE.{stream}"),
         account
-            .event_subject("basal", "pull_request_review", 1)
+            .event_subject("other", "pull_request_review", 1)
             .unwrap(),
     ] {
         assert!(
@@ -519,8 +522,8 @@ fn flow_engine_reads_its_own_durable_and_replays_through_ephemeral_consumers_onl
         .iter()
         .any(|entry| entry.subject.starts_with(&delete_prefix)));
 
-    // The only account subject the flow engine publishes is the dead-letter
-    // record.
+    // The only account subjects the flow engine publishes are the dead-letter
+    // record and its own module events.
     let account_prefix = format!("ck.{}.", account.account());
     let published = allows
         .iter()
@@ -528,7 +531,14 @@ fn flow_engine_reads_its_own_durable_and_replays_through_ephemeral_consumers_onl
         .filter(|entry| entry.subject.starts_with(&account_prefix))
         .map(|entry| entry.subject.clone())
         .collect::<Vec<_>>();
-    assert_eq!(published, vec![account.effect_dead()]);
+    let mut expected = vec![
+        account.effect_dead(),
+        account.event_publish_grant("basal").unwrap(),
+    ];
+    expected.sort();
+    let mut published = published;
+    published.sort();
+    assert_eq!(published, expected);
 
     assert!(flow_engine_permissions(&account, "UBASALKEY", "basal.>").is_err());
     assert!(flow_engine_permissions(&account, "UBASAL.>", "basal").is_err());

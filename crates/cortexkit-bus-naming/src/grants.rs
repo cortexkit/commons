@@ -459,10 +459,12 @@ pub fn system_permissions(credential_public: &str) -> Result<Vec<AllowEntry>, Gr
 
 /// The grant for the flow engine (basal), issued by its attested module id.
 ///
-/// It reads module events and produces nothing: its own inbox, census reads,
-/// the dead-letter record, pull and ack on its own durable `m_{module_id}` on
-/// the event stream, and ephemeral ordered consumers on that stream for dry-run
-/// replay. It publishes on no workload subject and on no event subject.
+/// It reads module events and publishes only its own: its own inbox, census
+/// reads, the dead-letter record, pull and ack on its own durable
+/// `m_{module_id}` on the event stream, ephemeral ordered consumers on that
+/// stream for dry-run replay, and publish on its own event subjects
+/// (`ck.{acct}.event.{module_id}.>`). It publishes on no workload subject and
+/// on no other module's event subject.
 ///
 /// The ephemeral consumers rest on three rows. Consumer create is granted only
 /// in its unnamed form, the bare `$JS.API.CONSUMER.CREATE.<stream>` with no
@@ -504,6 +506,11 @@ pub fn flow_engine_permissions(
         format!("$JS.API.CONSUMER.CREATE.{stream}"),
         format!("$JS.API.CONSUMER.INFO.{stream}.*"),
         format!("$JS.FC.{stream}.>"),
+        // The flow engine's own module events, `ck.{acct}.event.{module_id}.>`, the
+        // same own-subject publish every participant has. A flow engine that emits
+        // lifecycle events would otherwise be refused, and the server then closes
+        // the connection its event reader shares.
+        account.event_publish_grant(module_id)?,
     ] {
         add(
             &mut entries,
@@ -751,7 +758,8 @@ pub fn generate_permission_golden(
 
     // The flow engine cannot create a named or durable consumer on the event
     // stream, cannot delete any consumer there, cannot read an agent's
-    // durable, and publishes no workload message.
+    // durable, publishes no workload message, and publishes no other module's
+    // events.
     let event_stream = &account.streams().event;
     let own_durable = AccountNames::module_consumer_name(fixture.flow_engine_module)?;
     let foreign_durable = AccountNames::module_consumer_name(fixture.foreign_module)?;
@@ -784,6 +792,10 @@ pub fn generate_permission_golden(
             "agent-durable",
         ),
         (account.wake_fire(fixture.bound_agent)?, "workload-publish"),
+        (
+            account.event_subject(fixture.foreign_module, GOLDEN_EVENT, GOLDEN_EVENT_VERSION)?,
+            "foreign-module-event",
+        ),
     ] {
         refused.insert(RefusedEntry {
             principal: Principal::FlowEngine,
