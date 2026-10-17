@@ -7,9 +7,10 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Versions 0.8.x
-pair with subc-protocol 0.32; versions 0.7.x pair with protocol 0.31, and
-versions 0.6.x pair with protocol 0.30.
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.9.0
+pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.9.0. Versions
+0.8.x pair with subc-protocol 0.32; versions 0.7.x pair with protocol 0.31,
+and versions 0.6.x pair with protocol 0.30.
 
 ## Opt-in `content/v1` results
 
@@ -77,3 +78,13 @@ ever writes one of the three known modes, so a live route cannot carry an
 unknown one. Preservation and refusal of `CallMode::Unknown` are therefore
 checked by the role crate's own tests of `serves_call_mode`, not by this
 suite.
+
+## Catalog capability filtering
+
+`catalog_capability_filter_matches_describe` runs only when the live
+`role.describe` answer advertises `tool-catalog-capability-filter/v1`; otherwise
+it is reported as a named skip. The case requests the full discovered
+`tool_capabilities` list and checks that the filtered catalog's tag union is
+exactly that list. It also checks that missing and empty lists select no tools,
+that filtering does not change `generation`, and that a changed tool selection
+changes `catalog_digest`. No subject flag can opt out of a live advertisement.

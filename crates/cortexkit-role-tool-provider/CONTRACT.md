@@ -27,20 +27,33 @@ to them. Nothing here names a particular implementation.
 ## 2. `role.describe`
 
 - The answer is `{majors: [{version, ops, stability}], implementation_version,
-  capabilities?}` (`RoleDescribe`). `majors` lists every major of the role
-  the module serves, each with its own `ops` and `stability`; `version` is
+  capabilities?, tool_capabilities?}` (`RoleDescribe`). `majors` lists every
+  major of the role the module serves, each with its own `ops` and `stability`; `version` is
   spelled as in the manifest, for example `tool-provider/v1`. The caller picks
   the highest major it understands for a new session.
-- Decoded leniently: unknown fields, majors, ops and capabilities are
-  ignored; only the presence of the `tool-provider/v1` major and its required
-  ops are checked strictly. `capabilities` may be omitted. `stability` is
-  `alpha`, `beta` or `stable`; an unknown level decodes.
+- Decoded leniently: unknown fields, role majors, ops and module capabilities
+  are ignored, except for the `tool-provider/v1` major and the known filter
+  capability below. The v1 major and its required ops are checked strictly.
+  `capabilities` and `tool_capabilities` may be omitted when the filter is not
+  advertised. `stability` is `alpha`, `beta` or `stable`; an unknown level
+  decodes.
 - The answer describes the implementation, never the tools: it carries no
   tool list. It depends only on the module build, so a consumer may cache it
   for as long as it talks to the same module incarnation; two answers from one
   incarnation are identical.
-- `tool-provider/v1` defines no module-level capabilities. Session-level
-  capabilities travel in the catalog answer.
+- `tool-provider/v1` defines exactly one optional module-level capability:
+  `tool-catalog-capability-filter/v1` (`CATALOG_CAPABILITY_FILTER`). A consumer
+  sends `params.capabilities` only after `role.describe` advertises this token.
+  An advertising provider also returns `tool_capabilities`: the nonempty union
+  of capability tags on its catalog tools, sorted bytewise and without
+  duplicates. Every tag passes `check_capability_tag`. A provider that does not
+  advertise the filter omits `tool_capabilities` and is unchanged; the filter
+  is additive and opt-in. Session-level capabilities travel in the catalog
+  answer.
+- `tool_capabilities` is an index of tags, not a tool list. A consumer
+  intersects it with the tags it wants using
+  `describe::select_tool_capabilities`, then builds canonical `params` with
+  `catalog::params_for_capabilities`.
 
 ## 3. `tool.catalog`
 
@@ -53,6 +66,22 @@ to them. Nothing here names a particular implementation.
     `scope`, `tool_descs` and `exclude` are conventional names a provider
     reuses when it supports that axis, so the same idea is spelled the same
     way across providers; none is required of every provider.
+    - An advertising provider that supports `tool-catalog-capability-filter/v1`
+      accepts only `capabilities` in `params`. It must refuse any other key as
+      `invalid_request` with `detail.field: "params.<key>"`.
+    - `params.capabilities` is an array of strings in strictly increasing
+      bytewise order (therefore sorted and without repeats). A non-array is
+      refused with `detail.field: "params.capabilities"`; a non-string member
+      is refused with its indexed field `params.capabilities[i]`; an unsorted
+      or repeated list is refused naming `params.capabilities`. A requested tag
+      the provider does not serve is refused as `invalid_request` with
+      `detail: {field: "params.capabilities[i]", capability: "<tag>"}`.
+    - A valid list selects exactly the tools carrying **any** requested tag,
+      not only tools carrying every tag. An absent or empty list selects no
+      tools. A consumer sends the field only to a provider that advertised the
+      optional module capability; providers that do not advertise it retain
+      their existing params and catalog behavior. The acceptance and refusal
+      forms are pinned by `test-vectors/tool-provider-v1/catalog-capabilities.json`.
   - `preset` is the plan item's named variant, defined by the provider. It
     sits beside `params`, not inside it, so it never collides with a
     provider's own axis, and mirrors `system_text`'s `{preset, params}`.
@@ -67,15 +96,16 @@ to them. Nothing here names a particular implementation.
     for this provider.
 - Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
   tools: [...], system_text?, capabilities?}`.
-  - `generation` is an opaque string that changes whenever the catalog's
-    content changes.
-  - `catalog_digest` is an opaque digest of the answer's content. A full
-    answer and a `digest_only` answer to the same inputs carry the same value,
-    so a caller holding a full answer can check it later with one cheap
-    `digest_only` fetch. When the request asks for `system_text`, that item is
-    part of the answer's content, so `catalog_digest` covers it too: a change
-    to the text alone changes `catalog_digest`, and a `digest_only` fetch
-    with the same `system_text` request detects it.
+  - `generation` is an opaque string that changes whenever the full advertised
+    definitions change, independent of a capability filter.
+  - `catalog_digest` is an opaque digest of the answer's content, including
+    only the tools selected by the request's capability filter. A full answer
+    and a `digest_only` answer to the same inputs carry the same value, so a
+    caller holding a full answer can check it later with one cheap `digest_only`
+    fetch. When the request asks for `system_text`, that item is part of the
+    answer's content, so `catalog_digest` covers it too: a change to the text
+    alone changes `catalog_digest`, and a `digest_only` fetch with the same
+    `system_text` request detects it.
   - `composition_digest` is SHA-256 over the RFC 8785 (JCS) canonical JSON
     of the request's `composition` object exactly as sent, written as 64
     lowercase hex characters (`composition_digest`). Nothing is stripped
@@ -87,6 +117,10 @@ to them. Nothing here names a particular implementation.
     by name: `host_params`, `late_results`. A capability is declared by the
     value `true`; any other value is not a declaration. The runner freezes
     them with the tools.
+  - `tool_capabilities` in `role.describe` is the sorted, unique union of the
+    per-tool capability tags in the full catalog. An advertising provider's
+    filtered answer still contains exactly the tools selected by any requested
+    tag.
   - `system_text`, when requested, is `{text, item_digest, preflight_digest,
     composition_digest, tool_names}`, from the same configuration resolution
     as the catalog in the same reply. `item_digest` is the SHA-256 of the
@@ -530,6 +564,7 @@ CI against its real module over a real route; never against a double.
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
 | `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `catalog_capability_filter_matches_describe` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
 | `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
@@ -576,6 +611,14 @@ served on the listed-mode route. If no restricted tool fixture exists,
 passed. See the conformance crate's README for the subject hooks. The current
 daemon stamps only known bind modes; unknown-mode refusal is checked in the
 helper's unit tests instead.
+
+The `catalog_capability_filter_matches_describe` case is gated by the live
+`role.describe` advertisement, never a subject flag. It requests all of the
+advertised `tool_capabilities` and checks that the returned catalog's tag union
+matches exactly. It also checks that missing and empty lists select no tools,
+filtering leaves `generation` unchanged, and a changed selection changes
+`catalog_digest`. A provider that does not advertise the capability skips this
+case by name.
 
 Caller-side rules that no live provider can be made to exercise (an unknown
 withdraw `answer`, an unknown late-result `kind`, the withdraw caller policy)

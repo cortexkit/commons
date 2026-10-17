@@ -51,6 +51,9 @@ pub enum Capability {
     /// At least one catalog tool declares `result_format: "content/v1"`.
     /// Inferred by the runner, not an opt-out subject flag.
     ContentV1,
+    /// The provider advertises `tool-catalog-capability-filter/v1` in
+    /// `role.describe`. Inferred from the live answer, not a subject flag.
+    CatalogCapabilityFilter,
 }
 
 impl Capability {
@@ -68,6 +71,7 @@ impl Capability {
             Self::SystemText => "system_text",
             Self::CallModes => "call_modes",
             Self::ContentV1 => "content/v1",
+            Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
         }
     }
 }

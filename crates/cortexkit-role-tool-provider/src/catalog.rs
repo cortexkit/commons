@@ -12,7 +12,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::CallMode;
+use crate::{errors, CallMode};
+use subc_protocol::ErrorBody;
 
 /// The result operations a hook may apply to a tool's result. A tool that
 /// does not list `result_ops` accepts all three.
@@ -34,6 +35,101 @@ pub const AUDIENCE_HOST: &str = "host";
 
 /// Root-level schema keywords a flat argument schema must not carry.
 pub const ROOT_UNION_KEYWORDS: &[&str] = &["anyOf", "oneOf", "allOf"];
+
+/// Build the `params` map for a capability-filtered `tool.catalog` request.
+/// Tags are sorted by their UTF-8 bytes and deduplicated so the request is
+/// canonical regardless of the caller's input order.
+pub fn params_for_capabilities<I, S>(capabilities: I) -> Map<String, Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut tags: Vec<String> = capabilities
+        .into_iter()
+        .map(|tag| tag.as_ref().to_owned())
+        .collect();
+    tags.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    tags.dedup();
+    Map::from_iter([(
+        "capabilities".to_owned(),
+        Value::Array(tags.into_iter().map(Value::String).collect()),
+    )])
+}
+
+/// Select tools carrying any requested capability tag.
+///
+/// Providers that advertise [`crate::CATALOG_CAPABILITY_FILTER`] use this for
+/// the `params` of `tool.catalog`. An absent or empty capability list selects
+/// no tools. Unknown params, malformed lists, unsorted or repeated tags, and
+/// tags the provider does not serve are refused as `invalid_request`.
+pub fn select_by_capabilities<'a>(
+    params: &Map<String, Value>,
+    tools: &'a [CatalogTool],
+) -> Result<Vec<&'a CatalogTool>, ErrorBody> {
+    if let Some(field) = params.keys().find(|field| field.as_str() != "capabilities") {
+        return Err(errors::invalid_request(
+            &format!("params.{field}"),
+            "unknown catalog parameter",
+        ));
+    }
+
+    let Some(capabilities) = params.get("capabilities") else {
+        return Ok(Vec::new());
+    };
+    let capabilities = capabilities.as_array().ok_or_else(|| {
+        errors::invalid_request(
+            "params.capabilities",
+            "capabilities must be an array of tags",
+        )
+    })?;
+    let tags: Vec<&str> = capabilities
+        .iter()
+        .enumerate()
+        .map(|(index, capability)| {
+            capability.as_str().ok_or_else(|| {
+                errors::invalid_request(
+                    &format!("params.capabilities[{index}]"),
+                    "capability tag must be a string",
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    if tags
+        .windows(2)
+        .any(|pair| pair[0].as_bytes() >= pair[1].as_bytes())
+    {
+        return Err(errors::invalid_request(
+            "params.capabilities",
+            "capability tags must be sorted bytewise with no repeats",
+        ));
+    }
+
+    for (index, tag) in tags.iter().enumerate() {
+        if !tools
+            .iter()
+            .any(|tool| tool.capabilities.iter().any(|served| served == tag))
+        {
+            let field = format!("params.capabilities[{index}]");
+            return Err(errors::invalid_request(
+                &field,
+                format!("provider serves no capability {tag}"),
+            )
+            .with_detail(serde_json::json!({
+                "field": field,
+                "capability": tag,
+            })));
+        }
+    }
+
+    Ok(tools
+        .iter()
+        .filter(|tool| {
+            tool.capabilities
+                .iter()
+                .any(|served| tags.contains(&served.as_str()))
+        })
+        .collect())
+}
 
 /// The arguments of a `tool.catalog` request.
 ///
@@ -752,6 +848,71 @@ mod tests {
 
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn catalog_capability_vectors_select_any_requested_tag() {
+        let vectors = vectors::load("catalog-capabilities.json");
+        for case in vectors["accept"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let params: Map<String, Value> =
+                serde_json::from_value(case["params"].clone()).unwrap();
+            let tools: Vec<CatalogTool> = case["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| {
+                    CatalogTool::new(tool["name"].as_str().unwrap(), "", 1, serde_json::json!({}))
+                        .with_capabilities(
+                            serde_json::from_value(tool["capabilities"].clone()).unwrap(),
+                        )
+                })
+                .collect();
+            let selected: Vec<&str> = select_by_capabilities(&params, &tools)
+                .unwrap()
+                .into_iter()
+                .map(|tool| tool.name.as_str())
+                .collect();
+            let expected: Vec<String> = serde_json::from_value(case["selected"].clone()).unwrap();
+            assert_eq!(
+                selected,
+                expected.iter().map(String::as_str).collect::<Vec<_>>(),
+                "{name}"
+            );
+        }
+
+        let params = params_for_capabilities(["zeta:tool/v1", "code.read/v1", "zeta:tool/v1"]);
+        assert_eq!(
+            params,
+            serde_json::from_value(serde_json::json!({
+                "capabilities": ["code.read/v1", "zeta:tool/v1"]
+            }))
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn catalog_capability_refusal_vectors_name_the_bad_parameter() {
+        let vectors = vectors::load("catalog-capabilities.json");
+        let tools = [CatalogTool::new("read", "", 1, serde_json::json!({}))
+            .with_capabilities(vec!["code.read/v1".into()])];
+        for case in vectors["refuse"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let params: Map<String, Value> =
+                serde_json::from_value(case["params"].clone()).unwrap();
+            let error = select_by_capabilities(&params, &tools).unwrap_err();
+            assert_eq!(
+                error.code,
+                case["error"]["code"].as_str().unwrap(),
+                "{name}"
+            );
+            let expected_detail = &case["error"]["detail"];
+            let detail = serde_json::to_value(&error).unwrap()["detail"].clone();
+            assert_eq!(detail["field"], expected_detail["field"], "{name}");
+            if let Some(capability) = expected_detail.get("capability") {
+                assert_eq!(detail["capability"], *capability, "{name}");
+            }
+        }
+    }
 
     #[test]
     fn schema_vectors_check_as_recorded() {

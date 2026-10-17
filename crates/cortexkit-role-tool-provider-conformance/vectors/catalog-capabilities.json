@@ -1,0 +1,74 @@
+{
+  "_about": "tool.catalog capability filtering. A sorted, unique params.capabilities array selects every tool carrying any requested tag; absent or empty lists select no tools. Other params, malformed lists, repeated or unsorted tags, and unserved tags are refused.",
+  "accept": [
+    {
+      "name": "any requested tag selects its tools",
+      "params": {
+        "capabilities": ["code.edit/v1", "code.read/v1"]
+      },
+      "tools": [
+        {"name": "read", "capabilities": ["code.read/v1"]},
+        {"name": "edit", "capabilities": ["code.edit/v1"]},
+        {"name": "search", "capabilities": ["code.search/v1", "code.read/v1"]},
+        {"name": "shell", "capabilities": ["shell.exec/v1"]}
+      ],
+      "selected": ["read", "edit", "search"]
+    },
+    {
+      "name": "missing capability list selects no tools",
+      "params": {},
+      "tools": [
+        {"name": "read", "capabilities": ["code.read/v1"]},
+        {"name": "edit", "capabilities": ["code.edit/v1"]}
+      ],
+      "selected": []
+    },
+    {
+      "name": "empty capability list selects no tools",
+      "params": {"capabilities": []},
+      "tools": [
+        {"name": "read", "capabilities": ["code.read/v1"]},
+        {"name": "edit", "capabilities": ["code.edit/v1"]}
+      ],
+      "selected": []
+    }
+  ],
+  "refuse": [
+    {
+      "name": "unknown params key",
+      "params": {"scope": "workspace"},
+      "error": {"code": "invalid_request", "detail": {"field": "params.scope"}}
+    },
+    {
+      "name": "capabilities is not an array",
+      "params": {"capabilities": "code.read/v1"},
+      "error": {"code": "invalid_request", "detail": {"field": "params.capabilities"}}
+    },
+    {
+      "name": "capability member is not a string",
+      "params": {"capabilities": [17]},
+      "error": {"code": "invalid_request", "detail": {"field": "params.capabilities[0]"}}
+    },
+    {
+      "name": "capabilities are not bytewise sorted",
+      "params": {"capabilities": ["shell.exec/v1", "code.read/v1"]},
+      "error": {"code": "invalid_request", "detail": {"field": "params.capabilities"}}
+    },
+    {
+      "name": "capabilities contain a repeat",
+      "params": {"capabilities": ["code.read/v1", "code.read/v1"]},
+      "error": {"code": "invalid_request", "detail": {"field": "params.capabilities"}}
+    },
+    {
+      "name": "provider does not serve the requested capability",
+      "params": {"capabilities": ["acme:unserved/v1"]},
+      "error": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "params.capabilities[0]",
+          "capability": "acme:unserved/v1"
+        }
+      }
+    }
+  ]
+}

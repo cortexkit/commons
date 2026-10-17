@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+- Add optional catalog capability filtering, discoverable through the module
+  capability and the sorted `tool_capabilities` union in `role.describe`.
+  Filtering is additive; providers that do not advertise it are unchanged.
+- Make `RoleDescribe` non-exhaustive and add `RoleDescribe::new` plus optional capability builders. Migration: replace `RoleDescribe { ... }` literals with `RoleDescribe::new(majors, implementation_version).with_capabilities(...).with_tool_capabilities(...)`.
+- Add a consumer helper that sorts and deduplicates requested tags, and a
+  provider helper that selects every catalog tool carrying any requested tag.
+  Shared vectors pin accepted and refused `params.capabilities` requests.
+
 ## 0.8.1
 
 - Contract wording: every `tool.catalog` params key is per-provider. A provider

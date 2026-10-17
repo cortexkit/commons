@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0
+
+- Requires cortexkit-role-tool-provider 0.9.0 and subc-protocol 0.32 because
+  `RoleDescribe` is now non-exhaustive and carries discovered tool capability
+  tags.
+- Add `catalog_capability_filter_matches_describe`; it reads the live
+  `role.describe` advertisement, requests every listed tool capability, and
+  checks that the returned catalog contains the same tag union.
+- Add shared accept/refuse vectors for `params.capabilities`, vendor them in the
+  conformance crate, and update its fake provider to advertise and apply the
+  same capability filter.
+
 ## 0.8.0
 
 - Requires subc-protocol 0.32 and cortexkit-role-tool-provider 0.8.0. Consumers

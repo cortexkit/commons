@@ -36,10 +36,12 @@ use cortexkit_role_tool_provider_conformance::{
     wire::{
         call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
         catalog::{
-            composition_digest, schema_digest, serves_call_mode, system_text_digest,
-            CatalogRequest, CatalogTool,
+            composition_digest, params_for_capabilities, schema_digest, select_by_capabilities,
+            serves_call_mode, system_text_digest, CatalogRequest, CatalogTool,
         },
-        consumer_reads_content_v1, errors,
+        consumer_reads_content_v1,
+        describe::{Major, RoleDescribe},
+        errors,
         late_results::{
             check_since, kinds, reasons, AckRequest, Cursor, LateEntry, LateResultsReply,
             LateResultsRequest,
@@ -50,7 +52,7 @@ use cortexkit_role_tool_provider_conformance::{
             check_record_scope, parse_withdraw_request, resolve_carrier, CallerProblem,
             CarrierResolution, CompletedResult, StartedOutcome, WithdrawAnswer,
         },
-        CallMode,
+        CallMode, CATALOG_CAPABILITY_FILTER, REQUIRED_OPS,
     },
     CallModeProbe, CallSpec, Capability, Exchange, ObservedFrame, RouteFailure, ScopedPrincipals,
     ToolProviderSubject, ToolRoute,
@@ -65,6 +67,29 @@ pub const DISABLED: &str = "danger";
 const GENERATION: &str = "fake-gen-1";
 /// The only preset the fake defines: its default variant.
 const DEFAULT_PRESET: &str = "default";
+const FILTER_TOOL_CAPABILITIES: &[&str] = &[
+    "code.edit/v1",
+    "code.outline/v1",
+    "code.read/v1",
+    "fake:effect/v1",
+];
+
+fn filter_tags(defects: Defects) -> Vec<&'static str> {
+    let mut tags = FILTER_TOOL_CAPABILITIES.to_vec();
+    if defects.undefined_unprefixed_tag {
+        tags.retain(|tag| *tag != "code.edit/v1");
+        tags.push("code.refactor/v1");
+    }
+    tags
+}
+
+fn filter_params(defects: Defects) -> Map<String, Value> {
+    if defects.omit_catalog_capability_filter {
+        Map::new()
+    } else {
+        params_for_capabilities(filter_tags(defects))
+    }
+}
 /// Quotes, non-ASCII text, newlines and trailing spaces must all be hashed
 /// exactly as returned, without JSON escaping or whitespace normalization.
 pub const SYSTEM_TEXT: &str = "Use \"echo\" for café.\nKeep trailing whitespace. \n";
@@ -130,6 +155,8 @@ pub struct Defects {
     pub malformed_result: bool,
     /// Send content/v1 even when the route's bind does not declare support.
     pub ignore_consumer_capabilities: bool,
+    /// Do not advertise capability filtering in `role.describe`.
+    pub omit_catalog_capability_filter: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -349,16 +376,45 @@ impl Module {
         Ok(())
     }
 
-    fn describe() -> Value {
-        json!({
-            "majors": [{
-                "version": "tool-provider/v1", "stability": "alpha",
-                "ops": [ops::ROLE_DESCRIBE, ops::TOOL_CATALOG, ops::TOOL_WITHDRAW,
-                        ops::LATE_RESULTS, ops::LATE_RESULTS_ACK],
+    fn tool_capabilities(&self) -> Vec<String> {
+        let mut capabilities: Vec<String> = self
+            .tools()
+            .into_iter()
+            .flat_map(|tool| {
+                serde_json::from_value::<CatalogTool>(tool)
+                    .unwrap()
+                    .capabilities
+            })
+            .collect();
+        capabilities.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        capabilities.dedup();
+        capabilities
+    }
+
+    fn describe(&self) -> Value {
+        let role = RoleDescribe::new(
+            vec![Major {
+                version: "tool-provider/v1".into(),
+                ops: REQUIRED_OPS
+                    .iter()
+                    .chain([
+                        &ops::TOOL_WITHDRAW,
+                        &ops::LATE_RESULTS,
+                        &ops::LATE_RESULTS_ACK,
+                    ])
+                    .map(|op| (*op).to_owned())
+                    .collect(),
+                stability: "alpha".into(),
             }],
-            "implementation_version": "fake-0",
-            "capabilities": []
-        })
+            "fake-0",
+        );
+        let role = if self.defects.omit_catalog_capability_filter {
+            role
+        } else {
+            role.with_capabilities(vec![CATALOG_CAPABILITY_FILTER.into()])
+                .with_tool_capabilities(self.tool_capabilities())
+        };
+        serde_json::to_value(role).unwrap()
     }
 
     /// The served tools, each with its schema digest computed from its schema.
@@ -379,8 +435,8 @@ impl Module {
             json!(["fake:effect/v1", "code.edit/v1"])
         };
         let mut tools = vec![
-            json!({ "name": QUICK, "semantics": 1, "input_schema": object }),
-            json!({ "name": SLOW, "semantics": 1, "input_schema": { "type": "object" } }),
+            json!({ "name": QUICK, "semantics": 1, "capabilities": ["code.edit/v1", "code.read/v1"], "input_schema": object }),
+            json!({ "name": SLOW, "semantics": 1, "capabilities": ["code.outline/v1"], "input_schema": { "type": "object" } }),
             json!({ "name": HELD, "semantics": 2, "result_ops": ["prepend", "append"],
                     "capabilities": held_capabilities, "input_schema": held_schema }),
         ];
@@ -420,19 +476,26 @@ impl Module {
                 ));
             }
         }
-        let catalog_digest = if request.system_text.is_some() {
-            "fake-catalog-with-system-text-1"
+        let definitions: Vec<CatalogTool> = self
+            .tools()
+            .into_iter()
+            .map(serde_json::from_value)
+            .collect::<Result<_, _>>()
+            .map_err(|e| errors::invalid_request("catalog", e.to_string()))?;
+        let tools: Vec<Value> = if self.defects.omit_catalog_capability_filter {
+            self.tools()
         } else {
-            "fake-catalog-1"
+            select_by_capabilities(&request.params, &definitions)?
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<Result<_, _>>()
+                .map_err(|e| errors::invalid_request("catalog", e.to_string()))?
         };
-        if request.digest_only == Some(true) {
-            return Ok(json!({ "generation": GENERATION, "catalog_digest": catalog_digest }));
-        }
         let mut answer = json!({
             "generation": GENERATION,
-            "catalog_digest": catalog_digest,
+            "catalog_digest": "",
             "capabilities": { "late_results": true },
-            "tools": self.tools(),
+            "tools": tools,
         });
         if request.system_text.is_some()
             && !matches!(
@@ -441,6 +504,17 @@ impl Module {
             )
         {
             answer["system_text"] = self.system_text();
+        }
+        let mut digestable = answer.clone();
+        digestable.as_object_mut().unwrap().remove("catalog_digest");
+        let catalog_digest = composition_digest(&digestable)
+            .map_err(|e| errors::invalid_request("catalog", e.to_string()))?;
+        answer["catalog_digest"] = json!(catalog_digest);
+        if request.digest_only == Some(true) {
+            return Ok(json!({
+                "generation": GENERATION,
+                "catalog_digest": catalog_digest,
+            }));
         }
         Ok(answer)
     }
@@ -566,7 +640,7 @@ impl Module {
             }
         }
         Ok(match name {
-            ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(Self::describe())],
+            ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(self.describe())],
             ops::TOOL_CATALOG => reply(self.catalog(&request.arguments)),
             QUICK
                 if !self.defects.opaque_result
@@ -788,6 +862,7 @@ pub struct FakeSubject {
 
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
+        let params = filter_params(defects);
         Self {
             defects,
             capabilities: [
@@ -804,7 +879,7 @@ impl FakeSubject {
             ]
             .into(),
             system_text_arguments: Some(json!({
-                "params": {}, "preset": DEFAULT_PRESET,
+                "params": params, "preset": DEFAULT_PRESET,
                 "system_text": { "preset": DEFAULT_PRESET, "params": {} },
             })),
             mode_probe: Some(CallModeProbe {
@@ -921,7 +996,7 @@ impl ToolProviderSubject for FakeSubject {
     }
 
     fn catalog_arguments(&self) -> Value {
-        json!({ "params": Map::new(), "preset": DEFAULT_PRESET })
+        json!({ "params": filter_params(self.defects), "preset": DEFAULT_PRESET })
     }
 
     fn system_text_catalog_arguments(&self) -> Option<Value> {

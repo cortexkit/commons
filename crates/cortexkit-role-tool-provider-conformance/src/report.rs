@@ -14,8 +14,8 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    ApprovalExecution, CallKey, CallModes, Cancellation, ContentV1, DisableTool, HeldCalls,
-    LateResults, SchemaPin, ScopeStamp, SystemText,
+    ApprovalExecution, CallKey, CallModes, Cancellation, CatalogCapabilityFilter, ContentV1,
+    DisableTool, HeldCalls, LateResults, SchemaPin, ScopeStamp, SystemText,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -80,6 +80,11 @@ pub const CASES: &[CaseSpec] = &[
         name: "catalog_unknown_preset_refused",
         requires: &[],
         checks: "a tool.catalog request naming a preset the provider does not define is refused as invalid_request {field: \"preset\"}, never answered with a guessed variant",
+    },
+    CaseSpec {
+        name: "catalog_capability_filter_matches_describe",
+        requires: &[CatalogCapabilityFilter],
+        checks: "when role.describe advertises tool-catalog-capability-filter/v1, selecting all its tool_capabilities returns a catalog whose capability-tag union matches that list; filtering leaves generation unchanged, changes the catalog digest, and absent or empty lists select no tools",
     },
     CaseSpec {
         name: "system_text_digests_match_text",

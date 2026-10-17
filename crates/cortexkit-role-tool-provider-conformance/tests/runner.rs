@@ -235,6 +235,27 @@ async fn no_restricted_mode_fixture_is_skipped_by_name_never_passed() {
 }
 
 #[tokio::test]
+async fn catalog_capability_filter_is_skipped_when_role_describe_does_not_advertise_it() {
+    let report = run(&FakeSubject::new(Defects {
+        omit_catalog_capability_filter: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("catalog_capability_filter_matches_describe"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::CatalogCapabilityFilter],
+        })
+    );
+    assert!(report
+        .render()
+        .contains("SKIP catalog_capability_filter_matches_describe"));
+    assert!(!report
+        .render()
+        .contains("PASS catalog_capability_filter_matches_describe"));
+}
+
+#[tokio::test]
 async fn an_undefined_unprefixed_capability_tag_fails_the_catalog_case() {
     let report = run(&FakeSubject::new(Defects {
         undefined_unprefixed_tag: true,

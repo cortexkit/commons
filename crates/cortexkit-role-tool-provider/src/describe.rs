@@ -10,7 +10,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ops, PROVIDES, REQUIRED_OPS};
+use crate::{
+    check_capability_tag, ops, CapabilityTagProblem, CATALOG_CAPABILITY_FILTER, PROVIDES,
+    REQUIRED_OPS,
+};
 
 /// The `role.describe` answer: every major of the role the module serves,
 /// each with its own ops and stability. The caller picks the highest major it
@@ -20,14 +23,51 @@ use crate::{ops, PROVIDES, REQUIRED_OPS};
 /// ignored. Only the presence of the `tool-provider/v1` major and its required
 /// ops are checked strictly, by [`check_describe`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct RoleDescribe {
     pub majors: Vec<Major>,
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
-    /// Module-level capabilities. `tool-provider/v1` defines none; session
-    /// capabilities travel in the catalog answer instead.
+    /// Optional module-level capabilities. `tool-provider/v1` defines
+    /// [`CATALOG_CAPABILITY_FILTER`]; session capabilities travel in the
+    /// catalog answer instead.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// The provider's sorted, unique union of catalog tool capability tags,
+    /// present only when it advertises [`CATALOG_CAPABILITY_FILTER`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_capabilities: Vec<String>,
+}
+
+impl RoleDescribe {
+    /// A role description with no optional module capabilities.
+    pub fn new(majors: Vec<Major>, implementation_version: impl Into<String>) -> Self {
+        Self {
+            majors,
+            implementation_version: implementation_version.into(),
+            capabilities: Vec::new(),
+            tool_capabilities: Vec::new(),
+        }
+    }
+
+    /// Set the module-level capabilities.
+    pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    /// Set the tool capability tags, sorted by UTF-8 bytes and deduplicated.
+    pub fn with_tool_capabilities<I, S>(mut self, capabilities: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut capabilities: Vec<String> = capabilities.into_iter().map(Into::into).collect();
+        capabilities.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        capabilities.dedup();
+        self.tool_capabilities = capabilities;
+        self
+    }
 }
 
 /// One served major.
@@ -56,6 +96,43 @@ impl RoleDescribe {
     pub fn major(&self, version: &str) -> Option<&Major> {
         self.majors.iter().find(|major| major.version == version)
     }
+}
+
+/// Intersect a consumer's wanted tool tags with the provider's advertised
+/// tags. The result is sorted and deduplicated for `params.capabilities`; a
+/// provider that does not advertise [`CATALOG_CAPABILITY_FILTER`] returns
+/// `None` so the consumer can retain its existing catalog request behavior.
+///
+/// Run [`check_describe`] first. A provider that advertises the filter but
+/// lists no `tool_capabilities` (one built before this field existed) fails it
+/// with [`DescribeProblem::MissingToolCapabilities`]; skip that provider's
+/// tools rather than calling this, because an empty result here would mean "no
+/// tag in common" and send a request that selects nothing.
+pub fn select_tool_capabilities<I, S>(describe: &RoleDescribe, wanted: I) -> Option<Vec<String>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    if !describe
+        .capabilities
+        .iter()
+        .any(|capability| capability == CATALOG_CAPABILITY_FILTER)
+    {
+        return None;
+    }
+    let wanted: std::collections::BTreeSet<String> = wanted
+        .into_iter()
+        .map(|tag| tag.as_ref().to_owned())
+        .collect();
+    let mut selected: Vec<String> = describe
+        .tool_capabilities
+        .iter()
+        .filter(|tag| wanted.contains(*tag))
+        .cloned()
+        .collect();
+    selected.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    selected.dedup();
+    Some(selected)
 }
 
 impl Major {
@@ -94,6 +171,20 @@ pub enum DescribeProblem {
     /// The answer carries a `tools` list. The catalog comes only from
     /// `tool.catalog`, so a describe answer stays cacheable.
     CarriesToolList,
+    /// The provider advertises capability filtering but does not list its
+    /// served tool capability tags.
+    MissingToolCapabilities,
+    /// Tool capability tags are not in bytewise sorted order.
+    UnsortedToolCapabilities,
+    /// A tool capability tag appears more than once.
+    DuplicateToolCapabilities,
+    /// A tool capability tag does not pass this role's tag grammar.
+    InvalidToolCapabilityTag {
+        tag: String,
+        problem: CapabilityTagProblem,
+    },
+    /// The provider lists served tags without advertising capability filtering.
+    ToolCapabilitiesWithoutFilter,
 }
 
 /// Decode `raw` and check it lists a `tool-provider/v1` major with every
@@ -128,7 +219,38 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     if problems.is_empty() {
-        Ok(describe)
+        let advertises_filter = describe
+            .capabilities
+            .iter()
+            .any(|capability| capability == CATALOG_CAPABILITY_FILTER);
+        if advertises_filter {
+            if describe.tool_capabilities.is_empty() {
+                problems.push(DescribeProblem::MissingToolCapabilities);
+            } else {
+                for tag in &describe.tool_capabilities {
+                    if let Err(problem) = check_capability_tag(tag) {
+                        problems.push(DescribeProblem::InvalidToolCapabilityTag {
+                            tag: tag.clone(),
+                            problem,
+                        });
+                    }
+                }
+                for pair in describe.tool_capabilities.windows(2) {
+                    if pair[0].as_bytes() == pair[1].as_bytes() {
+                        problems.push(DescribeProblem::DuplicateToolCapabilities);
+                    } else if pair[0].as_bytes() > pair[1].as_bytes() {
+                        problems.push(DescribeProblem::UnsortedToolCapabilities);
+                    }
+                }
+            }
+        } else if object.contains_key("tool_capabilities") {
+            problems.push(DescribeProblem::ToolCapabilitiesWithoutFilter);
+        }
+        if problems.is_empty() {
+            Ok(describe)
+        } else {
+            Err(problems)
+        }
     } else {
         Err(problems)
     }
@@ -163,6 +285,15 @@ mod tests {
                     DescribeProblem::MissingMajor { .. } => "missing_major",
                     DescribeProblem::MissingOp(_) => "missing_op",
                     DescribeProblem::CarriesToolList => "carries_tool_list",
+                    DescribeProblem::MissingToolCapabilities => "missing_tool_capabilities",
+                    DescribeProblem::UnsortedToolCapabilities => "unsorted_tool_capabilities",
+                    DescribeProblem::DuplicateToolCapabilities => "duplicate_tool_capabilities",
+                    DescribeProblem::InvalidToolCapabilityTag { .. } => {
+                        "invalid_tool_capability_tag"
+                    }
+                    DescribeProblem::ToolCapabilitiesWithoutFilter => {
+                        "tool_capabilities_without_filter"
+                    }
                 })
                 .collect();
             assert!(names.contains(&expected), "{}: {names:?}", case["name"]);
@@ -188,5 +319,38 @@ mod tests {
             describe.major("tool-provider/v2").unwrap().stability(),
             Stability::Alpha
         );
+    }
+
+    #[test]
+    fn role_describe_omits_empty_tool_capabilities_on_the_wire() {
+        let describe = RoleDescribe::new(Vec::new(), "test")
+            .with_capabilities(vec![CATALOG_CAPABILITY_FILTER.into()]);
+        let value = serde_json::to_value(&describe).unwrap();
+        assert!(!value.as_object().unwrap().contains_key("tool_capabilities"));
+        let decoded: RoleDescribe = serde_json::from_value(value).unwrap();
+        assert!(decoded.tool_capabilities.is_empty());
+    }
+
+    #[test]
+    fn consumer_selects_the_sorted_intersection_only_for_advertising_providers() {
+        let describe = RoleDescribe::new(
+            vec![Major {
+                version: PROVIDES.into(),
+                ops: REQUIRED_OPS.iter().map(|op| (*op).to_owned()).collect(),
+                stability: "alpha".into(),
+            }],
+            "test",
+        )
+        .with_capabilities(vec![CATALOG_CAPABILITY_FILTER.into()])
+        .with_tool_capabilities(["zeta:tool/v1", "code.read/v1", "code.read/v1"]);
+        assert_eq!(
+            select_tool_capabilities(
+                &describe,
+                ["zeta:tool/v1", "code.read/v1", "missing:tool/v1"]
+            ),
+            Some(vec!["code.read/v1".into(), "zeta:tool/v1".into()])
+        );
+        let legacy = RoleDescribe::new(Vec::new(), "test");
+        assert_eq!(select_tool_capabilities(&legacy, ["code.read/v1"]), None);
     }
 }

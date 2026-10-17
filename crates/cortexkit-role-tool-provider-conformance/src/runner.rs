@@ -12,17 +12,17 @@ use cortexkit_role_harness::{
 use cortexkit_role_tool_provider::{
     call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
-        check_flat_schema, check_modes, check_reply, is_schema_digest, schema_digest,
-        session_capabilities, system_text_digest, CatalogAnswer,
+        check_flat_schema, check_modes, check_reply, is_schema_digest, params_for_capabilities,
+        schema_digest, session_capabilities, system_text_digest, CatalogAnswer,
     },
     check_capability_tag,
-    describe::check_describe,
+    describe::{check_describe, select_tool_capabilities},
     errors,
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
     ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    CallMode, CONTENT_V1_CAPABILITY, PROVIDES,
+    CallMode, CATALOG_CAPABILITY_FILTER, CONTENT_V1_CAPABILITY, PROVIDES,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -106,6 +106,7 @@ where
     }
 
     let mut capabilities = subject.capabilities();
+    capabilities.remove(&Capability::CatalogCapabilityFilter);
     // A provider may serve every known mode on every tool. Without a
     // restricted probe there is no refusal to exercise, so report a skip.
     if subject.call_mode_probe().is_none() {
@@ -117,6 +118,37 @@ where
         .spawn(&work_dir.join("main"))
         .await
         .map_err(|e| format!("spawning the provider failed: {e}"));
+
+    // The live role.describe answer, not a subject flag, decides whether the
+    // catalog-filter case is required.
+    let advertises_catalog_filter = match &main {
+        Ok(handle) => {
+            let case = Case {
+                subject,
+                driver: &driver,
+                handle,
+                work_dir,
+                capabilities: &capabilities,
+            };
+            match case.plain_route().await {
+                Ok(route) => case
+                    .describe(&route)
+                    .await
+                    .ok()
+                    .and_then(|answer| answer["capabilities"].as_array().cloned())
+                    .is_some_and(|declared| {
+                        declared.iter().any(|capability| {
+                            capability.as_str() == Some(CATALOG_CAPABILITY_FILTER)
+                        })
+                    }),
+                Err(_) => false,
+            }
+        }
+        Err(_) => false,
+    };
+    if advertises_catalog_filter {
+        capabilities.insert(Capability::CatalogCapabilityFilter);
+    }
 
     // Catalog declarations, not a subject flag, decide whether result checks
     // apply. A catalog/setup error must fail the case rather than hide as a skip.
@@ -267,6 +299,9 @@ where
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
             "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
+            "catalog_capability_filter_matches_describe" => {
+                self.catalog_capability_filter_matches_describe().await
+            }
             "system_text_digests_match_text" => self.system_text_digests_match_text().await,
             "system_text_preflight_digest_stable" => {
                 self.system_text_preflight_digest_stable().await
@@ -345,6 +380,30 @@ where
         )
     }
 
+    async fn catalog_for(
+        &self,
+        route: &S::Route,
+        arguments: Value,
+    ) -> Result<CatalogAnswer, String> {
+        let body = expect_response(
+            "tool.catalog",
+            request(route, op_body(ops::TOOL_CATALOG, arguments)).await?,
+        )?;
+        serde_json::from_value(body)
+            .map_err(|e| format!("tool.catalog answer does not decode: {e}"))
+    }
+
+    fn remove_unadvertised_catalog_filter(&self, arguments: &mut Value) {
+        if !self
+            .capabilities
+            .contains(&Capability::CatalogCapabilityFilter)
+        {
+            if let Some(params) = arguments.get_mut("params").and_then(Value::as_object_mut) {
+                params.remove("capabilities");
+            }
+        }
+    }
+
     async fn catalog_with(
         &self,
         route: &S::Route,
@@ -354,12 +413,8 @@ where
         if digest_only {
             arguments["digest_only"] = json!(true);
         }
-        let body = expect_response(
-            "tool.catalog",
-            request(route, op_body(ops::TOOL_CATALOG, arguments)).await?,
-        )?;
-        serde_json::from_value(body)
-            .map_err(|e| format!("tool.catalog answer does not decode: {e}"))
+        self.remove_unadvertised_catalog_filter(&mut arguments);
+        self.catalog_for(route, arguments).await
     }
 
     async fn catalog(&self, route: &S::Route) -> Result<CatalogAnswer, String> {
@@ -636,9 +691,111 @@ where
         Ok(())
     }
 
+    async fn catalog_capability_filter_matches_describe(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let answer = self.describe(&route).await?;
+        let describe = check_describe(&answer)
+            .map_err(|problems| format!("role.describe refused: {problems:?}"))?;
+        if !describe
+            .capabilities
+            .iter()
+            .any(|capability| capability == CATALOG_CAPABILITY_FILTER)
+        {
+            return Err("role.describe no longer advertises catalog capability filtering".into());
+        }
+        let all_tags = select_tool_capabilities(&describe, &describe.tool_capabilities)
+            .ok_or("the advertised catalog filter was not selected")?;
+        if all_tags != describe.tool_capabilities {
+            return Err(format!(
+                "selecting all advertised tool capabilities returned {all_tags:?}; expected {:?}",
+                describe.tool_capabilities
+            ));
+        }
+
+        let all = self
+            .catalog_for(
+                &route,
+                json!({ "params": params_for_capabilities(&all_tags) }),
+            )
+            .await?;
+        let mut union: Vec<String> = all
+            .tools
+            .iter()
+            .flat_map(|tool| tool.capabilities.iter().cloned())
+            .collect();
+        union.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        union.dedup();
+        if union != describe.tool_capabilities {
+            return Err(format!(
+                "catalog capability union {union:?} does not match role.describe tool_capabilities {:?}",
+                describe.tool_capabilities
+            ));
+        }
+        if all.tools.iter().any(|tool| {
+            !tool
+                .capabilities
+                .iter()
+                .any(|tag| all_tags.iter().any(|requested| requested == tag))
+        }) {
+            return Err("the filtered catalog contains a tool with no requested capability".into());
+        }
+
+        let empty = self.catalog_for(&route, json!({ "params": {} })).await?;
+        let explicitly_empty = self
+            .catalog_for(
+                &route,
+                json!({ "params": params_for_capabilities(std::iter::empty::<&str>()) }),
+            )
+            .await?;
+        if !empty.tools.is_empty() || !explicitly_empty.tools.is_empty() {
+            return Err("a missing or empty capability list must select no tools".into());
+        }
+        if all.generation != empty.generation
+            || all.generation != explicitly_empty.generation
+            || empty.catalog_digest != explicitly_empty.catalog_digest
+            || all.catalog_digest == empty.catalog_digest
+        {
+            return Err(format!(
+                "filtering changed generation or failed to change the filtered digest: all=({}, {}), empty=({}, {}), explicitly empty=({}, {})",
+                all.generation,
+                all.catalog_digest,
+                empty.generation,
+                empty.catalog_digest,
+                explicitly_empty.generation,
+                explicitly_empty.catalog_digest
+            ));
+        }
+
+        if let Some(first_tag) = all_tags.first() {
+            let single = self
+                .catalog_for(
+                    &route,
+                    json!({ "params": params_for_capabilities([first_tag]) }),
+                )
+                .await?;
+            if single.generation != all.generation {
+                return Err(format!(
+                    "generation changed with the filter: all {:?}, single {:?}",
+                    all.generation, single.generation
+                ));
+            }
+            let all_names: std::collections::BTreeSet<_> =
+                all.tools.iter().map(|tool| &tool.name).collect();
+            let single_names: std::collections::BTreeSet<_> =
+                single.tools.iter().map(|tool| &tool.name).collect();
+            if all_names != single_names && all.catalog_digest == single.catalog_digest {
+                return Err(
+                    "catalog_digest did not change when filtering changed the tools".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     async fn catalog_unknown_preset_refused(&self) -> CaseResult {
         let route = self.plain_route().await?;
         let mut arguments = self.subject.catalog_arguments();
+        self.remove_unadvertised_catalog_filter(&mut arguments);
         arguments[PRESET_FIELD] = json!(UNDEFINED_PRESET);
         let error = expect_error(
             &format!("tool.catalog with preset {UNDEFINED_PRESET:?}"),
@@ -648,10 +805,11 @@ where
     }
 
     fn system_text_arguments(&self) -> Result<Value, String> {
-        let arguments = self
+        let mut arguments = self
             .subject
             .system_text_catalog_arguments()
             .ok_or("declares system_text but supplies no system-text catalog arguments")?;
+        self.remove_unadvertised_catalog_filter(&mut arguments);
         if !arguments["system_text"].is_object() {
             return Err(format!(
                 "request system_text received {}; expected {{preset, params}}",

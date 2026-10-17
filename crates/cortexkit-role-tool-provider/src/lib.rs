@@ -41,6 +41,10 @@ pub const VERSION: &str = "v1";
 /// The string a provider lists in its manifest's `capabilities.provides`.
 pub const PROVIDES: &str = "tool-provider/v1";
 
+/// The optional `role.describe` capability for selecting catalog tools by
+/// their capability tags.
+pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
+
 /// The route-bind capability a consumer declares when it decodes `content/v1` results.
 pub const CONTENT_V1_CAPABILITY: &str = "content/v1";
 

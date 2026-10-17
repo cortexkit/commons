@@ -1,6 +1,6 @@
-//! The runner compiles in copies of two shared vectors (`vectors/` in this
-//! crate) so the published crate builds without the repository around it.
-//! This test keeps each copy byte-identical to the repository's
+//! The runner compiles in copies of the shared vectors it uses (`vectors/`
+//! in this crate) so the published crate builds without the repository around
+//! it. This test keeps each copy byte-identical to the repository's
 //! `test-vectors/tool-provider-v1/` file, which is the one the wire crate's
 //! own tests read. When a vector there changes, copy it here too.
 //!
@@ -10,7 +10,11 @@
 
 use std::path::Path;
 
-const VENDORED: &[&str] = &["call-key.json", "schema-pin.json"];
+const VENDORED: &[&str] = &[
+    "call-key.json",
+    "schema-pin.json",
+    "catalog-capabilities.json",
+];
 
 #[test]
 fn vendored_vectors_match_the_repository_vectors() {
