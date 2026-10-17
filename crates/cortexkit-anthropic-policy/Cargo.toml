@@ -1,0 +1,15 @@
+[package]
+name = "cortexkit-anthropic-policy"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = true
+exclude = ["mutations.d/**"]
+description = "Anthropic authentication headers, beta tokens, account limits, credits, and quota-header policy."
+keywords = ["anthropic", "headers", "quota", "policy"]
+
+[dependencies]
+serde_json = "1"
+httpdate = "1"

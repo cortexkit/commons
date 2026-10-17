@@ -6,6 +6,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 
 | Crate | Purpose | crates.io |
 |---|---|---|
+| [cortexkit-anthropic-policy](crates/cortexkit-anthropic-policy/README.md) | Anthropic authentication headers, beta tokens, account limits, credits, and quota-header policy. | [0.1.0](https://crates.io/crates/cortexkit-anthropic-policy) |
 | [cortexkit-bus-inmemory](crates/cortexkit-bus-inmemory/README.md) | Deterministic, process-local implementation of the bus traits. | [0.3.0](https://crates.io/crates/cortexkit-bus-inmemory) |
 | [cortexkit-bus-naming](crates/cortexkit-bus-naming/README.md) | Validation of message-plane names, topology limits, and grants. | [0.2.0](https://crates.io/crates/cortexkit-bus-naming) |
 | [cortexkit-bus-nats](crates/cortexkit-bus-nats/README.md) | NATS and JetStream backend for the bus traits. | [0.3.0](https://crates.io/crates/cortexkit-bus-nats) |

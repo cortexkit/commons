@@ -1,0 +1,6 @@
+[
+  ["anthropic-ratelimit-unified-status", "allowed"],
+  ["anthropic-ratelimit-unified-representative-claim", "five_hour"],
+  ["anthropic-ratelimit-unified-reset", "1790397000"],
+  ["retry-after", "0"]
+]

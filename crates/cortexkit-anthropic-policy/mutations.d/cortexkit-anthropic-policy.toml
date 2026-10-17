@@ -1,0 +1,35 @@
+[[control]]
+id = "anthropic-policy-beta-dedupe"
+guards = "the beta merger deduplicates exact tokens without changing first-seen order"
+file = "crates/cortexkit-anthropic-policy/src/beta.rs"
+old = "if !tokens.iter().any(|seen| seen == token) {"
+new = "if true { // NON-VACUITY BREAK: keep duplicate beta tokens"
+test_file = "crates/cortexkit-anthropic-policy/src/tests.rs"
+runner = "cargo"
+package = "cortexkit-anthropic-policy"
+target = "--lib"
+expect_red = ["tests::beta_merger_preserves_order_and_deduplicates_exact_tokens"]
+
+[[control]]
+id = "anthropic-policy-rejected-status"
+guards = "an account wall requires HTTP 429 with unified status rejected"
+file = "crates/cortexkit-anthropic-policy/src/limits.rs"
+old = "if !rejected {"
+new = "if false && !rejected { // NON-VACUITY BREAK: accept non-rejected statuses"
+test_file = "crates/cortexkit-anthropic-policy/src/tests.rs"
+runner = "cargo"
+package = "cortexkit-anthropic-policy"
+target = "--lib"
+expect_red = ["tests::only_rejected_status_on_429_is_an_account_wall"]
+
+[[control]]
+id = "anthropic-policy-dependency-free"
+guards = "the crate rejects forbidden runtime and product dependencies before dependency resolution"
+file = "crates/cortexkit-anthropic-policy/Cargo.toml"
+old = "[dependencies]"
+new = "[dependencies]\ntokio = \"1\" # NON-VACUITY BREAK: add an async runtime"
+test_file = "crates/cortexkit-anthropic-policy/tests/test_dependency_guard.py"
+runner = "command"
+command = ["python3", "-B", "crates/cortexkit-anthropic-policy/tests/test_dependency_guard.py", "{test}"]
+test_count_pattern = "Ran {count} test"
+expect_red = ["AnthropicPolicyDependencies.test_dependency_graph_stays_transport_free"]
