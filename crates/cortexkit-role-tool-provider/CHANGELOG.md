@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.1
+
+- Add optional per-tool `emits_events` (`CatalogTool::emits_events`,
+  `with_emits_events`). `false` is the provider's promise that no call to the
+  tool, with any arguments and any op, causes the provider to emit an event,
+  published directly or relayed from upstream; `true` means it may; absent
+  means unknown, which consumers treat like `true`. Absence emits no catalog
+  bytes, so existing catalogs and digests are unchanged. An explicit `null`
+  decodes as absent, like every optional member; any other non-boolean value
+  does not decode. Additive: `CatalogTool` is already non-exhaustive.
+- Add `test-vectors/tool-provider-v1/emits-events.json` with `false`, `true`,
+  absent, `null` and refused non-boolean entries.
+
 ## 0.9.0
 
 - Add optional catalog capability filtering, discoverable through the module

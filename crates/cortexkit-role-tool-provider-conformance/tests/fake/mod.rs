@@ -157,6 +157,8 @@ pub struct Defects {
     pub ignore_consumer_capabilities: bool,
     /// Do not advertise capability filtering in `role.describe`.
     pub omit_catalog_capability_filter: bool,
+    /// The quick tool's `emits_events` is this JSON text instead of `false`.
+    pub emits_events_override: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -381,9 +383,10 @@ impl Module {
             .tools()
             .into_iter()
             .flat_map(|tool| {
-                serde_json::from_value::<CatalogTool>(tool)
-                    .unwrap()
-                    .capabilities
+                // Read the capability tags from the raw entry, so a
+                // deliberately malformed member elsewhere in the tool (see
+                // `Defects::emits_events_override`) cannot break the union.
+                serde_json::from_value::<Vec<String>>(tool["capabilities"].clone()).unwrap()
             })
             .collect();
         capabilities.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
@@ -452,6 +455,13 @@ impl Module {
         } else {
             json!(["flow", "classic"])
         };
+        // The quick tool promises no events, the held tool says it may emit
+        // them, and the slow tool leaves it unknown, so the case sees all three.
+        tools[0]["emits_events"] = match self.defects.emits_events_override {
+            Some(text) => serde_json::from_str(text).unwrap(),
+            None => json!(false),
+        };
+        tools[2]["emits_events"] = json!(true);
         tools
     }
 
@@ -476,13 +486,24 @@ impl Module {
                 ));
             }
         }
+        let override_emits_events = self.defects.emits_events_override;
         let definitions: Vec<CatalogTool> = self
             .tools()
             .into_iter()
-            .map(serde_json::from_value)
+            .map(|mut tool| {
+                // `Defects::emits_events_override` may set the quick tool's
+                // `emits_events` to a non-boolean, which would not decode, or
+                // to `null`, which would decode as absence. Decode the tool
+                // without it; the raw value is written back into `tools`
+                // after selection.
+                if override_emits_events.is_some() && tool["name"] == QUICK {
+                    tool.as_object_mut().unwrap().remove("emits_events");
+                }
+                serde_json::from_value(tool)
+            })
             .collect::<Result<_, _>>()
             .map_err(|e| errors::invalid_request("catalog", e.to_string()))?;
-        let tools: Vec<Value> = if self.defects.omit_catalog_capability_filter {
+        let mut tools: Vec<Value> = if self.defects.omit_catalog_capability_filter {
             self.tools()
         } else {
             select_by_capabilities(&request.params, &definitions)?
@@ -491,6 +512,11 @@ impl Module {
                 .collect::<Result<_, _>>()
                 .map_err(|e| errors::invalid_request("catalog", e.to_string()))?
         };
+        if let Some(text) = override_emits_events {
+            for tool in tools.iter_mut().filter(|tool| tool["name"] == QUICK) {
+                tool["emits_events"] = serde_json::from_str(text).unwrap();
+            }
+        }
         let mut answer = json!({
             "generation": GENERATION,
             "catalog_digest": "",
@@ -615,7 +641,11 @@ impl Module {
         };
         let current = self.tools().into_iter().find(|tool| tool["name"] == name);
         if let Some(current) = &current {
-            let tool: CatalogTool = serde_json::from_value(current.clone()).unwrap();
+            // A deliberately malformed `emits_events` would not decode, and
+            // the mode check does not need it.
+            let mut current = current.clone();
+            current.as_object_mut().unwrap().remove("emits_events");
+            let tool: CatalogTool = serde_json::from_value(current).unwrap();
             if !self.defects.ignore_call_mode && !serves_call_mode(&tool, mode)
                 || self.defects.refuse_served_mode && *mode == CallMode::Flow
             {

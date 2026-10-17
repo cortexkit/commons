@@ -188,6 +188,38 @@ async fn invalid_modes_fail_the_catalog_case_by_tool_and_member() {
 }
 
 #[tokio::test]
+async fn a_null_emits_events_fails_the_boolean_case_by_tool_and_member() {
+    // `null` decodes as absence, so only a check of the raw answer sees it;
+    // every other catalog case still passes.
+    let report = run(&FakeSubject::new(Defects {
+        emits_events_override: Some("null"),
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_emits_events_boolean");
+    assert!(
+        reason.contains("invalid_answer: echo emits_events: must be a boolean, got null"),
+        "{reason}"
+    );
+    assert_passed(&report, "catalog_schemas_flat");
+    assert_passed(&report, "catalog_modes_valid");
+}
+
+#[tokio::test]
+async fn a_string_emits_events_fails_the_boolean_case_by_tool_and_member() {
+    let report = run(&FakeSubject::new(Defects {
+        emits_events_override: Some("\"false\""),
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_emits_events_boolean");
+    assert!(
+        reason.contains("invalid_answer: echo emits_events: must be a boolean, got \"false\""),
+        "{reason}"
+    );
+}
+
+#[tokio::test]
 async fn ignoring_bind_mode_fails_the_mode_case() {
     let report = run(&FakeSubject::new(Defects {
         ignore_call_mode: true,

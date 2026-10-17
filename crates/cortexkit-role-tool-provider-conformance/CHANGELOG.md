@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1
+
+- Add `catalog_emits_events_boolean`, which requires nothing and checks from
+  the raw `tool.catalog` answer that every tool carrying `emits_events`
+  declares a JSON boolean (`null` and other types fail). It cannot verify the
+  promise a `false` makes. No public type changes, so the crate version and
+  its cortexkit-role-tool-provider requirement stay as they are.
+
 ## 0.9.0
 
 - Requires cortexkit-role-tool-provider 0.9.0 and subc-protocol 0.32 because

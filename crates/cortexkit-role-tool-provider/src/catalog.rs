@@ -342,6 +342,22 @@ pub struct CatalogTool {
     /// Absent metadata leaves the runner's fallback unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<Reply>,
+    /// Whether a call to this tool can make this provider emit an event.
+    ///
+    /// `Some(false)` is the provider's promise that no call to this tool,
+    /// with any arguments and any op, causes this provider to emit an event:
+    /// neither one it publishes directly nor one it relays from an upstream
+    /// system (such as a webhook the upstream sends because of the call).
+    /// `Some(true)` means it may. `None` (absent) means unknown, and a
+    /// consumer must treat it like `Some(true)`; only `Some(false)` lets a
+    /// consumer skip a loop check. The declaration covers the whole tool, so
+    /// a tool whose ops differ must not declare `false`.
+    ///
+    /// Absence emits no catalog bytes, so catalogs that never declare it keep
+    /// their digests. An explicit JSON `null` decodes as absent, like every
+    /// other optional member; any other non-boolean value does not decode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emits_events: Option<bool>,
     /// The argument schema, which must be flat (see [`check_flat_schema`]).
     pub input_schema: Value,
 }
@@ -397,6 +413,15 @@ impl CatalogTool {
     /// Set the tool's reply deadline metadata. Validate with [`check_reply`].
     pub fn with_reply(mut self, reply: Reply) -> Self {
         self.reply = Some(reply);
+        self
+    }
+
+    /// Declare whether a call to this tool can make this provider emit an
+    /// event. Pass `false` only when no call, with any arguments and any op,
+    /// causes an event, published directly or relayed from upstream; see
+    /// [`CatalogTool::emits_events`].
+    pub fn with_emits_events(mut self, emits_events: bool) -> Self {
+        self.emits_events = Some(emits_events);
         self
     }
 

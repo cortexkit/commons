@@ -79,6 +79,17 @@ unknown one. Preservation and refusal of `CallMode::Unknown` are therefore
 checked by the role crate's own tests of `serves_call_mode`, not by this
 suite.
 
+## Per-tool `emits_events`
+
+`catalog_emits_events_boolean` runs for every provider. It reads the raw
+`tool.catalog` answer and checks that every tool carrying `emits_events`
+declares a JSON boolean: `null`, which the role crate decodes as absent, and
+any other type fail by tool and member. Tools that omit it pass. The case
+checks only the shape of the declaration. Whether a tool declaring `false`
+really never makes the provider emit an event, directly or relayed from
+upstream, cannot be observed from outside the provider, so a pass says
+nothing about that promise.
+
 ## Catalog capability filtering
 
 `catalog_capability_filter_matches_describe` runs only when the live

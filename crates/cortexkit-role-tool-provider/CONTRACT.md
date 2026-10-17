@@ -143,7 +143,8 @@ to them. Nothing here names a particular implementation.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
-  result_format?, capabilities, description?, input_schema, reply?, modes?}`.
+  result_format?, capabilities, description?, input_schema, reply?, modes?,
+  emits_events?}`.
   - `name` is the exact name the user tier disables the tool by.
   - `schema_digest` is the digest of the **structure** of `input_schema`
     (see "Schema digest" below): 64 lowercase hex characters. Description
@@ -265,6 +266,28 @@ to them. Nothing here names a particular implementation.
       ignore the optional member; old providers may omit it.
     - `test-vectors/tool-provider-v1/reply-deadline.json` pins the deadline
       arithmetic and valid and invalid reply declarations.
+  - `emits_events` is an optional boolean saying whether calling the tool can
+    make this provider emit an event. A consumer that reacts to this
+    provider's events (a flow triggered by them, say) uses it to tell whether
+    calling the tool could loop back into a new trigger.
+    - `false` is the provider's promise that **no call to this tool, with any
+      arguments and any op, causes this provider to emit an event**. That
+      covers events it publishes directly, and events it relays from an
+      upstream system (for example a webhook the upstream sends because of
+      the call).
+    - `true` means it may.
+    - **Absent means unknown**, and consumers MUST treat unknown like `true`.
+    - Only `false` lets a consumer skip a loop check. The declaration covers
+      the whole tool, so a tool whose ops differ must not declare `false`.
+    - The member is omitted from serialization when absent, so existing
+      catalog bytes and digests do not change. When present it is catalog
+      content, covered by `catalog_digest`, never by `schema_digest` or the
+      schema pin. An explicit `null` decodes as absent, as for every other
+      optional member; any other non-boolean value does not decode, so a
+      consumer refuses the catalog as `invalid_answer`, as for any other
+      malformed member.
+    - `test-vectors/tool-provider-v1/emits-events.json` pins `false`, `true`,
+      absent, `null` and refused non-boolean declarations.
 - The answer is a pure function of its inputs (the plan item's preset and
   params, the composition, user and project configuration, host facts), so
   `catalog_digest` covers the preset: a `digest_only` request with the same
@@ -563,7 +586,7 @@ CI against its real module over a real route; never against a double.
 | Case | Requires |
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
-| `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
 | `catalog_capability_filter_matches_describe` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
 | `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |

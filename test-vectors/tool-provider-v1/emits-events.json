@@ -1,0 +1,99 @@
+{
+  "_about": "Per-tool emits_events. `declared` entries decode to the recorded value (null means absent, which a consumer treats like true) and encode back to the same entry; only false promises that no call to the tool, with any arguments and any op, makes the provider emit an event, published directly or relayed from upstream. `absent_on_encode` entries decode as absent and encode without the member. `refused` entries do not decode. Existing vectors carry no emits_events and keep their bytes and digests.",
+  "declared": [
+    {
+      "name": "declares_no_events",
+      "emits_events": false,
+      "tool": {
+        "name": "read",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": false,
+        "input_schema": {"type": "object"}
+      }
+    },
+    {
+      "name": "declares_it_may_emit",
+      "emits_events": true,
+      "tool": {
+        "name": "post",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": true,
+        "input_schema": {"type": "object"}
+      }
+    },
+    {
+      "name": "absent_is_unknown",
+      "emits_events": null,
+      "tool": {
+        "name": "grep",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "input_schema": {"type": "object"}
+      }
+    }
+  ],
+  "absent_on_encode": [
+    {
+      "name": "explicit_null_is_unknown",
+      "tool": {
+        "name": "grep",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": null,
+        "input_schema": {"type": "object"}
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "string_false",
+      "tool": {
+        "name": "t",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": "false",
+        "input_schema": {"type": "object"}
+      }
+    },
+    {
+      "name": "integer_zero",
+      "tool": {
+        "name": "t",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": 0,
+        "input_schema": {"type": "object"}
+      }
+    },
+    {
+      "name": "array_of_booleans",
+      "tool": {
+        "name": "t",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": [false],
+        "input_schema": {"type": "object"}
+      }
+    },
+    {
+      "name": "per_op_object",
+      "tool": {
+        "name": "t",
+        "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "semantics": 1,
+        "capabilities": [],
+        "emits_events": {"read": false, "write": true},
+        "input_schema": {"type": "object"}
+      }
+    }
+  ]
+}

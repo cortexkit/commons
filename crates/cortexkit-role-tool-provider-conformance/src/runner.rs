@@ -295,6 +295,7 @@ where
             "catalog_schemas_flat" => self.catalog_schemas_flat().await,
             "catalog_reply_valid" => self.catalog_reply_valid().await,
             "catalog_modes_valid" => self.catalog_modes_valid().await,
+            "catalog_emits_events_boolean" => self.catalog_emits_events_boolean().await,
             "call_mode_matches_catalog" => self.call_mode_matches_catalog().await,
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
@@ -566,6 +567,43 @@ where
         let catalog = self.catalog(&route).await?;
         for tool in &catalog.tools {
             check_modes(tool).map_err(|problem| format!("invalid_answer: {problem}"))?;
+        }
+        Ok(())
+    }
+
+    /// Every tool that carries `emits_events` declares a JSON boolean.
+    ///
+    /// This reads the raw answer rather than the decoded `CatalogTool`,
+    /// because decoding turns an explicit `null` into absence, and a provider
+    /// that writes `null` has declared nothing. The case checks only the
+    /// declaration's shape: whether a tool declaring `false` really never
+    /// makes the provider emit an event cannot be observed from outside the
+    /// provider, so a pass says nothing about that promise.
+    async fn catalog_emits_events_boolean(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let mut arguments = self.subject.catalog_arguments();
+        self.remove_unadvertised_catalog_filter(&mut arguments);
+        let body = expect_response(
+            "tool.catalog",
+            request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
+        )?;
+        // An absent list is no tools, as the decoder treats it.
+        let tools = match body.get("tools") {
+            None => return Ok(()),
+            Some(tools) => tools
+                .as_array()
+                .ok_or("tool.catalog answer's tools is not a list")?,
+        };
+        for tool in tools {
+            let Some(declared) = tool.get("emits_events") else {
+                continue;
+            };
+            if !declared.is_boolean() {
+                let name = tool["name"].as_str().unwrap_or("<unnamed>");
+                return Err(format!(
+                    "invalid_answer: {name} emits_events: must be a boolean, got {declared}"
+                ));
+            }
         }
         Ok(())
     }
