@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.9
+
+- On macOS, `ckdev_binary` removes the debug map from a published Mach-O copy
+  with `/usr/bin/strip -S`, then ad hoc re-signs it with `/usr/bin/codesign -f -s -`.
+  A debug build's debug map (N_OSO stab entries) names every object file by
+  absolute path in the build folder. Symbolicating the running copy, for
+  example in a panic hook that captures a backtrace, opened those files, so
+  macOS asked for access to the removable volume holding the build folder and
+  the test stalled on the prompt. The symbol table stays, so backtraces keep
+  function names. Re-signing is needed because stripping invalidates the
+  linker's signature and Apple Silicon refuses unsigned arm64 binaries.
+- If either tool fails, cannot start, or runs longer than two minutes,
+  publication fails with an error naming the tool, the file and the tool's
+  stderr. Nothing is published: an unstripped fallback would bring the prompts
+  back without any signal.
+- Stripped publications use new content addresses (the source digest with a
+  format tag), so unstripped copies published by 0.1.8 and earlier are not
+  reused; they age out through the existing pruning. Because a stripped copy's
+  bytes differ from its source, its sealed directory also holds
+  `.published-digest`, the stripped file's digest recorded before the atomic
+  rename, and reuse checks the executable against that record. Scripts and
+  other non-Mach-O files, and every file on Linux and Windows, are still
+  published as exact copies at unchanged addresses.
+
 ## 0.1.8
 
 - Memoize built-binary digests and successful published-copy verification within

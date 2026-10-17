@@ -37,8 +37,41 @@ struct PublishedVerificationKey {
     digest: String,
 }
 
-fn content_digest_memo() -> &'static Mutex<HashMap<ContentDigestKey, String>> {
-    static MEMO: OnceLock<Mutex<HashMap<ContentDigestKey, String>>> = OnceLock::new();
+/// How a source build becomes the bytes published at its content address.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum Publication {
+    /// The published file is a byte-for-byte copy of the source.
+    Copy,
+    /// macOS Mach-O only: the copy has its debug map removed with `strip -S`
+    /// and is then ad hoc re-signed. A debug build's debug map (N_OSO stab
+    /// entries) names every object file by absolute path in the build folder;
+    /// symbolicating the running copy, for example for a panic backtrace,
+    /// opens those files, and when the build folder is on a removable volume
+    /// macOS shows a privacy prompt that stalls the test. The symbol table
+    /// stays, so backtraces still show function names.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    StrippedMachO,
+}
+
+impl Publication {
+    /// Bytes hashed ahead of the published name when computing the content
+    /// address. A copy hashes nothing extra, so its addresses are the ones
+    /// earlier releases used and their copies stay valid. A stripped
+    /// publication hashes a format tag: a Mach-O source therefore gets a new
+    /// address, and an unstripped copy published by 0.1.8 or earlier is never
+    /// reused as if it were stripped. Published names always start with
+    /// `ckdev-` and the tag does not, so the two hash inputs cannot coincide.
+    fn address_tag(self) -> &'static [u8] {
+        match self {
+            Self::Copy => b"",
+            Self::StrippedMachO => b"macos-strip-debug-map-adhoc-sign/1\0",
+        }
+    }
+}
+
+fn content_digest_memo() -> &'static Mutex<HashMap<ContentDigestKey, (String, Publication)>> {
+    static MEMO: OnceLock<Mutex<HashMap<ContentDigestKey, (String, Publication)>>> =
+        OnceLock::new();
     MEMO.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -267,6 +300,9 @@ fn strip_exe_suffix(name: &str) -> (&str, &str) {
 /// by concurrently spawned children. Published files are read-only, verified
 /// against their digest on reuse. New copies opportunistically prune unused
 /// builds after three days and limit the cache to 10 GiB, keeping recent uses.
+/// On macOS a Mach-O copy has its debug map stripped and is re-signed before
+/// it is published, so symbolicating it never opens object files in the
+/// build folder; panics with the tool's error if that fails.
 /// Use [`checked_output`] to report failed child exits, including signal names.
 pub fn ckdev_binary(built: impl AsRef<Path>) -> PathBuf {
     ckdev_binary_at(built.as_ref(), &publish_root())
@@ -315,13 +351,63 @@ fn ckdev_binary_at(built: &Path, root: &Path) -> PathBuf {
     placed
 }
 
-/// The content address: the first 32 hex digits of SHA-256 over the
-/// published name, a NUL, and the file's bytes.
+/// A file digest: the first 32 hex digits of SHA-256 over the published name,
+/// a NUL, and the file's bytes. A copied publication's file has the digest of
+/// its source, which is its content address.
 fn content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
+    tagged_digest(path, b"", dev_name)
+}
+
+/// The content address of a source build and how it is published: the
+/// digest of the source, preceded by the publication's format tag (see
+/// [`Publication::address_tag`]).
+fn source_address(path: &Path, dev_name: &str) -> io::Result<(String, Publication)> {
+    let publication = publication_for(path)?;
+    let digest = tagged_digest(path, publication.address_tag(), dev_name)?;
+    Ok((digest, publication))
+}
+
+/// On macOS a Mach-O file (thin or universal) is stripped when published;
+/// anything else, such as a shell script, and every file on other platforms
+/// is copied as it is.
+fn publication_for(path: &Path) -> io::Result<Publication> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::io::Read;
+        let mut magic = [0u8; 4];
+        let mut file = fs::File::open(path)?;
+        let mut filled = 0;
+        while filled < magic.len() {
+            match file.read(&mut magic[filled..])? {
+                0 => return Ok(Publication::Copy),
+                read => filled += read,
+            }
+        }
+        // MH_MAGIC and MH_MAGIC_64 in either byte order, then FAT_MAGIC and
+        // FAT_MAGIC_64, which universal binaries store big-endian.
+        let mach_o = matches!(
+            u32::from_be_bytes(magic),
+            0xfeed_face | 0xfeed_facf | 0xcefa_edfe | 0xcffa_edfe | 0xcafe_babe | 0xcafe_babf
+        );
+        Ok(if mach_o {
+            Publication::StrippedMachO
+        } else {
+            Publication::Copy
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Ok(Publication::Copy)
+    }
+}
+
+fn tagged_digest(path: &Path, tag: &[u8], dev_name: &str) -> io::Result<String> {
     use sha2::{Digest, Sha256};
     #[cfg(test)]
     record_hash_attempt();
     let mut hasher = Sha256::new();
+    hasher.update(tag);
     hasher.update(dev_name.as_bytes());
     hasher.update([0u8]);
     let mut file = fs::File::open(path)?;
@@ -374,13 +460,13 @@ fn file_identity(path: &Path) -> io::Result<FileIdentity> {
     })
 }
 
-fn memoized_content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
+fn memoized_source_address(path: &Path, dev_name: &str) -> io::Result<(String, Publication)> {
     let identity = match file_identity(path) {
         Ok(identity) => identity,
         Err(_) => {
             #[cfg(test)]
             record_built_hash();
-            return content_digest(path, dev_name);
+            return source_address(path, dev_name);
         }
     };
     let key = ContentDigestKey {
@@ -394,19 +480,19 @@ fn memoized_content_digest(path: &Path, dev_name: &str) -> io::Result<String> {
             .get(&key)
             .cloned()
     };
-    if let Some(digest) = cached {
-        return Ok(digest);
+    if let Some(address) = cached {
+        return Ok(address);
     }
     #[cfg(test)]
     record_built_hash();
-    let digest = content_digest(path, dev_name)?;
+    let address = source_address(path, dev_name)?;
     if matches!(file_identity(path), Ok(identity) if identity == key.identity) {
         content_digest_memo()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key, digest.clone());
+            .insert(key, address.clone());
     }
-    Ok(digest)
+    Ok(address)
 }
 
 fn publish(built: &Path, dev_name: &str, root: &Path) -> io::Result<PathBuf> {
@@ -421,7 +507,7 @@ fn publish_with_pruner(
     root: &Path,
     prune: impl FnOnce(&Path),
 ) -> io::Result<PathBuf> {
-    let digest = memoized_content_digest(built, dev_name)?;
+    let (digest, publication) = memoized_source_address(built, dev_name)?;
     prepare_root(root, 0o022)?;
     // Shared locks cover lookup, publication and the use marker. An exclusive
     // prune cannot delete an entry between verifying it and recording its use.
@@ -432,7 +518,7 @@ fn publish_with_pruner(
     let dir = root.join(&digest);
     let placed = dir.join(dev_name);
     if dir.exists() {
-        verify_published(&placed, dev_name, &digest)?;
+        verify_published(&placed, dev_name, &digest, publication)?;
         record_use(root, &digest, SystemTime::now());
         return Ok(placed);
     }
@@ -442,16 +528,25 @@ fn publish_with_pruner(
     let staged = staging.join(dev_name);
     let result = (|| {
         copy_executable(built, &staged)?;
-        // Permissions are set by path (chmod), so no writable descriptor is
-        // held; on Unix the published file is read-only and executable.
-        fs::set_permissions(&staged, published_permissions(built)?)?;
         #[cfg(test)]
         record_staged_hash();
-        if content_digest(&staged, dev_name)? != digest {
+        if source_address(&staged, dev_name)? != (digest.clone(), publication) {
             return Err(io::Error::other(format!(
                 "{} changed while it was being published",
                 built.display()
             )));
+        }
+        // A failure here leaves the staging directory unpublished; it is
+        // removed below and nothing is renamed into place, so a copy that
+        // still carries its debug map is never handed out.
+        if publication == Publication::StrippedMachO {
+            strip_debug_map(&staged)?;
+        }
+        // Permissions are set by path (chmod), so no writable descriptor is
+        // held; on Unix the published file is read-only and executable.
+        fs::set_permissions(&staged, published_permissions(built)?)?;
+        if publication == Publication::StrippedMachO {
+            write_publication_record(&staging, &content_digest(&staged, dev_name)?)?;
         }
         seal_dir(&staging)?;
         match fs::rename(&staging, &dir) {
@@ -468,7 +563,7 @@ fn publish_with_pruner(
         }
     }
     let created = result?;
-    verify_published(&placed, dev_name, &digest)?;
+    verify_published(&placed, dev_name, &digest, publication)?;
     record_use(root, &digest, SystemTime::now());
     let can_prune = cache_lock.is_ok();
     drop(cache_lock);
@@ -478,9 +573,89 @@ fn publish_with_pruner(
     Ok(placed)
 }
 
+/// The file in a stripped publication's sealed directory that records the
+/// digest of the published executable. Published names start with `ckdev-`,
+/// so it never collides with the executable.
+const PUBLICATION_RECORD: &str = ".published-digest";
+
+/// Records the stripped executable's digest next to it, inside the staging
+/// directory, before the directory is sealed and renamed into place, so the
+/// record and the executable appear together or not at all.
+fn write_publication_record(staging: &Path, published_digest: &str) -> io::Result<()> {
+    let record = staging.join(PUBLICATION_RECORD);
+    fs::write(&record, format!("{published_digest}\n"))?;
+    let mut permissions = fs::metadata(&record)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&record, permissions)
+}
+
+/// The digest a published file must have to be the correct publication of
+/// the source at content address `digest`.
+///
+/// A copy must hash to the address itself, so its bytes are the source's.
+/// A stripped copy cannot: `strip` and `codesign` change its bytes, and
+/// recomputing them on every cache hit would cost a strip and a signature
+/// per process. Instead the publisher hashes the stripped file and records
+/// that digest in the same sealed directory before the atomic rename, and
+/// reuse checks the file against the record. A partial, replaced or altered
+/// executable is still refused. The source-to-copy binding now rests on the
+/// publisher: a writer with this user's id who rewrites both the executable
+/// and its record in the user-private cache is not detected.
+fn expected_published_digest(
+    placed: &Path,
+    digest: &str,
+    publication: Publication,
+) -> io::Result<String> {
+    match publication {
+        Publication::Copy => Ok(digest.to_owned()),
+        Publication::StrippedMachO => {
+            let record = placed
+                .parent()
+                .expect("publication directory")
+                .join(PUBLICATION_RECORD);
+            let malformed = |detail: &dyn std::fmt::Display| {
+                io::Error::other(format!(
+                    "publication record {} is unusable ({detail}); remove {} to republish it",
+                    record.display(),
+                    placed.parent().unwrap_or(placed).display()
+                ))
+            };
+            let metadata = fs::symlink_metadata(&record).map_err(|error| malformed(&error))?;
+            if !metadata.is_file() || metadata.is_symlink() {
+                return Err(malformed(&"not a regular file"));
+            }
+            let text = fs::read_to_string(&record).map_err(|error| malformed(&error))?;
+            let recorded = text.trim_end_matches('\n');
+            if recorded.len() == 32
+                && recorded
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                Ok(recorded.to_owned())
+            } else {
+                Err(malformed(&"not a 32-digit lowercase hex digest"))
+            }
+        }
+    }
+}
+
+fn published_mismatch(placed: &Path, digest: &str, expected: &str, found: &str) -> io::Error {
+    io::Error::other(format!(
+        "published {} does not match its content address {digest} \
+         (expected {expected}, found {found}); remove {} to republish it",
+        placed.display(),
+        placed.parent().unwrap_or(placed).display()
+    ))
+}
+
 /// Re-hashes a published file before trusting it: a partial or altered file
 /// is refused, never run.
-fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<()> {
+fn verify_published(
+    placed: &Path,
+    dev_name: &str,
+    digest: &str,
+    publication: Publication,
+) -> io::Result<()> {
     let directory = fs::symlink_metadata(placed.parent().expect("publication directory"))?;
     let file = fs::symlink_metadata(placed)?;
     if !directory.is_dir() || directory.is_symlink() || !file.is_file() || file.is_symlink() {
@@ -492,7 +667,7 @@ fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<(
         identity: match file_identity(placed) {
             Ok(identity) => identity,
             Err(_) => {
-                return verify_published_bytes(placed, dev_name, digest);
+                return verify_published_bytes(placed, dev_name, digest, publication);
             }
         },
         dev_name: dev_name.to_owned(),
@@ -509,6 +684,7 @@ fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<(
     }
     #[cfg(test)]
     record_published_hash();
+    let expected = expected_published_digest(placed, digest, publication)?;
     let found = content_digest(placed, dev_name)?;
     let identity_unchanged = match file_identity(placed) {
         Ok(identity) if identity == key.identity => true,
@@ -520,7 +696,7 @@ fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<(
         }
         Err(_) => false,
     };
-    if found == digest {
+    if found == expected {
         if identity_unchanged {
             published_verification_memo()
                 .lock()
@@ -529,28 +705,24 @@ fn verify_published(placed: &Path, dev_name: &str, digest: &str) -> io::Result<(
         }
         Ok(())
     } else {
-        Err(io::Error::other(format!(
-            "published {} does not match its content address {digest} (found {found}); \
-             remove {} to republish it",
-            placed.display(),
-            placed.parent().unwrap_or(placed).display()
-        )))
+        Err(published_mismatch(placed, digest, &expected, &found))
     }
 }
 
-fn verify_published_bytes(placed: &Path, dev_name: &str, digest: &str) -> io::Result<()> {
+fn verify_published_bytes(
+    placed: &Path,
+    dev_name: &str,
+    digest: &str,
+    publication: Publication,
+) -> io::Result<()> {
     #[cfg(test)]
     record_published_hash();
+    let expected = expected_published_digest(placed, digest, publication)?;
     let found = content_digest(placed, dev_name)?;
-    if found == digest {
+    if found == expected {
         Ok(())
     } else {
-        Err(io::Error::other(format!(
-            "published {} does not match its content address {digest} (found {found}); \
-             remove {} to republish it",
-            placed.display(),
-            placed.parent().unwrap_or(placed).display()
-        )))
+        Err(published_mismatch(placed, digest, &expected, &found))
     }
 }
 
@@ -940,6 +1112,139 @@ fn copy_executable(src: &Path, dst: &Path) -> io::Result<()> {
     }
 }
 
+/// The tools that strip and re-sign a staged Mach-O copy, and how long each
+/// may run. Absolute paths: a test's `PATH` never chooses which program
+/// rewrites an executable.
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct StripTools {
+    strip: PathBuf,
+    codesign: PathBuf,
+    timeout: Duration,
+}
+
+#[cfg(target_os = "macos")]
+impl StripTools {
+    fn system() -> Self {
+        Self {
+            strip: PathBuf::from("/usr/bin/strip"),
+            codesign: PathBuf::from("/usr/bin/codesign"),
+            // Large debug builds take seconds; a hung tool must not hang the
+            // test that asked for the binary.
+            timeout: Duration::from_secs(120),
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+thread_local! {
+    /// Replaces [`StripTools::system`] for publications made on this test
+    /// thread, so tests can force a tool to fail.
+    static STRIP_TOOLS_OVERRIDE: std::cell::RefCell<Option<StripTools>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+/// Removes a staged Mach-O copy's debug map, then re-signs it.
+///
+/// `strip -S` removes debug symbols and stabs, including the N_OSO entries
+/// that point at object files in the build folder, and keeps the symbol
+/// table. Stripping invalidates the linker's ad hoc signature, and Apple
+/// Silicon refuses to run an unsigned arm64 binary, so `codesign -f -s -`
+/// signs the result again. Both run as child processes for the same reason
+/// as [`copy_executable`]: this process never opens the executable for
+/// writing.
+#[cfg(target_os = "macos")]
+fn strip_debug_map(staged: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(test)]
+    let tools = STRIP_TOOLS_OVERRIDE
+        .with_borrow(Option::clone)
+        .unwrap_or_else(StripTools::system);
+    #[cfg(not(test))]
+    let tools = StripTools::system();
+    // `cp` keeps the source's mode; both tools rewrite the file.
+    fs::set_permissions(staged, fs::Permissions::from_mode(0o700))?;
+    run_tool(&tools.strip, &["-S"], staged, tools.timeout)?;
+    run_tool(&tools.codesign, &["-f", "-s", "-"], staged, tools.timeout)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn strip_debug_map(staged: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        format!("stripping {} is only done on macOS", staged.display()),
+    ))
+}
+
+/// Runs `tool args target` with stdin from null, waits at most `timeout`,
+/// and turns any failure into an error naming the tool, the target and the
+/// tool's stderr.
+#[cfg(target_os = "macos")]
+fn run_tool(tool: &Path, args: &[&str], target: &Path, timeout: Duration) -> io::Result<()> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let failed = |detail: String| {
+        io::Error::other(format!(
+            "{} {} {} failed: {detail}",
+            tool.display(),
+            args.join(" "),
+            target.display()
+        ))
+    };
+    let mut child = Command::new(tool)
+        .args(args)
+        .arg(target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| failed(format!("could not start it: {error}; stderr: (none)")))?;
+    // A reader thread drains stderr so a chatty tool cannot block on a full
+    // pipe while this thread waits for it to exit.
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        let _ = sender.send(bytes);
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(failed(format!("could not wait for it: {error}")));
+            }
+        }
+    };
+    // A descendant the tool left running can keep stderr open; do not wait
+    // for it indefinitely.
+    let stderr = receiver
+        .recv_timeout(Duration::from_secs(1))
+        .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned())
+        .unwrap_or_else(|_| "(unavailable)".to_owned());
+    match status {
+        Some(status) if status.success() => Ok(()),
+        Some(status) => Err(failed(format!(
+            "{}; stderr: {stderr}",
+            describe_exit_status(status)
+        ))),
+        None => Err(failed(format!(
+            "timed out after {:?}; stderr: {stderr}",
+            timeout
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1085,7 +1390,20 @@ mod tests {
             .collect();
         let paths: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
         assert!(paths.iter().all(|p| p == &paths[0]));
-        assert_eq!(fs::read_dir(paths[0].parent().unwrap()).unwrap().count(), 1);
+        // One executable per publication. On macOS this fixture is a Mach-O
+        // test harness, which is stripped and published with a record of
+        // the stripped file's digest beside it.
+        let mut entries: Vec<_> = fs::read_dir(paths[0].parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        entries.sort();
+        let mut expected = vec![paths[0].file_name().unwrap().to_owned()];
+        if cfg!(target_os = "macos") {
+            expected.push(PUBLICATION_RECORD.into());
+        }
+        expected.sort();
+        assert_eq!(entries, expected);
         use std::os::unix::fs::MetadataExt;
         let inode = fs::metadata(&paths[0]).unwrap().ino();
         assert_eq!(ckdev_binary(&built), paths[0]);
@@ -1686,13 +2004,13 @@ mod tests {
         set_modified(&built, initial_time);
         reset_hash_counts();
 
-        let first = memoized_content_digest(&built, "ckdev-subc").unwrap();
+        let first = memoized_source_address(&built, "ckdev-subc").unwrap();
         let first_identity = file_identity(&built).unwrap();
         set_modified(&built, initial_time + Duration::from_secs(1));
         let second_identity = file_identity(&built).unwrap();
         assert_ne!(first_identity, second_identity);
 
-        let second = memoized_content_digest(&built, "ckdev-subc").unwrap();
+        let second = memoized_source_address(&built, "ckdev-subc").unwrap();
         assert_eq!(first, second);
         assert_eq!(hash_counts(), (2, 2, 0, 0));
     }
@@ -1874,6 +2192,254 @@ mod tests {
             "{LAUNCHES} repeated ckdev launches: {:.3}s",
             started.elapsed().as_secs_f64()
         );
+    }
+
+    /// Runs a system tool on `path` and returns its stdout, failing the test
+    /// when the tool fails.
+    #[cfg(target_os = "macos")]
+    fn tool_output(tool: &str, args: &[&str], path: &Path) -> String {
+        let output = Command::new(tool)
+            .args(args)
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{tool} {args:?} {} failed: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// The number of N_OSO stab entries, each naming an object file the
+    /// debug map points at.
+    #[cfg(target_os = "macos")]
+    fn debug_map_entries(path: &Path) -> usize {
+        tool_output("/usr/bin/nm", &["-ap"], path)
+            .lines()
+            .filter(|line| line.split_whitespace().any(|word| word == "OSO"))
+            .count()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn dev_name_of(built: &Path) -> String {
+        ckdev_file_name(built.file_name().unwrap().to_str().unwrap())
+    }
+
+    /// A debug build published on macOS loses its debug map, so nothing that
+    /// symbolicates the running copy opens object files in the build folder.
+    /// It keeps its function symbols and a valid signature, and still runs.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_published_mach_o_has_no_debug_map_but_keeps_symbols_signature_and_behaviour() {
+        let build = crate::ScratchDir::new("ckdev-strip-build");
+        let root = PublishRoot::new("ckdev-strip-root");
+        // This crate's own debug test harness, which links a debug map.
+        let built = built_fixture(&build);
+        let function = "staged_child_fixture";
+        assert!(
+            debug_map_entries(&built) > 0,
+            "the source must carry a debug map, or the check below proves nothing"
+        );
+        assert!(tool_output("/usr/bin/nm", &[], &built).contains(function));
+
+        let placed = ckdev_binary_at(&built, &root.path());
+
+        assert_eq!(debug_map_entries(&placed), 0, "{}", placed.display());
+        assert!(
+            tool_output("/usr/bin/nm", &[], &placed).contains(function),
+            "the symbol table must survive stripping"
+        );
+        tool_output("/usr/bin/codesign", &["--verify", "--strict"], &placed);
+        let output = checked_output(&mut fixture_command(&placed)).unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        let record = fs::read_to_string(placed.parent().unwrap().join(PUBLICATION_RECORD)).unwrap();
+        assert_eq!(
+            record.trim_end(),
+            content_digest(&placed, &dev_name_of(&built)).unwrap()
+        );
+        // A second request reuses the stripped publication.
+        assert_eq!(ckdev_binary_at(&built, &root.path()), placed);
+    }
+
+    /// A copy published by 0.1.8 or earlier sits at the untagged digest of
+    /// the unstripped bytes. It is never reused; the build is published again
+    /// at its stripped address.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unstripped_copy_at_the_old_address_is_not_reused() {
+        let build = crate::ScratchDir::new("ckdev-old-format-build");
+        let root = PublishRoot::new("ckdev-old-format-root");
+        let built = built_fixture(&build);
+        let dev_name = dev_name_of(&built);
+        let old_dir = root.path().join(content_digest(&built, &dev_name).unwrap());
+        fs::create_dir(&old_dir).unwrap();
+        copy_executable(&built, &old_dir.join(&dev_name)).unwrap();
+        seal_dir(&old_dir).unwrap();
+
+        let placed = ckdev_binary_at(&built, &root.path());
+
+        assert_ne!(placed.parent().unwrap(), old_dir);
+        assert_eq!(debug_map_entries(&placed), 0);
+    }
+
+    /// Replaces the strip and codesign tools for publications on this test
+    /// thread until dropped.
+    #[cfg(target_os = "macos")]
+    struct ToolOverride;
+
+    #[cfg(target_os = "macos")]
+    impl ToolOverride {
+        fn set(tools: StripTools) -> Self {
+            STRIP_TOOLS_OVERRIDE.with_borrow_mut(|slot| *slot = Some(tools));
+            Self
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for ToolOverride {
+        fn drop(&mut self) {
+            STRIP_TOOLS_OVERRIDE.with_borrow_mut(|slot| *slot = None);
+        }
+    }
+
+    /// After a failed publication the root holds only its lock file: no
+    /// publication directory, no staging directory and no use marker.
+    #[cfg(target_os = "macos")]
+    fn assert_nothing_published(root: &Path, built: &Path) {
+        let dev_name = dev_name_of(built);
+        let (address, publication) = source_address(built, &dev_name).unwrap();
+        assert_eq!(publication, Publication::StrippedMachO);
+        assert!(!root.join(&address).join(&dev_name).exists());
+        let entries: Vec<_> = fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(
+            entries.iter().all(|name| name == ".cache-lock"),
+            "left behind: {entries:?}"
+        );
+    }
+
+    /// A missing or failing strip or codesign fails publication with an
+    /// error naming the tool, the file and the tool's stderr, and nothing is
+    /// published: an unstripped copy would bring the privacy prompts back.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_strip_or_codesign_publishes_nothing() {
+        let build = crate::ScratchDir::new("ckdev-strip-failure-build");
+        let built = built_fixture(&build);
+        let dev_name = dev_name_of(&built);
+        let failing = build.join("failing-tool");
+        write_script(&failing, "#!/bin/sh\necho \"refused $1\" >&2\nexit 3\n");
+        let failing_text = failing.display().to_string();
+        let system = StripTools::system();
+        let cases = [
+            (
+                StripTools {
+                    strip: PathBuf::from("/nonexistent/strip"),
+                    ..system.clone()
+                },
+                "/nonexistent/strip -S",
+                "could not start it",
+            ),
+            (
+                StripTools {
+                    strip: failing.clone(),
+                    ..system.clone()
+                },
+                failing_text.as_str(),
+                "exit code Some(3); stderr: refused -S",
+            ),
+            (
+                StripTools {
+                    codesign: failing.clone(),
+                    ..system.clone()
+                },
+                failing_text.as_str(),
+                "exit code Some(3); stderr: refused -f",
+            ),
+        ];
+        for (tools, tool, detail) in cases {
+            let root = PublishRoot::new("ckdev-strip-failure-root");
+            let _override = ToolOverride::set(tools);
+            let error = publish_with_pruner(&built, &dev_name, &root.path(), |_| {
+                panic!("a failed publication must not prune")
+            })
+            .unwrap_err();
+            let text = error.to_string();
+            assert!(
+                text.contains(tool) && text.contains(detail) && text.contains(".staging-"),
+                "{text}"
+            );
+            assert_nothing_published(&root.path(), &built);
+        }
+    }
+
+    /// A tool that never exits is killed after its timeout and the
+    /// publication fails instead of hanging the test.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_hung_strip_times_out_and_publishes_nothing() {
+        let build = crate::ScratchDir::new("ckdev-strip-hang-build");
+        let root = PublishRoot::new("ckdev-strip-hang-root");
+        let built = built_fixture(&build);
+        let hung = build.join("hung-tool");
+        write_script(&hung, "#!/bin/sh\nexec /bin/sleep 30\n");
+        let _override = ToolOverride::set(StripTools {
+            strip: hung,
+            timeout: Duration::from_millis(300),
+            ..StripTools::system()
+        });
+        let started = std::time::Instant::now();
+        let error =
+            publish_with_pruner(&built, &dev_name_of(&built), &root.path(), |_| {}).unwrap_err();
+        assert!(error.to_string().contains("timed out after"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_nothing_published(&root.path(), &built);
+    }
+
+    /// Reuse still refuses a stripped publication whose executable no longer
+    /// matches the digest recorded when it was published, or whose record is
+    /// gone.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_altered_stripped_publication_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let build = crate::ScratchDir::new("ckdev-strip-altered-build");
+        let built = built_fixture(&build);
+        let dev_name = dev_name_of(&built);
+
+        let root = PublishRoot::new("ckdev-strip-altered-root");
+        let placed = ckdev_binary_at(&built, &root.path());
+        let dir = placed.parent().unwrap();
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_file(&placed).unwrap();
+        // The unstripped build swapped in for its stripped publication.
+        copy_executable(&built, &placed).unwrap();
+        let error = publish(&built, &dev_name, &root.path()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("does not match its content address"),
+            "{error}"
+        );
+
+        let root = PublishRoot::new("ckdev-strip-unrecorded-root");
+        let placed = ckdev_binary_at(&built, &root.path());
+        let dir = placed.parent().unwrap();
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_file(dir.join(PUBLICATION_RECORD)).unwrap();
+        // Replace the executable with an identical copy so the verification
+        // memo, keyed by file identity, does not answer for it.
+        let same = build.join("same");
+        copy_executable(&placed, &same).unwrap();
+        fs::remove_file(&placed).unwrap();
+        copy_executable(&same, &placed).unwrap();
+        let error = publish(&built, &dev_name, &root.path()).unwrap_err();
+        assert!(error.to_string().contains("publication record"), "{error}");
     }
 
     /// Writes through a staging file and a `cp` child, so this multi-threaded

@@ -57,6 +57,16 @@ Pruning runs at most once per process and per hour across processes; errors
 are logged without failing publication, including locked Windows executables.
 Do not modify a publication. A source rebuild receives a different path.
 
+On macOS, a Mach-O publication is not an exact copy: its debug map (the N_OSO
+entries that point at object files in the build folder) is removed with
+`/usr/bin/strip -S` and the result is ad hoc re-signed with
+`/usr/bin/codesign -f -s -`. Symbolicating the running copy therefore never
+opens files in the build folder, which on a removable volume triggers a macOS
+privacy prompt. Function names stay in backtraces. A failing tool fails the
+publication; nothing unstripped is published. These publications have their own
+content addresses, and their sealed directory records the stripped file's digest
+in `.published-digest` for the reuse check.
+
 ```no_run
 use cortexkit_test_support::{ckdev_binary, dev_command, checked_output};
 let placed = ckdev_binary("target/debug/ck-example");
