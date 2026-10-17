@@ -12,13 +12,13 @@ field-by-field explanation is `blueprint.md` (written for 2.1.280; see
 
 | id | model | what it covers |
 |----|-------|----------------|
-| `fable51-first-turn` | `claude-fable-5-1` | first turn: billing block with `cc_prompt_id` only; system sanitising and identity block; forced adaptive thinking; effort pinned; `fallbacks:"default"` + server-side-fallback beta; mid-conversation-output-config beta; `diagnostics.previous_message_id: null`; explicit cache (host breakpoints → `ttl:"1h"`) |
+| `fable51-first-turn` | `claude-fable-5-1` | first turn: billing block with `cc_prompt_id` only; system sanitising and identity block; forced adaptive thinking; effort pinned; `fallbacks:"default"` + server-side-fallback beta; per-turn-control beta; `diagnostics.previous_message_id: null`; explicit cache (host breakpoints → `ttl:"1h"`) |
 | `opus55-continuation-replayed-thinking` | `claude-opus-5-5` | continuation replaying a signed thinking block; `cc_prev_req` + `cc_prompt_id`; per-turn-control beta; `thinking.block_binding` + thinking-binding beta (account setting `drop_block`); hybrid cache anchors |
 | `opus55-effort-change` | `claude-opus-5-5` | effort high → low on turn 2: inserted `{"role":"system","content":[],"output_config":{"effort":"low"}}`, top-level effort = baseline `high`, internal marker blocks removed; cache off (5-minute breakpoints) |
 | `sonnet55-between-tools` | `claude-sonnet-5-5` | host `thinking: disabled` → `between_tools`, effort `xhigh` → `high`; no fallback; automatic cache (one top-level `cache_control`) |
 | `haiku55-tools-continuation` | `claude-haiku-5-5` | tools: `mcp_Read`/`mcp_Bash` in `tools[]` and replayed `tool_use`; trailing whitespace text after `tool_use` removed; `temperature` removed; `tool_result` continuation |
-| `sonnet55-full-agent-subagent` | `claude-sonnet-5-5` | body with `tools` + `context_management` → full-agent beta list, per-turn-control after prompt-caching-scope; forced `tool_choice` removed; subagent: no 1h cache, no lineage |
-| `opus48-structured-output-fast` | `claude-opus-4-8` | `json_schema` output → structured-output beta list; `speed:"fast"` + fast-mode beta; host budget thinking unchanged |
+| `sonnet55-full-agent-subagent` | `claude-sonnet-5-5` | main beta list, per-turn-control after prompt-caching-scope; forced `tool_choice` removed; subagent: no 1h cache, no lineage |
+| `opus48-structured-output-fast` | `claude-opus-4-8` | main beta list plus structured-output beta for `json_schema`; `speed:"fast"` + fast-mode beta; host budget thinking unchanged |
 
 ## Shape of each case
 
@@ -78,16 +78,35 @@ the same fixed values and placeholders. Compared with 2.1.280:
   besides tool results).
 - New headers: `x-claude-code-request-class` (`main`) on every request and
   `x-claude-code-prompt-id` (the billing `cc_prompt_id`) when there is one.
-- Beta lists follow 2.1.302's order: `claude-code-20250219` first in the
-  full-agent list, `per-turn-control-2026-07-01` directly after
-  `prompt-caching-scope-2026-01-05` (also on Fable 5.1 and Haiku 5.5), and
-  the 2.1.302 additions `mid-conversation-tool-changes-2026-07-01`,
-  `mid-conversation-system-clear-at-2026-08-21` and
-  `thinking-binding-controls-2026-08-01` in the full-agent list.
+- Beta selection now follows request class, not body-shape heuristics. All
+  main turns use the captured main list, including thinking-binding-controls
+  and thinking-display-updates even without a binding field. The binding
+  field itself still needs replayed thinking and an explicit setting.
+  `claude-code-20250219` comes first except on Haiku 5.5, where it follows
+  prompt-caching-scope. Per-turn-control follows that scope beta (and
+  claude-code on Haiku 5.5) for Sonnet 5.5, Opus 5.5, Fable 5.1 and Haiku
+  5.5, but not Opus 4.8. Main JSON-schema output adds structured-output at
+  its existing position before cache-diagnosis; fast mode and server-side
+  fallback retain their existing feature-beta selection and order.
 - Every vector is an uncompressed (identity) send. Claude Code 2.1.302 sends
   bodies of 4,096 characters or more to api.anthropic.com gzipped, with
   `cch=00000` and whitespace padding; that encoding is not part of these
   vectors.
+- The obsolete `mid-conversation-system-2026-04-07` and
+  `mid-conversation-output-config-2026-07-01` betas are absent. Fable 5.1
+  effort changes use `per-turn-control-2026-07-01`; effort-marker bodies
+  remain empty system messages with `output_config.effort`.
+- Advisor-tool and fallback-credit are absent: these requests enable no
+  advisor and carry no fallback credit code. Server-side-fallback remains
+  a separate feature beta, not a fallback-credit substitute.
+- Auxiliary one-token quota probes use the captured quota list; other
+  auxiliary requests use title/summary betas (with structured-output only
+  for JSON schema). Those classes are covered by Core tests, not these
+  main-request vectors.
+- No baseline beta difference remains from the capture. The body still uses
+  `thinking.display: "summarized"` where Claude Code sends `"updates"`,
+  because `"updates"` streams no thinking text. Advertising the
+  thinking-display-updates beta alone does not suppress summarized thinking.
 
 ## How the outputs were generated
 
@@ -105,9 +124,9 @@ body equals the signed body, that recomputing `cch` from
 `cch_canonical_body` and re-signing reproduce it, and that the suffix follows
 from the first user text.
 
-Bun 1.4.2 on macOS and Bun 1.3.14 on Linux (the version CI pins) produced
-byte-identical outputs. `vectors.json` has SHA-256
-`8f769683452e8da8502b2cd4856a6585615939938e2fa5f97b0da572d12d9623`.
+The beta-corrected outputs were regenerated with Bun 1.3.14 on Linux (the
+version CI pins). `vectors.json` has SHA-256
+`47072a18eb3640dd03502a4f24e7e9b5325160faffacdf47cb99db6462cb4ba5`.
 
 Not covered: Pi and OpenCode 2 (their differences are described in
 `blueprint.md`), lane-start warm requests, and CacheKeep prewarms.

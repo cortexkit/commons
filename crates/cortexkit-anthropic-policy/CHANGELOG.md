@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.3
+
+- Correct the Claude Code 2.1.302 wire vectors' beta lists to match an
+  interactive 2.1.302 capture for every model and request class: the
+  mid-conversation-system, mid-conversation-output-config, advisor-tool and
+  fallback-credit betas are removed, thinking-binding-controls and
+  thinking-display-updates are on every main list, and selection follows the
+  request class. The same seven cases, placeholder credentials. The one known
+  difference from Claude Code (the body's thinking display value) is described
+  in the vectors README. No runtime behaviour changes.
+
 ## 0.1.2
 
 - Replace the Claude OAuth wire test vectors with the set for the Claude Code
