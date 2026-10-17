@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2
+
+- Replace the Claude OAuth wire test vectors with the set for the Claude Code
+  2.1.302 identity: `cc_version` 2.1.302.*, the new billing fields
+  `cc_turn_origin`, `cc_prompt_index` and `cc_turn_index`, the
+  `x-claude-code-request-class` and `x-claude-code-prompt-id` headers, and the
+  updated beta lists. The same seven cases, uncompressed bodies only, with
+  placeholder credentials. A client still on the 2.1.280 identity pins 0.1.1.
+  No runtime behaviour changes.
+
 ## 0.1.1
 
 - Ship the Claude OAuth wire test vectors inside the package under

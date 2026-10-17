@@ -1,11 +1,12 @@
-# Claude OAuth wire vectors (Claude Code 2.1.280 persona)
+# Claude OAuth wire vectors (Claude Code 2.1.302 persona)
 
 `vectors.json` holds 7 request vectors for an OAuth `POST /v1/messages`
 as anthropic-auth's **OpenCode 1** path sends it. Every case is labelled
 `"source": "reconstructed"`: it was produced by running this repository's
 code, not captured from Claude Code. Shaped for
 `crates/cortexkit-anthropic-policy/test-vectors/claude-oauth-wire/`; the
-field-by-field explanation is `blueprint.md`.
+field-by-field explanation is `blueprint.md` (written for 2.1.280; see
+"Changes for 2.1.302" below).
 
 ## Cases
 
@@ -16,7 +17,7 @@ field-by-field explanation is `blueprint.md`.
 | `opus55-effort-change` | `claude-opus-5-5` | effort high → low on turn 2: inserted `{"role":"system","content":[],"output_config":{"effort":"low"}}`, top-level effort = baseline `high`, internal marker blocks removed; cache off (5-minute breakpoints) |
 | `sonnet55-between-tools` | `claude-sonnet-5-5` | host `thinking: disabled` → `between_tools`, effort `xhigh` → `high`; no fallback; automatic cache (one top-level `cache_control`) |
 | `haiku55-tools-continuation` | `claude-haiku-5-5` | tools: `mcp_Read`/`mcp_Bash` in `tools[]` and replayed `tool_use`; trailing whitespace text after `tool_use` removed; `temperature` removed; `tool_result` continuation |
-| `sonnet55-full-agent-subagent` | `claude-sonnet-5-5` | body with `tools` + `context_management` → full-agent beta list, per-turn-control after mid-conversation-system; forced `tool_choice` removed; subagent: no 1h cache, no lineage |
+| `sonnet55-full-agent-subagent` | `claude-sonnet-5-5` | body with `tools` + `context_management` → full-agent beta list, per-turn-control after prompt-caching-scope; forced `tool_choice` removed; subagent: no 1h cache, no lineage |
 | `opus48-structured-output-fast` | `claude-opus-4-8` | `json_schema` output → structured-output beta list; `speed:"fast"` + fast-mode beta; host budget thinking unchanged |
 
 ## Shape of each case
@@ -62,29 +63,51 @@ No time-dependent field exists in the request. Nothing else is
 substituted: suffixes, `cch` values, beta lists and bodies are exactly what
 the code produced from these inputs.
 
+## Changes for 2.1.302
+
+The 2.1.302 set was regenerated from the same `input` of every case, with
+the same fixed values and placeholders. Compared with 2.1.280:
+
+- `cc_version` is `2.1.302.<suffix>` and `User-Agent` is
+  `claude-cli/2.1.302 (external, cli)`; the suffix and `cch` rules did not
+  change.
+- `x-stainless-package-version` is `0.128.0`.
+- A billing block with `cc_prompt_id` also ends with
+  `cc_turn_origin=human; cc_prompt_index=N; cc_turn_index=N;`, where `N` is
+  the number of user prompts in `messages` (user messages that carry anything
+  besides tool results).
+- New headers: `x-claude-code-request-class` (`main`) on every request and
+  `x-claude-code-prompt-id` (the billing `cc_prompt_id`) when there is one.
+- Beta lists follow 2.1.302's order: `claude-code-20250219` first in the
+  full-agent list, `per-turn-control-2026-07-01` directly after
+  `prompt-caching-scope-2026-01-05` (also on Fable 5.1 and Haiku 5.5), and
+  the 2.1.302 additions `mid-conversation-tool-changes-2026-07-01`,
+  `mid-conversation-system-clear-at-2026-08-21` and
+  `thinking-binding-controls-2026-08-01` in the full-agent list.
+- Every vector is an uncompressed (identity) send. Claude Code 2.1.302 sends
+  bodies of 4,096 characters or more to api.anthropic.com gzipped, with
+  `cch=00000` and whitespace padding; that encoding is not part of these
+  vectors.
+
 ## How the outputs were generated
 
-`generate-vectors.ts` (harness) and `cases.ts` (inputs) in this folder call
-the real functions in the order `packages/opencode/src/index.ts`
-`sendWithAccessToken` uses them: `mergeHeaders` and deletion of the internal
-headers, `markOpenCodeEffortTransitions`/`encodeOpenCodeEffortPlan` for effort
-plans, `rewriteRequestBody` (which signs the body), `setOAuthHeaders`,
+The outputs come from the real functions, called in the order
+`packages/opencode/src/index.ts` `sendWithAccessToken` uses them:
+`mergeHeaders` and deletion of the internal headers,
+`markOpenCodeEffortTransitions`/`encodeOpenCodeEffortPlan` for effort plans,
+`rewriteRequestBody` (which signs the body), `setOAuthHeaders`,
 `addFastModeBetaHeader`, `rewriteUrl`, then Bun's `fetch` to a local raw TCP
 listener, which records the request line, headers and body bytes as written.
-The harness checks that the captured body equals the signed body, that
-recomputing `cch` from `cch_canonical_body` and re-signing reproduce it, and
-that the suffix follows from the first user text.
-
-```sh
-bun run --cwd packages/core build
-cd .cortexkit/internal-docs/research/wire-blueprint-2.1.280
-bun cases.ts > vectors.json
-```
+These are the steps anthropic-auth's `claude-oauth-wire-vectors.test.ts`
+runs; the 2.1.302 set was produced by running them on each case's `input`
+and writing the result to `output`. The harness checks that the captured
+body equals the signed body, that recomputing `cch` from
+`cch_canonical_body` and re-signing reproduce it, and that the suffix follows
+from the first user text.
 
 Bun 1.4.2 on macOS and Bun 1.3.14 on Linux (the version CI pins) produced
-byte-identical files (SHA-256
-`32ee924e877ce47219bdb1e7c808a50a7014fa85603a354b76a55b7f3a503655`). Code
-base: anthropic-auth `9234efe54cec0834813ecb923fdc7e890b28bf15`.
+byte-identical outputs. `vectors.json` has SHA-256
+`8f769683452e8da8502b2cd4856a6585615939938e2fa5f97b0da572d12d9623`.
 
 Not covered: Pi and OpenCode 2 (their differences are described in
 `blueprint.md`), lane-start warm requests, and CacheKeep prewarms.
