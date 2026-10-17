@@ -21,6 +21,20 @@ if mode == "garbage":
     path.write_text("this is not XML", encoding="utf-8")
 elif mode == "empty":
     path.write_text("<testsuites><testsuite/></testsuites>", encoding="utf-8")
+elif mode == "bun_nested":
+    # Bun 1.3.14's shape: one testsuite per file and per describe, and a nested
+    # testcase classname written innermost first with ` > ` escaped twice.
+    failure = '<failure message="guard assertion failed">expected failure</failure>' if mutated else ""
+    path.write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test"><testsuite name="rig.test.ts" file="rig.test.ts">
+  <testsuite name="guard" file="rig.test.ts">
+    <testcase classname="guard" name="script.tests.flows_rig.RigChecks.test_guard" file="rig.test.ts">{failure}</testcase>
+    <testsuite name="inner" file="rig.test.ts"><testsuite name="deepest" file="rig.test.ts">
+      <testcase classname="deepest &amp;gt; inner &amp;gt; guard" name="nested collateral" file="rig.test.ts">{failure}</testcase>
+    </testsuite></testsuite>
+  </testsuite>
+</testsuite></testsuites>
+''', encoding="utf-8")
 else:
     classname = "Guard" if mode == "same" else "Other"
     failure = '<failure message="guard assertion failed">expected failure</failure>' if mutated else ""

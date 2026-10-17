@@ -878,11 +878,22 @@ Set **all three** optional fields on a command row:
   including a symlink to an absent destination. The command must create a fresh
   report; create any necessary parent directory in your runner first.
 - `broad_id = "{name}"`: maps XML-decoded testcase attributes to exact catalogue
-  ids. `{classname}.{name}`, `{classname}/{name}`, `{file}:{name}` and literal
-  separators are also supported. `{file}` uses the testcase's `file`, then the
-  enclosing testsuite's `file`; it is an ERROR if neither has that attribute.
-  Only `{classname}`, `{name}` and `{file}` placeholders are allowed, and
-  `{name}` is required. Values are never trimmed, split or recursively expanded.
+  ids. `{classname}.{name}`, `{classname}/{name}`, `{file}:{name}`,
+  `{suite} > {name}` and literal separators are also supported. `{file}` uses the
+  testcase's `file`, then the enclosing testsuite's `file`; it is an ERROR if
+  neither has that attribute. `{suite}` (0.12.5) is the `name` of every enclosing
+  `<testsuite>` except the file-level one, outermost first, joined with ` > `;
+  the file-level suite is the outermost `<testsuite>` that has a `file`
+  attribute. It is an ERROR if a suite on that path has no `name`.
+  Only `{classname}`, `{name}`, `{file}` and `{suite}` placeholders are allowed,
+  and `{name}` is required. Values are never trimmed, split or recursively
+  expanded.
+- `junit_class = "classname" | "suites"` (optional, 0.12.5): where each
+  testcase's collateral target comes from. Absent or `"classname"` reads the
+  testcase's `classname`, exactly as before. `"suites"` uses the `{suite}` path
+  instead, for runners such as Bun that nest one testsuite per `describe` but
+  write nested classnames in the wrong order. It is refused, naming the row, on
+  a row without the three fields above or with any other value.
 
 A report must be UTF-8 JUnit XML rooted at `<testsuites>` or `<testsuite>`; nested
 suites, XML entities and CDATA are supported. Direct `<failure>` and `<error>`
@@ -898,7 +909,8 @@ Successful audits set `breadth_observed: true` and include collateral reds and
 their JUnit failure/error messages in `red` and `failures`. As for Cargo, unlisted
 failures in the expected tests' own target are reported as collateral but remain
 CAUGHT. Failures in other targets grade **CAUGHT_BROADLY**. For command rows the
-collateral target is the non-empty JUnit **`classname`**; when it is empty, the
+collateral target is the non-empty JUnit **`classname`** (or, with
+`junit_class = "suites"`, the non-empty `{suite}` path); when it is empty, the
   testcase's `file` is used, then the enclosing testsuite's `file`, then the empty
   string. Bun's top-level tests therefore report their source-file path. A reviewed
  `hub = "reason of at least 20 characters"` plus `hub_targets = ["OtherClass"]`
@@ -909,7 +921,8 @@ collateral target is the non-empty JUnit **`classname`**; when it is empty, the
  have collateral.
 
 Clean JUnit baselines are shared once per session by rows with identical
-`broad_command`, `broad_report`, `broad_id` and `timeout_s` selections; their
+`broad_command`, `broad_report`, `broad_id`, `junit_class` and `timeout_s`
+selections; their
 timing is attributed once. Named-command baselines remain per row. Already-red
 JUnit ids are recorded by target in `baseline_red` and their messages in
 `baseline_failures`, and excluded from mutant collateral just like Cargo's
@@ -931,9 +944,16 @@ Choose unique leaf names and escape regex metacharacters in your named runner
 when needed. For tests under one `describe`, **`{classname} > {name}`** maps to
 the console's descriptive name if your named runner accepts that full id.
 Bun 1.4.2 reports an empty classname for top-level tests and reverses the describe
-order in nested classnames (`inner > outer`); that nested value cannot be reversed
-by a template. Use unique leaf ids or normalize the XML in a runner when full
-console ids are needed. For collateral targets, an empty classname falls back to
+order in nested classnames (`inner > outer`); Bun 1.3.14 also escapes the joining
+` > ` and special characters in describe names a second time (`inner &gt; outer`
+after decoding). That nested value cannot be reversed by a template, and
+splitting it is ambiguous when a describe name contains ` > `. Bun does write
+one `<testsuite name=…>` per describe, outermost first, inside one file-level
+suite, so **`{suite} > {name}`** gives the console's full id at any depth
+(`outer > inner > deepest > test`), and **`junit_class = "suites"`** makes the
+collateral target that same `outer > inner > deepest` path, the form to write in
+`hub_targets`. A test one `describe` deep gets the same target either way. For
+collateral targets, an empty classname (or suite path) falls back to
 the testcase `file`, then the enclosing testsuite `file`. `{file}` in `broad_id`
 can make ids file-specific (for example, `{file}:{name}`); a testcase or its
 enclosing testsuite must carry a `file` when the template uses that placeholder.

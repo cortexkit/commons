@@ -99,9 +99,17 @@ pub struct Control {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broad_report: Option<String>,
     /// Maps JUnit testcase attributes to exact catalogue ids; `{file}` uses the
-    /// testcase file or its enclosing testsuite file.
+    /// testcase file or its enclosing testsuite file, and `{suite}` the names of
+    /// the enclosing testsuites below the file-level one, outermost first,
+    /// joined with ` > ` (see [`JunitClass::Suites`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broad_id: Option<String>,
+    /// Where a JUnit breadth audit reads each testcase's target from: its
+    /// `classname` attribute ("classname", the default when absent) or the
+    /// enclosing testsuite names ("suites"). Only valid on rows that set
+    /// `broad_command`, `broad_report` and `broad_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub junit_class: Option<JunitClass>,
     /// Literal output pattern with one {count} decimal placeholder, per invocation.
     pub test_count_pattern: Option<String>,
     /// Compare command stdout rather than relying on a test's exit status.
@@ -131,8 +139,9 @@ pub struct Control {
     pub hub: Option<String>,
     /// The test targets, other than the expected tests' own, that a reviewer
     /// approved to fail alongside them in a `run --broad` replay. Stable names,
-    /// without Cargo's executable hash; command-row targets use nonempty JUnit
-    /// classname, then testcase file, then enclosing testsuite file.
+    /// without Cargo's executable hash; command-row targets use the nonempty
+    /// JUnit classname (or, with `junit_class = "suites"`, the nonempty suite
+    /// path), then testcase file, then enclosing testsuite file.
     pub hub_targets: Option<Vec<String>>,
     /// Rust target-OS names; absent means the row runs on every host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,6 +164,33 @@ pub enum IgnoredSelection {
     Include,
     /// Run only the ignored tests.
     Only,
+}
+
+/// Which JUnit testcase identity a command row's breadth audit records as the
+/// testcase's target. `hub_targets` and CAUGHT_BROADLY grading compare targets.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum JunitClass {
+    /// The testcase's `classname` attribute as written by the runner.
+    #[default]
+    Classname,
+    /// The `name` attributes of the enclosing `<testsuite>` elements,
+    /// outermost first, joined with ` > `. The file-level suite is left out:
+    /// that is a `<testsuite>` with a `file` attribute and no enclosing
+    /// `<testsuite>`, as Bun writes one per test file. Use this for runners
+    /// such as Bun that nest one testsuite per `describe` but write nested
+    /// classnames innermost first.
+    Suites,
+}
+
+impl JunitClass {
+    /// The catalogue spelling, as written in a row's `junit_class` field.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Classname => "classname",
+            Self::Suites => "suites",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -368,18 +404,25 @@ impl Control {
             let literals = template
                 .replace("{classname}", "")
                 .replace("{name}", "")
-                .replace("{file}", "");
+                .replace("{file}", "")
+                .replace("{suite}", "");
             if !template.contains("{name}")
                 || literals.contains(['{', '}'])
                 || template.chars().any(char::is_control)
             {
                 return Err(invalid(
                     "broad_id",
-                    "requires {name} and permits only {classname}, {name} and {file} placeholders",
+                    "requires {name} and permits only {classname}, {name}, {file} and {suite} placeholders",
                 ));
             }
             repository_relative(self.broad_report.as_deref().unwrap())
                 .map_err(|e| invalid("broad_report", &e))?;
+        }
+        if self.junit_class.is_some() && self.broad_id.is_none() {
+            return Err(invalid(
+                "junit_class",
+                "requires broad_command, broad_report and broad_id: only a JUnit breadth audit reads it",
+            ));
         }
         if self.equivalent.is_some() != self.equivalent_guard.is_some() {
             return Err(invalid(
@@ -2446,8 +2489,11 @@ fn command_breadth(
         // directory or file with a link to somewhere outside the repository.
         let path = report_path(root, name)?;
         let xml = fs::read_to_string(&path).map_err(|e| format!("cannot read report: {e}"))?;
-        let mut results =
-            junit_results(&xml, c.broad_id.as_deref().ok_or("broad_id is required")?)?;
+        let mut results = junit_results(
+            &xml,
+            c.broad_id.as_deref().ok_or("broad_id is required")?,
+            c.junit_class.unwrap_or_default(),
+        )?;
         if output.code != Some(0) && results.red.is_empty() {
             return Err(format!(
                 "broad command exited {:?} without failed testcases",
@@ -2628,13 +2674,43 @@ fn junit_document(xml: &str) -> Result<JunitNode> {
     Ok(document)
 }
 
-fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
-    fn collect(
-        node: &JunitNode,
-        enclosing_suite_file: Option<&str>,
-        template: &str,
+/// Expands a `broad_id` template in one left-to-right pass. Only the template
+/// is scanned for placeholders; substituted attribute values are copied as they
+/// are, so a literal `{name}` or `{suite}` inside a test or describe name
+/// survives byte-for-byte.
+fn expand_broad_id(template: &str, values: &[(&str, &str)]) -> String {
+    let mut id = String::new();
+    let mut rest = template;
+    'scan: while let Some(c) = rest.chars().next() {
+        for (placeholder, value) in values {
+            if let Some(after) = rest.strip_prefix(placeholder) {
+                id.push_str(value);
+                rest = after;
+                continue 'scan;
+            }
+        }
+        id.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    id
+}
+
+fn junit_results(xml: &str, template: &str, class: JunitClass) -> Result<TestResults> {
+    struct Context<'a> {
+        template: &'a str,
+        class: JunitClass,
+    }
+    /// `suites` holds the names of the enclosing describe-level testsuites,
+    /// outermost first; `None` marks a suite without a `name` attribute.
+    fn collect<'a>(
+        node: &'a JunitNode,
+        enclosing_suite_file: Option<&'a str>,
+        mut suites: Vec<Option<&'a str>>,
+        inside_suite: bool,
+        context: &Context,
         results: &mut TestResults,
     ) -> Result<()> {
+        let template = context.template;
         let suite_file = if node.tag == "testsuite" {
             node.attributes
                 .get("file")
@@ -2643,9 +2719,25 @@ fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
         } else {
             enclosing_suite_file
         };
+        // The file-level suite is the outermost testsuite that names a file:
+        // Bun writes one per test file, with one nested testsuite per describe,
+        // each of which also carries the file. Matching on structure rather than
+        // on name == file keeps a describe that happens to be named like its
+        // file in the path.
+        if node.tag == "testsuite" && (inside_suite || !node.attributes.contains_key("file")) {
+            suites.push(node.attributes.get("name").map(String::as_str));
+        }
+        let inside_suite = inside_suite || node.tag == "testsuite";
         for child in &node.children {
             if child.tag == "testsuite" {
-                collect(child, suite_file, template, results)?;
+                collect(
+                    child,
+                    suite_file,
+                    suites.clone(),
+                    inside_suite,
+                    context,
+                    results,
+                )?;
             } else if child.tag == "testcase" && node.tag == "testsuite" {
                 let name = child
                     .attributes
@@ -2667,21 +2759,37 @@ fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
                 }
                 // Replace placeholders in the template, never in attribute values:
                 // a literal {name} in a class name must survive byte-for-byte.
-                let id = template
-                    .split("{classname}")
-                    .map(|part| {
-                        part.split("{name}")
-                            .map(|part| part.replace("{file}", file.unwrap_or_default()))
-                            .collect::<Vec<_>>()
-                            .join(name)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(classname);
+                // Nothing is split either, so a describe name containing " > "
+                // stays one path element.
+                let suite = if template.contains("{suite}") || context.class == JunitClass::Suites {
+                    suites
+                        .iter()
+                        .map(|suite| suite.ok_or_else(|| format!(
+                            "testcase {name:?} needs its suite path but an enclosing testsuite has no name attribute"
+                        )))
+                        .collect::<Result<Vec<_>>>()?
+                        .join(" > ")
+                } else {
+                    String::new()
+                };
+                let id = expand_broad_id(
+                    template,
+                    &[
+                        ("{classname}", classname),
+                        ("{name}", name),
+                        ("{file}", file.unwrap_or_default()),
+                        ("{suite}", &suite),
+                    ],
+                );
                 validate_command_id(&id)?;
-                let target = if classname.is_empty() {
+                let class_target = match context.class {
+                    JunitClass::Classname => classname.as_str(),
+                    JunitClass::Suites => suite.as_str(),
+                };
+                let target = if class_target.is_empty() {
                     file.unwrap_or_default()
                 } else {
-                    classname
+                    class_target
                 };
                 if results
                     .targets
@@ -2728,7 +2836,14 @@ fn junit_results(xml: &str, template: &str) -> Result<TestResults> {
         failure_output: BTreeMap::new(),
         signals: BTreeMap::new(),
     };
-    collect(&document, None, template, &mut results)?;
+    collect(
+        &document,
+        None,
+        Vec::new(),
+        false,
+        &Context { template, class },
+        &mut results,
+    )?;
     if results.targets.is_empty() {
         return Err("JUnit report contains zero testcases".into());
     }
@@ -2745,7 +2860,7 @@ mod junit_tests {
             <testcase classname="routes.{name}" name="scoped route &amp; café"><failure message="why &amp; how">trace &lt;here&gt;</failure></testcase>
             <testcase classname="" name="top level name"/>
             </testsuite></testsuite></testsuites>"#;
-        let results = junit_results(xml, "{classname}.{name}").unwrap();
+        let results = junit_results(xml, "{classname}.{name}", JunitClass::Classname).unwrap();
         assert_eq!(results.red, ["routes.{name}.scoped route & café"]);
         assert_eq!(results.targets[&results.red[0]], "routes.{name}");
         assert_eq!(
@@ -2753,7 +2868,7 @@ mod junit_tests {
             "why & how\ntrace <here>"
         );
         assert_eq!(results.green, [".top level name"]);
-        let results = junit_results(xml, "{name}").unwrap();
+        let results = junit_results(xml, "{name}", JunitClass::Classname).unwrap();
         assert_eq!(results.red, ["scoped route & café"]);
         assert_eq!(results.green, ["top level name"]);
     }
@@ -2765,7 +2880,7 @@ mod junit_tests {
             <testcase name="suite-file test" classname=""/>
             <testcase name="named suite test" classname="quota surface normalization" file="other.test.ts"/>
         </testsuite>"#;
-        let results = junit_results(xml, "{name}").unwrap();
+        let results = junit_results(xml, "{name}", JunitClass::Classname).unwrap();
         assert_eq!(
             results.targets["top-level test"],
             "src/tests/quota-surfaces.test.ts"
@@ -2786,7 +2901,7 @@ mod junit_tests {
             <testcase classname="" name="own file" file="case.test.ts"/>
             <testcase classname="" name="suite file"/>
         </testsuite></testsuite></testsuites>"#;
-        let results = junit_results(xml, "{file}:{name}").unwrap();
+        let results = junit_results(xml, "{file}:{name}", JunitClass::Classname).unwrap();
         assert!(results.targets.contains_key("case.test.ts:own file"));
         assert!(results.targets.contains_key("suite.test.ts:suite file"));
     }
@@ -2794,9 +2909,123 @@ mod junit_tests {
     #[test]
     fn broad_id_file_without_a_file_names_the_testcase_in_error() {
         let xml = r#"<testsuite><testcase classname="" name="fileless case"/></testsuite>"#;
-        let error = junit_results(xml, "{file}:{name}").unwrap_err();
+        let error = junit_results(xml, "{file}:{name}", JunitClass::Classname).unwrap_err();
         assert!(error.contains("fileless case"), "{error}");
         assert!(error.contains("{file}"), "{error}");
+    }
+
+    /// Bun 1.3.14's shape for a test nested three describe levels deep: one file-level
+    /// testsuite, one nested testsuite per describe carrying its name, and a
+    /// classname written innermost first with the joining ` > ` escaped twice.
+    const BUN_NESTED: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="3">
+  <testsuite name="src/tests/a.test.ts" file="src/tests/a.test.ts" tests="3">
+    <testcase name="top" classname="" file="src/tests/a.test.ts" line="2"/>
+    <testcase name="suite file only" classname=""/>
+    <testsuite name="outer" file="src/tests/a.test.ts" line="3">
+      <testcase name="one-level" classname="outer" file="src/tests/a.test.ts" line="4"/>
+      <testsuite name="inner" file="src/tests/a.test.ts" line="5">
+        <testsuite name="deepest" file="src/tests/a.test.ts" line="6">
+          <testcase name="three-level" classname="deepest &amp;gt; inner &amp;gt; outer" file="src/tests/a.test.ts" line="7"><failure message="boom"/></testcase>
+        </testsuite>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+</testsuites>"#;
+
+    #[test]
+    fn bun_nested_suites_give_outermost_first_ids_and_opt_in_targets() {
+        let results = junit_results(BUN_NESTED, "{suite}.{name}", JunitClass::Suites).unwrap();
+        assert_eq!(results.red, ["outer > inner > deepest.three-level"]);
+        assert_eq!(
+            results.targets["outer > inner > deepest.three-level"],
+            "outer > inner > deepest"
+        );
+        // Tests directly in the file-level suite have an empty suite path, so the
+        // target falls back to the testcase file, then the suite file.
+        assert_eq!(results.targets[".top"], "src/tests/a.test.ts");
+        assert_eq!(results.targets[".suite file only"], "src/tests/a.test.ts");
+        assert_eq!(results.targets["outer.one-level"], "outer");
+        // The default still reads the classname exactly as Bun wrote it, decoded
+        // once, for both the target and the {classname} placeholder.
+        let results = junit_results(BUN_NESTED, "{suite}.{name}", JunitClass::Classname).unwrap();
+        assert_eq!(
+            results.targets["outer > inner > deepest.three-level"],
+            "deepest &gt; inner &gt; outer"
+        );
+        let results =
+            junit_results(BUN_NESTED, "{classname}.{name}", JunitClass::Classname).unwrap();
+        assert_eq!(results.red, ["deepest &gt; inner &gt; outer.three-level"]);
+        assert_eq!(results.targets[".top"], "src/tests/a.test.ts");
+    }
+
+    #[test]
+    fn one_describe_deep_targets_agree_under_both_sources() {
+        for class in [JunitClass::Classname, JunitClass::Suites] {
+            let results = junit_results(BUN_NESTED, "{name}", class).unwrap();
+            assert_eq!(results.targets["one-level"], "outer", "{class:?}");
+        }
+    }
+
+    #[test]
+    fn suite_paths_are_never_split_or_recursively_expanded() {
+        // Bun double-escapes the describe names inside the classname as well, so
+        // the classname alone cannot tell which ` > ` joins two describes.
+        let xml = r#"<testsuites><testsuite name="a.test.ts" file="a.test.ts">
+            <testsuite name="outer" file="a.test.ts">
+              <testsuite name="in &gt; ner {name}" file="a.test.ts">
+                <testsuite name="deepest" file="a.test.ts">
+                  <testcase name="leaf {suite}" classname="deepest &amp;gt; in &amp;gt; ner {name} &amp;gt; outer"/>
+                </testsuite>
+              </testsuite>
+            </testsuite>
+        </testsuite></testsuites>"#;
+        let results = junit_results(xml, "{suite}/{name}", JunitClass::Suites).unwrap();
+        assert_eq!(
+            results.green,
+            ["outer > in > ner {name} > deepest/leaf {suite}"]
+        );
+        assert_eq!(
+            results.targets[&results.green[0]],
+            "outer > in > ner {name} > deepest"
+        );
+    }
+
+    #[test]
+    fn a_describe_named_like_its_file_stays_in_the_suite_path() {
+        // Only the outermost testsuite naming a file is the file-level one.
+        let xml = r#"<testsuite name="a.test.ts" file="a.test.ts">
+            <testsuite name="a.test.ts" file="a.test.ts">
+              <testcase name="leaf" classname="a.test.ts"/>
+            </testsuite>
+        </testsuite>"#;
+        let results = junit_results(xml, "{suite}|{name}", JunitClass::Suites).unwrap();
+        assert_eq!(results.green, ["a.test.ts|leaf"]);
+        // An outermost testsuite without a file attribute is a named suite.
+        let xml = r#"<testsuite name="package"><testcase name="leaf" classname=""/></testsuite>"#;
+        let results = junit_results(xml, "{suite}|{name}", JunitClass::Suites).unwrap();
+        assert_eq!(results.targets["package|leaf"], "package");
+    }
+
+    #[test]
+    fn a_needed_suite_path_through_a_nameless_suite_is_an_error() {
+        let xml = r#"<testsuites><testsuite><testcase name="leaf" classname="c"/></testsuite></testsuites>"#;
+        for (template, class) in [
+            ("{suite}.{name}", JunitClass::Classname),
+            ("{name}", JunitClass::Suites),
+        ] {
+            let error = junit_results(xml, template, class).unwrap_err();
+            assert!(
+                error.contains("leaf") && error.contains("no name attribute"),
+                "{error}"
+            );
+        }
+        assert_eq!(
+            junit_results(xml, "{name}", JunitClass::Classname)
+                .unwrap()
+                .targets["leaf"],
+            "c"
+        );
     }
 
     #[test]
@@ -2809,16 +3038,20 @@ mod junit_tests {
             "<testsuite><testcase name='missing class'/></testsuite>",
             "<!DOCTYPE testsuite><testsuite/>",
         ] {
-            assert!(junit_results(xml, "{name}").is_err(), "{xml}");
+            assert!(junit_results(xml, "{name}", JunitClass::Classname).is_err(), "{xml}");
         }
         let error = junit_results(
             "<testsuite><testcase name='missing class'/></testsuite>",
             "{name}",
+            JunitClass::Classname,
         )
         .unwrap_err();
         assert_eq!(error, "testcase missing classname");
         let xml = "<testsuite><testcase classname='a' name='b'><system-out><failure>not a failure child</failure></system-out></testcase></testsuite>";
-        assert!(junit_results(xml, "{name}").unwrap().red.is_empty());
+        assert!(junit_results(xml, "{name}", JunitClass::Classname)
+            .unwrap()
+            .red
+            .is_empty());
     }
 }
 
@@ -3854,6 +4087,7 @@ impl ReplaySession {
                     selection.broad_command = None;
                     selection.broad_report = None;
                     selection.broad_id = None;
+                    selection.junit_class = None;
                 }
                 // Baseline data is shared, but each row's expected reds are
                 // validated independently before its mutant can be applied.
@@ -3883,6 +4117,7 @@ impl ReplaySession {
                 key.extend([
                     c.broad_report.clone().unwrap(),
                     c.broad_id.clone().unwrap(),
+                    c.junit_class.unwrap_or_default().as_str().to_owned(),
                     c.timeout_s.to_string(),
                 ]);
                 let broad = if let Some(broad) = command_broad_shared.get(&key) {
@@ -6012,6 +6247,7 @@ mod order_tests {
             broad_command: None,
             broad_report: None,
             broad_id: None,
+            junit_class: None,
             test_count_pattern: None,
             catch_on: None,
             output_normalize: vec![],

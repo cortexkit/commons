@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.5
+
+- Add a `{suite}` placeholder to `broad_id`: the `name` of every enclosing
+  JUnit `<testsuite>` except the file-level one (the outermost testsuite with a
+  `file` attribute), outermost first, joined with ` > `. Bun writes one
+  testsuite per `describe`, so `{suite} > {name}` gives a nested test's full
+  console id even though Bun writes its `classname` innermost first (and, in
+  1.3.14, escaped twice). Like the other placeholders it is substituted in the
+  template only, never split or re-expanded.
+- Add an optional command-row field `junit_class = "classname" | "suites"`.
+  Absent or `"classname"` keeps today's targets byte-for-byte; `"suites"` makes
+  each testcase's collateral target its `{suite}` path, falling back to the
+  testcase file and then the suite file when the path is empty, so `hub_targets`
+  can name nested Bun describes as `outer > inner`. `check` refuses the field,
+  naming the row, on a row without `broad_command`, `broad_report` and
+  `broad_id`, and refuses any other value.
+
 ## 0.12.4
 
 - An ERROR row whose clean baseline was not green now shows what failed: the

@@ -106,6 +106,7 @@ impl Fixture {
             broad_command: None,
             broad_report: None,
             broad_id: None,
+            junit_class: None,
             test_count_pattern: None,
             catch_on: None,
             output_normalize: vec![],
@@ -809,6 +810,7 @@ impl CommandFixture {
             broad_command: None,
             broad_report: None,
             broad_id: None,
+            junit_class: None,
             test_count_pattern: Some("Ran {count} tests".into()),
             catch_on: None,
             output_normalize: vec![],
@@ -2139,6 +2141,81 @@ fn command_v090_junit_grades_collateral_and_reviewed_classname_hubs() {
 }
 
 #[test]
+fn command_junit_class_suites_grades_bun_nested_targets_outermost_first() {
+    let f = CommandFixture::new();
+    let mut c = junit_control(&f, "bun_nested");
+    c.hub = Some("these describes intentionally assert the same shared guard".into());
+    c.hub_targets = Some(vec!["guard > inner > deepest".into()]);
+    // The default reads Bun's reversed, escaped classname, which a reviewer's
+    // natural `outer > inner` target never matches.
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly, "{row:?}");
+    assert_eq!(row.collateral.targets, ["deepest &gt; inner &gt; guard"]);
+    c.junit_class = Some(JunitClass::Classname);
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly, "{row:?}");
+    assert_eq!(row.collateral.targets, ["deepest &gt; inner &gt; guard"]);
+    c.junit_class = Some(JunitClass::Suites);
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::Hub, "{row:?}");
+    assert_eq!(row.collateral.targets, ["guard > inner > deepest"]);
+    c.hub_targets = Some(vec!["deepest &gt; inner &gt; guard".into()]);
+    let row = junit_run(&f, &c);
+    assert_eq!(row.outcome, Outcome::CaughtBroadly, "{row:?}");
+    assert!(row
+        .reason
+        .unwrap()
+        .contains("outside hub_targets: guard > inner > deepest"));
+}
+
+#[test]
+fn command_junit_class_requires_a_breadth_audit_and_a_known_value() {
+    let f = CommandFixture::new();
+    let c = junit_control(&f, "bun_nested");
+    for class in [JunitClass::Classname, JunitClass::Suites] {
+        let mut row = c.clone();
+        row.junit_class = Some(class);
+        let path = f.root().join(format!(".git/{}.toml", class.as_str()));
+        append_control(&path, &row).unwrap();
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains(&format!("junit_class = \"{}\"", class.as_str())));
+        assert_eq!(
+            toml::to_string(&load(&path).unwrap().control[0]).unwrap(),
+            toml::to_string(&row).unwrap()
+        );
+        let mut bad = row.clone();
+        bad.broad_command = None;
+        bad.broad_report = None;
+        bad.broad_id = None;
+        f.load_error(&bad, "junit_class");
+    }
+    let text = toml::to_string(&Catalogue {
+        control: vec![c.clone()],
+        ..Catalogue::default()
+    })
+    .unwrap();
+    assert!(!text.contains("junit_class"), "{text}");
+    let bad = text.replace(
+        "broad_id = \"{name}\"\n",
+        "broad_id = \"{name}\"\njunit_class = \"suite\"\n",
+    );
+    assert_ne!(bad, text);
+    let path = f.root().join(".git/unknown-class.toml");
+    fs::write(&path, &bad).unwrap();
+    let out = f.cli(&["--catalogue", ".git/unknown-class.toml", "check"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("command-guard")
+            && stderr.contains("suite")
+            && stderr.contains("classname")
+            && stderr.contains("suites"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn command_v090_junit_missing_report_is_error() {
     let f = CommandFixture::new();
     let mut c = junit_control(&f, "missing");
@@ -2290,6 +2367,14 @@ fn command_v090_breadth_fields_and_report_paths_fail_closed() {
         load(&file_template_path).unwrap().control[0].broad_id,
         file_template.broad_id
     );
+    let mut suite_template = c.clone();
+    suite_template.broad_id = Some("{suite} > {name}".into());
+    let suite_template_path = f.root().join(".git/suite-template.toml");
+    append_control(&suite_template_path, &suite_template).unwrap();
+    assert_eq!(
+        load(&suite_template_path).unwrap().control[0].broad_id,
+        suite_template.broad_id
+    );
     for field in ["broad_command", "broad_report", "broad_id"] {
         let mut bad = c.clone();
         match field {
@@ -2299,7 +2384,14 @@ fn command_v090_breadth_fields_and_report_paths_fail_closed() {
         }
         f.load_error(&bad, field);
     }
-    for template in ["{filename}.{name}", "{classname}", "{name", "{name}\n"] {
+    for template in [
+        "{filename}.{name}",
+        "{classname}",
+        "{suite}",
+        "{suites}.{name}",
+        "{name",
+        "{name}\n",
+    ] {
         let mut bad = c.clone();
         bad.broad_id = Some(template.into());
         f.load_error(&bad, "broad_id");
