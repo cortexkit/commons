@@ -54,3 +54,11 @@ fn main() -> Result<(), InvalidBetaHeader> {
 The returned credential metadata describes where an application should attach its
 own credential; secrets remain with the client. See the crate API documentation
 for reset-source details and the behavior of each classifier.
+
+## Test vectors
+
+With the `test-vectors` feature, `cortexkit_anthropic_policy::vectors` exposes the
+Claude OAuth wire vectors that ship in this package
+(`test-vectors/claude-oauth-wire/`): fixed host requests and the exact request a
+client must send for each, pinned by `SHA256SUMS`. Clients in other languages
+read the same files from the published package or a pinned commit.

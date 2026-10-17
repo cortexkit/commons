@@ -1,15 +1,30 @@
 [package]
 name = "cortexkit-anthropic-policy"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 publish = true
-exclude = ["mutations.d/**"]
+# The Claude OAuth wire vectors ship inside the package (`test-vectors/`), and
+# the `test-vectors` feature exposes their bytes through the public `vectors`
+# module, so a client pinning this crate by version tests against the same bytes.
+include = ["Cargo.toml", "README.md", "CHANGELOG.md", "src/**", "tests/**", "test-vectors/**"]
 description = "Anthropic authentication headers, beta tokens, account limits, credits, and quota-header policy."
 keywords = ["anthropic", "headers", "quota", "policy"]
+
+[features]
+# Compiles the Claude OAuth wire vectors into the crate as the public `vectors` module.
+test-vectors = []
 
 [dependencies]
 serde_json = "1"
 httpdate = "1"
+
+[dev-dependencies]
+# Checks the shipped SHA256SUMS against the vector files in tests only.
+sha2 = "0.10"
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

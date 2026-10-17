@@ -5,6 +5,8 @@
 
 mod beta;
 mod limits;
+#[cfg(feature = "test-vectors")]
+pub mod vectors;
 
 pub use beta::{merge_beta_headers, remove_beta_token, InvalidBetaHeader};
 pub use limits::{

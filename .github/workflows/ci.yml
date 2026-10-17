@@ -51,6 +51,10 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-targets --locked
 
+      # Feature-gated vector tests do not run under the plain workspace test above.
+      - name: Test shipped vector features
+        run: cargo test --locked -p cortexkit-role-agent-data -p cortexkit-anthropic-policy --features test-vectors
+
   # cortexkit-store-postgres's live tests need a real postgres. GitHub service
   # containers are Linux-only, so they run here (the cross-OS matrix above skips
   # them: no DSN -> skip-pass, which is correct on macOS/Windows). CORTEXKIT_REQUIRE_PG

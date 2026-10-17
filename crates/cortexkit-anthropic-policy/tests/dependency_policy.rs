@@ -9,8 +9,21 @@ fn manifest_dependencies_stay_transport_free_and_self_contained() {
             manifest_path.display()
         )
     });
+    // `sha2` checks the shipped vector checksums in tests only, so it may
+    // appear in `[dev-dependencies]` but never in the crate's own dependencies.
+    let runtime_table = manifest
+        .split("\n[")
+        .find(|section| section.starts_with("dependencies]"))
+        .unwrap_or_default();
+    assert!(
+        !runtime_table
+            .lines()
+            .any(|line| line.trim_start().starts_with("sha2")),
+        "sha2 is allowed only as a dev-dependency in {}",
+        manifest_path.display()
+    );
     for dependency in dependency_names(&manifest) {
-        if !matches!(dependency.as_str(), "serde_json" | "httpdate") {
+        if !matches!(dependency.as_str(), "serde_json" | "httpdate" | "sha2") {
             panic!(
                 "forbidden dependency `{dependency}` is declared in {}",
                 manifest_path.display()
