@@ -1607,6 +1607,16 @@ pub struct Report {
     pub failures: BTreeMap<String, String>,
     /// Each baseline-red test's own output, separate from mutant failures.
     pub baseline_failures: BTreeMap<String, String>,
+    /// What ran and how it ended when the clean-tree baseline was not green
+    /// and the row is ERROR for that reason. Absent when the baseline was green.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_failure: Option<BaselineFailure>,
+    /// The latest clean-tree run that exited non-green even though the baseline
+    /// may still pass (Cargo baseline-red tests outside `expect_red` are
+    /// tolerated). Promoted to `baseline_failure` only if a later baseline
+    /// check rejects the row.
+    #[serde(skip)]
+    baseline_run: Option<BaselineFailure>,
     #[serde(skip)]
     unexpected_red: BTreeSet<String>,
     pub collateral: Collateral,
@@ -1656,6 +1666,8 @@ impl Report {
             green: vec![],
             failures: BTreeMap::new(),
             baseline_failures: BTreeMap::new(),
+            baseline_failure: None,
+            baseline_run: None,
             unexpected_red: BTreeSet::new(),
             collateral: Collateral {
                 count: 0,
@@ -1702,14 +1714,171 @@ impl Report {
     }
 }
 
+/// A clean-tree run that did not finish green: the command, how it ended and
+/// the end of its output. Environment variables are never recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BaselineFailure {
+    /// Program and arguments exactly as spawned. Every runner starts the
+    /// process in the repository root, so no working directory is recorded.
+    pub command: Vec<String>,
+    /// `exit N`, the signal that killed the process, or the expired timeout.
+    pub exit: String,
+    /// The last [`BASELINE_TAIL_LINES`] lines of output, at most
+    /// [`BASELINE_TAIL_BYTES`] bytes. Streams captured together keep their
+    /// write order; streams captured apart are labelled `--- stdout ---` and
+    /// `--- stderr ---`.
+    pub output_tail: String,
+    /// True when earlier output was dropped to fit those bounds.
+    pub truncated: bool,
+}
+
+pub const BASELINE_TAIL_LINES: usize = 40;
+pub const BASELINE_TAIL_BYTES: usize = 16 * 1024;
+
+impl BaselineFailure {
+    fn from_output(output: &Output) -> Self {
+        let exit = if output.timeout {
+            format!("timed out: killed after timeout_s = {}", output.timeout_s)
+        } else if let Some(signal) = &output.signal {
+            format!("killed by {signal}")
+        } else if let Some(code) = output.code {
+            format!("exit {code}")
+        } else {
+            "no exit status".into()
+        };
+        let (output_tail, truncated) = match &output.stderr {
+            None => {
+                let (tail, truncated) =
+                    output_tail(&output.stdout, BASELINE_TAIL_LINES, BASELINE_TAIL_BYTES);
+                (tail.to_owned(), truncated)
+            }
+            Some(stderr) => labelled_tails(&output.stdout, stderr),
+        };
+        Self {
+            command: output.argv.clone(),
+            exit,
+            output_tail,
+            truncated,
+        }
+    }
+}
+
+/// The end of `text`: at most `lines` lines and `bytes` bytes (cut at a
+/// character boundary), plus whether anything before it was dropped.
+fn output_tail(text: &str, lines: usize, bytes: usize) -> (&str, bool) {
+    let kept: usize = text
+        .split_inclusive('\n')
+        .rev()
+        .take(lines)
+        .map(str::len)
+        .sum();
+    let mut start = text.len() - kept.min(bytes);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    (&text[start..], start > 0)
+}
+
+/// Tails of separately captured stdout and stderr under one shared line and
+/// byte budget. Each stream gets half, and a stream that needs less than its
+/// half leaves the rest to the other. The labels count toward the byte cap.
+fn labelled_tails(stdout: &str, stderr: &str) -> (String, bool) {
+    const LABELS: usize = "--- stdout (earlier output dropped) ---\n".len()
+        + "--- stderr (earlier output dropped) ---\n".len()
+        + 2;
+    let line_count = |text: &str| text.split_inclusive('\n').count();
+    let bytes = BASELINE_TAIL_BYTES - LABELS;
+    let err_lines = line_count(stderr)
+        .min((BASELINE_TAIL_LINES / 2).max(BASELINE_TAIL_LINES.saturating_sub(line_count(stdout))));
+    let err_bytes = stderr
+        .len()
+        .min((bytes / 2).max(bytes.saturating_sub(stdout.len())));
+    let mut rendered = String::new();
+    let mut truncated = false;
+    for (name, text, lines, bytes) in [
+        (
+            "stdout",
+            stdout,
+            BASELINE_TAIL_LINES - err_lines,
+            bytes - err_bytes,
+        ),
+        ("stderr", stderr, err_lines, err_bytes),
+    ] {
+        let (tail, dropped) = output_tail(text, lines, bytes);
+        truncated |= dropped;
+        let note = if dropped {
+            " (earlier output dropped)"
+        } else {
+            ""
+        };
+        rendered.push_str(&format!("--- {name}{note} ---\n{tail}"));
+        if !tail.is_empty() && !tail.ends_with('\n') {
+            rendered.push('\n');
+        }
+    }
+    (rendered, truncated)
+}
+
+#[cfg(test)]
+mod baseline_tail_tests {
+    use super::*;
+
+    #[test]
+    fn tail_keeps_the_last_lines_and_reports_only_a_real_drop() {
+        let forty: String = (1..=40).map(|i| format!("{i}\n")).collect();
+        assert_eq!(output_tail(&forty, 40, 1024), (forty.as_str(), false));
+        let more = format!("0\n{forty}");
+        assert_eq!(output_tail(&more, 40, 1024), (forty.as_str(), true));
+        // An unterminated last line still counts as one line.
+        assert_eq!(output_tail("a\nb\nc", 2, 1024), ("b\nc", true));
+        assert_eq!(output_tail("", 40, 1024), ("", false));
+    }
+
+    #[test]
+    fn tail_byte_cap_keeps_the_end_on_a_character_boundary() {
+        assert_eq!(output_tail("abcdef", 40, 3), ("def", true));
+        // Cutting three bytes from the end would split the two-byte "é".
+        assert_eq!(output_tail("aéz\n", 40, 3), ("z\n", true));
+    }
+
+    #[test]
+    fn labelled_tails_share_one_budget_and_stay_under_the_cap() {
+        assert_eq!(
+            labelled_tails("out", "err\n"),
+            (
+                "--- stdout ---\nout\n--- stderr ---\nerr\n".to_owned(),
+                false
+            )
+        );
+        let many: String = (0..100).map(|i| format!("{i}\n")).collect();
+        let (rendered, truncated) = labelled_tails(&many, "only\n");
+        assert!(truncated);
+        // One stderr line leaves the other 39 lines to stdout.
+        assert_eq!(rendered.lines().count(), 2 + 39 + 1, "{rendered}");
+        assert!(rendered.starts_with("--- stdout (earlier output dropped) ---\n61\n"));
+        let wide = "x".repeat(20 * 1024);
+        let (rendered, truncated) = labelled_tails(&wide, &wide);
+        assert!(truncated);
+        assert!(rendered.len() <= BASELINE_TAIL_BYTES, "{}", rendered.len());
+        assert!(rendered.contains("--- stderr (earlier output dropped) ---\n"));
+    }
+}
+
 struct Output {
+    /// Program and arguments as spawned; never the environment.
+    argv: Vec<String>,
     success: bool,
     code: Option<i32>,
     signal: Option<String>,
     timeout: bool,
+    /// The deadline the run was given, named when it expired.
+    timeout_s: u64,
     interrupted: bool,
     text: String,
     stdout: String,
+    /// Present only when stderr was captured apart from stdout; otherwise both
+    /// streams share `stdout` in the order they were written.
+    stderr: Option<String>,
     ms: u128,
 }
 /// Which tests one replay runs and how their per-test results are graded.
@@ -1886,6 +2055,10 @@ fn execute_output(
         out_file.try_clone()
     }
     .map_err(|e| e.to_string())?;
+    let argv = std::iter::once(cmd.get_program())
+        .chain(cmd.get_args())
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
     cmd.current_dir(root)
         .env("CARGO_TERM_COLOR", "never")
         .stdout(Stdio::from(out_file))
@@ -1928,19 +2101,26 @@ fn execute_output(
             .map_err(|e| e.to_string())
     };
     let stdout_text = read_text(&stdout)?;
-    let text = if separate_stdout {
-        format!("{}{}", stdout_text, read_text(&stderr)?)
+    let stderr_text = if separate_stdout {
+        Some(read_text(&stderr)?)
     } else {
-        stdout_text.clone()
+        None
+    };
+    let text = match &stderr_text {
+        Some(stderr_text) => format!("{stdout_text}{stderr_text}"),
+        None => stdout_text.clone(),
     };
     Ok(Output {
+        argv,
         success: status.is_some_and(|s| s.success()),
         code: status.and_then(|s| s.code()),
         signal: status.and_then(exit_signal),
         timeout: timed_out,
+        timeout_s: timeout,
         interrupted,
         text,
         stdout: stdout_text,
+        stderr: stderr_text,
         ms: start.elapsed().as_millis(),
     })
 }
@@ -2147,6 +2327,11 @@ fn command_tests(
         if output.interrupted {
             return Err(error("interrupted".into()));
         }
+        // Every non-green clean run below ends the row as ERROR, so record what
+        // ran before any of those returns.
+        if baseline && !output.success {
+            report.baseline_failure = Some(BaselineFailure::from_output(&output));
+        }
         if output.timeout {
             report.timed_out_phase = Some(Phase::Test);
             return Err(error(format!(
@@ -2229,6 +2414,10 @@ fn command_breadth(
         cmd.args(&argv[1..]);
         let output = execute(root, cmd, c.timeout_s, stop)?;
         if baseline {
+            report.baseline_run = (!output.success && !output.interrupted)
+                .then(|| BaselineFailure::from_output(&output));
+        }
+        if baseline {
             report.baseline_test_ms += output.ms;
         } else {
             report.test_ms += output.ms;
@@ -2305,6 +2494,9 @@ fn command_breadth(
         report.outcome = breadth_outcome(c, report, &cross_targets);
         Ok(())
     })();
+    if audit.is_err() && baseline {
+        report.baseline_failure = report.baseline_run.clone();
+    }
     audit.map_err(|e| format!("{}: broad_report {name}: {e}", c.label()))
 }
 
@@ -2319,7 +2511,17 @@ fn validate_command_broad_ids(c: &Control, results: &TestResults) -> Result<()> 
     Ok(())
 }
 
-fn validate_command_broad_baseline(c: &Control, report: &Report) -> Result<()> {
+/// Rejects a package-wide JUnit baseline that does not show every expected id
+/// green, recording the clean run that produced it on the row when it failed.
+fn validate_command_broad_baseline(c: &Control, report: &mut Report) -> Result<()> {
+    let validation = command_broad_baseline_green(c, report);
+    if validation.is_err() {
+        report.baseline_failure = report.baseline_run.clone();
+    }
+    validation
+}
+
+fn command_broad_baseline_green(c: &Control, report: &Report) -> Result<()> {
     if let Some(results) = &report.baseline_results {
         validate_command_broad_ids(c, results)?;
         for id in &c.expect_red {
@@ -2671,6 +2873,12 @@ fn output_tests(
         if output.interrupted {
             return Err("interrupted".into());
         }
+        // A clean (unmutated) baseline that fails says the row cannot be graded:
+        // every branch below ends it as ERROR, so record what that run printed
+        // before returning.
+        if baseline && !output.success {
+            report.baseline_failure = Some(BaselineFailure::from_output(&output));
+        }
         if output.timeout {
             report.timed_out_phase = Some(Phase::Test);
             return Err(format!("test command exceeded timeout_s = {}", c.timeout_s));
@@ -2733,11 +2941,26 @@ fn cargo_baseline(
         report.timed_out_phase = Some(Phase::Build);
     }
     if build.interrupted || build.timeout || !build.success {
+        if !build.interrupted {
+            report.baseline_failure = Some(BaselineFailure::from_output(&build));
+        }
         return Err(format!("baseline build failed: {}", tail(&build.text)));
     }
     let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
     report.baseline_test_ms += tests.ms;
     report.test_tail = tail(&tests.text);
+    // A non-green run can still be a usable baseline when only tests outside
+    // `expect_red` failed, so keep it aside and report it only on rejection.
+    report.baseline_run =
+        (!tests.success && !tests.interrupted).then(|| BaselineFailure::from_output(&tests));
+    let checked = cargo_baseline_results(c, report, &tests);
+    if checked.is_err() {
+        report.baseline_failure = report.baseline_run.clone();
+    }
+    checked
+}
+
+fn cargo_baseline_results(c: &Control, report: &mut Report, tests: &Output) -> Result<()> {
     if tests.timeout {
         report.timed_out_phase = Some(Phase::Test);
     }
@@ -2773,6 +2996,7 @@ fn validate_baseline(c: &Control, report: &mut Report) -> Result<()> {
             .cloned()
             .collect();
         if !red.is_empty() {
+            report.baseline_failure = report.baseline_run.clone();
             return Err(format!("baseline red: {}", red.join(", ")));
         }
         if results.red.len() + results.green.len() == 0
@@ -3679,13 +3903,15 @@ impl ReplaySession {
                 report.baseline_failures.extend(broad.baseline_failures);
                 report.baseline_red = broad.baseline_red;
                 report.baseline_results = broad.baseline_results;
+                report.baseline_run = broad.baseline_run;
                 report.test_tail = tail(&format!("{}\n{}", report.test_tail, broad.test_tail));
                 if broad.outcome == Outcome::Error {
                     report.outcome = broad.outcome;
                     report.reason = broad.reason;
                     report.timed_out_phase = broad.timed_out_phase;
+                    report.baseline_failure = broad.baseline_failure;
                 } else if report.outcome == Outcome::Survived {
-                    if let Err(e) = validate_command_broad_baseline(c, &report) {
+                    if let Err(e) = validate_command_broad_baseline(c, &mut report) {
                         report.outcome = Outcome::Error;
                         report.reason = Some(e);
                     }
@@ -3981,7 +4207,7 @@ fn replay(
                 command_tests(root, c, stop, &mut report, true)?;
                 if scope == Scope::Broad && c.broad_command.is_some() {
                     command_breadth(root, c, stop, &mut report, true)?;
-                    validate_command_broad_baseline(c, &report)?;
+                    validate_command_broad_baseline(c, &mut report)?;
                 }
             } else {
                 if !c.expect_red.is_empty() && !matches!(scope, Scope::Explore { .. }) {
@@ -4012,7 +4238,7 @@ fn replay(
             && report.baseline_results.is_none()
         {
             command_breadth(root, c, stop, &mut report, true)?;
-            validate_command_broad_baseline(c, &report)?;
+            validate_command_broad_baseline(c, &mut report)?;
         }
         if baseline_only {
             report.outcome = Outcome::Survived;

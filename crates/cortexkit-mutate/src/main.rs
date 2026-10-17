@@ -259,6 +259,44 @@ impl<'a> NarrowReport<'a> {
     }
 }
 
+/// When the row's run on the unmutated tree failed, print its command, exit
+/// status and output below the row's ERROR line, so that a one-off CI failure
+/// can be diagnosed from the log alone.
+fn print_baseline_failure(id: &str, failure: &BaselineFailure) {
+    let command = failure
+        .command
+        .iter()
+        .map(|arg| {
+            if !arg.is_empty() && !arg.contains(|c: char| c.is_whitespace() || "\"'\\".contains(c))
+            {
+                arg.clone()
+            } else {
+                format!("{arg:?}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("  {id}: baseline command: {command}");
+    println!("  {id}: baseline status: {}", failure.exit);
+    println!(
+        "  {id}: baseline output ({}):",
+        if failure.truncated {
+            format!(
+                "last {BASELINE_TAIL_LINES} lines or {} KiB; earlier output dropped",
+                BASELINE_TAIL_BYTES / 1024
+            )
+        } else {
+            "complete".to_owned()
+        }
+    );
+    if failure.output_tail.is_empty() {
+        println!("    <no output>");
+    }
+    for line in failure.output_tail.lines() {
+        println!("    {line}");
+    }
+}
+
 fn write_report(
     path: Option<PathBuf>,
     rows: &[Report],
@@ -308,6 +346,9 @@ fn write_report(
                 "  anchor scope: after={:?}, before={:?}",
                 scope.after, scope.before
             );
+        }
+        if let Some(failure) = &row.baseline_failure {
+            print_baseline_failure(&row.id, failure);
         }
         if matches!(
             row.outcome,

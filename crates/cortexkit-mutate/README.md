@@ -1272,6 +1272,16 @@ WRONG_TEST and RED_FOR_ANOTHER_REASON console rows print the first six lines of
 each unexpected red's failure underneath the row. Unexpected reds include
 collateral tests and expected tests whose output mismatches `expect_message`.
 
+An ERROR row whose clean baseline was not green (0.12.4) prints, under the
+ERROR line and prefixed with the row id, the exact command that ran (argv; every
+runner starts in the repository root), its exit status, signal or expired
+timeout, and the last 40 lines of its output, capped at 16 KiB keeping the end,
+with a note when earlier output was dropped. Cargo, nextest and command test
+runs capture stdout and stderr together in write order; `catch_on` output rows
+capture them apart and label each stream. The JSON row then carries
+`baseline_failure: {command, exit, output_tail, truncated}`; the key is absent
+when the baseline was green. Environment variables are never recorded.
+
 Every row includes `breadth_observed`: true only when an opt-in broad audit
 finished and its complete per-test results were parsed. Normal replays, `prove`,
 `explore`, explicit dispositions, and incomplete audits report false.

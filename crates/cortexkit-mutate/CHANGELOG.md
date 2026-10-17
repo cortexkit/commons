@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.4
+
+- An ERROR row whose clean baseline was not green now shows what failed: the
+  command that ran, its exit status (or signal, or expired timeout) and the last
+  40 lines of its output, capped at 16 KiB keeping the end and marked when
+  earlier output was dropped. The console prints it under the row's ERROR line;
+  the JSON row gains an optional `baseline_failure: {command, exit, output_tail,
+  truncated}` object. This covers cargo and nextest builds and test runs,
+  command test runs, `catch_on` output rows (streams labelled) and `--broad`
+  JUnit baselines. Rows with a green baseline print and serialize exactly as
+  before. Environment variables are never recorded.
+
 ## 0.12.3
 
 - Add `run --narrow` for push/main replays, reusing expected-only selection and

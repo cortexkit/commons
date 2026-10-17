@@ -1528,6 +1528,245 @@ fn command_baseline_not_green_is_error_and_restores() {
 }
 
 #[test]
+fn command_baseline_failure_names_command_exit_and_output_tail() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = f.control();
+    c.expect_red.push("always_red".into());
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    // Two baselines run here: the first passes and records no failure, so the
+    // reported failure is the second one's.
+    assert_eq!(
+        row.baseline_failure,
+        Some(BaselineFailure {
+            command: vec!["python3".into(), "rig.py".into(), "always_red".into()],
+            exit: "exit 3".into(),
+            output_tail: "Ran 1 tests\n".into(),
+            truncated: false,
+        })
+    );
+}
+
+/// A command row whose baseline runs `script` with `python3 -c` for the id
+/// `flaky`. Both streams are forced to LF so the assertions hold on Windows.
+fn failing_baseline_row(f: &CommandFixture, script: &str) -> Control {
+    let mut c = f.control();
+    c.command = Some(vec![
+        "python3".into(),
+        "-c".into(),
+        format!("import sys\nsys.stdout.reconfigure(newline='\\n')\nsys.stderr.reconfigure(newline='\\n')\n{script}"),
+        "{test}".into(),
+    ]);
+    c.expect_red = vec!["flaky".into()];
+    c
+}
+
+fn run_command_catalogue(
+    f: &CommandFixture,
+    c: &Control,
+) -> (std::process::Output, serde_json::Value) {
+    fs::write(
+        f.root().join(".git/catalogue.toml"),
+        toml::to_string(&Catalogue {
+            control: vec![c.clone()],
+            ..Catalogue::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let output = f.cli(&[
+        "--catalogue",
+        ".git/catalogue.toml",
+        "run",
+        "--all",
+        "--report",
+        ".git/report.json",
+    ]);
+    let report =
+        serde_json::from_slice(&fs::read(f.root().join(".git/report.json")).unwrap()).unwrap();
+    (output, report)
+}
+
+#[test]
+fn cli_prints_failing_baseline_command_status_and_last_lines_under_its_error_row() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let c = failing_baseline_row(
+        &f,
+        "print('first stdout line', flush=True)\nprint('then stderr line', file=sys.stderr, flush=True)\nprint('Ran 1 tests', flush=True)\nsys.exit(1)",
+    );
+    let script = c.command.as_ref().unwrap()[2].clone();
+    let (output, report) = run_command_catalogue(&f, &c);
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<_> = text.lines().collect();
+    let error = lines
+        .iter()
+        .position(|line| {
+            line.starts_with("command-guard (")
+                && line.ends_with(": flaky: baseline was not green: exit 1)")
+        })
+        .unwrap_or_else(|| panic!("{text}"));
+    // Captured together, the streams keep the order the test wrote them in.
+    assert_eq!(
+        lines[error + 1..error + 7],
+        [
+            format!("  command-guard: baseline command: python3 -c {script:?} flaky").as_str(),
+            "  command-guard: baseline status: exit 1",
+            "  command-guard: baseline output (complete):",
+            "    first stdout line",
+            "    then stderr line",
+            "    Ran 1 tests",
+        ],
+        "{text}"
+    );
+    assert_eq!(
+        report[0]["baseline_failure"],
+        serde_json::json!({
+            "command": ["python3", "-c", script, "flaky"],
+            "exit": "exit 1",
+            "output_tail": "first stdout line\nthen stderr line\nRan 1 tests\n",
+            "truncated": false,
+        })
+    );
+}
+
+#[test]
+fn failing_baseline_keeps_its_last_40_lines_and_marks_the_drop() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let c = failing_baseline_row(
+        &f,
+        "print('Ran 1 tests')\nfor i in range(1, 101): print(f'line {i}')\nsys.exit(1)",
+    );
+    let (output, report) = run_command_catalogue(&f, &c);
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Here only the console's "earlier output dropped" marker is checked; the
+    // content of the printed lines is checked by the test that prints a
+    // failing baseline under its row's ERROR line.
+    assert!(
+        text.contains(
+            "  command-guard: baseline output (last 40 lines or 16 KiB; earlier output dropped):\n"
+        ),
+        "{text}"
+    );
+    let failure = &report[0]["baseline_failure"];
+    let expected: String = (61..=100).map(|i| format!("line {i}\n")).collect();
+    assert_eq!(failure["output_tail"], expected.as_str());
+    assert_eq!(failure["truncated"], true);
+}
+
+#[test]
+fn failing_baseline_tail_is_capped_at_16_kib_keeping_the_end() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    // Eleven lines of about 3 KiB each: within 40 lines, over the byte cap.
+    let c = failing_baseline_row(
+        &f,
+        "print('Ran 1 tests')\nfor i in range(10): print(str(i) * 3000)\nprint('final line')\nsys.exit(1)",
+    );
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    let failure = row.baseline_failure.unwrap();
+    assert!(failure.truncated);
+    assert_eq!(failure.output_tail.len(), BASELINE_TAIL_BYTES);
+    assert!(failure
+        .output_tail
+        .ends_with(&format!("{}\nfinal line\n", "9".repeat(3000))));
+    assert!(!failure.output_tail.contains("Ran 1 tests"));
+}
+
+#[test]
+fn failing_output_comparison_baseline_labels_its_separately_captured_streams() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let mut c = failing_baseline_row(
+        &f,
+        "print('to stdout', flush=True)\nprint('to stderr', file=sys.stderr, flush=True)\nsys.exit(2)",
+    );
+    c.command.as_mut().unwrap().pop();
+    c.catch_on = Some("output_differs".into());
+    c.test_count_pattern = None;
+    c.expect_red.clear();
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Error, "{row:?}");
+    let failure = row.baseline_failure.unwrap();
+    assert_eq!(failure.exit, "exit 2");
+    assert_eq!(
+        failure.output_tail,
+        "--- stdout ---\nto stdout\n--- stderr ---\nto stderr\n"
+    );
+    assert!(!failure.truncated);
+}
+
+#[test]
+fn green_baseline_adds_no_failure_to_the_report_or_the_printed_rows() {
+    if !python_available() {
+        return;
+    }
+    let f = CommandFixture::new();
+    let c = f.control();
+    let row = f.run(&c, false);
+    assert_eq!(row.outcome, Outcome::Caught, "{row:?}");
+    assert_eq!(row.baseline_failure, None);
+    // The serialized row keeps exactly the keys a green row had before
+    // baseline failures were reported, so its JSON is unchanged.
+    let json = serde_json::to_value(&row).unwrap();
+    let keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    let mut expected = vec![
+        "id",
+        "source",
+        "outcome",
+        "timed_out_phase",
+        "red",
+        "green",
+        "failures",
+        "baseline_failures",
+        "collateral",
+        "breadth_observed",
+        "build_ms",
+        "test_ms",
+        "baseline_build_ms",
+        "baseline_test_ms",
+        "baseline_red",
+        "prebuild_ms",
+        "prebuild_tail",
+        "baseline_prebuild_ms",
+        "baseline_prebuild_tail",
+        "restore_prebuild_ms",
+        "restore_prebuild_tail",
+        "build_tail",
+        "test_tail",
+        "reason",
+    ];
+    expected.sort_unstable();
+    let mut keys_sorted = keys.clone();
+    keys_sorted.sort_unstable();
+    assert_eq!(keys_sorted, expected);
+    let (output, report) = run_command_catalogue(&f, &c);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(!text.contains("baseline command"), "{text}");
+    assert!(report[0].get("baseline_failure").is_none(), "{report}");
+}
+
+#[test]
 fn command_invalid_process_is_error_not_red_and_restores() {
     if !python_available() {
         return;
@@ -5296,6 +5535,28 @@ fn expected_baseline_red_is_error_and_never_runs_mutant() {
         assert_eq!(row.baseline_failures.len(), 1);
         assert!(row.baseline_failures["tests::guard_rejects_zero"]
             .contains("assertion failed: super::guarded(0)"));
+        // The rejected clean run is reported with the command that ran it.
+        let failure = row.baseline_failure.expect("baseline failure");
+        let program = if runner == "cargo" {
+            ["cargo", "test"]
+        } else {
+            ["cargo", "nextest"]
+        };
+        assert_eq!(failure.command[..2], program, "{failure:?}");
+        assert_eq!(
+            failure.exit,
+            if runner == "cargo" {
+                "exit 101"
+            } else {
+                "exit 100"
+            },
+            "{failure:?}"
+        );
+        assert!(
+            failure.output_tail.contains("guard_rejects_zero"),
+            "{failure:?}"
+        );
+        assert!(failure.output_tail.len() <= BASELINE_TAIL_BYTES);
     }
 }
 
