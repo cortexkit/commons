@@ -57,3 +57,21 @@ and read through the typed accessor. `input-token-cap-results.json` pins
 `input-token-cap-describe.json` pins independent optional-group discovery and
 the missing-op refusal. Tool-result bodies remain runner-specific; the live
 conformance adapter decodes the runner's existing hard-stop result shape.
+
+# Structured output
+
+`structured-output.json` pins `session.send` `structured_output` requests: the
+raw member kept byte for byte in `SendRequest.runner_params`, accepted
+requests for each mode (including in-document references, data keywords and a
+schema exactly at the 65,536-byte JCS cap), and every refusal with its field:
+`final_text` with tools, a reserved-name collision, external `$ref` and
+`$dynamicRef`, a schema one byte over the cap, another dialect, malformed
+names and modes, an unknown member, and an unadvertised group. Cap cases are
+written as templates (`pad_to_jcs_bytes`) that the test fills, not as 64 KiB
+of padding. `structured-output-results.json` pins `run.result` and
+`run.status` for `enforced` and `passed`, `best_effort` with each reason,
+`failed` with errors, errors cut to 32 with `errors_truncated`, and `absent`;
+malformed results with the rule each breaks; and the `reply_too_large`
+refusal naming a run. `structured-output-describe.json` pins the optional
+group's discovery and its missing-op refusal. Checked by the
+`structured_output::tests` module of the wire crate.

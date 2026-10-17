@@ -68,6 +68,9 @@ pub enum ReplyTooLargeSubject {
     /// An atomic model-view group, identified by the existing source of its
     /// anchored entry.
     ModelGroup { source: crate::read::EntrySource },
+    /// A `run.result` or `run.status` answer for this run, made too large by
+    /// its structured-output `value`, which is never cut short.
+    Run { run_id: String },
 }
 
 /// `run.result` names a run the session does not have.
@@ -269,6 +272,9 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
 pub mod tool_result_reasons {
     /// The session input-token cap stopped the call before dispatch.
     pub const BUDGET_EXHAUSTED: &str = super::BUDGET_EXHAUSTED;
+    /// The call shared a step with a `submit_result` call, which ended the
+    /// run before any call of that step was dispatched.
+    pub const SKIPPED_AFTER_SUBMIT: &str = "skipped_after_submit";
     /// The call had a durable dispatch intent and no result when the runner
     /// restarted: it may or may not have run. Never re-dispatched.
     pub const OUTCOME_UNKNOWN: &str = "outcome_unknown";

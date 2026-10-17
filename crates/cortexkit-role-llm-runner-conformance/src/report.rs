@@ -48,9 +48,37 @@ const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
 const COMPACTED: &[Capability] = &[Compaction, ModelView, Queue, TranscriptReads, RunOps];
 const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, RunOps];
 const INPUT_CAP: &[Capability] = &[Capability::InputTokenCap, Queue, TranscriptReads, RunOps];
+const STRUCTURED: &[Capability] = &[Capability::StructuredOutput, Queue, TranscriptReads, RunOps];
+const STRUCTURED_RESTART: &[Capability] = &[
+    Capability::StructuredOutput,
+    Queue,
+    TranscriptReads,
+    RunOps,
+    KillAt(points::TOOL_RESULT_RECORDED),
+];
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("structured_output_final_text_enforced_passed", STRUCTURED,
+        "final_text on a tool-free run whose route reports support: the request carries the schema for the final text and no submit_result tool, and the completed run reports enforced and passed with the parsed value"),
+    case("structured_output_final_text_with_tools_refused", STRUCTURED,
+        "final_text on a run with tools is refused invalid_params naming structured_output.mode, writing nothing and starting no model request"),
+    case("structured_output_submit_tool_ends_run", STRUCTURED,
+        "submit_tool offers submit_result with the caller's schema in the first request; calling it ends the run completed after that step, the value passes, and the step's other calls are listed in skipped_siblings with never-executed results"),
+    case("structured_output_reserved_name_refused", STRUCTURED,
+        "an admitted tool named submit_result is refused invalid_params naming structured_output, writing nothing"),
+    case("structured_output_absent_without_submit", STRUCTURED,
+        "a submit_tool run whose model finishes without submit_result completes with validation absent, no value and empty skipped_siblings; an unstated catalog gives best_effort catalog_unknown"),
+    case("structured_output_failed_validation_completes", STRUCTURED,
+        "a submitted value that fails the schema leaves the run completed with validation failed, the value and bounded errors; a route without support gives best_effort route_unsupported"),
+    case("structured_output_frozen_across_restart", STRUCTURED_RESTART,
+        "a kill after a step's tool result and a restart leave the next model request of the run carrying the same tools and byte-identical schema"),
+    case("structured_output_not_inherited", STRUCTURED,
+        "a send without structured_output after a run with it starts a run whose request carries no schema and no submit_result tool, and whose result has no structured_output"),
+    case("structured_output_external_ref_refused", STRUCTURED,
+        "a schema with a $ref or $dynamicRef outside its document is refused invalid_params naming structured_output.schema at admission, writing nothing and starting no model request"),
+    case("structured_output_sibling_never_dispatched", STRUCTURED,
+        "a sibling emitted before submit_result in the same step is never invoked at the scripted tool provider, gets a never-executed skipped_after_submit result, and is listed; a second submit_result is a skipped sibling and the first one counts"),
     case("input_token_cap_at_limit", INPUT_CAP,
         "input plus both cache counts reach exactly the cap, output is excluded, and an omitted cap starts no model step in the next episode"),
     case("input_token_cap_crossing_tools", INPUT_CAP,
@@ -360,6 +388,8 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "structured-output cases cannot see a runner's commits, so 'in the same commit as the run's end' is checked as: once the run reads terminal, every skipped sibling already has exactly one never-executed result; schema subsets (schema_outside_subset, mode_not_enforceable) are runner-specific and are checked against the vectors only",
+    "structured_output_frozen_across_restart cuts ToolResultRecorded with a crash driver of its own, on its own state root, because the suite's driver cuts each point once and the shared crash scenario owns that cut; its kill is not in the run's kill ledger and does not count toward the real-kill rule",
     "run_attribution_per_message uses transcript_reads and a held tool call to observe a non-terminal run, cancelling it over run.cancel only when run_cancel is declared; the native fixture hook supplies unknown-origin records independently of read replies, or explicitly declares only that rule inapplicable via CannotHoldUnattributable (NotSupported fails)",
     "retention cases use advance_retention_clock when declared; otherwise waits over 30 seconds are skipped by name and shorter waits use real time",
     "retention deletion completion is inspected by the subject in the runner's durable report and runner-held stores, never inferred from an expired read; non-role export/list/read request schemas and pagination are supplied by retention_probe_params, and every advertised extra op must be classified",

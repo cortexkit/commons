@@ -31,6 +31,7 @@ pub mod retract;
 pub mod run;
 pub mod send;
 pub mod session_ref;
+pub mod structured_output;
 pub mod subscribe;
 
 pub use run::RUN_STATE_BUDGET_EXHAUSTED;
@@ -145,6 +146,9 @@ pub mod capabilities {
     pub const RETENTION: &str = "retention";
     /// Durable, lower-only session input-token budgets on `session.send`.
     pub const INPUT_TOKEN_CAP: &str = "input_token_cap";
+    /// Schema-shaped run output on `session.send` (`structured_output`),
+    /// reported on `run.result` and `run.status`.
+    pub const STRUCTURED_OUTPUT: &str = "structured_output";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -168,6 +172,7 @@ pub mod capabilities {
         (PLANS, &[ops::SESSION_SEND]),
         (RETENTION, &[ops::SESSION_SEND]),
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
+        (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -293,6 +298,9 @@ pub(crate) mod vectors {
         "send.json",
         "session-change.json",
         "session-ref.json",
+        "structured-output.json",
+        "structured-output-describe.json",
+        "structured-output-results.json",
         "subscribe.json",
     ];
 

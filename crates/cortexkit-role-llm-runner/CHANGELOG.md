@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.5
+
+- Add structured output to `session.send`, behind the new `structured_output` describe group (checked by `check_describe` for `session.send`). Modes `final_text` and `submit_tool`; the reserved `submit_result` tool; per-run JCS-frozen schemas; refusals at admission for an external `$ref`/`$dynamicRef` (runners never fetch), a schema over 65,536 JCS bytes, another `$schema` dialect, `final_text` with tools, and an admitted tool named `submit_result`. Validation is draft 2020-12 with `format` as an annotation and unknown keywords ignored. Enforcement and its reason are decided at admission from the runner's own per-family subset profile and fixed for the run.
+- `structured_output` stays inside `SendRequest.runner_params` as `budget` does; read it with `SendRequest::structured_output()` (returns the offending field path) and write it with `with_structured_output(...)`. No typed field is added to `SendRequest`. New `StructuredOutput` and `structured_output::Mode` are non-exhaustive.
+- `RunResult` and `RunStatus`, already non-exhaustive, gain an optional `structured_output` (`StructuredOutputResult`, non-exhaustive): enforcement and its closed-for-runners, open-for-consumers `reason`, validation, the value, `errors` bounded to 32 entries of 256 bytes with `errors_truncated`, and `skipped_siblings`. `well_formed()` names a broken member rule.
+- Siblings of `submit_result` are never dispatched; they get the hard-stop never-executed result with the new `tool_result_reasons::SKIPPED_AFTER_SUBMIT`. `ReplyTooLargeSubject` (non-exhaustive) gains `Run { run_id }` for a run answer made too large by its value.
+- Patch release: every new member sits in a non-exhaustive struct or rides in the existing flattened map. Adds a `serde_jcs` dependency.
+
 ## 0.2.4
 
 - Add discovery-gated, durable, lower-only `budget.max_input_tokens`, budget/nudge closed-member checks, budget-exhaustion detail and cause constants, and the `budget_exhausted` result code. Cache reads/writes count at face value across all session episodes; missing usage fails closed.

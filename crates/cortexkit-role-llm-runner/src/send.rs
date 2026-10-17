@@ -332,6 +332,40 @@ impl SendRequest {
             .map_err(|_| "budget".into())
     }
 
+    /// Replace the raw `runner_params["structured_output"]` value with this
+    /// request. The member stays in `runner_params`, as it arrives on the wire.
+    pub fn with_structured_output(
+        mut self,
+        structured_output: crate::structured_output::StructuredOutput,
+    ) -> Self {
+        self.runner_params.insert(
+            crate::structured_output::FIELD.into(),
+            serde_json::to_value(structured_output)
+                .expect("StructuredOutput contains only JSON values"),
+        );
+        self
+    }
+
+    /// Read a typed `structured_output` without moving or changing its raw
+    /// value in `runner_params`. `Ok(None)` when the send carries none. On a
+    /// malformed value, returns the field path of the `invalid_params`
+    /// refusal: `structured_output` for a non-object, `structured_output.mode`
+    /// for a missing or unknown mode, `structured_output.name` for a name
+    /// outside `[a-z0-9_]{1,48}`, `structured_output.schema` for a schema
+    /// that is not an object, references outside its document, names a
+    /// dialect other than draft 2020-12, or exceeds 65,536 JCS bytes, and
+    /// `structured_output.<member>` for an unknown member. Checks that depend
+    /// on the runner and the session are
+    /// [`StructuredOutput::check`](crate::structured_output::StructuredOutput::check).
+    pub fn structured_output(
+        &self,
+    ) -> Result<Option<crate::structured_output::StructuredOutput>, String> {
+        self.runner_params
+            .get(crate::structured_output::FIELD)
+            .map(crate::structured_output::decode)
+            .transpose()
+    }
+
     /// Validate retention before writing anything. `previous` is `None`
     /// for a fresh lineage and `Some(frozen_retention)` for an existing one,
     /// including `Some(None)` for one first sent without retention. Absence

@@ -46,16 +46,17 @@ use cortexkit_role_llm_runner_conformance::{
             HeadMeta, LastRunState, ReadMessage, ReadMode, ReadPage, ReadRequest, ReadView,
             RunAttribution, ToolCallAttribution,
         },
-        run::{FinalMessage, RunResult, RunResultRequest},
+        run::{FinalMessage, RunResult, RunResultRequest, RunState},
         send::{
             delivered_as, delivery_unsupported_detail, Delivered, SendReply, SendRequest,
             DELIVERY_FIELD,
         },
+        structured_output::{SkippedSibling, StructuredOutputResult, SUBMIT_RESULT_TOOL},
         subscribe::{SubscribeFrom, SubscribeRequest},
         PROVIDES,
     },
-    Capability, LlmRunnerSubject, Reply, RouteFailure, RunnerRoute, Script, ScriptedPart,
-    SubscribeOutcome, SCRIPTED_TOOL,
+    Capability, LlmRunnerSubject, ModelRequestObservation, Reply, RouteFailure, RunnerRoute,
+    Script, ScriptedPart, SubscribeOutcome, SCRIPTED_TOOL,
 };
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
@@ -153,6 +154,9 @@ pub struct Defects {
     pub sealed_call_without_attribution: bool,
     /// Resumption invokes a never-sent call twice, breaking at-most-once dispatch.
     pub dispatch_twice_on_resume: bool,
+    /// A step holding `submit_result` still invokes its sibling calls at the
+    /// scripted tool provider before the run ends.
+    pub structured_output_dispatches_siblings: bool,
     /// role.describe declares `interrupt`, which the runner does not serve
     /// and the subject does not declare.
     pub claim_unserved_group: bool,
@@ -229,6 +233,11 @@ struct World {
     groups: Vec<String>,
     scripts: Mutex<BTreeMap<String, Script>>,
     model_calls: Mutex<BTreeSet<(String, String, usize)>>,
+    /// What each session's scripted route reports about schema-constrained
+    /// output, as a catalog row would; a missing entry is not stated.
+    structured_output_support: Mutex<BTreeMap<String, Option<bool>>>,
+    /// Every model request the scripted model received, per session.
+    model_requests: Mutex<BTreeMap<String, Vec<ModelRequestObservation>>>,
     pending_model_holds: Mutex<BTreeSet<String>>,
     held_models: Mutex<BTreeMap<String, String>>,
     compaction: Mutex<compaction::Providers>,
@@ -323,6 +332,11 @@ struct RunRec {
     detail: Option<Value>,
     cancel_requested: bool,
     cancel_at: String,
+    /// The run's frozen structured-output request with its enforcement, from
+    /// the send that started it.
+    structured_output: Option<Value>,
+    /// The structured output its terminal record carries.
+    structured_output_result: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -347,6 +361,8 @@ struct Sess {
     title: Option<String>,
     owner: String,
     lineage: String,
+    /// The session's admitted tool set, from the first send's plan.
+    tools: Vec<String>,
     messages: Vec<Msg>,
     sends: BTreeMap<String, SendRec>,
     runs: Vec<RunRec>,
@@ -694,6 +710,7 @@ impl Module {
                 Sess {
                     owner: text("owner"),
                     lineage: text("lineage"),
+                    tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     ..Sess::default()
                 },
             );
@@ -772,6 +789,11 @@ impl Module {
                         detail: None,
                         cancel_requested: false,
                         cancel_at: String::new(),
+                        structured_output: record
+                            .get("structured_output")
+                            .filter(|frozen| !frozen.is_null())
+                            .cloned(),
+                        structured_output_result: None,
                     });
                 }
             }
@@ -862,6 +884,29 @@ impl Module {
                         Vec::new(),
                     );
                 }
+                if let Some(submitted) = record.get("submitted") {
+                    if let Some(call) = sess.calls.get_mut(submitted["call_key"].as_str().unwrap())
+                    {
+                        call.result = true;
+                    }
+                    sess.push(
+                        json!({"role":"tool", "tool_call_id":submitted["tool_call_id"],
+                        "content":{"executed":true,"submitted":true}}),
+                        &run_id,
+                        Vec::new(),
+                    );
+                }
+                for skipped in record["skipped"].as_array().into_iter().flatten() {
+                    if let Some(call) = sess.calls.get_mut(skipped["call_key"].as_str().unwrap()) {
+                        call.result = true;
+                    }
+                    sess.push(
+                        json!({"role":"tool", "tool_call_id":skipped["tool_call_id"],
+                        "content":{"executed":false,"error":{"code":errors::tool_result_reasons::SKIPPED_AFTER_SUBMIT}}}),
+                        &run_id,
+                        Vec::new(),
+                    );
+                }
                 let final_ordinal = sess
                     .messages
                     .iter()
@@ -872,6 +917,7 @@ impl Module {
                     run.state = text("state");
                     run.error = record.get("error").cloned();
                     run.detail = record.get("detail").cloned();
+                    run.structured_output_result = record.get("structured_output").cloned();
                     if run.state == "completed" {
                         run.final_ordinal = final_ordinal;
                         run.final_text = record["final_text"].as_str().map(str::to_owned);
@@ -958,11 +1004,23 @@ impl Module {
                     json!({ "kind": "terminal", "run_id": run_id, "state": "error" }),
                 );
             };
-            self.world.model_calls.lock().unwrap().insert((
+            let received = self.world.model_calls.lock().unwrap().insert((
                 session.into(),
                 run_id.into(),
                 turn_index,
             ));
+            let frozen = sess
+                .run(run_id)
+                .and_then(|run| run.structured_output.clone());
+            if received {
+                self.world
+                    .model_requests
+                    .lock()
+                    .unwrap()
+                    .entry(session.into())
+                    .or_default()
+                    .push(observe_request(&sess.tools, frozen.as_ref()));
+            }
             if !model_started
                 && self.world.defects.cancel_starts_next_step
                 && sess
@@ -994,6 +1052,7 @@ impl Module {
             let ordinal = sess.messages.len();
             let mut parts = Vec::new();
             let mut calls = Vec::new();
+            let mut tools = Vec::new();
             for (index, part) in turn.parts.iter().enumerate() {
                 match part {
                     ScriptedPart::Text(text) => parts.push(json!({ "type": "text", "text": text })),
@@ -1010,6 +1069,7 @@ impl Module {
                                            "tool": call.tool, "arguments": call.arguments }));
                         calls.push(json!({ "call_key": key, "tool_call_id": call.tool_call_id,
                                            "arguments": call.arguments }));
+                        tools.push(call.tool.clone());
                     }
                 }
             }
@@ -1036,13 +1096,58 @@ impl Module {
                         "detail":{"limit":limit,"spent":input_spent.unwrap_or(sess.input_spent),"cause":cause}}));
                 }
             }
+            let text: String = turn.text_parts().collect();
+            if let Some(frozen) = frozen.as_ref().filter(|f| f["mode"] == "submit_tool") {
+                if let Some(first) = tools.iter().position(|tool| tool == SUBMIT_RESULT_TOOL) {
+                    // No call of a submitting step is dispatched: the submit
+                    // ends the run, and every other call is skipped.
+                    let skipped: Vec<Value> = calls
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _)| *index != first)
+                        .map(|(index, call)| {
+                            json!({"call_key":call["call_key"], "tool_call_id":call["tool_call_id"],
+                                   "tool":tools[index], "arguments":call["arguments"]})
+                        })
+                        .collect();
+                    if self.world.defects.structured_output_dispatches_siblings {
+                        for call in skipped.iter().filter(|c| c["tool"] == SCRIPTED_TOOL) {
+                            self.world.invoke(&call["arguments"]);
+                        }
+                    }
+                    let siblings = skipped
+                        .iter()
+                        .map(|c| {
+                            SkippedSibling::new(
+                                c["tool_call_id"].as_str().unwrap(),
+                                c["tool"].as_str().unwrap(),
+                            )
+                        })
+                        .collect();
+                    let output = judge(
+                        frozen,
+                        Some(Ok(calls[first]["arguments"].clone())),
+                        siblings,
+                    );
+                    return self.commit(
+                        session,
+                        json!({ "kind": "terminal", "run_id": run_id, "state": "completed",
+                                "final_text": text, "skipped": skipped,
+                                "submitted": {"call_key":calls[first]["call_key"],
+                                              "tool_call_id":calls[first]["tool_call_id"]},
+                                "structured_output": output }),
+                    );
+                }
+            }
             if no_calls {
-                let text: String = turn.text_parts().collect();
-                return self.commit(
-                    session,
-                    json!({ "kind": "terminal", "run_id": run_id, "state": "completed",
-                            "final_text": text }),
-                );
+                let mut record = json!({ "kind": "terminal", "run_id": run_id, "state": "completed",
+                            "final_text": text });
+                if let Some(frozen) = &frozen {
+                    let produced = (frozen["mode"] == "final_text")
+                        .then(|| serde_json::from_str::<Value>(&text).map_err(|_| ()));
+                    record["structured_output"] = json!(judge(frozen, produced, Vec::new()));
+                }
+                return self.commit(session, record);
             }
         }
     }
@@ -1382,6 +1487,43 @@ impl Module {
                 return Ok(invalid(&field));
             }
         }
+        let structured_output = match request.structured_output() {
+            Ok(structured_output) => structured_output,
+            Err(field) => return Ok(invalid(&field)),
+        };
+        let tools: Vec<String> = match &existing {
+            Some(sess) => sess.tools.clone(),
+            None => request
+                .plan
+                .as_ref()
+                .and_then(|plan| serde_json::from_value(plan.get("tools")?.clone()).ok())
+                .unwrap_or_default(),
+        };
+        let frozen = match &structured_output {
+            None => Value::Null,
+            Some(structured_output) => {
+                if let Err(field) =
+                    structured_output.check(self.world.serves(groups::STRUCTURED_OUTPUT), &tools)
+                {
+                    return Ok(invalid(&field));
+                }
+                let support = self
+                    .world
+                    .structured_output_support
+                    .lock()
+                    .unwrap()
+                    .get(session)
+                    .copied()
+                    .flatten();
+                let (enforcement, reason) = match support {
+                    Some(true) => ("enforced", None),
+                    Some(false) => ("best_effort", Some("route_unsupported")),
+                    None => ("best_effort", Some("catalog_unknown")),
+                };
+                json!({"mode": structured_output.mode.as_str(), "schema": structured_output.schema,
+                       "enforcement": enforcement, "reason": reason})
+            }
+        };
         let defect = self.world.retention_defect;
         if defect == RetentionDefect::WithoutGroupIgnored && !self.world.serves(groups::RETENTION) {
             request.retention = None;
@@ -1504,7 +1646,8 @@ impl Module {
             };
             self.commit(
                 session,
-                json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage }),
+                json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
+                        "tools": tools }),
             )?;
         }
         let run_id = format!(
@@ -1516,7 +1659,8 @@ impl Module {
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt,
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "retention":request.retention, "title":request.runner_params.get("title"),
-                    "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
+                    "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
+                    "structured_output": frozen }),
         )?;
         self.drive(session, &run_id)?;
         let send = self.sessions.lock().unwrap()[session].sends[&request.send_id].clone();
@@ -1768,6 +1912,14 @@ impl Module {
         if let Some(detail) = &run.detail {
             result = result.with_detail(serde_json::from_value(detail.clone()).unwrap());
         }
+        if let Some(frozen) = &run.structured_output {
+            if RunState::parse(&result.state).is_terminal() {
+                result = result.with_structured_output(match &run.structured_output_result {
+                    Some(output) => serde_json::from_value(output.clone()).unwrap(),
+                    None => judge(frozen, None, Vec::new()),
+                });
+            }
+        }
         respond(result)
     }
 
@@ -1806,6 +1958,96 @@ impl Module {
                 })
                 .collect(),
         )
+    }
+}
+
+/// What the scripted model receives for a request of a run with the frozen
+/// structured-output request `frozen`, rendered only from frozen data.
+fn observe_request(tools: &[String], frozen: Option<&Value>) -> ModelRequestObservation {
+    let mut offered = tools.to_vec();
+    let Some(frozen) = frozen else {
+        return ModelRequestObservation::new(offered);
+    };
+    if frozen["mode"] == "submit_tool" {
+        offered.push(SUBMIT_RESULT_TOOL.into());
+        ModelRequestObservation::new(offered).with_submit_result_schema(frozen["schema"].clone())
+    } else {
+        ModelRequestObservation::new(offered).with_final_text_schema(frozen["schema"].clone())
+    }
+}
+
+/// The structured output of a run with the frozen request `frozen`.
+/// `produced` is `None` when no value was produced, `Some(Err)` when the
+/// final text was not JSON.
+fn judge(
+    frozen: &Value,
+    produced: Option<Result<Value, ()>>,
+    skipped: Vec<SkippedSibling>,
+) -> StructuredOutputResult {
+    let mode = frozen["mode"].as_str().unwrap_or_default();
+    let enforcement = frozen["enforcement"].as_str().unwrap_or_default();
+    let (validation, value, errors) = match produced {
+        None => ("absent", None, Vec::new()),
+        Some(Err(())) => ("failed", None, vec![": not valid JSON".to_owned()]),
+        Some(Ok(value)) => {
+            let mut errors = Vec::new();
+            validate(&frozen["schema"], &value, "", &mut errors);
+            let validation = if errors.is_empty() {
+                "passed"
+            } else {
+                "failed"
+            };
+            (validation, Some(value), errors)
+        }
+    };
+    let mut output = StructuredOutputResult::new(mode, enforcement, validation);
+    if let Some(reason) = frozen["reason"].as_str() {
+        output = output.with_reason(reason);
+    }
+    if let Some(value) = value {
+        output = output.with_value(value);
+    }
+    if !errors.is_empty() {
+        output = output.with_errors(errors);
+    }
+    if mode == "submit_tool" {
+        output = output.with_skipped_siblings(skipped);
+    }
+    output
+}
+
+/// The few JSON Schema keywords the suite's schemas use: `type`,
+/// `properties` and `required`. A real runner uses a full draft 2020-12
+/// validator.
+fn validate(schema: &Value, value: &Value, path: &str, errors: &mut Vec<String>) {
+    if let Some(wanted) = schema["type"].as_str() {
+        let matches = match wanted {
+            "object" => value.is_object(),
+            "string" => value.is_string(),
+            "integer" => value.is_i64() || value.is_u64(),
+            "number" => value.is_number(),
+            "boolean" => value.is_boolean(),
+            "array" => value.is_array(),
+            "null" => value.is_null(),
+            _ => true,
+        };
+        if !matches {
+            errors.push(format!("{path}: expected {wanted}"));
+            return;
+        }
+    }
+    let Some(members) = value.as_object() else {
+        return;
+    };
+    for (name, property) in schema["properties"].as_object().into_iter().flatten() {
+        if let Some(member) = members.get(name) {
+            validate(property, member, &format!("{path}/{name}"), errors);
+        }
+    }
+    for name in schema["required"].as_array().into_iter().flatten() {
+        if let Some(name) = name.as_str().filter(|name| !members.contains_key(*name)) {
+            errors.push(format!("{path}: missing required member {name}"));
+        }
     }
 }
 
@@ -1982,6 +2224,8 @@ impl FakeSubject {
                         .collect(),
                     scripts: Mutex::new(BTreeMap::new()),
                     model_calls: Mutex::new(BTreeSet::new()),
+                    structured_output_support: Mutex::new(BTreeMap::new()),
+                    model_requests: Mutex::new(BTreeMap::new()),
                     pending_model_holds: Mutex::new(BTreeSet::new()),
                     held_models: Mutex::new(BTreeMap::new()),
                     compaction: Mutex::new(compaction::Providers::new(
@@ -2136,6 +2380,47 @@ impl LlmRunnerSubject for FakeSubject {
             }
         }
         fields
+    }
+
+    fn send_fields_with_tools(
+        &self,
+        _session: &str,
+        first: bool,
+        tools: &[&str],
+    ) -> Option<Map<String, Value>> {
+        let mut fields = Map::new();
+        if first {
+            fields.insert("plan".into(), json!({ "tools": tools }));
+            fields.insert("model".into(), json!("fake-model"));
+        }
+        Some(fields)
+    }
+
+    async fn set_structured_output_support(
+        &self,
+        session: &str,
+        supported: Option<bool>,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .structured_output_support
+            .lock()
+            .unwrap()
+            .insert(session.into(), supported);
+        Ok(())
+    }
+
+    async fn model_requests(
+        &self,
+        session: &str,
+    ) -> Result<Vec<ModelRequestObservation>, HarnessError> {
+        Ok(self
+            .world()
+            .model_requests
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn tool_provider_module(&self) -> String {

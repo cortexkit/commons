@@ -259,3 +259,35 @@ Count requests at the model independently of transcript reads so a discarded
 extra model answer cannot hide a violation. The batch case cancels while the
 model is held, then releases its answer and an entire two-call tool batch;
 escalation keeps the model held until `now` has ended the run.
+
+## Structured output
+
+The ten `structured_output_*` cases run only when the subject declares
+`Capability::StructuredOutput` (the `structured_output` group); otherwise the
+report names each one as skipped, never as passed. They also require
+`queue`, `transcript_reads` and `run_ops`, and
+`structured_output_frozen_across_restart` also requires the
+`ToolResultRecorded` kill point.
+
+An adapter for such a runner implements three defaulted hooks:
+
+- `send_fields_with_tools(session, first, tools)`: send fields admitting
+  exactly `tools`, so the cases can open a tool-free session for
+  `final_text` and one listing `submit_result` for the reserved-name refusal;
+- `set_structured_output_support(session, supported)`: what the scripted
+  route reports about schema-constrained output, as a catalog row would
+  (`Some(true)`, `Some(false)`, or `None` for not stated);
+- `model_requests(session)`: every model request the scripted model
+  received, as `ModelRequestObservation`s (offered tool names, the final-text
+  schema, the `submit_result` input schema), kept outside the runner.
+
+A scripted call whose `tool` is `submit_result` is the model calling the
+runner's submit tool: its `arguments` are the submitted value, and the
+scripted tool provider never sees it. Decode the never-executed result of a
+skipped sibling through `not_executed_tool_result`; its code is
+`skipped_after_submit`.
+
+The restart case kills the runner right after a tool result is saved. The
+suite's crash driver kills at each point only once per run, and the general
+crash cases already use that point, so this case uses a separate driver on a
+separate state root. The suite's count of real kills does not include it.

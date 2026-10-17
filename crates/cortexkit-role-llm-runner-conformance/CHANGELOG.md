@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+- Require cortexkit-role-llm-runner 0.2.5 and add structured-output cases, run only when the subject declares `structured_output` (otherwise each is reported as skipped, by name). They check that:
+  - `final_text` on a tool-free run whose route reports support completes `enforced` and `passed`;
+  - `final_text` on a run with tools, an admitted tool named `submit_result`, and a schema with an external `$ref` or `$dynamicRef` are refused at admission naming their fields, writing nothing;
+  - `submit_tool` offers `submit_result` from the first request, and calling it ends the run `completed`;
+  - a sibling of `submit_result` in the same step is never invoked at the scripted tool provider, even when emitted first, gets a never-executed `skipped_after_submit` result and is listed in `skipped_siblings`; a second `submit_result` is a skipped sibling;
+  - a run finishing without `submit_result` reports `absent`, and a value failing the schema reports `failed` on a `completed` run;
+  - the next model request after a kill and restart carries the same tools and schema bytes;
+  - a later send without `structured_output` carries no schema.
+- Breaking: `Capability` gains `StructuredOutput`, so an exhaustive `match` on it needs the new arm. That public type change makes this a minor (0.5.0) rather than a patch.
+- `LlmRunnerSubject` gains defaulted `send_fields_with_tools`, `set_structured_output_support` and `model_requests` hooks, required only when declaring `structured_output`; the new `ModelRequestObservation` is non-exhaustive with a constructor. A `ScriptedToolCall` may name `submit_result`.
+
 ## 0.4.0
 
 - Require runner 0.2.4 and add input-token cap cases, run only when the subject advertises `input_token_cap` (otherwise each is reported as skipped, by name). They check that:

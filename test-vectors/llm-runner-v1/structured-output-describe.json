@@ -1,0 +1,37 @@
+{
+  "accept": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.send"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "structured_output"
+    ],
+    "session_capabilities_from": "baseline"
+  },
+  "refuse": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "structured_output"
+    ],
+    "session_capabilities_from": "baseline"
+  }
+}

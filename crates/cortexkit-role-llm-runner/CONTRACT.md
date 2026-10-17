@@ -128,15 +128,20 @@ shipping runner with this document.
 | `retention` | `session.send` with `retention` | §9.1 |
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
+| `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
-- [pinned] `run_status`, `run_cancel`, `retract` and `input_token_cap` are each declared on
-  their own: a runner may serve any of them without the others, and
+- [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap` and
+  `structured_output` are each declared on their own: a runner may serve any of them without the others, and
   without `run_ops` or `transcript_reads`.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
+- [pinned] A caller MUST NOT send `structured_output` unless the runner
+  advertises `structured_output`. `check_describe` checks the group for
+  `session.send` like the other optional groups; it adds no discovery
+  metadata.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -274,7 +279,8 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
   [pinned] The answer is `{run_id, state, reason?, error?, detail?, final_message?:
-  {ordinal, mid, text}}` (`RunResult`), and a run that has not ended answers
+  {ordinal, mid, text}, structured_output?}` (`RunResult`; `structured_output`
+  is §9.4's result, on an ended run admitted with it), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
   are concatenated exactly as emitted, with nothing inserted, so a JSON
@@ -295,6 +301,13 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   `error` and `interrupted`. States are decoded open: a runner's own state
   (broca's `transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
+- [pinned] Structured output adds no state. A run that calls `submit_result`
+  (§9.4) ends `completed` after that step, whether or not the submitted value
+  validates: `validation: "failed"` is reported on a `completed` run, and no
+  request flag turns it into `error`. A run admitted with structured output
+  that ends in any state other than `completed` reports `validation:
+  "absent"`, and so does a `submit_tool` run that completes without calling
+  `submit_result`.
 - [pinned] `budget_exhausted` is not retryable within the run. A caller needing
   more input opens a new session, not another episode on the exhausted one.
   Both `run.result` and `run.status` carry `detail: {limit, spent, cause}`
@@ -311,6 +324,11 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   runner-specific (§12.3). For `budget_exhausted`, its refusal code is
   `budget_exhausted` wherever that runner places a refusal code. No dispatch
   intent is recorded for these calls.
+- [pinned] The same rule covers a step that calls `submit_result` (§9.4): no
+  call of that step is dispatched before the step completes, and every call
+  of it other than the counted `submit_result` gets the same never-executed
+  result, with refusal code `skipped_after_submit`, in the same durable commit
+  as the run's end. No dispatch intent is recorded for them.
 - [pinned] A run error (`RunResult::error`) is `{class, message,
   provider_code, status?, retry_after_secs?, resets_at_ms?, account_ref?,
   provider?, reason?, provider_detail_code?}`. `class`, `message` and
@@ -358,7 +376,8 @@ state, polled without reading the transcript.
 - [pinned] The request is `{run_id?}`, strict: an unknown field is refused
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
-- [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?}`,
+- [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
+  structured_output?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason`, `usage` and
   `retries_used` stay runner members, not pinned.
@@ -372,6 +391,7 @@ state, polled without reading the transcript.
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
   - `detail`: on `budget_exhausted`, exactly the detail `run.result` carries (§6).
+  - `structured_output`: exactly what `run.result` carries for the run (§9.4).
 - [pinned] `undelivered_steers` is the list of `send_id`s of the steers
   this run accepted and never rendered to the model before it ended, in
   the order they were accepted. On the status of a run that has ended:
@@ -588,7 +608,8 @@ run.
   caller is refused `scope_owner_mismatch`.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. Except for the scoped closed `budget`
-  rules on an `input_token_cap` runner (§9.3), the request is lenient: a
+  rules on an `input_token_cap` runner (§9.3) and the strict
+  `structured_output` member (§9.4), the request is lenient: a
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
 - [pinned] A `steer` or `interrupt` into an existing session takes every
@@ -796,6 +817,174 @@ joined, and `session.retract` does not withdraw it.
   runner-specific values of the three older budget members verbatim; only
   their member names are pinned here. Non-advertising runners retain their
   existing budget behavior unchanged.
+
+### 9.4 `structured_output`: schema-shaped run output
+
+A caller asks a run for a JSON value shaped by a JSON Schema, and reads back
+what the run produced and whether it validated.
+
+**The request.**
+
+- [pinned] `session.send` may carry `structured_output: {mode, schema,
+  name?}` (`structured_output::StructuredOutput`). `mode` is `final_text` or
+  `submit_tool`. `schema` is a JSON Schema object. `name` is optional, 1 to 48
+  of `[a-z0-9_]`, and is used where a provider needs a schema name; absent
+  means `result`. The member is strict: an unknown member, an unknown or
+  missing `mode`, a malformed `name` (including `null`) and a missing or
+  non-object `schema` are each refused `invalid_params` naming the member's
+  path (`structured_output.mode`, `structured_output.name`,
+  `structured_output.schema`, `structured_output.<member>`), and a
+  non-object `structured_output` names `structured_output`. A refused send
+  writes nothing.
+- [pinned] The Rust `SendRequest` keeps the member in
+  `runner_params["structured_output"]`, exactly as received; it has no typed
+  field. `SendRequest::structured_output()` returns a typed copy, `Ok(None)`
+  when absent, or the offending field path. `with_structured_output(...)`
+  replaces that map entry, so one `structured_output` key is serialized.
+- [pinned] **Per run, frozen at admission.** The runner records the RFC 8785
+  (JCS) bytes of the schema (`StructuredOutput::schema_jcs`), with the mode,
+  name, enforcement and reason, on the record that starts the run, and
+  renders every request of the run from those bytes, through resume and
+  retry. A send without `structured_output` starts a run with none; it does
+  not inherit the previous run's. A send that joins a running run (`steer`)
+  runs under that run's frozen request; one carrying a different
+  `structured_output` is refused `invalid_params` naming `structured_output`.
+  `structured_output` is part of a keyed send's payload: the same `send_id`
+  with a different value is refused `send_id_reuse` naming it.
+
+**What a runner refuses at admission.** Each is `invalid_params` and writes
+nothing. `SendRequest::structured_output()` checks the value itself, then
+`StructuredOutput::check(advertised, tools)` the rest, in this order:
+
+- [pinned] The runner does not advertise `structured_output`: field
+  `structured_output`.
+- [pinned] **No remote fetches; a bounded schema.** A `$ref` or `$dynamicRef`
+  that points outside the schema document is refused naming
+  `structured_output.schema`. Runners never fetch a schema over the network
+  or from files. A reference is inside the document when it starts with `#`,
+  or when its part before any `#` equals exactly the `$id` (an empty trailing
+  `#` removed) of the root or of a subschema in a draft 2020-12 schema
+  position of the same document. Anything else is external, including a
+  relative reference that would resolve only against a base URI, and an `$id`
+  inside a keyword draft 2020-12 does not define never makes a reference
+  internal. Values of `const`, `enum`, `default` and `examples` are data, not
+  references (`structured_output::check_schema`).
+- [pinned] The JCS bytes of the schema are at most 65,536
+  (`MAX_SCHEMA_JCS_BYTES`); a larger schema is refused naming
+  `structured_output.schema`.
+- [pinned] A `$schema` other than
+  `https://json-schema.org/draft/2020-12/schema` is refused naming
+  `structured_output.schema`.
+- [pinned] A schema the runner cannot compile is refused naming
+  `structured_output.schema` at admission, never discovered at run end.
+- [pinned] `submit_result` is reserved: a run whose admitted tool set (the
+  plan's tools and the runner's own) includes a tool of that name is refused
+  naming `structured_output`, in either mode. Callers cannot choose another
+  name.
+- [pinned] `final_text` on a run whose admitted tool set is non-empty is
+  refused naming `structured_output.mode`: providers that constrain every
+  reply would break tool calls. Use `submit_tool` there.
+
+**Validator semantics.**
+
+- [pinned] The runner validates with JSON Schema draft 2020-12, whatever the
+  enforcement. `format` is an annotation and is never asserted. Unknown
+  keywords are ignored.
+
+**Mode `final_text`.**
+
+- [pinned] The runner asks the provider to constrain the final assistant text
+  to the schema where the route supports it. When the run completes, the
+  final text (joined as `run.result` joins it, §6) is parsed as JSON and
+  validated.
+
+**Mode `submit_tool`.**
+
+- [pinned] The runner adds one tool, `submit_result`
+  (`SUBMIT_RESULT_TOOL`), whose input schema is the caller's schema and whose
+  description says calling it ends the task. It is in the run's tool list
+  from its first request, so the prompt prefix never changes mid-run.
+- [pinned] **When the model calls it, the run ends** `completed` after that
+  step. With `submit_tool` active, no call of a step that contains
+  `submit_result` is dispatched before the step completes, so a sibling the
+  model emitted before `submit_result` is not dispatched either. Every other
+  call of that step gets the never-executed result of a hard stop (§6), with
+  refusal code `skipped_after_submit`, in the same durable commit as the
+  run's end, and is listed in `skipped_siblings`. The counted `submit_result`
+  call gets the runner's own recorded result in that commit, so no call
+  dangles.
+- [pinned] If the model calls `submit_result` more than once in one step, the
+  first call counts; the others are skipped siblings.
+- [pinned] A run that ends any other way (`max_steps`, `stop_when`,
+  `budget_exhausted`, `cancelled`, `error`, `interrupted`, or the model
+  finishing without calling it) has no submitted value: `validation:
+  "absent"`.
+- [pinned] The runner does not force the tool. Whether forcing works beside
+  extended thinking differs by provider; a later minor may add an opt-in.
+
+**Enforcement.**
+
+- [pinned] `enforcement` and `reason` are fixed for the run at admission and
+  never change mid-run.
+- [pinned] `enforced` means the route supports schema-constrained output for
+  the requested mode and the schema fits that route's supported subset.
+  Anything else is `best_effort`: the runner still sends the schema (as the
+  tool's input schema, or in instructions) and still validates, but the
+  provider gave no guarantee.
+- [pinned] A runner decides the subset question from its own per-family
+  subset profile at admission. It never sends a schema in a provider's strict
+  mode when the schema is outside that route's supported subset (some
+  providers reject that only inside a stream that already answered 200); it
+  sends such a schema non-strictly and reports `best_effort` with
+  `schema_outside_subset`. Such a schema is never refused for that reason,
+  and the reason is never discovered from a provider error.
+- [pinned] `reason` is present only on `best_effort`. For runners it is a
+  closed set (`structured_output::reasons`): `catalog_unknown` (the model
+  catalog does not say whether the route supports schemas; Fusiform's per-row
+  `capability.structured_output`, where absent means unknown, is that
+  source), `route_unsupported` (the catalog says it does not),
+  `schema_outside_subset`, and `mode_not_enforceable` (the route enforces
+  schemas for final text but not for tool input, or the reverse). Consumers
+  decode it as an open string. Where a route's support comes from, and each
+  family's subset profile, is the runner's business, not this contract's.
+
+**The result.**
+
+- [pinned] `run.result` and `run.status` of an ended run admitted with
+  structured output carry `structured_output: {mode, enforcement, reason?,
+  validation, value?, errors?, errors_truncated?, skipped_siblings?}`
+  (`StructuredOutputResult`), the same on both. It is absent on a run that
+  has not ended and on a run admitted without it. Members that do not apply
+  are omitted, never empty or zero; all string members decode open.
+- [pinned] `validation` is `passed` (`value` holds the parsed JSON),
+  `failed` (`value` holds what the model produced if it parsed as JSON, and
+  `errors` lists messages naming the JSON Pointer of each failing instance
+  location), or `absent` (no value, no errors). The run state stays
+  `completed` on `failed`; the caller decides.
+- [pinned] **A bounded result.** `errors` has at most 32 entries
+  (`MAX_ERRORS`) of at most 256 bytes each (`MAX_ERROR_BYTES`), an entry cut
+  at a UTF-8 character boundary. `errors_truncated: true` is present when an
+  entry was dropped or shortened (`structured_output::bound_errors`) and
+  omitted otherwise. `value` is never cut short: it counts toward the reply's
+  frame limit, and an answer that exceeds it is refused `reply_too_large`
+  with `subject: {kind: "run", run_id}` (§12.1).
+- [pinned] `skipped_siblings: [{tool_call_id, tool}]` is present on every
+  `submit_tool` result, in the order the model emitted the calls, and `[]`
+  when `submit_result` came alone or was never called. It is absent on
+  `final_text`.
+- [pinned] A result that breaks one of these member rules is malformed, not
+  a refusal (`StructuredOutputResult::well_formed` names the rule).
+
+**Caching.**
+
+- [pinned] A schema is part of the request and sits ahead of the input in a
+  provider's cached prefix, on every provider family measured: an identical
+  schema keeps the cached prefix, while one added field or a dropped schema
+  loses all of it. A caller that needs more than one shape in a session
+  declares one schema covering them (a union keyed by a required
+  discriminator field). Once a session has used a schema, the caller sends
+  the same bytes on every send in that session, including sends that need no
+  shape, because dropping the schema also changes the request.
 
 ## 10. `session.baseline` and the admission reply
 
@@ -1036,7 +1225,7 @@ treats it as a terminal refusal of that one request.
 | `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
-| `reply_too_large` | the complete encoded `session.read` reply exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}` or `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`); no message content | no: terminal for this request; lowering `max_bytes` cannot shrink a message or atomic group |
+| `reply_too_large` | the complete encoded `session.read` reply, or a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`) or `{kind: "run", run_id}`; no message content or value | no: terminal for this request; lowering `max_bytes` cannot shrink a message or atomic group |
 | `unknown_run` | `run.result` names no run of the session | — | no |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode | `field` when the runner can identify it | no |
@@ -1128,6 +1317,10 @@ provider codes.
   withheld; the error text says so.
 - [pinned] `route_drained`: the call was never sent, because its route closed
   under a drained scope.
+- [pinned] `skipped_after_submit`: the call shared a step with a counted
+  `submit_result` call, which ended the run before any call of that step was
+  dispatched (§9.4). It is marked not executed, with no dispatch intent, using
+  the same native result as other hard stops (§6).
 - [pinned] `budget_exhausted`: the session input cap stopped the call before
   dispatch (§9.3). It is marked not executed, with no dispatch intent, using
   the same native result as other hard stops (§6).
@@ -1297,6 +1490,8 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
 | `retention_active_run_never_expires` | `retention`, `queue`, `transcript_reads`, `run_ops`, held non-terminal run (active or paused) |
 | `crash_at_RetentionTombstoned` | `retention`, `queue`, `transcript_reads`, `run_ops`, and `RetentionTombstoned`; real process kill, expiry remains readable by name and deletion completion is reported after restart |
+| `structured_output_final_text_enforced_passed`, `structured_output_final_text_with_tools_refused`, `structured_output_submit_tool_ends_run`, `structured_output_reserved_name_refused`, `structured_output_absent_without_submit`, `structured_output_failed_validation_completes`, `structured_output_not_inherited`, `structured_output_external_ref_refused`, `structured_output_sibling_never_dispatched` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; the adapter's tool-set send fields, route support switch and model-request observations; reported as a named skip without `structured_output` |
+| `structured_output_frozen_across_restart` | the above, and `ToolResultRecorded`; the next model request after a restart carries the same tools and schema bytes |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run

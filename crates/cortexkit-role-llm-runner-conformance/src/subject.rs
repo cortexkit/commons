@@ -48,6 +48,8 @@ pub enum Capability {
     Retention,
     /// The durable session input-token cap on `session.send.budget`.
     InputTokenCap,
+    /// Schema-shaped run output on `session.send.structured_output`.
+    StructuredOutput,
     /// The runner under test can move its retention clock forward on request, so expiry and deletion happen without waiting in real time. For tests only; release builds must not offer it.
     RetentionClock,
     /// The runner adapter's scripted tool provider can hold a received call
@@ -81,6 +83,7 @@ impl Capability {
         Self::SessionChange,
         Self::Retention,
         Self::InputTokenCap,
+        Self::StructuredOutput,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -115,6 +118,7 @@ impl Capability {
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
+            Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
             Self::HoldToolCalls | Self::RetentionClock | Self::KillAt(_) => return None,
         })
     }
@@ -174,6 +178,41 @@ impl ToolResultObservation {
     }
 }
 
+/// What one model request carried, as the scripted model received it.
+/// Recorded by the runner adapter outside the runner, never reconstructed
+/// from configuration or replies.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ModelRequestObservation {
+    /// The names of the tools the request offered, in request order.
+    pub tools: Vec<String>,
+    /// The schema the request asked the provider to shape the final text
+    /// with, if any.
+    pub final_text_schema: Option<Value>,
+    /// The input schema of the `submit_result` tool, if the request offered
+    /// it.
+    pub submit_result_schema: Option<Value>,
+}
+
+impl ModelRequestObservation {
+    pub fn new(tools: Vec<String>) -> Self {
+        Self {
+            tools,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_final_text_schema(mut self, schema: Value) -> Self {
+        self.final_text_schema = Some(schema);
+        self
+    }
+
+    pub fn with_submit_result_schema(mut self, schema: Value) -> Self {
+        self.submit_result_schema = Some(schema);
+        self
+    }
+}
+
 impl ScriptedUsage {
     pub fn new(
         input_tokens: u64,
@@ -208,7 +247,10 @@ pub struct ScriptedToolCall {
     /// The model's id for the call. Display only: cases reuse one id
     /// across turns on purpose.
     pub tool_call_id: String,
-    /// Always [`crate::SCRIPTED_TOOL`].
+    /// [`crate::SCRIPTED_TOOL`], served by the scripted tool provider, or
+    /// `submit_result` (`cortexkit_role_llm_runner::structured_output::SUBMIT_RESULT_TOOL`)
+    /// in a structured-output case, which the runner handles itself: its
+    /// `arguments` are the submitted value and its `result` is unused.
     pub tool: String,
     /// The call's arguments. Unique within a conformance run, so the scripted
     /// tool provider can find the call's result by them.
@@ -307,6 +349,48 @@ pub trait LlmRunnerSubject: Harness {
     /// plan must make [`crate::SCRIPTED_TOOL`], served by the scripted tool
     /// provider, available to the model.
     fn send_fields(&self, session: &str, first: bool) -> Map<String, Value>;
+
+    /// Like [`Self::send_fields`], but admitting exactly `tools` as the
+    /// session's tool set: an empty list for a tool-free session, or a list
+    /// naming `submit_result` for the reserved-name refusal. Every other name
+    /// is [`crate::SCRIPTED_TOOL`]. Return `None` when the runner cannot
+    /// admit that tool set. Required when the adapter declares
+    /// [`Capability::StructuredOutput`]: `final_text` needs a tool-free run.
+    fn send_fields_with_tools(
+        &self,
+        _session: &str,
+        _first: bool,
+        _tools: &[&str],
+    ) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// Make the scripted model route of `session` report what a catalog row
+    /// would say about schema-constrained output: `Some(true)` supported for
+    /// final text and tool input, `Some(false)` not supported, `None` not
+    /// stated. Called before the session's first send. Required with
+    /// [`Capability::StructuredOutput`].
+    async fn set_structured_output_support(
+        &self,
+        _session: &str,
+        _supported: Option<bool>,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "structured-output route support is not implemented",
+        ))
+    }
+
+    /// Every model request the scripted model received for `session`, in
+    /// order, across kills and restarts. Keep the record outside the runner
+    /// and its state root. Required with [`Capability::StructuredOutput`].
+    async fn model_requests(
+        &self,
+        _session: &str,
+    ) -> Result<Vec<ModelRequestObservation>, HarnessError> {
+        Err(HarnessError::new(
+            "model request observation is not implemented",
+        ))
+    }
 
     /// The module id the runner records as `dispatched_to` for a call to
     /// the scripted tool provider.

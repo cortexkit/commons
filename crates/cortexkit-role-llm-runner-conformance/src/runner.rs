@@ -106,6 +106,10 @@ where
                     )
                     .await
                     .map(|()| Ending::Passed)
+                } else if spec.name == "structured_output_frozen_across_restart" {
+                    crate::structured_output::restart(subject, work_dir, &declared, &mint)
+                        .await
+                        .map(|()| Ending::Passed)
                 } else if spec.name == "crash_at_RetentionTombstoned" {
                     retention::crash(subject, &mut driver, work_dir, &declared, &mint).await
                 } else if let Some(point) = crash::point_of(spec.name) {

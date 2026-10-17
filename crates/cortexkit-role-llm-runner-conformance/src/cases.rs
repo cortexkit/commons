@@ -134,6 +134,11 @@ where
             name if name.starts_with("input_token_cap_") => crate::input_token_cap::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
+            name if name.starts_with("structured_output_") => {
+                crate::structured_output::run(self, name)
+                    .await
+                    .map(|()| Ending::Passed)
+            }
             name if name.starts_with("retention_") => self.retention_case(name).await,
             name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
                 crate::compaction::run(self, name)

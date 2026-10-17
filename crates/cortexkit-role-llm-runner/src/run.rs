@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::structured_output::{SkippedSibling, StructuredOutputResult};
+
 pub const RUN_STATE_BUDGET_EXHAUSTED: &str = "budget_exhausted";
 
 /// Run state names. A state not listed here decodes as [`RunState::Other`],
@@ -137,6 +139,10 @@ pub struct RunResult {
     /// text parts. Absent on a run that has not ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_message: Option<FinalMessage>,
+    /// On an ended run admitted with `structured_output`: what it produced
+    /// and whether that validated. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<StructuredOutputResult>,
 }
 
 impl RunResult {
@@ -148,7 +154,13 @@ impl RunResult {
             reason: None,
             error: None,
             final_message: None,
+            structured_output: None,
         }
+    }
+
+    pub fn with_structured_output(mut self, structured_output: StructuredOutputResult) -> Self {
+        self.structured_output = Some(structured_output);
+        self
     }
 
     pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
@@ -362,6 +374,9 @@ pub struct RunStatus {
     /// empty list means checked and clean. Absent on a non-terminal run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undelivered_steers: Option<Vec<String>>,
+    /// Exactly what `run.result` carries for the same run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<StructuredOutputResult>,
 }
 impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
@@ -371,7 +386,12 @@ impl RunStatus {
             reason: None,
             error: None,
             undelivered_steers: None,
+            structured_output: None,
         }
+    }
+    pub fn with_structured_output(mut self, structured_output: StructuredOutputResult) -> Self {
+        self.structured_output = Some(structured_output);
+        self
     }
     pub fn with_reason(mut self, reason: RunReason) -> Self {
         self.reason = Some(reason);

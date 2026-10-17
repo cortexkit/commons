@@ -86,6 +86,7 @@ mod report;
 mod retention;
 mod route;
 mod runner;
+mod structured_output;
 mod subject;
 
 pub use compaction::{
@@ -98,8 +99,8 @@ pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, C
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
-    AttributionFixture, Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall,
-    ScriptedTurn, ScriptedUsage, ToolResultObservation,
+    AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, Script,
+    ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage, ToolResultObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

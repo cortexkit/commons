@@ -24,12 +24,14 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
-    if report.outcome(case)
-        == Some(&CaseOutcome::Skipped {
-            missing: vec![Capability::InputTokenCap],
-        })
-    {
-        return;
+    for group in [Capability::InputTokenCap, Capability::StructuredOutput] {
+        if report.outcome(case)
+            == Some(&CaseOutcome::Skipped {
+                missing: vec![group],
+            })
+        {
+            return;
+        }
     }
     // Legacy fake configurations intentionally do not declare retention.
     // Assert the named skip, never count it as a passed retention case.
@@ -123,6 +125,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.claim_process_kill = true;
     subject.enable_retention();
     subject.capabilities.insert(Capability::InputTokenCap);
+    subject.capabilities.insert(Capability::StructuredOutput);
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -370,6 +373,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::Streaming,
                     Capability::Retention,
                     Capability::InputTokenCap,
+                    Capability::StructuredOutput,
                     Capability::HoldToolCalls
                 ]
             );
@@ -716,7 +720,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                 &vec![
                     Capability::RunOps,
                     Capability::Retention,
-                    Capability::InputTokenCap
+                    Capability::InputTokenCap,
+                    Capability::StructuredOutput
                 ],
                 "{}",
                 report.render()
@@ -941,6 +946,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.enable_retention();
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
+    subject.capabilities.insert(Capability::StructuredOutput);
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
@@ -953,6 +959,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.enable_retention();
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
+    subject.capabilities.insert(Capability::StructuredOutput);
     subject.advertise_status = false;
     let report = run(&subject).await;
     assert!(
@@ -1365,6 +1372,7 @@ const INPUT_CAP_CASES: &[&str] = &[
 async fn input_cap_case(name: &str) {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.insert(Capability::InputTokenCap);
+    subject.capabilities.insert(Capability::StructuredOutput);
     let report = run(&subject).await;
     assert_eq!(
         report.outcome(name),
@@ -1411,5 +1419,103 @@ async fn input_token_cap_undeclared_cases_skip_by_name() {
             "{name}"
         );
         assert!(report.render().contains(&format!("SKIP {name}")));
+    }
+}
+
+const STRUCTURED_OUTPUT_CASES: &[&str] = &[
+    "structured_output_final_text_enforced_passed",
+    "structured_output_final_text_with_tools_refused",
+    "structured_output_submit_tool_ends_run",
+    "structured_output_reserved_name_refused",
+    "structured_output_absent_without_submit",
+    "structured_output_failed_validation_completes",
+    "structured_output_frozen_across_restart",
+    "structured_output_not_inherited",
+    "structured_output_external_ref_refused",
+    "structured_output_sibling_never_dispatched",
+];
+
+async fn structured_output_case(name: &str) {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::StructuredOutput);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{name}: {:?}",
+        report.outcome(name)
+    );
+}
+
+#[tokio::test]
+async fn structured_output_final_text_enforced_passed() {
+    structured_output_case("structured_output_final_text_enforced_passed").await;
+}
+#[tokio::test]
+async fn structured_output_final_text_with_tools_refused() {
+    structured_output_case("structured_output_final_text_with_tools_refused").await;
+}
+#[tokio::test]
+async fn structured_output_submit_tool_ends_run() {
+    structured_output_case("structured_output_submit_tool_ends_run").await;
+}
+#[tokio::test]
+async fn structured_output_reserved_name_refused() {
+    structured_output_case("structured_output_reserved_name_refused").await;
+}
+#[tokio::test]
+async fn structured_output_absent_without_submit() {
+    structured_output_case("structured_output_absent_without_submit").await;
+}
+#[tokio::test]
+async fn structured_output_failed_validation_completes() {
+    structured_output_case("structured_output_failed_validation_completes").await;
+}
+#[tokio::test]
+async fn structured_output_frozen_across_restart() {
+    structured_output_case("structured_output_frozen_across_restart").await;
+}
+#[tokio::test]
+async fn structured_output_not_inherited() {
+    structured_output_case("structured_output_not_inherited").await;
+}
+#[tokio::test]
+async fn structured_output_external_ref_refused() {
+    structured_output_case("structured_output_external_ref_refused").await;
+}
+#[tokio::test]
+async fn structured_output_sibling_never_dispatched() {
+    structured_output_case("structured_output_sibling_never_dispatched").await;
+}
+
+#[tokio::test]
+async fn structured_output_undeclared_cases_skip_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in STRUCTURED_OUTPUT_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::StructuredOutput]
+            }),
+            "{name}"
+        );
+        assert!(report.render().contains(&format!("SKIP {name}")));
+    }
+}
+
+#[tokio::test]
+async fn a_runner_dispatching_a_submit_sibling_fails_only_the_sibling_case() {
+    let mut subject = FakeSubject::new(Defects {
+        structured_output_dispatches_siblings: true,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::StructuredOutput);
+    let report = run(&subject).await;
+    let reason = failed(&report, "structured_output_sibling_never_dispatched");
+    assert!(reason.contains("was invoked 1 times"), "{reason}");
+    for name in STRUCTURED_OUTPUT_CASES {
+        if *name != "structured_output_sibling_never_dispatched" {
+            assert_passed(&report, name);
+        }
     }
 }
