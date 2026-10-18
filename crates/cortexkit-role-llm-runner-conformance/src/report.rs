@@ -50,6 +50,9 @@ const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, R
 const INPUT_CAP: &[Capability] = &[Capability::InputTokenCap, Queue, TranscriptReads, RunOps];
 const STRUCTURED: &[Capability] = &[Capability::StructuredOutput, Queue, TranscriptReads, RunOps];
 const ADOPT: &[Capability] = &[Capability::Adopt, TranscriptReads];
+const TAGS: &[Capability] = &[Capability::Tags, Queue, TranscriptReads];
+const TOOL_CALLS: &[Capability] = &[Capability::RunToolCalls, Queue, TranscriptReads];
+const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
 const STRUCTURED_RESTART: &[Capability] = &[
     Capability::StructuredOutput,
     Queue,
@@ -60,6 +63,46 @@ const STRUCTURED_RESTART: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("read_stable_across_host_metadata_change", &[Queue, TranscriptReads, Capability::HostMetadataChange],
+        "a re-read after the host changes the session's metadata, under the same lineage, answers the same entries byte for byte"),
+    case("tags_on_every_read_entry", TAGS,
+        "every read entry carries part rows with at least one tagged part; every tag is a well-formed §N§ used once in the session and every part key once in its message; a second read answers the same rows"),
+    case("tags_never_reused_across_runs", TAGS,
+        "a later run leaves the earlier messages' tags as they were and assigns only numbers above the earlier highest"),
+    case("tags_exist_whether_or_not_rendered", TAGS,
+        "sessions whose plan sets render_tags true and leaves it absent both carry tags on every entry"),
+    case("tags_resolve_returns_stored_content", TAGS,
+        "session.resolve of a prompt's and an answer's tags answers the exact stored text naming the entry's ordinal, mid and part, and a character range counted in Unicode scalar values answers exactly that text"),
+    case("tags_resolve_unknown_tag_refused", TAGS,
+        "a well-formed tag the session never assigned is refused unknown_tag, and malformed tags are refused invalid_params naming tag"),
+    case("tags_resolve_range_refused", TAGS,
+        "a range past the content or starting after its end is refused invalid_params naming range; an empty range at the end answers empty content"),
+    case("tags_model_written_tags_stored_verbatim", TAGS,
+        "a model-written §N§ in a text part is stored and resolved as written, and one in a tool call's arguments reaches the tool exactly once, as written"),
+    case("run_tool_calls_listed_in_dispatch_order", TOOL_CALLS,
+        "run.tool_calls, followed one call a page through next, lists a run's three calls in dispatch order with their names, ids, exact args, succeeded outcome, dispatch module, stored result size and carrying ordinal"),
+    case("run_tool_calls_unknown_run_refused", TOOL_CALLS,
+        "an unknown run_id is refused unknown_run; a run without calls lists none; a misspelled cursor and limit 0 are refused invalid_params by name"),
+    case("run_tool_calls_indeterminate_until_result", &[Capability::RunToolCalls, Queue, TranscriptReads, HoldToolCalls],
+        "a held call lists as indeterminate with no stored result, then as succeeded with one once released"),
+    case("run_context_ceiling_wait_is_not_a_stall", &[Queue, TranscriptReads, Capability::HoldContextCeiling],
+        "a run held at the context ceiling reads active with reason context_ceiling_wait on session.head (and on run.status with a deadline_ms, where served); with a view it completes, without one it ends context_ceiling with cause view_timeout and no error"),
+    case("delivery_order_never_starts_a_run", ORDER,
+        "a list without idle_start on an idle session answers pending and changes nothing, then rides the owner's next turn as a steer, delivered once"),
+    case("delivery_order_first_possible_mode", &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
+        "on an idle session [tool_result, steer, idle_start] starts a run through idle_start; during a held call [tool_result, idle_start] goes out with that call's result, recording its call_key"),
+    case("delivery_order_dedupe_supersedes_queued", ORDER,
+        "a second queued send with the same dedupe_key replaces the first, whose re-send answers superseded and which is never delivered"),
+    case("delivery_order_expired_never_delivered", ORDER,
+        "a send past its expires_at_ms is never delivered, and its re-send answers expired"),
+    case("delivery_order_with_legacy_delivery_refused", ORDER,
+        "a send carrying both delivery and delivery_order is refused invalid_params naming delivery_order and writes nothing"),
+    case("delivery_order_unnamed_sender_refused", ORDER,
+        "a module the plan does not name is refused scope_owner_mismatch, even naming the plan sender in a request field; the plan sender without the idle_start grant is refused listing idle_start; its steer is delivered once"),
+    case("delivery_order_template_renders_as_system", ORDER,
+        "a plan sender's template send with valid slots goes out once with the rendered text, as turn_system where the adapter's route supports it and as a steer otherwise"),
+    case("delivery_order_bad_slot_refused", ORDER,
+        "a template send whose percentage slot is 101 is refused invalid_params naming template, writes nothing, and nothing goes out as turn_system"),
     case("adopt_binds_owner_without_a_run", ADOPT,
         "on a session the host started, with no message and after the person's first turn, session.adopt answers owner_bound with the plan's identity and session.head's last_ordinal, starts no run and writes no message; afterwards session.baseline answers the adopting owner ready and refuses another caller scope_owner_mismatch"),
     case("adopt_exact_repeat_replays_reply", ADOPT,
@@ -412,6 +455,9 @@ pub const NARROWINGS: &[&str] = &[
     "retention deletion completion is inspected by the subject in the runner's durable report and runner-held stores, never inferred from an expired read; non-role export/list/read request schemas and pagination are supplied by retention_probe_params, and every advertised extra op must be classified",
     "retention_run_status_expired is inapplicable if run.status is not advertised",
     "the fetch plan's shape is not pinned (CONTRACT §10), so the subject builds each session's first-send fields and the suite never inspects a plan or a baseline's items",
+    "the tags cases check part rows, tags and resolve answers, never how a tag is rendered to the model; durability of tags across a restart is not driven by them",
+    "delivery_order cases observe deliveries through read entries' delivered_as and the send's text; the rendered request is not inspected, so turn_system support is the adapter's word (turn_system_supported)",
+    "the context-ceiling refusal of a send has no live case: the suite cannot bring a runner's context to its ceiling except through the adapter's held wait",
     "adopt cases start sessions through the subject's host-start hook, with plans the subject builds (host_plan); a plan's identity is the runner's, so the suite compares identities only with each other, never with a digest of its own",
     "the suite writes sessions with session.send (delivery absent, which means queue), so every case that needs a written session requires queue; a runner that admits sessions declares it (§9)",
     "the suite waits for a run to end through session.head's last_run_state, or run.result where only run_ops is required, so cases that wait require transcript_reads",

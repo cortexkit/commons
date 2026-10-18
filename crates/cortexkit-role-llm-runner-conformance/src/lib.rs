@@ -79,8 +79,10 @@
 mod adopt;
 mod cancel;
 mod cases;
+mod ceiling;
 mod compaction;
 mod crash;
+mod delivery_order;
 mod drive;
 mod input_token_cap;
 mod report;
@@ -89,6 +91,8 @@ mod route;
 mod runner;
 mod structured_output;
 mod subject;
+mod tags;
+mod tool_calls;
 
 pub use compaction::{
     CompactionAnswer, CompactionCall, CompactionCallKind, CompactionMessage, CompactionObservation,
@@ -100,8 +104,8 @@ pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, C
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
-    AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, Script,
-    ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage, ToolResultObservation,
+    AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
+    Script, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage, ToolResultObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

@@ -64,6 +64,11 @@ pub struct CrashObservation {
     /// Store the resulting transcript or the error from sending, waiting or reading;
     /// absent when recovery did not take this sealing branch.
     sealed_follow_up: Option<Result<Vec<ReadMessage>, String>>,
+    /// At `StepRecorded`, session B's lineage after an earlier finished run,
+    /// read before the kill, and its lineage after the restart. A recovery
+    /// that drops or rewrites the cut step must move B to a new lineage.
+    lineage_before_b: Option<String>,
+    lineage_after_b: Option<String>,
 }
 
 /// The kill point a case's scenario cuts at, if it is a crash case.
@@ -119,16 +124,16 @@ where
     let (b_step, step_text) = mint.text("step");
     let (b_final, final_text) = mint.text("final");
     let b_call = mint.call("call_b");
-    install(
-        name_b.clone(),
-        Script {
-            turns: vec![
-                turn(vec![b_step, ScriptedPart::ToolCall(b_call.clone())]),
-                turn(vec![b_final]),
-            ],
-        },
-    )
-    .await?;
+    // At StepRecorded, B first runs one finished turn, so its lineage can be
+    // read before the kill and compared after the recovery.
+    let earlier_b = point == points::STEP_RECORDED;
+    let mut b_turns = Vec::new();
+    if earlier_b {
+        b_turns.push(turn(vec![mint.text("earlier").0]));
+    }
+    b_turns.push(turn(vec![b_step, ScriptedPart::ToolCall(b_call.clone())]));
+    b_turns.push(turn(vec![b_final]));
+    install(name_b.clone(), Script { turns: b_turns }).await?;
 
     let handle = driver
         .spawn(&root)
@@ -154,11 +159,42 @@ where
         .session_route(handle.inner(), &name_b, &owner)
         .await
         .map_err(|e| format!("opening the route of {name_b}: {e}"))?;
+    let mut lineage_before_b = None;
+    let mut earlier_run = None;
+    if earlier_b {
+        let params = send_params(
+            subject,
+            &name_b,
+            true,
+            &mint.next("earlier"),
+            &mint.next("send"),
+            None,
+        );
+        let reply: SendReply = decode(
+            "session.send",
+            expect_ok(
+                "session B's earlier send",
+                call(&route_b, ops::SESSION_SEND, params).await?,
+            )?,
+        )?;
+        wait_run_end(subject, &route_b, declared, None, &reply).await?;
+        let head_before = head(&route_b).await?;
+        lineage_before_b = head_before.lineage_id;
+        earlier_run = head_before.last_run_state.map(|last| last.run_id);
+    }
     let prompt = mint.next("prompt");
-    let params_b = send_params(subject, &name_b, true, &prompt, &mint.next("send"), None);
+    let params_b = send_params(
+        subject,
+        &name_b,
+        !earlier_b,
+        &prompt,
+        &mint.next("send"),
+        None,
+    );
     let trigger: Trigger<'_> = {
         let route_b = &route_b;
         let params = params_b.clone();
+        let earlier_run = earlier_run.clone();
         Box::pin(async move {
             if route_b.request(ops::SESSION_SEND, params).await.is_err() {
                 return;
@@ -167,10 +203,10 @@ where
                 match head(route_b).await {
                     Err(_) => return,
                     Ok(head) => {
-                        if head
-                            .last_run_state
-                            .is_some_and(|last| RunState::parse(&last.state).is_terminal())
-                        {
+                        if head.last_run_state.is_some_and(|last| {
+                            Some(&last.run_id) != earlier_run.as_ref()
+                                && RunState::parse(&last.state).is_terminal()
+                        }) {
                             return;
                         }
                     }
@@ -206,10 +242,11 @@ where
             call(&route_b, ops::SESSION_SEND, params_b).await?,
         )?,
     )?;
-    wait_run_end(subject, &route_b, declared, None, &retry).await?;
+    wait_run_end(subject, &route_b, declared, earlier_run.as_deref(), &retry).await?;
     let (_, after_a) = read_all(&route_a).await?;
     let (_, after_b) = read_all(&route_b).await?;
     let head_b = head(&route_b).await?;
+    let head_b_lineage = head_b.lineage_id.clone();
     let invocations_after = subject.tool_invocations(&b_call.arguments).await;
     let run_result = match (
         &head_b.last_run_state,
@@ -274,6 +311,8 @@ where
         call: b_call,
         final_text,
         sealed_follow_up,
+        lineage_before_b,
+        lineage_after_b: head_b_lineage,
     })
 }
 
@@ -557,6 +596,17 @@ fn check_sealed_history(
         contains_id(&m.message, id) || keys.iter().any(|key| contains_id(&m.message, key))
     };
     if entries_for(cut, id).is_empty() {
+        // Dropping the call (and maybe its text) rewrote a written message,
+        // so the recovery must have started a new lineage (§4.2, §14).
+        if observed.lineage_before_b.is_none()
+            || observed.lineage_after_b == observed.lineage_before_b
+        {
+            return Err(format!(
+                "the recovery dropped the never-sent call from history but kept lineage {:?}: \
+                 dropping or rewriting a written message starts a new lineage",
+                observed.lineage_after_b
+            ));
+        }
         let text_copies = holding(cut, &observed.step_text);
         if text_copies > 1 {
             return Err("the dropped call's assistant text is held more than once".into());

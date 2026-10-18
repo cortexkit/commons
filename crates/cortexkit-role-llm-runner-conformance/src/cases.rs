@@ -134,6 +134,21 @@ where
             name if name.starts_with("adopt_") => {
                 crate::adopt::run(self, name).await.map(|()| Ending::Passed)
             }
+            name if name.starts_with("tags_") => {
+                crate::tags::run(self, name).await.map(|()| Ending::Passed)
+            }
+            name if name.starts_with("run_tool_calls_") => crate::tool_calls::run(self, name)
+                .await
+                .map(|()| Ending::Passed),
+            name if name.starts_with("delivery_order_") => {
+                crate::delivery_order::run(self, name).await
+            }
+            "read_stable_across_host_metadata_change" => {
+                passed(self.read_stable_across_host_metadata_change().await)
+            }
+            "run_context_ceiling_wait_is_not_a_stall" => {
+                crate::ceiling::run(self).await.map(|()| Ending::Passed)
+            }
             name if name.starts_with("input_token_cap_") => crate::input_token_cap::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
@@ -150,6 +165,38 @@ where
             }
             other => Err(format!("the runner has no case named {other}")),
         }
+    }
+
+    /// Read the transcript, change the session's metadata in the host, and
+    /// read it again: the same lineage answers the same entries, byte for
+    /// byte.
+    async fn read_stable_across_host_metadata_change(&self) -> Check {
+        let (answer, _) = self.mint.text("stable-answer");
+        let prompt = self.mint.next("stable-prompt");
+        let session = self
+            .session_with_runs(
+                "read-stable",
+                vec![ScriptedTurn::new(vec![answer])],
+                vec![prompt],
+            )
+            .await?;
+        let before = read(&session.route, &ReadRequest::range(0)).await?;
+        self.subject
+            .change_host_metadata(self.handle.inner(), &session.name)
+            .await
+            .map_err(|e| format!("changing {}'s host metadata: {e}", session.name))?;
+        let after = read(&session.route, &ReadRequest::range(0)).await?;
+        if after.lineage_id != before.lineage_id {
+            return Ok(());
+        }
+        if after.messages != before.messages {
+            return Err(format!(
+                "after a host-side metadata change, session.read under lineage {:?} answered \
+                 other entries: before {:?}, after {:?}",
+                before.lineage_id, before.messages, after.messages
+            ));
+        }
+        Ok(())
     }
 
     fn declares(&self, capability: Capability) -> bool {
