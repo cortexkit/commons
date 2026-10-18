@@ -42,6 +42,14 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             astrocyte.consumer.filter_subjects,
             [format!("ck.{account}.event.insula.>")]
         );
+        let routing = specs
+            .iter()
+            .find(|spec| spec.consumer.durable == "m_prefrontal-routing")
+            .unwrap();
+        assert_eq!(
+            routing.consumer.filter_subjects,
+            [format!("ck.{account}.event.insula.>")]
+        );
     }
 }
 

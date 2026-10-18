@@ -35,6 +35,11 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_astrocyte",
         filter_subjects: &["event.insula.>"],
     },
+    EventConsumer {
+        module_id: "prefrontal-routing",
+        durable: "m_prefrontal-routing",
+        filter_subjects: &["event.insula.>"],
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

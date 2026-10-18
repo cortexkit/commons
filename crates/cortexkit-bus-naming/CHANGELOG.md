@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4
+
+- Add `prefrontal-routing` as a third reader in the event-consumer table,
+  consuming `ck.{acct}.event.insula.>` through its own durable
+  `m_prefrontal-routing`, so model routing can follow Insula's quota samples
+  instead of polling quota every 60 seconds. Its participant grant gains only
+  pull, acknowledgement and consumer-info on that durable. ck-bus creates the
+  durable at boot once it is built against this version.
+
 ## 0.2.3
 
 - Add a closed, code-reviewed table of module-event consumers. The first reader,
