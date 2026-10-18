@@ -567,11 +567,12 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-compaction-provider"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "cortexkit-role-llm-runner",
  "cortexkit-role-step-transform-provider",
  "serde",
+ "serde_jcs",
  "serde_json",
  "sha2 0.10.9",
 ]

@@ -129,6 +129,25 @@ impl RoleDescribe {
         self.majors.iter().find(|major| major.version == version)
     }
 
+    /// Declare the `async` group ([`crate::async_group::GROUP`]), adding it
+    /// to `capabilities` once. The caller must also list the group's ops in
+    /// the `compaction-provider/v1` major, which [`check_describe`] checks.
+    pub fn with_async(mut self) -> Self {
+        if !self.declares_async() {
+            self.capabilities.push(crate::async_group::GROUP.to_owned());
+        }
+        self
+    }
+
+    /// Whether `capabilities` lists the `async` group. A caller uses the
+    /// asynchronous path only when this is true and the runner declares its
+    /// own half; otherwise it keeps calling `compaction.step`.
+    pub fn declares_async(&self) -> bool {
+        self.capabilities
+            .iter()
+            .any(|capability| capability == crate::async_group::GROUP)
+    }
+
     /// The runner groups this provider needs that `declared` (a runner's
     /// `role.describe` capabilities) does not list, in the order the
     /// provider listed them. When this is not empty the plan composer fails the
@@ -210,6 +229,13 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             for op in REQUIRED_OPS {
                 if !major.serves(op) {
                     problems.push(DescribeProblem::MissingOp(op));
+                }
+            }
+            if describe.declares_async() {
+                for op in crate::async_group::GROUP_OPS {
+                    if !major.serves(op) {
+                        problems.push(DescribeProblem::MissingOp(op));
+                    }
                 }
             }
         }

@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     answer::CompactionMessage,
+    async_group::ceiling::CeilingPolicy,
     errors::RefuseCode,
     status::{DescendsFrom, MessageRef},
 };
@@ -263,6 +264,12 @@ pub enum SetupAnswer {
         stability: Vec<StabilityRank>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_when: Option<CallWhen>,
+        /// When the runner pauses for a view and, failing one, refuses the
+        /// run (CONTRACT.md §20.5). Meaningful only on a session where both
+        /// sides declare the `async` group; absent, the runner never pauses
+        /// for the provider but still never sends over the window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ceiling: Option<CeilingPolicy>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own

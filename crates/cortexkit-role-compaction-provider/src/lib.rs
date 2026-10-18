@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 pub mod answer;
+pub mod async_group;
 pub mod bootstrap;
 pub mod describe;
 pub mod errors;
@@ -78,6 +79,13 @@ pub mod ops {
     /// the work behind a `wait` answer is done. Listed here because the
     /// provider sends it.
     pub const COMPACTION_READY: &str = "compaction.ready";
+    /// Fetch one published view by version. Served by a provider that
+    /// declares the `async` group ([`crate::async_group::GROUP`]).
+    pub const VIEW_GET: &str = "view.get";
+    /// The runner's synchronous request for a view when its prefix is being
+    /// rewritten anyway or a request reached the ceiling. Served by a provider
+    /// that declares the `async` group.
+    pub const COMPACTION_RIDE: &str = "compaction.ride";
 }
 
 /// Ops every `compaction-provider/v1` module must list in `role.describe`.
@@ -112,6 +120,7 @@ pub(crate) mod vectors {
         "claude-code-native-ingress.json",
         "claude-code.json",
         "answers.json",
+        "async.json",
         "errors.json",
         "fence.json",
         "host-runner-lane.json",
