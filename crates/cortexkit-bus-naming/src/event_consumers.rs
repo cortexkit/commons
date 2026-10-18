@@ -40,6 +40,24 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_prefrontal-routing",
         filter_subjects: &["event.insula.>"],
     },
+    EventConsumer {
+        module_id: "magic-context",
+        durable: "m_magic-context",
+        filter_subjects: &[
+            "event.thalamus-harness.compaction.>",
+            "event.broca.compaction.>",
+        ],
+    },
+    EventConsumer {
+        module_id: "thalamus-harness",
+        durable: "m_thalamus-harness",
+        filter_subjects: &["event.magic-context.compaction.>"],
+    },
+    EventConsumer {
+        module_id: "broca",
+        durable: "m_broca",
+        filter_subjects: &["event.magic-context.compaction.>"],
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -50,6 +50,27 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             routing.consumer.filter_subjects,
             [format!("ck.{account}.event.insula.>")]
         );
+        let mc = specs
+            .iter()
+            .find(|spec| spec.consumer.durable == "m_magic-context")
+            .unwrap();
+        assert_eq!(
+            mc.consumer.filter_subjects,
+            [
+                format!("ck.{account}.event.thalamus-harness.compaction.>"),
+                format!("ck.{account}.event.broca.compaction.>"),
+            ]
+        );
+        for durable in ["m_thalamus-harness", "m_broca"] {
+            let reader = specs
+                .iter()
+                .find(|spec| spec.consumer.durable == durable)
+                .unwrap();
+            assert_eq!(
+                reader.consumer.filter_subjects,
+                [format!("ck.{account}.event.magic-context.compaction.>")]
+            );
+        }
     }
 }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.5
+
+- Add three readers to the event-consumer table for compaction between
+  harness runners and Magic Context. `magic-context` reads runners' advance
+  notices on `event.thalamus-harness.compaction.>` and `event.broca.compaction.>`
+  through `m_magic-context`; `thalamus-harness` and `broca` each read Magic
+  Context's view notices on `event.magic-context.compaction.>` through their
+  own durable. As before, each reader's grant gains only pull, acknowledgement
+  and consumer-info on its own durable.
+- The golden's foreign-event refusals for a reader now skip that reader's own
+  events, since broca, now a reader, may publish `event.broca.>` itself.
+
 ## 0.2.4
 
 - Add `prefrontal-routing` as a third reader in the event-consumer table,

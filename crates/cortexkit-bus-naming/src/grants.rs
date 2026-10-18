@@ -821,14 +821,6 @@ pub fn generate_permission_golden(
                 "event-consumer-delete",
             ),
             (
-                account.event_subject("broca", "run", 1)?,
-                "foreign-module-event",
-            ),
-            (
-                account.event_subject("insula", "quota_sampled", 1)?,
-                "foreign-module-event",
-            ),
-            (
                 format!("$JS.API.STREAM.MSG.GET.{event_stream}"),
                 "event-direct-read",
             ),
@@ -839,6 +831,18 @@ pub fn generate_permission_golden(
                 subject,
                 reason,
             });
+        }
+        // A reader may publish its own events, so only another module's
+        // event subject is a foreign publish for it.
+        for (module, event) in [("broca", "run"), ("insula", "quota_sampled")] {
+            if module != reader.module_id {
+                refused.insert(RefusedEntry {
+                    principal,
+                    operation: Operation::Publish,
+                    subject: account.event_subject(module, event, 1)?,
+                    reason: "foreign-module-event",
+                });
+            }
         }
         for other in EVENT_CONSUMERS
             .iter()
