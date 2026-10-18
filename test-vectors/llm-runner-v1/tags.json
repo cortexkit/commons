@@ -262,6 +262,38 @@
         "role": "assistant",
         "written_at": 1790000008000
       }
+    },
+    {
+      "name": "an image part has a row and a stable key, but no tag",
+      "entry": {
+        "ordinal": 9,
+        "mid": "m9",
+        "message": {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "what is this?"
+            },
+            {
+              "type": "image",
+              "media_type": "image/png",
+              "data_ref": "blob-1"
+            }
+          ]
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§12§"
+          },
+          {
+            "part": "1"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000009000
+      }
     }
   ],
   "ledger": [
@@ -602,6 +634,71 @@
           "field": "plan.render_tags"
         }
       }
+    }
+  ],
+  "rendered_parts": [
+    {
+      "name": "user text: the tag, one space, the text",
+      "kind": "user_text",
+      "tag": "§1§",
+      "text": "fix the build",
+      "rendered": "§1§ fix the build"
+    },
+    {
+      "name": "a tool result's first text block",
+      "kind": "tool_result_text",
+      "tag": "§5§",
+      "text": "fn main() {}",
+      "rendered": "§5§ fn main() {}"
+    },
+    {
+      "name": "assistant text where the text part carries no provider state",
+      "kind": "assistant_text",
+      "tag": "§2§",
+      "text": "Looking at héllo wörld",
+      "rendered": "§2§ Looking at héllo wörld"
+    },
+    {
+      "name": "assistant text carrying provider state: metadata only",
+      "kind": "assistant_text_with_provider_state",
+      "tag": "§11§",
+      "text": "as §2§ says",
+      "rendered": "as §2§ says"
+    },
+    {
+      "name": "a tool call has no text and carries none",
+      "kind": "no_text",
+      "tag": "§4§",
+      "text": "",
+      "rendered": ""
+    },
+    {
+      "name": "an image carries none",
+      "kind": "no_text",
+      "tag": null,
+      "text": "",
+      "rendered": ""
+    },
+    {
+      "name": "an empty text part carries none",
+      "kind": "user_text",
+      "tag": "§13§",
+      "text": "",
+      "rendered": ""
+    },
+    {
+      "name": "an untagged text part renders unchanged",
+      "kind": "user_text",
+      "tag": null,
+      "text": "hello",
+      "rendered": "hello"
+    },
+    {
+      "name": "text that already starts with a sigil gets the prefix all the same",
+      "kind": "user_text",
+      "tag": "§14§",
+      "text": "§1§ quoted",
+      "rendered": "§14§ §1§ quoted"
     }
   ]
 }

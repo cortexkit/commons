@@ -52,29 +52,80 @@ pub fn next_after(highest: Option<u64>) -> u64 {
     highest.map_or(1, |n| n.saturating_add(1))
 }
 
-/// One part's tag on a `session.read` entry: one row per tagged part of the
-/// message, beside the message as `tool_calls` are.
+/// One part of a `session.read` entry: one row per part the runner exposes,
+/// in the message's part order, beside the message as `tool_calls` are.
+/// Every exposed part has a row, tagged or not, so a reader learns every
+/// part key from the rows alone.
 ///
 /// Non-exhaustive so a later optional member is additive: build one with
-/// [`PartTag::new`], or decode one.
+/// [`PartTag::tagged`] or [`PartTag::untagged`], or decode one.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct PartTag {
     /// The runner's own key for the part within its message (an index, or a
     /// part id), opaque to consumers: the key its ledger records the tag
-    /// under and `session.resolve` answers with. Never changes once
-    /// assigned.
+    /// under, `session.resolve` answers with, and a compaction provider
+    /// addresses part-level view edits by. Stable: never changes once the
+    /// part is exposed.
     pub part: String,
-    /// The part's tag, `§N§`.
-    pub tag: String,
+    /// The part's tag, `§N§`. Absent for a part the runner does not tag (an
+    /// image, say).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 impl PartTag {
-    pub fn new(part: impl Into<String>, tag: impl Into<String>) -> Self {
+    pub fn tagged(part: impl Into<String>, tag: impl Into<String>) -> Self {
         Self {
             part: part.into(),
-            tag: tag.into(),
+            tag: Some(tag.into()),
         }
+    }
+
+    pub fn untagged(part: impl Into<String>) -> Self {
+        Self {
+            part: part.into(),
+            tag: None,
+        }
+    }
+}
+
+/// What separates a rendered tag from the text after it: one space.
+pub const RENDER_SEPARATOR: &str = " ";
+
+/// The kind of a part, as far as tag rendering cares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RenderKind {
+    /// Text the person, the owner or a sender wrote.
+    UserText,
+    /// A tool result's text: its first text block.
+    ToolResultText,
+    /// The model's text, on a provider whose text part carries no provider
+    /// state (an Anthropic text block, say).
+    AssistantText,
+    /// The model's text, on a provider whose text part carries provider
+    /// state (a thought signature, ChatGPT's `phase`, encrypted reasoning).
+    AssistantTextWithProviderState,
+    /// Anything without text to carry a prefix: an image, a tool call, a
+    /// reasoning or thinking block.
+    NoText,
+}
+
+/// The exact text a runner renders for a part when the session's plan has
+/// `render_tags: true`: the tag, one space, then the part's text, for user
+/// text, a tool result's first text block, and assistant text where the
+/// provider's text part carries no provider state. Every other part, an
+/// untagged part, and a part whose text is empty render unchanged. A
+/// compaction provider builds the same bytes for a drop placeholder.
+pub fn render_text(kind: RenderKind, tag: Option<&str>, text: &str) -> String {
+    match (kind, tag) {
+        (
+            RenderKind::UserText | RenderKind::ToolResultText | RenderKind::AssistantText,
+            Some(tag),
+        ) if !text.is_empty() => format!("{tag}{RENDER_SEPARATOR}{text}"),
+        _ => text.to_owned(),
     }
 }
 
@@ -286,9 +337,11 @@ mod tests {
             let entry: ReadMessage = vectors::round_trip(name, &case["entry"]);
             let mut parts = std::collections::BTreeSet::new();
             for row in &entry.tags {
-                assert!(parse_tag(&row.tag).is_some(), "{name}: {}", row.tag);
                 assert!(parts.insert(row.part.clone()), "{name}: part twice");
-                assert!(seen.insert(row.tag.clone()), "{name}: {} reused", row.tag);
+                if let Some(tag) = &row.tag {
+                    assert!(parse_tag(tag).is_some(), "{name}: {tag}");
+                    assert!(seen.insert(tag.clone()), "{name}: {tag} reused");
+                }
             }
         }
         // A runner without the group sends no tags, and a consumer still
@@ -377,6 +430,24 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(lenient, ResolveReply::new("§1§", 0, "m", "0", ""));
+    }
+
+    #[test]
+    fn rendered_parts_carry_the_exact_prefix() {
+        let file = vectors::load("tags.json");
+        let mut kinds = std::collections::BTreeSet::new();
+        for case in vectors::cases(&file, "rendered_parts") {
+            let name = case["name"].as_str().unwrap();
+            let kind: RenderKind = serde_json::from_value(case["kind"].clone()).unwrap();
+            let rendered = render_text(kind, case["tag"].as_str(), case["text"].as_str().unwrap());
+            assert_eq!(rendered, case["rendered"].as_str().unwrap(), "{name}");
+            kinds.insert(format!("{kind:?}"));
+        }
+        assert_eq!(kinds.len(), 5, "every render kind has a vector");
+        assert_eq!(
+            render_text(RenderKind::UserText, Some("§3§"), "hi"),
+            "§3§ hi"
+        );
     }
 
     #[test]

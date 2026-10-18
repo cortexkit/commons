@@ -636,6 +636,47 @@ mod context_ceiling_tests {
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(detail.cause, case["detail"]["cause"], "{name}");
         }
+        // While held at the ceiling the run is active and waiting, with a
+        // deadline, on run.status, session.head and the stream.
+        let waiting = &file["waiting"];
+        let status: RunStatus = vectors::round_trip("waiting status", &waiting["status"]);
+        assert_eq!(status.run_state(), RunState::Active);
+        assert_eq!(
+            status.reason,
+            Some(crate::run::RunReason::ContextCeilingWait)
+        );
+        assert_eq!(
+            status,
+            RunStatus::context_ceiling_wait(status.deadline_ms.expect("deadline_ms"))
+        );
+        let head: crate::read::HeadMeta = vectors::round_trip("waiting head", &waiting["head"]);
+        let last = head.last_run_state.unwrap();
+        assert_eq!(
+            last.reason.as_deref(),
+            Some(crate::RUN_REASON_CONTEXT_CEILING_WAIT)
+        );
+        assert!(!RunState::parse(&last.state).is_terminal());
+        let event: crate::subscribe::SubscribeEvent =
+            serde_json::from_value(waiting["event"].clone()).unwrap();
+        assert_eq!(event.kind, crate::subscribe::kinds::CONTROL);
+        assert_eq!(
+            waiting["event"]["reason"],
+            crate::RUN_REASON_CONTEXT_CEILING_WAIT
+        );
+        assert_eq!(
+            waiting["event"]["deadline_ms"],
+            waiting["status"]["deadline_ms"]
+        );
+        for end in vectors::cases(waiting, "ends") {
+            let name = end["name"].as_str().unwrap();
+            let status: RunStatus = vectors::round_trip(name, &end["status"]);
+            assert!(status.deadline_ms.is_none(), "{name}");
+            assert_ne!(
+                status.reason,
+                Some(crate::run::RunReason::ContextCeilingWait),
+                "{name}"
+            );
+        }
         // A provider's own overflow refusal stays a provider failure.
         let overflow: RunResult =
             vectors::round_trip("provider overflow", &file["provider_overflow"]["answer"]);

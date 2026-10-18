@@ -574,10 +574,10 @@ pub struct ReadMessage {
     /// declares `dispatch_attribution`, for messages that carry tool calls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
-    /// One row per tagged part of the message: the part's key and its
-    /// `§N§` tag, which never change once assigned. Present on a runner
-    /// that declares `tags`. No digest rides here: a reader computes one
-    /// from the bytes it reads.
+    /// One row per part the runner exposes, in part order: the part's
+    /// stable key, and its `§N§` tag when the part is tagged. Neither
+    /// changes once assigned. Present on a runner that declares `tags`. No
+    /// digest rides here: a reader computes one from the bytes it reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<crate::tags::PartTag>,
     /// The message's role (`role::USER`, `role::ASSISTANT`, `role::TOOL`,

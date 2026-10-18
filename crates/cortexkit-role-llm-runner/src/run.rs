@@ -355,13 +355,23 @@ impl RunStatusRequest {
     }
 }
 
-/// Known reasons for a pause. Other reasons survive decoding unchanged.
+/// The `reason` of an `active` run waiting at its session's context ceiling
+/// for a compaction view, with `deadline_ms` beside it on `run.status`. The
+/// run is waiting, not stalled; the wait ends in progress (a view arrived)
+/// or in the terminal `context_ceiling` state.
+pub const RUN_REASON_CONTEXT_CEILING_WAIT: &str = "context_ceiling_wait";
+
+/// Known reasons a run names on `run.status`, `session.head` and stream
+/// events: why a paused run is paused, or why an active run is waiting.
+/// Other reasons survive decoding unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(from = "String", into = "String")]
 #[non_exhaustive]
 pub enum RunReason {
     AuthRequired,
     Restart,
+    /// An `active` run held at the context ceiling until `deadline_ms`.
+    ContextCeilingWait,
     Unknown(String),
 }
 impl From<String> for RunReason {
@@ -369,6 +379,7 @@ impl From<String> for RunReason {
         match value.as_str() {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
+            RUN_REASON_CONTEXT_CEILING_WAIT => Self::ContextCeilingWait,
             _ => Self::Unknown(value),
         }
     }
@@ -378,6 +389,7 @@ impl From<RunReason> for String {
         match value {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
+            RunReason::ContextCeilingWait => RUN_REASON_CONTEXT_CEILING_WAIT.into(),
             RunReason::Unknown(s) => s,
         }
     }
@@ -405,6 +417,11 @@ pub struct RunStatus {
     /// Exactly what `run.result` carries for the same run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
+    /// With `reason: context_ceiling_wait`: when the wait ends, in
+    /// milliseconds since the Unix epoch. A watchdog treats the run as
+    /// healthy until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_ms: Option<u64>,
 }
 impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
@@ -416,7 +433,18 @@ impl RunStatus {
             undelivered_steers: None,
             structured_output: None,
             context_ceiling: None,
+            deadline_ms: None,
         }
+    }
+    /// An `active` run waiting at the context ceiling until `deadline_ms`.
+    pub fn context_ceiling_wait(deadline_ms: u64) -> Self {
+        let mut status = Self::new(states::ACTIVE).with_reason(RunReason::ContextCeilingWait);
+        status.deadline_ms = Some(deadline_ms);
+        status
+    }
+    pub fn with_deadline_ms(mut self, deadline_ms: u64) -> Self {
+        self.deadline_ms = Some(deadline_ms);
+        self
     }
     pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
         self.context_ceiling = Some(detail);

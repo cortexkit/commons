@@ -364,6 +364,23 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   backoff to the model, or mark it unhealthy, for it. A send that would start
   or join a run while the context is already at or over the ceiling is
   refused `context_ceiling` instead, writing nothing (§9).
+- [pinned] **Waiting at the ceiling.** A run the runner holds at the
+  ceiling while it waits for a compaction view (up to the provider's bound,
+  300 s, say) is waiting, not stalled. It stays in the non-terminal state
+  `active` and names `reason: context_ceiling_wait`
+  (`run::RUN_REASON_CONTEXT_CEILING_WAIT`, `RunReason::ContextCeilingWait`)
+  on `run.status`, on `session.head`'s `last_run_state` and on the stream
+  event that reports the wait (§7), with `deadline_ms`, the absolute time
+  the wait ends in milliseconds since the Unix epoch, on `run.status`
+  (`RunStatus::context_ceiling_wait`) and on that event. This reuses the
+  shape a non-terminal run already uses to say why it is not moving, a
+  state with an open `reason`, as `paused` does with `auth_required`; it is
+  not `paused`, because a paused run waits for a caller's retry and changes
+  how sends behind it are admitted (§9), while this wait ends on its own. A
+  watchdog MUST NOT nudge or stop a run waiting this way before
+  `deadline_ms`. The wait ends in progress, when a view arrived (the reason
+  and deadline are gone), or in the terminal `context_ceiling` state with
+  `cause: view_timeout`.
 - [pinned] A provider's own refusal of a request as too long is different:
   that is the provider refusing, and the run ends `error` with
   `provider_code: context_overflow` (§12.2). A runner reports
@@ -433,16 +450,19 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?}`,
+  structured_output?, context_ceiling?, deadline_ms?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason`, `usage` and
   `retries_used` stay runner members, not pinned.
   - `state` is a run state as in `run.result` (`run::states`), decoded open
     (`RunState::parse`): a consumer does not treat an unknown state as
     terminal.
-  - `reason`, where the runner names one: why a paused run is paused, or
-    why an ended run ended. It is an open string; the known pause reasons
-    are `auth_required` and `restart`.
+  - `reason`, where the runner names one: why a paused run is paused, why
+    an active run is waiting, or why an ended run ended. It is an open
+    string; the known pause reasons are `auth_required` and `restart`, and
+    the known waiting reason is `context_ceiling_wait` (§6).
+  - `deadline_ms`: with `reason: context_ceiling_wait`, when the wait ends
+    (§6); absent otherwise.
   - `error`: on a run that ended `error`, the same run error `run.result`
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
@@ -606,9 +626,11 @@ what a run called without decoding any message body.
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
   never replayed.
-- [pinned] A stream event that names why a run is paused uses `reason`, an
-  open string with known values `auth_required` and `restart`, as
-  `run.status` does (§6.1).
+- [pinned] A stream event that names why a run is paused or waiting uses
+  `reason`, an open string with known values `auth_required`, `restart` and
+  `context_ceiling_wait`, as `run.status` does (§6.1). A runner reports a
+  wait at the context ceiling with a durable `control` event carrying
+  `reason: context_ceiling_wait` and `deadline_ms` when the wait starts.
 
 ## 8. `model_view`
 
@@ -1208,7 +1230,11 @@ runner answers with the exact stored content.
 
 **Assignment.**
 
-- [pinned] A runner that declares `tags` gives every message part a tag
+- [pinned] A runner that declares `tags` gives every part it exposes a
+  stable key (`part`), and a tag to every part it tags. It tags at least
+  every part that carries text: user text, a tool result's text and the
+  model's text. It may tag others (a tool call, a reasoning block); a part
+  with nothing to address by text (an image, say) may stay untagged. A tag is
   `§N§` (`tags::SIGIL`), `N` a positive decimal integer without a leading
   zero that fits a `u64` (`tags::parse_tag`, `tags::format_tag`). That one
   spelling is the tag: no other spelling names it.
@@ -1222,8 +1248,9 @@ runner answers with the exact stored content.
   Both readings conform. Either way the tag is recorded durably in the
   runner's ledger, keyed by (message, part), and every later read and
   resolve answers it byte-identical.
-- [pinned] Once assigned, a part's key (`part`), its tag and its stored
-  content never change.
+- [pinned] Once a part is exposed, its key never changes, tagged or not;
+  once assigned, its tag and its stored content never change. A compaction
+  provider addresses part-level view edits by that key.
 
 **What the model writes.**
 
@@ -1250,8 +1277,11 @@ runner answers with the exact stored content.
 **Reads.**
 
 - [pinned] On a runner that declares `tags`, every `session.read` entry
-  carries `tags: [{part, tag}]` (`tags::PartTag`), one row per tagged part,
-  beside the message as `tool_calls` are. `part` is the runner's own key for the part within its
+  carries `tags: [{part, tag?}]` (`tags::PartTag`), one row per part the
+  runner exposes, in the message's part order, beside the message as
+  `tool_calls` are: `tag` is present on a tagged part and absent on an
+  untagged one, so a reader learns every part's key, tagged or not, from
+  the rows alone. `part` is the runner's own key for the part within its
   message schema (an index or a part id), opaque to consumers: the key its
   ledger records the tag under and the one `session.resolve` answers with.
   Decoding stays lenient: a reader of a runner without `tags` finds no
@@ -1284,6 +1314,18 @@ runner answers with the exact stored content.
 - [pinned] Resolve writes nothing.
 
 **Visibility.**
+
+- [pinned] With `render_tags: true`, the runner renders a tagged part's tag
+  as an exact prefix: the tag, one space (U+0020), then the part's text
+  (`tags::render_text`, `tags::RENDER_SEPARATOR`). It does so for user
+  text, for a tool result's first text block, and for the model's text only
+  where the provider's text part carries no provider state and the
+  rendering is fixed at the first render (above); assistant text that
+  carries provider state renders as stored, its tag metadata only. A part
+  with no text (an image, a tool call, a reasoning or thinking block), an
+  empty text part and an untagged part carry no prefix. A compaction
+  provider builds the same bytes for a drop placeholder; `tags.json` pins
+  rendered parts.
 
 - [pinned] Whether tags are rendered to the model is the session's fetch
   plan's `render_tags` member (`tags::PLAN_RENDER_TAGS`), composed by core
@@ -1954,6 +1996,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_with_legacy_delivery_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
 | `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
+| `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
 | `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_falls_through` | the above; inapplicable when the adapter says its scripted route has no turn-scoped system message, since nothing then can go out as `turn_system` |
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |

@@ -99,5 +99,57 @@
         "status": 400
       }
     }
+  },
+  "waiting": {
+    "name": "a run held at the ceiling for up to 300 s is waiting, not stalled",
+    "status": {
+      "state": "active",
+      "reason": "context_ceiling_wait",
+      "deadline_ms": 1790000300000
+    },
+    "head": {
+      "lineage_id": "lin-1",
+      "last_ordinal": 7,
+      "head": {
+        "seq": 12
+      },
+      "last_run_state": {
+        "run_id": "run-4",
+        "state": "active",
+        "reason": "context_ceiling_wait"
+      },
+      "updated_at": 1790000000000
+    },
+    "event": {
+      "kind": "control",
+      "cursor": {
+        "seq": 12
+      },
+      "type": "run_waiting",
+      "run_id": "run-4",
+      "state": "active",
+      "reason": "context_ceiling_wait",
+      "deadline_ms": 1790000300000
+    },
+    "ends": [
+      {
+        "name": "a view arrived: the run goes on",
+        "status": {
+          "state": "active"
+        }
+      },
+      {
+        "name": "no view by the deadline: the terminal state",
+        "status": {
+          "state": "context_ceiling",
+          "undelivered_steers": [],
+          "context_ceiling": {
+            "window": 200000,
+            "size": 190500,
+            "cause": "view_timeout"
+          }
+        }
+      }
+    ]
   }
 }

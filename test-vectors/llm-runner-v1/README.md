@@ -101,7 +101,7 @@ which apply the pinned order of checks to every case.
 `tags.json` pins the `tags` group: the one spelling of a tag (valid and
 invalid spellings, including a leading zero, a non-ASCII digit and a number
 past `u64`); a fork continuing after its parent's highest number; read
-entries carrying `tags` (one row per part, every tag used once) with `role`
+entries carrying `tags` (one row per exposed part, every tag used once, an image part keyed but untagged) with `role`
 and `written_at` in the envelope; a model-written `§N§` stored as written in
 a text part and in tool-call arguments; `session.resolve` requests, requests
 refused by field, and cases against a ledger of stored parts (the whole
@@ -109,7 +109,7 @@ part, a character range, a range counted in Unicode scalar values, an empty
 range at the end, a tool-call part in the runner's stored encoding,
 `unknown_tag`, malformed tags, a range past the content and one starting
 after its end); and the plan's `render_tags` member, off when absent or
-`null`, refused when not a boolean or when `true` without the group.
+`null`, refused when not a boolean or when `true` without the group; and rendered parts, the tag, one space and the text, on the kinds that carry it, and nothing on parts without text.
 `tags-describe.json` pins the group's discovery, its missing-op refusal and
 an answer without the group. Checked by the `tags::tests` and
 `describe::tags_and_tool_calls_tests` modules of the wire crate.

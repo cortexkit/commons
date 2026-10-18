@@ -38,7 +38,9 @@ pub mod subscribe;
 pub mod tags;
 pub mod tool_calls;
 
-pub use run::{RUN_STATE_BUDGET_EXHAUSTED, RUN_STATE_CONTEXT_CEILING};
+pub use run::{
+    RUN_REASON_CONTEXT_CEILING_WAIT, RUN_STATE_BUDGET_EXHAUSTED, RUN_STATE_CONTEXT_CEILING,
+};
 
 pub use session_ref::session_ref;
 

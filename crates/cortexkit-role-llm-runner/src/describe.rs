@@ -732,6 +732,15 @@ mod tags_and_tool_calls_tests {
     }
 
     #[test]
+    fn delivery_order_describe_group_requires_session_send() {
+        group_describe(
+            "delivery-order-describe.json",
+            capabilities::DELIVERY_ORDER,
+            crate::ops::SESSION_SEND,
+        );
+    }
+
+    #[test]
     fn run_tool_calls_describe_group_requires_its_op() {
         group_describe(
             "run-tool-calls-describe.json",
