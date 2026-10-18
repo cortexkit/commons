@@ -3,7 +3,7 @@
 //!
 //! On a session where the provider declares `async` and the runner declares
 //! the matching runner-side support in its `llm-runner/v1` describe (message
-//! tags, origins and the `context_ceiling` code), the runner never calls
+//! tags and the `context_ceiling` code), the runner never calls
 //! `compaction.step`.
 //! Instead:
 //!

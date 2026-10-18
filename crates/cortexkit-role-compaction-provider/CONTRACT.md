@@ -1251,8 +1251,8 @@ the ride request and the ceiling pause (§20.5).
   lists `async` without both ops, naming each missing op (`missing_op`).
   `RoleDescribe::with_async` and `declares_async` build and read the
   declaration.
-- [pinned] The runner declares its own half in `llm-runner/v1` (tags,
-  message origin and the `context_ceiling` code, added in
+- [pinned] The runner declares its own half in `llm-runner/v1` (tags and
+  the `context_ceiling` code, added in
   `cortexkit-role-llm-runner` 0.2.7). A session runs this mode only when the
   provider declares `async` and the runner declares its half. Otherwise the
   session uses `compaction.step` (§6–§10) exactly as before.
