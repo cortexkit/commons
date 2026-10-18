@@ -21,6 +21,65 @@ pub const MAX_VIEW_BYTES: usize = 3_145_728;
 /// The domain string that starts a view's digest input.
 pub const VIEW_DIGEST_DOMAIN: &str = "ck.compaction.view.v1";
 
+/// Upper bound on a part key, in bytes.
+pub const MAX_PART_KEY_BYTES: usize = 256;
+
+/// One edit of one part of a message inside a keep range: the message stays,
+/// and only this part changes. `part` is `llm-runner/v1`'s opaque part key,
+/// the key its `tags` rows and `session.resolve` use. Exactly one of `bytes`
+/// and `drop` is given.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct PartEdit {
+    /// The message's ordinal; inside the enclosing keep range.
+    pub ordinal: u64,
+    /// The message's id at that ordinal, checked against the transcript.
+    pub mid: String,
+    /// The part key, 1 to [`MAX_PART_KEY_BYTES`] bytes, compared byte for
+    /// byte.
+    pub part: String,
+    /// The replacement part: UTF-8 JSON in the runner's message schema,
+    /// final bytes sent exactly as given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<String>,
+    /// True removes the part outright. Omitted when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub drop: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+impl PartEdit {
+    /// An edit that replaces the part with `bytes`.
+    pub fn replace(
+        ordinal: u64,
+        mid: impl Into<String>,
+        part: impl Into<String>,
+        bytes: impl Into<String>,
+    ) -> Self {
+        Self {
+            ordinal,
+            mid: mid.into(),
+            part: part.into(),
+            bytes: Some(bytes.into()),
+            drop: false,
+        }
+    }
+
+    /// An edit that removes the part.
+    pub fn drop(ordinal: u64, mid: impl Into<String>, part: impl Into<String>) -> Self {
+        Self {
+            ordinal,
+            mid: mid.into(),
+            part: part.into(),
+            bytes: None,
+            drop: true,
+        }
+    }
+}
+
 /// One range of a view, half-open over ordinals of the view's lineage:
 /// `from` included, `to` excluded. Strict on `kind`: a runner cannot apply a
 /// range it does not understand.
@@ -28,9 +87,16 @@ pub const VIEW_DIGEST_DOMAIN: &str = "ck.compaction.view.v1";
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ViewRange {
-    /// Send the transcript's messages in `[from, to)` as written. Never
-    /// empty.
-    Keep { from: u64, to: u64 },
+    /// Send the transcript's messages in `[from, to)` as written, except for
+    /// the parts `edits` changes. Never empty. `edits` is sorted by ordinal,
+    /// then by the part's position in its message, with at most one edit per
+    /// part; omitted when empty.
+    Keep {
+        from: u64,
+        to: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        edits: Vec<PartEdit>,
+    },
     /// Send `bytes` in place of the messages in `[from, to)`. `bytes` is a
     /// UTF-8 JSON array of messages in the runner's message schema, carried
     /// as a string so its exact bytes enter the digest. `from == to` inserts
@@ -40,7 +106,16 @@ pub enum ViewRange {
 
 impl ViewRange {
     pub fn keep(from: u64, to: u64) -> Self {
-        Self::Keep { from, to }
+        Self::Keep {
+            from,
+            to,
+            edits: Vec::new(),
+        }
+    }
+
+    /// A keep range whose messages change only in the parts `edits` names.
+    pub fn keep_with_edits(from: u64, to: u64, edits: Vec<PartEdit>) -> Self {
+        Self::Keep { from, to, edits }
     }
 
     pub fn replace(from: u64, to: u64, bytes: impl Into<String>) -> Self {
@@ -129,6 +204,19 @@ pub enum ViewProblem {
     /// The cut is malformed, beyond the coverage, not on a range boundary, or
     /// preceded by a keep range.
     Cut,
+    /// A part edit's ordinal is outside its keep range.
+    EditOutsideRange,
+    /// A keep range's edits are not sorted by ordinal, or, against the
+    /// transcript, not in the order of the parts within their message.
+    EditOrder,
+    /// Two edits name the same part of the same message.
+    DuplicateEdit,
+    /// A part edit's key is empty or longer than [`MAX_PART_KEY_BYTES`].
+    EditPart,
+    /// A part edit gives both `bytes` and `drop`, or neither.
+    EditAction,
+    /// A part edit's `bytes` are not JSON.
+    EditNotJson,
     /// The view's encoding exceeds [`MAX_VIEW_BYTES`].
     TooLarge,
     /// `digest` is not lowercase hexadecimal SHA-256.
@@ -157,6 +245,12 @@ impl ViewProblem {
             Self::CoverageEnd => "coverage_end",
             Self::ReplacementNotArray => "replacement_not_array",
             Self::Cut => "cut",
+            Self::EditOutsideRange => "edit_outside_range",
+            Self::EditOrder => "edit_order",
+            Self::DuplicateEdit => "duplicate_edit",
+            Self::EditPart => "edit_part",
+            Self::EditAction => "edit_action",
+            Self::EditNotJson => "edit_not_json",
             Self::TooLarge => "too_large",
             Self::DigestMalformed => "digest_malformed",
             Self::DigestMismatch => "digest_mismatch",
@@ -200,10 +294,12 @@ impl CompactionView {
     /// `session_ref`, `view_version` in decimal, `lineage_id`,
     /// `covers_through.ordinal` in decimal, `covers_through.mid`, the number
     /// of ranges in decimal; then for each range in order its `kind`, `from`
-    /// and `to` in decimal and, for `replace`, its `bytes`; then, only when a
-    /// cut is present, `cut`, its `cut_id` and its `through_ordinal` in
-    /// decimal. Lowercase hexadecimal SHA-256. `digest` itself is not an
-    /// input.
+    /// and `to` in decimal and, for `replace`, its `bytes`, or, for `keep`, the
+    /// number of its edits in decimal followed, for each edit in order, by its
+    /// `ordinal` in decimal, its `mid`, its `part`, and either `bytes` and the
+    /// bytes or `drop`; then, only when a cut is present, `cut`, its `cut_id`
+    /// and its `through_ordinal` in decimal. Lowercase hexadecimal SHA-256.
+    /// `digest` itself is not an input.
     pub fn compute_digest(&self) -> String {
         let mut hasher = Sha256::new();
         frame(&mut hasher, VIEW_DIGEST_DOMAIN.as_bytes());
@@ -218,10 +314,23 @@ impl CompactionView {
         frame(&mut hasher, self.ranges.len().to_string().as_bytes());
         for range in &self.ranges {
             match range {
-                ViewRange::Keep { from, to } => {
+                ViewRange::Keep { from, to, edits } => {
                     frame(&mut hasher, b"keep");
                     frame(&mut hasher, from.to_string().as_bytes());
                     frame(&mut hasher, to.to_string().as_bytes());
+                    frame(&mut hasher, edits.len().to_string().as_bytes());
+                    for edit in edits {
+                        frame(&mut hasher, edit.ordinal.to_string().as_bytes());
+                        frame(&mut hasher, edit.mid.as_bytes());
+                        frame(&mut hasher, edit.part.as_bytes());
+                        match &edit.bytes {
+                            Some(bytes) => {
+                                frame(&mut hasher, b"bytes");
+                                frame(&mut hasher, bytes.as_bytes());
+                            }
+                            None => frame(&mut hasher, b"drop"),
+                        }
+                    }
                 }
                 ViewRange::Replace { from, to, bytes } => {
                     frame(&mut hasher, b"replace");
@@ -240,8 +349,9 @@ impl CompactionView {
     }
 
     /// Check the view on its own, in a fixed order: session reference,
-    /// version, digest form, the ranges' tiling, the replacements, the cut,
-    /// the size, and last the digest against the content.
+    /// version, digest form, the ranges' tiling, each range's replacement or
+    /// part edits, the cut, the size, and last the digest against the
+    /// content.
     pub fn check(&self) -> Result<(), ViewProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(ViewProblem::SessionRef);
@@ -260,14 +370,17 @@ impl CompactionView {
             if range.from() != next {
                 return Err(ViewProblem::Gap);
             }
-            let empty_keep = matches!(range, ViewRange::Keep { from, to } if from == to);
+            let empty_keep = matches!(range, ViewRange::Keep { from, to, .. } if from == to);
             if range.from() > range.to() || empty_keep {
                 return Err(ViewProblem::Inverted);
             }
-            if let ViewRange::Replace { bytes, .. } = range {
-                if serde_json::from_str::<Vec<IgnoredAny>>(bytes).is_err() {
-                    return Err(ViewProblem::ReplacementNotArray);
+            match range {
+                ViewRange::Replace { bytes, .. } => {
+                    if serde_json::from_str::<Vec<IgnoredAny>>(bytes).is_err() {
+                        return Err(ViewProblem::ReplacementNotArray);
+                    }
                 }
+                ViewRange::Keep { from, to, edits } => check_edits(*from, *to, edits)?,
             }
             next = range.to();
         }
@@ -316,42 +429,82 @@ impl CompactionView {
         }
     }
 
+    /// Every part edit of every keep range, in order.
+    pub fn edits(&self) -> impl Iterator<Item = &PartEdit> {
+        self.ranges.iter().flat_map(|range| match range {
+            ViewRange::Keep { edits, .. } => edits.as_slice(),
+            ViewRange::Replace { .. } => &[],
+        })
+    }
+
     /// Whether the view's coverage is still a prefix of the runner's
-    /// transcript: same lineage, and `mid_at(covers_through.ordinal)`, the
-    /// id of the message the runner holds at that ordinal, equals
-    /// `covers_through.mid`. Ordinals are never reused within a lineage, so a
-    /// revert that truncated below the coverage fails this check.
+    /// transcript: same lineage; the message the runner holds at
+    /// `covers_through.ordinal` has id `covers_through.mid`; and the message
+    /// at each part edit's ordinal has that edit's `mid`. `mid_at(ordinal)`
+    /// is the id of the message the runner holds at that ordinal. Ordinals
+    /// are never reused within a lineage, so a revert that truncated below
+    /// the coverage fails this check.
     pub fn check_prefix(
         &self,
         lineage_id: &str,
         mid_at: impl Fn(u64) -> Option<String>,
     ) -> Result<(), ViewProblem> {
-        let same_message = mid_at(self.covers_through.ordinal).as_deref()
-            == Some(self.covers_through.mid.as_str());
-        if self.lineage_id == lineage_id && same_message {
+        let holds = |ordinal: u64, mid: &str| mid_at(ordinal).as_deref() == Some(mid);
+        let same_message = holds(self.covers_through.ordinal, &self.covers_through.mid);
+        let edits_hold = self.edits().all(|edit| holds(edit.ordinal, &edit.mid));
+        if self.lineage_id == lineage_id && same_message && edits_hold {
             Ok(())
         } else {
             Err(ViewProblem::NotAPrefix)
         }
     }
 
+    /// Check every part edit against the part keys of the message it edits,
+    /// `parts_at(ordinal)`, in the message's order. A key the message does
+    /// not have is `Err(None)`, which the runner reports as
+    /// `view_refused:<version>:unknown_part`. Edits of one message out of its
+    /// part order are `Err(Some(ViewProblem::EditOrder))`. Call it on a view
+    /// that passed [`CompactionView::check_prefix`].
+    pub fn check_parts(
+        &self,
+        parts_at: impl Fn(u64) -> Option<Vec<String>>,
+    ) -> Result<(), Option<ViewProblem>> {
+        let mut previous: Option<(u64, usize)> = None;
+        for edit in self.edits() {
+            let parts = parts_at(edit.ordinal).unwrap_or_default();
+            let position = parts
+                .iter()
+                .position(|part| *part == edit.part)
+                .ok_or(None)?;
+            if previous.is_some_and(|(ordinal, at)| ordinal == edit.ordinal && at >= position) {
+                return Err(Some(ViewProblem::EditOrder));
+            }
+            previous = Some((edit.ordinal, position));
+        }
+        Ok(())
+    }
+
     /// The history a runner sends under this view, before the runner's own
-    /// model rules (CONTRACT.md §20.4): for each range in order, the
-    /// transcript's messages with ordinals inside a keep range, or a replace
-    /// range's messages; then every transcript message after the coverage.
-    /// `transcript` is `(ordinal, message)` in ordinal order. A reference
-    /// for tests and vectors; call it on a view that passed
-    /// [`CompactionView::check`].
-    pub fn assemble(&self, transcript: &[(u64, Value)]) -> Result<Vec<Value>, ViewProblem> {
+    /// provider rules (CONTRACT.md §20.4): for each range in order, the
+    /// transcript's messages with ordinals inside a keep range, with their
+    /// part edits applied, or a replace range's messages; then every
+    /// transcript message after the coverage. Replacement and edit bytes go
+    /// in exactly as given. A reference for tests and vectors, over a model
+    /// of the runner's schema in which a message's parts are the elements of
+    /// its `content` array, keyed in order by [`TranscriptMessage::parts`].
+    /// Call it on a view that passed every other check.
+    pub fn assemble(&self, transcript: &[TranscriptMessage]) -> Result<Vec<Value>, ViewProblem> {
         let mut out = Vec::new();
         for range in &self.ranges {
             match range {
-                ViewRange::Keep { from, to } => out.extend(
-                    transcript
+                ViewRange::Keep { from, to, edits } => {
+                    for entry in transcript
                         .iter()
-                        .filter(|(ordinal, _)| ordinal >= from && ordinal < to)
-                        .map(|(_, message)| message.clone()),
-                ),
+                        .filter(|entry| entry.ordinal >= *from && entry.ordinal < *to)
+                    {
+                        out.push(entry.edited(edits)?);
+                    }
+                }
                 ViewRange::Replace { bytes, .. } => {
                     let messages: Vec<Value> = serde_json::from_str(bytes)
                         .map_err(|_| ViewProblem::ReplacementNotArray)?;
@@ -362,10 +515,98 @@ impl CompactionView {
         out.extend(
             transcript
                 .iter()
-                .filter(|(ordinal, _)| *ordinal > self.covers_through.ordinal)
-                .map(|(_, message)| message.clone()),
+                .filter(|entry| entry.ordinal > self.covers_through.ordinal)
+                .map(|entry| entry.message.clone()),
         );
         Ok(out)
+    }
+}
+
+/// Check one keep range's edits on their own: each inside the range, sorted
+/// by ordinal, one per part, with a valid key, exactly one action, and JSON
+/// bytes.
+fn check_edits(from: u64, to: u64, edits: &[PartEdit]) -> Result<(), ViewProblem> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut previous = None;
+    for edit in edits {
+        if edit.ordinal < from || edit.ordinal >= to {
+            return Err(ViewProblem::EditOutsideRange);
+        }
+        if previous.is_some_and(|ordinal| edit.ordinal < ordinal) {
+            return Err(ViewProblem::EditOrder);
+        }
+        previous = Some(edit.ordinal);
+        if !seen.insert((edit.ordinal, edit.part.as_str())) {
+            return Err(ViewProblem::DuplicateEdit);
+        }
+        if edit.part.is_empty() || edit.part.len() > MAX_PART_KEY_BYTES {
+            return Err(ViewProblem::EditPart);
+        }
+        match (&edit.bytes, edit.drop) {
+            (Some(bytes), false) => {
+                if serde_json::from_str::<IgnoredAny>(bytes).is_err() {
+                    return Err(ViewProblem::EditNotJson);
+                }
+            }
+            (None, true) => {}
+            _ => return Err(ViewProblem::EditAction),
+        }
+    }
+    Ok(())
+}
+
+/// One message of the runner's transcript as the runner's checks and
+/// [`CompactionView::assemble`] see it: its place, id, part keys in order,
+/// and body.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct TranscriptMessage {
+    pub ordinal: u64,
+    pub mid: String,
+    /// The message's part keys, in the order its parts appear.
+    pub parts: Vec<String>,
+    pub message: Value,
+}
+
+impl TranscriptMessage {
+    pub fn new(ordinal: u64, mid: impl Into<String>, parts: Vec<String>, message: Value) -> Self {
+        Self {
+            ordinal,
+            mid: mid.into(),
+            parts,
+            message,
+        }
+    }
+
+    /// The message with the `edits` that name it applied: a replaced part
+    /// becomes its parsed bytes, a dropped part is removed, and every other
+    /// part stays as written.
+    fn edited(&self, edits: &[PartEdit]) -> Result<Value, ViewProblem> {
+        let mine: Vec<&PartEdit> = edits
+            .iter()
+            .filter(|edit| edit.ordinal == self.ordinal)
+            .collect();
+        if mine.is_empty() {
+            return Ok(self.message.clone());
+        }
+        let content = self.message["content"]
+            .as_array()
+            .filter(|content| content.len() == self.parts.len())
+            .ok_or(ViewProblem::EditPart)?;
+        let mut parts = Vec::new();
+        for (key, part) in self.parts.iter().zip(content) {
+            match mine.iter().find(|edit| edit.part == *key) {
+                None => parts.push(part.clone()),
+                Some(edit) if edit.drop => {}
+                Some(edit) => {
+                    let bytes = edit.bytes.as_deref().unwrap_or_default();
+                    parts.push(serde_json::from_str(bytes).map_err(|_| ViewProblem::EditNotJson)?);
+                }
+            }
+        }
+        let mut message = self.message.clone();
+        message["content"] = Value::Array(parts);
+        Ok(message)
     }
 }
 
@@ -375,8 +616,10 @@ pub enum ViewDisposition {
     /// Write it durably as the session's next view and render it from the
     /// next step boundary on, that is from the first model request of the
     /// next step, never partway through a step; from then every notice names it in
-    /// `applied_view_version`. The runner may still refuse it under its own
-    /// structural and model rules (`view_refused`, CONTRACT.md §20.4).
+    /// `applied_view_version`. Under the current model provider's rules the
+    /// runner may still defer it (`view_deferred`), apply it with companion
+    /// edits (`view_companion`) or refuse it (`view_refused`), CONTRACT.md
+    /// §20.4.
     Apply,
     /// Its version is not above the current view's: ignore it.
     Stale,
@@ -388,6 +631,11 @@ pub enum ViewDisposition {
     /// report `view_discarded:<version>` with `revert_below` on the next
     /// notice.
     Discard,
+    /// It edits a part key the message does not have: refuse it, report
+    /// `view_refused:<version>:<reason>` with this reason (one of
+    /// [`super::notice::refusal_reasons`]) on the next notice, and keep the
+    /// current view.
+    Refuse(&'static str),
 }
 
 impl ViewDisposition {
@@ -399,6 +647,7 @@ impl ViewDisposition {
             Self::Stale => "stale".into(),
             Self::Rejected(problem) => format!("rejected:{}", problem.name()),
             Self::Discard => "discard".into(),
+            Self::Refuse(reason) => format!("refused:{reason}"),
         }
     }
 }
@@ -407,15 +656,18 @@ impl ViewDisposition {
 /// is the view asked for; it is well formed with a matching digest
 /// ([`CompactionView::check`]); its digest is the one `ready` announced; its
 /// version is above `current_version`, the version of the view the runner
-/// currently applies (`None` before any); its coverage is a prefix of the
-/// transcript ([`CompactionView::check_prefix`]). The first that fails
-/// decides.
+/// currently applies (`None` before any); its coverage and part edits are a
+/// prefix of the transcript ([`CompactionView::check_prefix`]); every edited
+/// part key exists, in its message's part order
+/// ([`CompactionView::check_parts`]). The first that fails decides.
+/// `message_at(ordinal)` is the message the runner holds at that ordinal of
+/// `lineage_id`.
 pub fn dispose_fetched(
     view: &CompactionView,
     ready: &ViewReady,
     current_version: Option<u64>,
     lineage_id: &str,
-    mid_at: impl Fn(u64) -> Option<String>,
+    message_at: impl Fn(u64) -> Option<TranscriptMessage>,
 ) -> ViewDisposition {
     if view.session_ref != ready.session_ref || view.view_version != ready.view_version {
         return ViewDisposition::Rejected(ViewProblem::NotRequested);
@@ -429,9 +681,16 @@ pub fn dispose_fetched(
     if current_version.is_some_and(|current| view.view_version <= current) {
         return ViewDisposition::Stale;
     }
-    match view.check_prefix(lineage_id, mid_at) {
+    if view
+        .check_prefix(lineage_id, |ordinal| message_at(ordinal).map(|m| m.mid))
+        .is_err()
+    {
+        return ViewDisposition::Discard;
+    }
+    match view.check_parts(|ordinal| message_at(ordinal).map(|m| m.parts)) {
         Ok(()) => ViewDisposition::Apply,
-        Err(_) => ViewDisposition::Discard,
+        Err(None) => ViewDisposition::Refuse(super::notice::refusal_reasons::UNKNOWN_PART),
+        Err(Some(problem)) => ViewDisposition::Rejected(problem),
     }
 }
 

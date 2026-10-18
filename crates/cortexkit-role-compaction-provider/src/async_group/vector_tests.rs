@@ -11,7 +11,10 @@ use super::{
     content_digest,
     notice::{self, AdvanceNotice, Event, LastUsage, MarkerOutcome, ViewReady},
     ride::{RideAnswer, RideCause, RideRequest},
-    view::{dispose_fetched, CompactionView, ViewCut, ViewGetAnswer, ViewGetRequest, ViewRange},
+    view::{
+        dispose_fetched, CompactionView, PartEdit, TranscriptMessage, ViewCut, ViewGetAnswer,
+        ViewGetRequest, ViewRange,
+    },
 };
 use crate::{
     describe::{check_describe, DescribeProblem, RoleDescribe},
@@ -122,9 +125,13 @@ fn notices_round_trip_with_independent_digests() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|row| row[0].as_u64() == Some(notice.through_ordinal))
+            .find(|row| row["ordinal"].as_u64() == Some(notice.through_ordinal))
             .unwrap();
-        assert_eq!(content_digest(&message[2]), notice.through_digest, "{name}");
+        assert_eq!(
+            content_digest(&message["message"]),
+            notice.through_digest,
+            "{name}"
+        );
         assert!(notice::header_bytes(&map) <= notice::MAX_NOTICE_HEADER_BYTES);
     }
 }
@@ -251,13 +258,12 @@ fn view_ready_vectors() {
     }
 }
 
-fn transcript(file: &Value) -> Vec<(u64, Value)> {
-    file["transcript"]["messages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|row| (row[0].as_u64().unwrap(), row[2].clone()))
-        .collect()
+fn transcript_of(rows: &Value) -> Vec<TranscriptMessage> {
+    serde_json::from_value(rows.clone()).unwrap()
+}
+
+fn transcript(file: &Value) -> Vec<TranscriptMessage> {
+    transcript_of(&file["transcript"]["messages"])
 }
 
 #[test]
@@ -279,10 +285,11 @@ fn view_builders_compute_the_vector_digest() {
     let file = file();
     let case = &vectors::cases(&file, "views")[1];
     let decoded: CompactionView = serde_json::from_value(case["view"].clone()).unwrap();
-    let bytes = |i: usize| match &decoded.ranges[i] {
-        ViewRange::Replace { bytes, .. } => bytes.clone(),
-        ViewRange::Keep { .. } => panic!("range {i} is a keep range"),
+    let (head, edits) = match (&decoded.ranges[0], &decoded.ranges[1]) {
+        (ViewRange::Replace { bytes, .. }, ViewRange::Keep { edits, .. }) => (bytes, edits),
+        other => panic!("unexpected ranges {other:?}"),
     };
+    let placeholder = edits[0].bytes.clone().unwrap();
     let built = CompactionView::new(
         str_of(&file, "session_ref"),
         3,
@@ -292,10 +299,15 @@ fn view_builders_compute_the_vector_digest() {
             mid: "m4".into(),
         },
         vec![
-            ViewRange::replace(0, 2, bytes(0)),
-            ViewRange::keep(2, 3),
-            ViewRange::replace(3, 4, bytes(2)),
-            ViewRange::keep(4, 5),
+            ViewRange::replace(0, 2, head.clone()),
+            ViewRange::keep_with_edits(
+                2,
+                5,
+                vec![
+                    PartEdit::replace(3, "m3", "prt_3a", placeholder),
+                    PartEdit::drop(3, "m3", "prt_3b"),
+                ],
+            ),
         ],
     )
     .with_cut(ViewCut::new("cut-1", 1));
@@ -317,6 +329,19 @@ fn views_refused_by_name() {
     }
 }
 
+#[test]
+fn part_edits_refused_by_name() {
+    let file = file();
+    let cases = vectors::cases(&file, "edits_refused");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let name = name(case);
+        let view = vectors::round_trip::<CompactionView>(name, &case["view"]);
+        let problem = view.check().expect_err(name);
+        assert_eq!(problem.name(), case["problem"].as_str().unwrap(), "{name}");
+    }
+}
+
 /// The dispositions with an outcome in `outcomes`, each checked against
 /// [`dispose_fetched`]. Returns how many were checked.
 fn check_dispositions(outcomes: &[&str]) -> usize {
@@ -330,23 +355,13 @@ fn check_dispositions(outcomes: &[&str]) -> usize {
         let name = name(case);
         let view: CompactionView = serde_json::from_value(case["view"].clone()).unwrap();
         let ready = ViewReady::from_headers(&headers(&case["ready"])).unwrap();
-        let mids: BTreeMap<u64, String> = case["transcript"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|row| {
-                (
-                    row[0].as_u64().unwrap(),
-                    row[1].as_str().unwrap().to_owned(),
-                )
-            })
-            .collect();
+        let held = transcript_of(&case["transcript"]);
         let disposition = dispose_fetched(
             &view,
             &ready,
             case["current_version"].as_u64(),
             case["lineage_id"].as_str().unwrap(),
-            |ordinal| mids.get(&ordinal).cloned(),
+            |ordinal| held.iter().find(|m| m.ordinal == ordinal).cloned(),
         );
         assert_eq!(disposition.name(), outcome, "{name}");
         checked += 1;
@@ -356,15 +371,26 @@ fn check_dispositions(outcomes: &[&str]) -> usize {
 
 const APPLY_OR_STALE: &[&str] = &["apply", "stale"];
 const DISCARD: &[&str] = &["discard"];
+const UNKNOWN_PART: &[&str] = &["refused:unknown_part"];
 const DIGEST: &[&str] = &["rejected:digest_mismatch"];
-const OTHER_REJECTIONS: &[&str] = &["rejected:not_requested", "rejected:gap"];
+const OTHER_REJECTIONS: &[&str] = &[
+    "rejected:not_requested",
+    "rejected:gap",
+    "rejected:edit_order",
+];
 
 #[test]
 fn every_disposition_vector_is_checked_by_one_test() {
     let file = file();
     for case in vectors::cases(&file, "dispositions") {
         let outcome = case["outcome"].as_str().unwrap();
-        let groups = [APPLY_OR_STALE, DISCARD, DIGEST, OTHER_REJECTIONS];
+        let groups = [
+            APPLY_OR_STALE,
+            DISCARD,
+            UNKNOWN_PART,
+            DIGEST,
+            OTHER_REJECTIONS,
+        ];
         let owners = groups.iter().filter(|g| g.contains(&outcome)).count();
         assert_eq!(owners, 1, "{}: outcome {outcome}", name(case));
     }
@@ -377,7 +403,12 @@ fn fetched_view_applies_or_is_stale() {
 
 #[test]
 fn view_whose_coverage_is_no_longer_a_prefix_is_discarded() {
-    assert_eq!(check_dispositions(DISCARD), 3);
+    assert_eq!(check_dispositions(DISCARD), 4);
+}
+
+#[test]
+fn view_editing_an_unknown_part_is_refused() {
+    assert_eq!(check_dispositions(UNKNOWN_PART), 1);
 }
 
 #[test]
@@ -387,7 +418,7 @@ fn fetched_view_failing_its_digest_is_rejected() {
 
 #[test]
 fn fetched_view_not_requested_or_malformed_is_rejected() {
-    assert_eq!(check_dispositions(OTHER_REJECTIONS), 2);
+    assert_eq!(check_dispositions(OTHER_REJECTIONS), 3);
 }
 
 #[test]

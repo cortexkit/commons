@@ -5,10 +5,19 @@
 //! prompt cache expired, the model changed, the system text or tool surface
 //! changed), or when a request reached the Setup ceiling. The provider
 //! answers with a view or with nothing; a missed deadline counts as nothing.
+//! For the three rewrite causes, nothing means the runner proceeds with its
+//! current view and the run goes on: those rides never end a run. Only the
+//! `ceiling` cause waits up to the ceiling policy's `wait_ms` and can end in
+//! the run being refused.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{ceiling::MAX_CEILING_WAIT_MS, notice::is_session_ref, view::CompactionView};
+
+/// Upper bound on `deadline_ms` for the rewrite causes `ttl_expired`,
+/// `model_change` and `surface_change`. Those rides sit in front of a
+/// request the user is waiting for, so they stay short.
+pub const MAX_REWRITE_RIDE_DEADLINE_MS: u64 = 10_000;
 
 /// Why the runner asks. A cause this crate does not know still decodes, as
 /// [`RideCause::Unknown`], so a newer runner does not break an older
@@ -71,7 +80,9 @@ pub struct RideRequest {
     pub session_ref: String,
     pub cause: RideCause,
     /// How long the runner waits for the answer, in milliseconds from when it
-    /// sent the request. Above 0 and at most [`MAX_CEILING_WAIT_MS`].
+    /// sent the request. Above 0; at most [`MAX_REWRITE_RIDE_DEADLINE_MS`]
+    /// for a rewrite cause; for `ceiling`, the time left of the ceiling
+    /// policy's `wait_ms`, at most [`MAX_CEILING_WAIT_MS`].
     pub deadline_ms: u64,
 }
 
@@ -105,7 +116,13 @@ impl RideRequest {
         if !is_session_ref(&self.session_ref) {
             return Err(RideProblem::SessionRef);
         }
-        if self.deadline_ms == 0 || self.deadline_ms > MAX_CEILING_WAIT_MS {
+        let bound = match self.cause {
+            RideCause::TtlExpired | RideCause::ModelChange | RideCause::SurfaceChange => {
+                MAX_REWRITE_RIDE_DEADLINE_MS
+            }
+            RideCause::Ceiling | RideCause::Unknown(_) => MAX_CEILING_WAIT_MS,
+        };
+        if self.deadline_ms == 0 || self.deadline_ms > bound {
             return Err(RideProblem::DeadlineOutOfRange);
         }
         Ok(())

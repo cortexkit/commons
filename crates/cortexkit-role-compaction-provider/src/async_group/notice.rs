@@ -33,7 +33,8 @@ pub const MAX_EVENTS: usize = 32;
 pub const MAX_EVENT_TOKEN_BYTES: usize = 128;
 /// Upper bound on a `cut_id`, in bytes.
 pub const MAX_CUT_ID_BYTES: usize = 64;
-/// Upper bound on a `view_refused` reason, in bytes.
+/// Upper bound on the word that ends a `view_refused`, `view_deferred` or
+/// `view_companion` token, in bytes.
 pub const MAX_REFUSAL_REASON_BYTES: usize = 32;
 /// Upper bound on the `model` header, in bytes.
 pub const MAX_MODEL_BYTES: usize = 256;
@@ -151,9 +152,28 @@ pub mod refusal_reasons {
     pub const TOOL_PAIR_SPLIT: &str = "tool_pair_split";
     /// Applying the view would break the current model provider's role order.
     pub const ROLE_ORDER: &str = "role_order";
-    /// The current model's own rules forbid the view and the runner cannot
-    /// adapt it (for example, signed thinking it may not strip).
-    pub const MODEL_RULES: &str = "model_rules";
+    /// A part edit names a part key the message does not have.
+    pub const UNKNOWN_PART: &str = "unknown_part";
+    /// The current model provider's rules forbid applying the view now, and
+    /// the runner can neither defer it nor apply it with companion edits.
+    pub const PROVIDER_CONSTRAINT: &str = "provider_constraint";
+}
+
+/// Reasons a runner gives in `view_deferred`. Open, like the refusal
+/// reasons.
+pub mod defer_reasons {
+    /// Applying the view now would change bytes before signed reasoning the
+    /// model provider requires unchanged; the runner waits for a boundary
+    /// where that no longer holds.
+    pub const SIGNED_REASONING: &str = "signed_reasoning";
+}
+
+/// Companion edits a runner names in `view_companion`: changes the model
+/// provider requires beside the view, and nothing more.
+pub mod companion_edits {
+    /// Remove the signed reasoning produced after the view's first changed
+    /// byte.
+    pub const STRIP_SIGNED_REASONING: &str = "strip_signed_reasoning";
 }
 
 /// One token of a notice's `events` header.
@@ -181,6 +201,15 @@ pub enum Event {
     /// this view and keeps rendering its current one. `reason` is one of
     /// [`refusal_reasons`] or another `[a-z0-9_]` word of at most 32 bytes.
     ViewRefused { view_version: u64, reason: String },
+    /// `view_deferred:<view_version>:<reason>`: the runner holds this view
+    /// until a step boundary where applying it is safe for the current model
+    /// provider, and keeps rendering its current one meanwhile. `reason` is
+    /// one of [`defer_reasons`] or another word of the same form.
+    ViewDeferred { view_version: u64, reason: String },
+    /// `view_companion:<view_version>:<edit>`: the runner applied this view
+    /// together with a companion edit the model provider requires. `edit` is
+    /// one of [`companion_edits`] or another word of the same form.
+    ViewCompanion { view_version: u64, edit: String },
     /// `view_discarded:<view_version>`: the runner discarded this view
     /// because its coverage is no longer a prefix of the transcript. Always
     /// comes with `revert_below` in the same notice.
@@ -234,6 +263,13 @@ impl Event {
                 view_version,
                 reason,
             } => format!("view_refused:{view_version}:{reason}"),
+            Self::ViewDeferred {
+                view_version,
+                reason,
+            } => format!("view_deferred:{view_version}:{reason}"),
+            Self::ViewCompanion { view_version, edit } => {
+                format!("view_companion:{view_version}:{edit}")
+            }
             Self::ViewDiscarded(version) => format!("view_discarded:{version}"),
             Self::Unknown(token) => token.clone(),
         }
@@ -263,20 +299,31 @@ impl Event {
             "revert_below" => parse_decimal(rest)
                 .map(Self::RevertBelow)
                 .ok_or_else(malformed),
-            "view_refused" => {
-                let (view_version, reason) = rest.split_once(':').ok_or_else(malformed)?;
+            "view_refused" | "view_deferred" | "view_companion" => {
+                let (view_version, word) = rest.split_once(':').ok_or_else(malformed)?;
                 let view_version = version(view_version)?;
-                let reason_ok = !reason.is_empty()
-                    && reason.len() <= MAX_REFUSAL_REASON_BYTES
-                    && reason
+                let word_ok = !word.is_empty()
+                    && word.len() <= MAX_REFUSAL_REASON_BYTES
+                    && word
                         .bytes()
                         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-                if !reason_ok {
+                if !word_ok {
                     return Err(malformed());
                 }
-                Ok(Self::ViewRefused {
-                    view_version,
-                    reason: reason.to_owned(),
+                let word = word.to_owned();
+                Ok(match name {
+                    "view_refused" => Self::ViewRefused {
+                        view_version,
+                        reason: word,
+                    },
+                    "view_deferred" => Self::ViewDeferred {
+                        view_version,
+                        reason: word,
+                    },
+                    _ => Self::ViewCompanion {
+                        view_version,
+                        edit: word,
+                    },
                 })
             }
             "view_discarded" => version(rest).map(Self::ViewDiscarded),

@@ -39,13 +39,24 @@ RUNNER = "thalamus-harness"
 PROVIDER = "ck-mc"
 MODEL = "anthropic/claude-sonnet-4-5"
 
+def text(t):
+    return {"type": "text", "text": t}
+
+
+# ordinal -> (mid, part keys in order, message). In this model of the runner's
+# schema a message's parts are the elements of its `content` array.
 M = {
-    1: ("m1", {"role": "user", "content": "Fix the parser."}),
-    2: ("m2", {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "read", "input": {"path": "src/parser.rs"}}]}),
-    3: ("m3", {"role": "tool", "tool_call_id": "call_1", "content": "fn parse() { /* 4,000 lines */ }"}),
-    4: ("m4", {"role": "assistant", "content": "The parser drops trailing commas; fixed."}),
-    5: ("m5", {"role": "user", "content": "Now add tests."}),
-    6: ("m6", {"role": "assistant", "content": "Added three tests."}),
+    1: ("m1", ["prt_1a"], {"role": "user", "content": [text("Fix the parser.")]}),
+    2: ("m2", ["prt_2a", "prt_2b"], {"role": "assistant", "content": [
+        text("Reading the parser."),
+        {"type": "tool_use", "id": "call_1", "name": "read", "input": {"path": "src/parser.rs"}}]}),
+    3: ("m3", ["prt_3a", "prt_3b"], {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "call_1", "content": "fn parse() { /* 4,000 lines */ }"},
+        {"type": "image", "source": "screenshot-1.png"}]}),
+    4: ("m4", ["prt_4a"], {"role": "assistant", "content": [
+        text("I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse().")]}),
+    5: ("m5", ["prt_5a"], {"role": "user", "content": [text("Now add tests.")]}),
+    6: ("m6", ["prt_6a"], {"role": "assistant", "content": [text("Added three tests.")]}),
 }
 
 NOTICE_ORDER = ["applied_view_version", "est_tokens", "events", "last_usage", "model", "seq",
@@ -62,7 +73,7 @@ def notice_digest(h):
 
 def notice(name, seq, through, events=None, applied=None, usage=None, window="200000", est="1200", model=MODEL):
     h = {"session_ref": SR, "seq": str(seq), "through_ordinal": str(through),
-         "through_digest": sha(jcs(M[through][1])), "est_tokens": est, "model": model}
+         "through_digest": sha(jcs(M[through][2])), "est_tokens": est, "model": model}
     if window is not None:
         h["window"] = window
     if events:
@@ -87,6 +98,12 @@ def view_digest(v):
         parts += [r["kind"], str(r["from"]), str(r["to"])]
         if r["kind"] == "replace":
             parts.append(r["bytes"])
+        else:
+            edits = r.get("edits", [])
+            parts.append(str(len(edits)))
+            for e in edits:
+                parts += [str(e["ordinal"]), e["mid"], e["part"]]
+                parts += ["bytes", e["bytes"]] if "bytes" in e else ["drop"]
     if "cut" in v:
         parts += ["cut", v["cut"]["cut_id"], str(v["cut"]["through_ordinal"])]
     return framed(parts)
@@ -101,8 +118,11 @@ def view(version, through, ranges, cut=None, lineage="lin_a", digest=None):
     return v
 
 
-def keep(a, b):
-    return {"kind": "keep", "from": a, "to": b}
+def keep(a, b, edits=None):
+    r = {"kind": "keep", "from": a, "to": b}
+    if edits:
+        r["edits"] = edits
+    return r
 
 
 def replace(a, b, messages):
@@ -110,24 +130,70 @@ def replace(a, b, messages):
             "bytes": json.dumps(messages, separators=(",", ":"))}
 
 
-HEAD = [{"role": "user", "content": "<session-history>The user asked to fix the parser.</session-history>"}]
-PLACEHOLDER = [{"role": "tool", "tool_call_id": "call_1", "content": "[dropped \u00a73\u00a7]"}]
+def edit(ordinal, part_key, part=None, drop=False, mid=None):
+    e = {"ordinal": ordinal, "mid": mid or M[ordinal][0], "part": part_key}
+    if part is not None:
+        e["bytes"] = json.dumps(part, separators=(",", ":"))
+    if drop:
+        e["drop"] = True
+    return e
+
+
+def message_row(o):
+    mid, parts, message = M[o]
+    return {"ordinal": o, "mid": mid, "parts": parts, "message": message}
+
+
+def assemble(v, transcript_rows):
+    """Reference assembly: parts are the elements of `content`, keyed by `parts`."""
+    out = []
+    for r in v["ranges"]:
+        if r["kind"] == "replace":
+            out += json.loads(r["bytes"])
+            continue
+        for row in transcript_rows:
+            if not (r["from"] <= row["ordinal"] < r["to"]):
+                continue
+            mine = {e["part"]: e for e in r.get("edits", []) if e["ordinal"] == row["ordinal"]}
+            if not mine:
+                out.append(row["message"])
+                continue
+            content = []
+            for key, part in zip(row["parts"], row["message"]["content"]):
+                e = mine.get(key)
+                if e is None:
+                    content.append(part)
+                elif not e.get("drop"):
+                    content.append(json.loads(e["bytes"]))
+            out.append({**row["message"], "content": content})
+    out += [row["message"] for row in transcript_rows if row["ordinal"] > v["covers_through"]["ordinal"]]
+    return out
+
+
+HEAD = [{"role": "user", "content": [{"type": "text", "text": "<session-history>The user asked to fix the parser.</session-history>"}]}]
+PLACEHOLDER_PART = {"type": "tool_result", "tool_use_id": "call_1", "content": "[dropped \u00a73\u00a7]"}
+COMPRESSED_PART = {"type": "text", "text": "Fixed: the parser dropped trailing commas."}
+FOLD = [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "<folded>parser.rs, 4,000 lines</folded>"}]}]
 
 V1 = view(1, 1, [replace(0, 0, HEAD), keep(0, 2)])
-V3 = view(3, 4, [replace(0, 2, HEAD), keep(2, 3), replace(3, 4, PLACEHOLDER), keep(4, 5)],
+V3 = view(3, 4, [replace(0, 2, HEAD),
+                 keep(2, 5, [edit(3, "prt_3a", part=PLACEHOLDER_PART), edit(3, "prt_3b", drop=True)])],
           cut={"cut_id": "cut-1", "through_ordinal": 1})
-V4 = view(4, 5, [replace(0, 2, HEAD), keep(2, 6)], cut={"cut_id": "cut-2", "through_ordinal": 1})
+V4 = view(4, 5, [replace(0, 2, HEAD), keep(2, 6, [edit(4, "prt_4a", part=COMPRESSED_PART)])],
+          cut={"cut_id": "cut-2", "through_ordinal": 1})
+V5 = view(5, 4, [replace(0, 2, HEAD), keep(2, 3), replace(3, 4, FOLD), keep(4, 5)],
+          cut={"cut_id": "cut-3", "through_ordinal": 1})
 
-transcript = [[o, M[o][0], M[o][1]] for o in sorted(M)]
+transcript = [message_row(o) for o in sorted(M)]
 
 views = [
-    {"name": "insertion head before every message", "view": V1,
-     "assembled": [HEAD[0], M[1][1], M[2][1], M[3][1], M[4][1], M[5][1], M[6][1]]},
-    {"name": "keep and replace ranges with a cut", "view": V3,
-     "assembled": [HEAD[0], M[2][1], PLACEHOLDER[0], M[4][1], M[5][1], M[6][1]]},
-    {"name": "head then one kept range", "view": V4,
-     "assembled": [HEAD[0], M[2][1], M[3][1], M[4][1], M[5][1], M[6][1]]},
+    {"name": "insertion head before every message", "view": V1},
+    {"name": "part edits inside a keep range: a dropped tool output and a stripped image", "view": V3},
+    {"name": "compressed text inside a kept message", "view": V4},
+    {"name": "whole-message fold between kept ranges", "view": V5},
 ]
+for case in views:
+    case["assembled"] = assemble(case["view"], transcript)
 
 
 def bad(name, problem, **changes):
@@ -141,7 +207,8 @@ def bad(name, problem, **changes):
 
 
 tampered = json.loads(json.dumps(V3))
-tampered["ranges"][2]["bytes"] = json.dumps([{"role": "tool", "tool_call_id": "call_1", "content": "rm -rf /"}], separators=(",", ":"))
+tampered["ranges"][1]["edits"][0]["bytes"] = json.dumps(
+    {"type": "tool_result", "tool_use_id": "call_1", "content": "rm -rf /"}, separators=(",", ":"))
 
 views_refused = [
     bad("session_ref is not a session reference", "session_ref", session_ref="ses_1"),
@@ -166,6 +233,30 @@ del no_ranges["cut"]
 no_ranges["digest"] = view_digest(no_ranges)
 views_refused.insert(3, {"name": "no ranges", "view": no_ranges, "problem": "no_ranges"})
 
+def bad_edits(name, problem, edits):
+    v = json.loads(json.dumps(V3))
+    v["ranges"][1]["edits"] = edits
+    v["digest"] = view_digest(v)
+    return {"name": name, "view": v, "problem": problem}
+
+
+BOTH = {**edit(3, "prt_3a", part=PLACEHOLDER_PART), "drop": True}
+NEITHER = {"ordinal": 3, "mid": "m3", "part": "prt_3a"}
+edits_refused = [
+    bad_edits("edit above its keep range", "edit_outside_range", [edit(5, "prt_5a", drop=True)]),
+    bad_edits("edit below its keep range", "edit_outside_range", [edit(1, "prt_1a", drop=True)]),
+    bad_edits("edits out of ordinal order", "edit_order",
+              [edit(4, "prt_4a", part=COMPRESSED_PART), edit(3, "prt_3b", drop=True)]),
+    bad_edits("two edits of one part", "duplicate_edit",
+              [edit(3, "prt_3a", part=PLACEHOLDER_PART), edit(3, "prt_3a", drop=True)]),
+    bad_edits("empty part key", "edit_part", [edit(3, "", drop=True)]),
+    bad_edits("part key over 256 bytes", "edit_part", [edit(3, "p" * 257, drop=True)]),
+    bad_edits("both bytes and drop", "edit_action", [BOTH]),
+    bad_edits("neither bytes nor drop", "edit_action", [NEITHER]),
+    bad_edits("edit bytes are not JSON", "edit_not_json",
+              [{"ordinal": 3, "mid": "m3", "part": "prt_3a", "bytes": "{\"type\": \"tool_result\""}]),
+]
+
 views_undecodable = [
     {"name": "unknown range kind", "view": {**V3, "ranges": [{"kind": "summarize", "from": 0, "to": 5}]}},
     {"name": "range named by message ids", "view": {**V3, "ranges": [{"kind": "keep", "from": "m1", "to": "m4"}]}},
@@ -179,8 +270,20 @@ def ready_headers(v, digest=None, version=None):
             "covers_through": str(v["covers_through"]["ordinal"]), "digest": digest or v["digest"]}
 
 
-after_revert = [[o, M[o][0]] for o in (1, 2, 3)] + [[7, "m7"]]
-full = [[o, M[o][0]] for o in sorted(M)]
+def rows(ordinals, extra=()):
+    return [message_row(o) for o in ordinals] + list(extra)
+
+
+M7 = {"ordinal": 7, "mid": "m7", "parts": ["prt_7a"],
+      "message": {"role": "user", "content": [{"type": "text", "text": "Try again."}]}}
+after_revert = rows((1, 2, 3), [M7])
+full = rows(sorted(M))
+m3_rewritten = rows((1, 2)) + [{**message_row(3), "mid": "m3b"}] + rows((4, 5, 6))
+m4_rewritten = rows((1, 2, 3)) + [{**message_row(4), "mid": "m4b"}]
+
+UNKNOWN_PART = view(6, 4, [replace(0, 2, HEAD), keep(2, 5, [edit(3, "prt_3z", drop=True)])])
+PART_ORDER = view(6, 4, [replace(0, 2, HEAD), keep(2, 5, [edit(3, "prt_3b", drop=True),
+                                                         edit(3, "prt_3a", part=PLACEHOLDER_PART)])])
 
 dispositions = [
     {"name": "newer view over the current transcript applies", "view": V3, "ready": ready_headers(V3),
@@ -192,10 +295,14 @@ dispositions = [
     {"name": "revert truncated below the coverage: discard", "view": V3, "ready": ready_headers(V3),
      "current_version": 1, "lineage_id": "lin_a", "transcript": after_revert, "outcome": "discard"},
     {"name": "another message now at the coverage ordinal: discard", "view": V3, "ready": ready_headers(V3),
-     "current_version": 1, "lineage_id": "lin_a",
-     "transcript": [[1, "m1"], [2, "m2"], [3, "m3"], [4, "m4b"]], "outcome": "discard"},
+     "current_version": 1, "lineage_id": "lin_a", "transcript": m4_rewritten, "outcome": "discard"},
+    {"name": "an edited message now has another id: discard", "view": V3, "ready": ready_headers(V3),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": m3_rewritten, "outcome": "discard"},
     {"name": "view over another lineage: discard", "view": V3, "ready": ready_headers(V3),
      "current_version": 1, "lineage_id": "lin_b", "transcript": full, "outcome": "discard"},
+    {"name": "edit names a part key the message does not have", "view": UNKNOWN_PART,
+     "ready": ready_headers(UNKNOWN_PART),
+     "current_version": 4, "lineage_id": "lin_a", "transcript": full, "outcome": "refused:unknown_part"},
     {"name": "digest differs from the announced digest", "view": V3, "ready": ready_headers(V3, digest=V4["digest"]),
      "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:digest_mismatch"},
     {"name": "bytes changed but the digest member kept", "view": tampered, "ready": ready_headers(V3),
@@ -205,6 +312,8 @@ dispositions = [
     {"name": "malformed view is rejected before any prefix check", "view": views_refused[5]["view"],
      "ready": ready_headers(views_refused[5]["view"]),
      "current_version": 1, "lineage_id": "lin_a", "transcript": after_revert, "outcome": "rejected:gap"},
+    {"name": "edits of one message out of its part order", "view": PART_ORDER, "ready": ready_headers(PART_ORDER),
+     "current_version": 4, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:edit_order"},
 ]
 
 notices = [
@@ -218,6 +327,12 @@ notices = [
     notice("revert discards the current view", 8, 3, events=["revert_below:4", "view_discarded:3"], est="9000"),
     notice("view refused for a split tool pair", 9, 6, events=["view_refused:5:tool_pair_split"], applied=4,
            est="70000"),
+    notice("view refused for an unknown part", 10, 6, events=["view_refused:6:unknown_part"], applied=4,
+           est="70100"),
+    notice("view deferred until a provider-safe boundary", 11, 6, events=["view_deferred:6:signed_reasoning"],
+           applied=4, est="70200"),
+    notice("view applied with a companion edit", 12, 6, events=["view_companion:6:strip_signed_reasoning"],
+           applied=6, est="41000"),
     notice("window unknown", 2, 2, window=None, est="1500"),
 ]
 
@@ -271,6 +386,9 @@ notices_refused = [
     mutate(N1, "view_discarded of version zero", "malformed:events", events="revert_below:2,view_discarded:0"),
     mutate(N1, "view_refused with an uppercase reason", "malformed:events", events="view_refused:4:Tool_Split"),
     mutate(N1, "view_refused without a reason", "malformed:events", events="view_refused:4"),
+    mutate(N1, "view_deferred without a reason", "malformed:events", events="view_deferred:6"),
+    mutate(N1, "view_companion with an uppercase edit", "malformed:events", events="view_companion:6:Strip"),
+    mutate(N1, "view_companion of version zero", "malformed:events", events="view_companion:0:strip_signed_reasoning"),
     mutate(N1, "duplicate event token", "duplicate_event", events="model_change,model_change"),
     mutate(N1, "more than 32 event tokens", "too_many_events", events=",".join(f"e{i}" for i in range(33))),
     mutate(N1, "events over 1024 bytes", "malformed:events",
@@ -320,6 +438,8 @@ ride = {
     "requests_refused": [
         {"name": "zero deadline", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 0}, "problem": "deadline_out_of_range"},
         {"name": "deadline over five minutes", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},
+        {"name": "a rewrite ride over ten seconds", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 10001}, "problem": "deadline_out_of_range"},
+        {"name": "a model-change ride over ten seconds", "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 30000}, "problem": "deadline_out_of_range"},
         {"name": "raw session id", "params": {"session_ref": "ses_1", "cause": "ttl_expired", "deadline_ms": 1500}, "problem": "session_ref"},
     ],
     "answers": [
@@ -398,6 +518,7 @@ doc = {
     "views": views,
     "views_refused": views_refused,
     "views_undecodable": views_undecodable,
+    "edits_refused": edits_refused,
     "dispositions": dispositions,
     "view_get": view_get,
     "ride": ride,
