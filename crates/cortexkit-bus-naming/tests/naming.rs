@@ -91,10 +91,16 @@ fn every_governed_name_obeys_its_rule_and_exemptions_are_closed() {
 }
 
 #[test]
-fn event_names_are_one_subject_token_without_hyphens() {
+fn event_names_refuse_hyphens_and_non_lexicon_characters() {
     use cortexkit_bus_naming::validate_token;
     let names = AccountNames::derive("box_events").unwrap();
-    for bad in ["pull-request", "a.b"] {
+    for bad in [
+        "pull-request",
+        "run.bad-name",
+        "run.Bad",
+        "run._lead",
+        "run.a b",
+    ] {
         let error =
             validate_token(TokenKind::EventName, bad).expect_err("event name must be refused");
         assert_eq!(error.kind(), TokenKind::EventName);
@@ -123,6 +129,72 @@ fn event_names_are_one_subject_token_without_hyphens() {
             .unwrap(),
         "ck.box_events.event.github.pull_request_review.v1"
     );
+}
+
+#[test]
+fn event_names_accept_hierarchical_paths_with_the_version_last() {
+    use cortexkit_bus_naming::validate_token;
+    let names = AccountNames::derive("box_events").unwrap();
+    for event in ["run.started", "run.worker.step.finished"] {
+        validate_token(TokenKind::EventName, event).unwrap();
+        let subject = names.event_subject("broca", event, 1).unwrap();
+        assert_eq!(subject, format!("ck.box_events.event.broca.{event}.v1"));
+        let tokens = subject.split('.').collect::<Vec<_>>();
+        assert_eq!(tokens.last(), Some(&"v1"));
+        assert_eq!(tokens[4..tokens.len() - 1].join("."), event);
+    }
+    assert_eq!(
+        names.event_subject("broca", "run.started", 1).unwrap(),
+        "ck.box_events.event.broca.run.started.v1"
+    );
+}
+
+#[test]
+fn event_names_refuse_five_levels() {
+    use cortexkit_bus_naming::validate_token;
+    let names = AccountNames::derive("box_events").unwrap();
+    assert!(validate_token(TokenKind::EventName, "a.b.c.d.e").is_err());
+    assert!(names.event_subject("broca", "a.b.c.d.e", 1).is_err());
+}
+
+#[test]
+fn event_names_refuse_empty_or_version_shaped_levels() {
+    use cortexkit_bus_naming::validate_token;
+    let names = AccountNames::derive("box_events").unwrap();
+    for bad in [
+        "",
+        ".run",
+        "run.",
+        "run..started",
+        "v1",
+        "v0",
+        "v01",
+        "v1.run",
+        "run.v2",
+        "run.v1.started",
+        "run.worker.step.v999999999999999999999",
+        "run.*",
+        "run.>",
+        "run.é",
+        "run.\tstarted",
+    ] {
+        let error = validate_token(TokenKind::EventName, bad).unwrap_err();
+        assert_eq!(error.kind(), TokenKind::EventName);
+        assert_eq!(error.token(), bad);
+        assert!(names.event_subject("broca", bad, 1).is_err(), "{bad:?}");
+    }
+    for good in ["v", "v1a", "run.v_1", "1.2.3.4"] {
+        validate_token(TokenKind::EventName, good).unwrap();
+    }
+}
+
+#[test]
+fn event_name_length_limit_applies_to_each_level() {
+    use cortexkit_bus_naming::validate_token;
+    let level = "a".repeat(63);
+    let path = [level.as_str(); 4].join(".");
+    validate_token(TokenKind::EventName, &path).unwrap();
+    assert!(validate_token(TokenKind::EventName, &format!("run.{}a", level)).is_err());
 }
 
 #[test]

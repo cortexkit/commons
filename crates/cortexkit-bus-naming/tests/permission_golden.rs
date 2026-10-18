@@ -610,3 +610,221 @@ fn system_user_can_look_up_account_claims_and_read_only_its_own_replies() {
     assert!(!has(Operation::Subscribe, "_INBOX.>"));
     assert!(system_permissions("cksys.>").is_err());
 }
+
+#[test]
+fn non_table_modules_keep_the_exact_participant_grant() {
+    use cortexkit_bus_naming::{participant_permissions, Operation};
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let allows = participant_permissions(&account, "ckbus", "ckbus", &["room_gold_bound"]).unwrap();
+    let rendered = allows
+        .iter()
+        .map(|entry| {
+            format!(
+                "allow participant {} {}",
+                entry.operation.as_str(),
+                entry.subject
+            )
+        })
+        .collect::<Vec<_>>();
+    let expected = CHECKED_IN_GOLDEN
+        .lines()
+        .filter(|line| line.starts_with("allow participant "))
+        .collect::<Vec<_>>();
+    assert_eq!(rendered, expected);
+    assert!(!allowed(
+        &allows,
+        Principal::Participant,
+        Operation::Publish,
+        &format!(
+            "$JS.API.CONSUMER.MSG.NEXT.{}.m_ckbus",
+            account.streams().event
+        )
+    ));
+}
+
+#[test]
+fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() {
+    use cortexkit_bus_naming::{participant_permissions, AllowEntry, Operation};
+    use std::collections::BTreeSet;
+    let account = AccountNames::derive("box_readers").unwrap();
+    for module_id in ["prefrontal-core", "astrocyte"] {
+        let baseline = participant_permissions(&account, "UPFC", "ordinary", &[])
+            .unwrap()
+            .into_iter()
+            .map(|mut entry| {
+                if entry.subject == "ck.box_readers.event.ordinary.>" {
+                    entry.subject = format!("ck.box_readers.event.{module_id}.>");
+                }
+                entry
+            })
+            .collect::<BTreeSet<_>>();
+        let actual = participant_permissions(&account, "UPFC", module_id, &[])
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert!(baseline.is_subset(&actual));
+        let extra = actual
+            .difference(&baseline)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let expected = [
+            format!("$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_{module_id}"),
+            format!("$JS.ACK.CK_BOX_READERS_EVENT.m_{module_id}.>"),
+            format!("$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_{module_id}"),
+        ]
+        .map(|subject| AllowEntry {
+            principal: Principal::Participant,
+            operation: Operation::Publish,
+            subject: subject.to_owned(),
+        })
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        assert_eq!(extra, expected);
+        assert!(allowed(
+            &actual.into_iter().collect::<Vec<_>>(),
+            Principal::Participant,
+            Operation::Subscribe,
+            "_INBOX.UPFC.reply"
+        ));
+    }
+}
+
+fn assert_event_reader_refused(subjects: &[String]) {
+    use cortexkit_bus_naming::{
+        delivery_authority_permissions, participant_permissions, Operation,
+    };
+    let account = AccountNames::derive("box_readers").unwrap();
+    for (principal, allows) in [
+        (
+            Principal::Participant,
+            participant_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap(),
+        ),
+        (
+            Principal::DeliveryAuthority,
+            delivery_authority_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap(),
+        ),
+        (
+            Principal::Participant,
+            participant_permissions(&account, "UASTRO", "astrocyte", &[]).unwrap(),
+        ),
+    ] {
+        for subject in subjects {
+            assert!(
+                !allowed(&allows, principal, Operation::Publish, subject),
+                "{} may publish {subject}",
+                principal.as_str()
+            );
+        }
+    }
+}
+
+#[test]
+fn event_consumer_cannot_create_consumers() {
+    let stream = "CK_BOX_READERS_EVENT";
+    assert_event_reader_refused(&[
+        format!("$JS.API.CONSUMER.CREATE.{stream}"),
+        format!("$JS.API.CONSUMER.CREATE.{stream}.ephemeral"),
+        format!("$JS.API.CONSUMER.CREATE.{stream}.m_prefrontal-core.ck.box_readers.event.broca.>"),
+        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_prefrontal-core"),
+    ]);
+}
+
+#[test]
+fn event_consumer_cannot_pull_basal() {
+    assert_event_reader_refused(&[
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_basal".to_owned(),
+        "$JS.ACK.CK_BOX_READERS_EVENT.m_basal.1.2.3.4.5".to_owned(),
+        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_basal".to_owned(),
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.server_ephemeral".to_owned(),
+    ]);
+}
+
+#[test]
+fn event_consumer_cannot_delete_purge_or_directly_read_events() {
+    let stream = "CK_BOX_READERS_EVENT";
+    assert_event_reader_refused(&[
+        format!("$JS.API.CONSUMER.DELETE.{stream}.m_prefrontal-core"),
+        format!("$JS.API.CONSUMER.DELETE.{stream}.m_astrocyte"),
+        format!("$JS.API.STREAM.PURGE.{stream}"),
+        format!("$JS.API.STREAM.DELETE.{stream}"),
+        format!("$JS.API.STREAM.MSG.GET.{stream}"),
+        format!("$JS.API.DIRECT.GET.{stream}"),
+        format!("$JS.API.DIRECT.GET.{stream}.ck.box_readers.event.broca.run.started.v1"),
+    ]);
+}
+
+#[test]
+fn astrocyte_reads_only_its_own_event_durable_and_publishes_only_its_own_events() {
+    use cortexkit_bus_naming::{participant_permissions, Operation};
+    let account = AccountNames::derive("box_readers").unwrap();
+    let allows = participant_permissions(&account, "UASTRO", "astrocyte", &[]).unwrap();
+    for subject in [
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_astrocyte",
+        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_astrocyte",
+        "$JS.ACK.CK_BOX_READERS_EVENT.m_astrocyte.1.2.3.4.5",
+        "ck.box_readers.event.astrocyte.quota_sampled.v1",
+    ] {
+        assert!(
+            allowed(&allows, Principal::Participant, Operation::Publish, subject),
+            "astrocyte cannot {subject}"
+        );
+    }
+    for subject in [
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_prefrontal-core",
+        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_prefrontal-core",
+        "$JS.ACK.CK_BOX_READERS_EVENT.m_prefrontal-core.1.2.3.4.5",
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_basal",
+        "ck.box_readers.event.insula.quota_sampled.v1",
+    ] {
+        assert!(
+            !allowed(&allows, Principal::Participant, Operation::Publish, subject),
+            "astrocyte may publish {subject}"
+        );
+    }
+    assert!(!allowed(
+        &allows,
+        Principal::Participant,
+        Operation::Subscribe,
+        "ck.box_readers.event.insula.quota_sampled.v1"
+    ));
+    assert!(allowed(
+        &allows,
+        Principal::Participant,
+        Operation::Subscribe,
+        "_INBOX.UASTRO.reply"
+    ));
+}
+
+#[test]
+fn event_consumer_reads_but_cannot_publish_broca_events() {
+    use cortexkit_bus_naming::{participant_permissions, Operation};
+    assert_event_reader_refused(&[
+        "ck.box_readers.event.broca.run.v1".to_owned(),
+        "ck.box_readers.event.broca.run.started.v1".to_owned(),
+        "ck.box_readers.event.broca.run.progress.v1".to_owned(),
+    ]);
+    let account = AccountNames::derive("box_readers").unwrap();
+    let allows = participant_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap();
+    for subject in [
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_prefrontal-core",
+        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_prefrontal-core",
+        "$JS.ACK.CK_BOX_READERS_EVENT.m_prefrontal-core.1.2.3.4.5",
+        "ck.box_readers.event.prefrontal-core.run.started.v1",
+    ] {
+        assert!(
+            allowed(&allows, Principal::Participant, Operation::Publish, subject),
+            "reader cannot {subject}"
+        );
+    }
+    for subject in [
+        "ck.box_readers.event.broca.run.started.v1",
+        "_INBOX.someone_else.reply",
+    ] {
+        assert!(!allowed(
+            &allows,
+            Principal::Participant,
+            Operation::Subscribe,
+            subject
+        ));
+    }
+}

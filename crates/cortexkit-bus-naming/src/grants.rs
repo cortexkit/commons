@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::names::AccountNames;
 use crate::token::{validate_token, NamingError, TokenKind};
+use crate::EVENT_CONSUMERS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Principal {
@@ -13,6 +14,11 @@ pub enum Principal {
     System,
     /// The module that runs flows (basal): it reads the event stream.
     FlowEngine,
+    /// An event-consumer table entry as its own principal in the permission
+    /// golden file (tests/grants/permission_golden.txt), separate from the
+    /// generic participant, so the golden can show that one reader cannot pull
+    /// another reader's JetStream durable consumer.
+    EventConsumer(&'static str),
 }
 
 impl Principal {
@@ -23,6 +29,7 @@ impl Principal {
             Self::Bus => "bus",
             Self::System => "system",
             Self::FlowEngine => "flow-engine",
+            Self::EventConsumer(module_id) => module_id,
         }
     }
 }
@@ -203,6 +210,7 @@ impl From<NamingError> for GrantError {
 ///
 /// It may publish its own module events, on `ck.{acct}.event.{module_id}.>`
 /// and on no other module's event subjects.
+/// Modules in `EVENT_CONSUMERS` may also read their own filtered event durable.
 pub fn participant_permissions(
     account: &AccountNames,
     credential_public: &str,
@@ -340,6 +348,20 @@ fn add_consumer_permissions(
     }
 
     add_census_read_permissions(entries, principal, account);
+    if let Some(consumer) = EVENT_CONSUMERS
+        .iter()
+        .find(|entry| entry.module_id == module_id)
+    {
+        let durable = consumer.durable_name()?;
+        let stream = &account.streams().event;
+        for subject in [
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{durable}"),
+            format!("$JS.ACK.{stream}.{durable}.>"),
+            format!("$JS.API.CONSUMER.INFO.{stream}.{durable}"),
+        ] {
+            add(entries, principal, Operation::Publish, subject);
+        }
+    }
     Ok(())
 }
 
@@ -552,6 +574,19 @@ pub fn generate_permission_golden(
         fixture.flow_engine_module,
         fixture.flow_engine_module,
     )?);
+    for reader in EVENT_CONSUMERS.iter().filter(|reader| {
+        reader.module_id != fixture.delivery_authority_module
+            && reader.module_id != fixture.module_id
+    }) {
+        allows.extend(
+            participant_permissions(&account, reader.module_id, reader.module_id, &[])?
+                .into_iter()
+                .map(|mut entry| {
+                    entry.principal = Principal::EventConsumer(reader.module_id);
+                    entry
+                }),
+        );
+    }
 
     let mut refused = BTreeSet::new();
     // Credentials name no agents, so no participant may produce a workload
@@ -763,6 +798,63 @@ pub fn generate_permission_golden(
     let event_stream = &account.streams().event;
     let own_durable = AccountNames::module_consumer_name(fixture.flow_engine_module)?;
     let foreign_durable = AccountNames::module_consumer_name(fixture.foreign_module)?;
+    for reader in EVENT_CONSUMERS {
+        let principal = if reader.module_id == fixture.delivery_authority_module {
+            Principal::DeliveryAuthority
+        } else if reader.module_id == fixture.module_id {
+            Principal::Participant
+        } else {
+            Principal::EventConsumer(reader.module_id)
+        };
+        let reader_durable = reader.durable_name()?;
+        for (subject, reason) in [
+            (
+                format!("$JS.API.CONSUMER.CREATE.{event_stream}"),
+                "event-consumer-create",
+            ),
+            (
+                format!("$JS.API.CONSUMER.MSG.NEXT.{event_stream}.{own_durable}"),
+                "foreign-event-durable",
+            ),
+            (
+                format!("$JS.API.CONSUMER.DELETE.{event_stream}.{reader_durable}"),
+                "event-consumer-delete",
+            ),
+            (
+                account.event_subject("broca", "run", 1)?,
+                "foreign-module-event",
+            ),
+            (
+                account.event_subject("insula", "quota_sampled", 1)?,
+                "foreign-module-event",
+            ),
+            (
+                format!("$JS.API.STREAM.MSG.GET.{event_stream}"),
+                "event-direct-read",
+            ),
+        ] {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Publish,
+                subject,
+                reason,
+            });
+        }
+        for other in EVENT_CONSUMERS
+            .iter()
+            .filter(|other| other.module_id != reader.module_id)
+        {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Publish,
+                subject: format!(
+                    "$JS.API.CONSUMER.MSG.NEXT.{event_stream}.{}",
+                    other.durable_name()?
+                ),
+                reason: "foreign-event-durable",
+            });
+        }
+    }
     for (subject, reason) in [
         (
             format!("$JS.API.CONSUMER.DURABLE.CREATE.{event_stream}.{foreign_durable}"),
@@ -922,7 +1014,10 @@ fn validate_principal(line: usize, principal: &str) -> Result<(), GrantError> {
     if matches!(
         principal,
         "participant" | "delivery-authority" | "bus" | "system" | "flow-engine"
-    ) {
+    ) || EVENT_CONSUMERS
+        .iter()
+        .any(|entry| entry.module_id == principal)
+    {
         Ok(())
     } else {
         Err(file_error(line, "unknown principal"))

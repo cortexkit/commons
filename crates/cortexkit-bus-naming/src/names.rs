@@ -182,9 +182,10 @@ impl AccountNames {
     /// The subject one module publishes one event on:
     /// `ck.{acct}.event.{module_id}.{event}.v{version}`.
     ///
-    /// The event name must be a single subject token and the version at least
-    /// 1, so every event subject has exactly six tokens and the version is
-    /// always the last one.
+    /// The event name is one to four dot-separated tokens and the version at
+    /// least 1. Readers must take the version from the last token and the event
+    /// name from everything between the module id and that version, rather
+    /// than splitting at fixed positions.
     pub fn event_subject(
         &self,
         module_id: &str,
@@ -223,7 +224,7 @@ impl AccountNames {
     /// The durable a module reads a non-agent stream through, `m_{module_id}`.
     ///
     /// The `m_` prefix keeps module durables apart from the agent namespace
-    /// `c_`. They live on the event stream (one per flow-engine module) and on
+    /// `c_`. They live on the event stream (flow engine and reviewed readers) and on
     /// the ROOM stream (the delivery authority's one durable, filtered on
     /// `room_binding`), never on an agent stream.
     pub fn module_consumer_name(module_id: &str) -> Result<String, NamingError> {

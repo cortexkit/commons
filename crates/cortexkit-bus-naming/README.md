@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-bus-naming = "0.2.0"
+cortexkit-bus-naming = "0.2.3"
 ```
 
 See the [crate source](src/lib.rs) for `validate_token`, `TokenKind`, and topology validators.

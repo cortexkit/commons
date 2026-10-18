@@ -12,7 +12,7 @@ pub enum TokenKind {
     RosterHostId,
     CredentialPublic,
     RootProvider,
-    /// The `{event}` token of a module event subject.
+    /// The one-to-four-token `{event}` path of a module event subject.
     EventName,
     /// The `v{version}` token of a module event subject.
     EventVersion,
@@ -88,18 +88,37 @@ pub fn validate_account_token(token: &str) -> Result<(), NamingError> {
     )
 }
 
-/// Validates an event name, `[a-z0-9][a-z0-9_]{0,62}`.
+/// Validates an event name with one to four dot-separated subject tokens,
+/// each `[a-z0-9][a-z0-9_]{0,62}`.
 ///
-/// NATS splits subjects on dots, so an event name must be exactly one subject
-/// token: a dot would add a level to `ck.{acct}.event.{module_id}.{event}.v{n}`
-/// and shift the version out of place. The hyphen is refused as well, so event
-/// names stay in the narrower lexicon the account token already uses.
+/// Version-shaped name levels (`v` followed by digits) are reserved so a name
+/// level cannot be confused with the subject's final version token.
 fn validate_event_name(token: &str) -> Result<(), NamingError> {
-    validate_no_hyphen_token(
-        TokenKind::EventName,
-        token,
-        "expected [a-z0-9][a-z0-9_]{0,62}; an event name is one subject token, so dots, hyphens, wildcards and whitespace are forbidden",
-    )
+    if !(1..=4).contains(&token.split('.').count()) {
+        return Err(NamingError::new(
+            TokenKind::EventName,
+            token,
+            "event name must contain one to four dot-separated tokens",
+        ));
+    }
+    for level in token.split('.') {
+        validate_no_hyphen_token(
+            TokenKind::EventName,
+            level,
+            "each event-name level must match [a-z0-9][a-z0-9_]{0,62}; hyphens, wildcards and whitespace are forbidden",
+        )
+        .map_err(|error| NamingError::new(TokenKind::EventName, token, error.reason()))?;
+        if level.strip_prefix('v').is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        }) {
+            return Err(NamingError::new(
+                TokenKind::EventName,
+                token,
+                "event-name levels must not be version-shaped (v followed by digits)",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Parses the version token of an event subject, `v{n}` with `n >= 1`.

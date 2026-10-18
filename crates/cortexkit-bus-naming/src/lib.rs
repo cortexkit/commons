@@ -1,10 +1,15 @@
 //! Canonical names, topology limits, and allow-only grants for the NATS plane.
 
+mod event_consumers;
 mod grants;
 mod limits;
 mod names;
 mod token;
 
+pub use event_consumers::{
+    event_consumer_specs, flow_engine_consumer_spec, AckPolicy, DeliverPolicy, EventConsumer,
+    EventConsumerError, ModuleEventConsumerSpec, EVENT_CONSUMERS,
+};
 pub use grants::{
     bus_permissions, delivery_authority_permissions, flow_engine_permissions,
     generate_permission_golden, participant_permissions, system_permissions,
