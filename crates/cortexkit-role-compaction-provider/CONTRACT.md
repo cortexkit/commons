@@ -46,6 +46,11 @@ refusals keep their existing bytes and meaning.
   `capabilities.provides` (`PROVIDES`). A module may serve several majors.
 - [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, the Setup op
   `compaction.setup` and the per-step op `compaction.step`.
+  `compaction.step` is removed in the next breaking release, once every
+  runner declares its half of the `async` group (§20.1); until then it stays
+  required.
+- [pinned] A provider that declares the `async` group also serves
+  `view.get` and `compaction.ride` (§20).
 - [pinned] A runner refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it.
 - [pinned] Compaction routes are module-level and unscoped. Requests name
@@ -83,8 +88,10 @@ refusals keep their existing bytes and meaning.
 - [pinned] The answer describes the provider build, never a session, so a
   consumer may cache it for as long as it talks to the same module
   incarnation.
-- [pinned] This role defines no identifiers for the `capabilities` list yet;
-  optional support is advertised by named describe members.
+- [pinned] This role defines one identifier for the `capabilities` list:
+  the `async` group (§20.1), which also requires the group's ops in the
+  `compaction-provider/v1` major. Other optional support is advertised by
+  named describe members.
 - [pinned] Optional boolean `role.describe.setup_descends_from: true`
   declares support for setup-level descent (§4). Absent or false means
   unsupported; false is omitted when encoded. A provider advertising true
@@ -191,7 +198,7 @@ the session and freezes that plan for use.
   setup decoding is not a declaration of support. `SetupRequest` is
   non-exhaustive and the optional member remains additive within v1.
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, stability?, call_when?}` or `{answer: "refuse", request_id, code,
+  initial, stability?, call_when?, ceiling?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§11).
   - `initial` is a CompactionMessage (§8). Usually its range is empty at the
     start of the lineage, `{from: 0, to: 0}`: the provider's head is
@@ -210,6 +217,9 @@ the session and freezes that plan for use.
   - `call_when` says when the runner calls the provider: a share of the
     context window, with per-model overrides (§5). Absent, the runner
     calls on every step.
+  - `ceiling` says when the runner pauses for a view and, failing one,
+    refuses the run (§20.5). It applies only on a session in `async` mode
+    and is omitted when absent.
   - A `refuse` ends the run `error` with the refusal's role `code`, and the
     next send runs Setup again (§11).
 
@@ -242,6 +252,10 @@ the session and freezes that plan for use.
   every newer message raw.
 
 ## 6. `compaction.step`: the status
+
+`compaction.step` is removed in the next breaking release, once every runner
+declares its half of the `async` group; a session in `async` mode never calls
+it (§20.1).
 
 The admitted host lane adds the optional fields in §18.2 and departs from the
 suffix, final-value and size rules only as specified in §18.4.
@@ -559,8 +573,8 @@ role's ids show up in it.
 
 ## 13. Purity and identity
 
-- [pinned] What the runner freezes from Setup, `stability` and `call_when`,
-  derives only from the preset, the params, the provider's configuration
+- [pinned] What the runner freezes from Setup, `stability`, `call_when`
+  and `ceiling`, derives only from the preset, the params, the provider's configuration
   and the composition. The same inputs give the same bytes.
 - [pinned] No request in this role carries scope, agent or session identity
   beyond the opaque `session` handle and the caller's `harness` (§1). A
@@ -635,6 +649,7 @@ in this table is not retryable.
 
 Host-lane omission and legacy compatibility are specified in §18.5.
 
+- [pinned] The `async` group's decoding rules are in §20.7.
 - [pinned] **Lenient** (unknown fields ignored): `role.describe`, the Setup
   request, the status and its messages, `compaction.ready`, and the fields
   of every answer.
@@ -715,10 +730,17 @@ serves `session.read` from a scripted transcript, and receives
 | `wait_then_ready_names_request`, `ready_only_after_durable_work` | §10 |
 | `stable_message_stays_stable` | §8: across steps that add only to the tail, the top-ranked replacement message's bytes do not change |
 | `crash_at_<point>` for each point in §16 | §16 |
+| `async_describe_group_ops` | §20.1: `async` declared with `view.get` and `compaction.ride` |
+| `async_notice_wakes_read`, `async_duplicate_notice_is_a_wake`, `async_seq_gap_loses_no_content` | §20.2: the provider reads with `session.read` from its own cursor |
+| `async_resync_on_changed_bytes` | §20.2: a changed digest triggers the resync steps, and no view is published until the re-read completes |
+| `async_view_immutable`, `async_view_version_rises`, `async_view_get_never_another_version` | §20.3 |
+| `async_ride_answers_within_deadline`, `async_ride_unknown_cause_nothing` | §20.5 |
+| `async_ceiling_pure` | §13: the same inputs give the same `ceiling` bytes |
 
 Runner-side rules no live provider can exercise (the fence, an unknown
-answer, the model-view source of a range, empty or not) are tested against
-the vectors in this crate.
+answer, the model-view source of a range, empty or not, a fetched view's
+disposition and the ceiling decision) are tested against the vectors in this
+crate.
 
 Verdict, as for `tool-provider/v1`: a case whose requirements the subject
 does not declare is skipped, never passed; a run fails if any case fails or
@@ -1208,3 +1230,366 @@ preserve integer precision rather than round ids, cursors or versions.
   of source admission or signed-prefix safety; the provider verifies those
   preconditions before calling it. Old-generation state remains readable for
   rollback and is not overwritten by the new native ledger.
+
+## 20. The `async` group: compaction off the runner's hot path
+
+Types: `async_group` (`notice`, `view`, `ride`, `ceiling`). Vectors:
+`async.json`, pinned by `ASYNC_SHA256SUMS`.
+
+In this mode the provider is never on the runner's hot path. The runner
+announces what it wrote over ck-bus; the provider reads it, decides on its
+own when to reshape the history, and publishes a view; the runner applies
+the newest view it holds to every request. The only synchronous contacts are
+the ride request and the ceiling pause (§20.5).
+
+### 20.1 Declaration and cutover
+
+- [pinned] A provider declares the group by listing `async`
+  (`async_group::GROUP`) in `role.describe.capabilities` and serving its two
+  ops, `view.get` and `compaction.ride` (`async_group::GROUP_OPS`), in the
+  `compaction-provider/v1` major. `check_describe` refuses a describe that
+  lists `async` without both ops, naming each missing op (`missing_op`).
+  `RoleDescribe::with_async` and `declares_async` build and read the
+  declaration.
+- [pinned] The runner declares its own half in `llm-runner/v1` (tags,
+  message origin and the `context_ceiling` code, added in
+  `cortexkit-role-llm-runner` 0.2.7). A session runs this mode only when the
+  provider declares `async` and the runner declares its half. Otherwise the
+  session uses `compaction.step` (§6–§10) exactly as before.
+- [pinned] On a session in this mode the runner still calls
+  `compaction.setup` once (§4), and never calls `compaction.step`. The
+  request fence, `wait` and `compaction.ready` (§9, §10) belong to
+  `compaction.step` and play no part. Setup's `initial` CompactionMessage is
+  what the runner renders until it applies its first view; a view replaces
+  it entirely and is never a delta over it.
+- [pinned] `compaction.step` is **removed in the next breaking release** of
+  this role, once every runner declares its half of `async`. That is a clean
+  cutover: within one session the two modes never mix, and no lasting
+  coexistence of the two modes is planned.
+- [pinned] New messages are read with `llm-runner/v1`'s `session.read`.
+  This role defines no delta op.
+
+### 20.2 Advance notices: runner to provider
+
+The bus carries no message content: the broker transports ids, digests and
+headers, never bodies. A notice is a claim check that only wakes the
+provider.
+
+- [pinned] After each durable write to a session (a message, or a runner
+  event below), the runner publishes an advance notice
+  (`notice::AdvanceNotice`) on
+  `ck.{acct}.event.<runner_module_id>.compaction.advanced.v1`
+  (`notice::event_subject` with `notice::ADVANCED_EVENT`). The bus message
+  id is `<session_ref>:<seq>` (`AdvanceNotice::message_id`). The bus digest
+  is the notice digest below. `session_ref` is `llm-runner/v1`'s session
+  reference (its §14.1, `session_ref`): 32 lowercase hexadecimal
+  characters.
+- [pinned] `seq` is the session's notice sequence: 1 for the first notice,
+  one higher for each later one. The runner assigns it when it records the
+  notice durably, before publishing. A notice republished after a crash
+  reuses its `seq` and carries identical headers, so the bus discards the
+  duplicate by id.
+- [pinned] Headers (`notice::headers`). Every value is ASCII. Every number
+  is a canonical decimal `u64`: digits only, no sign, no leading zero except
+  `0` itself. A header this contract does not define is ignored and is not
+  part of the digest.
+
+| Header | Required | Value |
+|---|---|---|
+| `session_ref` | yes | the session reference |
+| `seq` | yes | the notice sequence, at least 1 |
+| `through_ordinal` | yes | the newest ordinal written in the session's current lineage when the notice was recorded |
+| `through_digest` | yes | the content digest (below) of the message at `through_ordinal` |
+| `applied_view_version` | no | the version of the view the runner renders now; absent before its first view, and after a discard leaves it rendering none (§20.4) |
+| `events` | no | event tokens, comma-separated with no spaces, in the order they happened; omitted when there are none, never empty |
+| `est_tokens` | yes | the runner's estimate, in tokens, of its next request under its current view plus the messages after it |
+| `window` | no | the current model's context window in tokens; omitted when unknown |
+| `model` | yes | the current model id: 1 to 256 bytes, printable ASCII, no space |
+| `last_usage` | no | the last response's measured usage, `<input>:<cache_read>:<cache_write>:<output>`; omitted before the first response |
+
+- [pinned] Event tokens (`notice::Event`). Every token follows one grammar:
+  a name `[a-z][a-z0-9_]*`, then zero or more `:<argument>` segments of
+  `[A-Za-z0-9._-]+`, at most 128 bytes in all. A notice carries at most 32
+  tokens and never repeats a token. The known tokens:
+
+| Token | Meaning |
+|---|---|
+| `model_change` | the session's model changed |
+| `surface_change` | the frozen system text or tool surface changed |
+| `ttl_expired` | the prompt cache expired |
+| `revert_below:<ordinal>` | the transcript was truncated; every message at `ordinal` or above is gone |
+| `marker_outcome:<applied\|deferred\|unknown>:<cut_id>` | the host's native compaction marker for the cut of the view named by `applied_view_version` in the same notice (§20.6). `cut_id` is 1 to 64 bytes of `[A-Za-z0-9._-]` |
+| `view_discarded:<view_version>` | the runner discarded that view because its coverage is no longer a prefix of the transcript; always with `revert_below` in the same notice |
+| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§20.4). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `model_rules`, or another reason a provider treats the same way |
+
+  A known name with arguments it does not take is malformed. An unknown
+  name that follows the grammar decodes (`Event::Unknown`) and the provider
+  ignores it.
+- [pinned] `applied_view_version` is the runner's durable acknowledgement
+  of views. Every notice repeats it, so a lost notice loses no
+  acknowledgement, and there is no separate `view_applied` event. The
+  provider builds its next view against the view the runner renders now.
+- [pinned] `ttl_expired` may be declared, as an event or a ride cause,
+  **only** by a runner that knows the cache lifetime it actually sent. A host
+  whose model SDK places its own cache markers declares `model_change` and
+  `surface_change` only.
+- [pinned] A notice is refused (`AdvanceNotice::from_headers`,
+  `NoticeProblem`) when a required header is missing (`missing:<header>`), a
+  value breaks its encoding (`malformed:<header>`: `seq` or
+  `applied_view_version` of 0, a digest not lowercase hexadecimal, a
+  non-canonical number, a malformed token, a value over 1,024 bytes), a token
+  repeats (`duplicate_event`), there are more than 32 tokens
+  (`too_many_events`), `view_discarded` comes without `revert_below`
+  (`view_discarded_without_revert_below`), or `marker_outcome` comes without
+  `applied_view_version` (`marker_outcome_without_applied_view_version`).
+  The provider drops a refused notice; the next well-formed notice wakes
+  it.
+- [pinned] Size bound: the headers this contract defines total at most
+  2,048 bytes (`MAX_NOTICE_HEADER_BYTES`), counting every name's and value's
+  length as the bus counts a message's headers. The per-value bounds keep
+  every well-formed notice at or under 1,659 bytes; a runner with more events
+  than fit splits them across consecutive notices.
+- [pinned] Notice digest (`AdvanceNotice::digest`, `notice::notice_digest`):
+  lowercase hexadecimal SHA-256 over a sequence of frames, each an 8-byte
+  unsigned big-endian length followed by that many bytes: first the domain
+  `ck.compaction.advanced.v1`, then, for each header of the table the notice
+  carries, in ascending byte order of its name, the name's frame followed by
+  the value's frame.
+- [pinned] Content digest (`async_group::content_digest`): lowercase
+  hexadecimal SHA-256 over the RFC 8785 (JCS) encoding of a message, or a
+  message part, as `session.read` returns it. `through_digest` is the content
+  digest of the message at `through_ordinal`. The provider computes part
+  digests itself, over the parts the runner's tags address.
+
+#### What the provider does with a notice
+
+- [pinned] A notice only wakes the provider. The provider then reads every
+  message after its own cursor over its `llm-runner/v1` route with
+  `session.read` (range reads from the ordinal after its cursor, following
+  `next_from_ordinal`), with each message's per-part tags. That read is
+  ordered and replayable, so a lost or duplicate notice loses no content.
+  The cursor is the provider's own, kept durably per session, and advances
+  only once the messages it covers are durable in the provider's store.
+- [pinned] A notice with a `seq` at or below the highest the provider has
+  processed is a duplicate: it is a wake and nothing more. A gap in `seq`
+  loses no content and no acknowledgement (`applied_view_version` repeats).
+  A gap may hide events. A hidden revert shows up in the read (below). A
+  hidden refusal or discard shows up as `applied_view_version` never naming
+  that view. A hidden marker outcome is taken as `unknown`.
+- [pinned] The provider computes the content digest of every message it
+  reads. **Resync** is required when any of these happens:
+  - `through_digest` differs from the digest the provider computes for
+    `through_ordinal` once it has read that far;
+  - a re-read returns different bytes for an ordinal or a tag it already
+    holds;
+  - the read's `lineage_id` differs from the lineage the provider holds;
+  - the transcript ends below an ordinal the provider holds.
+- [pinned] Resync, in order:
+  1. The provider publishes no `view_ready` for the session and answers
+     every `compaction.ride` with `nothing` until step 4. Views it already
+     published stay immutable and `view.get` keeps serving them.
+  2. It discards its held copy of the session's messages, its per-part
+     index, and every unpublished view built from them. It resets its cursor
+     to none. Derived state (summaries, say) may be kept only if its sources
+     re-validate by content digest after the re-read.
+  3. It re-reads the whole current lineage from its first message, through
+     at least the newest `through_ordinal` it has seen.
+  4. It publishes a new view, at a higher version, built only from re-read
+     content.
+  If the re-read itself returns different bytes for an ordinal already
+  re-read in the same resync, the runner's reads are unstable. The provider
+  then publishes no views for the session until a later notice's
+  `through_digest` matches its read. Meanwhile the runner keeps rendering its
+  current view, and the ceiling still applies.
+- [pinned] The provider never repairs or rewrites the runner's transcript.
+  Tags are the runner's, so nothing needs repair after an outage.
+
+### 20.3 Views: provider to runner
+
+- [pinned] A view (`view::CompactionView`) is `{session_ref, view_version,
+  lineage_id, covers_through: {ordinal, mid}, ranges, cut?, digest}`. It is
+  the provider's preferred shape for the prefix of the transcript through
+  message `covers_through`. Every message after it goes out unchanged. A view
+  never replaces or rewrites the runner's transcript or the records in its
+  write-ahead log, so a session can later switch to another compaction
+  provider, or to none, with its history intact.
+- [pinned] `ranges` (`view::ViewRange`) are half-open over ordinals of
+  `lineage_id`, `from` included and `to` excluded, the convention of §8.
+  Together they tile `[0, covers_through.ordinal + 1)` in order, with no gap
+  and no overlap:
+  - `{kind: "keep", from, to}` sends the transcript's messages in the range
+    as written. Never empty.
+  - `{kind: "replace", from, to, bytes}` sends `bytes` in their place.
+    `bytes` is a string holding a UTF-8 JSON array of messages in the
+    runner's message schema: a drop placeholder, compressed text or a
+    history head. It is carried as a string so its exact bytes enter the
+    digest. `from == to` inserts the messages before `to` and replaces
+    nothing.
+  `kind` is strict: a runner cannot apply a range it does not understand.
+- [pinned] Optional `cut: {cut_id, through_ordinal}` (`view::ViewCut`) names
+  the point through which the provider's replacements stand for the whole
+  transcript. It lies on a range boundary within the coverage, with only
+  replace ranges before it (§20.6).
+- [pinned] `view_version` is a `u64` from 1, raised for every view of the
+  session, including ride views. It is never reused across a provider
+  restart: the provider resumes above both the highest version it published
+  and the highest `applied_view_version` it has seen. The provider never
+  publishes two contents under one version.
+- [pinned] View digest (`CompactionView::compute_digest`): lowercase
+  hexadecimal SHA-256 over frames as in §20.2: the domain
+  `ck.compaction.view.v1`; `session_ref`; `view_version` in decimal;
+  `lineage_id`; `covers_through.ordinal` in decimal; `covers_through.mid`;
+  the number of ranges in decimal; for each range in order, its `kind`,
+  `from` and `to` in decimal and, for `replace`, its `bytes`; then, only when
+  a cut is present, `cut`, its `cut_id` and its `through_ordinal` in decimal.
+  `digest` itself is not an input.
+- [pinned] A view is well formed (`CompactionView::check`) when, checked in
+  this order: `session_ref` is a session reference (`session_ref`);
+  `view_version` is not 0 (`version_zero`); `digest` is lowercase hexadecimal
+  (`digest_malformed`); `ranges` is not empty (`no_ranges`); each range starts
+  where the previous ended, the first at 0 (`gap`); no range is inverted and
+  no keep range is empty (`inverted`); the last range ends at
+  `covers_through.ordinal + 1` (`coverage_end`); every replace range's bytes
+  are a JSON array (`replacement_not_array`); the cut is valid (`cut`); the
+  compact JSON encoding is at most 3,145,728 bytes (`MAX_VIEW_BYTES`,
+  `too_large`); and `digest` matches the content (`digest_mismatch`).
+- [pinned] When a view is durable in its own store, the provider publishes
+  `ck.{acct}.event.<provider_module_id>.compaction.view_ready.v1`
+  (`notice::ViewReady`, `notice::VIEW_READY_EVENT`) with headers
+  `session_ref`, `view_version`, `covers_through` (the ordinal) and `digest`
+  (the view digest). The bus id is `<session_ref>:<view_version>`, and the
+  bus digest is the view digest, so the event is a claim check for exactly
+  one immutable view. It publishes one for every view, including ride
+  views.
+- [pinned] `view.get {session_ref, view_version}` (`view::ViewGetRequest`)
+  is served by the provider on the compaction route. Its answer
+  (`view::ViewGetAnswer`, strict on `answer`) is `{answer: "view", view}`,
+  byte for byte the view first published under that version, or
+  `{answer: "refuse", code, reason}` with `code` `unknown_session` or
+  `unknown_version` (`view::view_get_codes`). The provider never answers a
+  different version. It keeps at least its newest published view for each
+  session, plus every view newer than the latest `applied_view_version` it
+  has seen. A runner treats an unknown refusal code like `unknown_version`:
+  it keeps its current view and waits for the next `view_ready`.
+- [pinned] `ck-bus`'s module-event consumer table (`cortexkit-bus-naming`)
+  must admit the provider as a reader of the runner's events and the runner
+  as a reader of the provider's. This role does not change that table.
+
+### 20.4 Applying a view: the runner's side
+
+- [pinned] On a `view_ready` whose version is above the view it renders,
+  the runner fetches that view with `view.get` and decides in a fixed order
+  (`view::dispose_fetched`):
+  1. the view names the announced `session_ref` and version, or it is
+     `rejected:not_requested`;
+  2. it is well formed (§20.3), including its own digest, or it is
+     `rejected:<problem>`;
+  3. its digest equals the announced digest, or it is
+     `rejected:digest_mismatch`;
+  4. its version is above the one the runner renders, or it is `stale` and
+     ignored;
+  5. its coverage is a prefix of the transcript: same `lineage_id`, and the
+     runner's message at `covers_through.ordinal` has id
+     `covers_through.mid`. If not, it is `discard`ed.
+  Only then does it `apply`. A rejected view is not persisted, not applied
+  and not reported; the runner keeps its current view and may fetch again.
+- [pinned] **A view applies only at a step boundary.** The runner writes it
+  durably, as its own record in its write-ahead log, before the step that
+  first renders it. So a resumed run renders byte for byte what it rendered
+  before. A view that arrives mid-step waits for the next boundary. From that
+  boundary on, the runner renders it for every request until a newer view
+  applies, including across runner restarts and while the provider is down.
+  Every later notice names it in `applied_view_version`.
+- [pinned] Under a view, a request's history is, for each range in order,
+  the transcript's messages inside a keep range or a replace range's
+  messages, followed by every message after the coverage
+  (`CompactionView::assemble` is the reference). Messages a runner carries
+  outside the transcript (reminders, appends) are the runner's to place.
+- [pinned] Provider and model quirks are **the runner's** duty. The view is
+  the provider's preference, and the runner applies it within the current
+  model's rules. For example, on a model that binds signed thinking to its
+  prefix, an edit before a kept signed thinking block requires stripping
+  every later signed block; the runner does that itself. The provider
+  carries no model quirks for runners in this mode.
+- [pinned] The runner may refuse a view it cannot apply within those rules:
+  one that splits a tool call from its result (`tool_pair_split`), breaks
+  role order for the current model provider (`role_order`), or that the
+  model's rules forbid and the runner cannot adapt (`model_rules`). It
+  reports `view_refused:<version>:<reason>` on its next notice and keeps
+  rendering its current view.
+- [pinned] A view whose coverage is no longer a prefix of the transcript,
+  because a revert truncated below `covers_through`, is discarded, whether
+  just fetched or currently applied. The runner reports
+  `view_discarded:<version>` with `revert_below` on its next notice. With
+  its current view discarded, it renders Setup's initial CompactionMessage
+  and omits `applied_view_version` until a newer view applies.
+
+### 20.5 Ride request and ceiling
+
+- [pinned] `compaction.ride {session_ref, cause, deadline_ms}`
+  (`ride::RideRequest`) is a synchronous call on the compaction route. The
+  runner sends it only when its prefix is being rewritten anyway (`cause`
+  `ttl_expired`, `model_change` or `surface_change`), or when a request
+  reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
+  (`RideCause::Unknown`); a provider answers `nothing` to a cause it does not
+  know. `deadline_ms` is how long the runner waits for the answer, counted
+  from sending: above 0 and at most 300,000 (`ceiling::MAX_CEILING_WAIT_MS`).
+- [pinned] The answer (`ride::RideAnswer`, strict on `answer`) is
+  `{answer: "view", view}` or `{answer: "nothing"}`. A view is checked as in
+  §20.4, against its own digest, and applies at this step: the ride happens
+  at the step boundary before the step. A missed deadline, an `ERROR`, or an
+  answer that does not decode is treated as `nothing`, and the runner
+  proceeds with its current view. A late answer is dropped. The provider
+  also publishes `view_ready` for every ride view, so a dropped one can still
+  apply at a later boundary.
+- [pinned] Setup's `ready` answer gains optional `ceiling`
+  (`ceiling::CeilingPolicy`): `{at_share, on_overflow?, wait_ms}`. It is
+  frozen with the session, like `call_when` (§13). The runner pauses
+  when its estimate of the next request reaches `at_share` of the window
+  (`CeilingPolicy::reached`: `size >= at_share * window`), or, when
+  `on_overflow` is true, when the model provider refused the request as too
+  large. `at_share` is above 0 and at most 1. `wait_ms` is above 0 and at most
+  300,000. `on_overflow` is omitted when false (`CeilingPolicy::check`,
+  `share_out_of_range`, `wait_out_of_range`).
+- [pinned] At the ceiling the runner sends `compaction.ride` with `cause:
+  "ceiling"` and `deadline_ms` set to the time left of `wait_ms`. If that call
+  brings no view that fits, it keeps waiting for a `view_ready` until
+  `wait_ms` has passed in total. Then it decides (`CeilingPolicy::decide`),
+  in order:
+  1. a request larger than the window is refused `over_window`: the runner
+     never sends over the window;
+  2. a request that no longer reaches the ceiling is sent. A pause caused by
+     an overflow error resends only under a newer view than the one that
+     overflowed;
+  3. anything else is refused `provider_unavailable` when the provider
+     could not be reached, and `view_timeout` otherwise.
+  A refusal ends the run with `llm-runner/v1`'s `context_ceiling` code
+  (`async_group::CONTEXT_CEILING`, added in `cortexkit-role-llm-runner`
+  0.2.7) and detail `{window, size, cause}`, with `cause` from
+  `async_group::context_ceiling_causes`.
+- [pinned] Without `ceiling` the runner never pauses for the provider, and
+  still never sends over the window: such a request is refused
+  `context_ceiling` with `cause: "over_window"`.
+
+### 20.6 Native compaction marker
+
+- [pinned] Once a view with a `cut` has applied (§20.4), the runner writes
+  its host's native compaction marker at the cut (for example OpenCode's
+  compaction message or Pi's compaction entry). On its next notice it
+  reports `marker_outcome:<applied|deferred|unknown>:<cut_id>`, alongside
+  `applied_view_version` naming that view. `deferred` promises a later notice
+  with the final outcome. A runner whose host has no native marker reports
+  nothing.
+- [pinned] The marker is a host record. It never changes what the runner
+  sends while a view applies, and never rewrites the runner's transcript.
+
+### 20.7 Decoding
+
+- [pinned] Lenient: the fields of `view.get` and `compaction.ride` requests
+  and answers, of a view and its cut, and of `ceiling`. Unknown notice and
+  view-ready headers are ignored.
+- [pinned] Strict on values: `answer` in `view.get` and `compaction.ride`
+  answers, and each range's `kind`. Open: ride `cause`, unknown event tokens,
+  `view_refused` reasons and `view.get` refusal codes.
+- [pinned] `ceiling` is absent from Setup answers that predate it, which
+  keep their bytes. A runner outside this mode ignores it.

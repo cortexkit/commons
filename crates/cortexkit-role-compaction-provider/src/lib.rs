@@ -9,6 +9,12 @@
 //! or `refuse`. After a `wait`, the provider tells the runner it is done with
 //! `compaction.ready`, an op the runner serves.
 //!
+//! A provider that also declares the `async` group ([`async_group`]) takes
+//! compaction off the runner's hot path. The runner sends advance notices
+//! over ck-bus instead of calling `compaction.step`; the provider publishes
+//! views, which the runner fetches with [`ops::VIEW_GET`]. The runner asks
+//! for a view synchronously only with [`ops::COMPACTION_RIDE`].
+//!
 //! A provider claims the role by listing [`PROVIDES`] in its manifest's
 //! `capabilities.provides` and answers every op in [`REQUIRED_OPS`].
 //!

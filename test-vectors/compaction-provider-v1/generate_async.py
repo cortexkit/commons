@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""Generate test-vectors/compaction-provider-v1/async.json.
+
+Run: python3 generate_async.py async.json  (then refresh ASYNC_SHA256SUMS).
+
+Digests are computed here, independently of the Rust crate, so the crate's
+tests compare its implementation against a second one.
+"""
+import hashlib
+import json
+import struct
+import sys
+
+OUT = sys.argv[1]
+
+
+def jcs(value):
+    # Sufficient for these vectors: ASCII strings, integers, objects, arrays.
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def framed(parts):
+    h = hashlib.sha256()
+    for p in parts:
+        if isinstance(p, str):
+            p = p.encode()
+        h.update(struct.pack(">Q", len(p)))
+        h.update(p)
+    return h.hexdigest()
+
+
+SR = sha(jcs({"harness": "opencode", "project_root": "/work/demo", "session": "ses_1"}))[:32]
+ACCT = "acme"
+RUNNER = "thalamus-harness"
+PROVIDER = "ck-mc"
+MODEL = "anthropic/claude-sonnet-4-5"
+
+M = {
+    1: ("m1", {"role": "user", "content": "Fix the parser."}),
+    2: ("m2", {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "read", "input": {"path": "src/parser.rs"}}]}),
+    3: ("m3", {"role": "tool", "tool_call_id": "call_1", "content": "fn parse() { /* 4,000 lines */ }"}),
+    4: ("m4", {"role": "assistant", "content": "The parser drops trailing commas; fixed."}),
+    5: ("m5", {"role": "user", "content": "Now add tests."}),
+    6: ("m6", {"role": "assistant", "content": "Added three tests."}),
+}
+
+NOTICE_ORDER = ["applied_view_version", "est_tokens", "events", "last_usage", "model", "seq",
+                "session_ref", "through_digest", "through_ordinal", "window"]
+
+
+def notice_digest(h):
+    parts = ["ck.compaction.advanced.v1"]
+    for name in NOTICE_ORDER:
+        if name in h:
+            parts += [name, h[name]]
+    return framed(parts)
+
+
+def notice(name, seq, through, events=None, applied=None, usage=None, window="200000", est="1200", model=MODEL):
+    h = {"session_ref": SR, "seq": str(seq), "through_ordinal": str(through),
+         "through_digest": sha(jcs(M[through][1])), "est_tokens": est, "model": model}
+    if window is not None:
+        h["window"] = window
+    if events:
+        h["events"] = ",".join(events)
+    if usage:
+        h["last_usage"] = usage
+    if applied is not None:
+        h["applied_view_version"] = str(applied)
+    return {
+        "name": name,
+        "subject": f"ck.{ACCT}.event.{RUNNER}.compaction.advanced.v1",
+        "message_id": f"{SR}:{seq}",
+        "headers": h,
+        "digest": notice_digest(h),
+    }
+
+
+def view_digest(v):
+    parts = ["ck.compaction.view.v1", v["session_ref"], str(v["view_version"]), v["lineage_id"],
+             str(v["covers_through"]["ordinal"]), v["covers_through"]["mid"], str(len(v["ranges"]))]
+    for r in v["ranges"]:
+        parts += [r["kind"], str(r["from"]), str(r["to"])]
+        if r["kind"] == "replace":
+            parts.append(r["bytes"])
+    if "cut" in v:
+        parts += ["cut", v["cut"]["cut_id"], str(v["cut"]["through_ordinal"])]
+    return framed(parts)
+
+
+def view(version, through, ranges, cut=None, lineage="lin_a", digest=None):
+    v = {"session_ref": SR, "view_version": version, "lineage_id": lineage,
+         "covers_through": {"ordinal": through, "mid": M[through][0]}, "ranges": ranges}
+    if cut:
+        v["cut"] = cut
+    v["digest"] = digest or view_digest(v)
+    return v
+
+
+def keep(a, b):
+    return {"kind": "keep", "from": a, "to": b}
+
+
+def replace(a, b, messages):
+    return {"kind": "replace", "from": a, "to": b,
+            "bytes": json.dumps(messages, separators=(",", ":"))}
+
+
+HEAD = [{"role": "user", "content": "<session-history>The user asked to fix the parser.</session-history>"}]
+PLACEHOLDER = [{"role": "tool", "tool_call_id": "call_1", "content": "[dropped \u00a73\u00a7]"}]
+
+V1 = view(1, 1, [replace(0, 0, HEAD), keep(0, 2)])
+V3 = view(3, 4, [replace(0, 2, HEAD), keep(2, 3), replace(3, 4, PLACEHOLDER), keep(4, 5)],
+          cut={"cut_id": "cut-1", "through_ordinal": 1})
+V4 = view(4, 5, [replace(0, 2, HEAD), keep(2, 6)], cut={"cut_id": "cut-2", "through_ordinal": 1})
+
+transcript = [[o, M[o][0], M[o][1]] for o in sorted(M)]
+
+views = [
+    {"name": "insertion head before every message", "view": V1,
+     "assembled": [HEAD[0], M[1][1], M[2][1], M[3][1], M[4][1], M[5][1], M[6][1]]},
+    {"name": "keep and replace ranges with a cut", "view": V3,
+     "assembled": [HEAD[0], M[2][1], PLACEHOLDER[0], M[4][1], M[5][1], M[6][1]]},
+    {"name": "head then one kept range", "view": V4,
+     "assembled": [HEAD[0], M[2][1], M[3][1], M[4][1], M[5][1], M[6][1]]},
+]
+
+
+def bad(name, problem, **changes):
+    v = json.loads(json.dumps(V3))
+    keep_digest = changes.pop("keep_digest", False)
+    for k, val in changes.items():
+        v[k] = val
+    if not keep_digest:
+        v["digest"] = view_digest(v)
+    return {"name": name, "view": v, "problem": problem}
+
+
+tampered = json.loads(json.dumps(V3))
+tampered["ranges"][2]["bytes"] = json.dumps([{"role": "tool", "tool_call_id": "call_1", "content": "rm -rf /"}], separators=(",", ":"))
+
+views_refused = [
+    bad("session_ref is not a session reference", "session_ref", session_ref="ses_1"),
+    bad("version zero", "version_zero", view_version=0),
+    bad("digest in uppercase", "digest_malformed", digest=V3["digest"].upper(), keep_digest=True),
+    bad("first range does not start at 0", "gap", ranges=[replace(1, 2, HEAD), keep(2, 5)]),
+    bad("a hole between ranges", "gap", ranges=[replace(0, 2, HEAD), keep(3, 5)]),
+    bad("an empty keep range", "inverted", ranges=[replace(0, 2, HEAD), keep(2, 2), keep(2, 5)]),
+    bad("an inverted replace range", "inverted", ranges=[replace(0, 2, HEAD), {"kind": "replace", "from": 2, "to": 1, "bytes": "[]"}]),
+    bad("ranges end before the coverage", "coverage_end", ranges=[replace(0, 2, HEAD), keep(2, 4)]),
+    bad("ranges run past the coverage", "coverage_end", ranges=[replace(0, 2, HEAD), keep(2, 7)]),
+    bad("replacement bytes are not a JSON array", "replacement_not_array",
+        ranges=[{"kind": "replace", "from": 0, "to": 2, "bytes": "{\"role\":\"user\"}"}, keep(2, 5)]),
+    bad("cut not on a range boundary", "cut", cut={"cut_id": "cut-1", "through_ordinal": 0}),
+    bad("cut after a kept range", "cut", cut={"cut_id": "cut-1", "through_ordinal": 2}),
+    bad("cut beyond the coverage", "cut", cut={"cut_id": "cut-1", "through_ordinal": 9}),
+    bad("cut id with a space", "cut", cut={"cut_id": "cut 1", "through_ordinal": 1}),
+]
+no_ranges = json.loads(json.dumps(V3))
+no_ranges["ranges"] = []
+del no_ranges["cut"]
+no_ranges["digest"] = view_digest(no_ranges)
+views_refused.insert(3, {"name": "no ranges", "view": no_ranges, "problem": "no_ranges"})
+
+views_undecodable = [
+    {"name": "unknown range kind", "view": {**V3, "ranges": [{"kind": "summarize", "from": 0, "to": 5}]}},
+    {"name": "range named by message ids", "view": {**V3, "ranges": [{"kind": "keep", "from": "m1", "to": "m4"}]}},
+    {"name": "no digest", "view": {k: v for k, v in V3.items() if k != "digest"}},
+    {"name": "negative version", "view": {**V3, "view_version": -1}},
+]
+
+
+def ready_headers(v, digest=None, version=None):
+    return {"session_ref": v["session_ref"], "view_version": str(version or v["view_version"]),
+            "covers_through": str(v["covers_through"]["ordinal"]), "digest": digest or v["digest"]}
+
+
+after_revert = [[o, M[o][0]] for o in (1, 2, 3)] + [[7, "m7"]]
+full = [[o, M[o][0]] for o in sorted(M)]
+
+dispositions = [
+    {"name": "newer view over the current transcript applies", "view": V3, "ready": ready_headers(V3),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "apply"},
+    {"name": "first view applies", "view": V1, "ready": ready_headers(V1),
+     "current_version": None, "lineage_id": "lin_a", "transcript": full, "outcome": "apply"},
+    {"name": "same version as the current view is stale", "view": V3, "ready": ready_headers(V3),
+     "current_version": 3, "lineage_id": "lin_a", "transcript": full, "outcome": "stale"},
+    {"name": "revert truncated below the coverage: discard", "view": V3, "ready": ready_headers(V3),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": after_revert, "outcome": "discard"},
+    {"name": "another message now at the coverage ordinal: discard", "view": V3, "ready": ready_headers(V3),
+     "current_version": 1, "lineage_id": "lin_a",
+     "transcript": [[1, "m1"], [2, "m2"], [3, "m3"], [4, "m4b"]], "outcome": "discard"},
+    {"name": "view over another lineage: discard", "view": V3, "ready": ready_headers(V3),
+     "current_version": 1, "lineage_id": "lin_b", "transcript": full, "outcome": "discard"},
+    {"name": "digest differs from the announced digest", "view": V3, "ready": ready_headers(V3, digest=V4["digest"]),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:digest_mismatch"},
+    {"name": "bytes changed but the digest member kept", "view": tampered, "ready": ready_headers(V3),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:digest_mismatch"},
+    {"name": "fetched view is not the announced version", "view": V3, "ready": ready_headers(V3, version=4),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:not_requested"},
+    {"name": "malformed view is rejected before any prefix check", "view": views_refused[5]["view"],
+     "ready": ready_headers(views_refused[5]["view"]),
+     "current_version": 1, "lineage_id": "lin_a", "transcript": after_revert, "outcome": "rejected:gap"},
+]
+
+notices = [
+    notice("first notice after a user message", 1, 1),
+    notice("tool step with usage, applied view and marker", 5, 4, events=["marker_outcome:applied:cut-1"],
+           applied=3, usage="61000:58000:2000:850", est="64000"),
+    notice("model change and cache expiry", 6, 4, events=["model_change", "ttl_expired"], applied=3,
+           usage="61000:58000:2000:850", est="64100", model="openai/gpt-5", window="400000"),
+    notice("surface change with a deferred marker", 7, 5, events=["surface_change", "marker_outcome:deferred:cut-2"],
+           applied=4, est="66000"),
+    notice("revert discards the current view", 8, 3, events=["revert_below:4", "view_discarded:3"], est="9000"),
+    notice("view refused for a split tool pair", 9, 6, events=["view_refused:5:tool_pair_split"], applied=4,
+           est="70000"),
+    notice("window unknown", 2, 2, window=None, est="1500"),
+]
+
+
+def mutate(base, name, problem=None, drop=(), **set_):
+    h = dict(base["headers"])
+    for k in drop:
+        del h[k]
+    h.update(set_)
+    case = {"name": name, "headers": h}
+    if problem:
+        case["problem"] = problem
+    return case
+
+
+N1, N2 = notices[0], notices[1]
+extra = dict(N1["headers"])
+extra["trace_id"] = "abc"
+unknown_event = dict(N2["headers"])
+unknown_event["events"] = "marker_outcome:applied:cut-1,cache_warmed:5m"
+
+notices_accepted = [
+    {"name": "a header this contract does not define is ignored and not digested", "headers": extra,
+     "digest": N1["digest"], "events": []},
+    {"name": "an unknown event token decodes and is ignored", "headers": unknown_event,
+     "digest": notice_digest(unknown_event), "events": ["marker_outcome:applied:cut-1", "cache_warmed:5m"]},
+]
+
+notices_refused = [
+    mutate(N1, "no seq", "missing:seq", drop=["seq"]),
+    mutate(N1, "no through_digest", "missing:through_digest", drop=["through_digest"]),
+    mutate(N1, "no model", "missing:model", drop=["model"]),
+    mutate(N1, "seq zero", "malformed:seq", seq="0"),
+    mutate(N1, "seq with a leading zero", "malformed:seq", seq="01"),
+    mutate(N1, "seq with a sign", "malformed:seq", seq="+1"),
+    mutate(N1, "through_digest in uppercase", "malformed:through_digest",
+           through_digest=N1["headers"]["through_digest"].upper()),
+    mutate(N1, "session_ref is the raw session id", "malformed:session_ref", session_ref="ses_1"),
+    mutate(N1, "model with a space", "malformed:model", model="claude sonnet"),
+    mutate(N1, "model over 256 bytes", "malformed:model", model="m" * 257),
+    mutate(N1, "window not a number", "malformed:window", window="200k"),
+    mutate(N1, "empty events", "malformed:events", events=""),
+    mutate(N1, "an empty event token", "malformed:events", events="model_change,"),
+    mutate(N1, "a space after a comma", "malformed:events", events="model_change, ttl_expired"),
+    mutate(N1, "argument on an event that takes none", "malformed:events", events="model_change:x"),
+    mutate(N1, "revert_below without an ordinal", "malformed:events", events="revert_below"),
+    mutate(N1, "unknown marker outcome", "malformed:events", events="marker_outcome:maybe:cut-1",
+           applied_view_version="3"),
+    mutate(N1, "marker without a cut id", "malformed:events", events="marker_outcome:applied",
+           applied_view_version="3"),
+    mutate(N1, "view_discarded of version zero", "malformed:events", events="revert_below:2,view_discarded:0"),
+    mutate(N1, "view_refused with an uppercase reason", "malformed:events", events="view_refused:4:Tool_Split"),
+    mutate(N1, "view_refused without a reason", "malformed:events", events="view_refused:4"),
+    mutate(N1, "duplicate event token", "duplicate_event", events="model_change,model_change"),
+    mutate(N1, "more than 32 event tokens", "too_many_events", events=",".join(f"e{i}" for i in range(33))),
+    mutate(N1, "events over 1024 bytes", "malformed:events",
+           events=",".join("e" + str(i) + "_" + "x" * 100 for i in range(10))),
+    mutate(N1, "view_discarded without revert_below", "view_discarded_without_revert_below",
+           events="view_discarded:3"),
+    mutate(N1, "marker_outcome without applied_view_version", "marker_outcome_without_applied_view_version",
+           events="marker_outcome:applied:cut-1"),
+    mutate(N1, "applied_view_version zero", "malformed:applied_view_version", applied_view_version="0"),
+    mutate(N1, "last_usage with three parts", "malformed:last_usage", last_usage="1:2:3"),
+]
+
+view_ready = [{
+    "name": "view 3 is ready",
+    "subject": f"ck.{ACCT}.event.{PROVIDER}.compaction.view_ready.v1",
+    "message_id": f"{SR}:3",
+    "headers": ready_headers(V3),
+    "bus_digest": V3["digest"],
+}]
+view_ready_refused = [
+    {"name": "view_version zero", "headers": {**ready_headers(V3), "view_version": "0"}, "problem": "malformed:view_version"},
+    {"name": "no digest", "headers": {k: v for k, v in ready_headers(V3).items() if k != "digest"}, "problem": "missing:digest"},
+    {"name": "covers_through not a number", "headers": {**ready_headers(V3), "covers_through": "m4"}, "problem": "malformed:covers_through"},
+]
+
+view_get = {
+    "requests": [{"name": "fetch view 3", "request": {"method": "view.get", "params": {"session_ref": SR, "view_version": 3}}}],
+    "answers": [
+        {"name": "the view", "answer": {"answer": "view", "view": V3}},
+        {"name": "unknown version", "answer": {"answer": "refuse", "code": "unknown_version", "reason": "view 2 was superseded and dropped"}},
+        {"name": "unknown session", "answer": {"answer": "refuse", "code": "unknown_session", "reason": "no view state for this session"}},
+    ],
+    "undecodable_answers": [
+        {"name": "unknown answer", "answer": {"answer": "latest", "view": V3}},
+        {"name": "refuse without a code", "answer": {"answer": "refuse", "reason": "gone"}},
+    ],
+}
+
+ride = {
+    "requests": [
+        {"name": "cache expired", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 1500}}},
+        {"name": "model changed", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 1500}}},
+        {"name": "surface changed", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "surface_change", "deadline_ms": 1500}}},
+        {"name": "ceiling reached", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000}}},
+        {"name": "cause this crate does not know, kept as received", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "provider_switch", "deadline_ms": 1500}}},
+    ],
+    "requests_refused": [
+        {"name": "zero deadline", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 0}, "problem": "deadline_out_of_range"},
+        {"name": "deadline over five minutes", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},
+        {"name": "raw session id", "params": {"session_ref": "ses_1", "cause": "ttl_expired", "deadline_ms": 1500}, "problem": "session_ref"},
+    ],
+    "answers": [
+        {"name": "a view", "answer": {"answer": "view", "view": V4}},
+        {"name": "nothing", "answer": {"answer": "nothing"}},
+    ],
+    "undecodable_answers": [
+        {"name": "unknown answer", "answer": {"answer": "later"}},
+        {"name": "view answer without a view", "answer": {"answer": "view"}},
+    ],
+}
+
+ceiling = {
+    "setup_answer": {
+        "answer": "ready", "request_id": "req-setup-1",
+        "initial": {"compaction_id": "head", "version": 1, "range": {"from": 0, "to": 0}, "replacement": []},
+        "ceiling": {"at_share": 0.9, "on_overflow": True, "wait_ms": 30000},
+    },
+    "policies": [
+        {"name": "share only", "policy": {"at_share": 0.85, "wait_ms": 20000}},
+        {"name": "share and overflow", "policy": {"at_share": 0.9, "on_overflow": True, "wait_ms": 30000}},
+        {"name": "the whole window, longest wait", "policy": {"at_share": 1.0, "wait_ms": 300000}},
+    ],
+    "policies_refused": [
+        {"name": "share zero", "policy": {"at_share": 0.0, "wait_ms": 30000}, "problem": "share_out_of_range"},
+        {"name": "share above one", "policy": {"at_share": 1.2, "wait_ms": 30000}, "problem": "share_out_of_range"},
+        {"name": "wait zero", "policy": {"at_share": 0.9, "wait_ms": 0}, "problem": "wait_out_of_range"},
+        {"name": "wait over five minutes", "policy": {"at_share": 0.9, "wait_ms": 300001}, "problem": "wait_out_of_range"},
+    ],
+    "reached": [
+        {"size": 179999, "window": 200000, "reached": False},
+        {"size": 180000, "window": 200000, "reached": True},
+        {"size": 250000, "window": 200000, "reached": True},
+    ],
+    "decisions": [
+        {"name": "a view brought it under the ceiling", "size": 120000, "window": 200000, "overflowed": False, "end": "view_applied", "decision": "send"},
+        {"name": "still at the ceiling when the wait ran out", "size": 185000, "window": 200000, "overflowed": False, "end": "timed_out", "decision": "refuse:view_timeout"},
+        {"name": "a view arrived but still at the ceiling", "size": 190000, "window": 200000, "overflowed": False, "end": "view_applied", "decision": "refuse:view_timeout"},
+        {"name": "provider unreachable", "size": 185000, "window": 200000, "overflowed": False, "end": "provider_unavailable", "decision": "refuse:provider_unavailable"},
+        {"name": "over the window after a switch to a smaller model", "size": 150000, "window": 128000, "overflowed": False, "end": "view_applied", "decision": "refuse:over_window"},
+        {"name": "overflow error, no newer view: never resend the same request", "size": 150000, "window": 200000, "overflowed": True, "end": "timed_out", "decision": "refuse:view_timeout"},
+        {"name": "overflow error, newer view applied", "size": 150000, "window": 200000, "overflowed": True, "end": "view_applied", "decision": "send"},
+    ],
+}
+
+describe_ops = ["role.describe", "compaction.setup", "compaction.step"]
+describe = {
+    "accepted": [
+        {"name": "async group absent", "declares_async": False,
+         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops, "stability": "alpha"}],
+                    "implementation_version": "synthetic-provider", "capabilities": []}},
+        {"name": "async group declared with its ops", "declares_async": True,
+         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops + ["view.get", "compaction.ride"], "stability": "alpha"}],
+                    "implementation_version": "synthetic-provider", "capabilities": ["async"]}},
+    ],
+    "refused": [
+        {"name": "async declared without view.get", "problem": "missing_op", "op": "view.get",
+         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops + ["compaction.ride"], "stability": "alpha"}],
+                    "implementation_version": "synthetic-provider", "capabilities": ["async"]}},
+        {"name": "async declared without compaction.ride", "problem": "missing_op", "op": "compaction.ride",
+         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops + ["view.get"], "stability": "alpha"}],
+                    "implementation_version": "synthetic-provider", "capabilities": ["async"]}},
+    ],
+}
+
+doc = {
+    "session": {"harness": "opencode", "project_root": "/work/demo", "session": "ses_1", "session_ref": SR,
+                "account": ACCT, "runner_module_id": RUNNER, "provider_module_id": PROVIDER},
+    "transcript": {"lineage_id": "lin_a", "messages": transcript},
+    "describe": describe,
+    "notices": notices,
+    "notices_accepted": notices_accepted,
+    "notices_refused": notices_refused,
+    "view_ready": view_ready,
+    "view_ready_refused": view_ready_refused,
+    "views": views,
+    "views_refused": views_refused,
+    "views_undecodable": views_undecodable,
+    "dispositions": dispositions,
+    "view_get": view_get,
+    "ride": ride,
+    "ceiling": ceiling,
+}
+
+with open(OUT, "w") as f:
+    json.dump(doc, f, indent=2, ensure_ascii=False)
+    f.write("\n")
