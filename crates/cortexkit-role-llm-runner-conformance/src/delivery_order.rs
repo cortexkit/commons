@@ -226,7 +226,8 @@ where
     )?;
     if reply.state != send_states::PENDING {
         return Err(format!(
-            "a list without idle_start on an idle session answered {}, not pending",
+            "a list without idle_start on an idle session answered {}, not pending: it must \
+             wait, queued, and never start a run",
             reply.state
         ));
     }
@@ -319,7 +320,9 @@ where
         .await
         .map_err(|e| format!("waiting for the held call: {e}"))?;
     let rides = case.mint.next("rides-result");
-    let order = DeliveryOrder::new(vec![Mode::ToolResult, Mode::IdleStart]);
+    // Steer is possible at that boundary too; the list's order picks
+    // tool_result.
+    let order = DeliveryOrder::new(vec![Mode::ToolResult, Mode::Steer, Mode::IdleStart]);
     expect_ok(
         "a tool_result send during a held call",
         ordered(

@@ -28,6 +28,9 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         Capability::InputTokenCap,
         Capability::StructuredOutput,
         Capability::Adopt,
+        Capability::Tags,
+        Capability::RunToolCalls,
+        Capability::DeliveryOrder,
     ] {
         if report.outcome(case)
             == Some(&CaseOutcome::Skipped {
@@ -131,6 +134,9 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
     subject.capabilities.insert(Capability::Adopt);
+    subject.capabilities.insert(Capability::Tags);
+    subject.capabilities.insert(Capability::RunToolCalls);
+    subject.capabilities.insert(Capability::DeliveryOrder);
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -380,6 +386,9 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::InputTokenCap,
                     Capability::StructuredOutput,
                     Capability::Adopt,
+                    Capability::Tags,
+                    Capability::RunToolCalls,
+                    Capability::DeliveryOrder,
                     Capability::HoldToolCalls
                 ]
             );
@@ -728,7 +737,10 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::Retention,
                     Capability::InputTokenCap,
                     Capability::StructuredOutput,
-                    Capability::Adopt
+                    Capability::Adopt,
+                    Capability::Tags,
+                    Capability::RunToolCalls,
+                    Capability::DeliveryOrder
                 ],
                 "{}",
                 report.render()
@@ -955,6 +967,9 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
     subject.capabilities.insert(Capability::Adopt);
+    subject.capabilities.insert(Capability::Tags);
+    subject.capabilities.insert(Capability::RunToolCalls);
+    subject.capabilities.insert(Capability::DeliveryOrder);
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
@@ -969,6 +984,9 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
     subject.capabilities.insert(Capability::Adopt);
+    subject.capabilities.insert(Capability::Tags);
+    subject.capabilities.insert(Capability::RunToolCalls);
+    subject.capabilities.insert(Capability::DeliveryOrder);
     subject.advertise_status = false;
     let report = run(&subject).await;
     assert!(
@@ -1643,5 +1661,284 @@ async fn an_adoption_taking_over_another_owner_fails_only_the_owner_case() {
         if *name != "adopt_other_owner_refused" {
             assert_passed(&report, name);
         }
+    }
+}
+
+/// A subject declaring `capability`, with `defects`.
+fn declaring(capability: Capability, defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.insert(capability);
+    subject
+}
+
+/// The cases a capability gates, by name prefix.
+fn cases_of(prefixes: &[&str]) -> Vec<&'static str> {
+    CASES
+        .iter()
+        .map(|spec| spec.name)
+        .filter(|name| prefixes.iter().any(|prefix| name.starts_with(prefix)))
+        .collect()
+}
+
+/// Run `capability`'s cases on a fake with `defects`: every case in
+/// `failing` fails with a reason containing its text, and every other case
+/// of the capability passes.
+async fn only_these_fail(
+    capability: Capability,
+    prefixes: &[&str],
+    defects: Defects,
+    failing: &[(&str, &str)],
+) {
+    let report = run(&declaring(capability, defects)).await;
+    for (name, text) in failing {
+        let reason = failed(&report, name);
+        assert!(reason.contains(text), "{name}: {reason}");
+    }
+    for name in cases_of(prefixes) {
+        if !failing.iter().any(|(failing, _)| *failing == name) {
+            assert_passed(&report, name);
+        }
+    }
+}
+
+const TAG_PREFIXES: &[&str] = &["tags_"];
+const TOOL_CALL_PREFIXES: &[&str] = &["run_tool_calls_"];
+const ORDER_PREFIXES: &[&str] = &["delivery_order_"];
+
+#[tokio::test]
+async fn a_tagging_runner_passes_the_tags_cases() {
+    only_these_fail(Capability::Tags, TAG_PREFIXES, Defects::default(), &[]).await;
+}
+
+#[tokio::test]
+async fn a_runner_reusing_tag_numbers_fails_the_reuse_case() {
+    only_these_fail(
+        Capability::Tags,
+        TAG_PREFIXES,
+        Defects {
+            tags_reused_across_runs: true,
+            ..Defects::default()
+        },
+        &[("tags_never_reused_across_runs", "used twice")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_runner_rewriting_model_written_tags_fails_the_verbatim_case() {
+    only_these_fail(
+        Capability::Tags,
+        TAG_PREFIXES,
+        Defects {
+            tags_rewrite_model_text: true,
+            ..Defects::default()
+        },
+        &[("tags_model_written_tags_stored_verbatim", "as written")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_runner_listing_tool_calls_passes_and_reversed_order_fails_by_name() {
+    only_these_fail(
+        Capability::RunToolCalls,
+        TOOL_CALL_PREFIXES,
+        Defects::default(),
+        &[],
+    )
+    .await;
+    only_these_fail(
+        Capability::RunToolCalls,
+        TOOL_CALL_PREFIXES,
+        Defects {
+            run_tool_calls_reversed: true,
+            ..Defects::default()
+        },
+        &[("run_tool_calls_listed_in_dispatch_order", "dispatch order")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_runner_honouring_delivery_order_passes_its_cases() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects::default(),
+        &[],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn without_turn_system_a_template_goes_out_as_the_same_text_at_user_authority() {
+    let mut subject = declaring(Capability::DeliveryOrder, Defects::default());
+    subject.turn_system = false;
+    let report = run(&subject).await;
+    for name in cases_of(ORDER_PREFIXES) {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn a_list_without_idle_start_that_starts_a_run_fails_the_never_starts_case() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects {
+            order_starts_runs_without_idle_start: true,
+            ..Defects::default()
+        },
+        // Every other case that queues a steer on an idle session sees it
+        // start a run too, and fails on what that run delivered.
+        &[
+            ("delivery_order_never_starts_a_run", "never start a run"),
+            ("delivery_order_dedupe_supersedes_queued", "not superseded"),
+            ("delivery_order_unnamed_sender_refused", "not steer"),
+            (
+                "delivery_order_template_renders_as_system",
+                "not turn_system",
+            ),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_out_of_range_slot_rendered_as_system_fails_the_bad_slot_case() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects {
+            order_template_slots_unchecked: true,
+            ..Defects::default()
+        },
+        &[("delivery_order_bad_slot_refused", "not refused")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_unnamed_sender_accepted_fails_the_sender_case() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects {
+            order_admits_any_sender: true,
+            ..Defects::default()
+        },
+        &[("delivery_order_unnamed_sender_refused", "not refused")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn delivery_order_defects_each_fail_their_case() {
+    for (defects, name, text) in [
+        (
+            Defects {
+                order_dedupe_keeps_both: true,
+                ..Defects::default()
+            },
+            "delivery_order_dedupe_supersedes_queued",
+            "superseded",
+        ),
+        (
+            Defects {
+                order_expiry_ignored: true,
+                ..Defects::default()
+            },
+            "delivery_order_expired_never_delivered",
+            "expires_at_ms",
+        ),
+        (
+            Defects {
+                order_legacy_and_list_accepted: true,
+                ..Defects::default()
+            },
+            "delivery_order_with_legacy_delivery_refused",
+            "not refused",
+        ),
+    ] {
+        only_these_fail(
+            Capability::DeliveryOrder,
+            ORDER_PREFIXES,
+            defects,
+            &[(name, text)],
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn the_last_possible_mode_winning_fails_the_order_cases() {
+    // Wherever two modes are possible at one boundary, the defect picks the
+    // later one: the held tool result's boundary, and the template's.
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects {
+            order_last_possible_mode: true,
+            ..Defects::default()
+        },
+        &[
+            ("delivery_order_first_possible_mode", "tool_result"),
+            (
+                "delivery_order_template_renders_as_system",
+                "not turn_system",
+            ),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn without_the_new_groups_their_cases_skip_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for (capability, prefixes) in [
+        (Capability::Tags, TAG_PREFIXES),
+        (Capability::RunToolCalls, TOOL_CALL_PREFIXES),
+        (Capability::DeliveryOrder, ORDER_PREFIXES),
+    ] {
+        for name in cases_of(prefixes) {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&capability)),
+                "{name}: {:?}",
+                report.outcome(name)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_ceiling_wait_reads_as_waiting_and_ends_either_way() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.advertise_status = true;
+    let report = run(&subject).await;
+    assert_passed(&report, "run_context_ceiling_wait_is_not_a_stall");
+}
+
+#[tokio::test]
+async fn a_read_serving_live_host_metadata_fails_the_stability_case() {
+    let report = run(&FakeSubject::new(Defects {
+        read_serves_live_host_metadata: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "read_stable_across_host_metadata_change");
+    assert!(reason.contains("other entries"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_drop_recovery_keeping_its_lineage_fails_the_step_recorded_crash_case() {
+    for recovery in [StepRecovery::SealDropStep, StepRecovery::SealDropCall] {
+        let mut subject = FakeSubject::new(Defects {
+            drop_keeps_lineage: true,
+            ..Defects::default()
+        });
+        subject.step_recovery = recovery;
+        let report = run(&subject).await;
+        let reason = failed(&report, "crash_at_StepRecorded");
+        assert!(reason.contains("new lineage"), "{recovery:?}: {reason}");
     }
 }

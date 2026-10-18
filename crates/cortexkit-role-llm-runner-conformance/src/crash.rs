@@ -596,17 +596,6 @@ fn check_sealed_history(
         contains_id(&m.message, id) || keys.iter().any(|key| contains_id(&m.message, key))
     };
     if entries_for(cut, id).is_empty() {
-        // Dropping the call (and maybe its text) rewrote a written message,
-        // so the recovery must have started a new lineage (§4.2, §14).
-        if observed.lineage_before_b.is_none()
-            || observed.lineage_after_b == observed.lineage_before_b
-        {
-            return Err(format!(
-                "the recovery dropped the never-sent call from history but kept lineage {:?}: \
-                 dropping or rewriting a written message starts a new lineage",
-                observed.lineage_after_b
-            ));
-        }
         let text_copies = holding(cut, &observed.step_text);
         if text_copies > 1 {
             return Err("the dropped call's assistant text is held more than once".into());
@@ -634,6 +623,17 @@ fn check_sealed_history(
             1,
             "the later assistant turn",
         )?;
+        // Dropping the call (and maybe its text) rewrote a written message,
+        // so the recovery must have started a new lineage (§4.2, §14).
+        if observed.lineage_before_b.is_none()
+            || observed.lineage_after_b == observed.lineage_before_b
+        {
+            return Err(format!(
+                "the recovery dropped the never-sent call from history but kept lineage {:?}: \
+                 dropping or rewriting a written message starts a new lineage",
+                observed.lineage_after_b
+            ));
+        }
     } else {
         // The result may be written when the run is sealed or only when the
         // owner's next send renders the history, so the cut-run transcript may
