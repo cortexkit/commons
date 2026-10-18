@@ -291,3 +291,27 @@ The restart case kills the runner right after a tool result is saved. The
 suite's crash driver kills at each point only once per run, and the general
 crash cases already use that point, so this case uses a separate driver on a
 separate state root. The suite's count of real kills does not include it.
+
+## Adoption
+
+The eight `adopt_*` cases run only when the subject declares
+`Capability::Adopt` (the `adopt` group); otherwise the report names each one
+as skipped, never as passed, and the suite sends no `session.adopt`. Each
+case also reads the live `role.describe` and sends nothing unless it declares
+`adopt`. They require `transcript_reads`; `adopt_during_active_run` also
+requires held tool calls, and `adopt_then_owner_sends` also requires `queue`.
+
+An adapter for such a runner implements two defaulted hooks:
+
+- `host_plan(session, alternate)`: the fetch plan the host applies to
+  `session` when it starts, which must make the scripted tool available; with
+  `alternate`, another plan with a different identity that the runner would
+  otherwise accept, for the drift and reuse cases;
+- `start_host_session(handle, session, plan, prompt)`: start `session` as a
+  person's own app would, with `plan` applied and no role request yet, and
+  with `prompt`, the person's first turn, answered by the session's script.
+
+The cases compare the transcript before and after every adoption: the
+lineage, the last ordinal, the last run and its state, and every message.
+They never compare a plan identity with a digest of their own; they compare
+the identities the runner reports with each other.

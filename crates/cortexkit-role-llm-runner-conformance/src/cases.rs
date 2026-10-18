@@ -131,6 +131,9 @@ where
             }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
+            name if name.starts_with("adopt_") => {
+                crate::adopt::run(self, name).await.map(|()| Ending::Passed)
+            }
             name if name.starts_with("input_token_cap_") => crate::input_token_cap::run(self, name)
                 .await
                 .map(|()| Ending::Passed),

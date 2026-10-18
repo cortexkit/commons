@@ -24,7 +24,11 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
-    for group in [Capability::InputTokenCap, Capability::StructuredOutput] {
+    for group in [
+        Capability::InputTokenCap,
+        Capability::StructuredOutput,
+        Capability::Adopt,
+    ] {
         if report.outcome(case)
             == Some(&CaseOutcome::Skipped {
                 missing: vec![group],
@@ -126,6 +130,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.enable_retention();
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
+    subject.capabilities.insert(Capability::Adopt);
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -374,6 +379,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::Retention,
                     Capability::InputTokenCap,
                     Capability::StructuredOutput,
+                    Capability::Adopt,
                     Capability::HoldToolCalls
                 ]
             );
@@ -721,7 +727,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunOps,
                     Capability::Retention,
                     Capability::InputTokenCap,
-                    Capability::StructuredOutput
+                    Capability::StructuredOutput,
+                    Capability::Adopt
                 ],
                 "{}",
                 report.render()
@@ -947,6 +954,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
+    subject.capabilities.insert(Capability::Adopt);
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
@@ -960,6 +968,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
+    subject.capabilities.insert(Capability::Adopt);
     subject.advertise_status = false;
     let report = run(&subject).await;
     assert!(
@@ -1515,6 +1524,123 @@ async fn a_runner_dispatching_a_submit_sibling_fails_only_the_sibling_case() {
     assert!(reason.contains("was invoked 1 times"), "{reason}");
     for name in STRUCTURED_OUTPUT_CASES {
         if *name != "structured_output_sibling_never_dispatched" {
+            assert_passed(&report, name);
+        }
+    }
+}
+
+const ADOPT_CASES: &[&str] = &[
+    "adopt_binds_owner_without_a_run",
+    "adopt_exact_repeat_replays_reply",
+    "adopt_send_id_reuse_names_plan",
+    "adopt_plan_drift_refused",
+    "adopt_during_active_run",
+    "adopt_other_owner_refused",
+    "adopt_same_owner_readopts",
+    "adopt_then_owner_sends",
+];
+
+fn adopting(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.insert(Capability::Adopt);
+    subject
+}
+
+async fn adopt_case(name: &str) {
+    let report = run(&adopting(Defects::default())).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{name}: {:?}",
+        report.outcome(name)
+    );
+}
+
+#[tokio::test]
+async fn adopt_binds_owner_without_a_run() {
+    adopt_case("adopt_binds_owner_without_a_run").await;
+}
+#[tokio::test]
+async fn adopt_exact_repeat_replays_reply() {
+    adopt_case("adopt_exact_repeat_replays_reply").await;
+}
+#[tokio::test]
+async fn adopt_send_id_reuse_names_plan() {
+    adopt_case("adopt_send_id_reuse_names_plan").await;
+}
+#[tokio::test]
+async fn adopt_plan_drift_refused() {
+    adopt_case("adopt_plan_drift_refused").await;
+}
+#[tokio::test]
+async fn adopt_during_active_run() {
+    adopt_case("adopt_during_active_run").await;
+}
+#[tokio::test]
+async fn adopt_other_owner_refused() {
+    adopt_case("adopt_other_owner_refused").await;
+}
+#[tokio::test]
+async fn adopt_same_owner_readopts() {
+    adopt_case("adopt_same_owner_readopts").await;
+}
+#[tokio::test]
+async fn adopt_then_owner_sends() {
+    adopt_case("adopt_then_owner_sends").await;
+}
+
+#[tokio::test]
+async fn without_the_adopt_group_no_adoption_is_sent_and_its_cases_skip_by_name() {
+    let subject = FakeSubject::new(Defects::default());
+    let report = run(&subject).await;
+    for name in ADOPT_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::Adopt]
+            }),
+            "{name}"
+        );
+        assert!(report.render().contains(&format!("SKIP {name}")));
+    }
+    assert_eq!(subject.adopt_calls(), 0, "{}", report.render());
+}
+
+#[tokio::test]
+async fn an_adoption_that_writes_a_message_fails_the_adopt_cases() {
+    let subject = adopting(Defects {
+        adopt_writes_message: true,
+        ..Defects::default()
+    });
+    let report = run(&subject).await;
+    for name in [
+        "adopt_binds_owner_without_a_run",
+        "adopt_exact_repeat_replays_reply",
+        "adopt_send_id_reuse_names_plan",
+        "adopt_plan_drift_refused",
+        "adopt_during_active_run",
+        "adopt_other_owner_refused",
+        "adopt_same_owner_readopts",
+    ] {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("changed the transcript"),
+            "{name}: {reason}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_adoption_taking_over_another_owner_fails_only_the_owner_case() {
+    let subject = adopting(Defects {
+        adopt_takes_over_owner: true,
+        ..Defects::default()
+    });
+    let report = run(&subject).await;
+    let reason = failed(&report, "adopt_other_owner_refused");
+    assert!(reason.contains("was answered"), "{reason}");
+    for name in ADOPT_CASES {
+        if *name != "adopt_other_owner_refused" {
             assert_passed(&report, name);
         }
     }

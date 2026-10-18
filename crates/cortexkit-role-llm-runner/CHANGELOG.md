@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6
+
+- Add `session.adopt {send_id, plan}`, behind the new `adopt` describe group (checked by `check_describe` for `session.adopt`): the session's owner takes over a session the host started with a plan already applied, without a prompt. It binds the owner and frozen scope to the plan as owner admission does, so `session.baseline` answers the same afterwards; it starts no run, writes no message, and neither interrupts nor refuses a run in progress. The reply is `{owner_bound, applied_plan_digest, last_ordinal?}`.
+- Admission reuses §9's owner rule; checks run caller (`scope_owner_mismatch`), then `send_id` (exact repeat replays the original reply; another plan is `send_id_reuse` naming `plan`), then drift: a plan other than the one applied at host start is the existing terminal `plan_drift {frozen, sent}`, whose fields are the two plans' digests (never plan content), with `frozen` absent when no plan was applied. Refusals write nothing. The same owner re-adopting with the same plan succeeds; adopt never takes over another owner's session.
+- New `adopt` module: `AdoptRequest` (strict, so a request naming its session is refused) and `AdoptReply` (lenient), both non-exhaustive with constructors; `AdoptRequest::reused_field` and `check_drift`. `ops::SESSION_ADOPT`, `capabilities::ADOPT` and its `GROUPS` entry. `PlanDriftDetail` gains a `new(frozen, sent)` constructor. No new error code: `plan_drift`, `send_id_reuse` and `scope_owner_mismatch` already exist.
+- Vectors: `adopt.json` covers a first adoption, an exact replay, `send_id_reuse`, `plan_drift`, adoption during a run, another owner's attempt and the same owner re-adopting; `adopt-describe.json` covers describe with and without the group. CONTRACT gains §9.5 for `session.adopt`; §1, §3, §9, §10.1, §12.1, §13 and §15 now list the op, its group and the codes it reuses.
+- Patch release: every addition is a new item or a non-exhaustive type; `PlanDriftDetail` keeps its public fields and stays exhaustive.
+
 ## 0.2.5
 
 - Add structured output to `session.send`, behind the new `structured_output` describe group (checked by `check_describe` for `session.send`). Modes `final_text` and `submit_tool`; the reserved `submit_result` tool; per-run JCS-frozen schemas; refusals at admission for an external `$ref`/`$dynamicRef` (runners never fetch), a schema over 65,536 JCS bytes, another `$schema` dialect, `final_text` with tools, and an admitted tool named `submit_result`. Validation is draft 2020-12 with `format` as an annotation and unknown keywords ignored. Enforcement and its reason are decided at admission from the runner's own per-family subset profile and fixed for the run.

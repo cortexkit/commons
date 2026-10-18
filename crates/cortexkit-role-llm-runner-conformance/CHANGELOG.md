@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+- Require cortexkit-role-llm-runner 0.2.6 and add `session.adopt` cases, run only when the subject declares `adopt` (otherwise each is reported as skipped, by name, and no `session.adopt` is sent); each case also refuses to send one unless the live `role.describe` declares `adopt`. They check that:
+  - a first adoption, with no message yet and after the person's first turn, answers `owner_bound` with the transcript's last ordinal, writes nothing and starts no run, and `session.baseline` then answers only the adopting owner;
+  - an exact repeat replays the original reply; the same `send_id` with another plan is refused `send_id_reuse` naming `plan`;
+  - a plan other than the host's is refused `plan_drift` with distinct `frozen` and `sent` identities and no content, binding no owner and recording no `send_id`; a session the host never started answers `plan_drift` without `frozen`;
+  - an adoption during a person's held run leaves the run in progress, and it completes once released;
+  - another caller, even repeating the owner's request, is refused `scope_owner_mismatch`; the same owner re-adopting succeeds;
+  - after adoption the owner's send runs, and another caller's is refused.
+- Breaking: `Capability` gains `Adopt`, so an exhaustive `match` on it needs the new arm.
+- `LlmRunnerSubject` gains defaulted `host_plan` and `start_host_session` hooks, required only when declaring `adopt`.
+
 ## 0.5.0
 
 - Require cortexkit-role-llm-runner 0.2.5 and add structured-output cases, run only when the subject declares `structured_output` (otherwise each is reported as skipped, by name). They check that:

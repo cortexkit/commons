@@ -75,3 +75,23 @@ malformed results with the rule each breaks; and the `reply_too_large`
 refusal naming a run. `structured-output-describe.json` pins the optional
 group's discovery and its missing-op refusal. Checked by the
 `structured_output::tests` module of the wire crate.
+
+# Adoption
+
+`adopt.json` pins `session.adopt`: a canonical request carrying the full
+plan; requests refused by field (naming the session through `session_ref`,
+no plan, no `send_id`, a digest in place of the plan); replies with and
+without `last_ordinal`; and cases, each with the session's state (the
+identity of the plan applied at host start, the recorded owner, the last
+ordinal and any run in progress), earlier answered adoptions, the caller,
+the request with its plan's identity, and the reply or refusal: a first
+adoption, one before any message, an exact repeat answered with the original
+reply after the transcript grew, `send_id_reuse` naming `plan`, `plan_drift`
+with and without `frozen`, an adoption during an active run, another owner
+(including one repeating the owner's request exactly) and a `direct` caller
+refused `scope_owner_mismatch`, and the same owner re-adopting. No case
+writes a message, starts a run or interrupts one. The plan identities are
+symbolic, as in `plans.json`. `adopt-describe.json` pins the group's
+discovery, its missing-op refusal and an answer without the group. Checked by
+the `adopt::tests` and `describe::adopt_tests` modules of the wire crate,
+which apply the pinned order of checks to every case.

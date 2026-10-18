@@ -49,6 +49,7 @@ const COMPACTED: &[Capability] = &[Compaction, ModelView, Queue, TranscriptReads
 const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, RunOps];
 const INPUT_CAP: &[Capability] = &[Capability::InputTokenCap, Queue, TranscriptReads, RunOps];
 const STRUCTURED: &[Capability] = &[Capability::StructuredOutput, Queue, TranscriptReads, RunOps];
+const ADOPT: &[Capability] = &[Capability::Adopt, TranscriptReads];
 const STRUCTURED_RESTART: &[Capability] = &[
     Capability::StructuredOutput,
     Queue,
@@ -59,6 +60,22 @@ const STRUCTURED_RESTART: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("adopt_binds_owner_without_a_run", ADOPT,
+        "on a session the host started, with no message and after the person's first turn, session.adopt answers owner_bound with the plan's identity and session.head's last_ordinal, starts no run and writes no message; afterwards session.baseline answers the adopting owner ready and refuses another caller scope_owner_mismatch"),
+    case("adopt_exact_repeat_replays_reply", ADOPT,
+        "an exact repeat of session.adopt is answered with the original reply and writes nothing"),
+    case("adopt_send_id_reuse_names_plan", ADOPT,
+        "the same send_id with another plan is refused send_id_reuse naming plan, writing nothing; the original request still replays its reply"),
+    case("adopt_plan_drift_refused", ADOPT,
+        "a plan other than the one the host applied is refused plan_drift with frozen and sent identities and no plan content, binding no owner and recording no send_id, so the owner then adopts the host's plan under that send_id with applied_plan_digest equal to frozen; a session the host never started answers plan_drift without frozen"),
+    case("adopt_during_active_run", &[Capability::Adopt, TranscriptReads, HoldToolCalls],
+        "session.adopt while the person's run waits on a held tool call succeeds, writes nothing and leaves the run in progress; released, the same run completes and its tool runs once"),
+    case("adopt_other_owner_refused", ADOPT,
+        "once the owner has adopted, another caller's session.adopt, even an exact repeat of the owner's request, is refused scope_owner_mismatch, and session.baseline still answers only the owner"),
+    case("adopt_same_owner_readopts", ADOPT,
+        "the owner adopting again with the same plan and a new send_id succeeds with the same applied_plan_digest and writes nothing"),
+    case("adopt_then_owner_sends", &[Capability::Adopt, Queue, TranscriptReads],
+        "after adoption the owner's session.send starts a run that writes its prompt and answer once, and another caller's send is refused scope_owner_mismatch"),
     case("structured_output_final_text_enforced_passed", STRUCTURED,
         "final_text on a tool-free run whose route reports support: the request carries the schema for the final text and no submit_result tool, and the completed run reports enforced and passed with the parsed value"),
     case("structured_output_final_text_with_tools_refused", STRUCTURED,
@@ -395,6 +412,7 @@ pub const NARROWINGS: &[&str] = &[
     "retention deletion completion is inspected by the subject in the runner's durable report and runner-held stores, never inferred from an expired read; non-role export/list/read request schemas and pagination are supplied by retention_probe_params, and every advertised extra op must be classified",
     "retention_run_status_expired is inapplicable if run.status is not advertised",
     "the fetch plan's shape is not pinned (CONTRACT §10), so the subject builds each session's first-send fields and the suite never inspects a plan or a baseline's items",
+    "adopt cases start sessions through the subject's host-start hook, with plans the subject builds (host_plan); a plan's identity is the runner's, so the suite compares identities only with each other, never with a digest of its own",
     "the suite writes sessions with session.send (delivery absent, which means queue), so every case that needs a written session requires queue; a runner that admits sessions declares it (§9)",
     "the suite waits for a run to end through session.head's last_run_state, or run.result where only run_ops is required, so cases that wait require transcript_reads",
     "a read's byte measure is not pinned, so byte-cap cases use a cap below any message (one byte) or a message far above the cap, never a cap between message sizes",

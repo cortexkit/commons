@@ -1,0 +1,783 @@
+{
+  "requests": [
+    {
+      "name": "adopt with the full plan",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      }
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "a request naming its session",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        },
+        "session_ref": "0123456789abcdef0123456789abcdef"
+      },
+      "field": "session_ref"
+    },
+    {
+      "name": "a request without a plan",
+      "request": {
+        "send_id": "adopt-1"
+      },
+      "field": "plan"
+    },
+    {
+      "name": "a request without a send_id",
+      "request": {
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "field": "send_id"
+    },
+    {
+      "name": "a plan digest instead of the plan",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "field": "plan"
+    }
+  ],
+  "replies": [
+    {
+      "name": "reply with last ordinal",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "last_ordinal": 4
+      }
+    },
+    {
+      "name": "reply on a session with no message",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "first adopt binds the owner",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": null,
+        "last_ordinal": 4,
+        "active_run": null
+      },
+      "earlier": [],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "last_ordinal": 4
+      },
+      "writes": "adoption",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "first adopt before the session has a message",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": null,
+        "last_ordinal": null,
+        "active_run": null
+      },
+      "earlier": [],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "writes": "adoption",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "an exact repeat replays the original reply",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": "core",
+        "last_ordinal": 6,
+        "active_run": null
+      },
+      "earlier": [
+        {
+          "caller": "core",
+          "request": {
+            "send_id": "adopt-1",
+            "plan": {
+              "items": [
+                {
+                  "provider": "aft",
+                  "preset": "default",
+                  "params": {}
+                }
+              ],
+              "composition": {
+                "providers": [
+                  {
+                    "module": "aft",
+                    "tools": [
+                      "read"
+                    ]
+                  }
+                ]
+              },
+              "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+            }
+          },
+          "reply": {
+            "owner_bound": true,
+            "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "last_ordinal": 4
+          }
+        }
+      ],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "last_ordinal": 4
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "the same send_id with another plan is send_id_reuse",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": "core",
+        "last_ordinal": 4,
+        "active_run": null
+      },
+      "earlier": [
+        {
+          "caller": "core",
+          "request": {
+            "send_id": "adopt-1",
+            "plan": {
+              "items": [
+                {
+                  "provider": "aft",
+                  "preset": "default",
+                  "params": {}
+                }
+              ],
+              "composition": {
+                "providers": [
+                  {
+                    "module": "aft",
+                    "tools": [
+                      "read"
+                    ]
+                  }
+                ]
+              },
+              "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+            }
+          },
+          "reply": {
+            "owner_bound": true,
+            "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "last_ordinal": 4
+          }
+        }
+      ],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            },
+            {
+              "provider": "plexus",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              },
+              {
+                "module": "plexus",
+                "tools": [
+                  "web_search"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "8888888888888888888888888888888888888888888888888888888888888888"
+        }
+      },
+      "sent_plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "refusal": {
+        "code": "send_id_reuse",
+        "detail": {
+          "field": "plan"
+        }
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "a plan other than the one applied at host start is plan_drift",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": null,
+        "last_ordinal": 4,
+        "active_run": null
+      },
+      "earlier": [],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-2",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            },
+            {
+              "provider": "plexus",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              },
+              {
+                "module": "plexus",
+                "tools": [
+                  "web_search"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "8888888888888888888888888888888888888888888888888888888888888888"
+        }
+      },
+      "sent_plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "refusal": {
+        "code": "plan_drift",
+        "detail": {
+          "frozen": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sent": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "a session the host started without a plan is plan_drift without frozen",
+      "session": {
+        "applied_plan_digest": null,
+        "owner": null,
+        "last_ordinal": null,
+        "active_run": null
+      },
+      "earlier": [],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refusal": {
+        "code": "plan_drift",
+        "detail": {
+          "sent": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "adopt during an active run binds the owner and leaves the run running",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": null,
+        "last_ordinal": 2,
+        "active_run": "run-7"
+      },
+      "earlier": [],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "last_ordinal": 2
+      },
+      "writes": "adoption",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "another owner is refused scope_owner_mismatch",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": "core",
+        "last_ordinal": 4,
+        "active_run": null
+      },
+      "earlier": [
+        {
+          "caller": "core",
+          "request": {
+            "send_id": "adopt-1",
+            "plan": {
+              "items": [
+                {
+                  "provider": "aft",
+                  "preset": "default",
+                  "params": {}
+                }
+              ],
+              "composition": {
+                "providers": [
+                  {
+                    "module": "aft",
+                    "tools": [
+                      "read"
+                    ]
+                  }
+                ]
+              },
+              "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+            }
+          },
+          "reply": {
+            "owner_bound": true,
+            "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "last_ordinal": 4
+          }
+        }
+      ],
+      "caller": "stranger",
+      "request": {
+        "send_id": "adopt-9",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refusal": {
+        "code": "scope_owner_mismatch"
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "another owner repeating the owner's request is still refused",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": "core",
+        "last_ordinal": 4,
+        "active_run": null
+      },
+      "earlier": [
+        {
+          "caller": "core",
+          "request": {
+            "send_id": "adopt-1",
+            "plan": {
+              "items": [
+                {
+                  "provider": "aft",
+                  "preset": "default",
+                  "params": {}
+                }
+              ],
+              "composition": {
+                "providers": [
+                  {
+                    "module": "aft",
+                    "tools": [
+                      "read"
+                    ]
+                  }
+                ]
+              },
+              "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+            }
+          },
+          "reply": {
+            "owner_bound": true,
+            "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "last_ordinal": 4
+          }
+        }
+      ],
+      "caller": "stranger",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refusal": {
+        "code": "scope_owner_mismatch"
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "a direct caller is not an owner",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": null,
+        "last_ordinal": 4,
+        "active_run": null
+      },
+      "earlier": [],
+      "caller": "direct",
+      "request": {
+        "send_id": "adopt-1",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refusal": {
+        "code": "scope_owner_mismatch"
+      },
+      "writes": "nothing",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    },
+    {
+      "name": "the same owner re-adopting with the same plan succeeds",
+      "session": {
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": "core",
+        "last_ordinal": 6,
+        "active_run": null
+      },
+      "earlier": [
+        {
+          "caller": "core",
+          "request": {
+            "send_id": "adopt-1",
+            "plan": {
+              "items": [
+                {
+                  "provider": "aft",
+                  "preset": "default",
+                  "params": {}
+                }
+              ],
+              "composition": {
+                "providers": [
+                  {
+                    "module": "aft",
+                    "tools": [
+                      "read"
+                    ]
+                  }
+                ]
+              },
+              "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+            }
+          },
+          "reply": {
+            "owner_bound": true,
+            "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "last_ordinal": 4
+          }
+        }
+      ],
+      "caller": "core",
+      "request": {
+        "send_id": "adopt-2",
+        "plan": {
+          "items": [
+            {
+              "provider": "aft",
+              "preset": "default",
+              "params": {}
+            }
+          ],
+          "composition": {
+            "providers": [
+              {
+                "module": "aft",
+                "tools": [
+                  "read"
+                ]
+              }
+            ]
+          },
+          "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "sent_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reply": {
+        "owner_bound": true,
+        "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "last_ordinal": 6
+      },
+      "writes": "adoption",
+      "messages_written": 0,
+      "runs_started": 0,
+      "runs_interrupted": 0
+    }
+  ]
+}

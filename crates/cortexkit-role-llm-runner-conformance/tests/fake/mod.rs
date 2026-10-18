@@ -38,6 +38,7 @@ use cortexkit_role_llm_runner_conformance::{
         Trigger,
     },
     wire::{
+        adopt::{check_drift, AdoptReply, AdoptRequest, PLAN_FIELD},
         baseline::{Baseline, BaselineItem, BaselineReply},
         capabilities as groups,
         describe::{Major, Retention, RoleDescribe},
@@ -197,6 +198,12 @@ pub struct Defects {
     /// `active` while the first was answered `finished`: two retries that
     /// differ in state after nothing could have moved.
     pub retry_state_moves_after_end: bool,
+    /// `session.adopt` writes a user message into the transcript, which an
+    /// adoption must never do.
+    pub adopt_writes_message: bool,
+    /// `session.adopt` from a caller other than the recorded owner takes the
+    /// session over instead of being refused `scope_owner_mismatch`.
+    pub adopt_takes_over_owner: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -249,6 +256,8 @@ struct World {
     transcript_calls: AtomicUsize,
     /// Every `run.result` request received, served or not.
     run_result_calls: AtomicUsize,
+    /// Every `session.adopt` request received, served or not.
+    adopt_calls: AtomicUsize,
     /// How many `run.result` reads of an ended run still answer `active`,
     /// modelling a runner that reports the run as ended only a moment after
     /// the send returns.
@@ -361,6 +370,12 @@ struct Sess {
     title: Option<String>,
     owner: String,
     lineage: String,
+    /// The identity of the plan the session runs under: the one the host
+    /// applied at start, or the one the first send admitted.
+    plan_digest: Option<String>,
+    /// Every answered `session.adopt`, by `send_id`: the request and the
+    /// reply an exact repeat replays.
+    adopts: BTreeMap<String, (Value, Value)>,
     /// The session's admitted tool set, from the first send's plan.
     tools: Vec<String>,
     messages: Vec<Msg>,
@@ -420,6 +435,16 @@ fn invalid(field: &str) -> Reply {
 
 fn respond<T: serde::Serialize>(value: T) -> Reply {
     Reply::Response(serde_json::to_value(value).expect("fake replies serialize"))
+}
+
+/// The fake's identity of a plan: a hash of its JSON text, so a refusal
+/// names plans without carrying their content. A real runner uses the
+/// identity admission uses; the suite only compares identities.
+fn plan_digest(plan: &Map<String, Value>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    Value::Object(plan.clone()).to_string().hash(&mut hasher);
+    format!("plan-{:016x}", hasher.finish())
 }
 
 fn baseline() -> Baseline {
@@ -710,6 +735,7 @@ impl Module {
                 Sess {
                     owner: text("owner"),
                     lineage: text("lineage"),
+                    plan_digest: record["plan_digest"].as_str().map(str::to_owned),
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     ..Sess::default()
                 },
@@ -727,6 +753,13 @@ impl Module {
             sess.last_activity = record["at"].as_u64().unwrap_or_default();
         }
         match kind.as_str() {
+            "adopt" => {
+                sess.owner = text("owner");
+                sess.adopts.insert(
+                    text("send_id"),
+                    (record["request"].clone(), record["reply"].clone()),
+                );
+            }
             "cancel" => {
                 if let Some(run) = sess.run_mut(&text("run_id")) {
                     run.cancel_requested = true;
@@ -1222,6 +1255,16 @@ impl Module {
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
             ops::SESSION_SEND => self.send(stamp, session, params),
+            ops::SESSION_ADOPT => {
+                self.world.adopt_calls.fetch_add(1, Ordering::SeqCst);
+                if self.world.serves(groups::ADOPT) {
+                    self.adopt(stamp, session, params)
+                } else {
+                    // A runner that does not declare adopt does not serve
+                    // its op.
+                    Ok(refuse("unknown_method", Some(json!({ "method": method }))))
+                }
+            }
             ops::RUN_CANCEL if self.world.serves(groups::RUN_CANCEL) => {
                 self.cancel(stamp, session, params)
             }
@@ -1286,6 +1329,93 @@ impl Module {
         }
         self.drive(session, &request.run_id)?;
         Ok(respond("ack"))
+    }
+
+    /// `session.adopt`, checked in the order the contract pins: the caller,
+    /// then the `send_id`, then the plan's identity against the one the
+    /// session runs under. It records the owner and the reply, and writes no
+    /// message and starts no run.
+    fn adopt(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(field) = unknown_field(&params, &["send_id", PLAN_FIELD]) {
+            return Ok(invalid(&field));
+        }
+        let request: AdoptRequest = match serde_json::from_value(params) {
+            Ok(request) => request,
+            Err(error) if error.to_string().contains(PLAN_FIELD) => return Ok(invalid(PLAN_FIELD)),
+            Err(_) => return Ok(invalid("send_id")),
+        };
+        let sess = self.sessions.lock().unwrap().get(session).cloned();
+        if let Some(sess) = &sess {
+            if !sess.owner.is_empty()
+                && sess.owner != stamp.principal
+                && !self.world.defects.adopt_takes_over_owner
+            {
+                return Ok(refuse(
+                    errors::SCOPE_OWNER_MISMATCH,
+                    Some(json!({ "accepted": sess.owner })),
+                ));
+            }
+            if let Some((earlier, reply)) = sess.adopts.get(&request.send_id) {
+                let earlier: AdoptRequest =
+                    serde_json::from_value(earlier.clone()).expect("stored adopt requests decode");
+                return Ok(match request.reused_field(&earlier) {
+                    Some(field) => refuse(errors::SEND_ID_REUSE, Some(json!({ "field": field }))),
+                    None => Reply::Response(reply.clone()),
+                });
+            }
+        }
+        let sent = plan_digest(&request.plan);
+        let applied = sess.as_ref().and_then(|sess| sess.plan_digest.as_deref());
+        if let Err(detail) = check_drift(applied, &sent) {
+            return Ok(refuse(
+                errors::PLAN_DRIFT,
+                Some(serde_json::to_value(detail).unwrap()),
+            ));
+        }
+        let mut reply = AdoptReply::new(sent);
+        if let Some(last) = sess.as_ref().and_then(|sess| sess.messages.last()) {
+            reply = reply.with_last_ordinal(last.ordinal);
+        }
+        let reply = serde_json::to_value(reply).unwrap();
+        self.commit(
+            session,
+            json!({ "kind": "adopt", "owner": stamp.principal, "send_id": request.send_id,
+                    "request": request, "reply": reply }),
+        )?;
+        if self.world.defects.adopt_writes_message {
+            self.commit(
+                session,
+                json!({ "kind": "unattributed", "marker": "adopted" }),
+            )?;
+        }
+        Ok(Reply::Response(reply))
+    }
+
+    /// Start `session` as a person's app would: the plan applied, no owner
+    /// recorded, and, with `prompt`, the person's first turn run as far as
+    /// the scripted model and tools let it.
+    fn host_start(
+        &self,
+        session: &str,
+        plan: &Map<String, Value>,
+        prompt: Option<&str>,
+    ) -> Result<(), Killed> {
+        let tools = plan.get("tools").cloned().unwrap_or(json!([]));
+        self.commit(
+            session,
+            json!({ "kind": "start", "owner": "", "lineage": format!("lin-{session}"),
+                    "tools": tools, "plan_digest": plan_digest(plan) }),
+        )?;
+        let Some(prompt) = prompt else {
+            return Ok(());
+        };
+        let run_id = "run-1";
+        self.commit(
+            session,
+            json!({ "kind": "send", "send_id": format!("host-{session}"), "prompt": prompt,
+                    "delivery": groups::QUEUE, "run_id": run_id, "admitted": false }),
+        )?;
+        self.drive(session, run_id)
     }
 
     fn describe(&self) -> Reply {
@@ -1647,7 +1777,8 @@ impl Module {
             self.commit(
                 session,
                 json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
-                        "tools": tools }),
+                        "tools": tools,
+                        "plan_digest": request.plan.as_ref().map(plan_digest) }),
             )?;
         }
         let run_id = format!(
@@ -2236,6 +2367,7 @@ impl FakeSubject {
                     released: Mutex::new(BTreeSet::new()),
                     transcript_calls: AtomicUsize::new(0),
                     run_result_calls: AtomicUsize::new(0),
+                    adopt_calls: AtomicUsize::new(0),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
                 })
             })
@@ -2266,6 +2398,12 @@ impl FakeSubject {
     /// not.
     pub fn run_result_calls(&self) -> usize {
         self.world().run_result_calls.load(Ordering::SeqCst)
+    }
+
+    /// How many `session.adopt` requests the runner has received, served or
+    /// not.
+    pub fn adopt_calls(&self) -> usize {
+        self.world().adopt_calls.load(Ordering::SeqCst)
     }
 
     pub fn held_steer_break_answers(&self) -> usize {
@@ -2421,6 +2559,28 @@ impl LlmRunnerSubject for FakeSubject {
             .get(session)
             .cloned()
             .unwrap_or_default())
+    }
+
+    fn host_plan(&self, _session: &str, alternate: bool) -> Option<Map<String, Value>> {
+        let mut plan = Map::new();
+        plan.insert("tools".into(), json!([SCRIPTED_TOOL]));
+        if alternate {
+            plan.insert("variant".into(), json!("alternate"));
+        }
+        Some(plan)
+    }
+
+    async fn start_host_session(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        plan: &Map<String, Value>,
+        prompt: Option<&str>,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .host_start(session, plan, prompt)
+            .map_err(|Killed| HarnessError::new("the module was killed"))
     }
 
     fn tool_provider_module(&self) -> String {

@@ -21,6 +21,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod adopt;
 pub mod baseline;
 pub mod compaction;
 pub mod describe;
@@ -87,6 +88,10 @@ pub mod ops {
     /// Drop the frozen prefix and apply any pending change on the next step,
     /// whatever its policy. In `session_change`.
     pub const SESSION_FLUSH_PREFIX: &str = "session.flush_prefix";
+    /// Make the caller the owner of a session the host started with a plan
+    /// already applied, without a prompt: no run starts and nothing is
+    /// written to the transcript. In `adopt`.
+    pub const SESSION_ADOPT: &str = "session.adopt";
 }
 
 /// Ops every `llm-runner/v1` module must list in `role.describe`. A consumer
@@ -149,6 +154,10 @@ pub mod capabilities {
     /// Schema-shaped run output on `session.send` (`structured_output`),
     /// reported on `run.result` and `run.status`.
     pub const STRUCTURED_OUTPUT: &str = "structured_output";
+    /// `session.adopt`: the owner takes over a session the host started
+    /// with a plan already applied, before or during the person's own turns,
+    /// without sending a prompt.
+    pub const ADOPT: &str = "adopt";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -173,6 +182,7 @@ pub mod capabilities {
         (RETENTION, &[ops::SESSION_SEND]),
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
         (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
+        (ADOPT, &[ops::SESSION_ADOPT]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -273,6 +283,8 @@ pub(crate) mod vectors {
     /// Every vector file. A test checks this list against the directory, so
     /// a new file cannot land without a test reading it.
     pub const FILES: &[&str] = &[
+        "adopt.json",
+        "adopt-describe.json",
         "admit-optional-text-refused.json",
         "admit-optional-text-timeout.json",
         "admit-optional-text-unknown-provider.json",
@@ -401,6 +413,7 @@ mod tests {
             ops::SESSION_REFRESH,
             ops::SESSION_REFRESH_POLICY,
             ops::SESSION_FLUSH_PREFIX,
+            ops::SESSION_ADOPT,
         ];
         for (group, group_ops) in capabilities::GROUPS {
             assert!(!group_ops.is_empty(), "{group} names no op");

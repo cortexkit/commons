@@ -50,9 +50,9 @@ shipping runner with this document.
   `role.describe` does not list them. The compaction interface (§11.1) is
   not required: it is the `compaction` group.
 - [pinned] Everything else is a declared capability group (§3), including
-  the operations not every runner serves: `run.status`, `run.cancel` and
-  `session.retract`. A runner serves a group only if it declares it, and a
-  consumer uses a group only if it is declared.
+  the operations not every runner serves: `run.status`, `run.cancel`,
+  `session.retract` and `session.adopt`. A runner serves a group only if it
+  declares it, and a consumer uses a group only if it is declared.
 - [pinned] A consumer refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it. The check lives in the
   consumer, never in the daemon.
@@ -129,12 +129,14 @@ shipping runner with this document.
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
+| `adopt` | `session.adopt` | §9.5 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
-- [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap` and
-  `structured_output` are each declared on their own: a runner may serve any of them without the others, and
-  without `run_ops` or `transcript_reads`.
+- [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
+  `structured_output` and `adopt` are each declared on their own: a runner
+  may serve any of them without the others, and without `run_ops` or
+  `transcript_reads`.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
@@ -142,6 +144,9 @@ shipping runner with this document.
   advertises `structured_output`. `check_describe` checks the group for
   `session.send` like the other optional groups; it adds no discovery
   metadata.
+- [pinned] A caller MUST NOT send `session.adopt` unless the runner
+  advertises `adopt` (§9.5). `check_describe` checks the group for
+  `session.adopt`; it adds no discovery metadata.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -585,6 +590,8 @@ run.
 - [pinned] A runner that admits sessions declares `queue`, because its first
   send is one.
 - [pinned] Owner sends MUST carry both `send_id` and `prompt`.
+  `session.adopt` (§9.5) is not a send: it carries a `send_id` and a plan,
+  and no prompt.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
   part of the send's identity:
   - the same key with the same payload and mode is answered with the
@@ -986,6 +993,87 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
   the same bytes on every send in that session, including sends that need no
   shape, because dropping the schema also changes the request.
 
+### 9.5 `adopt`: `session.adopt`
+
+A harness runner serves sessions a person starts in their own app. The host
+fixes the tool set and system text when it starts, so the runner applies the
+installation's fetch plan before the first turn. The session's owner must
+then take the session over, but it has no prompt to send, and owner sends
+must carry one (§9). `session.adopt` makes the caller the session's owner
+without a prompt.
+
+- [pinned] A runner that declares `adopt` serves `session.adopt`. A caller
+  MUST NOT send it unless the runner's `role.describe` declares `adopt`; a
+  runner without the group is unaffected. The group adds no discovery
+  metadata and is independent of `plans` and of the delivery modes.
+- [pinned] The request is `{send_id, plan}` (`adopt::AdoptRequest`),
+  strict: an unknown field is refused `invalid_params` naming it, and a
+  `plan` that is not an object is refused naming `plan`. The request names no
+  session and carries no `session_ref`: the session is the one the route is bound to
+  (§1). `plan` is the full fetch-plan object, the same object
+  `SendRequest::plan` carries (§10.1), never a digest of it.
+- [pinned] `session.adopt` is admitted from exactly the callers an owner's
+  keyed `session.send` is admitted from (§9), with the owner principals of
+  §6.2: the runner records them from the route bind's attested principal
+  and the scope stamp's owner, never from a request field, as it would at
+  the session's first owner send. Once the session has a recorded owner, any
+  other caller is refused `scope_owner_mismatch`, as §9 refuses it. A caller
+  that could not be recorded as an owner (a `direct` caller, §6.2) is
+  refused `scope_owner_mismatch`: adopt is never an unkeyed non-owner send.
+- [pinned] Effect: the runner records the caller as the session's owner and
+  binds the session's frozen scope to the plan, exactly as owner admission
+  records a plan (§10.1), so `session.baseline` answers the owner afterwards
+  as it would after that admission. It starts no run and writes no message.
+  It does not interrupt, wait for or refuse a run already in progress: the
+  person may be mid-turn in their app, and that run goes on as before.
+- [pinned] Drift: the runner computes the identity of the request's plan,
+  the same identity admission uses for `plan_drift` (§10.1), and compares
+  it with the identity of the plan it applied when the host started the
+  session. A mismatch is refused `plan_drift {frozen, sent}`, the refusal
+  and detail of §10.1 (`errors::PlanDriftDetail`, `adopt::check_drift`):
+  `frozen` is the identity of the plan applied at host start and `sent` the
+  identity of the request's plan, identities only, never plan content.
+  `frozen` is absent when the runner applied no plan to the session (the
+  host never started it, or started it without one): adopt never
+  establishes a plan, it only confirms the one applied. `plan_drift` is
+  terminal and not retried with the same request.
+- [pinned] Idempotency is keyed by the bound session and `send_id`, and
+  compares the whole request, as owner sends do (§9). An exact repeat is
+  answered with the original reply, unchanged, even after the transcript
+  has grown. The same `send_id` with another plan is refused
+  `send_id_reuse` with `detail.field: "plan"`
+  (`AdoptRequest::reused_field`). The owner derives `send_id` from the
+  session and plan it adopts, so a retry after a lost reply carries the same
+  `send_id` and replays; it never derives it from the attempt (a counter or a
+  time), and never reuses a `send_id` of its `session.send`s.
+- [pinned] Already owned: the session's owner adopting again with the same
+  plan, under a new `send_id`, succeeds as an adoption does, with the same
+  `applied_plan_digest`. Adopt never takes over a session another owner
+  holds.
+- [pinned] The runner checks a request in this order, and the first
+  failing check answers: the caller (`scope_owner_mismatch`), then the
+  `send_id` (a replay, or `send_id_reuse`), then the plan (`plan_drift`).
+  So another caller repeating the owner's request exactly is still refused
+  `scope_owner_mismatch`.
+- [pinned] A refusal writes nothing, its `send_id` and caller included: a
+  later request may use the same `send_id`, and a refused caller did not
+  become the owner.
+- [pinned] The reply is `{owner_bound, applied_plan_digest, last_ordinal?}`
+  (`adopt::AdoptReply`), decoded leniently. `owner_bound` is `true`.
+  `applied_plan_digest` is the identity of the plan the session is bound to.
+  `last_ordinal` is the session's last committed ordinal when it was
+  adopted, so the caller knows where the transcript stands; it is absent
+  when the session has no message yet, as in `session.head` (§4.3).
+- [pinned] The reply follows the sync: the runner answers only after the
+  record of the adoption (the owner, the plan's identity, the `send_id` and
+  the reply) is durable. That record is not a transcript message and takes
+  no ordinal.
+- [pinned] After adoption, the owner's sends follow §9 unchanged, and the
+  owner reads `session.baseline` as §10 describes.
+- [pinned] `session.adopt` is not scope adoption: `scope_adoption_refused`
+  (§12.1) concerns a scoped send into a session recorded without a scope,
+  and is unchanged.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -1065,6 +1153,8 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
   `scope_unsupported` when the send is under a scope and the daemon lacks scopes. A later send whose plan differs from the frozen one is
   refused `plan_drift {frozen?, sent}`, naming the two plan identities.
   `frozen` is absent when the session's first episode was plan-less.
+  `session.adopt` refuses a plan other than the one applied at host start
+  with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
 - [pinned] A plan carrying a `compaction_item`, sent to a runner that does
   not declare `compaction`, is refused at admission `invalid_params {field:
@@ -1228,17 +1318,17 @@ treats it as a terminal refusal of that one request.
 | `reply_too_large` | the complete encoded `session.read` reply, or a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`) or `{kind: "run", run_id}`; no message content or value | no: terminal for this request; lowering `max_bytes` cannot shrink a message or atomic group |
 | `unknown_run` | `run.result` names no run of the session | — | no |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
-| `send_id_reuse` | a `send_id` reused with another payload or mode | `field` when the runner can identify it | no |
+| `send_id_reuse` | a `send_id` reused with another payload or mode, or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9), `session.baseline`, `run.cancel` or `session.retract` | the accepted identity | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9), `session.baseline`, `run.cancel`, `session.retract` or `session.adopt` (§9.5) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
 | `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
-| `plan_drift` | a later send's plan differs from the frozen one | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode) | no |
+| `plan_drift` | a later send's plan differs from the frozen one; a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode, or on `session.adopt` when no plan was applied) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
@@ -1333,13 +1423,13 @@ provider codes.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
   strings): `role.describe`, every reply and event a consumer decodes
   (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
-  `SendReply`, `BaselineReply`, and the `run.status`, `run.cancel` and
-  `session.retract` answers), and `compaction.ready`. One exception: a
-  model-view entry's `source` kind is strict (§8).
+  `SendReply`, `BaselineReply`, `AdoptReply`, and the `run.status`,
+  `run.cancel` and `session.retract` answers), and `compaction.ready`. One
+  exception: a model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `run.result`, `run.status`,
-  `session.subscribe` and `session.baseline` requests. A runner refuses an
-  unknown field with `invalid_params` naming it.
+  `session.subscribe`, `session.baseline` and `session.adopt` requests. A
+  runner refuses an unknown field with `invalid_params` naming it.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
   `session.send` tolerates unknown fields (a newer owner against an older
   runner degrades rather than fails), but `delivery` refuses an unknown value
@@ -1492,6 +1582,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `crash_at_RetentionTombstoned` | `retention`, `queue`, `transcript_reads`, `run_ops`, and `RetentionTombstoned`; real process kill, expiry remains readable by name and deletion completion is reported after restart |
 | `structured_output_final_text_enforced_passed`, `structured_output_final_text_with_tools_refused`, `structured_output_submit_tool_ends_run`, `structured_output_reserved_name_refused`, `structured_output_absent_without_submit`, `structured_output_failed_validation_completes`, `structured_output_not_inherited`, `structured_output_external_ref_refused`, `structured_output_sibling_never_dispatched` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; the adapter's tool-set send fields, route support switch and model-request observations; reported as a named skip without `structured_output` |
 | `structured_output_frozen_across_restart` | the above, and `ToolResultRecorded`; the next model request after a restart carries the same tools and schema bytes |
+| `adopt_binds_owner_without_a_run`, `adopt_exact_repeat_replays_reply`, `adopt_send_id_reuse_names_plan`, `adopt_plan_drift_refused`, `adopt_other_owner_refused`, `adopt_same_owner_readopts` | `adopt`, `transcript_reads`; the adapter's host-start hook and host plans; the live `role.describe` must declare `adopt` before any `session.adopt` is sent; reported as a named skip without `adopt` |
+| `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
+| `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
 
 Consumer-side rules no live runner can be made to exercise (an unknown run

@@ -50,6 +50,9 @@ pub enum Capability {
     InputTokenCap,
     /// Schema-shaped run output on `session.send.structured_output`.
     StructuredOutput,
+    /// `session.adopt`: the owner takes over a session the host started
+    /// with a plan applied, without sending a prompt.
+    Adopt,
     /// The runner under test can move its retention clock forward on request, so expiry and deletion happen without waiting in real time. For tests only; release builds must not offer it.
     RetentionClock,
     /// The runner adapter's scripted tool provider can hold a received call
@@ -84,6 +87,7 @@ impl Capability {
         Self::Retention,
         Self::InputTokenCap,
         Self::StructuredOutput,
+        Self::Adopt,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -119,6 +123,7 @@ impl Capability {
             Self::Retention => groups::RETENTION,
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
             Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
+            Self::Adopt => groups::ADOPT,
             Self::HoldToolCalls | Self::RetentionClock | Self::KillAt(_) => return None,
         })
     }
@@ -389,6 +394,36 @@ pub trait LlmRunnerSubject: Harness {
     ) -> Result<Vec<ModelRequestObservation>, HarnessError> {
         Err(HarnessError::new(
             "model request observation is not implemented",
+        ))
+    }
+
+    /// The fetch plan a host applies to `session` when it starts, in the
+    /// shape `session.adopt` carries it (the contract does not pin a plan's
+    /// shape, so the runner adapter builds it). The plan must make
+    /// [`crate::SCRIPTED_TOOL`] available to the model. With `alternate`, a
+    /// different plan, with a different identity, that the runner would
+    /// otherwise accept: the drift cases send it to a session started with
+    /// the first one. Required with [`Capability::Adopt`].
+    fn host_plan(&self, _session: &str, _alternate: bool) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// Start `session` the way a person's own app starts one, outside the
+    /// role: the runner applies `plan` at host start, and no role request has
+    /// reached the session yet, so it has no recorded owner. With `prompt`,
+    /// the person also sends `prompt` as the session's first turn, answered
+    /// by the script installed for `session`; return once the turn has
+    /// started, without waiting for it to end. Pass `None` for a session
+    /// with no message yet. Required with [`Capability::Adopt`].
+    async fn start_host_session(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _plan: &Map<String, Value>,
+        _prompt: Option<&str>,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "host-started sessions are not implemented",
         ))
     }
 

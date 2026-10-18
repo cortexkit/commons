@@ -663,3 +663,36 @@ mod input_cap_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod adopt_tests {
+    use super::*;
+    use crate::vectors;
+
+    #[test]
+    fn adopt_describe_group_requires_session_adopt_and_is_never_assumed() {
+        let file = vectors::load("adopt-describe.json");
+        let answer: RoleDescribe = vectors::round_trip("adopt describe", &file["accept"]);
+        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
+        assert!(answer.declares(capabilities::ADOPT));
+        assert_eq!(
+            check_describe(&file["refuse"]),
+            Err(vec![DescribeProblem::GroupIncomplete {
+                capability: capabilities::ADOPT,
+                op: crate::ops::SESSION_ADOPT
+            }])
+        );
+        // A runner without the group is a usable runner; a consumer that
+        // needs adoption finds the group missing and never sends the op.
+        let without = check_describe(&file["without"]).unwrap();
+        assert!(!without.declares(capabilities::ADOPT));
+        assert_eq!(
+            without.missing(&[capabilities::ADOPT]),
+            vec![capabilities::ADOPT]
+        );
+        assert!(!without
+            .major(PROVIDES)
+            .unwrap()
+            .serves(crate::ops::SESSION_ADOPT));
+    }
+}

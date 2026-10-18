@@ -124,9 +124,9 @@ impl Default for RetentionInvalidDetail {
     }
 }
 
-/// A send reused a `send_id` with a different payload or delivery mode.
-/// `detail.field` names the first field that differs, for example
-/// `delivery`.
+/// A send reused a `send_id` with a different payload or delivery mode, or
+/// a `session.adopt` reused one with another plan. `detail.field` names the
+/// first field that differs, for example `delivery` or `plan`.
 pub const SEND_ID_REUSE: &str = "send_id_reuse";
 
 /// A retry of a durably retracted send. Nothing is written and it never starts.
@@ -141,8 +141,9 @@ pub const DELIVERY_UNSUPPORTED: &str = "delivery_unsupported";
 /// run's own retry or an interrupt. Nothing was written.
 pub const RUN_PAUSED: &str = "run_paused";
 
-/// The caller is not the identity allowed to drive the session: a send, or
-/// a `session.baseline` request, from anyone but the session's owner.
+/// The caller is not the identity allowed to drive the session: a send, a
+/// `session.baseline` request or a `session.adopt`, from anyone but the
+/// session's owner.
 pub const SCOPE_OWNER_MISMATCH: &str = "scope_owner_mismatch";
 
 /// A scoped send into a session recorded without a scope that cannot adopt
@@ -166,17 +167,30 @@ pub const PLAN_STALE: &str = "plan_stale";
 /// `detail` is [`ToolNameCollisionDetail`]. Nothing was written.
 pub const TOOL_NAME_COLLISION: &str = "tool_name_collision";
 
-/// A later send carried a plan that differs from the session's frozen plan.
-/// `detail` is [`PlanDriftDetail`]. Nothing was applied.
+/// A later send carried a plan that differs from the session's frozen plan,
+/// or a `session.adopt` carried a plan other than the one the runner applied
+/// when the host started the session. `detail` is [`PlanDriftDetail`].
+/// Nothing was applied. Terminal: never retried with the same request.
 pub const PLAN_DRIFT: &str = "plan_drift";
 
 /// The identities of the frozen and sent plans in a `plan_drift` refusal.
+/// Identities only, never plan content.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlanDriftDetail {
-    /// Absent when the session's first episode had no plan.
+    /// Absent when the session's first episode had no plan, or, on
+    /// `session.adopt`, when the runner applied no plan at host start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen: Option<String>,
     pub sent: String,
+}
+
+impl PlanDriftDetail {
+    pub fn new(frozen: Option<String>, sent: impl Into<String>) -> Self {
+        Self {
+            frozen,
+            sent: sent.into(),
+        }
+    }
 }
 
 /// The model-facing name and every provider that offered it.
