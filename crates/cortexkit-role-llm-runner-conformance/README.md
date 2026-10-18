@@ -315,3 +315,49 @@ The cases compare the transcript before and after every adoption: the
 lineage, the last ordinal, the last run and its state, and every message.
 They never compare a plan identity with a digest of their own; they compare
 the identities the runner reports with each other.
+
+## Tags
+
+The seven `tags_*` cases run only when the subject declares
+`Capability::Tags` (the `tags` group); otherwise each is reported as skipped,
+by name, and the suite sends no `session.resolve`. They require `queue` and
+`transcript_reads`, and read the live `role.describe` before resolving. They
+check part rows (a stable key per exposed part, at least one tagged part per
+entry, each tag a well-formed `§N§` used once), that a later run never reuses
+or lowers numbers, that tags exist whether or not the plan renders them,
+`session.resolve`'s exact stored content (with a character range counted in
+Unicode scalar values) and its `unknown_tag`, `tag` and `range` refusals, and
+that a model-written `§N§` is stored and dispatched as written. The rendered
+case needs the defaulted `send_fields_with_plan(session, first, members)`
+hook, which adds members (here `render_tags`) to the first send's plan.
+
+## Run tool calls
+
+The three `run_tool_calls_*` cases run only with `Capability::RunToolCalls`.
+They follow `next` one call a page and check dispatch order, names, ids,
+exact `args`, outcomes, the dispatch module, stored result sizes and the
+carrying ordinal; `unknown_run`, a misspelled cursor and `limit: 0`; and, with
+held tool calls, `indeterminate` until the result is stored.
+
+## Delivery order
+
+The eight `delivery_order_*` cases run only with `Capability::DeliveryOrder`.
+They need `send_fields_with_plan` (to name `senders` in the plan) and
+`plan_sender()`, the route identity and module id of a sender the plan
+names. `turn_system_supported()` says whether the scripted route takes a
+turn-scoped system message: the template case then expects `turn_system`,
+and otherwise the same rendered text at user authority. They check that a
+list without `idle_start` never starts a run, that the first possible mode
+wins (with a held tool call for `tool_result`), dedupe, expiry, the refusal of
+a list beside a legacy `delivery`, plan-named senders and the `idle_start`
+grant, and that an out-of-range slot refuses the send.
+
+## Context ceiling and read stability
+
+`run_context_ceiling_wait_is_not_a_stall` needs the harness capability
+`Capability::HoldContextCeiling` and the hooks `hold_context_ceiling` and
+`end_context_ceiling_wait`. `read_stable_across_host_metadata_change` needs
+`Capability::HostMetadataChange` and `change_host_metadata`. At
+`crash_at_StepRecorded`, session B first finishes one run so its lineage can
+be read before the kill: a recovery that drops the never-sent call or its
+step must leave B on a new lineage.

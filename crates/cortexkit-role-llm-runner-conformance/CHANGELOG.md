@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+- Require cortexkit-role-llm-runner 0.2.7 and add cases for its new groups, each run only when the subject declares the group (otherwise reported as skipped, by name, with no op of the group sent):
+  - `tags` (seven cases): part rows and tags on every entry, never reused across runs, present whether or not rendered, `session.resolve` content, ranges and refusals, model-written `§N§` stored and dispatched as written;
+  - `run_tool_calls` (three cases): dispatch order through `next` paging, `unknown_run` and field refusals, `indeterminate` until a held call's result;
+  - `delivery_order` (eight cases): a list without `idle_start` never starts a run, the first possible mode wins, dedupe supersedes, expiry, the refusal beside a legacy `delivery`, plan-named senders and the `idle_start` grant, a template rendered once for whichever mode carries it, and an out-of-range slot refused.
+- Add `run_context_ceiling_wait_is_not_a_stall` (harness capability `HoldContextCeiling`) and `read_stable_across_host_metadata_change` (harness capability `HostMetadataChange`).
+- `crash_at_StepRecorded` now gives session B one finished run before the kill and fails a recovery that drops the never-sent call or its step without moving B to a new lineage.
+- Breaking: `Capability` gains `Tags`, `RunToolCalls`, `DeliveryOrder`, `HoldContextCeiling` and `HostMetadataChange`, so an exhaustive `match` needs the new arms.
+- `LlmRunnerSubject` gains defaulted `send_fields_with_plan`, `plan_sender`, `turn_system_supported`, `hold_context_ceiling`, `end_context_ceiling_wait` and `change_host_metadata` hooks; the new `PlanSenderIdentity` is non-exhaustive with a constructor.
+- The reference fake's defects (tag reuse, rewritten model tags, reversed tool calls, runs started without `idle_start`, unchecked template slots, unnamed senders admitted, dedupe and expiry ignored, last possible mode, both delivery fields accepted, drop recovery keeping its lineage, reads serving live host metadata) each fail their named cases in the suite's own tests.
+
 ## 0.6.0
 
 - Require cortexkit-role-llm-runner 0.2.6 and add `session.adopt` cases, run only when the subject declares `adopt` (otherwise each is reported as skipped, by name, and no `session.adopt` is sent); each case also refuses to send one unless the live `role.describe` declares `adopt`. They check that:
