@@ -129,8 +129,11 @@ waiting for the run to end); a plan sender's typed template with uses that
 render or name their problem (a percentage over 100 or written as a string,
 an integer outside its bounds, an unassigned tag, free text in a tag slot,
 an unlisted enum value, missing and undeclared slots, another digest, an
-unknown template); what goes out, system text or the prompt at user
-authority after a fall-through; plans with senders, valid and refused
+unknown template); what goes out (a rendered template as system text, or
+as the same text at user authority after a fall-through, a plain prompt at
+user authority) and the refusal naming `template` of every template that
+cannot render; template sends with an empty `prompt`, and the refusals of a
+template beside a prompt or an empty prompt without one; plans with senders, valid and refused
 (including a string slot); admission of the owner, named senders with and
 without the `idle_start` grant, and unnamed modules refused
 `scope_owner_mismatch` even when a request field names a sender; dedupe and

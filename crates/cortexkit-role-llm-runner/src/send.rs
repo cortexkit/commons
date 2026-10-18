@@ -448,10 +448,24 @@ impl SendRequest {
     /// when it rides beside a legacy `delivery`, so a caller never has two
     /// answers. Only a runner that declares `delivery_order` calls this; a
     /// caller never sends the members to one that does not.
+    /// A send naming a `template` carries an empty `prompt` (the runner
+    /// renders its one text), and a `delivery_order` send without a template
+    /// carries a non-empty one; anything else is refused naming `template`.
+    /// The empty prompt is a transitional encoding: `prompt` becomes
+    /// optional at the next breaking release.
     pub fn delivery_order(
         &self,
     ) -> Result<Option<crate::delivery_order::DeliveryOrder>, &'static str> {
-        crate::delivery_order::DeliveryOrder::decode(&self.runner_params, self.delivery.is_some())
+        let order = crate::delivery_order::DeliveryOrder::decode(
+            &self.runner_params,
+            self.delivery.is_some(),
+        )?;
+        if let Some(order) = &order {
+            if order.template.is_some() != self.prompt.is_empty() {
+                return Err(crate::delivery_order::TEMPLATE_FIELD);
+            }
+        }
+        Ok(order)
     }
 
     /// Refuse a send carrying any `delivery_order` member with

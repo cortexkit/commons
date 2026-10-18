@@ -32,7 +32,7 @@
     {
       "name": "a module's reminder: tool result, then system, then steer",
       "request": {
-        "prompt": "reminder r-1",
+        "prompt": "",
         "send_id": "r-1",
         "delivery_order": [
           "tool_result",
@@ -203,6 +203,39 @@
           },
           "text": "free text"
         }
+      },
+      "field": "template"
+    },
+    {
+      "name": "a template beside a non-empty prompt",
+      "request": {
+        "prompt": "two texts",
+        "send_id": "x-10",
+        "delivery_order": [
+          "turn_system",
+          "steer"
+        ],
+        "template": {
+          "id": "ctx_pressure",
+          "digest": "a998a072f47ea1fcd3ef4424ad66b6f9b955cb07c77361ee7526c47d224128a5",
+          "slots": {
+            "pct": 82,
+            "tag": "§2§",
+            "level": "high",
+            "count": 12
+          }
+        }
+      },
+      "field": "template"
+    },
+    {
+      "name": "an empty prompt without a template",
+      "request": {
+        "prompt": "",
+        "send_id": "x-11",
+        "delivery_order": [
+          "steer"
+        ]
       },
       "field": "template"
     }
@@ -593,7 +626,7 @@
   },
   "fall_through": [
     {
-      "name": "a valid template goes out as system",
+      "name": "a rendered template goes out as system",
       "modes": [
         "turn_system",
         "steer"
@@ -615,29 +648,7 @@
       }
     },
     {
-      "name": "an out-of-range slot falls through to user authority",
-      "modes": [
-        "turn_system",
-        "steer"
-      ],
-      "provider_supports": true,
-      "use": {
-        "id": "ctx_pressure",
-        "digest": "a998a072f47ea1fcd3ef4424ad66b6f9b955cb07c77361ee7526c47d224128a5",
-        "slots": {
-          "pct": 101,
-          "tag": "§2§",
-          "level": "high",
-          "count": 12
-        }
-      },
-      "delivered": {
-        "mode": "steer",
-        "text": "prompt"
-      }
-    },
-    {
-      "name": "a provider without turn-scoped system messages falls through",
+      "name": "rendered, but the provider has no turn-scoped system message: the same text at user authority",
       "modes": [
         "turn_system",
         "steer"
@@ -655,11 +666,11 @@
       },
       "delivered": {
         "mode": "steer",
-        "text": "prompt"
+        "text": "Context is 82% full; consider dropping §2§ (high, 12 parts)."
       }
     },
     {
-      "name": "no template at all falls through",
+      "name": "no template: turn_system is never possible, the prompt goes out at user authority",
       "modes": [
         "turn_system",
         "steer"
@@ -669,6 +680,125 @@
       "delivered": {
         "mode": "steer",
         "text": "prompt"
+      }
+    },
+    {
+      "name": "an out-of-range slot cannot render: refused, never sent at either authority",
+      "modes": [
+        "turn_system",
+        "steer"
+      ],
+      "provider_supports": true,
+      "use": {
+        "id": "ctx_pressure",
+        "digest": "a998a072f47ea1fcd3ef4424ad66b6f9b955cb07c77361ee7526c47d224128a5",
+        "slots": {
+          "pct": 101,
+          "tag": "§2§",
+          "level": "high",
+          "count": 12
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "template"
+        }
+      }
+    },
+    {
+      "name": "an unknown template id: refused",
+      "modes": [
+        "turn_system",
+        "steer"
+      ],
+      "provider_supports": true,
+      "use": {
+        "id": "other",
+        "digest": "a998a072f47ea1fcd3ef4424ad66b6f9b955cb07c77361ee7526c47d224128a5",
+        "slots": {
+          "pct": 82,
+          "tag": "§2§",
+          "level": "high",
+          "count": 12
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "template"
+        }
+      }
+    },
+    {
+      "name": "another digest: refused",
+      "modes": [
+        "turn_system",
+        "steer"
+      ],
+      "provider_supports": true,
+      "use": {
+        "id": "ctx_pressure",
+        "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "slots": {
+          "pct": 82,
+          "tag": "§2§",
+          "level": "high",
+          "count": 12
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "template"
+        }
+      }
+    },
+    {
+      "name": "a missing slot: refused",
+      "modes": [
+        "turn_system",
+        "steer"
+      ],
+      "provider_supports": true,
+      "use": {
+        "id": "ctx_pressure",
+        "digest": "a998a072f47ea1fcd3ef4424ad66b6f9b955cb07c77361ee7526c47d224128a5",
+        "slots": {
+          "pct": 82,
+          "tag": "§2§",
+          "level": "high"
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "template"
+        }
+      }
+    },
+    {
+      "name": "a wrongly typed slot: refused",
+      "modes": [
+        "turn_system",
+        "steer"
+      ],
+      "provider_supports": true,
+      "use": {
+        "id": "ctx_pressure",
+        "digest": "a998a072f47ea1fcd3ef4424ad66b6f9b955cb07c77361ee7526c47d224128a5",
+        "slots": {
+          "pct": "82",
+          "tag": "§2§",
+          "level": "high",
+          "count": 12
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "template"
+        }
       }
     }
   ],

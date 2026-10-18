@@ -248,6 +248,29 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] Each message (`ReadMessage`) carries `ordinal`, `mid` and its
   final values: what later steps render and what executed. The raw view and
   the model view then differ only by compaction.
+- [pinned] **Only finished messages.** `session.read` returns only messages
+  the runner will no longer change. A message still being generated (a
+  model step streaming, a tool result being written) is never an entry
+  until it completes. This is stricter than, and contains, the final-values
+  rule above; streaming progress reaches a consumer through the stream
+  (§7), never through a partial entry.
+- [pinned] **Read stability.** Once `session.read` has returned an entry
+  under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
+  `written_at`, `delivered_as`, and its part keys and tags never change
+  under that lineage. Envelope members that report later state move forward
+  only as their own rules say (`run.final`, §6; `tool_calls`'
+  `call_key`, `dispatched_to` and `indeterminate`, §5). A runner that reads
+  from a host freezes the bytes it first ingested and serves its own
+  journal, never the host's live history. A host change that reaches the
+  model (a revert, an edited part) and a recovery that drops or rewrites a
+  written message (§14, property 4) start a new lineage, so reads of the old
+  one are refused `lineage_changed`; changed bytes never appear under the
+  same lineage. A reader may treat changed bytes under one lineage as a
+  runner defect.
+- [pinned] **Bookkeeping stays out.** Host records a runner writes for its
+  own compaction bookkeeping (a host's native compaction message, summary or
+  entry) are outside the transcript: they never appear in `session.read`
+  and are never rendered to the model on top of the view.
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
   originals?, tool_calls?, tags?, role?, written_at?, delivered_as?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
@@ -735,7 +758,10 @@ what a run called without decoding any message body.
 - [pinned] A send that would start or join a run while the session's
   context is at or over its ceiling is refused `context_ceiling {window,
   size, cause}` and writes nothing (§6, §12.1).
-- [pinned] Owner sends MUST carry both `send_id` and `prompt`.
+- [pinned] Owner sends MUST carry both `send_id` and `prompt`. A
+  `delivery_order` send naming a plan template carries an empty `prompt`
+  (§9.7), a transitional encoding until `prompt` becomes optional at the
+  next breaking release.
   `session.adopt` (§9.5) is not a send: it carries a `send_id` and a plan,
   and no prompt.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
@@ -1420,20 +1446,32 @@ say who may send and which texts are system text.
   records that send S was delivered with result R, and renders R followed
   by S's text from that record, so a resume renders the same bytes.
 
-**Authority.**
+**Text and authority.**
 
+- [pinned] A send has one text, whatever mode carries it: its `prompt`, or,
+  for a send naming a plan template, the text the runner renders from that
+  template and the send's slots. A template send carries `template: {id,
+  digest, slots}` (`delivery_order::TemplateUse`, strict) and an empty
+  `prompt`; a template beside a non-empty `prompt`, or a `delivery_order`
+  send with an empty `prompt` and no template, is refused `invalid_params
+  {field: "template"}` (`SendRequest::delivery_order`). The empty `prompt` is
+  a transitional encoding: `prompt` becomes optional at the next breaking
+  release.
+- [pinned] The runner renders the template from the plan's template for
+  that sender and the send's slots, validating every slot itself
+  (`delivery_order::render`); the sender's word is never enough. A send
+  whose template cannot render has no text, so it is refused at admission
+  `invalid_params {field: "template"}`, writing nothing
+  (`delivery_order::TemplateProblem`): the sender's plan entry declares no
+  template with that id, its digest differs, a slot is missing or
+  undeclared, or a value is not a value of its slot (the wrong type, out of
+  range, an unassigned tag, an unlisted enum value).
 - [pinned] `tool_result`, `steer` and `idle_start` deliver at user
-  authority: the send's `prompt`, as a user would have written it.
-- [pinned] `turn_system` is possible only for text the runner rendered
-  itself from a template the session's plan declares for that sender, under
-  the digest the send names. The send names it as `template: {id, digest,
-  slots}` (`delivery_order::TemplateUse`, strict). The runner renders and
-  validates every slot (`delivery_order::render`); the sender's word is
-  never enough. If the template is unknown, its digest differs, or a slot is
-  missing, undeclared or invalid, `turn_system` is not possible
-  (`delivery_order::TemplateProblem`): not a refusal, the runner falls
-  through to the next mode in the list, and the send's `prompt` goes out at
-  user authority.
+  authority. `turn_system` is possible only for a rendered template, and
+  only where the provider supports a turn-scoped system message and the
+  runner owns the request. Where it is not, the runner falls through to the
+  next mode in the list, carrying the same rendered text at user authority.
+  A send without a template never goes out as `turn_system`.
 - [pinned] A template is `{id, text, slots}` (`delivery_order::Template`):
   `text` holds `{name}` placeholders, `name` in `[a-z0-9_]+`, and no other
   brace; every placeholder names a declared slot and every slot is used. Its
@@ -1885,6 +1923,10 @@ state root (`cortexkit-role-harness`):
    follow-up transcript carries its id or `call_key`, attribution, or result.
    The assistant step's text may also be dropped, or retained exactly once
    without the call. The same shape is preserved through the follow-up.
+   Dropping or rewriting a written message starts a new lineage, whether or
+   not a reader saw the message (the runner cannot know), so read stability
+   (§4.2) holds without exception: reads of the old lineage are refused
+   `lineage_changed`, and a reader resyncs from the new one.
 5. [pinned] **Replay, not re-invocation.** Applied compaction and every hook
    output replay from durable state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
@@ -1981,7 +2023,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
 | `send_id_retry_settled_same_answer` | `steer` or `queue`, and `run_ops` |
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
-| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
+| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result; a recovery that drops the call or its step moves the session to a new lineage | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
 | `retention_honoured`, `retention_no_content_served`, `retention_shorten_continues_lineage`, `retention_equal_noop`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
 | `retention_run_status_expired` | the above; not applicable unless the major lists `run.status` (§6.1) |
@@ -1997,7 +2039,8 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_with_legacy_delivery_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
 | `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
 | `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
-| `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_falls_through` | the above; inapplicable when the adapter says its scripted route has no turn-scoped system message, since nothing then can go out as `turn_system` |
+| `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_refused` | the above; the rendered text goes out as `turn_system` where the adapter says its scripted route supports it, and as the same text at user authority otherwise; an out-of-range slot is refused naming `template` and writes nothing |
+| `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |

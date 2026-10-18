@@ -14,11 +14,14 @@
 //! `[steer, idle_start]`, and `interrupt` has no list form. A send carrying
 //! both is refused naming `delivery_order`.
 //!
-//! `tool_result`, `steer` and `idle_start` deliver at user authority.
-//! `turn_system` delivers a turn-scoped system message, and only for text the
-//! runner rendered itself from a template the session's plan declares for
-//! that sender, with every typed slot valid ([`render`]); otherwise it is not
-//! possible and the runner falls through to the next mode.
+//! A send has one text whatever mode carries it: its `prompt`, or, for a
+//! send naming a plan `template` (with an empty `prompt`), the text the
+//! runner renders from that template and the send's typed slots
+//! ([`render`]). A template that cannot render refuses the send.
+//! `tool_result`, `steer` and `idle_start` deliver at user authority;
+//! `turn_system` delivers a turn-scoped system message, possible only for a
+//! rendered template, and otherwise the runner falls through to the next
+//! mode, carrying the same text at user authority.
 
 use std::collections::BTreeMap;
 
@@ -522,9 +525,9 @@ pub fn admit(
     Ok(())
 }
 
-/// Why a template use cannot go out as `turn_system`. Not a refusal: the
-/// runner falls through to the next mode in the list, and the send's
-/// `prompt` goes out at user authority.
+/// Why a send's template cannot render. The send has no text, so it is
+/// refused at admission `invalid_params {field: "template"}`, writing
+/// nothing; it never falls through.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TemplateProblem {
@@ -541,10 +544,12 @@ pub enum TemplateProblem {
     InvalidSlot(String),
 }
 
-/// Render `use_` from the templates the plan declares for its sender.
-/// `assigned` says whether the session assigned a tag number. The runner
-/// renders and validates every slot itself; the sender's word is never
-/// enough.
+/// Render `use_` from the templates the plan declares for its sender: the
+/// send's one text, used for whichever mode carries it. `assigned` says
+/// whether the session assigned a tag number. The runner renders and
+/// validates every slot itself; the sender's word is never enough. A value
+/// outside its slot's type, range or listed values is not a value of that
+/// slot, so it is as unrenderable as a missing one.
 pub fn render(
     templates: &[Template],
     use_: &TemplateUse,
@@ -804,23 +809,29 @@ mod tests {
                 None => assert_eq!(outcome, Err(problem_of(&case["problem"])), "{name}"),
             }
         }
-        // What goes out: the rendering as system when it rendered and the
-        // provider supports it, otherwise the send's prompt at user authority.
+        // A send has one text: the template's rendering, or its prompt
+        // without a template. A template that cannot render refuses the
+        // send; one that renders goes out as system where the provider
+        // supports it, otherwise as the same text at user authority.
         for case in vectors::cases(&file, "fall_through") {
             let name = case["name"].as_str().unwrap();
-            let rendered = (!case["use"].is_null())
-                .then(|| serde_json::from_value::<TemplateUse>(case["use"].clone()).unwrap())
-                .and_then(|use_| render(&sender.templates, &use_, has).ok());
+            let rendered = (!case["use"].is_null()).then(|| {
+                let use_: TemplateUse = serde_json::from_value(case["use"].clone()).unwrap();
+                render(&sender.templates, &use_, has)
+            });
+            if let Some(refusal) = case.get("refusal") {
+                assert!(matches!(rendered, Some(Err(_))), "{name}");
+                assert_eq!(refusal["code"], crate::errors::INVALID_PARAMS, "{name}");
+                assert_eq!(refusal["detail"]["field"], TEMPLATE_FIELD, "{name}");
+                continue;
+            }
+            let rendered = rendered.map(Result::unwrap);
             let mut at = Boundary::default().with_run_in_progress();
             if rendered.is_some() && case["provider_supports"] == true {
                 at = at.with_turn_system();
             }
             let mode = choose(&modes(&case["modes"]), &at).unwrap();
-            let text = if mode == Mode::TurnSystem {
-                rendered.unwrap()
-            } else {
-                "prompt".to_owned()
-            };
+            let text = rendered.unwrap_or_else(|| "prompt".to_owned());
             assert_eq!(case["delivered"]["mode"], mode.as_str(), "{name}");
             assert_eq!(case["delivered"]["text"], text.as_str(), "{name}");
             assert_eq!(mode.is_user_authority(), mode != Mode::TurnSystem);
