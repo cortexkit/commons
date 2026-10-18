@@ -211,13 +211,16 @@ mod tests {
     fn tool_call_requests_round_trip_and_refuse_by_field() {
         let file = vectors::load("run-tool-calls.json");
         for case in vectors::cases(&file, "requests") {
-            vectors::round_trip::<ToolCallsRequest>(case["name"].as_str().unwrap(), &case["request"]);
+            vectors::round_trip::<ToolCallsRequest>(
+                case["name"].as_str().unwrap(),
+                &case["request"],
+            );
         }
         for case in vectors::cases(&file, "refused_requests") {
             let name = case["name"].as_str().unwrap();
             let field = case["field"].as_str().unwrap();
-            let error =
-                serde_json::from_value::<ToolCallsRequest>(case["request"].clone()).expect_err(name);
+            let error = serde_json::from_value::<ToolCallsRequest>(case["request"].clone())
+                .expect_err(name);
             assert!(error.to_string().contains(field), "{name}: {error}");
         }
     }
@@ -239,7 +242,10 @@ mod tests {
             let mut last = None;
             for call in &page.calls {
                 assert!(call.args.is_object(), "{name}: args must be an object");
-                assert!(last.is_none_or(|last| last <= call.ordinal), "{name}: out of order");
+                assert!(
+                    last.is_none_or(|last| last <= call.ordinal),
+                    "{name}: out of order"
+                );
                 last = Some(call.ordinal);
                 outcomes_seen.insert(call.outcome.clone());
                 let dispatched = call.dispatched_to.is_some();

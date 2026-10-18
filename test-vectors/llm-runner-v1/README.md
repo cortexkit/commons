@@ -95,3 +95,54 @@ symbolic, as in `plans.json`. `adopt-describe.json` pins the group's
 discovery, its missing-op refusal and an answer without the group. Checked by
 the `adopt::tests` and `describe::adopt_tests` modules of the wire crate,
 which apply the pinned order of checks to every case.
+
+# Tags
+
+`tags.json` pins the `tags` group: the one spelling of a tag (valid and
+invalid spellings, including a leading zero, a non-ASCII digit and a number
+past `u64`); a fork continuing after its parent's highest number; read
+entries carrying `tags` (one row per part, every tag used once) and an
+`origin` for each named origin, none on the model's own output, with `role`
+and `written_at` in the envelope; a model-written `§N§` stored as written in
+a text part and in tool-call arguments; `session.resolve` requests, requests
+refused by field, and cases against a ledger of stored parts (the whole part
+with its origin, a character range, a range counted in Unicode scalar values,
+an empty range at the end, a tool-call part in the runner's stored encoding,
+`unknown_tag`, malformed tags, a range past the content and one starting
+after its end); and the plan's `render_tags` member, off when absent or
+`null`, refused when not a boolean or when `true` without the group.
+`tags-describe.json` pins the group's discovery, its missing-op refusal and
+an answer without the group. Checked by the `tags::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Send origin
+
+`send-origin.json` pins `session.send`'s `origin`: absent and `null` mean
+`owner`; `owner`, `wake` and `peer` are recorded; `person`, the read-only
+origins `reminder` and `tool_result`, an unknown value and a non-string are
+refused `invalid_params` naming `origin`, writing nothing; a runner without
+`tags` ignores the field, `person` included. Its `identity` cases pin the
+origin as part of a send's identity: absent equals `owner`, and another
+origin under the same `send_id` is `send_id_reuse` naming `origin`. Checked
+by the `send::origin_tests` module of the wire crate.
+
+# Run tool calls
+
+`run-tool-calls.json` pins `run.tool_calls`: requests, requests refused by
+field (a misspelled cursor, a named session, no `run_id`); pages following
+`next` under a `limit`, in dispatch order, with one call for each named
+outcome (a reused model id is a different call), and a run with no calls;
+and refusals: `unknown_run`, a cursor never given, `limit: 0`, and
+`reply_too_large` naming the call. `run-tool-calls-describe.json` pins the
+group's discovery. Checked by the `tool_calls::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Context ceiling
+
+`context-ceiling.json` pins the `context_ceiling` refusal of a send, one per
+documented cause, writing nothing; `run.result` and `run.status` of a run
+that ended in the `context_ceiling` state with its detail and no error; a
+cause this role does not name and an unknown member, both tolerated; and,
+for contrast, a provider's own overflow, which ends `error` with
+`context_overflow`. Checked by the `errors::context_ceiling_tests` module of
+the wire crate.

@@ -45,7 +45,6 @@
           "role": "user",
           "text": "fix the build"
         },
-        "origin": "person",
         "tags": [
           {
             "part": "0",
@@ -57,7 +56,7 @@
       }
     },
     {
-      "name": "the model's answer: one tag per part, no origin",
+      "name": "the model's answer: one tag per part",
       "entry": {
         "ordinal": 1,
         "mid": "m1",
@@ -130,7 +129,6 @@
           "episode": "ep-1",
           "final": false
         },
-        "origin": "tool_result",
         "tags": [
           {
             "part": "0",
@@ -150,7 +148,6 @@
           "role": "user",
           "text": "now run the tests"
         },
-        "origin": "owner",
         "tags": [
           {
             "part": "0",
@@ -170,7 +167,6 @@
           "role": "user",
           "text": "wake: CI finished"
         },
-        "origin": "wake",
         "tags": [
           {
             "part": "0",
@@ -190,7 +186,6 @@
           "role": "user",
           "text": "from reviewer: looks good"
         },
-        "origin": "peer",
         "tags": [
           {
             "part": "0",
@@ -210,7 +205,6 @@
           "role": "user",
           "text": "<system-reminder>context is 80% full</system-reminder>"
         },
-        "origin": "reminder",
         "tags": [
           {
             "part": "0",
@@ -230,7 +224,6 @@
           "role": "user",
           "text": "[session resumed]"
         },
-        "origin": "synthetic",
         "tags": [
           {
             "part": "0",
@@ -277,8 +270,7 @@
       "ordinal": 0,
       "mid": "m0",
       "part": "0",
-      "content": "fix the build",
-      "origin": "person"
+      "content": "fix the build"
     },
     {
       "tag": "§2§",
@@ -364,7 +356,7 @@
   ],
   "resolve_cases": [
     {
-      "name": "whole part with its message's origin",
+      "name": "whole part",
       "request": {
         "tag": "§1§"
       },
@@ -373,8 +365,7 @@
         "ordinal": 0,
         "mid": "m0",
         "part": "0",
-        "content": "fix the build",
-        "origin": "person"
+        "content": "fix the build"
       }
     },
     {
@@ -395,8 +386,7 @@
         "range": {
           "start": 4,
           "end": 9
-        },
-        "origin": "person"
+        }
       }
     },
     {

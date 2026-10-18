@@ -574,11 +574,6 @@ pub struct ReadMessage {
     /// declares `dispatch_attribution`, for messages that carry tool calls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
-    /// Where the message came from (`crate::tags::origins`), decoded as an
-    /// open string. Present on a runner that declares `tags`, for every
-    /// message but the model's own output, which has no origin.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<String>,
     /// One row per tagged part of the message: the part's key and its
     /// `§N§` tag, which never change once assigned. Present on a runner
     /// that declares `tags`. No digest rides here: a reader computes one
@@ -596,6 +591,11 @@ pub struct ReadMessage {
     /// when the runner does not know it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written_at: Option<u64>,
+    /// On the entry a `delivery_order` send wrote when it was delivered: the
+    /// mode it went out in and, for `tool_result`, the tool result it went
+    /// out with, so readers and a resumed run render exactly what was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_as: Option<crate::delivery_order::EntryDelivery>,
 }
 
 /// The roles a read entry's `role` names. Decoded as open strings: a
@@ -620,11 +620,16 @@ impl ReadMessage {
             run: None,
             originals: None,
             tool_calls: Vec::new(),
-            origin: None,
             tags: Vec::new(),
             role: None,
             written_at: None,
+            delivered_as: None,
         }
+    }
+
+    pub fn with_delivered_as(mut self, delivered_as: crate::delivery_order::EntryDelivery) -> Self {
+        self.delivered_as = Some(delivered_as);
+        self
     }
 
     pub fn with_role(mut self, role: impl Into<String>) -> Self {
@@ -634,11 +639,6 @@ impl ReadMessage {
 
     pub fn with_written_at(mut self, written_at: u64) -> Self {
         self.written_at = Some(written_at);
-        self
-    }
-
-    pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
-        self.origin = Some(origin.into());
         self
     }
 

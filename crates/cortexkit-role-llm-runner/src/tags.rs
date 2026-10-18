@@ -1,5 +1,4 @@
-//! The `tags` group: runner-owned part tags, message origins and
-//! `session.resolve`.
+//! The `tags` group: runner-owned part tags and `session.resolve`.
 //!
 //! A runner that declares `tags` ([`crate::capabilities::TAGS`]) gives every
 //! message part a tag `§N§`, `N` a positive integer, per session. A tag is
@@ -10,11 +9,9 @@
 //! highest tag ([`next_after`]). Once assigned, a part's key, its tag and
 //! its stored content never change.
 //!
-//! Every message also records where it came from ([`origins`]), at write or
-//! first ingest, except the model's own output, which has no origin.
-//! `session.read` entries carry both ([`crate::read::ReadMessage::tags`] and
-//! [`crate::read::ReadMessage::origin`]); `session.resolve` answers a tag
-//! with the part's exact stored content and its message's origin.
+//! `session.read` entries carry each message's part tags
+//! ([`crate::read::ReadMessage::tags`]); `session.resolve` answers a tag with
+//! the part's exact stored content.
 //!
 //! Whether tags are rendered to the model is the session's fetch plan's
 //! `render_tags` member ([`plan_render_tags`]); the numbers exist either way.
@@ -53,33 +50,6 @@ pub fn parse_tag(tag: &str) -> Option<u64> {
 /// all continue from here.
 pub fn next_after(highest: Option<u64>) -> u64 {
     highest.map_or(1, |n| n.saturating_add(1))
-}
-
-/// Where a message came from, as `session.read` entries and
-/// `session.resolve` answers name it. Decoded as an open string: a consumer
-/// keeps a value it does not know as itself.
-pub mod origins {
-    /// Typed by the person in the harness's own input. Recorded only from
-    /// that input path, never from a route: a `session.send` naming it is
-    /// refused.
-    pub const PERSON: &str = "person";
-    /// A `session.send` from the session's owner. What an absent send
-    /// `origin` means.
-    pub const OWNER: &str = "owner";
-    /// A `session.send` the owner makes to wake the session.
-    pub const WAKE: &str = "wake";
-    /// A `session.send` carrying a message from a peer agent.
-    pub const PEER: &str = "peer";
-    /// A reminder the runner placed in the transcript. Not a send origin.
-    pub const REMINDER: &str = "reminder";
-    /// A tool's result, on a runner whose schema stores it as a message of
-    /// its own.
-    pub const TOOL_RESULT: &str = "tool_result";
-    /// Written by the runner or its host without an input behind it (a
-    /// placeholder, a host-made notice).
-    pub const SYNTHETIC: &str = "synthetic";
-    /// Every origin this role names.
-    pub const ALL: &[&str] = &[PERSON, OWNER, WAKE, PEER, REMINDER, TOOL_RESULT, SYNTHETIC];
 }
 
 /// One part's tag on a `session.read` entry: one row per tagged part of the
@@ -214,9 +184,6 @@ pub struct ResolveReply {
     /// The requested range, echoed; absent for the whole content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<CharRange>,
-    /// The origin of the part's message. Absent for the model's own output.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<String>,
 }
 
 impl ResolveReply {
@@ -234,17 +201,11 @@ impl ResolveReply {
             part: part.into(),
             content: content.into(),
             range: None,
-            origin: None,
         }
     }
 
     pub fn with_range(mut self, range: CharRange) -> Self {
         self.range = Some(range);
-        self
-    }
-
-    pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
-        self.origin = Some(origin.into());
         self
     }
 }
@@ -317,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn read_entries_carry_part_tags_and_origin() {
+    fn read_entries_carry_part_tags() {
         let file = vectors::load("tags.json");
         let mut seen = std::collections::BTreeSet::new();
         for case in vectors::cases(&file, "read_entries") {
@@ -329,29 +290,13 @@ mod tests {
                 assert!(parts.insert(row.part.clone()), "{name}: part twice");
                 assert!(seen.insert(row.tag.clone()), "{name}: {} reused", row.tag);
             }
-            if let Some(origin) = &entry.origin {
-                assert!(origins::ALL.contains(&origin.as_str()), "{name}: {origin}");
-            }
         }
-        for origin in origins::ALL {
-            assert!(
-                vectors::cases(&file, "read_entries")
-                    .iter()
-                    .any(|case| case["entry"]["origin"] == *origin),
-                "no read entry has origin {origin}"
-            );
-        }
-        // A runner without the group sends neither member, and a consumer
-        // still decodes the entry; an origin this role does not name decodes
-        // as itself.
+        // A runner without the group sends no tags, and a consumer still
+        // decodes the entry.
         let plain: ReadMessage =
-            serde_json::from_value(json!({"ordinal": 0, "mid": "m0", "message": {}})).unwrap();
-        assert!(plain.tags.is_empty() && plain.origin.is_none());
-        let future: ReadMessage = serde_json::from_value(
-            json!({"ordinal": 0, "mid": "m0", "message": {}, "origin": "future", "x": 1}),
-        )
-        .unwrap();
-        assert_eq!(future.origin.as_deref(), Some("future"));
+            serde_json::from_value(json!({"ordinal": 0, "mid": "m0", "message": {}, "x": 1}))
+                .unwrap();
+        assert!(plain.tags.is_empty());
     }
 
     #[test]
@@ -372,9 +317,9 @@ mod tests {
         for case in vectors::cases(&file, "resolve_cases") {
             let name = case["name"].as_str().unwrap();
             let request: ResolveRequest = vectors::round_trip(name, &case["request"]);
-            let decided = request.number().map_err(|field| {
-                (errors::INVALID_PARAMS, Some(json!({ "field": field })))
-            });
+            let decided = request
+                .number()
+                .map_err(|field| (errors::INVALID_PARAMS, Some(json!({ "field": field }))));
             let decided = decided.and_then(|_| {
                 let part = parts
                     .iter()
@@ -392,16 +337,17 @@ mod tests {
                 if let Some(range) = request.range {
                     reply = reply.with_range(range);
                 }
-                if let Some(origin) = part["origin"].as_str() {
-                    reply = reply.with_origin(origin);
-                }
                 Ok(reply)
             });
             match (decided, case.get("refusal")) {
                 (Ok(reply), None) => {
                     let expected: ResolveReply = vectors::round_trip(name, &case["reply"]);
                     assert_eq!(reply, expected, "{name}");
-                    kinds.insert(if reply.range.is_some() { "range" } else { "whole" });
+                    kinds.insert(if reply.range.is_some() {
+                        "range"
+                    } else {
+                        "whole"
+                    });
                 }
                 (Err((code, detail)), Some(refusal)) => {
                     assert_eq!(refusal["code"], code, "{name}");
@@ -417,7 +363,13 @@ mod tests {
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }
         }
-        for kind in ["whole", "range", "unknown_tag", "range_refused", "tag_refused"] {
+        for kind in [
+            "whole",
+            "range",
+            "unknown_tag",
+            "range_refused",
+            "tag_refused",
+        ] {
             assert!(kinds.contains(kind), "no resolve vector for {kind}");
         }
         let lenient: ResolveReply = serde_json::from_value(json!({
@@ -430,9 +382,18 @@ mod tests {
     #[test]
     fn ranges_count_unicode_scalar_values() {
         assert_eq!(slice("héllo", Some(&CharRange::new(1, 3))), Ok("él".into()));
-        assert_eq!(slice("héllo", Some(&CharRange::new(5, 5))), Ok(String::new()));
-        assert_eq!(slice("héllo", Some(&CharRange::new(0, 6))), Err(RANGE_FIELD));
-        assert_eq!(slice("héllo", Some(&CharRange::new(3, 2))), Err(RANGE_FIELD));
+        assert_eq!(
+            slice("héllo", Some(&CharRange::new(5, 5))),
+            Ok(String::new())
+        );
+        assert_eq!(
+            slice("héllo", Some(&CharRange::new(0, 6))),
+            Err(RANGE_FIELD)
+        );
+        assert_eq!(
+            slice("héllo", Some(&CharRange::new(3, 2))),
+            Err(RANGE_FIELD)
+        );
         assert_eq!(slice("héllo", None), Ok("héllo".into()));
     }
 

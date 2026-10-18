@@ -605,7 +605,8 @@ mod context_ceiling_tests {
             let name = case["name"].as_str().unwrap();
             assert_eq!(case["refusal"]["code"], CONTEXT_CEILING, "{name}");
             assert_eq!(case["writes"], "nothing", "{name}");
-            let detail: ContextCeilingDetail = vectors::round_trip(name, &case["refusal"]["detail"]);
+            let detail: ContextCeilingDetail =
+                vectors::round_trip(name, &case["refusal"]["detail"]);
             causes.insert(detail.cause);
         }
         for cause in context_ceiling_causes::ALL {
@@ -631,8 +632,8 @@ mod context_ceiling_tests {
         }
         for case in vectors::cases(&file, "tolerated") {
             let name = case["name"].as_str().unwrap();
-            let detail: ContextCeilingDetail =
-                serde_json::from_value(case["detail"].clone()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let detail: ContextCeilingDetail = serde_json::from_value(case["detail"].clone())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(detail.cause, case["detail"]["cause"], "{name}");
         }
         // A provider's own overflow refusal stays a provider failure.

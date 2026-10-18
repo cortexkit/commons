@@ -24,6 +24,7 @@
 pub mod adopt;
 pub mod baseline;
 pub mod compaction;
+pub mod delivery_order;
 pub mod describe;
 pub mod errors;
 pub mod points;
@@ -95,7 +96,7 @@ pub mod ops {
     /// written to the transcript. In `adopt`.
     pub const SESSION_ADOPT: &str = "session.adopt";
     /// The exact stored content of the message part a runner tag names, or a
-    /// character range of it, with its message's origin. In `tags`.
+    /// character range of it. In `tags`.
     pub const SESSION_RESOLVE: &str = "session.resolve";
     /// Every tool call a run made, in order, without message bodies. In
     /// `run_tool_calls`.
@@ -166,13 +167,16 @@ pub mod capabilities {
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
     pub const ADOPT: &str = "adopt";
-    /// Runner-owned tags: a durable `§N§` per message part and an origin
-    /// per message, on `session.read` entries, resolved by
-    /// `session.resolve`; a send's `origin` is recorded.
+    /// Runner-owned tags: a durable `§N§` per message part on
+    /// `session.read` entries, resolved by `session.resolve`.
     pub const TAGS: &str = "tags";
     /// `run.tool_calls`: a run's tool calls as a paged list, read without
     /// decoding message bodies.
     pub const RUN_TOOL_CALLS: &str = "run_tool_calls";
+    /// `session.send` with `delivery_order`: an ordered list of delivery
+    /// modes, plan-named senders and plan templates for system-authority
+    /// text.
+    pub const DELIVERY_ORDER: &str = "delivery_order";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -200,6 +204,7 @@ pub mod capabilities {
         (ADOPT, &[ops::SESSION_ADOPT]),
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
+        (DELIVERY_ORDER, &[ops::SESSION_SEND]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -311,6 +316,8 @@ pub(crate) mod vectors {
         "baseline.json",
         "compaction-ready.json",
         "context-ceiling.json",
+        "delivery-order.json",
+        "delivery-order-describe.json",
         "errors.json",
         "fence.json",
         "head.json",
@@ -336,7 +343,6 @@ pub(crate) mod vectors {
         "subscribe.json",
         "tags.json",
         "tags-describe.json",
-        "send-origin.json",
     ];
 
     pub fn dir() -> String {
