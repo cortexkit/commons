@@ -696,3 +696,47 @@ mod adopt_tests {
             .serves(crate::ops::SESSION_ADOPT));
     }
 }
+
+#[cfg(test)]
+mod tags_and_tool_calls_tests {
+    use super::*;
+    use crate::vectors;
+
+    /// A describe vector file pinning one optional group: its discovery, the
+    /// refusal of a declaration missing `missing_op`, and a usable answer
+    /// without the group.
+    fn group_describe(file: &str, group: &'static str, missing_op: &'static str) {
+        let file = vectors::load(file);
+        let answer: RoleDescribe = vectors::round_trip(group, &file["accept"]);
+        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
+        assert!(answer.declares(group));
+        assert_eq!(
+            check_describe(&file["refuse"]),
+            Err(vec![DescribeProblem::GroupIncomplete {
+                capability: group,
+                op: missing_op
+            }])
+        );
+        let without = check_describe(&file["without"]).unwrap();
+        assert!(!without.declares(group));
+        assert_eq!(without.missing(&[group]), vec![group]);
+    }
+
+    #[test]
+    fn tags_describe_group_requires_read_and_resolve() {
+        group_describe(
+            "tags-describe.json",
+            capabilities::TAGS,
+            crate::ops::SESSION_RESOLVE,
+        );
+    }
+
+    #[test]
+    fn run_tool_calls_describe_group_requires_its_op() {
+        group_describe(
+            "run-tool-calls-describe.json",
+            capabilities::RUN_TOOL_CALLS,
+            crate::ops::RUN_TOOL_CALLS,
+        );
+    }
+}

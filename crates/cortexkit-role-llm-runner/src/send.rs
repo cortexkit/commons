@@ -109,6 +109,47 @@ impl Delivered {
 /// `send_id` reused with another mode.
 pub const DELIVERY_FIELD: &str = "delivery";
 
+/// The `field` a refusal names for a send `origin` a route may not claim
+/// (`person`, an origin that is not a send origin, an unknown value or a
+/// non-string), or for a `send_id` reused with another origin.
+pub const ORIGIN_FIELD: &str = "origin";
+
+/// Where an owner's send says its message comes from: the send origins of
+/// a `session.send`'s `origin`, a subset of [`crate::tags::origins`].
+/// Absent means [`SendOrigin::Owner`]. `person` is never a send origin: the
+/// harness records it only from its own input path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SendOrigin {
+    /// The owner's own send. The default.
+    Owner,
+    /// The owner wakes the session.
+    Wake,
+    /// The owner carries a peer agent's message.
+    Peer,
+}
+
+impl SendOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => crate::tags::origins::OWNER,
+            Self::Wake => crate::tags::origins::WAKE,
+            Self::Peer => crate::tags::origins::PEER,
+        }
+    }
+
+    /// The send origin spelled `value`, or `None` for anything a route may
+    /// not claim, `person` included.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            crate::tags::origins::OWNER => Some(Self::Owner),
+            crate::tags::origins::WAKE => Some(Self::Wake),
+            crate::tags::origins::PEER => Some(Self::Peer),
+            _ => None,
+        }
+    }
+}
+
 /// How a prompt is delivered when a run is already active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -437,6 +478,58 @@ impl SendRequest {
             Err("plan")
         } else {
             Ok(())
+        }
+    }
+
+    /// Admission's check of the plan's `render_tags` against `declared` (a
+    /// runner's module-level capabilities): `Err` with the `field` of an
+    /// `invalid_params` refusal (`plan.render_tags`) for a value that is not
+    /// a boolean, or `true` on a runner without `tags`. A request without a
+    /// plan passes.
+    pub fn check_render_tags<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        match &self.plan {
+            Some(plan) => crate::tags::check_plan(plan, declared),
+            None => Ok(()),
+        }
+    }
+
+    /// Set the send's `origin`. The member stays in `runner_params`, as it
+    /// arrives on the wire, so a runner without `tags` keeps ignoring it.
+    pub fn with_origin(mut self, origin: SendOrigin) -> Self {
+        self.runner_params
+            .insert(ORIGIN_FIELD.into(), Value::from(origin.as_str()));
+        self
+    }
+
+    /// The send's origin, with absence (or `null`) read as
+    /// [`SendOrigin::Owner`], without moving the raw value out of
+    /// `runner_params`. Any other value (`person`, a read-only origin such
+    /// as `reminder` or `tool_result`, an unknown string, a non-string) is
+    /// [`ORIGIN_FIELD`], the field of the `invalid_params` refusal a runner
+    /// declaring `tags` answers, writing nothing.
+    pub fn origin(&self) -> Result<SendOrigin, &'static str> {
+        match self.runner_params.get(ORIGIN_FIELD) {
+            None | Some(Value::Null) => Ok(SendOrigin::Owner),
+            Some(Value::String(value)) => SendOrigin::parse(value).ok_or(ORIGIN_FIELD),
+            Some(_) => Err(ORIGIN_FIELD),
+        }
+    }
+
+    /// The origin a runner records for this send, given `declared`, its
+    /// module-level capabilities. A runner without `tags` records no origin
+    /// and may ignore the field entirely, so this answers `Ok(None)` there,
+    /// whatever the field holds. A runner with `tags` gets [`Self::origin`].
+    pub fn check_origin<S: AsRef<str>>(
+        &self,
+        declared: &[S],
+    ) -> Result<Option<SendOrigin>, &'static str> {
+        if declared
+            .iter()
+            .any(|name| name.as_ref() == crate::capabilities::TAGS)
+        {
+            self.origin().map(Some)
+        } else {
+            Ok(None)
         }
     }
 
@@ -952,5 +1045,88 @@ mod input_cap_tests {
             .budget()
             .unwrap()
             .is_some());
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+    use crate::{capabilities, errors, vectors};
+    use serde_json::json;
+
+    fn declared(case: &Value) -> Vec<&str> {
+        case["declares"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_send_origin_is_recorded_and_person_is_refused_on_a_route() {
+        let file = vectors::load("send-origin.json");
+        let mut refused_person = false;
+        let mut ignored_without_group = false;
+        for case in vectors::cases(&file, "cases") {
+            let name = case["name"].as_str().unwrap();
+            let request: SendRequest = vectors::round_trip(name, &case["request"]);
+            let declares = declared(case);
+            match (request.check_origin(&declares), case.get("refusal")) {
+                (Ok(recorded), None) => {
+                    assert_eq!(
+                        recorded.map(SendOrigin::as_str),
+                        case["recorded"].as_str(),
+                        "{name}"
+                    );
+                    if !declares.contains(&capabilities::TAGS) {
+                        ignored_without_group |= request.runner_params.contains_key(ORIGIN_FIELD);
+                    }
+                }
+                (Err(field), Some(refusal)) => {
+                    assert_eq!(refusal["code"], errors::INVALID_PARAMS, "{name}");
+                    assert_eq!(refusal["detail"]["field"], field, "{name}");
+                    assert_eq!(case["writes"], "nothing", "{name}");
+                    refused_person |= request.runner_params[ORIGIN_FIELD] == "person";
+                }
+                (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
+            }
+        }
+        assert!(refused_person, "no vector refuses origin person");
+        assert!(ignored_without_group, "no vector shows a runner without tags ignoring origin");
+    }
+
+    #[test]
+    fn origin_is_part_of_a_sends_identity() {
+        let file = vectors::load("send-origin.json");
+        for case in vectors::cases(&file, "identity") {
+            let name = case["name"].as_str().unwrap();
+            let earlier: SendRequest = serde_json::from_value(case["earlier"].clone()).unwrap();
+            let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();
+            assert_eq!(earlier.send_id, request.send_id, "{name}");
+            let same = earlier.origin().unwrap() == request.origin().unwrap();
+            match case.get("refusal") {
+                None => assert!(same, "{name}"),
+                Some(refusal) => {
+                    assert!(!same, "{name}");
+                    assert_eq!(refusal["code"], errors::SEND_ID_REUSE, "{name}");
+                    assert_eq!(refusal["detail"]["field"], ORIGIN_FIELD, "{name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn with_origin_writes_the_raw_member_and_absence_means_owner() {
+        let send = SendRequest::new("p", "s").with_origin(SendOrigin::Wake);
+        assert_eq!(send.runner_params[ORIGIN_FIELD], json!("wake"));
+        assert_eq!(send.origin(), Ok(SendOrigin::Wake));
+        assert_eq!(SendRequest::new("p", "s").origin(), Ok(SendOrigin::Owner));
+        for value in ["person", "reminder", "tool_result", "synthetic", "boss"] {
+            let mut params = Map::new();
+            params.insert(ORIGIN_FIELD.into(), json!(value));
+            let send = SendRequest::new("p", "s").with_runner_params(params);
+            assert_eq!(send.origin(), Err(ORIGIN_FIELD), "{value}");
+        }
     }
 }

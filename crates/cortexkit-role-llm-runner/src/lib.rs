@@ -34,8 +34,10 @@ pub mod send;
 pub mod session_ref;
 pub mod structured_output;
 pub mod subscribe;
+pub mod tags;
+pub mod tool_calls;
 
-pub use run::RUN_STATE_BUDGET_EXHAUSTED;
+pub use run::{RUN_STATE_BUDGET_EXHAUSTED, RUN_STATE_CONTEXT_CEILING};
 
 pub use session_ref::session_ref;
 
@@ -92,6 +94,12 @@ pub mod ops {
     /// already applied, without a prompt: no run starts and nothing is
     /// written to the transcript. In `adopt`.
     pub const SESSION_ADOPT: &str = "session.adopt";
+    /// The exact stored content of the message part a runner tag names, or a
+    /// character range of it, with its message's origin. In `tags`.
+    pub const SESSION_RESOLVE: &str = "session.resolve";
+    /// Every tool call a run made, in order, without message bodies. In
+    /// `run_tool_calls`.
+    pub const RUN_TOOL_CALLS: &str = "run.tool_calls";
 }
 
 /// Ops every `llm-runner/v1` module must list in `role.describe`. A consumer
@@ -158,6 +166,13 @@ pub mod capabilities {
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
     pub const ADOPT: &str = "adopt";
+    /// Runner-owned tags: a durable `§N§` per message part and an origin
+    /// per message, on `session.read` entries, resolved by
+    /// `session.resolve`; a send's `origin` is recorded.
+    pub const TAGS: &str = "tags";
+    /// `run.tool_calls`: a run's tool calls as a paged list, read without
+    /// decoding message bodies.
+    pub const RUN_TOOL_CALLS: &str = "run_tool_calls";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -183,6 +198,8 @@ pub mod capabilities {
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
         (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
+        (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
+        (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -293,6 +310,7 @@ pub(crate) mod vectors {
         "refuse-tool-name-collision.json",
         "baseline.json",
         "compaction-ready.json",
+        "context-ceiling.json",
         "errors.json",
         "fence.json",
         "head.json",
@@ -307,6 +325,8 @@ pub(crate) mod vectors {
         "run-result.json",
         "run-cancel.json",
         "run-cancel-describe.json",
+        "run-tool-calls.json",
+        "run-tool-calls-describe.json",
         "send.json",
         "session-change.json",
         "session-ref.json",
@@ -314,6 +334,9 @@ pub(crate) mod vectors {
         "structured-output-describe.json",
         "structured-output-results.json",
         "subscribe.json",
+        "tags.json",
+        "tags-describe.json",
+        "send-origin.json",
     ];
 
     pub fn dir() -> String {
@@ -414,6 +437,8 @@ mod tests {
             ops::SESSION_REFRESH_POLICY,
             ops::SESSION_FLUSH_PREFIX,
             ops::SESSION_ADOPT,
+            ops::SESSION_RESOLVE,
+            ops::RUN_TOOL_CALLS,
         ];
         for (group, group_ops) in capabilities::GROUPS {
             assert!(!group_ops.is_empty(), "{group} names no op");

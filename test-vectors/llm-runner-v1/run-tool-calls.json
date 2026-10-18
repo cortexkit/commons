@@ -1,0 +1,207 @@
+{
+  "requests": [
+    {
+      "name": "the first page",
+      "request": {
+        "run_id": "run-1"
+      }
+    },
+    {
+      "name": "after a cursor, with a limit",
+      "request": {
+        "run_id": "run-1",
+        "after": "2",
+        "limit": 2
+      }
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "a misspelled cursor",
+      "request": {
+        "run_id": "run-1",
+        "from": 2
+      },
+      "field": "from"
+    },
+    {
+      "name": "naming its session",
+      "request": {
+        "run_id": "run-1",
+        "session": "s"
+      },
+      "field": "session"
+    },
+    {
+      "name": "no run_id",
+      "request": {
+        "limit": 2
+      },
+      "field": "run_id"
+    }
+  ],
+  "pages": [
+    {
+      "name": "a page stopped by its limit, with the next cursor",
+      "request": {
+        "run_id": "run-1",
+        "limit": 2
+      },
+      "page": {
+        "run_id": "run-1",
+        "calls": [
+          {
+            "tool_call_id": "call_1",
+            "call_key": "lin.1.0",
+            "name": "read",
+            "args": {
+              "path": "a.rs"
+            },
+            "outcome": "succeeded",
+            "result_bytes": 412,
+            "dispatched_to": "aft",
+            "ordinal": 1
+          },
+          {
+            "tool_call_id": "call_2",
+            "call_key": "lin.1.1",
+            "name": "read",
+            "args": {
+              "path": "missing.rs"
+            },
+            "outcome": "failed",
+            "result_bytes": 96,
+            "dispatched_to": "aft",
+            "ordinal": 1
+          }
+        ],
+        "next": "2"
+      }
+    },
+    {
+      "name": "the next page; a reused model id is a different call",
+      "request": {
+        "run_id": "run-1",
+        "after": "2",
+        "limit": 2
+      },
+      "page": {
+        "run_id": "run-1",
+        "calls": [
+          {
+            "tool_call_id": "call_1",
+            "call_key": "lin.3.0",
+            "name": "bash",
+            "args": {
+              "command": "rm -rf /"
+            },
+            "outcome": "refused",
+            "result_bytes": 58,
+            "ordinal": 3
+          },
+          {
+            "tool_call_id": "call_4",
+            "call_key": "lin.5.0",
+            "name": "bash",
+            "args": {
+              "command": "cargo test"
+            },
+            "outcome": "indeterminate",
+            "dispatched_to": "exec",
+            "ordinal": 5
+          }
+        ],
+        "next": "4"
+      }
+    },
+    {
+      "name": "the last page carries no cursor",
+      "request": {
+        "run_id": "run-1",
+        "after": "4"
+      },
+      "page": {
+        "run_id": "run-1",
+        "calls": [
+          {
+            "tool_call_id": "call_5",
+            "call_key": "lin.7.0",
+            "name": "read",
+            "args": {
+              "path": "b.rs"
+            },
+            "outcome": "not_executed",
+            "result_bytes": 64,
+            "ordinal": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "a run without tool calls",
+      "request": {
+        "run_id": "run-2"
+      },
+      "page": {
+        "run_id": "run-2",
+        "calls": []
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "an unknown run, as run.result refuses one",
+      "request": {
+        "run_id": "run-9"
+      },
+      "refusal": {
+        "code": "unknown_run"
+      }
+    },
+    {
+      "name": "a cursor the runner never gave for this run",
+      "request": {
+        "run_id": "run-1",
+        "after": "zz"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "after"
+        }
+      }
+    },
+    {
+      "name": "a limit of zero",
+      "request": {
+        "run_id": "run-1",
+        "limit": 0
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "limit"
+        }
+      }
+    },
+    {
+      "name": "one call too large for a frame on its own, args never cut",
+      "request": {
+        "run_id": "run-1"
+      },
+      "refusal": {
+        "code": "reply_too_large",
+        "detail": {
+          "bytes": 5242931,
+          "limit": 4194304,
+          "subject": {
+            "kind": "tool_call",
+            "run_id": "run-1",
+            "tool_call_id": "call_9",
+            "call_key": "lin.9.0"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "refusals": [
+    {
+      "name": "send refused: no view came within the provider's bound",
+      "op": "session.send",
+      "refusal": {
+        "code": "context_ceiling",
+        "detail": {
+          "window": 200000,
+          "size": 187000,
+          "cause": "view_timeout"
+        }
+      },
+      "writes": "nothing"
+    },
+    {
+      "name": "send refused: no compaction provider for the session",
+      "op": "session.send",
+      "refusal": {
+        "code": "context_ceiling",
+        "detail": {
+          "window": 128000,
+          "size": 121000,
+          "cause": "provider_unavailable"
+        }
+      },
+      "writes": "nothing"
+    },
+    {
+      "name": "send refused: over the window even after the current view",
+      "op": "session.send",
+      "refusal": {
+        "code": "context_ceiling",
+        "detail": {
+          "window": 32000,
+          "size": 40500,
+          "cause": "over_window"
+        }
+      },
+      "writes": "nothing"
+    }
+  ],
+  "results": [
+    {
+      "name": "run.result of a run that reached the ceiling at a step boundary",
+      "kind": "run.result",
+      "answer": {
+        "run_id": "run-4",
+        "state": "context_ceiling",
+        "context_ceiling": {
+          "window": 200000,
+          "size": 190500,
+          "cause": "view_timeout"
+        }
+      }
+    },
+    {
+      "name": "run.status of the same run",
+      "kind": "run.status",
+      "answer": {
+        "state": "context_ceiling",
+        "undelivered_steers": [],
+        "context_ceiling": {
+          "window": 200000,
+          "size": 190500,
+          "cause": "view_timeout"
+        }
+      }
+    }
+  ],
+  "tolerated": [
+    {
+      "name": "a cause this role does not name decodes as itself",
+      "detail": {
+        "window": 1000,
+        "size": 1000,
+        "cause": "operator_cap"
+      }
+    },
+    {
+      "name": "an unknown member is ignored",
+      "detail": {
+        "window": 1000,
+        "size": 999,
+        "cause": "over_window",
+        "estimator": "chars/4"
+      }
+    }
+  ],
+  "provider_overflow": {
+    "name": "the provider refused the request as too long: an error with context_overflow, not the ceiling",
+    "answer": {
+      "run_id": "run-5",
+      "state": "error",
+      "error": {
+        "class": "provider",
+        "message": "prompt is too long",
+        "provider_code": "context_overflow",
+        "status": 400
+      }
+    }
+  }
+}

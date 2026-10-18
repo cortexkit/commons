@@ -574,6 +574,41 @@ pub struct ReadMessage {
     /// declares `dispatch_attribution`, for messages that carry tool calls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
+    /// Where the message came from (`crate::tags::origins`), decoded as an
+    /// open string. Present on a runner that declares `tags`, for every
+    /// message but the model's own output, which has no origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// One row per tagged part of the message: the part's key and its
+    /// `§N§` tag, which never change once assigned. Present on a runner
+    /// that declares `tags`. No digest rides here: a reader computes one
+    /// from the bytes it reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<crate::tags::PartTag>,
+    /// The message's role (`role::USER`, `role::ASSISTANT`, `role::TOOL`,
+    /// `role::SYSTEM`), decoded as an open string, so a consumer learns who
+    /// spoke without decoding `message`. Absent when the runner does not
+    /// know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// When the message was written (or first ingested, for a message the
+    /// host stored itself), in milliseconds since the Unix epoch. Absent
+    /// when the runner does not know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_at: Option<u64>,
+}
+
+/// The roles a read entry's `role` names. Decoded as open strings: a
+/// runner's own role decodes as itself.
+pub mod role {
+    /// A message into the session: a prompt, a send, a wake or a reminder.
+    pub const USER: &str = "user";
+    /// The model's own output.
+    pub const ASSISTANT: &str = "assistant";
+    /// A tool's result, on a runner that stores it as a message of its own.
+    pub const TOOL: &str = "tool";
+    /// System text the runner stores in the transcript.
+    pub const SYSTEM: &str = "system";
 }
 
 impl ReadMessage {
@@ -585,7 +620,31 @@ impl ReadMessage {
             run: None,
             originals: None,
             tool_calls: Vec::new(),
+            origin: None,
+            tags: Vec::new(),
+            role: None,
+            written_at: None,
         }
+    }
+
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+
+    pub fn with_written_at(mut self, written_at: u64) -> Self {
+        self.written_at = Some(written_at);
+        self
+    }
+
+    pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
+        self.origin = Some(origin.into());
+        self
+    }
+
+    pub fn with_tags(mut self, tags: Vec<crate::tags::PartTag>) -> Self {
+        self.tags = tags;
+        self
     }
 
     pub fn with_run(mut self, run: RunAttribution) -> Self {
