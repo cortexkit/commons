@@ -168,8 +168,10 @@ pub mod defer_reasons {
     pub const SIGNED_REASONING: &str = "signed_reasoning";
 }
 
-/// Companion edits a runner names in `view_companion`: changes the model
-/// provider requires beside the view, and nothing more.
+/// Edits a runner names in `view_companion`. A companion edit is a change the
+/// current model provider requires the runner to make to the request along
+/// with the view (for example, removing signed reasoning the view would
+/// invalidate); the runner makes that change and no other.
 pub mod companion_edits {
     /// Remove the signed reasoning produced after the view's first changed
     /// byte.

@@ -68,7 +68,7 @@ impl PartEdit {
         }
     }
 
-    /// An edit that removes the part.
+    /// An edit that removes part `part` of the message at `ordinal`.
     pub fn drop(ordinal: u64, mid: impl Into<String>, part: impl Into<String>) -> Self {
         Self {
             ordinal,
