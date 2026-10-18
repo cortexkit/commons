@@ -16,7 +16,7 @@ pub const ADVANCED_EVENT: &str = "compaction.advanced";
 /// Event name of the provider's view-ready event, under the provider's
 /// module id.
 pub const VIEW_READY_EVENT: &str = "compaction.view_ready";
-/// Both events are at version 1: the subject ends in `.v1`.
+/// Both events are at version 1: [`event_subject`] ends their subjects in `.v1`.
 pub const EVENT_VERSION: u32 = 1;
 
 /// Upper bound on a notice's headers: the sum over every header this contract

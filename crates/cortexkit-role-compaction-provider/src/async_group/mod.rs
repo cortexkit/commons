@@ -2,7 +2,9 @@
 //! (CONTRACT.md §20).
 //!
 //! On a session where the provider declares `async` and the runner declares
-//! its own half in `llm-runner/v1`, the runner never calls `compaction.step`.
+//! the matching runner-side support in its `llm-runner/v1` describe (message
+//! tags, origins and the `context_ceiling` code), the runner never calls
+//! `compaction.step`.
 //! Instead:
 //!
 //! - after it writes, the runner publishes an advance notice on ck-bus
@@ -30,8 +32,9 @@ pub mod view;
 mod vector_tests;
 
 /// The describe group a provider lists in `role.describe.capabilities` when
-/// it implements every rule of CONTRACT.md §20. A caller relies on none of
-/// them, and keeps calling `compaction.step`, unless the provider declares it.
+/// it serves advance notices, views, `view.get`, `compaction.ride` and the
+/// Setup ceiling as CONTRACT.md §20 specifies. A runner uses none of those,
+/// and keeps calling `compaction.step`, unless the provider lists this group.
 pub const GROUP: &str = "async";
 
 /// The ops a provider that declares [`GROUP`] must serve.
@@ -50,8 +53,9 @@ pub mod context_ceiling_causes {
     /// The ceiling wait ran out with no view that brought the request back
     /// under the ceiling.
     pub const VIEW_TIMEOUT: &str = "view_timeout";
-    /// The provider could not be reached for the ceiling ride, and the current
-    /// view does not bring the request back under the ceiling.
+    /// The `compaction.ride` call the runner makes at the ceiling could not
+    /// reach the provider, and the current view does not bring the request
+    /// back under the ceiling.
     pub const PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
     /// The request is larger than the model's window even under the best view
     /// the runner holds, for example after a switch to a smaller window.

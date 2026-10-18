@@ -92,7 +92,8 @@ impl ViewCut {
 pub struct CompactionView {
     /// The session reference, `llm-runner/v1`'s `session_ref`.
     pub session_ref: String,
-    /// Raised by the provider for every view of the session, from 1.
+    /// The view's version within the session: 1 for the provider's first
+    /// view, and higher for each later one.
     pub view_version: u64,
     /// The lineage whose ordinals the ranges use.
     pub lineage_id: String,
@@ -372,7 +373,8 @@ impl CompactionView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ViewDisposition {
     /// Write it durably as the session's next view and render it from the
-    /// next step boundary on; from then every notice names it in
+    /// next step boundary on, that is from the first model request of the
+    /// next step, never partway through a step; from then every notice names it in
     /// `applied_view_version`. The runner may still refuse it under its own
     /// structural and model rules (`view_refused`, CONTRACT.md §20.4).
     Apply,
@@ -449,7 +451,7 @@ impl ViewGetRequest {
         }
     }
 
-    /// The request for the view `ready` announced.
+    /// The request that fetches the view a [`ViewReady`] event announced.
     pub fn for_ready(ready: &ViewReady) -> Self {
         Self::new(ready.session_ref.clone(), ready.view_version)
     }

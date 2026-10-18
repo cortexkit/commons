@@ -10,8 +10,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{ceiling::MAX_CEILING_WAIT_MS, notice::is_session_ref, view::CompactionView};
 
-/// Why the runner asks. Decoded open: a provider that meets a cause it does
-/// not know answers `nothing`.
+/// Why the runner asks. A cause this crate does not know still decodes, as
+/// [`RideCause::Unknown`], so a newer runner does not break an older
+/// provider; the provider answers such a request `nothing`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RideCause {
@@ -22,7 +23,8 @@ pub enum RideCause {
     ModelChange,
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
-    /// `ceiling`: the request reached the Setup ceiling (CONTRACT.md §20.5).
+    /// `ceiling`: the request reached the share of the context window that
+    /// Setup's ceiling policy names, or overflowed (CONTRACT.md §20.5).
     Ceiling,
     /// A cause this crate does not know, kept as received.
     Unknown(String),
