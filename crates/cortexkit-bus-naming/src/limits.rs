@@ -8,6 +8,14 @@ pub const HOUR: Duration = Duration::from_secs(60 * 60);
 pub const MIB: u64 = 1024 * 1024;
 pub const GIB: u64 = 1024 * MIB;
 
+/// Per-subject message cap on the module-event stream. A busy subject can carry
+/// 50,000-70,000 events a day; at 100,000 messages that keeps about 1.5 days of
+/// replay history (about 30 MB at 300 bytes an event), where 10,000 kept only
+/// 3.5-5 hours. The 1 GiB stream byte cap and seven-day age stay the real
+/// bounds; this cap keeps one runaway subject from evicting every other
+/// subject's history.
+const EVENT_MAX_MSGS_PER_SUBJECT: i64 = 100_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamKind {
     Room,
@@ -194,7 +202,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
-            max_msgs_per_subject: Some(10_000),
+            max_msgs_per_subject: Some(EVENT_MAX_MSGS_PER_SUBJECT),
         },
     ]
 }

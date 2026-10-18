@@ -168,7 +168,7 @@ fn only_the_event_stream_caps_messages_per_subject() {
             false,
         ),
     ];
-    // The event stream: a week, 1 GiB, discard old, at most 10,000 messages on
+    // The event stream: a week, 1 GiB, discard old, at most 100,000 messages on
     // any one subject, and not a work queue.
     let mut event = spec(
         StreamKind::Event,
@@ -179,7 +179,7 @@ fn only_the_event_stream_caps_messages_per_subject() {
         DiscardPolicy::Old,
         false,
     );
-    event.max_msgs_per_subject = Some(10_000);
+    event.max_msgs_per_subject = Some(100_000);
     expected.push(event);
 
     assert_eq!(shipped_streams(&names), expected);
