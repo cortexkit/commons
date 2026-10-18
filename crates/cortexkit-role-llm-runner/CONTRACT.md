@@ -131,14 +131,15 @@ shipping runner with this document.
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
 | `adopt` | `session.adopt` | §9.5 |
-| `tags` | `session.read` (`tags`, `origin`), `session.resolve`; a send's `origin` is recorded | §9.6 |
+| `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
+| `delivery_order` | `session.send` with `delivery_order`, plan-named senders and plan templates | §9.7 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
-  `structured_output`, `adopt`, `tags` and `run_tool_calls` are each
-  declared on their own: a runner may serve any of them without the others,
+  `structured_output`, `adopt`, `tags`, `run_tool_calls` and
+  `delivery_order` are each declared on their own: a runner may serve any of them without the others,
   and without `run_ops` or `transcript_reads`. `tags` adds fields to
   `session.read`, so it requires that op (and `session.resolve`), not all of
   `transcript_reads`.
@@ -155,8 +156,13 @@ shipping runner with this document.
 - [pinned] A caller MUST NOT send `session.resolve` unless the runner
   advertises `tags`, nor `run.tool_calls` unless it advertises
   `run_tool_calls` (§9.6, §6.3). `check_describe` checks each group for its
-  ops; neither adds discovery metadata. A send's `origin` (§9.6) needs no
-  discovery: a runner without `tags` may ignore it.
+  ops; neither adds discovery metadata.
+- [pinned] A caller MUST NOT send `delivery_order` or its members
+  (`dedupe_key`, `expires_at_ms`, `template`), nor a plan naming `senders`,
+  unless the runner advertises `delivery_order` (§9.7). A runner of this
+  revision without the group refuses them by name; an older runner, lenient
+  on send fields, would ignore them and deliver the send as a legacy
+  `queue`, starting a run, which is why the caller's check comes first.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -243,14 +249,15 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   final values: what later steps render and what executed. The raw view and
   the model view then differ only by compaction.
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
-  originals?, tool_calls?, origin?, tags?, role?, written_at?}`. Every
+  originals?, tool_calls?, tags?, role?, written_at?, delivered_as?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
   when (`written_at`, milliseconds since the Unix epoch, of the write or of
-  the runner's first ingest of a message its host stored), where the message
-  came from and its part tags (`origin`, `tags`, §9.6), its run (`run`, §6)
-  and its tool calls (`tool_calls`, §5). `role` and `written_at` are
+  the runner's first ingest of a message its host stored), its part tags
+  (`tags`, §9.6), its run (`run`, §6), its tool calls (`tool_calls`, §5) and,
+  for a `delivery_order` send, the mode it went out in (`delivered_as`,
+  §9.7). `role` and `written_at` are
   optional: a runner sets them whenever it knows them, which is always for a
   message it wrote itself, and an absent one means not known. A consumer
   never decodes `message` for any of these facts, so a reader of several
@@ -699,10 +706,10 @@ what a run called without decoding any message body.
   (`SendRequest::check_delivery`).
 - [pinned] A runner that admits sessions declares `queue`, because its first
   send is one.
-- [pinned] A send's `origin` (`owner`, `wake` or `peer`; absent means
-  `owner`) says where its message comes from, and a runner that declares
-  `tags` records it on the message it writes (§9.6). `person` is never
-  accepted on a route. A runner without `tags` may ignore the field.
+- [pinned] A runner that declares `delivery_order` also accepts an ordered
+  list of delivery modes in a separate `delivery_order` member (§9.7). The
+  string `delivery` keeps its meaning exactly; a send carrying both is
+  refused `invalid_params {field: "delivery_order"}`.
 - [pinned] A send that would start or join a run while the session's
   context is at or over its ceiling is refused `context_ceiling {window,
   size, cause}` and writes nothing (§6, §12.1).
@@ -733,8 +740,8 @@ what a run called without decoding any message body.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. Except for the scoped closed `budget`
   rules on an `input_token_cap` runner (§9.3), the strict
-  `structured_output` member (§9.4) and the strict `origin` value on a
-  `tags` runner (§9.6), the request is lenient: a
+  `structured_output` member (§9.4) and the strict `delivery_order` members
+  on a `delivery_order` runner (§9.7), the request is lenient: a
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
 - [pinned] A `steer` or `interrupt` into an existing session takes every
@@ -1192,11 +1199,11 @@ without a prompt.
   (§12.1) concerns a scoped send into a session recorded without a scope,
   and is unchanged.
 
-### 9.6 `tags`: runner-owned part tags and message origins
+### 9.6 `tags`: runner-owned part tags
 
 The runner owns the transcript, so it owns short, stable addresses for its
-parts: tags. A consumer (a context manager, a peer quoting the person, a
-tool using part of an earlier output) names a part by its tag, and the
+parts: tags. A consumer (a context manager, a model referring to an earlier
+message, a tool using part of an earlier output) names a part by its tag, and the
 runner answers with the exact stored content.
 
 **Assignment.**
@@ -1240,43 +1247,16 @@ runner answers with the exact stored content.
   bytes. This is the runner's provider duty: it applies the rule per
   provider and model, and a consumer never sees the difference in a read.
 
-**Origins.**
-
-- [pinned] Every message records where it came from, at write or first
-  ingest (`tags::origins`, decoded open): `person` (typed by the person in
-  the harness's own input), `owner` (a `session.send` from the owner),
-  `wake`, `peer`, `reminder` (a reminder the runner placed in the
-  transcript), `tool_result` (a tool's result, on a runner whose schema
-  stores one as a message of its own) or `synthetic` (written by the runner
-  or its host with no input behind it). The model's own output has no
-  origin.
-- [pinned] `session.send` carries an optional `origin`, one of `owner`,
-  `wake` or `peer` (`send::SendOrigin`), and absent or `null` means `owner`
-  (`SendRequest::origin`). A runner that declares `tags` records it on the
-  message the send writes. Any other value is refused `invalid_params
-  {field: "origin"}`, writing nothing: `person`, because a route never
-  speaks for the person (the harness records `person` only from its own
-  input path); a read-only origin such as `reminder`, `tool_result` or
-  `synthetic`; an unknown string; or a non-string.
-- [pinned] The field is additive. It rides beside the role's members, in
-  `SendRequest::runner_params`, so an older sender keeps working, and a
-  runner without `tags`, which records no origin, may ignore the field,
-  whatever it holds (`SendRequest::check_origin`).
-- [pinned] On a `tags` runner the origin, with absence read as `owner`, is
-  part of the send's identity (§9): the same `send_id` with another origin
-  is refused `send_id_reuse {field: "origin"}`, and a retry that spells out
-  `owner` where the first send left it absent is the same send.
-
 **Reads.**
 
 - [pinned] On a runner that declares `tags`, every `session.read` entry
   carries `tags: [{part, tag}]` (`tags::PartTag`), one row per tagged part,
-  beside the message as `tool_calls` are, and `origin` on every message but
-  the model's own. `part` is the runner's own key for the part within its
+  beside the message as `tool_calls` are. `part` is the runner's own key for the part within its
   message schema (an index or a part id), opaque to consumers: the key its
   ledger records the tag under and the one `session.resolve` answers with.
-  Decoding stays lenient: a reader of a runner without `tags` finds neither
-  member.
+  Decoding stays lenient: a reader of a runner without `tags` finds no
+  `tags`. Where a message came from (its attestation) is not in this
+  revision.
 - [pinned] No digest rides on an entry: a reader computes one from the
   bytes it reads.
 
@@ -1288,14 +1268,13 @@ runner answers with the exact stored content.
   (`tags::CharRange`), a half-open range of the part's content counted in
   Unicode scalar values: not bytes, and not UTF-16 code units, so a range
   names the same text in every language.
-- [pinned] The answer is `{tag, ordinal, mid, part, content, range?,
-  origin?}` (`tags::ResolveReply`), decoded leniently: `content` is the
+- [pinned] The answer is `{tag, ordinal, mid, part, content, range?}`
+  (`tags::ResolveReply`), decoded leniently: `content` is the
   part's exact stored content, or the requested range of it
   (`tags::slice`). For a text part that is its text; for any other part
   (a tool call, a reasoning block, a structured result) it is the runner's
   own stored encoding of the part, the same bytes on every resolve. `range`
-  echoes the request's; `origin` is the origin of the part's message, absent
-  for the model's own output.
+  echoes the request's.
 - [pinned] A malformed tag is refused `invalid_params {field: "tag"}`; a
   well-formed tag the session never assigned is refused `unknown_tag`,
   terminal, since tags are never reused (§12.1). A range whose `start` is
@@ -1317,6 +1296,135 @@ runner answers with the exact stored content.
   records, reads and resolves them whether or not the plan renders them.
   `render_tags` is part of the plan, so it is frozen with it, and a later
   plan that differs in it is `plan_drift` like any other difference.
+
+### 9.7 `delivery_order`: ordered delivery modes, plan senders and templates
+
+A send does not always want to become a turn. A module's reminder should
+ride the next request the session makes anyway, never start one; text a
+plan vouches for may go out with system authority. `delivery_order` lets
+a send say, in order, how it may be delivered, and lets the session's plan
+say who may send and which texts are system text.
+
+**The list.**
+
+- [pinned] A runner that declares `delivery_order` accepts an optional
+  `delivery_order: [mode, ...]` on `session.send`
+  (`delivery_order::DeliveryOrder`, read with
+  `SendRequest::delivery_order`), with modes (`delivery_order::Mode`):
+  - `tool_result`: rendered with the next tool result, the first time that
+    result is sent;
+  - `turn_system`: a turn-scoped system message (Anthropic's `clear_at:
+    next_user_message`), for template text only (below);
+  - `steer`: a user message into the run in progress, at its next step;
+  - `idle_start`: a user message that starts a run on an idle session.
+- [pinned] The list is strict: not an array of these modes, empty, or a
+  mode twice is refused `invalid_params {field: "delivery_order"}`, writing
+  nothing.
+- [pinned] At each request boundary, the runner takes the first mode in the
+  list that is possible there (`delivery_order::choose`,
+  `delivery_order::Boundary`): `tool_result` needs a tool result about to be
+  sent for the first time; `turn_system` needs a provider that supports it,
+  a runner that owns the request, and the authority rule below; `steer`
+  needs a run in progress; `idle_start` needs an idle session. When none is
+  possible, the send stays queued, durably, for the next boundary.
+- [pinned] **A list without `idle_start` never starts a run.** It waits,
+  queued, for a request the session makes anyway.
+- [pinned] The legacy string `delivery` is unchanged, and maps onto lists
+  (`delivery_order::legacy_equivalent`): `queue`, or an absent `delivery`,
+  is `[idle_start]` (it waits durably and starts the next turn once the run
+  ends); `steer` is `[steer, idle_start]`. `interrupt` has no list form and
+  stays its own mode. A send carrying both `delivery` and `delivery_order`
+  is refused `invalid_params {field: "delivery_order"}`, so a caller never
+  has two answers.
+- [pinned] A runner of this revision that does not declare the group
+  refuses a send carrying `delivery_order`, `dedupe_key`, `expires_at_ms`
+  or `template` with `invalid_params` naming that member, writing nothing
+  (`SendRequest::check_delivery_order`): it never delivers such a send
+  another way. A caller still checks discovery first (§3).
+- [pinned] The list, with its members, is part of the send's identity
+  (§9): the same `send_id` with another list is refused `send_id_reuse`
+  naming `delivery_order`. A retry with the same `send_id` is the same send
+  and answers its current state. Idempotency is keyed by the sender and
+  `send_id`, so two senders' `send_id`s never collide.
+
+**Dedupe and expiry.**
+
+- [pinned] `dedupe_key?` (a non-empty string) replaces a queued,
+  undelivered send from the same sender carrying the same key
+  (`delivery_order::replaces`); a delivered send, another sender's or
+  another key's is never replaced. `dedupe_key` is not `send_id`: a retry
+  under the same `send_id` is the same send, never a replacement.
+- [pinned] A replaced send ends in the terminal send state `superseded`
+  (`send::states::SUPERSEDED`), and is never delivered. A caller observes it
+  by re-sending its `send_id`, which answers `{state: "superseded"}`.
+- [pinned] `expires_at_ms?` (milliseconds since the Unix epoch) drops a
+  send still undelivered at that time, durably, in the terminal send state
+  `expired` (`send::states::EXPIRED`, `delivery_order::expired`); it is then
+  never delivered, and a re-send of its `send_id` answers `{state:
+  "expired"}`. A send whose time has passed when it arrives is dropped at
+  its first boundary.
+- [pinned] Until it is delivered, a queued send answers `pending` with its
+  `submission_id`, as a queued send does today (§9).
+
+**What is written.**
+
+- [pinned] A delivered send is a transcript entry of its own, carrying
+  `delivered_as: {mode, call_key?}` (`delivery_order::EntryDelivery`) in its
+  envelope (§4.2): the mode it went out in, and for `tool_result` the
+  `call_key` of the tool result it went out with. Readers and a resumed run
+  render exactly what was sent from that entry. Once delivered, it is resent
+  byte-identical on every later request.
+- [pinned] `tool_result` never changes the stored tool result. The runner
+  records that send S was delivered with result R, and renders R followed
+  by S's text from that record, so a resume renders the same bytes.
+
+**Authority.**
+
+- [pinned] `tool_result`, `steer` and `idle_start` deliver at user
+  authority: the send's `prompt`, as a user would have written it.
+- [pinned] `turn_system` is possible only for text the runner rendered
+  itself from a template the session's plan declares for that sender, under
+  the digest the send names. The send names it as `template: {id, digest,
+  slots}` (`delivery_order::TemplateUse`, strict). The runner renders and
+  validates every slot (`delivery_order::render`); the sender's word is
+  never enough. If the template is unknown, its digest differs, or a slot is
+  missing, undeclared or invalid, `turn_system` is not possible
+  (`delivery_order::TemplateProblem`): not a refusal, the runner falls
+  through to the next mode in the list, and the send's `prompt` goes out at
+  user authority.
+- [pinned] A template is `{id, text, slots}` (`delivery_order::Template`):
+  `text` holds `{name}` placeholders, `name` in `[a-z0-9_]+`, and no other
+  brace; every placeholder names a declared slot and every slot is used. Its
+  digest is lowercase hex SHA-256 over its RFC 8785 (JCS) bytes
+  (`delivery_order::template_digest`). Slots are typed
+  (`delivery_order::Slot`), and none takes free text: `integer {min, max}`
+  (inclusive), `percentage` (an integer from 0 to 100), `tag` (a tag this
+  session assigned, §9.6) and `enum {values}` (one of the listed values).
+  Integers render in decimal; a tag and an enum value render as themselves.
+
+**Senders.**
+
+- [pinned] The plan's optional `senders: [{module, idle_start?,
+  templates?}]` (`delivery_order::PlanSender`) names the modules other than
+  the owner whose sends the session admits, and the templates each may use.
+  It is malformed (a module twice, a template id twice within a sender, a
+  placeholder without a slot or a slot without a placeholder, an integer
+  slot with `min` over `max`, an enum with no value, an unknown member or
+  slot type) or present on a runner without the group, and is then refused
+  at admission `invalid_params {field: "plan.senders"}`, writing nothing
+  (`delivery_order::check_plan`). The owner's own templates, when it has
+  any, are an entry naming the owner.
+- [pinned] On a runner that declares `delivery_order`, a send from anyone
+  but the owner is admitted only when the plan names the sender, matched on
+  the route's attested principal, never on a request field
+  (`delivery_order::admit`); any other caller is refused
+  `scope_owner_mismatch`, writing nothing. This replaces §9's permission to
+  admit unkeyed non-owner sends on such a runner.
+- [pinned] A named sender may list `idle_start`, and so start a run, only
+  when its entry grants `idle_start: true`; otherwise its list (or its
+  legacy `queue` or `steer`, which stand for lists holding `idle_start`) is
+  refused `invalid_params {field: "delivery_order"}`. `interrupt` stays the
+  owner's.
 
 ## 10. `session.baseline` and the admission reply
 
@@ -1415,7 +1523,9 @@ runner answers with the exact stored content.
 - [pinned] The plan travels as `plan` on the session's first send, carried
   verbatim (`SendRequest::plan`); its shape is the fetch-plan section's.
 - [pinned] The plan's optional `render_tags` member decides whether part
-  tags are rendered to the model (§9.6); absent means off.
+  tags are rendered to the model (§9.6); absent means off. Its optional
+  `senders` member names the session's other senders and their templates
+  (§9.7); absent means the owner alone.
 
 ### 10.2 `session_change`: mid-session changes
 
@@ -1558,7 +1668,7 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a send `origin` a route may not claim, `person` included (§9.6); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
+| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a send's `delivery_order` beside a legacy `delivery`, a malformed list or member, a member sent to a runner without the group, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
@@ -1566,11 +1676,11 @@ treats it as a terminal refusal of that one request.
 | `unknown_tag` | `session.resolve` names a well-formed tag the session never assigned (§9.6) | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
-| `send_id_reuse` | a `send_id` reused with another payload, mode or origin (§9.6), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `origin` for another origin; `plan` on `session.adopt` | no |
+| `send_id_reuse` | a `send_id` reused with another payload or mode (another `delivery_order` list included, §9.7), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9), `session.baseline`, `run.cancel`, `session.retract` or `session.adopt` (§9.5) | the accepted identity | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract` or `session.adopt` (§9.5) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
@@ -1677,8 +1787,8 @@ provider codes.
   (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
   `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
   `ToolCallsPage`, and the `run.status`, `run.cancel` and `session.retract`
-  answers), and `compaction.ready`. A read entry's `origin`, a run call's
-  `outcome` and a ceiling's `cause` are open strings. One
+  answers), and `compaction.ready`. A run call's `outcome`, a ceiling's
+  `cause` and a read entry's `delivered_as.mode` are open strings. One
   exception: a model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `run.result`, `run.status`,
@@ -1690,8 +1800,8 @@ provider codes.
   runner degrades rather than fails), but `delivery` refuses an unknown value
   naming the field. `retention` is a recognized field even on a runner without
   its group, and is refused there (§9.1), never treated as an unknown extra.
-  `view` on `session.read` is strict the same way, and so is `origin` on
-  `session.send` for a runner that declares `tags` (§9.6).
+  `view` on `session.read` is strict the same way, and so are the
+  `delivery_order` members on a runner that declares the group (§9.7).
   `run.cancel` remains lenient on fields, but a runner that advertises
   `run_cancel.at` refuses unlisted `at` values (§6.2).
 - [pinned] A capability is declared only by being listed (`role.describe`)
@@ -1841,8 +1951,10 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `adopt_binds_owner_without_a_run`, `adopt_exact_repeat_replays_reply`, `adopt_send_id_reuse_names_plan`, `adopt_plan_drift_refused`, `adopt_other_owner_refused`, `adopt_same_owner_readopts` | `adopt`, `transcript_reads`; the adapter's host-start hook and host plans; the live `role.describe` must declare `adopt` before any `session.adopt` is sent; reported as a named skip without `adopt` |
 | `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
 | `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
-| `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content_and_origin`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
-| `send_origin_recorded_on_the_message`, `send_origin_person_refused` | `tags`, `queue`, `transcript_reads`; `person` and the other refused origins write nothing and leave the `send_id` free |
+| `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
+| `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_with_legacy_delivery_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
+| `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
+| `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_falls_through` | the above; inapplicable when the adapter says its scripted route has no turn-scoped system message, since nothing then can go out as `turn_system` |
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |

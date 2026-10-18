@@ -101,13 +101,12 @@ which apply the pinned order of checks to every case.
 `tags.json` pins the `tags` group: the one spelling of a tag (valid and
 invalid spellings, including a leading zero, a non-ASCII digit and a number
 past `u64`); a fork continuing after its parent's highest number; read
-entries carrying `tags` (one row per part, every tag used once) and an
-`origin` for each named origin, none on the model's own output, with `role`
+entries carrying `tags` (one row per part, every tag used once) with `role`
 and `written_at` in the envelope; a model-written `§N§` stored as written in
 a text part and in tool-call arguments; `session.resolve` requests, requests
-refused by field, and cases against a ledger of stored parts (the whole part
-with its origin, a character range, a range counted in Unicode scalar values,
-an empty range at the end, a tool-call part in the runner's stored encoding,
+refused by field, and cases against a ledger of stored parts (the whole
+part, a character range, a range counted in Unicode scalar values, an empty
+range at the end, a tool-call part in the runner's stored encoding,
 `unknown_tag`, malformed tags, a range past the content and one starting
 after its end); and the plan's `render_tags` member, off when absent or
 `null`, refused when not a boolean or when `true` without the group.
@@ -115,16 +114,31 @@ after its end); and the plan's `render_tags` member, off when absent or
 an answer without the group. Checked by the `tags::tests` and
 `describe::tags_and_tool_calls_tests` modules of the wire crate.
 
-# Send origin
+# Delivery order
 
-`send-origin.json` pins `session.send`'s `origin`: absent and `null` mean
-`owner`; `owner`, `wake` and `peer` are recorded; `person`, the read-only
-origins `reminder` and `tool_result`, an unknown value and a non-string are
-refused `invalid_params` naming `origin`, writing nothing; a runner without
-`tags` ignores the field, `person` included. Its `identity` cases pin the
-origin as part of a send's identity: absent equals `owner`, and another
-origin under the same `send_id` is `send_id_reuse` naming `origin`. Checked
-by the `send::origin_tests` module of the wire crate.
+`delivery-order.json` pins the `delivery_order` group: the legacy
+`delivery` equivalences (`queue` and absent are `[idle_start]`, `steer` is
+`[steer, idle_start]`, `interrupt` has none); sends carrying a list with
+its `dedupe_key`, `expires_at_ms` and `template`, and sends refused by field
+(a list beside a legacy `delivery`, empty, a mode twice, a legacy mode, not a
+list, members without a list, malformed members); a runner without the
+group refusing each member by name while the legacy field still works;
+mode choices at boundaries (fall-through order, order winning over what else
+is possible, a list without `idle_start` never starting a run, `queue`
+waiting for the run to end); a plan sender's typed template with uses that
+render or name their problem (a percentage over 100 or written as a string,
+an integer outside its bounds, an unassigned tag, free text in a tag slot,
+an unlisted enum value, missing and undeclared slots, another digest, an
+unknown template); what goes out, system text or the prompt at user
+authority after a fall-through; plans with senders, valid and refused
+(including a string slot); admission of the owner, named senders with and
+without the `idle_start` grant, and unnamed modules refused
+`scope_owner_mismatch` even when a request field names a sender; dedupe and
+expiry; `superseded` and `expired` send states; and entries recording each
+mode. Template digests are SHA-256 over JCS bytes and are checked by
+recomputation. `delivery-order-describe.json` pins the group's discovery.
+Checked by the `delivery_order::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
 
 # Run tool calls
 
