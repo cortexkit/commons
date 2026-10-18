@@ -734,6 +734,7 @@ serves `session.read` from a scripted transcript, and receives
 | `async_notice_wakes_read`, `async_duplicate_notice_is_a_wake`, `async_seq_gap_loses_no_content` | §20.2: the provider reads with `session.read` from its own cursor |
 | `async_resync_on_changed_bytes` | §20.2: a changed digest triggers the resync steps, and no view is published until the re-read completes |
 | `async_view_immutable`, `async_view_version_rises`, `async_view_get_never_another_version` | §20.3 |
+| `async_part_edits_well_formed` | §20.3: a provider's part edits are sorted, one per part, inside their keep range, and name part keys the runner's `session.read` returned |
 | `async_ride_answers_within_deadline`, `async_ride_unknown_cause_nothing` | §20.5 |
 | `async_ceiling_pure` | §13: the same inputs give the same `ceiling` bytes |
 
@@ -1320,7 +1321,9 @@ provider.
 | `revert_below:<ordinal>` | the transcript was truncated; every message at `ordinal` or above is gone |
 | `marker_outcome:<applied\|deferred\|unknown>:<cut_id>` | the host's native compaction marker for the cut of the view named by `applied_view_version` in the same notice (§20.6). `cut_id` is 1 to 64 bytes of `[A-Za-z0-9._-]` |
 | `view_discarded:<view_version>` | the runner discarded that view because its coverage is no longer a prefix of the transcript; always with `revert_below` in the same notice |
-| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§20.4). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `model_rules`, or another reason a provider treats the same way |
+| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§20.4). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
+| `view_deferred:<view_version>:<reason>` | the runner holds that view until a step boundary where applying it is safe for the current model provider, and keeps rendering its current one meanwhile (§20.4). `reason` has the same form: `signed_reasoning`, or another (`notice::defer_reasons`) |
+| `view_companion:<view_version>:<edit>` | the runner applied that view together with a companion edit the model provider requires, and nothing more (§20.4). `edit` has the same form: `strip_signed_reasoning`, or another (`notice::companion_edits`) |
 
   A known name with arguments it does not take is malformed. An unknown
   name that follows the grammar decodes (`Event::Unknown`) and the provider
@@ -1417,15 +1420,36 @@ provider.
   `lineage_id`, `from` included and `to` excluded, the convention of §8.
   Together they tile `[0, covers_through.ordinal + 1)` in order, with no gap
   and no overlap:
-  - `{kind: "keep", from, to}` sends the transcript's messages in the range
-    as written. Never empty.
+    - `{kind: "keep", from, to, edits?}` sends the transcript's messages in the
+    range as written, except for the parts `edits` changes. Never empty.
+  - `edits: [{ordinal, mid, part, bytes?, drop?}]` (`view::PartEdit`) edits
+    single parts of messages that otherwise stay: a dropped tool output, a
+    stripped image, compressed text. So a view never re-sends a whole message
+    to change one part. `part` is `llm-runner/v1`'s opaque part key, the same
+    key as its `tags: [{part, tag}]` rows and `session.resolve`; it is 1 to
+    256 bytes, compared byte for byte. Each edit gives exactly one of `bytes`,
+    a string holding the replacement part as UTF-8 JSON in the runner's
+    message schema, or `drop: true`, which removes the part outright (`drop`
+    is omitted when false). Edits are sorted by `ordinal` and, within one
+    message, by the part's position in that message; there is at most one
+    edit per part; every `ordinal` lies inside its keep range; and every
+    `mid` is the id of the message the runner holds at that ordinal, or the
+    view is discarded as not a prefix (§20.4). `edits` is omitted when
+    empty.
   - `{kind: "replace", from, to, bytes}` sends `bytes` in their place.
     `bytes` is a string holding a UTF-8 JSON array of messages in the
-    runner's message schema: a drop placeholder, compressed text or a
-    history head. It is carried as a string so its exact bytes enter the
-    digest. `from == to` inserts the messages before `to` and replaces
+        runner's message schema: a history head or a fold of whole messages. It
+    is carried as a string so its exact bytes enter the digest. `from == to` inserts the messages before `to` and replaces
     nothing.
-  `kind` is strict: a runner cannot apply a range it does not understand.
+    `kind` is strict: a runner cannot apply a range it does not understand.
+- [pinned] **Replaced bytes are final.** A replace range's `bytes` and an
+  edit's `bytes` are sent exactly as given. When the run renders tags
+  (`render_tags`), the runner renders them only on transcript parts it sends
+  as written, and adds nothing inside replaced bytes. A drop placeholder that
+  should carry a tag carries it in its own bytes, written in `llm-runner/v1`'s
+  pinned tag render format (its exact prefix and separator, and the part
+  kinds that carry a tag, pinned in `cortexkit-role-llm-runner` 0.2.7), so a
+  provider produces the same bytes the runner would.
 - [pinned] Optional `cut: {cut_id, through_ordinal}` (`view::ViewCut`) names
   the point through which the provider's replacements stand for the whole
   transcript. It lies on a range boundary within the coverage, with only
@@ -1439,18 +1463,25 @@ provider.
   hexadecimal SHA-256 over frames as in §20.2: the domain
   `ck.compaction.view.v1`; `session_ref`; `view_version` in decimal;
   `lineage_id`; `covers_through.ordinal` in decimal; `covers_through.mid`;
-  the number of ranges in decimal; for each range in order, its `kind`,
-  `from` and `to` in decimal and, for `replace`, its `bytes`; then, only when
-  a cut is present, `cut`, its `cut_id` and its `through_ordinal` in decimal.
-  `digest` itself is not an input.
+    the number of ranges in decimal; for each range in order, its `kind`,
+  `from` and `to` in decimal and, for `replace`, its `bytes`, or, for
+  `keep`, the number of its edits in decimal followed, for each edit in
+  order, by its `ordinal` in decimal, its `mid`, its `part`, and either
+  `bytes` and the edit's bytes or `drop`; then, only when a cut is present,
+  `cut`, its `cut_id` and its `through_ordinal` in decimal. `digest` itself
+  is not an input.
 - [pinned] A view is well formed (`CompactionView::check`) when, checked in
   this order: `session_ref` is a session reference (`session_ref`);
   `view_version` is not 0 (`version_zero`); `digest` is lowercase hexadecimal
   (`digest_malformed`); `ranges` is not empty (`no_ranges`); each range starts
   where the previous ended, the first at 0 (`gap`); no range is inverted and
   no keep range is empty (`inverted`); the last range ends at
-  `covers_through.ordinal + 1` (`coverage_end`); every replace range's bytes
-  are a JSON array (`replacement_not_array`); the cut is valid (`cut`); the
+    `covers_through.ordinal + 1` (`coverage_end`); every replace range's bytes
+  are a JSON array (`replacement_not_array`); every keep range's edits lie
+  inside it (`edit_outside_range`), are sorted by ordinal (`edit_order`), name
+  each part once (`duplicate_edit`), have a valid part key (`edit_part`),
+  give exactly one of `bytes` and `drop` (`edit_action`), and give JSON bytes
+  (`edit_not_json`); the cut is valid (`cut`); the
   compact JSON encoding is at most 3,145,728 bytes (`MAX_VIEW_BYTES`,
   `too_large`); and `digest` matches the content (`digest_mismatch`).
 - [pinned] When a view is durable in its own store, the provider publishes
@@ -1488,9 +1519,15 @@ provider.
      `rejected:digest_mismatch`;
   4. its version is above the one the runner renders, or it is `stale` and
      ignored;
-  5. its coverage is a prefix of the transcript: same `lineage_id`, and the
+    5. its coverage is a prefix of the transcript: same `lineage_id`, the
      runner's message at `covers_through.ordinal` has id
-     `covers_through.mid`. If not, it is `discard`ed.
+     `covers_through.mid`, and the message at each edit's `ordinal` has the
+     edit's `mid`. If not, it is `discard`ed;
+  6. every edited part key exists in its message, or the view is
+     `refused:unknown_part` and the runner reports
+     `view_refused:<version>:unknown_part`;
+  7. each message's edits follow its part order, or it is
+     `rejected:edit_order`.
   Only then does it `apply`. A rejected view is not persisted, not applied
   and not reported; the runner keeps its current view and may fetch again.
 - [pinned] **A view applies only at a step boundary.** The runner writes it
@@ -1501,22 +1538,35 @@ provider.
   applies, including across runner restarts and while the provider is down.
   Every later notice names it in `applied_view_version`.
 - [pinned] Under a view, a request's history is, for each range in order,
-  the transcript's messages inside a keep range or a replace range's
-  messages, followed by every message after the coverage
-  (`CompactionView::assemble` is the reference). Messages a runner carries
+  the transcript's messages inside a keep range, with their part edits
+  applied (a replaced part becomes its bytes, a dropped part is left out,
+  every other part is sent as written), or a replace range's messages,
+  followed by every message after the coverage (`CompactionView::assemble`
+  is the reference, over a model in which a message's parts are the elements
+  of its `content` array). Messages a runner carries
   outside the transcript (reminders, appends) are the runner's to place.
-- [pinned] Provider and model quirks are **the runner's** duty. The view is
-  the provider's preference, and the runner applies it within the current
-  model's rules. For example, on a model that binds signed thinking to its
-  prefix, an edit before a kept signed thinking block requires stripping
-  every later signed block; the runner does that itself. The provider
-  carries no model quirks for runners in this mode.
-- [pinned] The runner may refuse a view it cannot apply within those rules:
-  one that splits a tool call from its result (`tool_pair_split`), breaks
-  role order for the current model provider (`role_order`), or that the
-  model's rules forbid and the runner cannot adapt (`model_rules`). It
-  reports `view_refused:<version>:<reason>` on its next notice and keeps
-  rendering its current view.
+- [pinned] Model provider quirks are **the runner's** duty. The view is the
+  provider's preference, and the provider carries no model-provider quirks
+  for runners in this mode. When the current model provider's rules forbid
+  applying a view as it stands, the runner has two options:
+  - **Defer:** hold the view until a step boundary where applying it is safe
+    for the model provider, keep rendering its current view, and report
+    `view_deferred:<version>:<reason>`. `applied_view_version` names the view
+    only once it applies.
+  - **Companion edits:** apply it together with only the edits the model
+    provider requires and nothing else, and report
+    `view_companion:<version>:<edit>` alongside `applied_view_version` naming
+    the view. Today the one such edit is `strip_signed_reasoning`: removing
+    the signed reasoning produced after the view's first changed byte, which
+    a model that binds signed reasoning to its prefix requires.
+  A runner that can do neither refuses the view with
+  `view_refused:<version>:provider_constraint`.
+- [pinned] The runner also refuses a view, reporting
+  `view_refused:<version>:<reason>` on its next notice and keeping its
+  current view, when applying it would separate a tool call from its result
+  (`tool_pair_split`), including through a dropped part, or break role order
+  for the current model provider (`role_order`), and when an edit names a
+  part key the message does not have (`unknown_part`, step 6 above).
 - [pinned] A view whose coverage is no longer a prefix of the transcript,
   because a revert truncated below `covers_through`, is discarded, whether
   just fetched or currently applied. The runner reports
@@ -1530,10 +1580,20 @@ provider.
   (`ride::RideRequest`) is a synchronous call on the compaction route. The
   runner sends it only when its prefix is being rewritten anyway (`cause`
   `ttl_expired`, `model_change` or `surface_change`), or when a request
-  reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
+    reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
   (`RideCause::Unknown`); a provider answers `nothing` to a cause it does not
   know. `deadline_ms` is how long the runner waits for the answer, counted
-  from sending: above 0 and at most 300,000 (`ceiling::MAX_CEILING_WAIT_MS`).
+  from sending, and is above 0. For the three rewrite causes it is the
+  runner's own short deadline, at most 10,000
+  (`ride::MAX_REWRITE_RIDE_DEADLINE_MS`), because the ride sits in front of a
+  request the user is waiting for. Only `ceiling` uses the ceiling policy's
+  `wait_ms`: its `deadline_ms` is the time left of that wait, at most 300,000
+  (`ceiling::MAX_CEILING_WAIT_MS`). `RideRequest::check` refuses a deadline
+  out of range (`deadline_out_of_range`).
+- [pinned] A rewrite-cause ride never ends a run: whatever its outcome, the
+  runner sends the request, under the ride's view or its current one. Only
+  a `ceiling` ride can end in the run being refused (`context_ceiling`,
+  below).
 - [pinned] The answer (`ride::RideAnswer`, strict on `answer`) is
   `{answer: "view", view}` or `{answer: "nothing"}`. A view is checked as in
   §20.4, against its own digest, and applies at this step: the ride happens
@@ -1589,8 +1649,10 @@ provider.
   and answers, of a view and its cut, and of `ceiling`. Unknown notice and
   view-ready headers are ignored.
 - [pinned] Strict on values: `answer` in `view.get` and `compaction.ride`
-  answers, and each range's `kind`. Open: ride `cause`, unknown event tokens,
-  `view_refused` reasons and `view.get` refusal codes.
+    answers, and each range's `kind`. Open: ride `cause`, unknown event tokens,
+  the reasons and edits in `view_refused`, `view_deferred` and
+  `view_companion`, and `view.get` refusal codes. A part edit's fields are
+  lenient; its `ordinal`, `mid` and `part` are required.
 - [pinned] `ceiling` is absent from Setup answers that predate it, which
   keep their bytes. A runner on a session that is not in `async` mode ignores
   `ceiling`.
