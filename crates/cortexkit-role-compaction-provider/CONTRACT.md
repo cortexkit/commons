@@ -1373,7 +1373,7 @@ provider.
 - [pinned] A notice with a `seq` at or below the highest the provider has
   processed is a duplicate: it is a wake and nothing more. A gap in `seq`
   loses no content and no acknowledgement (`applied_view_version` repeats).
-  A gap may hide events. A hidden revert shows up in the read (below). A
+  A gap may hide events. A hidden revert shows up in the read as one of the resync triggers listed next. A
   hidden refusal or discard shows up as `applied_view_version` never naming
   that view. A hidden marker outcome is taken as `unknown`.
 - [pinned] The provider computes the content digest of every message it
@@ -1592,4 +1592,5 @@ provider.
   answers, and each range's `kind`. Open: ride `cause`, unknown event tokens,
   `view_refused` reasons and `view.get` refusal codes.
 - [pinned] `ceiling` is absent from Setup answers that predate it, which
-  keep their bytes. A runner outside this mode ignores it.
+  keep their bytes. A runner on a session that is not in `async` mode ignores
+  `ceiling`.
