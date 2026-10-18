@@ -1,0 +1,94 @@
+{
+  "description": "ChatGPT/Codex backend HTTP refusals and the class each must receive. `headers` are [name, value] pairs, `body` is the raw response body, and `now_ms` is the observation time in Unix milliseconds. `provenance` says where each body came from: CAPTURED bodies were copied from real backend answers, RECONSTRUCTED bodies were written for tests.",
+  "vectors": [
+    {
+      "name": "usage_limit_reached_with_body_reset",
+      "provenance": "CAPTURED: terminal error recorded for a production run on 2026-09-16 (broca WAL 4430787e24105d49.wal), the CHATGPT_USAGE_LIMIT_BODY fixture in broca-provider transport.rs",
+      "status": 429,
+      "headers": [["retry-after", "30"]],
+      "body": "{\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\",\"plan_type\":\"pro\",\"resets_at\":1790021043,\"eligible_promo\":null,\"resets_in_seconds\":441721}}",
+      "now_ms": 1789579322081,
+      "expected": {
+        "class": "account_limit_exhausted",
+        "resets_at_ms": 1790021043000,
+        "resets_at_source": "body"
+      }
+    },
+    {
+      "name": "usage_limit_reached_with_retry_after_reset",
+      "provenance": "RECONSTRUCTED: the captured usage-limit body without its reset fields, as in broca-provider's chatgpt_http_refusals_keep_their_recorded_errors",
+      "status": 429,
+      "headers": [["Retry-After", "30"]],
+      "body": "{\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\"}}",
+      "now_ms": 1789579322081,
+      "expected": {
+        "class": "account_limit_exhausted",
+        "resets_at_ms": 1789579352081,
+        "resets_at_source": "retry_after"
+      }
+    },
+    {
+      "name": "usage_not_included_code",
+      "provenance": "RECONSTRUCTED: broca-provider transport.rs http_errors_use_structured_provider_codes_and_status_defaults fixture",
+      "status": 429,
+      "headers": [],
+      "body": "{\"error\":{\"message\":\"not in plan\",\"code\":\"usage_not_included\"}}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "usage_not_included" }
+    },
+    {
+      "name": "usage_not_included_type",
+      "provenance": "RECONSTRUCTED: the error.type form the Codex client keys on (codex-rs/codex-api/src/api_bridge.rs)",
+      "status": 429,
+      "headers": [],
+      "body": "{\"error\":{\"type\":\"usage_not_included\",\"message\":\"not in plan\"}}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "usage_not_included" }
+    },
+    {
+      "name": "credential_401_expired_token",
+      "provenance": "RECONSTRUCTED: broca-provider transport.rs a_chatgpt_401_naming_an_api_key_is_upstream_not_our_credential token fixture",
+      "status": 401,
+      "headers": [],
+      "body": "{\"error\":{\"message\":\"Your authentication token has expired.\",\"type\":\"invalid_request_error\",\"code\":\"token_expired\"}}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "auth_failure" }
+    },
+    {
+      "name": "credential_401_without_code",
+      "provenance": "RECONSTRUCTED: broca-provider transport.rs UNAUTHORIZED fixture",
+      "status": 401,
+      "headers": [],
+      "body": "{\"error\":{\"message\":\"invalid token\"}}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "auth_failure" }
+    },
+    {
+      "name": "upstream_sk_key_401",
+      "provenance": "CAPTURED: ChatGPT backend answer on 2026-09-25 from 22:41Z, broca-provider transport.rs a_chatgpt_401_naming_an_api_key_is_upstream_not_our_credential",
+      "status": 401,
+      "headers": [],
+      "body": "{\n  \"error\": {\n    \"message\": \"Incorrect API key provided: sk-svcac***********fvMA. You can find your API key at https://platform.openai.com/account/api-keys.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": null,\n    \"code\": \"invalid_api_key\"\n  }\n}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "upstream_key_rejection" }
+    },
+    {
+      "name": "ordinary_throttle_429",
+      "provenance": "RECONSTRUCTED: broca-provider transport.rs only_the_chatgpt_usage_limit_body_on_the_chatgpt_family_is_an_account_wall throttle fixture",
+      "status": 429,
+      "headers": [["retry-after", "2"]],
+      "body": "{\"error\":{\"type\":\"rate_limit_exceeded\",\"message\":\"Rate limit reached\"}}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "rate_limited" }
+    },
+    {
+      "name": "overloaded_503",
+      "provenance": "RECONSTRUCTED: broca-provider transport.rs a_refreshed_resend_that_meets_a_503_keeps_the_full_retry_budget fixture",
+      "status": 503,
+      "headers": [],
+      "body": "{\"error\":{\"message\":\"overloaded\"}}",
+      "now_ms": 1789579322081,
+      "expected": { "class": "overloaded" }
+    }
+  ]
+}

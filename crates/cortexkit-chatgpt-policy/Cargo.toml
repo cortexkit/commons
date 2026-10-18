@@ -1,0 +1,27 @@
+[package]
+name = "cortexkit-chatgpt-policy"
+version = "0.1.0"
+edition.workspace = true
+license = "MIT AND Apache-2.0"
+repository.workspace = true
+authors.workspace = true
+publish = true
+exclude = ["mutations.d/**"]
+description = "ChatGPT/Codex subscription account-id resolution, refusal classification, and quota-header policy."
+keywords = ["chatgpt", "codex", "quota", "policy"]
+
+[features]
+test-vectors = []
+
+[dependencies]
+serde_json = "1"
+httpdate = "1"
+base64 = "0.22"
+
+[dev-dependencies]
+sha2 = "0.10"
+
+[[test]]
+name = "vectors_feature"
+path = "tests/vectors.rs"
+required-features = ["test-vectors"]

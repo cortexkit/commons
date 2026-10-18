@@ -1,0 +1,59 @@
+{
+  "description": "ChatGPT account-id resolution. `vault_account_id` is the id a credential vault served (null when none), `access_token` the OAuth access token. The tokens are SYNTHETIC alg:none JWTs, generated to carry the account id in each claim shape (broca-catalog live.rs tests); their signatures are placeholders. `expected` holds either `account_id` or `error`.",
+  "vectors": [
+    {
+      "name": "vault_id_wins_over_the_claim",
+      "vault_account_id": "acct-vault",
+      "access_token": "eyJhbGciOiJub25lIn0.eyJjaGF0Z3B0X2FjY291bnRfaWQiOiAiYWNjdC10b3AifQ.sig",
+      "expected": { "account_id": "acct-vault" }
+    },
+    {
+      "name": "vault_id_rescues_a_token_without_a_claim",
+      "vault_account_id": "acct-vault",
+      "access_token": "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6ICJ4QHkueiJ9.sig",
+      "expected": { "account_id": "acct-vault" }
+    },
+    {
+      "name": "blank_vault_id_falls_back_to_the_claim",
+      "vault_account_id": " \t",
+      "access_token": "eyJhbGciOiJub25lIn0.eyJjaGF0Z3B0X2FjY291bnRfaWQiOiAiYWNjdC10b3AifQ.sig",
+      "expected": { "account_id": "acct-top" }
+    },
+    {
+      "name": "top_level_claim",
+      "vault_account_id": null,
+      "access_token": "eyJhbGciOiJub25lIn0.eyJjaGF0Z3B0X2FjY291bnRfaWQiOiAiYWNjdC10b3AifQ.sig",
+      "expected": { "account_id": "acct-top" }
+    },
+    {
+      "name": "nested_auth_claim",
+      "vault_account_id": null,
+      "access_token": "eyJhbGciOiJub25lIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfYWNjb3VudF9pZCI6ICJhY2N0LW5lc3RlZCJ9fQ.sig",
+      "expected": { "account_id": "acct-nested" }
+    },
+    {
+      "name": "first_organization_id",
+      "vault_account_id": null,
+      "access_token": "eyJhbGciOiJub25lIn0.eyJvcmdhbml6YXRpb25zIjogW3siaWQiOiAib3JnLWZpcnN0In1dfQ.sig",
+      "expected": { "account_id": "org-first" }
+    },
+    {
+      "name": "missing_everywhere",
+      "vault_account_id": null,
+      "access_token": "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6ICJ4QHkueiJ9.sig",
+      "expected": { "error": "missing_account_id" }
+    },
+    {
+      "name": "missing_with_a_blank_vault_id",
+      "vault_account_id": "",
+      "access_token": "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6ICJ4QHkueiJ9.sig",
+      "expected": { "error": "missing_account_id" }
+    },
+    {
+      "name": "not_a_jwt",
+      "vault_account_id": null,
+      "access_token": "not-a-jwt",
+      "expected": { "error": "missing_account_id" }
+    }
+  ]
+}
