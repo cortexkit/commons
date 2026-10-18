@@ -67,7 +67,8 @@ mod compaction;
 pub use compaction::CompactionDefect;
 
 pub const TOOL_MODULE: &str = "fake.tools";
-/// The module the delivery-order cases name in a plan's `senders`.
+/// The module id (and route principal) of the sender the delivery-order
+/// cases name in a session plan's `senders` member.
 pub const SENDER_MODULE: &str = "fake.sender";
 /// How long the fake holds a run at the context ceiling before its bound.
 const CEILING_WAIT_MS: u64 = 300_000;
@@ -362,11 +363,13 @@ struct Msg {
     calls: Vec<String>,
     /// One row per part: its key and its tag number, if tagged.
     tags: Vec<(String, Option<u64>)>,
-    /// How a `delivery_order` send this entry holds went out.
+    /// For an entry written by a delivered `delivery_order` send: the mode
+    /// it went out in, as the entry's `delivered_as`.
     delivered_as: Option<Value>,
 }
 
-/// A `delivery_order` send the fake accepted.
+/// A `session.send` carrying a `delivery_order` list that the fake
+/// accepted, queued until a boundary where one of its modes is possible.
 #[derive(Clone, Debug)]
 struct Queued {
     send_id: String,
@@ -409,7 +412,8 @@ struct RunRec {
     structured_output: Option<Value>,
     /// The structured output its terminal record carries.
     structured_output_result: Option<Value>,
-    /// The detail of a `context_ceiling` end.
+    /// The `{window, size, cause}` detail of a run that ended in the
+    /// `context_ceiling` state.
     ceiling: Option<Value>,
 }
 
@@ -451,15 +455,16 @@ struct Sess {
     events: Vec<String>,
     /// The highest tag number assigned.
     last_tag: u64,
-    /// The plan's other senders.
+    /// The non-owner senders the session's admitted plan names.
     senders: Vec<order::PlanSender>,
-    /// `delivery_order` sends, keyed by sender and `send_id`, and their
-    /// arrival order.
+    /// Accepted `delivery_order` sends, keyed by sender and `send_id`, and
+    /// those keys in arrival order.
     ordered: BTreeMap<String, Queued>,
     queue: Vec<String>,
     /// Host-side metadata changes made outside the role.
     host_meta: u64,
-    /// The run waiting at the context ceiling, and when the wait ends.
+    /// The run waiting at the context ceiling, and the time its wait ends
+    /// (milliseconds since the Unix epoch).
     ceiling_wait: Option<(String, u64)>,
 }
 

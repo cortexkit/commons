@@ -50,7 +50,9 @@ async fn page<R: RunnerRoute>(
     decode("run.tool_calls", body)
 }
 
-/// Every call of `run_id`, following `next` with `limit` calls a page.
+/// Every call of run `run_id`: pages of at most `limit` calls, each request
+/// passing the previous page's `next` back as `after`, until a page has no
+/// `next`.
 async fn list<R: RunnerRoute>(
     route: &R,
     run_id: &str,

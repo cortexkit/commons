@@ -427,7 +427,8 @@ where
     Ok(())
 }
 
-/// A tag nothing in the session carries, and the highest it does.
+/// A well-formed tag far above the highest tag any entry of the session
+/// carries, so the session never assigned it.
 fn unassigned(messages: &[ReadMessage]) -> String {
     let highest = messages
         .iter()

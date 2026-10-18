@@ -130,7 +130,8 @@ pub struct ContextCeilingDetail {
     /// The runner's estimate of the request's size, in tokens, when it
     /// stopped.
     pub size: u64,
-    /// One of [`context_ceiling_causes`]; any other value decodes as itself.
+    /// One of [`context_ceiling_causes`]; a cause this crate does not name
+    /// is kept as the string received.
     pub cause: String,
 }
 

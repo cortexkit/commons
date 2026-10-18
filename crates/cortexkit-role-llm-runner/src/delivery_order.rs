@@ -77,8 +77,8 @@ impl Mode {
     }
 }
 
-/// The modes' spellings, as a read entry's `delivered_as.mode` names them
-/// (decoded open there).
+/// The modes' spellings, as a read entry's `delivered_as.mode` names them.
+/// That member is an open string: a consumer keeps a mode it does not know.
 pub mod modes {
     pub const TOOL_RESULT: &str = "tool_result";
     pub const TURN_SYSTEM: &str = "turn_system";
@@ -179,7 +179,8 @@ impl DeliveryOrder {
         self.modes.contains(&Mode::IdleStart)
     }
 
-    /// The members as they ride on a send.
+    /// The send members (`delivery_order` and, when set, `dedupe_key`,
+    /// `expires_at_ms`, `template`) to put beside the role's on a send.
     pub fn to_members(&self) -> Map<String, Value> {
         let mut members = Map::new();
         members.insert(
@@ -306,7 +307,7 @@ pub fn choose(modes: &[Mode], boundary: &Boundary) -> Option<Mode> {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct EntryDelivery {
-    /// One of [`modes`], decoded open.
+    /// One of [`modes`]; a mode this crate does not know decodes as itself.
     pub mode: String,
     /// For `tool_result`: the `call_key` of the tool result it went out
     /// with.
@@ -344,7 +345,7 @@ pub enum Slot {
     Percentage,
     /// A tag (`§N§`) the session assigned.
     Tag,
-    /// One of `values`.
+    /// Exactly one of the strings in `values`.
     Enum { values: Vec<String> },
 }
 

@@ -51,7 +51,8 @@ where
     }
 }
 
-/// The plan template the template cases use, under the plan sender.
+/// The template the template cases declare in the plan, in the plan
+/// sender's entry of `senders`.
 fn template() -> Template {
     let mut slots = std::collections::BTreeMap::new();
     slots.insert("pct".to_owned(), Slot::Percentage);
