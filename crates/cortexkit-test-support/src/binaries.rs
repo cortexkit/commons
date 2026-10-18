@@ -870,18 +870,9 @@ impl CacheLock {
 
     fn try_exclusive(root: &Path) -> io::Result<Self> {
         let file = cache_lock(root)?;
-        file.try_lock().map_err(|error| {
-            let error = io::Error::from(error);
-            log_cache_error(
-                root,
-                &format!(
-                    "try_lock failed: kind={:?}, raw_os_error={:?}",
-                    error.kind(),
-                    error.raw_os_error()
-                ),
-            );
-            error
-        })?;
+        // Contention (WouldBlock) is the normal case when several test threads
+        // publish at once; the caller decides whether it is worth reporting.
+        file.try_lock().map_err(io::Error::from)?;
         Ok(Self {
             file,
             root: root.to_owned(),
@@ -900,13 +891,21 @@ impl Drop for CacheLock {
     }
 }
 
+// eprintln! goes through libtest's output capture, so a report from a test
+// thread stays with that test's captured output. Writing to io::stderr()
+// directly bypasses the capture and can land in the middle of libtest's
+// "test <name> ... ok" status line, which test-output parsers then misread.
 fn log_cache_error(path: &Path, error: &dyn std::fmt::Display) {
-    use std::io::Write;
-    let _ = writeln!(
-        io::stderr().lock(),
-        "ckdev cache maintenance at {}: {error}",
-        path.display()
-    );
+    #[cfg(test)]
+    LOGGED.with(|logged| logged.set(logged.get() + 1));
+    eprintln!("ckdev cache maintenance at {}: {error}", path.display());
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Reports made on this thread, so a test can prove that ordinary
+    /// contention prints nothing.
+    static LOGGED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn touch_marker(path: &Path, now: SystemTime) -> io::Result<()> {
@@ -983,6 +982,9 @@ impl CachePruner {
         })();
         match result {
             Ok(pruned) => *completed = pruned,
+            // Another process holds the cache for its own prune or publish:
+            // skip quietly and let a later copy try again.
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
             Err(error) => log_cache_error(root, &error),
         }
     }
@@ -1736,6 +1738,37 @@ mod tests {
             released.is_ok(),
             "inherited prune descriptor retained its lock"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_prune_that_finds_the_cache_busy_is_skipped_without_a_report() {
+        let root = PublishRoot::new("prune-busy-quiet");
+        let held = CacheLock::try_exclusive(&root.path()).unwrap();
+        let contended = CacheLock::try_exclusive(&root.path());
+        assert_eq!(
+            contended.as_ref().err().map(io::Error::kind),
+            Some(io::ErrorKind::WouldBlock)
+        );
+        let before = LOGGED.with(std::cell::Cell::get);
+        let pruner = CachePruner::new();
+        let protected = root.path().join("protected");
+        let mut removed = 0;
+        pruner.maybe_prune(&root.path(), &protected, SystemTime::now(), |_| {
+            removed += 1;
+            Ok(())
+        });
+        assert_eq!(
+            LOGGED.with(std::cell::Cell::get),
+            before,
+            "busy cache was reported"
+        );
+        assert_eq!(removed, 0);
+        assert!(
+            !*pruner.completed.lock().unwrap(),
+            "a skipped prune must not count as done"
+        );
+        drop(held);
     }
 
     #[cfg(unix)]

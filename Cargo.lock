@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-test-support"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "file-id",
  "rustix",

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.10
+
+- Cache maintenance no longer reports ordinary contention. When several test
+  threads or processes publish at once, the background prune finds the cache
+  lock held (WouldBlock) and now skips quietly, as intended, instead of printing
+  "try_lock failed: kind=WouldBlock".
+- The remaining maintenance reports use `eprintln!`, which libtest captures per
+  test, instead of writing to stderr directly. A direct write could land inside
+  libtest's "test <name> ... ok" status line, and mutation runners that parse
+  those lines then failed the baseline with "unrecognized test status".
+
 ## 0.1.9
 
 - On macOS, `ckdev_binary` removes the debug map from a published Mach-O copy
