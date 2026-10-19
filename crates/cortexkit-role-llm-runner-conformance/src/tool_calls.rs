@@ -118,9 +118,16 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
-    // Two sibling calls in the first step, a third in the second, all with
-    // the same model id, so only position and key tell them apart.
-    let scripted: Vec<_> = (0..3).map(|_| case.mint.call("listed")).collect();
+    // Two sibling calls in the first step and a third in the second. Siblings
+    // get distinct model ids, as a real provider never repeats an id within one
+    // response and a host may key tool parts by it. The ids sort against
+    // dispatch order, and the third reuses the first's id (allowed across
+    // steps, §5), so a runner that orders or identifies calls by model id
+    // fails; only position and key tell the two "listed-b" calls apart.
+    let scripted: Vec<_> = ["listed-b", "listed-a", "listed-b"]
+        .into_iter()
+        .map(|id| case.mint.call(id))
+        .collect();
     let (last, _) = case.mint.text("listed-final");
     let mut session = case
         .open(

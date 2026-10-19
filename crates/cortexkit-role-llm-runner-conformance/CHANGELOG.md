@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- `run_tool_calls_listed_in_dispatch_order` no longer gives two sibling tool calls in one step the same model id. A real provider never repeats an id within one response, and a host that keys tool parts by id (OpenCode does) stored the two siblings as one part, so the case failed a correct runner. Siblings now have distinct ids that sort against dispatch order, and the next step's call reuses the first id, so ordering or identifying calls by model id still fails.
+
 ## 0.7.0
 
 - Requires cortexkit-role-llm-runner 0.3.0 and cortexkit-role-compaction-provider 0.3.0, which is async only. Removed with the synchronous compaction interface, with what callers lose:
