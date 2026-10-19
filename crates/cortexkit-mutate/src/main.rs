@@ -9,6 +9,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::Ordering,
+    time::Instant,
 };
 
 #[derive(Parser)]
@@ -811,15 +812,33 @@ fn run() -> Result<bool> {
                 } else {
                     session.baselines(&root, &shard, allow_dirty, &stop)?;
                 }
-                for i in execution_order(&shard) {
+                let order = execution_order(&shard);
+                for (position, &i) in order.iter().enumerate() {
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
-                    slots[i] = Some(if broad {
+                    // One stderr line as each row starts and ends, so a log
+                    // shows which row a stuck run is in. Stdout and the JSON
+                    // report are unaffected.
+                    let progress = format!(
+                        "progress: row {}/{} {}",
+                        position + 1,
+                        order.len(),
+                        shard[i].id
+                    );
+                    eprintln!("{progress}: started");
+                    let started = Instant::now();
+                    let row = if broad {
                         session.run_broad_row(&root, shard[i], allow_dirty, &stop)?
                     } else {
                         session.run_row(&root, shard[i], allow_dirty, &stop, false)?
-                    });
+                    };
+                    eprintln!(
+                        "{progress}: {} ({:.1} s)",
+                        row.outcome.name(),
+                        started.elapsed().as_secs_f64()
+                    );
+                    slots[i] = Some(row);
                 }
                 Ok(())
             })();

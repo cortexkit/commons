@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.12.6
+
+- Fix a timed-out or interrupted test run leaving its tests running. The runner
+  started each command in its own process group and, at the deadline, sent
+  SIGKILL to that group only. nextest starts every test in a process group of
+  its own, and a test may do the same for helpers it spawns, so those processes
+  survived the deadline as orphans and kept running while later rows replayed
+  (a scheduled macOS `run --all --broad` shard ran to its 6-hour cutoff, and
+  the job's cleanup found an orphaned test binary). At a deadline the runner now
+  reads the command's process tree first, sends SIGTERM to every process in it
+  and every process group in it, sends SIGKILL after a 2-second grace, and
+  waits for them to go. This applies to every spawn: baselines, mutant runs,
+  `--broad` runs, command rows, listings and prerequisites. The tree is read from
+  `/proc` on Linux and with `pgrep` elsewhere. A process that detached from the
+  tree before the deadline (a double-forked daemon) is still out of reach.
+- A timeout reason now says what was running at the deadline: for a cargo
+  test run, the test target Cargo started last; for every runner, the processes
+  under the command that were still alive, such as `test run exceeded timeout_s
+  = 600 (last test target started: tests/package_instances.rs (...); still
+  running: package_instances-1a2b3c (pid 4242))`.
+- A cargo or nextest baseline whose build or test run exceeds its deadline is
+  now TIMED_OUT, as the same timeout on a mutant already was, with
+  `timed_out_phase` `"build"` or `"test"` and the clean run's
+  `baseline_failure`. It was ERROR. Command-row timeouts stay ERROR.
+- `run` prints one progress line on stderr as each baseline and each row starts
+  and ends, such as `progress: row 3/40 some-row: started` and
+  `progress: row 3/40 some-row: CAUGHT (41.2 s)`, so a log shows which row a
+  slow or stuck shard is in. Stdout and the JSON report are unchanged.
+- `timeout_s` is still a deadline for each spawned test run on its own, not a
+  budget shared by the row's baseline, mutant and broad runs.
+
 ## 0.12.5
 
 - Add a `{suite}` placeholder to `broad_id`: the `name` of every enclosing

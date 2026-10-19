@@ -1611,6 +1611,14 @@ impl Outcome {
     pub fn is_caught(&self) -> bool {
         matches!(self, Self::Caught | Self::CaughtBroadly | Self::Hub)
     }
+
+    /// The outcome as reports spell it, such as `TIMED_OUT`.
+    pub fn name(&self) -> String {
+        serde_json::to_value(self)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_default()
+    }
 }
 /// Which deadline expired (command rows report timeouts as ERROR).
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -1917,6 +1925,10 @@ struct Output {
     /// The deadline the run was given, named when it expired.
     timeout_s: u64,
     interrupted: bool,
+    /// Processes under the command that were still alive when its deadline
+    /// expired or the run was interrupted, as `program args (pid N)`. Empty
+    /// when the command exited on its own.
+    running_at_deadline: Vec<String>,
     text: String,
     stdout: String,
     /// Present only when stderr was captured apart from stdout; otherwise both
@@ -2116,18 +2128,23 @@ fn execute_output(
     // Close the command's capture handles before cleanup, including when
     // spawning fails (Windows cannot remove files with live handles).
     drop(cmd);
-    let mut child = RunningChild(child.map_err(|e| e.to_string())?);
+    let mut child = RunningChild {
+        child: child.map_err(|e| e.to_string())?,
+        exited: false,
+    };
     let mut timed_out = false;
     let mut interrupted = false;
+    let mut running_at_deadline = vec![];
     let status = loop {
         if stop.load(Ordering::SeqCst) || start.elapsed() >= Duration::from_secs(timeout) {
             interrupted = stop.load(Ordering::SeqCst);
             timed_out = !interrupted;
-            kill_tree(&mut child.0);
-            let _ = child.0.wait();
+            running_at_deadline = terminate_tree(&mut child.child);
+            child.exited = true;
             break None;
         }
-        if let Some(status) = child.0.try_wait().map_err(|e| e.to_string())? {
+        if let Some(status) = child.child.try_wait().map_err(|e| e.to_string())? {
+            child.exited = true;
             break Some(status);
         }
         thread::sleep(Duration::from_millis(20));
@@ -2161,6 +2178,7 @@ fn execute_output(
         timeout: timed_out,
         timeout_s: timeout,
         interrupted,
+        running_at_deadline,
         text,
         stdout: stdout_text,
         stderr: stderr_text,
@@ -2214,11 +2232,22 @@ fn wrong_message(c: &Control, id: &str, output: &str) -> Result<Option<String>> 
     }
     Ok(None)
 }
-struct RunningChild(std::process::Child);
+/// A spawned command. Dropped before the command exited (an error while
+/// waiting for it), it stops the command's whole process tree; dropped after
+/// an exit, it only kills what is left in the command's own process group.
+struct RunningChild {
+    child: std::process::Child,
+    /// True once the command exited on its own or `terminate_tree` reaped it.
+    exited: bool,
+}
 impl Drop for RunningChild {
     fn drop(&mut self) {
-        kill_tree(&mut self.0);
-        let _ = self.0.wait();
+        if self.exited {
+            kill_tree(&mut self.child);
+            let _ = self.child.wait();
+        } else {
+            terminate_tree(&mut self.child);
+        }
     }
 }
 fn kill_tree(child: &mut std::process::Child) {
@@ -2235,6 +2264,311 @@ fn kill_tree(child: &mut std::process::Child) {
             .status();
     }
     let _ = child.kill();
+}
+
+/// How long a timed-out or interrupted command's processes get to exit after
+/// SIGTERM before they are sent SIGKILL. A test runner such as nextest uses
+/// this time to stop the tests it started.
+#[cfg(unix)]
+const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+
+/// Stop a command that is still running, and every process it started, then
+/// reap it. Returns the processes under the command that were alive when this
+/// was called, as `program args (pid N)`.
+///
+/// The command runs in its own process group, but signalling only that group
+/// is not enough: nextest starts each test in a process group of its own, and
+/// a test may do the same for helpers it spawns. Those processes would outlive
+/// the deadline and keep running while later rows replay. So the process tree
+/// under the command is read before any signal is sent (a process whose parent
+/// dies is re-parented and can no longer be found from the command), and every
+/// process in it, and its process group, gets SIGTERM, then SIGKILL after
+/// [`TERMINATE_GRACE`]. The tree is read again while waiting, so processes
+/// started in the meantime are stopped too. A process that left the tree
+/// before the deadline, such as a double-forked daemon, is out of reach.
+#[cfg(unix)]
+fn terminate_tree(child: &mut std::process::Child) -> Vec<String> {
+    use rustix::process::Signal;
+    let root = child.id();
+    let mut tracked = BTreeMap::new();
+    track_tree(root, &mut tracked);
+    let running = tracked
+        .iter()
+        .filter(|(pid, _)| is_running(**pid))
+        .map(|(pid, process)| format!("{} (pid {pid})", short_command(&process.command)))
+        .collect();
+    signal_tree(root, &tracked, Signal::TERM);
+    let grace = Instant::now();
+    loop {
+        let exited = matches!(child.try_wait(), Ok(Some(_)));
+        let known = tracked.len();
+        track_tree(root, &mut tracked);
+        if tracked.len() > known {
+            signal_tree(root, &tracked, Signal::TERM);
+        }
+        if (exited && !tracked.keys().any(|pid| is_running(*pid)))
+            || grace.elapsed() >= TERMINATE_GRACE
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    track_tree(root, &mut tracked);
+    signal_tree(root, &tracked, Signal::KILL);
+    let _ = child.kill();
+    let _ = child.wait();
+    // Delivery of SIGKILL is asynchronous. Wait briefly until the killed
+    // processes are gone, so the next command never runs alongside them.
+    let reap = Instant::now();
+    while reap.elapsed() < Duration::from_secs(1) && tracked.keys().any(|pid| is_running(*pid)) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    running
+}
+
+#[cfg(not(unix))]
+fn terminate_tree(child: &mut std::process::Child) -> Vec<String> {
+    // `taskkill /T` walks the process tree from the command itself.
+    kill_tree(child);
+    let _ = child.wait();
+    vec![]
+}
+
+/// A process found under a command that is being stopped.
+#[cfg(unix)]
+struct TreeProcess {
+    /// Its process group when found, or 0 when that could not be read.
+    pgid: u32,
+    /// Program and arguments, or the short process name when those are unreadable.
+    command: String,
+}
+
+/// Add to `tracked` every process whose chain of parents reaches `root` or a
+/// process tracked earlier. The second case keeps the children of a tracked
+/// process whose own parent already died and was replaced by init.
+#[cfg(unix)]
+fn track_tree(root: u32, tracked: &mut BTreeMap<u32, TreeProcess>) {
+    let mut parents: BTreeSet<u32> = tracked.keys().copied().collect();
+    parents.insert(root);
+    loop {
+        let found: Vec<(u32, String)> = children_of(&parents)
+            .into_iter()
+            .filter(|(pid, _)| *pid != root && !tracked.contains_key(pid))
+            .collect();
+        if found.is_empty() {
+            return;
+        }
+        for (pid, command) in found {
+            let pgid = process_group(Some(pid));
+            tracked.insert(pid, TreeProcess { pgid, command });
+            parents.insert(pid);
+        }
+    }
+}
+
+/// Send `signal` to the command's process group, every process group seen in
+/// its tree, and every tracked process. Never signals this runner's own group
+/// or init, whatever a descendant's group is.
+#[cfg(unix)]
+fn signal_tree(root: u32, tracked: &BTreeMap<u32, TreeProcess>, signal: rustix::process::Signal) {
+    use rustix::process::{kill_process, kill_process_group, Pid};
+    let own_group = process_group(None);
+    let mut groups: BTreeSet<u32> = tracked.values().map(|process| process.pgid).collect();
+    groups.insert(root);
+    for group in groups {
+        if group > 1 && group != own_group {
+            if let Some(group) = Pid::from_raw(group as i32) {
+                let _ = kill_process_group(group, signal);
+            }
+        }
+    }
+    for &pid in tracked.keys() {
+        if pid > 1 {
+            if let Some(pid) = Pid::from_raw(pid as i32) {
+                let _ = kill_process(pid, signal);
+            }
+        }
+    }
+}
+
+/// The live processes whose parent is in `parents`, with their commands, read
+/// from `/proc` so that Linux needs no extra program.
+#[cfg(target_os = "linux")]
+fn children_of(parents: &BTreeSet<u32>) -> Vec<(u32, String)> {
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return vec![];
+    };
+    let mut children = vec![];
+    for entry in dir.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Some(stat) = proc_stat(&pid.to_string()) else {
+            continue;
+        };
+        if !parents.contains(&stat.ppid) || stat.state == 'Z' || stat.state == 'X' {
+            continue;
+        }
+        let argv = fs::read(entry.path().join("cmdline")).unwrap_or_default();
+        let command = argv
+            .split(|byte| *byte == 0)
+            .filter(|arg| !arg.is_empty())
+            .map(String::from_utf8_lossy)
+            .collect::<Vec<_>>()
+            .join(" ");
+        children.push((
+            pid,
+            if command.is_empty() {
+                stat.name
+            } else {
+                command
+            },
+        ));
+    }
+    children
+}
+
+/// The fields of `/proc/<pid>/stat` this runner reads.
+#[cfg(target_os = "linux")]
+struct ProcStat {
+    name: String,
+    state: char,
+    ppid: u32,
+    pgid: u32,
+}
+
+/// Read `/proc/<pid>/stat`, where `pid` is a number or `self`.
+#[cfg(target_os = "linux")]
+fn proc_stat(pid: &str) -> Option<ProcStat> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // `pid (name) state ppid pgrp ...`; the name may hold spaces or ')'.
+    let (open, close) = (stat.find('(')?, stat.rfind(')')?);
+    let mut fields = stat[close + 1..].split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    let ppid = fields.next()?.parse().ok()?;
+    let pgid = fields.next()?.parse().ok()?;
+    Some(ProcStat {
+        name: stat[open + 1..close].to_owned(),
+        state,
+        ppid,
+        pgid,
+    })
+}
+
+/// The process group of `pid`, or of this process for `None`; 0 when unknown.
+/// Read from `/proc` rather than with getpgid(2): inside a PID namespace
+/// whose process group leader lives outside it (as in some containers) the
+/// group id is 0, which rustix's `getpgrp` treats as impossible.
+#[cfg(target_os = "linux")]
+fn process_group(pid: Option<u32>) -> u32 {
+    let pid = pid.map_or_else(|| "self".to_owned(), |pid| pid.to_string());
+    proc_stat(&pid).map_or(0, |stat| stat.pgid)
+}
+
+/// True while `pid` exists and has not exited; a zombie counts as exited.
+#[cfg(target_os = "linux")]
+fn is_running(pid: u32) -> bool {
+    proc_stat(&pid.to_string()).is_some_and(|stat| stat.state != 'Z' && stat.state != 'X')
+}
+
+/// The processes whose parent is in `parents`, with their commands, from
+/// `pgrep`. `ps` would also work, but it is setuid on macOS, and sandboxes
+/// that forbid running setuid programs (as agent sandboxes do) refuse it.
+/// Empty when `pgrep` cannot run, which leaves only the command's own process
+/// group to stop.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn children_of(parents: &BTreeSet<u32>) -> Vec<(u32, String)> {
+    let list = parents
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let Ok(output) = Command::new("pgrep")
+        .args(["-l", "-f", "-P", &list])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return vec![];
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (pid, command) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
+            Some((pid.parse().ok()?, command.to_owned()))
+        })
+        .collect()
+}
+
+/// True while `pid` exists. A zombie also counts, but the processes waited on
+/// here are reaped promptly by their parent or, once orphaned, by init.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn is_running(pid: u32) -> bool {
+    use rustix::process::{test_kill_process, Pid};
+    Pid::from_raw(pid as i32).is_some_and(|pid| test_kill_process(pid).is_ok())
+}
+
+/// The process group of `pid`, or of this process for `None`; 0 when unknown.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_group(pid: Option<u32>) -> u32 {
+    use rustix::process::{getpgid, Pid};
+    let group = match pid {
+        Some(pid) => Pid::from_raw(pid as i32).and_then(|pid| getpgid(Some(pid)).ok()),
+        None => getpgid(None).ok(),
+    };
+    group.map_or(0, |group| Pid::as_raw(Some(group)) as u32)
+}
+
+/// `program args` without the program's directory, at most 120 characters.
+#[cfg(unix)]
+fn short_command(command: &str) -> String {
+    let (program, args) = command.split_once(' ').unwrap_or((command, ""));
+    let program = program.rsplit('/').next().unwrap_or(program);
+    let text = if args.is_empty() {
+        program.to_owned()
+    } else {
+        format!("{program} {args}")
+    };
+    match text.char_indices().nth(120) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text,
+    }
+}
+
+/// What a command was doing when its deadline expired, appended to a
+/// timeout reason: for a Cargo test run, the test target it started last;
+/// for any command, the processes under it that were still running (at most
+/// eight). Empty when neither is known.
+fn deadline_note(output: &Output, cargo_test_run: bool) -> String {
+    let mut parts = vec![];
+    if cargo_test_run {
+        // Cargo prints `Running <target> (<binary>)` before each test binary.
+        if let Some(target) = output
+            .text
+            .lines()
+            .rev()
+            .find_map(|line| line.trim().strip_prefix("Running "))
+        {
+            parts.push(format!("last test target started: {target}"));
+        }
+    }
+    let running = &output.running_at_deadline;
+    if !running.is_empty() {
+        let mut shown = running.iter().take(8).cloned().collect::<Vec<_>>();
+        if running.len() > 8 {
+            shown.push(format!("{} more", running.len() - 8));
+        }
+        parts.push(format!("still running: {}", shown.join(", ")));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join("; "))
+    }
 }
 fn tail(text: &str) -> String {
     let start = text.char_indices().rev().nth(7999).map_or(0, |(i, _)| i);
@@ -2378,8 +2712,9 @@ fn command_tests(
         if output.timeout {
             report.timed_out_phase = Some(Phase::Test);
             return Err(error(format!(
-                "test command exceeded timeout_s = {}",
-                c.timeout_s
+                "test command exceeded timeout_s = {}{}",
+                c.timeout_s,
+                deadline_note(&output, false)
             )));
         }
         let code = match output.code {
@@ -2472,8 +2807,9 @@ fn command_breadth(
         if output.timeout {
             report.timed_out_phase = Some(Phase::Test);
             return Err(format!(
-                "broad command exceeded timeout_s = {}",
-                c.timeout_s
+                "broad command exceeded timeout_s = {}{}",
+                c.timeout_s,
+                deadline_note(&output, false)
             ));
         }
         if output.interrupted {
@@ -3114,7 +3450,11 @@ fn output_tests(
         }
         if output.timeout {
             report.timed_out_phase = Some(Phase::Test);
-            return Err(format!("test command exceeded timeout_s = {}", c.timeout_s));
+            return Err(format!(
+                "test command exceeded timeout_s = {}{}",
+                c.timeout_s,
+                deadline_note(&output, false)
+            ));
         }
         let code = output.code.ok_or_else(|| {
             format!(
@@ -3160,6 +3500,9 @@ fn output_tests(
     Ok(())
 }
 
+/// Run a Cargo/nextest row's clean-tree build and tests. A deadline that
+/// expires on either grades the row TIMED_OUT here and returns Ok, so the
+/// caller stops before any mutant is applied; other failures are errors.
 fn cargo_baseline(
     root: &Path,
     c: &Control,
@@ -3172,8 +3515,16 @@ fn cargo_baseline(
     report.build_tail = tail(&build.text);
     if build.timeout {
         report.timed_out_phase = Some(Phase::Build);
+        report.baseline_failure = Some(BaselineFailure::from_output(&build));
+        report.outcome = Outcome::TimedOut;
+        report.reason = Some(format!(
+            "baseline build exceeded build_timeout_s = {}{}",
+            c.build_timeout_s,
+            deadline_note(&build, false)
+        ));
+        return Ok(());
     }
-    if build.interrupted || build.timeout || !build.success {
+    if build.interrupted || !build.success {
         if !build.interrupted {
             report.baseline_failure = Some(BaselineFailure::from_output(&build));
         }
@@ -3186,6 +3537,17 @@ fn cargo_baseline(
     // `expect_red` failed, so keep it aside and report it only on rejection.
     report.baseline_run =
         (!tests.success && !tests.interrupted).then(|| BaselineFailure::from_output(&tests));
+    if tests.timeout {
+        report.timed_out_phase = Some(Phase::Test);
+        report.baseline_failure = report.baseline_run.clone();
+        report.outcome = Outcome::TimedOut;
+        report.reason = Some(format!(
+            "baseline test run exceeded timeout_s = {}{}",
+            c.timeout_s,
+            deadline_note(&tests, c.runner == "cargo")
+        ));
+        return Ok(());
+    }
     let checked = cargo_baseline_results(c, report, &tests);
     if checked.is_err() {
         report.baseline_failure = report.baseline_run.clone();
@@ -3194,10 +3556,7 @@ fn cargo_baseline(
 }
 
 fn cargo_baseline_results(c: &Control, report: &mut Report, tests: &Output) -> Result<()> {
-    if tests.timeout {
-        report.timed_out_phase = Some(Phase::Test);
-    }
-    if tests.interrupted || tests.timeout || tests.code.is_none() {
+    if tests.interrupted || tests.code.is_none() {
         return Err(format!("baseline test run failed: {}", tail(&tests.text)));
     }
     let results = parse_test_results(&tests.text, &c.runner)?;
@@ -4048,7 +4407,18 @@ impl ReplaySession {
         }
         let mut shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
         let mut command_broad_shared: BTreeMap<Vec<String>, Report> = BTreeMap::new();
-        for c in rows {
+        for (position, c) in rows.iter().enumerate() {
+            // Progress goes to stderr, one line as each baseline starts and
+            // ends, so a log shows which row a stuck run is in. Stdout and the
+            // JSON report are unaffected.
+            let progress = format!(
+                "progress: baseline {}/{} {}",
+                position + 1,
+                rows.len(),
+                c.id
+            );
+            eprintln!("{progress}: started");
+            let started = Instant::now();
             let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
             let key = if active && c.runner != "command" {
                 let mut key: Vec<String> = command(c, "build", scope)?
@@ -4171,6 +4541,15 @@ impl ReplaySession {
                     report.reason = Some(e);
                 }
             }
+            eprintln!(
+                "{progress}: {} ({:.1} s)",
+                if report.outcome == Outcome::Survived {
+                    "ready".to_owned()
+                } else {
+                    report.outcome.name()
+                },
+                started.elapsed().as_secs_f64()
+            );
             self.row_baselines.insert(c.id.clone(), report);
             if stop.load(Ordering::SeqCst) {
                 break;
@@ -4339,7 +4718,11 @@ fn run_prebuild(
         eprintln!("{label} ({} ms):\n{}", output.ms, output.text);
         if output.timeout {
             *phase = Some(Phase::Prebuild);
-            return Err(format!("{label}: exceeded timeout_s = {}", step.timeout_s));
+            return Err(format!(
+                "{label}: exceeded timeout_s = {}{}",
+                step.timeout_s,
+                deadline_note(&output, false)
+            ));
         }
         if !output.success || output.interrupted {
             return Err(format!(
@@ -4453,6 +4836,9 @@ fn replay(
                     resolve_listed(c, &names)?;
                 }
                 cargo_baseline(root, c, scope, stop, &mut report)?;
+                if report.outcome == Outcome::TimedOut {
+                    return Ok(());
+                }
                 let mut baseline_control = c.clone();
                 if matches!(scope, Scope::Explore { .. }) {
                     baseline_control.expect_red.clear();
@@ -4513,8 +4899,9 @@ fn replay(
             report.outcome = Outcome::TimedOut;
             report.timed_out_phase = Some(Phase::Build);
             report.reason = Some(format!(
-                "build exceeded build_timeout_s = {}",
-                c.build_timeout_s
+                "build exceeded build_timeout_s = {}{}",
+                c.build_timeout_s,
+                deadline_note(&build, false)
             ));
             return Ok(());
         }
@@ -4539,7 +4926,11 @@ fn replay(
         if tests.timeout {
             report.outcome = Outcome::TimedOut;
             report.timed_out_phase = Some(Phase::Test);
-            report.reason = Some(format!("test run exceeded timeout_s = {}", c.timeout_s));
+            report.reason = Some(format!(
+                "test run exceeded timeout_s = {}{}",
+                c.timeout_s,
+                deadline_note(&tests, c.runner == "cargo")
+            ));
             return Ok(());
         }
         if tests.code.is_none() {

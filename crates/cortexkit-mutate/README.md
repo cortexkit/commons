@@ -165,6 +165,28 @@ therefore never read as a hung test, and a TIMED_OUT row says which deadline
 expired. `prove` and `explore` take `--timeout-s` and `--build-timeout-s` for the
 same two deadlines.
 
+Each deadline applies to each spawned command on its own: the clean baseline
+run, the mutant run and a `--broad` run each get the full `timeout_s`, not a
+share of one budget for the row. When a deadline expires (or the run is
+interrupted), the runner reads the process tree under the command, sends
+SIGTERM to every process and process group in it, sends SIGKILL after a
+2-second grace, and waits for them to exit, so no test outlives its row. That
+includes tests nextest starts in their own process groups and helpers a test
+starts the same way. The tree is read from `/proc` on Linux and with `pgrep`
+elsewhere; Windows uses `taskkill /T`. A process that detached from the tree
+before the deadline, such as a double-forked daemon, is out of reach. The
+timeout reason names what was running at the deadline: for a cargo test run,
+the test target Cargo started last, and for every runner, the processes still
+alive under the command.
+
+`run` prints one progress line on stderr as each baseline and each row starts
+and ends, for example `progress: baseline 3/40 some-row: started`,
+`progress: baseline 3/40 some-row: ready (2.0 s)`,
+`progress: row 3/40 some-row: started` and
+`progress: row 3/40 some-row: CAUGHT (41.2 s)`. A baseline line ends in `ready`
+when the row can be replayed, or otherwise in the row's outcome. Rows run
+grouped by package, so the position counts rows in execution order. Stdout and
+the JSON report are unaffected.
 A `command` row has no separate build: its command builds and tests in one
 process (an `xcodebuild test` or a Swift package test, for example), so its
 `timeout_s` covers both, and `build_timeout_s` does not apply to it. To time or
@@ -1248,7 +1270,7 @@ succeed. The first three count as catches:
 | NO_TESTS_RAN | Passed plus failed is zero, or an expected full name did not run. |
 | ANCHOR_MISSING | The replacement count was zero or greater than one. |
 | DID_NOT_COMPILE | The separate build command exited nonzero. |
-| TIMED_OUT | The build exceeded `build_timeout_s`, or the test run exceeded `timeout_s`. `timed_out_phase` is `"build"` or `"test"`, and the reason names the deadline. |
+| TIMED_OUT | The build exceeded `build_timeout_s`, or the test run exceeded `timeout_s`, on the mutant or (0.12.6, cargo and nextest rows) on the clean baseline. `timed_out_phase` is `"build"` or `"test"`, and the reason names the deadline and what was still running. |
 | EQUIVALENT | A replayed equivalent row survived. Recorded with its reason and guard; succeeds separately, not a catch. |
 | EQUIVALENT_CAUGHT | A newly red test or output comparison caught a claimed equivalent. Fails; turn the row into a normal proof. |
 | UNREACHABLE | Explicitly recorded with a reason explaining why no production caller exists. Listed separately, never counted as caught. |
