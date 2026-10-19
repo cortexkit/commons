@@ -365,6 +365,8 @@ fn add_consumer_permissions(
     Ok(())
 }
 
+/// The daemon records activity but has no bus credential, so ck-bus mirrors
+/// that ledger as `event.subc.activity.v1` on its behalf.
 pub fn bus_permissions(
     account: &AccountNames,
     credential_public: &str,
@@ -388,6 +390,13 @@ pub fn bus_permissions(
         );
     }
     add_census_read_permissions(&mut entries, Principal::Bus, account);
+
+    add(
+        &mut entries,
+        Principal::Bus,
+        Operation::Publish,
+        account.event_subject("subc", "activity", 1)?,
+    );
 
     let census_stream = &account.buckets().census_stream;
     for subject in [
@@ -685,6 +694,12 @@ pub fn generate_permission_golden(
             });
         }
     }
+    refused.insert(RefusedEntry {
+        principal: Principal::Bus,
+        operation: Operation::Publish,
+        subject: account.event_subject("broca", "run", 1)?,
+        reason: "foreign-module-event",
+    });
 
     // The ROOM module durable is the delivery authority's alone. A participant
     // cannot read it; the delivery authority cannot read another module's
@@ -830,6 +845,14 @@ pub fn generate_permission_golden(
                 operation: Operation::Publish,
                 subject,
                 reason,
+            });
+        }
+        if reader.module_id == "prefrontal-core" {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Subscribe,
+                subject: format!("ck.{}.event.basal.>", account.account()),
+                reason: "foreign-event-subscribe",
             });
         }
         // A reader may publish its own events, so only another module's

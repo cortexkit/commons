@@ -28,7 +28,13 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "prefrontal-core",
         durable: "m_prefrontal-core",
-        filter_subjects: &["event.broca.>"],
+        filter_subjects: &[
+            "event.broca.>",
+            "event.basal.flow_instance_created.v1",
+            "event.basal.flow_instance_extended.v1",
+            "event.basal.flow_instance_ended.v1",
+            "event.basal.flow_instance_expired.v1",
+        ],
     },
     EventConsumer {
         module_id: "astrocyte",
@@ -271,5 +277,26 @@ mod tests {
         }
         let names = AccountNames::derive("box_readers").unwrap();
         assert!(module_event_spec(&names, "reader", &["event.broca.>.run"]).is_err());
+    }
+
+    #[test]
+    fn prefrontal_core_filter_is_exact_for_basal_lifecycle_events() {
+        let names = AccountNames::derive("box_readers").unwrap();
+        let reader = event_consumer_specs(&names)
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.consumer.durable == "m_prefrontal-core")
+            .expect("prefrontal-core reader is in the reviewed table");
+
+        assert_eq!(
+            reader.consumer.filter_subjects,
+            [
+                "ck.box_readers.event.broca.>",
+                "ck.box_readers.event.basal.flow_instance_created.v1",
+                "ck.box_readers.event.basal.flow_instance_extended.v1",
+                "ck.box_readers.event.basal.flow_instance_ended.v1",
+                "ck.box_readers.event.basal.flow_instance_expired.v1",
+            ]
+        );
     }
 }

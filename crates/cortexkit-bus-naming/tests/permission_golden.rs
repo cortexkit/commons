@@ -43,15 +43,15 @@ fn permission_model_is_allow_only_and_expands_all_streams() {
     }
 
     let account_subject_prefix = format!("ck.{}.", account.account());
+    let activity_subject = account.event_subject("subc", "activity", 1).unwrap();
     for entry in document
         .allows()
         .iter()
         .filter(|entry| entry.principal == Principal::Bus)
     {
         if entry.subject.starts_with(&account_subject_prefix) {
-            assert_eq!(
-                entry.subject,
-                account.sentinel_ping(),
+            assert!(
+                entry.subject == account.sentinel_ping() || entry.subject == activity_subject,
                 "the bus management identity must not carry workload rights"
             );
         }
@@ -595,6 +595,27 @@ fn the_bus_creates_module_durables_on_the_event_stream() {
 }
 
 #[test]
+fn bus_activity_mirror_publish_grant_is_exact() {
+    use cortexkit_bus_naming::{bus_permissions, Operation};
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let allows = bus_permissions(&account, "ckbus").unwrap();
+    let activity = account.event_subject("subc", "activity", 1).unwrap();
+    let subc_publishes = allows
+        .iter()
+        .filter(|entry| {
+            entry.principal == Principal::Bus
+                && entry.operation == Operation::Publish
+                && entry
+                    .subject
+                    .starts_with(&format!("ck.{}.event.subc.", account.account()))
+        })
+        .map(|entry| entry.subject.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(subc_publishes, [activity.as_str()]);
+}
+
+#[test]
 fn system_user_can_look_up_account_claims_and_read_only_its_own_replies() {
     use cortexkit_bus_naming::{system_permissions, Operation};
     let allows = system_permissions("cksys").unwrap();
@@ -824,6 +845,8 @@ fn event_consumer_reads_but_cannot_publish_broca_events() {
     for subject in [
         "ck.box_readers.event.broca.run.started.v1",
         "_INBOX.someone_else.reply",
+        "ck.box_readers.event.basal.flow_instance_created.v1",
+        "ck.box_readers.event.basal.>",
     ] {
         assert!(!allowed(
             &allows,

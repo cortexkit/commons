@@ -32,7 +32,13 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             .unwrap();
         assert_eq!(
             reader.consumer.filter_subjects,
-            [format!("ck.{account}.event.broca.>")]
+            [
+                format!("ck.{account}.event.broca.>"),
+                format!("ck.{account}.event.basal.flow_instance_created.v1"),
+                format!("ck.{account}.event.basal.flow_instance_extended.v1"),
+                format!("ck.{account}.event.basal.flow_instance_ended.v1"),
+                format!("ck.{account}.event.basal.flow_instance_expired.v1"),
+            ]
         );
         let astrocyte = specs
             .iter()

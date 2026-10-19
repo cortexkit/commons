@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.7
+
+- Allow the bus module to publish only `event.subc.activity.v1`, so ck-bus can
+  mirror the daemon's activity ledger; the daemon has no bus credential of its
+  own. Keep the bus grant from publishing other modules' events.
+- Let `prefrontal-core` read the four exact Basal flow-instance lifecycle events
+  through its existing `m_prefrontal-core` durable, without widening its filter
+  to other Basal events.
+
 ## 0.2.6
 
 - Add `thalamus` (the Claude Code gateway) as a reader of Magic Context's
