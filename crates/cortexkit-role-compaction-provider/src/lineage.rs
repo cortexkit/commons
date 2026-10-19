@@ -51,7 +51,8 @@ pub struct DescentLink {
 pub enum DescentProblem {
     /// The parent, the cut, or a message of the retained prefix is not held.
     HistoryUnreadable,
-    /// The declaration differs from the saved link.
+    /// The Setup's `descends_from` names a different parent or cut than the
+    /// link the provider already saved for this lineage.
     Conflict,
 }
 

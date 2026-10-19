@@ -144,7 +144,7 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
 /// The `code` of a Setup `refuse` answer: one of the role's four codes, each
 /// with a fixed retryability. A code this crate does not know still decodes,
 /// as [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
-/// answer undecodable; it is never retryable. A provider's own, finer reason
+/// answer undecodable; an unfamiliar code is never retryable. A provider's own, finer reason
 /// goes in the answer's separate `provider_code`, never in `code`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RefuseCode {
