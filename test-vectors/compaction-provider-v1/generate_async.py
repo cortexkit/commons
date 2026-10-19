@@ -59,8 +59,8 @@ M = {
     6: ("m6", ["prt_6a"], {"role": "assistant", "content": [text("Added three tests.")]}),
 }
 
-NOTICE_ORDER = ["applied_view_version", "est_tokens", "events", "last_usage", "model", "seq",
-                "session_ref", "through_digest", "through_ordinal", "window"]
+NOTICE_ORDER = ["applied_view_version", "descends_from", "est_tokens", "events", "last_usage", "lineage_id",
+                "model", "seq", "session_ref", "through_digest", "through_ordinal", "window"]
 
 
 def notice_digest(h):
@@ -71,8 +71,13 @@ def notice_digest(h):
     return framed(parts)
 
 
-def notice(name, seq, through, events=None, applied=None, usage=None, window="200000", est="1200", model=MODEL):
-    h = {"session_ref": SR, "seq": str(seq), "through_ordinal": str(through),
+def digest_of(o):
+    return sha(jcs(M[o][2]))
+
+
+def notice(name, seq, through, events=None, applied=None, usage=None, window="200000", est="1200", model=MODEL,
+           lineage="lin_a", descends_from=None):
+    h = {"session_ref": SR, "seq": str(seq), "lineage_id": lineage, "through_ordinal": str(through),
          "through_digest": sha(jcs(M[through][2])), "est_tokens": est, "model": model}
     if window is not None:
         h["window"] = window
@@ -82,10 +87,12 @@ def notice(name, seq, through, events=None, applied=None, usage=None, window="20
         h["last_usage"] = usage
     if applied is not None:
         h["applied_view_version"] = str(applied)
+    if descends_from is not None:
+        h["descends_from"] = descends_from
     return {
         "name": name,
         "subject": f"ck.{ACCT}.event.{RUNNER}.compaction.advanced.v1",
-        "message_id": f"{SR}:{seq}",
+        "message_id": f"{SR}:advanced:{seq}",
         "headers": h,
         "digest": notice_digest(h),
     }
@@ -334,6 +341,8 @@ notices = [
     notice("view applied with a companion edit", 12, 6, events=["view_companion:6:strip_signed_reasoning"],
            applied=6, est="41000"),
     notice("window unknown", 2, 2, window=None, est="1500"),
+    notice("a fork moves the session to a new lineage, declaring its descent", 13, 4, lineage="lin_b",
+           descends_from=f"lin_a:3:{digest_of(3)}", est="65000"),
 ]
 
 
@@ -399,12 +408,24 @@ notices_refused = [
            events="marker_outcome:applied:cut-1"),
     mutate(N1, "applied_view_version zero", "malformed:applied_view_version", applied_view_version="0"),
     mutate(N1, "last_usage with three parts", "malformed:last_usage", last_usage="1:2:3"),
+    mutate(N1, "no lineage_id", "missing:lineage_id", drop=["lineage_id"]),
+    mutate(N1, "lineage_id with a space", "malformed:lineage_id", lineage_id="lin a"),
+    mutate(N1, "lineage_id over 256 bytes", "malformed:lineage_id", lineage_id="l" * 257),
+    mutate(N1, "descends_from without a digest", "malformed:descends_from", descends_from="lin_z:3"),
+    mutate(N1, "descends_from with a leading-zero ordinal", "malformed:descends_from",
+           descends_from=f"lin_z:03:{digest_of(3)}"),
+    mutate(N1, "descends_from with an uppercase digest", "malformed:descends_from",
+           descends_from=f"lin_z:3:{digest_of(3).upper()}"),
+    mutate(N1, "descends_from without an old lineage", "malformed:descends_from",
+           descends_from=f":3:{digest_of(3)}"),
+    mutate(N1, "descends_from naming the notice's own lineage", "malformed:descends_from",
+           descends_from=f"lin_a:3:{digest_of(3)}"),
 ]
 
 view_ready = [{
     "name": "view 3 is ready",
     "subject": f"ck.{ACCT}.event.{PROVIDER}.compaction.view_ready.v1",
-    "message_id": f"{SR}:3",
+    "message_id": f"{SR}:view_ready:3",
     "headers": ready_headers(V3),
     "bus_digest": V3["digest"],
 }]
@@ -485,87 +506,39 @@ ceiling = {
     ],
 }
 
-describe_ops = ["role.describe", "compaction.setup", "compaction.step"]
-describe = {
-    "accepted": [
-        {"name": "async group absent", "declares_async": False,
-         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops, "stability": "alpha"}],
-                    "implementation_version": "synthetic-provider", "capabilities": []}},
-        {"name": "async group declared with its ops", "declares_async": True,
-         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops + ["view.get", "compaction.ride"], "stability": "alpha"}],
-                    "implementation_version": "synthetic-provider", "capabilities": ["async"]}},
-    ],
-    "refused": [
-        {"name": "async declared without view.get", "problem": "missing_op", "op": "view.get",
-         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops + ["compaction.ride"], "stability": "alpha"}],
-                    "implementation_version": "synthetic-provider", "capabilities": ["async"]}},
-        {"name": "async declared without compaction.ride", "problem": "missing_op", "op": "compaction.ride",
-         "answer": {"majors": [{"version": "compaction-provider/v1", "ops": describe_ops + ["view.get"], "stability": "alpha"}],
-                    "implementation_version": "synthetic-provider", "capabilities": ["async"]}},
-    ],
-}
-
-SETUP_REQUEST = {"session": "ses_1", "harness": "opencode", "request_id": "cr-000001", "params": {},
-                 "composition": {}, "model": MODEL, "context_window": 200000, "now": 1790000000000}
-READY = {"answer": "ready", "request_id": "cr-000001",
-         "initial": {"compaction_id": "head", "version": 1, "range": {"from": 0, "to": 0}, "replacement": []}}
+def fork_case(name, outcome, descends_from, held="lin_a", lineage="lin_b"):
+    case = notice(name, 20, 4, lineage=lineage, descends_from=descends_from)
+    return {"name": name, "held_lineage": held,
+            "recorded_digests": [[o, digest_of(o)] for o in (1, 2, 3, 4)],
+            "headers": case["headers"], "outcome": outcome}
 
 
-def with_mode(obj, m):
-    return obj if m is None else {**obj, "compaction_mode": m}
+EDITED_M3 = sha(jcs({**M[3][2], "content": [M[3][2]["content"][0]]}))
 
+descent = [
+    fork_case("descent from the held lineage with a matching digest keeps state through the cut",
+              "keep_through:3", f"lin_a:3:{digest_of(3)}"),
+    fork_case("an old lineage id containing ':' parses from the right", "keep_through:2",
+              f"run:fork:1:2:{digest_of(2)}", held="run:fork:1", lineage="run:fork:2"),
+    fork_case("a digest that differs from the recorded one resyncs", "resync", f"lin_a:3:{EDITED_M3}"),
+    fork_case("no descends_from header: full resync", "resync", None),
+    fork_case("descent from a lineage the provider does not hold resyncs", "resync",
+              f"lin_z:3:{digest_of(3)}"),
+    fork_case("descent through an ordinal the provider never recorded resyncs", "resync",
+              f"lin_a:9:{digest_of(3)}"),
+]
 
-mode = {
-    "requests": [
-        {"name": "no mode: sync, the bytes before the mode existed", "request": SETUP_REQUEST},
-        {"name": "sync asked explicitly", "request": with_mode(SETUP_REQUEST, "sync")},
-        {"name": "async asked", "request": with_mode(SETUP_REQUEST, "async")},
-    ],
-    "undecodable_requests": [
-        {"name": "unknown mode is refused, never read as sync", "request": with_mode(SETUP_REQUEST, "turbo")},
-        {"name": "mode in uppercase", "request": with_mode(SETUP_REQUEST, "ASYNC")},
-    ],
-    "answers": [
-        {"name": "ready echoing async", "answer": with_mode(READY, "async")},
-        {"name": "ready with no echo", "answer": READY},
-        {"name": "refused: the runner does not declare compaction_async",
-         "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "async_not_supported",
-                    "reason": "the runner's describe does not list compaction_async"},
-         "retryable": False},
-    ],
-    "undecodable_answers": [
-        {"name": "ready echoing an unknown mode", "answer": with_mode(READY, "turbo")},
-    ],
-    "session_mode": [
-        {"requested": None, "echo": None, "mode": "sync"},
-        {"requested": "sync", "echo": None, "mode": "sync"},
-        {"requested": "sync", "echo": "sync", "mode": "sync"},
-        {"requested": "async", "echo": "async", "mode": "async"},
-        {"requested": "async", "echo": None, "mode": "sync"},
-        {"requested": "async", "echo": "sync", "mode": "sync"},
-        {"requested": "sync", "echo": "async", "mode": "sync"},
-        {"requested": None, "echo": "async", "mode": "sync"},
-        {"requested": "async", "echo": "refuse", "mode": "sync"},
-    ],
-    "acceptance": [
-        {"name": "both sides declare async", "requested": "async", "provider_declares_async": True,
-         "runner_capabilities": ["transcript_reads", "compaction", "compaction_async"], "outcome": "echo:async"},
-        {"name": "runner describe lacks compaction_async", "requested": "async", "provider_declares_async": True,
-         "runner_capabilities": ["transcript_reads", "compaction"], "outcome": "refuse:async_not_supported"},
-        {"name": "provider does not declare async", "requested": "async", "provider_declares_async": False,
-         "runner_capabilities": ["compaction", "compaction_async"], "outcome": "no_echo"},
-        {"name": "sync request", "requested": "sync", "provider_declares_async": True,
-         "runner_capabilities": ["compaction", "compaction_async"], "outcome": "no_echo"},
-        {"name": "no mode asked", "requested": None, "provider_declares_async": True,
-         "runner_capabilities": ["compaction", "compaction_async"], "outcome": "no_echo"},
-    ],
+id_collision = {
+    "notice_headers": notice("notice 3", 3, 3)["headers"],
+    "view_ready_headers": ready_headers(V3),
+    "notice_id": f"{SR}:advanced:3",
+    "view_ready_id": f"{SR}:view_ready:3",
 }
 
 doc = {
     "session": {"harness": "opencode", "project_root": "/work/demo", "session": "ses_1", "session_ref": SR,
                 "account": ACCT, "runner_module_id": RUNNER, "provider_module_id": PROVIDER},
     "transcript": {"lineage_id": "lin_a", "messages": transcript},
-    "describe": describe,
     "notices": notices,
     "notices_accepted": notices_accepted,
     "notices_refused": notices_refused,
@@ -579,7 +552,8 @@ doc = {
     "view_get": view_get,
     "ride": ride,
     "ceiling": ceiling,
-    "mode": mode,
+    "descent": descent,
+    "id_collision": id_collision,
 }
 
 with open(OUT, "w") as f:

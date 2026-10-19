@@ -53,13 +53,10 @@ pub struct RoleDescribe {
     /// inherited history, persist its parent lineage and inclusive cut, and
     /// refuse a later declaration that contradicts that saved ancestry.
     /// Callers may send setup `descends_from` only when this is true;
-    /// absent or false means use the first step or hook instead.
+    /// absent or false means callers omit it, and the provider treats the
+    /// session's first lineage as a root.
     #[serde(default, skip_serializing_if = "is_false")]
     pub setup_descends_from: bool,
-    /// Optional Claude Code capabilities, also selected at transform.declare.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_code:
-        Option<cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -109,14 +106,6 @@ impl RoleDescribe {
         self
     }
 
-    pub fn with_claude_code(
-        mut self,
-        bundle: cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities,
-    ) -> Self {
-        self.claude_code = Some(bundle);
-        self
-    }
-
     /// Set the runner groups the provider needs.
     pub fn with_runner_groups(mut self, groups: Vec<String>) -> Self {
         self.runner_groups = groups;
@@ -127,25 +116,6 @@ impl RoleDescribe {
     /// served.
     pub fn major(&self, version: &str) -> Option<&Major> {
         self.majors.iter().find(|major| major.version == version)
-    }
-
-    /// Declare the `async` group ([`crate::async_group::GROUP`]), adding it
-    /// to `capabilities` once. The caller must also list the group's ops in
-    /// the `compaction-provider/v1` major, which [`check_describe`] checks.
-    pub fn with_async(mut self) -> Self {
-        if !self.declares_async() {
-            self.capabilities.push(crate::async_group::GROUP.to_owned());
-        }
-        self
-    }
-
-    /// Whether `capabilities` lists the `async` group. A caller uses the
-    /// asynchronous path only when this is true and the runner declares its
-    /// own half; otherwise it keeps calling `compaction.step`.
-    pub fn declares_async(&self) -> bool {
-        self.capabilities
-            .iter()
-            .any(|capability| capability == crate::async_group::GROUP)
     }
 
     /// The runner groups this provider needs that `declared` (a runner's
@@ -229,13 +199,6 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             for op in REQUIRED_OPS {
                 if !major.serves(op) {
                     problems.push(DescribeProblem::MissingOp(op));
-                }
-            }
-            if describe.declares_async() {
-                for op in crate::async_group::GROUP_OPS {
-                    if !major.serves(op) {
-                        problems.push(DescribeProblem::MissingOp(op));
-                    }
                 }
             }
         }

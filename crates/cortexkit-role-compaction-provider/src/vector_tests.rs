@@ -6,21 +6,22 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::{
+use crate::{
     ceiling::{CeilingDecision, CeilingPolicy, WaitEnd},
-    content_digest,
-    notice::{self, AdvanceNotice, Event, LastUsage, MarkerOutcome, ViewReady},
+    digest::{content_digest, sha256_hex},
+    lineage::MessageRef,
+    notice::{
+        self, descent_outcome, AdvanceNotice, DescentOutcome, Event, LastUsage, MarkerOutcome,
+        NoticeDescent, ViewReady,
+    },
     ride::{RideAnswer, RideCause, RideRequest},
+    setup::SetupAnswer,
+    vectors,
     view::{
         dispose_fetched, CompactionView, PartEdit, TranscriptMessage, ViewCut, ViewGetAnswer,
         ViewGetRequest, ViewRange,
     },
-};
-use crate::{
-    describe::{check_describe, DescribeProblem, RoleDescribe},
-    setup::{accept_mode, session_mode, CompactionMode, SetupAnswer, SetupRequest},
-    status::MessageRef,
-    vectors, OpRequest,
+    OpRequest,
 };
 
 fn file() -> Value {
@@ -47,7 +48,7 @@ fn async_fixture_matches_sha256sum() {
     let (digest, file_name) = lines[0].split_once("  ").unwrap();
     assert_eq!(file_name, "async.json");
     let bytes = std::fs::read(format!("{}/{file_name}", vectors::dir())).unwrap();
-    assert_eq!(super::sha256_hex(&bytes), digest);
+    assert_eq!(sha256_hex(&bytes), digest);
 }
 
 #[test]
@@ -64,43 +65,6 @@ fn session_ref_is_the_runner_roles_reference() {
 }
 
 #[test]
-fn describe_declares_the_async_group_with_its_ops() {
-    let file = file();
-    for case in vectors::cases(&file["describe"], "accepted") {
-        let name = name(case);
-        let describe = vectors::round_trip::<RoleDescribe>(name, &case["answer"]);
-        let checked = check_describe(&case["answer"]).unwrap_or_else(|p| panic!("{name}: {p:?}"));
-        assert_eq!(
-            checked.declares_async(),
-            case["declares_async"].as_bool().unwrap()
-        );
-        if describe.declares_async() {
-            let mut bare = case["answer"].clone();
-            bare["capabilities"] = Value::Array(Vec::new());
-            let built = serde_json::from_value::<RoleDescribe>(bare)
-                .unwrap()
-                .with_async()
-                .with_async();
-            assert_eq!(built, describe, "{name}: with_async adds the group once");
-        }
-    }
-    for case in vectors::cases(&file["describe"], "refused") {
-        let name = name(case);
-        let problems = check_describe(&case["answer"]).expect_err(name);
-        let op = case["op"].as_str().unwrap();
-        assert!(
-            problems.contains(&DescribeProblem::MissingOp(
-                super::GROUP_OPS.iter().find(|o| **o == op).unwrap()
-            )),
-            "{name}: {problems:?}"
-        );
-        assert!(problems
-            .iter()
-            .all(|p| p.name() == case["problem"].as_str().unwrap()));
-    }
-}
-
-#[test]
 fn notices_round_trip_with_independent_digests() {
     let file = file();
     let account = str_of(&file, "account");
@@ -112,11 +76,6 @@ fn notices_round_trip_with_independent_digests() {
         let notice = AdvanceNotice::from_headers(&map).unwrap_or_else(|p| panic!("{name}: {p:?}"));
         assert_eq!(notice.to_headers(), map, "{name}");
         assert_eq!(notice.digest(), case["digest"].as_str().unwrap(), "{name}");
-        assert_eq!(
-            notice.message_id(),
-            case["message_id"].as_str().unwrap(),
-            "{name}"
-        );
         assert_eq!(
             notice::event_subject(account, runner, notice::ADVANCED_EVENT),
             case["subject"].as_str().unwrap()
@@ -144,6 +103,7 @@ fn notice_builders_match_the_vector() {
     let built = AdvanceNotice::new(
         str_of(&file, "session_ref"),
         5,
+        "lin_a",
         4,
         decoded.through_digest.clone(),
         64000,
@@ -202,6 +162,7 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     let notice = AdvanceNotice::new(
         "0".repeat(32),
         max,
+        "l".repeat(256),
         max,
         "a".repeat(64),
         max,
@@ -210,15 +171,17 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     .with_window(max)
     .with_last_usage(LastUsage::new(max, max, max, max))
     .with_applied_view_version(max)
+    .with_descends_from(NoticeDescent::new("p".repeat(256), max, "b".repeat(64)))
     .with_events(events);
     let encoded = notice.to_headers();
     assert!(encoded[notice::headers::EVENTS].len() <= notice::MAX_HEADER_VALUE_BYTES);
     assert_eq!(notice.check(), Ok(()));
-    // Every value at its bound: `events` at 1,024 bytes, the rest at their
-    // widest encodings.
+    // Every value at its bound: `events` at 1,024 bytes, both lineage ids at
+    // 256, and the rest at their widest encodings.
     let names: usize = notice::headers::NOTICE.iter().map(|n| n.len()).sum();
-    let widest = names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 5 * 20;
-    assert_eq!(widest, 1659);
+    let descent = 256 + 1 + 20 + 1 + 64;
+    let widest = names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 5 * 20 + 256 + descent;
+    assert_eq!(widest, 2280);
     assert!(widest <= notice::MAX_NOTICE_HEADER_BYTES);
     assert!(notice::header_bytes(&encoded) <= widest);
 }
@@ -231,7 +194,6 @@ fn view_ready_vectors() {
         let map = headers(&case["headers"]);
         let ready = ViewReady::from_headers(&map).unwrap_or_else(|p| panic!("{name}: {p:?}"));
         assert_eq!(ready.to_headers(), map, "{name}");
-        assert_eq!(ready.message_id(), case["message_id"].as_str().unwrap());
         assert_eq!(ready.digest, case["bus_digest"].as_str().unwrap());
         assert_eq!(
             notice::event_subject(
@@ -436,8 +398,8 @@ fn view_get_vectors() {
             ViewGetAnswer::View { view } => assert_eq!(view.check(), Ok(())),
             ViewGetAnswer::Refuse { code, .. } => assert!(
                 [
-                    super::view::view_get_codes::UNKNOWN_SESSION,
-                    super::view::view_get_codes::UNKNOWN_VERSION
+                    crate::view::view_get_codes::UNKNOWN_SESSION,
+                    crate::view::view_get_codes::UNKNOWN_VERSION
                 ]
                 .contains(&code.as_str()),
                 "{code}"
@@ -559,88 +521,102 @@ fn ceiling_absent_keeps_existing_setup_bytes() {
     }
 }
 
-fn mode_of(value: &Value) -> Option<CompactionMode> {
-    (!value.is_null()).then(|| serde_json::from_value(value.clone()).unwrap())
-}
-
 #[test]
-fn setup_mode_vectors_decode_strictly() {
+fn message_ids_name_their_event_so_equal_numbers_never_collide() {
     let file = file();
-    let mode = &file["mode"];
-    let requested: Vec<Option<CompactionMode>> = vectors::cases(mode, "requests")
-        .iter()
-        .map(|case| {
-            vectors::round_trip::<SetupRequest>(name(case), &case["request"]).compaction_mode
-        })
-        .collect();
-    assert_eq!(
-        requested,
-        [
-            None,
-            Some(CompactionMode::Sync),
-            Some(CompactionMode::Async)
-        ]
-    );
-    for case in vectors::cases(mode, "undecodable_requests") {
-        vectors::refused::<SetupRequest>(name(case), &case["request"]);
-    }
-    for case in vectors::cases(mode, "answers") {
-        let answer = vectors::round_trip::<SetupAnswer>(name(case), &case["answer"]);
-        if let Some(retryable) = case.get("retryable") {
-            assert_eq!(answer.retryable(), retryable.as_bool(), "{}", name(case));
-        }
-    }
-    for case in vectors::cases(mode, "undecodable_answers") {
-        vectors::refused::<SetupAnswer>(name(case), &case["answer"]);
-    }
-}
-
-#[test]
-fn session_is_async_only_when_asked_and_echoed() {
-    let file = file();
-    let answers = vectors::cases(&file["mode"], "answers");
-    let ready: SetupAnswer = serde_json::from_value(answers[1]["answer"].clone()).unwrap();
-    let refused: SetupAnswer = serde_json::from_value(answers[2]["answer"].clone()).unwrap();
-    for case in vectors::cases(&file["mode"], "session_mode") {
-        let answer = match case["echo"].as_str() {
-            Some("refuse") => refused.clone(),
-            echo => {
-                let mut answer = ready.clone();
-                if let SetupAnswer::Ready {
-                    compaction_mode, ..
-                } = &mut answer
-                {
-                    *compaction_mode = echo.map(|_| mode_of(&case["echo"]).unwrap());
-                }
-                answer
-            }
-        };
-        let expected: CompactionMode = serde_json::from_value(case["mode"].clone()).unwrap();
+    let session_ref = str_of(&file, "session_ref");
+    for case in vectors::cases(&file, "notices") {
+        let notice = AdvanceNotice::from_headers(&headers(&case["headers"])).unwrap();
         assert_eq!(
-            session_mode(mode_of(&case["requested"]), &answer),
-            expected,
-            "{case}"
+            notice.message_id(),
+            case["message_id"].as_str().unwrap(),
+            "{}",
+            name(case)
         );
     }
+    for case in vectors::cases(&file, "view_ready") {
+        let ready = ViewReady::from_headers(&headers(&case["headers"])).unwrap();
+        assert_eq!(ready.message_id(), case["message_id"].as_str().unwrap());
+    }
+    // The event stream deduplicates ids across all its subjects, so a notice
+    // and a view-ready event with the same number must still differ.
+    let collision = &file["id_collision"];
+    let notice = AdvanceNotice::from_headers(&headers(&collision["notice_headers"])).unwrap();
+    let ready = ViewReady::from_headers(&headers(&collision["view_ready_headers"])).unwrap();
+    assert_eq!(notice.seq, ready.view_version);
+    assert_eq!(
+        notice.message_id(),
+        collision["notice_id"].as_str().unwrap()
+    );
+    assert_eq!(
+        ready.message_id(),
+        collision["view_ready_id"].as_str().unwrap()
+    );
+    assert_ne!(notice.message_id(), ready.message_id());
+    assert!(notice.message_id().starts_with(session_ref));
+}
+
+/// The fork-descent cases: each names the lineage the provider holds, the
+/// content digests it recorded for that lineage, and the notice that moves
+/// the session to a new lineage, with the outcome the provider must reach.
+fn check_descent(outcomes: &[&str]) -> usize {
+    let file = file();
+    let mut checked = 0;
+    for case in vectors::cases(&file, "descent") {
+        let expected = case["outcome"].as_str().unwrap();
+        if !outcomes.iter().any(|o| expected.starts_with(o)) {
+            continue;
+        }
+        let name = name(case);
+        let notice = AdvanceNotice::from_headers(&headers(&case["headers"]))
+            .unwrap_or_else(|p| panic!("{name}: {p:?}"));
+        let recorded: BTreeMap<u64, String> =
+            serde_json::from_value::<Vec<(u64, String)>>(case["recorded_digests"].clone())
+                .unwrap()
+                .into_iter()
+                .collect();
+        let outcome = descent_outcome(
+            case["held_lineage"].as_str().unwrap(),
+            |ordinal| recorded.get(&ordinal).cloned(),
+            notice.descends_from.as_ref(),
+        );
+        let spelled = match outcome {
+            DescentOutcome::KeepThrough(ordinal) => format!("keep_through:{ordinal}"),
+            DescentOutcome::Resync => "resync".to_owned(),
+        };
+        assert_eq!(spelled, expected, "{name}");
+        checked += 1;
+    }
+    checked
 }
 
 #[test]
-fn provider_accepts_async_only_for_a_runner_declaring_compaction_async() {
-    let file = file();
-    for case in vectors::cases(&file["mode"], "acceptance") {
-        let capabilities: Vec<String> =
-            serde_json::from_value(case["runner_capabilities"].clone()).unwrap();
-        let outcome = match accept_mode(
-            mode_of(&case["requested"]),
-            case["provider_declares_async"].as_bool().unwrap(),
-            &capabilities,
-        ) {
-            Ok(Some(CompactionMode::Async)) => "echo:async".to_owned(),
-            Ok(Some(CompactionMode::Sync)) => "echo:sync".to_owned(),
-            Ok(None) => "no_echo".to_owned(),
-            Err(code) => format!("refuse:{}", code.as_str()),
-        };
-        assert_eq!(outcome, case["outcome"].as_str().unwrap(), "{}", name(case));
+fn fork_descent_with_matching_digest_keeps_state() {
+    assert_eq!(check_descent(&["keep_through"]), 2);
+}
+
+#[test]
+fn fork_descent_without_a_matching_digest_resyncs() {
+    assert_eq!(check_descent(&["resync"]), 4);
+}
+
+#[test]
+fn descends_from_parses_from_the_right() {
+    let digest = "a".repeat(64);
+    let descent = NoticeDescent::parse(&format!("run:fork:7:42:{digest}")).unwrap();
+    assert_eq!(
+        descent,
+        NoticeDescent::new("run:fork:7", 42, digest.clone())
+    );
+    assert_eq!(descent.encode(), format!("run:fork:7:42:{digest}"));
+    for bad in [
+        format!("42:{digest}"),
+        format!(":42:{digest}"),
+        format!("lin:042:{digest}"),
+        format!("lin:42:{}", "A".repeat(64)),
+        format!("lin a:42:{digest}"),
+        "lin:42".to_owned(),
+    ] {
+        assert_eq!(NoticeDescent::parse(&bad), None, "{bad}");
     }
-    assert_eq!(super::RUNNER_GROUP, "compaction_async");
 }

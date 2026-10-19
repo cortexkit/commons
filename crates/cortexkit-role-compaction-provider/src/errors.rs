@@ -3,10 +3,8 @@
 //! Three kinds, kept apart because they reach different places:
 //!
 //! - a provider's refusal of a request, the `code` of an `ERROR` frame's
-//!   body `{code, message, detail?}` ([`INVALID_PARAMS`], [`TRANSIENT`]).
-//!   The runner treats any refusal of a step call as a failed call: it
-//!   keeps the last applied CompactionMessage;
-//! - the `code` of a `refuse` answer, one of the role's fixed codes
+//!   body `{code, message, detail?}` ([`INVALID_PARAMS`], [`TRANSIENT`]);
+//! - the `code` of a Setup `refuse` answer, one of the role's fixed codes
 //!   ([`RefuseCode`], [`refuse_codes`]); the provider's own, finer reason
 //!   rides beside it as the answer's `provider_code`;
 //! - codes the runner answers or writes, quoted from `llm-runner/v1` so
@@ -14,11 +12,9 @@
 //!
 //! Every named code has a fixed retryability ([`KnownCode::retryable`]:
 //! `true` means the runner may retry without the user acting) and a fixed
-//! set of calls after which it may end a run ([`KnownCode::ends_run_at`]):
-//! four of the five `refuse` codes after Setup or a step call,
-//! `async_not_supported` after Setup only,
-//! `compaction_unavailable` after Setup only, `compaction_wait_exceeded`
-//! after a step call only, and the ERROR and ready-refusal codes never.
+//! answer to whether it may end a run after Setup
+//! ([`KnownCode::ends_run_after_setup`]): the four `refuse` codes and
+//! `compaction_unavailable` may, the ERROR codes never.
 //!
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request, never retried.
@@ -72,58 +68,31 @@ macro_rules! known_codes {
     };
 }
 
-/// The two calls a runner makes to its compaction provider.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Call {
-    /// `compaction.setup`, once per session before its first model call.
-    Setup,
-    /// `compaction.step`, the per-step call.
-    Step,
-}
-
-impl Call {
-    pub const ALL: [Call; 2] = [Call::Setup, Call::Step];
-}
-
 impl KnownCode {
     /// Whether the code is retryable. Retryability is fixed by the code:
     /// `true` means the runner may retry without the user acting. A
     /// `refuse` answer carries no retryability of its own.
     pub fn retryable(self) -> bool {
         match self {
-            Self::Transient
-            | Self::ProviderBusy
-            | Self::HistoryUnreadable
-            | Self::CompactionWaitExceeded => true,
+            Self::Transient | Self::ProviderBusy | Self::HistoryUnreadable => true,
             Self::InvalidParams
             | Self::WindowTooSmall
             | Self::Misconfigured
-            | Self::AsyncNotSupported
-            | Self::NotSessionCompactionProvider
             | Self::CompactionUnavailable => false,
         }
     }
 
-    /// Whether a run may end `error` with this code because of `call`.
-    /// `window_too_small`, `provider_busy`, `misconfigured` and
-    /// `history_unreadable` may end it after either call.
-    /// `async_not_supported` may end it only after Setup, the one call that
-    /// asks for a compaction mode.
-    /// `compaction_unavailable` may end it only after Setup: when a step
-    /// call fails or times out, the run does not end at all, because the
-    /// runner sends the request with the last applied CompactionMessage.
-    /// `compaction_wait_exceeded` may end it only after a step call,
-    /// because only a step call can be answered `wait`. ERROR codes and
-    /// the ready refusal never end a run themselves.
-    pub fn ends_run_at(self, call: Call) -> bool {
+    /// Whether a run may end `error` with this code after Setup: the four
+    /// `refuse` codes, and `compaction_unavailable` when Setup failed or
+    /// timed out with no answer. ERROR codes never end a run themselves.
+    pub fn ends_run_after_setup(self) -> bool {
         match self {
             Self::WindowTooSmall
             | Self::ProviderBusy
             | Self::Misconfigured
-            | Self::HistoryUnreadable => true,
-            Self::CompactionUnavailable | Self::AsyncNotSupported => call == Call::Setup,
-            Self::CompactionWaitExceeded => call == Call::Step,
-            Self::InvalidParams | Self::Transient | Self::NotSessionCompactionProvider => false,
+            | Self::HistoryUnreadable
+            | Self::CompactionUnavailable => true,
+            Self::InvalidParams | Self::Transient => false,
         }
     }
 
@@ -143,10 +112,7 @@ known_codes! {
     ProviderBusy => refuse_codes::PROVIDER_BUSY,
     Misconfigured => refuse_codes::MISCONFIGURED,
     HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
-    AsyncNotSupported => refuse_codes::ASYNC_NOT_SUPPORTED,
-    NotSessionCompactionProvider => runner_codes::NOT_SESSION_COMPACTION_PROVIDER,
     CompactionUnavailable => runner_codes::COMPACTION_UNAVAILABLE,
-    CompactionWaitExceeded => runner_codes::COMPACTION_WAIT_EXCEEDED,
 }
 
 /// A request field is malformed (an unknown preset or params value, say).
@@ -175,9 +141,9 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
     detail?.get("field")?.as_str()
 }
 
-/// The `code` of a `refuse` answer: one of the role's five codes, each with
-/// a fixed retryability. A code this crate does not know still decodes, as
-/// [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
+/// The `code` of a Setup `refuse` answer: one of the role's four codes, each
+/// with a fixed retryability. A code this crate does not know still decodes,
+/// as [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
 /// answer undecodable; it is never retryable. A provider's own, finer reason
 /// goes in the answer's separate `provider_code`, never in `code`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -186,9 +152,6 @@ pub enum RefuseCode {
     ProviderBusy,
     Misconfigured,
     HistoryUnreadable,
-    /// Setup only: the runner asked for async mode, but its `llm-runner/v1`
-    /// `role.describe` does not list the `compaction_async` group.
-    AsyncNotSupported,
     /// A code this role does not name, kept as received.
     Unknown(String),
 }
@@ -200,7 +163,6 @@ impl RefuseCode {
             Self::ProviderBusy => refuse_codes::PROVIDER_BUSY,
             Self::Misconfigured => refuse_codes::MISCONFIGURED,
             Self::HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
-            Self::AsyncNotSupported => refuse_codes::ASYNC_NOT_SUPPORTED,
             Self::Unknown(code) => code,
         }
     }
@@ -212,7 +174,6 @@ impl RefuseCode {
             refuse_codes::PROVIDER_BUSY => Self::ProviderBusy,
             refuse_codes::MISCONFIGURED => Self::Misconfigured,
             refuse_codes::HISTORY_UNREADABLE => Self::HistoryUnreadable,
-            refuse_codes::ASYNC_NOT_SUPPORTED => Self::AsyncNotSupported,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -238,32 +199,26 @@ impl<'de> Deserialize<'de> for RefuseCode {
     }
 }
 
-/// The spellings of the five [`RefuseCode`]s.
+/// The spellings of the four [`RefuseCode`]s.
 pub mod refuse_codes {
     /// The model's window cannot hold the smallest view the provider can
     /// build. The user has to switch to a larger model. Not retryable.
     pub const WINDOW_TOO_SMALL: &str = "window_too_small";
     /// The provider is busy with the session's history and cannot answer
-    /// within the wait cap. Retryable: the next send may succeed.
+    /// Setup now. Retryable: the next send may succeed.
     pub const PROVIDER_BUSY: &str = "provider_busy";
     /// The provider's configuration for this preset and params cannot be
     /// used. The user has to fix it. Not retryable.
     pub const MISCONFIGURED: &str = "misconfigured";
-    /// The provider needed history it could not read (a gap after its
-    /// cursor, and no transcript it can reach). Retryable.
+    /// The provider needed history it could not read, such as a declared
+    /// inherited prefix it does not hold. Retryable.
     pub const HISTORY_UNREADABLE: &str = "history_unreadable";
-    /// Setup only: the runner asked for `compaction_mode: "async"`, but its
-    /// `llm-runner/v1` `role.describe` does not list the `compaction_async`
-    /// group. Not retryable: the runner's next Setup for the session asks
-    /// for `sync`.
-    pub const ASYNC_NOT_SUPPORTED: &str = "async_not_supported";
 
     pub const ALL: &[&str] = &[
         WINDOW_TOO_SMALL,
         PROVIDER_BUSY,
         MISCONFIGURED,
         HISTORY_UNREADABLE,
-        ASYNC_NOT_SUPPORTED,
     ];
 
     /// Whether this `refuse` code may be retried without the user acting. Only
@@ -289,25 +244,14 @@ pub mod runner_codes {
     /// the plan's compaction item, which a runner without the `compaction`
     /// group cannot serve.
     pub const PLAN_COMPACTION_ITEM: &str = compaction::PLAN_COMPACTION_ITEM_FIELD;
-    /// A `compaction.ready` whose route caller is not the provider at
-    /// `plan.compaction_item.provider`, or for a session without one.
-    pub const NOT_SESSION_COMPACTION_PROVIDER: &str = errors::NOT_SESSION_COMPACTION_PROVIDER;
-    /// The codes a `compaction.ready` may be refused with.
-    pub const READY_CODES: &[&str] = &[INVALID_PARAMS, NOT_SESSION_COMPACTION_PROVIDER];
     /// A `provider_code` the runner writes itself, after Setup only: Setup
     /// failed or timed out with no answer, so no initial view was recorded
-    /// and no model call was made. The next send calls Setup again. The
-    /// runner never writes this code after a step call: a step call that
-    /// fails or times out does not end the run, because the runner sends the
-    /// request with the last applied CompactionMessage.
+    /// and no model call was made. The next send calls Setup again.
     pub const COMPACTION_UNAVAILABLE: &str = errors::provider_codes::COMPACTION_UNAVAILABLE;
-    /// A `provider_code` the runner writes itself: a `wait` reached the
-    /// runner's cap and the request could not be shown to fit.
-    pub const COMPACTION_WAIT_EXCEEDED: &str = errors::provider_codes::COMPACTION_WAIT_EXCEEDED;
     /// The `provider_code` values the runner writes itself on account of
     /// its compaction provider. A `refuse` answer's code is recorded as
     /// given.
-    pub const PROVIDER_CODES: &[&str] = &[COMPACTION_UNAVAILABLE, COMPACTION_WAIT_EXCEEDED];
+    pub const PROVIDER_CODES: &[&str] = &[COMPACTION_UNAVAILABLE];
 }
 
 #[cfg(test)]
@@ -318,17 +262,17 @@ mod tests {
     fn contract_codes() -> std::collections::BTreeSet<String> {
         let contract = include_str!("../CONTRACT.md");
         let refuse = contract
-            .split("## 11. REFUSE")
+            .split("## 10. REFUSE")
             .nth(1)
             .unwrap()
-            .split("## 12.")
+            .split("## 11.")
             .next()
             .unwrap();
         let errors = contract
-            .split("## 14. Error codes")
+            .split("## 13. Error codes")
             .nth(1)
             .unwrap()
-            .split("## 15.")
+            .split("## 14.")
             .next()
             .unwrap();
         [refuse, errors]
@@ -439,7 +383,6 @@ mod tests {
             (RefuseCode::ProviderBusy, true),
             (RefuseCode::Misconfigured, false),
             (RefuseCode::HistoryUnreadable, true),
-            (RefuseCode::AsyncNotSupported, false),
         ];
         assert_eq!(expected.len(), refuse_codes::ALL.len());
         for (code, retryable) in expected {
@@ -457,82 +400,65 @@ mod tests {
     }
 
     /// Reads the retryability table from CONTRACT.md. Each row is one named
-    /// code: its spelling, whether it is retryable, and the calls (Setup,
-    /// step) after which it may end a run.
-    fn contract_retryability() -> Vec<(String, bool, Vec<Call>)> {
+    /// code: its spelling, whether it is retryable, and whether it may end a
+    /// run after Setup.
+    fn contract_retryability() -> Vec<(String, bool, bool)> {
         let contract = include_str!("../CONTRACT.md");
         let table = contract
-            .split("### 14.3 ")
+            .split("### 13.3 ")
             .nth(1)
-            .expect("CONTRACT.md has no §14.3")
+            .expect("CONTRACT.md has no §13.3")
             .split("\n## ")
             .next()
             .unwrap();
+        let yes_no = |code: &str, cell: &str| match cell {
+            "yes" => true,
+            "no" => false,
+            other => panic!("{code}: cell {other:?}"),
+        };
         table
             .lines()
             .filter(|line| line.starts_with("| `"))
             .map(|row| {
                 let cells: Vec<&str> = row.split('|').map(str::trim).collect();
                 let code = cells[1].trim_matches('`').to_owned();
-                let retryable = match cells[2] {
-                    "yes" => true,
-                    "no" => false,
-                    other => panic!("{code}: retryable cell {other:?}"),
-                };
-                let calls = cells[3]
-                    .split(',')
-                    .map(str::trim)
-                    .filter_map(|call| match call {
-                        "Setup" => Some(Call::Setup),
-                        "step" => Some(Call::Step),
-                        "—" => None,
-                        other => panic!("{code}: call cell {other:?}"),
-                    })
-                    .collect();
-                (code, retryable, calls)
+                let retryable = yes_no(&code, cells[2]);
+                let ends_run = yes_no(&code, cells[3]);
+                (code, retryable, ends_run)
             })
             .collect()
     }
 
     /// Checks that three copies of one table agree: `KnownCode`'s
-    /// `retryable` and `ends_run_at`, the retryability table in CONTRACT.md,
-    /// and the `retryability` cases in `errors.json`. Each gives, per named
-    /// code, whether it is retryable and the calls after which it may end a
-    /// run. It also pins that `compaction_unavailable` is never retryable
-    /// and ends a run only after Setup.
+    /// `retryable` and `ends_run_after_setup`, the retryability table in
+    /// CONTRACT.md, and the `retryability` cases in `errors.json`. It also
+    /// pins that `compaction_unavailable` is never retryable and may end a
+    /// run after Setup.
     #[test]
     fn retryability_table_matches_contract_and_vectors() {
         let table = contract_retryability();
-        assert_eq!(table.len(), KnownCode::ALL.len(), "§14.3 rows: {table:?}");
+        assert_eq!(table.len(), KnownCode::ALL.len(), "§13.3 rows: {table:?}");
         let file = vectors::load("errors.json");
         let rows = vectors::cases(&file, "retryability");
         assert_eq!(rows.len(), KnownCode::ALL.len());
-        for ((code, retryable, calls), row) in table.iter().zip(rows) {
+        for ((code, retryable, ends_run), row) in table.iter().zip(rows) {
             let known = KnownCode::from_code(code).unwrap_or_else(|| panic!("{code}"));
             assert_eq!(row["code"], code.as_str());
             assert_eq!(known.retryable(), *retryable, "{code}: retryable");
             assert_eq!(row["retryable"], *retryable, "{code}: vector retryable");
-            let ends: Vec<Call> = Call::ALL
-                .into_iter()
-                .filter(|call| known.ends_run_at(*call))
-                .collect();
-            assert_eq!(&ends, calls, "{code}: ends a run after");
-            let vector_calls: Vec<Call> = row["ends_run_at"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|call| match call.as_str().unwrap() {
-                    "setup" => Call::Setup,
-                    "step" => Call::Step,
-                    other => panic!("{code}: {other}"),
-                })
-                .collect();
-            assert_eq!(&vector_calls, calls, "{code}: vector ends_run_at");
+            assert_eq!(
+                known.ends_run_after_setup(),
+                *ends_run,
+                "{code}: ends a run"
+            );
+            assert_eq!(
+                row["ends_run_after_setup"], *ends_run,
+                "{code}: vector ends_run_after_setup"
+            );
         }
         let unavailable = KnownCode::CompactionUnavailable;
         assert!(!unavailable.retryable());
-        assert!(unavailable.ends_run_at(Call::Setup));
-        assert!(!unavailable.ends_run_at(Call::Step));
+        assert!(unavailable.ends_run_after_setup());
     }
 
     #[test]

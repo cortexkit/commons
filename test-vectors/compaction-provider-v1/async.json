@@ -124,123 +124,31 @@
       }
     ]
   },
-  "describe": {
-    "accepted": [
-      {
-        "name": "async group absent",
-        "declares_async": false,
-        "answer": {
-          "majors": [
-            {
-              "version": "compaction-provider/v1",
-              "ops": [
-                "role.describe",
-                "compaction.setup",
-                "compaction.step"
-              ],
-              "stability": "alpha"
-            }
-          ],
-          "implementation_version": "synthetic-provider",
-          "capabilities": []
-        }
-      },
-      {
-        "name": "async group declared with its ops",
-        "declares_async": true,
-        "answer": {
-          "majors": [
-            {
-              "version": "compaction-provider/v1",
-              "ops": [
-                "role.describe",
-                "compaction.setup",
-                "compaction.step",
-                "view.get",
-                "compaction.ride"
-              ],
-              "stability": "alpha"
-            }
-          ],
-          "implementation_version": "synthetic-provider",
-          "capabilities": [
-            "async"
-          ]
-        }
-      }
-    ],
-    "refused": [
-      {
-        "name": "async declared without view.get",
-        "problem": "missing_op",
-        "op": "view.get",
-        "answer": {
-          "majors": [
-            {
-              "version": "compaction-provider/v1",
-              "ops": [
-                "role.describe",
-                "compaction.setup",
-                "compaction.step",
-                "compaction.ride"
-              ],
-              "stability": "alpha"
-            }
-          ],
-          "implementation_version": "synthetic-provider",
-          "capabilities": [
-            "async"
-          ]
-        }
-      },
-      {
-        "name": "async declared without compaction.ride",
-        "problem": "missing_op",
-        "op": "compaction.ride",
-        "answer": {
-          "majors": [
-            {
-              "version": "compaction-provider/v1",
-              "ops": [
-                "role.describe",
-                "compaction.setup",
-                "compaction.step",
-                "view.get"
-              ],
-              "stability": "alpha"
-            }
-          ],
-          "implementation_version": "synthetic-provider",
-          "capabilities": [
-            "async"
-          ]
-        }
-      }
-    ]
-  },
   "notices": [
     {
       "name": "first notice after a user message",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:1",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
         "model": "anthropic/claude-sonnet-4-5",
         "window": "200000"
       },
-      "digest": "8ef9780006ef51aaab27d8889073ae6d754693079f949116b5cf4225f96ef309"
+      "digest": "86f1773244a1808218bb08064725e9fbb76f476a5c01a8d78be9d19c94070b06"
     },
     {
       "name": "tool step with usage, applied view and marker",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:5",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:5",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "5",
+        "lineage_id": "lin_a",
         "through_ordinal": "4",
         "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
         "est_tokens": "64000",
@@ -250,15 +158,16 @@
         "last_usage": "61000:58000:2000:850",
         "applied_view_version": "3"
       },
-      "digest": "9fdb76f924c7ca1b1594cdc83c84d27669353c2a353f1d9775f5ee860d1dfde4"
+      "digest": "b204761e9eead132da22a84d565d7080eff74bcf2362ef787300aa0bb511f918"
     },
     {
       "name": "model change and cache expiry",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:6",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:6",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "6",
+        "lineage_id": "lin_a",
         "through_ordinal": "4",
         "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
         "est_tokens": "64100",
@@ -268,15 +177,16 @@
         "last_usage": "61000:58000:2000:850",
         "applied_view_version": "3"
       },
-      "digest": "175889d231768a69b624667cc5156b76aaa8cf3f50f55746465bea444e8d5f32"
+      "digest": "336b9dcd0bf52f0ffae1f64673b47d22229a9b1069506aef4b9fd7e9afe0766f"
     },
     {
       "name": "surface change with a deferred marker",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:7",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:7",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "7",
+        "lineage_id": "lin_a",
         "through_ordinal": "5",
         "through_digest": "91b261cb563d0533f0ca4f7da657ecb0e26570ef2e9785d3374b1a9121f7f7f6",
         "est_tokens": "66000",
@@ -285,15 +195,16 @@
         "events": "surface_change,marker_outcome:deferred:cut-2",
         "applied_view_version": "4"
       },
-      "digest": "79f316a9bcf5e364265b38537cd76ffc8212ea843e7385d91e803b612e789387"
+      "digest": "432245d89c48e1e6bad0bbf754ba59e748719441032a97de0b8feff7297b1926"
     },
     {
       "name": "revert discards the current view",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:8",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:8",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "8",
+        "lineage_id": "lin_a",
         "through_ordinal": "3",
         "through_digest": "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958",
         "est_tokens": "9000",
@@ -301,15 +212,16 @@
         "window": "200000",
         "events": "revert_below:4,view_discarded:3"
       },
-      "digest": "1bc194f75dfe3a11e43bc1226f9989a9618d67ead2655f9e64ef9ed8a56f004c"
+      "digest": "b6dd16a22217810e6346cb9c2cbd7e52d0b76767609e4910b20374f9a659275a"
     },
     {
       "name": "view refused for a split tool pair",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:9",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:9",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "9",
+        "lineage_id": "lin_a",
         "through_ordinal": "6",
         "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
         "est_tokens": "70000",
@@ -318,15 +230,16 @@
         "events": "view_refused:5:tool_pair_split",
         "applied_view_version": "4"
       },
-      "digest": "dab639607f857adcc3a97261e421da0430c21139097f943ddca700882dd37c16"
+      "digest": "a5e157b3c60537f0880e10b1112fb1db9fead538a1ac6fe15efa40c2b4ef4c3e"
     },
     {
       "name": "view refused for an unknown part",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:10",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:10",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "10",
+        "lineage_id": "lin_a",
         "through_ordinal": "6",
         "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
         "est_tokens": "70100",
@@ -335,15 +248,16 @@
         "events": "view_refused:6:unknown_part",
         "applied_view_version": "4"
       },
-      "digest": "a75dacb563ce4efbfa9af969969aa0564339f84c48a4cd2db70ee8c9fd315f3d"
+      "digest": "6d9ad42573fdba0a5abf10da38e8470ca327772edb7b678826c90cde1041507c"
     },
     {
       "name": "view deferred until a provider-safe boundary",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:11",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:11",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "11",
+        "lineage_id": "lin_a",
         "through_ordinal": "6",
         "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
         "est_tokens": "70200",
@@ -352,15 +266,16 @@
         "events": "view_deferred:6:signed_reasoning",
         "applied_view_version": "4"
       },
-      "digest": "f0ca7f4f788e4bc6c83018611bab53ca57ea0b58a4caaed2ea3e2a986ac9bf9a"
+      "digest": "ab9ab171da09e2a6223c14ba3ee807a24d6dd5ed5424f340d02254a0fdce9a90"
     },
     {
       "name": "view applied with a companion edit",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:12",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:12",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "12",
+        "lineage_id": "lin_a",
         "through_ordinal": "6",
         "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
         "est_tokens": "41000",
@@ -369,21 +284,39 @@
         "events": "view_companion:6:strip_signed_reasoning",
         "applied_view_version": "6"
       },
-      "digest": "acfe967e330c389b859570f46639e49b602d45de9f121c2dd01895013c232208"
+      "digest": "eacfb5b09efc81b2dafa2013d61835b1de84eda8faa4ddde5d05040cec883ad5"
     },
     {
       "name": "window unknown",
       "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:2",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:2",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "2",
+        "lineage_id": "lin_a",
         "through_ordinal": "2",
         "through_digest": "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b",
         "est_tokens": "1500",
         "model": "anthropic/claude-sonnet-4-5"
       },
-      "digest": "612e673aff207a1462a00b4fc5fe8a2b0ac3fd78f53b78502d4fedea11559e20"
+      "digest": "283e93e3bd49f55593857f27ab3a408870412338529c303f658c87a507a0cc31"
+    },
+    {
+      "name": "a fork moves the session to a new lineage, declaring its descent",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:13",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "13",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "65000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "digest": "845894e2a378d023891d73702f1cc1abb43b78b2ed847bbecd2e88c40d19ba49"
     }
   ],
   "notices_accepted": [
@@ -392,6 +325,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -399,7 +333,7 @@
         "window": "200000",
         "trace_id": "abc"
       },
-      "digest": "8ef9780006ef51aaab27d8889073ae6d754693079f949116b5cf4225f96ef309",
+      "digest": "86f1773244a1808218bb08064725e9fbb76f476a5c01a8d78be9d19c94070b06",
       "events": []
     },
     {
@@ -407,6 +341,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "5",
+        "lineage_id": "lin_a",
         "through_ordinal": "4",
         "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
         "est_tokens": "64000",
@@ -416,7 +351,7 @@
         "last_usage": "61000:58000:2000:850",
         "applied_view_version": "3"
       },
-      "digest": "68897860eaecefb0a39715917b7c771fde05c3a264f4a767127a9bfd6ba5600c",
+      "digest": "fb3f27696ef31fa0f964f5040b07661996e3ccc80deacbce35c81887073cd4cb",
       "events": [
         "marker_outcome:applied:cut-1",
         "cache_warmed:5m"
@@ -428,6 +363,7 @@
       "name": "no seq",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -441,6 +377,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "est_tokens": "1200",
         "model": "anthropic/claude-sonnet-4-5",
@@ -453,6 +390,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -465,6 +403,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "0",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -478,6 +417,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "01",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -491,6 +431,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "+1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -504,6 +445,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "EFC959960E9C3392A28C897F298CA6651073D4D263C7F241EB7956ED87267FC1",
         "est_tokens": "1200",
@@ -517,6 +459,7 @@
       "headers": {
         "session_ref": "ses_1",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -530,6 +473,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -543,6 +487,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -556,6 +501,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -569,6 +515,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -583,6 +530,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -597,6 +545,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -611,6 +560,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -625,6 +575,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -639,6 +590,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -654,6 +606,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -669,6 +622,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -683,6 +637,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -697,6 +652,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -711,6 +667,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -725,6 +682,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -739,6 +697,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -753,6 +712,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -767,6 +727,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -781,6 +742,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -795,6 +757,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -809,6 +772,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -823,6 +787,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -837,6 +802,7 @@
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "seq": "1",
+        "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "est_tokens": "1200",
@@ -845,13 +811,129 @@
         "last_usage": "1:2:3"
       },
       "problem": "malformed:last_usage"
+    },
+    {
+      "name": "no lineage_id",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "missing:lineage_id"
+    },
+    {
+      "name": "lineage_id with a space",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:lineage_id"
+    },
+    {
+      "name": "lineage_id over 256 bytes",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:lineage_id"
+    },
+    {
+      "name": "descends_from without a digest",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:3"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from with a leading-zero ordinal",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:03:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from with an uppercase digest",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:3:2C817FE268CC6E06FA84AC216A44A34654869704235FB05B92E77F06D1BB8958"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from without an old lineage",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": ":3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from naming the notice's own lineage",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "problem": "malformed:descends_from"
     }
   ],
   "view_ready": [
     {
       "name": "view 3 is ready",
       "subject": "ck.acme.event.ck-mc.compaction.view_ready.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:3",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3",
       "headers": {
         "session_ref": "357f07b24fd03982c83220c3c73f52fd",
         "view_version": "3",
@@ -4852,243 +4934,229 @@
       }
     ]
   },
-  "mode": {
-    "requests": [
-      {
-        "name": "no mode: sync, the bytes before the mode existed",
-        "request": {
-          "session": "ses_1",
-          "harness": "opencode",
-          "request_id": "cr-000001",
-          "params": {},
-          "composition": {},
-          "model": "anthropic/claude-sonnet-4-5",
-          "context_window": 200000,
-          "now": 1790000000000
-        }
-      },
-      {
-        "name": "sync asked explicitly",
-        "request": {
-          "session": "ses_1",
-          "harness": "opencode",
-          "request_id": "cr-000001",
-          "params": {},
-          "composition": {},
-          "model": "anthropic/claude-sonnet-4-5",
-          "context_window": 200000,
-          "now": 1790000000000,
-          "compaction_mode": "sync"
-        }
-      },
-      {
-        "name": "async asked",
-        "request": {
-          "session": "ses_1",
-          "harness": "opencode",
-          "request_id": "cr-000001",
-          "params": {},
-          "composition": {},
-          "model": "anthropic/claude-sonnet-4-5",
-          "context_window": 200000,
-          "now": 1790000000000,
-          "compaction_mode": "async"
-        }
-      }
-    ],
-    "undecodable_requests": [
-      {
-        "name": "unknown mode is refused, never read as sync",
-        "request": {
-          "session": "ses_1",
-          "harness": "opencode",
-          "request_id": "cr-000001",
-          "params": {},
-          "composition": {},
-          "model": "anthropic/claude-sonnet-4-5",
-          "context_window": 200000,
-          "now": 1790000000000,
-          "compaction_mode": "turbo"
-        }
-      },
-      {
-        "name": "mode in uppercase",
-        "request": {
-          "session": "ses_1",
-          "harness": "opencode",
-          "request_id": "cr-000001",
-          "params": {},
-          "composition": {},
-          "model": "anthropic/claude-sonnet-4-5",
-          "context_window": 200000,
-          "now": 1790000000000,
-          "compaction_mode": "ASYNC"
-        }
-      }
-    ],
-    "answers": [
-      {
-        "name": "ready echoing async",
-        "answer": {
-          "answer": "ready",
-          "request_id": "cr-000001",
-          "initial": {
-            "compaction_id": "head",
-            "version": 1,
-            "range": {
-              "from": 0,
-              "to": 0
-            },
-            "replacement": []
-          },
-          "compaction_mode": "async"
-        }
-      },
-      {
-        "name": "ready with no echo",
-        "answer": {
-          "answer": "ready",
-          "request_id": "cr-000001",
-          "initial": {
-            "compaction_id": "head",
-            "version": 1,
-            "range": {
-              "from": 0,
-              "to": 0
-            },
-            "replacement": []
-          }
-        }
-      },
-      {
-        "name": "refused: the runner does not declare compaction_async",
-        "answer": {
-          "answer": "refuse",
-          "request_id": "cr-000001",
-          "code": "async_not_supported",
-          "reason": "the runner's describe does not list compaction_async"
-        },
-        "retryable": false
-      }
-    ],
-    "undecodable_answers": [
-      {
-        "name": "ready echoing an unknown mode",
-        "answer": {
-          "answer": "ready",
-          "request_id": "cr-000001",
-          "initial": {
-            "compaction_id": "head",
-            "version": 1,
-            "range": {
-              "from": 0,
-              "to": 0
-            },
-            "replacement": []
-          },
-          "compaction_mode": "turbo"
-        }
-      }
-    ],
-    "session_mode": [
-      {
-        "requested": null,
-        "echo": null,
-        "mode": "sync"
-      },
-      {
-        "requested": "sync",
-        "echo": null,
-        "mode": "sync"
-      },
-      {
-        "requested": "sync",
-        "echo": "sync",
-        "mode": "sync"
-      },
-      {
-        "requested": "async",
-        "echo": "async",
-        "mode": "async"
-      },
-      {
-        "requested": "async",
-        "echo": null,
-        "mode": "sync"
-      },
-      {
-        "requested": "async",
-        "echo": "sync",
-        "mode": "sync"
-      },
-      {
-        "requested": "sync",
-        "echo": "async",
-        "mode": "sync"
-      },
-      {
-        "requested": null,
-        "echo": "async",
-        "mode": "sync"
-      },
-      {
-        "requested": "async",
-        "echo": "refuse",
-        "mode": "sync"
-      }
-    ],
-    "acceptance": [
-      {
-        "name": "both sides declare async",
-        "requested": "async",
-        "provider_declares_async": true,
-        "runner_capabilities": [
-          "transcript_reads",
-          "compaction",
-          "compaction_async"
+  "descent": [
+    {
+      "name": "descent from the held lineage with a matching digest keeps state through the cut",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
         ],
-        "outcome": "echo:async"
-      },
-      {
-        "name": "runner describe lacks compaction_async",
-        "requested": "async",
-        "provider_declares_async": true,
-        "runner_capabilities": [
-          "transcript_reads",
-          "compaction"
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
         ],
-        "outcome": "refuse:async_not_supported"
-      },
-      {
-        "name": "provider does not declare async",
-        "requested": "async",
-        "provider_declares_async": false,
-        "runner_capabilities": [
-          "compaction",
-          "compaction_async"
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
         ],
-        "outcome": "no_echo"
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
       },
-      {
-        "name": "sync request",
-        "requested": "sync",
-        "provider_declares_async": true,
-        "runner_capabilities": [
-          "compaction",
-          "compaction_async"
+      "outcome": "keep_through:3"
+    },
+    {
+      "name": "an old lineage id containing ':' parses from the right",
+      "held_lineage": "run:fork:1",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
         ],
-        "outcome": "no_echo"
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "run:fork:2",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "run:fork:1:2:f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
       },
-      {
-        "name": "no mode asked",
-        "requested": null,
-        "provider_declares_async": true,
-        "runner_capabilities": [
-          "compaction",
-          "compaction_async"
+      "outcome": "keep_through:2"
+    },
+    {
+      "name": "a digest that differs from the recorded one resyncs",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
         ],
-        "outcome": "no_echo"
-      }
-    ]
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:e04013e94d36a3644ccf7945e5c51570d87103b6820058aefb1ec3cafeb750ab"
+      },
+      "outcome": "resync"
+    },
+    {
+      "name": "no descends_from header: full resync",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "outcome": "resync"
+    },
+    {
+      "name": "descent from a lineage the provider does not hold resyncs",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "outcome": "resync"
+    },
+    {
+      "name": "descent through an ordinal the provider never recorded resyncs",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:9:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "outcome": "resync"
+    }
+  ],
+  "id_collision": {
+    "notice_headers": {
+      "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+      "seq": "3",
+      "lineage_id": "lin_a",
+      "through_ordinal": "3",
+      "through_digest": "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958",
+      "est_tokens": "1200",
+      "model": "anthropic/claude-sonnet-4-5",
+      "window": "200000"
+    },
+    "view_ready_headers": {
+      "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+      "view_version": "3",
+      "covers_through": "4",
+      "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+    },
+    "notice_id": "357f07b24fd03982c83220c3c73f52fd:advanced:3",
+    "view_ready_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3"
   }
 }

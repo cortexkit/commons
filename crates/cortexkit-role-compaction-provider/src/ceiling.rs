@@ -1,9 +1,29 @@
-//! The Setup ceiling (CONTRACT.md §20.5): when the runner pauses for a view,
+//! The Setup ceiling (CONTRACT.md §8): when the runner pauses for a view,
 //! and when it refuses the run instead of sending.
 
 use serde::{Deserialize, Serialize};
 
-use super::context_ceiling_causes;
+/// The `llm-runner/v1` run-error code a runner writes when a request reached
+/// the ceiling and no view brought it back under (CONTRACT.md §8). The
+/// runner role defines it, with its `{window, size, cause}` detail, in
+/// `cortexkit-role-llm-runner` 0.2.7; this constant quotes the spelling until
+/// this crate depends on that release.
+pub const CONTEXT_CEILING: &str = "context_ceiling";
+
+/// The `cause` values of [`CONTEXT_CEILING`]'s detail, quoted from
+/// `llm-runner/v1` like the code itself.
+pub mod context_ceiling_causes {
+    /// The ceiling wait ran out with no view that brought the request back
+    /// under the ceiling.
+    pub const VIEW_TIMEOUT: &str = "view_timeout";
+    /// The `compaction.ride` call the runner makes at the ceiling could not
+    /// reach the provider, and the current view does not bring the request
+    /// back under the ceiling.
+    pub const PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
+    /// The request is larger than the model's window even under the best view
+    /// the runner holds, for example after a switch to a smaller window.
+    pub const OVER_WINDOW: &str = "over_window";
+}
 
 /// Upper bound on [`CeilingPolicy::wait_ms`] and on a ride's `deadline_ms`:
 /// five minutes, the shortest prompt-cache lifetime a runner may hold the

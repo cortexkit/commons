@@ -1,23 +1,20 @@
 //! `compaction.setup`: called once per session, before its first model
 //! call.
 //!
-//! Setup returns the initial CompactionMessage (how a session starts with
-//! its head already in place; a provider with no head returns an empty
-//! replacement), the stability rank of each of the provider's own messages,
-//! and `call_when`, the conditions for calling the provider. The runner
-//! records the answer before the first model call; once it is recorded,
-//! Setup never runs again for the session.
-
-use std::collections::BTreeMap;
+//! Setup returns the initial CompactionMessage, which the runner renders
+//! until it applies the session's first view (a provider with no head
+//! returns an empty replacement), and optionally the ceiling policy. The
+//! runner records the answer before the first model call; once it is
+//! recorded, Setup never runs again for the session.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    answer::CompactionMessage,
-    async_group::ceiling::CeilingPolicy,
+    ceiling::CeilingPolicy,
     errors::RefuseCode,
-    status::{DescendsFrom, MessageRef},
+    lineage::{DescendsFrom, MessageRef},
+    message::CompactionMessage,
 };
 
 /// The `compaction.setup` request. Decoded leniently.
@@ -27,8 +24,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct SetupRequest {
-    /// The runner's opaque name for the session, as every later status
-    /// spells it.
+    /// The runner's opaque name for the session.
     pub session: String,
     /// The harness named in the session's key, which identifies the caller
     /// (for example `broca`). This differs from the route's bind harness,
@@ -42,8 +38,10 @@ pub struct SetupRequest {
     /// The session's lineage, absent when nothing has been written yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_id: Option<String>,
-    /// Optional inherited prefix, with the same meaning as on a step status.
-    /// Absence leaves descent undeclared; a later step or hook may declare it.
+    /// Optional inherited prefix: the session's first lineage continues
+    /// another lineage of the same conversation through an inclusive cut.
+    /// Sent only to a provider whose `role.describe` declares
+    /// `setup_descends_from`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub descends_from: Option<DescendsFrom>,
     /// The compaction item's preset, verbatim from the plan. Absent means
@@ -69,87 +67,9 @@ pub struct SetupRequest {
     pub newest: Option<MessageRef>,
     /// The runner's clock, in milliseconds since the Unix epoch.
     pub now: u64,
-    /// Optional Claude Code capabilities selected at transform.declare. Copy
-    /// that selection unchanged; setup cannot change the connection's plan.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_code:
-        Option<cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities>,
-    /// The compaction mode the runner asks for (CONTRACT.md §20.1). Absent
-    /// means `sync`, the behaviour before the mode existed. A runner sends
-    /// `async` only when the provider's `role.describe` declares the `async`
-    /// group and the runner's own declares `compaction_async`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compaction_mode: Option<CompactionMode>,
-}
-
-/// How a session's compaction runs. Strict on value: an unknown mode does
-/// not decode, and is never read as `sync`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CompactionMode {
-    /// The runner calls `compaction.step` (CONTRACT.md §6–§10).
-    Sync,
-    /// Advance notices, views, `view.get` and `compaction.ride` (CONTRACT.md
-    /// §20); the runner never calls `compaction.step`.
-    Async,
-}
-
-/// The mode a session runs in, from what its Setup asked for and the answer:
-/// `async` only if the request asked for `async` and a `ready` answer echoes
-/// `async`. Every other combination, including a `ready` answer without the
-/// echo, is `sync`.
-pub fn session_mode(requested: Option<CompactionMode>, answer: &SetupAnswer) -> CompactionMode {
-    let echoed = match answer {
-        SetupAnswer::Ready {
-            compaction_mode, ..
-        } => *compaction_mode,
-        SetupAnswer::Refuse { .. } => None,
-    };
-    if requested == Some(CompactionMode::Async) && echoed == Some(CompactionMode::Async) {
-        CompactionMode::Async
-    } else {
-        CompactionMode::Sync
-    }
-}
-
-/// The provider's decision on the mode a Setup asks for, as the `compaction_mode`
-/// its `ready` answer echoes. `provider_declares_async` is whether the
-/// provider's own `role.describe` lists the `async` group;
-/// `runner_capabilities` is the `capabilities` list of the runner's
-/// `llm-runner/v1` `role.describe`, which the provider reads over its own
-/// llm-runner route. An `async` request from a provider that declares the
-/// group is echoed `async` when the runner lists
-/// [`crate::async_group::RUNNER_GROUP`], and refused
-/// [`RefuseCode::AsyncNotSupported`] when it does not. A provider may instead
-/// answer that request in sync mode by omitting the echo; this helper takes
-/// the refusing choice. Every other request gets no echo, so its answer keeps
-/// the bytes it had before the mode existed.
-pub fn accept_mode(
-    requested: Option<CompactionMode>,
-    provider_declares_async: bool,
-    runner_capabilities: &[String],
-) -> Result<Option<CompactionMode>, RefuseCode> {
-    if requested != Some(CompactionMode::Async) || !provider_declares_async {
-        return Ok(None);
-    }
-    if runner_capabilities
-        .iter()
-        .any(|capability| capability == crate::async_group::RUNNER_GROUP)
-    {
-        Ok(Some(CompactionMode::Async))
-    } else {
-        Err(RefuseCode::AsyncNotSupported)
-    }
 }
 
 impl SetupRequest {
-    /// Check host-only plan values only after authenticating a runner principal.
-    pub fn check_runner_params(
-        &self,
-    ) -> Result<(), cortexkit_role_step_transform_provider::subscription::RunnerParamsProblem> {
-        cortexkit_role_step_transform_provider::subscription::check_runner_params(&self.params)
-    }
-
     pub fn new(
         session: impl Into<String>,
         harness: impl Into<String>,
@@ -173,22 +93,7 @@ impl SetupRequest {
             output_limit: None,
             newest: None,
             now,
-            claude_code: None,
-            compaction_mode: None,
         }
-    }
-
-    pub fn with_compaction_mode(mut self, mode: CompactionMode) -> Self {
-        self.compaction_mode = Some(mode);
-        self
-    }
-
-    pub fn with_claude_code(
-        mut self,
-        bundle: cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities,
-    ) -> Self {
-        self.claude_code = Some(bundle);
-        self
     }
 
     /// Set the plan item's preset and params.
@@ -226,129 +131,24 @@ impl SetupRequest {
     }
 }
 
-/// The stability rank of one of the provider's own messages: `index` is the
-/// position in every CompactionMessage's `replacement`, and a higher `rank`
-/// means the message changes less often. The runner places cache
-/// breakpoints and judges change policies on these segments.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct StabilityRank {
-    pub index: u32,
-    pub rank: u32,
-}
-
-/// When the runner calls the provider, frozen with the session. The runner
-/// calls when the step's reported usage reaches the model's share of the
-/// window ([`CallWhen::share_for`]). It also always calls on a prefix
-/// rebuild, when it re-sends the conversation from the start because its
-/// cached prefix was lost or invalidated (after a model change, say), and
-/// after an execution error. With no `call_when`, or with a
-/// condition kind it does not know, it calls on every step
-/// ([`calls_every_step`]).
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct CallWhen {
-    /// The share of the context window, above 0 and at most 1.
-    pub default: f64,
-    /// Per-model overrides, keyed by an exact model id or by a pattern that
-    /// ends in one `*` and matches every model id starting with the text
-    /// before it.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub models: BTreeMap<String, f64>,
-    /// Condition kinds this crate does not know. New kinds are additive,
-    /// and a runner that meets one it does not know calls on every step
-    /// rather than guess ([`CallWhen::has_unknown_conditions`]).
-    #[serde(flatten)]
-    pub unknown: Map<String, Value>,
-}
-
-impl CallWhen {
-    pub fn new(default: f64) -> Self {
-        Self {
-            default,
-            models: BTreeMap::new(),
-            unknown: Map::new(),
-        }
-    }
-
-    pub fn with_models(mut self, models: BTreeMap<String, f64>) -> Self {
-        self.models = models;
-        self
-    }
-
-    pub fn with_unknown_conditions(mut self, unknown: Map<String, Value>) -> Self {
-        self.unknown = unknown;
-        self
-    }
-
-    pub fn has_unknown_conditions(&self) -> bool {
-        !self.unknown.is_empty()
-    }
-
-    /// The share of the window that applies to `model`. Matching is in a
-    /// fixed order: a key equal to `model`; else the trailing-`*` key with
-    /// the longest prefix that `model` starts with; else `default`. A `*`
-    /// anywhere but at the end of a key is literal, so such a key matches
-    /// only exactly.
-    pub fn share_for(&self, model: &str) -> f64 {
-        if let Some(share) = self.models.get(model) {
-            return *share;
-        }
-        self.models
-            .iter()
-            .filter_map(|(key, share)| {
-                let prefix = key.strip_suffix('*')?;
-                model.starts_with(prefix).then_some((prefix.len(), *share))
-            })
-            .max_by_key(|(length, _)| *length)
-            .map_or(self.default, |(_, share)| share)
-    }
-
-    /// Whether every share is above 0 and at most 1.
-    pub fn shares_in_range(&self) -> bool {
-        std::iter::once(&self.default)
-            .chain(self.models.values())
-            .all(|share| *share > 0.0 && *share <= 1.0)
-    }
-}
-
-/// Whether the runner calls the provider on every step regardless of
-/// usage: when Setup declared no `call_when`, or declared a condition kind
-/// the runner does not know. A runner never skips a call because it could
-/// not read a condition.
-pub fn calls_every_step(call_when: Option<&CallWhen>) -> bool {
-    call_when.is_none_or(CallWhen::has_unknown_conditions)
-}
-
-/// The `compaction.setup` answer. Strict on `answer`, like a step answer.
+/// The `compaction.setup` answer. Strict on `answer`: a runner treats an
+/// answer it cannot decode as a failed Setup.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum SetupAnswer {
-    /// The session's initial view and declarations.
+    /// The session's initial view and ceiling policy.
     Ready {
         request_id: String,
         /// The initial CompactionMessage. Its range is usually empty at the
         /// start of the lineage (`{from: 0, to: 0}`): the head goes before
-        /// every message.
+        /// every message. The runner renders it until it applies the
+        /// session's first view.
         initial: CompactionMessage,
-        /// Ranks for the provider's own messages; empty for a provider that
-        /// declares none (a subagent session with no head, say).
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        stability: Vec<StabilityRank>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_when: Option<CallWhen>,
         /// When the runner pauses for a view and, failing one, refuses the
-        /// run (CONTRACT.md §20.5). Meaningful only on a session where both
-        /// sides declare the `async` group; absent, the runner never pauses
-        /// for the provider but still never sends over the window.
+        /// run (CONTRACT.md §8). Absent, the runner never pauses for the
+        /// provider but still never sends over the window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ceiling: Option<CeilingPolicy>,
-        /// The mode the provider accepted, echoed only for a Setup that asked
-        /// for `async` and was accepted in it. The session is in async mode
-        /// only when this is `async` and the request asked for `async`
-        /// ([`session_mode`]); a runner that asked for `async` and gets no
-        /// echo runs the session in sync mode.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        compaction_mode: Option<CompactionMode>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own
@@ -432,19 +232,8 @@ mod tests {
             if let Some(retryable) = case.get("retryable") {
                 assert_eq!(answer.retryable(), retryable.as_bool(), "{name}");
             }
-            if let SetupAnswer::Ready {
-                initial, call_when, ..
-            } = &answer
-            {
+            if let SetupAnswer::Ready { initial, .. } = &answer {
                 assert_eq!(initial.check(), Ok(()), "{name}");
-                if let Some(call_when) = call_when {
-                    assert!(call_when.shares_in_range(), "{name}");
-                    assert_eq!(
-                        call_when.has_unknown_conditions(),
-                        case["unknown_conditions"].as_bool().unwrap_or(false),
-                        "{name}"
-                    );
-                }
             }
         }
         for case in vectors::cases(&file, "tolerated") {
@@ -455,11 +244,6 @@ mod tests {
         }
         for case in vectors::cases(&file, "undecodable") {
             vectors::refused::<SetupAnswer>(case["name"].as_str().unwrap(), &case["answer"]);
-        }
-        for case in vectors::cases(&file, "shares_out_of_range") {
-            let name = case["name"].as_str().unwrap();
-            let call_when: CallWhen = serde_json::from_value(case["call_when"].clone()).unwrap();
-            assert!(!call_when.shares_in_range(), "{name}");
         }
     }
 
@@ -488,10 +272,8 @@ mod tests {
                     answer["provider_code"] = Value::from(own);
                 }
                 let setup = vectors::round_trip::<SetupAnswer>(code, &answer);
-                let step = vectors::round_trip::<crate::answer::StepAnswer>(code, &answer);
                 let fixed = crate::errors::refuse_codes::retryable(code);
                 assert_eq!(setup.retryable(), Some(fixed), "{code}");
-                assert_eq!(step.retryable(), Some(fixed), "{code}");
             }
         }
     }
@@ -510,53 +292,11 @@ mod tests {
                 "reason": "x", "retryable": sent
             });
             let setup: SetupAnswer = serde_json::from_value(answer.clone()).unwrap();
-            let step: crate::answer::StepAnswer = serde_json::from_value(answer).unwrap();
             assert_eq!(setup.retryable(), Some(fixed), "{code}");
-            assert_eq!(step.retryable(), Some(fixed), "{code}");
             assert!(serde_json::to_value(&setup)
                 .unwrap()
                 .get("retryable")
                 .is_none());
         }
-    }
-
-    /// Model matching: an exact key wins over any pattern, the longest
-    /// matching trailing-`*` pattern wins over shorter ones, and `default`
-    /// applies only when nothing matches.
-    #[test]
-    fn model_matching_is_exact_then_longest_star_then_default() {
-        let file = vectors::load("setup.json");
-        for case in vectors::cases(&file, "model_matching") {
-            let name = case["name"].as_str().unwrap();
-            let call_when: CallWhen = serde_json::from_value(case["call_when"].clone())
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
-            for expected in case["expected"].as_array().unwrap() {
-                let model = expected["model"].as_str().unwrap();
-                assert_eq!(
-                    call_when.share_for(model),
-                    expected["share"].as_f64().unwrap(),
-                    "{name}: {model}"
-                );
-            }
-        }
-        let call_when = CallWhen::new(0.8).with_models(BTreeMap::from([
-            ("anthropic/*".to_owned(), 0.6),
-            ("anthropic/claude-*".to_owned(), 0.65),
-            ("anthropic/claude-opus-4-5".to_owned(), 0.7),
-        ]));
-        assert_eq!(call_when.share_for("anthropic/claude-opus-4-5"), 0.7);
-        assert_eq!(call_when.share_for("anthropic/claude-sonnet-4"), 0.65);
-        assert_eq!(call_when.share_for("anthropic/other"), 0.6);
-        assert_eq!(call_when.share_for("openai/gpt-5"), 0.8);
-    }
-
-    #[test]
-    fn no_call_when_or_an_unknown_condition_calls_every_step() {
-        assert!(calls_every_step(None));
-        assert!(!calls_every_step(Some(&CallWhen::new(0.8))));
-        let mut unknown = Map::new();
-        unknown.insert("every_n_steps".into(), Value::from(10));
-        let call_when = CallWhen::new(0.8).with_unknown_conditions(unknown);
-        assert!(calls_every_step(Some(&call_when)));
     }
 }

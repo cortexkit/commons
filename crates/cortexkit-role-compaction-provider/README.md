@@ -1,6 +1,6 @@
 # cortexkit-role-compaction-provider
 
-Wire types and vectors for `compaction-provider/v1`: setup, per-step status, compaction replies, request fencing, and readiness notifications.
+Wire types and vectors for `compaction-provider/v1`: Setup, advance notices, views and `view.get`, `compaction.ride`, and the ceiling policy.
 
 Add to `Cargo.toml`:
 

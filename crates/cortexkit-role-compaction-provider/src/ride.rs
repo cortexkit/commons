@@ -1,5 +1,5 @@
 //! `compaction.ride`: the runner's synchronous request for a view
-//! (CONTRACT.md §20.5).
+//! (CONTRACT.md §8).
 //!
 //! The runner sends it only when its prefix is being rewritten anyway (the
 //! prompt cache expired, the model changed, the system text or tool surface
@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{ceiling::MAX_CEILING_WAIT_MS, notice::is_session_ref, view::CompactionView};
+use crate::{ceiling::MAX_CEILING_WAIT_MS, notice::is_session_ref, view::CompactionView};
 
 /// Upper bound on `deadline_ms` for the rewrite causes `ttl_expired`,
 /// `model_change` and `surface_change`. Those rides sit in front of a
@@ -33,7 +33,7 @@ pub enum RideCause {
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
     /// `ceiling`: the request reached the share of the context window that
-    /// Setup's ceiling policy names, or overflowed (CONTRACT.md §20.5).
+    /// Setup's ceiling policy names, or overflowed (CONTRACT.md §8).
     Ceiling,
     /// A cause this crate does not know, kept as received.
     Unknown(String),
