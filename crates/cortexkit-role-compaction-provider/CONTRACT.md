@@ -156,8 +156,9 @@ the session and freezes that plan for use.
   session it has seen before, and its answer is well formed whatever it
   answered last time (kill point `SetupRecorded`).
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
-  preset?, params, composition, model, variant?, context_window?, output_limit?,
-  newest?, lineage_id?, descends_from?, now}`. `model` is a string; `variant`,
+    preset?, params, composition, model, variant?, context_window?, output_limit?,
+  newest?, lineage_id?, descends_from?, compaction_mode?, now}`.
+  `compaction_mode` is `sync` or `async`, absent meaning `sync` (§20.1). `model` is a string; `variant`,
   `context_window` and `output_limit` are sibling fields, not a nested
   model object. `params` defaults to `{}`; an absent `preset` selects the
   provider's default. `composition` is an opaque object passed verbatim.
@@ -198,7 +199,7 @@ the session and freezes that plan for use.
   setup decoding is not a declaration of support. `SetupRequest` is
   non-exhaustive and the optional member remains additive within v1.
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, stability?, call_when?, ceiling?}` or `{answer: "refuse", request_id, code,
+  initial, stability?, call_when?, ceiling?, compaction_mode?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§11).
   - `initial` is a CompactionMessage (§8). Usually its range is empty at the
     start of the lineage, `{from: 0, to: 0}`: the provider's head is
@@ -217,9 +218,11 @@ the session and freezes that plan for use.
   - `call_when` says when the runner calls the provider: a share of the
     context window, with per-model overrides (§5). Absent, the runner
     calls on every step.
-  - `ceiling` says when the runner pauses for a view and, failing one,
+    - `ceiling` says when the runner pauses for a view and, failing one,
     refuses the run (§20.5). It applies only on a session in `async` mode
     and is omitted when absent.
+  - `compaction_mode` echoes `async` when the provider accepted an async
+    Setup, and is omitted otherwise (§20.1).
   - A `refuse` ends the run `error` with the refusal's role `code`, and the
     next send runs Setup again (§11).
 
@@ -733,6 +736,7 @@ serves `session.read` from a scripted transcript, and receives
 | `stable_message_stays_stable` | §8: across steps that add only to the tail, the top-ranked replacement message's bytes do not change |
 | `crash_at_<point>` for each point in §16 | §16 |
 | `async_describe_group_ops` | §20.1: `async` declared with `view.get` and `compaction.ride` |
+| `async_mode_echoed_only_when_asked`, `async_not_supported_without_runner_group` | §20.1: the provider echoes `async` only to an async Setup from a runner whose describe lists `compaction_async`, and otherwise refuses `async_not_supported` or answers without the echo |
 | `async_notice_wakes_read`, `async_duplicate_notice_is_a_wake`, `async_seq_gap_loses_no_content` | §20.2: the provider reads with `session.read` from its own cursor |
 | `async_resync_on_changed_bytes` | §20.2: a changed digest triggers the resync steps, and no view is published until the re-read completes |
 | `async_view_immutable`, `async_view_version_rises`, `async_view_get_never_another_version` | §20.3 |
@@ -1254,12 +1258,38 @@ the ride request and the ceiling pause (§20.5).
   lists `async` without both ops, naming each missing op (`missing_op`).
   `RoleDescribe::with_async` and `declares_async` build and read the
   declaration.
-- [pinned] The runner declares its own half in `llm-runner/v1` (tags and
-  the `context_ceiling` code, added in
-  `cortexkit-role-llm-runner` 0.2.7). A session runs this mode only when the
-  provider declares `async` and the runner declares its half. Otherwise the
-  session uses `compaction.step` (§6–§10) exactly as before.
-- [pinned] On a session in this mode the runner still calls
+- [pinned] The runner's half is the `llm-runner/v1` describe group
+  `compaction_async` (`async_group::RUNNER_GROUP`), added in
+  `cortexkit-role-llm-runner` 0.2.7 together with tags and the
+  `context_ceiling` code.
+- [pinned] A session selects its mode in Setup (`setup::CompactionMode`):
+  - `compaction.setup` carries optional `compaction_mode: "sync" | "async"`.
+    Absent means `sync`, so existing runners change nothing. A runner sends
+    `async` only when the provider's `role.describe` declares the `async`
+    group **and** its own `role.describe` declares `compaction_async`.
+  - `SetupAnswer`'s `ready` carries optional `compaction_mode`, echoing the
+    mode the provider accepted. A provider echoes `async` only to a Setup that
+    asked for it, and otherwise omits the echo, so its answer keeps the bytes
+    it had before the mode existed.
+  - The session is in async mode **only if** the Setup asked for `async` and
+    the `ready` answer echoes `async` (`setup::session_mode`). Every other
+    combination is sync. A runner that asked for `async` and got a `ready`
+    answer without the echo, or with `sync`, runs the session in sync mode.
+  - A provider that declares `async` may refuse an async Setup from a runner
+    whose `llm-runner/v1` `role.describe` does not list `compaction_async`,
+    with `refuse` code `async_not_supported` (§11), which it checks by reading
+    that describe over its own llm-runner route. It may instead accept the
+    Setup in sync mode by omitting the echo. `setup::accept_mode` is the
+    reference for the refusing choice. `async_not_supported` is not
+    retryable and ends a run only after Setup; the runner's next Setup for
+    the session asks for `sync`.
+  - `compaction_mode` is strict on value in both places: an unknown mode
+    does not decode and is never read as `sync`. A provider refuses such a
+    Setup `invalid_params` naming `compaction_mode`, and a runner treats such
+    an answer as a failed Setup (§4).
+  - Without async mode the session uses `compaction.step` (§6–§10) exactly as
+    before.
+- [pinned] On a session in async mode the runner still calls
   `compaction.setup` once (§4), and never calls `compaction.step`. The
   request fence, `wait` and `compaction.ready` (§9, §10) belong to
   `compaction.step` and play no part. Setup's `initial` CompactionMessage is
@@ -1650,8 +1680,9 @@ provider.
 - [pinned] Lenient: the fields of `view.get` and `compaction.ride` requests
   and answers, of a view and its cut, and of `ceiling`. Unknown notice and
   view-ready headers are ignored.
-- [pinned] Strict on values: `answer` in `view.get` and `compaction.ride`
-    answers, and each range's `kind`. Open: ride `cause`, unknown event tokens,
+- [pinned] Strict on values: `compaction_mode` in a Setup request and in a
+  `ready` answer, `answer` in `view.get` and `compaction.ride` answers, and
+  each range's `kind`. Open: ride `cause`, unknown event tokens,
   the reasons and edits in `view_refused`, `view_deferred` and
   `view_companion`, and `view.get` refusal codes. A part edit's fields are
   lenient; its `ordinal`, `mid` and `part` are required.
