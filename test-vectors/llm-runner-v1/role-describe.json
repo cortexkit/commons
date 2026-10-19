@@ -24,7 +24,7 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready",
+              "session.resolve",
               "session.read",
               "session.head",
               "run.result",
@@ -47,6 +47,7 @@
           "queue",
           "ordered_hook_phases",
           "interrupt",
+          "tags",
           "compaction",
           "session_change",
           "plans"
@@ -93,7 +94,8 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready",
+              "session.read",
+              "session.resolve",
               "vendor.extra"
             ]
           }
@@ -104,8 +106,9 @@
       }
     },
     {
-      "name": "compaction declared with compaction.ready",
+      "name": "compaction declared with tags and its ops",
       "declares": [
+        "tags",
         "compaction"
       ],
       "answer": {
@@ -116,12 +119,14 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "compaction.ready"
+              "session.read",
+              "session.resolve"
             ]
           }
         ],
         "implementation_version": "1",
         "capabilities": [
+          "tags",
           "compaction"
         ],
         "session_capabilities_from": "admission"
@@ -370,7 +375,8 @@
             "stability": "alpha",
             "ops": [
               "role.describe",
-              "compaction.ready"
+              "session.read",
+              "session.resolve"
             ]
           }
         ],
@@ -483,7 +489,7 @@
       }
     },
     {
-      "name": "compaction declared without compaction.ready",
+      "name": "compaction declared without session.resolve",
       "problem": "group_incomplete",
       "answer": {
         "majors": [
@@ -492,12 +498,14 @@
             "stability": "alpha",
             "ops": [
               "role.describe",
-              "session.baseline"
+              "session.baseline",
+              "session.read"
             ]
           }
         ],
         "implementation_version": "1",
         "capabilities": [
+          "tags",
           "compaction"
         ],
         "session_capabilities_from": "admission"
@@ -546,6 +554,29 @@
         "session_capabilities_from": "admission"
       },
       "problem": "group_incomplete"
+    },
+    {
+      "name": "compaction declared without tags",
+      "problem": "compaction_without_tags",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.read",
+              "session.resolve"
+            ]
+          }
+        ],
+        "implementation_version": "1",
+        "capabilities": [
+          "compaction"
+        ],
+        "session_capabilities_from": "admission"
+      }
     }
   ]
 }

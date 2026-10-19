@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::structured_output::{SkippedSibling, StructuredOutputResult};
 
-pub const RUN_STATE_BUDGET_EXHAUSTED: &str = "budget_exhausted";
-
 /// Run state names. A state not listed here decodes as [`RunState::Other`],
 /// keeping its name, and a consumer treats it as unclassified.
 pub mod states {
@@ -22,7 +20,11 @@ pub mod states {
     /// The run ended at its step limit.
     pub const MAX_STEPS: &str = "max_steps";
     /// The session's input-token cap was reached, or usage was unreported.
-    pub const BUDGET_EXHAUSTED: &str = super::RUN_STATE_BUDGET_EXHAUSTED;
+    pub const BUDGET_EXHAUSTED: &str = "budget_exhausted";
+    /// The session's context reached its ceiling at a step boundary, so the
+    /// runner sent no further request. Carried with `context_ceiling`
+    /// detail; never `error`, because no model or provider failed.
+    pub const CONTEXT_CEILING: &str = "context_ceiling";
     /// A caller cancelled the run.
     pub const CANCELLED: &str = "cancelled";
     /// The run ended with an error, carried in `error`.
@@ -31,13 +33,21 @@ pub mod states {
     pub const INTERRUPTED: &str = "interrupted";
 }
 
-/// A run state, classified.
+/// A run state, classified. Non-exhaustive: a state the role adds later
+/// must not break a consumer's `match`, which keeps a catch-all arm. A state
+/// a runner names that this crate does not know decodes as
+/// [`RunState::Other`], keeping its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RunState {
     Active,
     Paused,
     Completed,
     MaxSteps,
+    /// The session's input-token cap was reached, or usage was unreported.
+    BudgetExhausted,
+    /// The session's context reached its ceiling at a step boundary.
+    ContextCeiling,
     Cancelled,
     Error,
     Interrupted,
@@ -51,6 +61,8 @@ impl RunState {
             states::PAUSED => Self::Paused,
             states::COMPLETED => Self::Completed,
             states::MAX_STEPS => Self::MaxSteps,
+            states::BUDGET_EXHAUSTED => Self::BudgetExhausted,
+            states::CONTEXT_CEILING => Self::ContextCeiling,
             states::CANCELLED => Self::Cancelled,
             states::ERROR => Self::Error,
             states::INTERRUPTED => Self::Interrupted,
@@ -58,17 +70,44 @@ impl RunState {
         }
     }
 
-    pub fn is_budget_exhausted(&self) -> bool {
-        matches!(self, Self::Other(state) if state == RUN_STATE_BUDGET_EXHAUSTED)
+    /// The state's name as the wire spells it: `parse(state.as_str())`
+    /// gives back the same state.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Active => states::ACTIVE,
+            Self::Paused => states::PAUSED,
+            Self::Completed => states::COMPLETED,
+            Self::MaxSteps => states::MAX_STEPS,
+            Self::BudgetExhausted => states::BUDGET_EXHAUSTED,
+            Self::ContextCeiling => states::CONTEXT_CEILING,
+            Self::Cancelled => states::CANCELLED,
+            Self::Error => states::ERROR,
+            Self::Interrupted => states::INTERRUPTED,
+            Self::Other(state) => state,
+        }
     }
 
-    /// Whether the state is terminal. Unrecognized strings answer `false`;
-    /// budget exhaustion is recognized without adding an enum variant.
+    pub fn is_budget_exhausted(&self) -> bool {
+        matches!(self, Self::BudgetExhausted)
+    }
+
+    pub fn is_context_ceiling(&self) -> bool {
+        matches!(self, Self::ContextCeiling)
+    }
+
+    /// Whether the state is terminal. A state this crate does not know
+    /// ([`RunState::Other`]) is not terminal.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::MaxSteps | Self::Cancelled | Self::Error | Self::Interrupted
-        ) || self.is_budget_exhausted()
+            Self::Completed
+                | Self::MaxSteps
+                | Self::BudgetExhausted
+                | Self::ContextCeiling
+                | Self::Cancelled
+                | Self::Error
+                | Self::Interrupted
+        )
     }
 }
 
@@ -143,6 +182,10 @@ pub struct RunResult {
     /// and whether that validated. Absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<StructuredOutputResult>,
+    /// On a run that ended `context_ceiling`: the window, the request's size
+    /// and the cause. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
 }
 
 impl RunResult {
@@ -155,7 +198,13 @@ impl RunResult {
             error: None,
             final_message: None,
             structured_output: None,
+            context_ceiling: None,
         }
+    }
+
+    pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
+        self.context_ceiling = Some(detail);
+        self
     }
 
     pub fn with_structured_output(mut self, structured_output: StructuredOutputResult) -> Self {
@@ -330,13 +379,23 @@ impl RunStatusRequest {
     }
 }
 
-/// Known reasons for a pause. Other reasons survive decoding unchanged.
+/// The `reason` of an `active` run waiting at its session's context ceiling
+/// for a compaction view, with `deadline_ms` beside it on `run.status`. The
+/// run is waiting, not stalled; the wait ends in progress (a view arrived)
+/// or in the terminal `context_ceiling` state.
+pub const RUN_REASON_CONTEXT_CEILING_WAIT: &str = "context_ceiling_wait";
+
+/// Known reasons a run names on `run.status`, `session.head` and stream
+/// events: why a paused run is paused, or why an active run is waiting.
+/// Other reasons survive decoding unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(from = "String", into = "String")]
 #[non_exhaustive]
 pub enum RunReason {
     AuthRequired,
     Restart,
+    /// An `active` run held at the context ceiling until `deadline_ms`.
+    ContextCeilingWait,
     Unknown(String),
 }
 impl From<String> for RunReason {
@@ -344,6 +403,7 @@ impl From<String> for RunReason {
         match value.as_str() {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
+            RUN_REASON_CONTEXT_CEILING_WAIT => Self::ContextCeilingWait,
             _ => Self::Unknown(value),
         }
     }
@@ -353,6 +413,7 @@ impl From<RunReason> for String {
         match value {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
+            RunReason::ContextCeilingWait => RUN_REASON_CONTEXT_CEILING_WAIT.into(),
             RunReason::Unknown(s) => s,
         }
     }
@@ -377,6 +438,14 @@ pub struct RunStatus {
     /// Exactly what `run.result` carries for the same run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<StructuredOutputResult>,
+    /// Exactly what `run.result` carries for the same run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
+    /// With `reason: context_ceiling_wait`: when the wait ends, in
+    /// milliseconds since the Unix epoch. A watchdog treats the run as
+    /// healthy until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_ms: Option<u64>,
 }
 impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
@@ -387,7 +456,23 @@ impl RunStatus {
             error: None,
             undelivered_steers: None,
             structured_output: None,
+            context_ceiling: None,
+            deadline_ms: None,
         }
+    }
+    /// An `active` run waiting at the context ceiling until `deadline_ms`.
+    pub fn context_ceiling_wait(deadline_ms: u64) -> Self {
+        let mut status = Self::new(states::ACTIVE).with_reason(RunReason::ContextCeilingWait);
+        status.deadline_ms = Some(deadline_ms);
+        status
+    }
+    pub fn with_deadline_ms(mut self, deadline_ms: u64) -> Self {
+        self.deadline_ms = Some(deadline_ms);
+        self
+    }
+    pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
+        self.context_ceiling = Some(detail);
+        self
     }
     pub fn with_structured_output(mut self, structured_output: StructuredOutputResult) -> Self {
         self.structured_output = Some(structured_output);
@@ -487,6 +572,44 @@ impl From<RunCancelReply> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_named_state_round_trips_through_its_own_variant() {
+        for name in [
+            states::ACTIVE,
+            states::PAUSED,
+            states::COMPLETED,
+            states::MAX_STEPS,
+            states::BUDGET_EXHAUSTED,
+            states::CONTEXT_CEILING,
+            states::CANCELLED,
+            states::ERROR,
+            states::INTERRUPTED,
+        ] {
+            let state = RunState::parse(name);
+            assert!(
+                !matches!(state, RunState::Other(_)),
+                "{name} decoded as Other"
+            );
+            assert_eq!(state.as_str(), name);
+            assert_eq!(RunState::parse(state.as_str()), state, "{name}");
+        }
+        assert_eq!(
+            RunState::parse(states::BUDGET_EXHAUSTED),
+            RunState::BudgetExhausted
+        );
+        assert!(
+            RunState::BudgetExhausted.is_budget_exhausted()
+                && RunState::BudgetExhausted.is_terminal()
+        );
+        assert!(
+            RunState::ContextCeiling.is_context_ceiling() && RunState::ContextCeiling.is_terminal()
+        );
+        let vendor = RunState::parse("vendor_state");
+        assert_eq!(vendor, RunState::Other("vendor_state".into()));
+        assert_eq!(vendor.as_str(), "vendor_state");
+        assert!(!vendor.is_terminal());
+    }
     use crate::{errors, vectors};
 
     #[test]
@@ -737,7 +860,7 @@ mod input_cap_tests {
             assert_eq!(result.detail, status.detail);
             assert!(result.run_state().is_budget_exhausted());
             assert!(status.run_state().is_terminal());
-            assert!(matches!(result.run_state(), RunState::Other(_)));
+            assert_eq!(result.run_state(), RunState::BudgetExhausted);
             causes.insert(result.detail.unwrap().cause);
         }
         assert_eq!(

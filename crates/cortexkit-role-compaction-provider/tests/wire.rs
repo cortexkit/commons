@@ -1,11 +1,11 @@
 use cortexkit_role_compaction_provider::{
-    answer::StepAnswer,
     describe::{check_describe, DescribeRequest, Major, RoleDescribe},
     errors::RefuseCode,
+    lineage::MessageRef,
     ops,
-    ready::{CompactionReady, ReadyReply},
+    ride::{RideCause, RideRequest},
     setup::{SetupAnswer, SetupRequest},
-    status::{Estimate, MessageRef, StepStatus},
+    view::ViewGetRequest,
     OpRequest, PROVIDES, REQUIRED_OPS,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -18,7 +18,7 @@ fn exact<T: Serialize + DeserializeOwned>(value: &T, expected: Value) {
 }
 
 #[test]
-fn op_envelopes_and_empty_answers_round_trip() {
+fn op_envelopes_round_trip() {
     exact(
         &OpRequest::new(ops::ROLE_DESCRIBE, DescribeRequest::new()),
         json!({"method": "role.describe", "params": {}}),
@@ -33,32 +33,20 @@ fn op_envelopes_and_empty_answers_round_trip() {
             "composition": {}, "model": "m", "now": 1
         }}),
     );
+    let session_ref = "0123456789abcdef0123456789abcdef";
+    exact(
+        &OpRequest::new(ops::VIEW_GET, ViewGetRequest::new(session_ref, 3)),
+        json!({"method": "view.get", "params": {"session_ref": session_ref, "view_version": 3}}),
+    );
     exact(
         &OpRequest::new(
-            ops::COMPACTION_STEP,
-            StepStatus::new(
-                "s",
-                "broca",
-                "r1",
-                "l",
-                "step",
-                "user_turn",
-                "m",
-                Estimate::new(3),
-                1,
-            ),
+            ops::COMPACTION_RIDE,
+            RideRequest::new(session_ref, RideCause::TtlExpired, 1500),
         ),
-        json!({"method": "compaction.step", "params": {
-            "session": "s", "harness": "broca", "request_id": "r1", "lineage_id": "l",
-            "step_id": "step", "step_kind": "user_turn", "model": "m",
-            "estimate": {"request_tokens": 3}, "messages": [], "now": 1
+        json!({"method": "compaction.ride", "params": {
+            "session_ref": session_ref, "cause": "ttl_expired", "deadline_ms": 1500
         }}),
     );
-    exact(
-        &OpRequest::new(ops::COMPACTION_READY, CompactionReady::new("s", "r1")),
-        json!({"method": "compaction.ready", "params": {"session": "s", "request_id": "r1"}}),
-    );
-    exact(&ReadyReply::new(), json!({}));
 }
 
 #[test]
@@ -95,7 +83,7 @@ fn runner_groups_round_trip_and_name_the_unmet_ones() {
     .with_runner_groups(vec!["transcript_reads".into()]);
     let wire = json!({
         "majors": [{"version": "compaction-provider/v1",
-            "ops": ["role.describe", "compaction.setup", "compaction.step"],
+            "ops": ["role.describe", "compaction.setup", "view.get", "compaction.ride"],
             "stability": "alpha"}],
         "implementation_version": "1.0.0", "capabilities": [],
         "runner_groups": ["transcript_reads"]
@@ -112,22 +100,19 @@ fn runner_groups_round_trip_and_name_the_unmet_ones() {
 }
 
 #[test]
-fn refuse_carries_provider_code_and_no_retryable() {
+fn setup_refuse_carries_provider_code_and_no_retryable() {
     let wire = json!({"answer": "refuse", "request_id": "r1", "code": "provider_busy",
         "reason": "busy", "provider_code": "mc:historian_running"});
-    let step: StepAnswer = serde_json::from_value(wire.clone()).unwrap();
+    let setup: SetupAnswer = serde_json::from_value(wire.clone()).unwrap();
     assert_eq!(
-        step,
-        StepAnswer::Refuse {
+        setup,
+        SetupAnswer::Refuse {
             request_id: "r1".into(),
             code: RefuseCode::ProviderBusy,
             reason: "busy".into(),
             provider_code: Some("mc:historian_running".into()),
-            detail: None,
         }
     );
-    exact(&step, wire.clone());
-    let setup: SetupAnswer = serde_json::from_value(wire.clone()).unwrap();
     exact(&setup, wire);
-    assert_eq!(step.retryable(), Some(true));
+    assert_eq!(setup.retryable(), Some(true));
 }

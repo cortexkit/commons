@@ -31,6 +31,9 @@ pub mod problem_names {
     pub const EMPTY_RUN_CANCEL_AT: &str = "empty_run_cancel_at";
     pub const MISSING_RUN_CANCEL_NOW: &str = "missing_run_cancel_now";
     pub const DUPLICATE_RUN_CANCEL_AT: &str = "duplicate_run_cancel_at";
+    /// The answer declares `compaction` without `tags`, which a compaction
+    /// provider addresses every view edit by.
+    pub const COMPACTION_WITHOUT_TAGS: &str = "compaction_without_tags";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -339,6 +342,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.session_capabilities_from.is_none() {
         problems.push(DescribeProblem::MissingSessionCapabilitiesSource);
     }
+    if describe.declares(capabilities::COMPACTION) && !describe.declares(capabilities::TAGS) {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::COMPACTION_WITHOUT_TAGS.into(),
+        ));
+    }
     if let Some(cancel) = &describe.run_cancel {
         if !describe.declares(capabilities::RUN_CANCEL) {
             problems.push(DescribeProblem::Undecodable(
@@ -384,6 +392,7 @@ mod tests {
                 problem_names::EMPTY_RUN_CANCEL_AT => problem_names::EMPTY_RUN_CANCEL_AT,
                 problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,
                 problem_names::DUPLICATE_RUN_CANCEL_AT => problem_names::DUPLICATE_RUN_CANCEL_AT,
+                problem_names::COMPACTION_WITHOUT_TAGS => problem_names::COMPACTION_WITHOUT_TAGS,
                 _ => "undecodable",
             },
             DescribeProblem::MissingMajor { .. } => "missing_major",
@@ -538,7 +547,7 @@ mod tests {
         let answer = serde_json::json!({
             "majors": [
                 {"version": "llm-runner/v1", "stability": "experimental",
-                 "ops": ["role.describe", "session.baseline", "compaction.ready", "vendor.extra"]},
+                 "ops": ["role.describe", "session.baseline", "vendor.extra"]},
                 {"version": "llm-runner/v2", "stability": "alpha", "ops": ["role.describe"]}
             ],
             "implementation_version": "1.2.3",
@@ -564,7 +573,6 @@ mod tests {
                 vec![
                     ops::ROLE_DESCRIBE.into(),
                     ops::SESSION_BASELINE.into(),
-                    ops::COMPACTION_READY.into(),
                     ops::SESSION_SEND.into(),
                 ],
                 "alpha",
@@ -694,5 +702,58 @@ mod adopt_tests {
             .major(PROVIDES)
             .unwrap()
             .serves(crate::ops::SESSION_ADOPT));
+    }
+}
+
+#[cfg(test)]
+mod tags_and_tool_calls_tests {
+    use super::*;
+    use crate::vectors;
+
+    /// A describe vector file pinning one optional group: its discovery, the
+    /// refusal of a declaration missing `missing_op`, and a usable answer
+    /// without the group.
+    fn group_describe(file: &str, group: &'static str, missing_op: &'static str) {
+        let file = vectors::load(file);
+        let answer: RoleDescribe = vectors::round_trip(group, &file["accept"]);
+        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
+        assert!(answer.declares(group));
+        assert_eq!(
+            check_describe(&file["refuse"]),
+            Err(vec![DescribeProblem::GroupIncomplete {
+                capability: group,
+                op: missing_op
+            }])
+        );
+        let without = check_describe(&file["without"]).unwrap();
+        assert!(!without.declares(group));
+        assert_eq!(without.missing(&[group]), vec![group]);
+    }
+
+    #[test]
+    fn tags_describe_group_requires_read_and_resolve() {
+        group_describe(
+            "tags-describe.json",
+            capabilities::TAGS,
+            crate::ops::SESSION_RESOLVE,
+        );
+    }
+
+    #[test]
+    fn delivery_order_describe_group_requires_session_send() {
+        group_describe(
+            "delivery-order-describe.json",
+            capabilities::DELIVERY_ORDER,
+            crate::ops::SESSION_SEND,
+        );
+    }
+
+    #[test]
+    fn run_tool_calls_describe_group_requires_its_op() {
+        group_describe(
+            "run-tool-calls-describe.json",
+            capabilities::RUN_TOOL_CALLS,
+            crate::ops::RUN_TOOL_CALLS,
+        );
     }
 }

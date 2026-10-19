@@ -4,8 +4,7 @@
 use super::*;
 use cortexkit_role_llm_runner::read::{EntrySource, ModelEntry, ModelPage};
 use cortexkit_role_llm_runner_conformance::{
-    CompactionAnswer, CompactionCall, CompactionCallKind, CompactionMessage, CompactionObservation,
-    CompactionScript, CompactionSetup, CompactionStep,
+    CompactionCall, CompactionMessage, CompactionObservation, CompactionSetup,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -16,26 +15,9 @@ pub enum CompactionDefect {
     RerunSetupOnResumeSend,
     ChangeSetupResumeView,
     CancelSetupCrash,
-    FoldBeforeAnswer,
     InsertionAfterMessage,
     UnavailableAsRefusal,
     FinerCodeReplacesRoleCode,
-    ExceedWaitCap,
-    ApplyLate,
-    ApplyStale,
-    TimeoutEndsUnavailable,
-    ApplyTwoViews,
-    ForgetRecordedFold,
-}
-
-#[derive(Clone, Debug)]
-struct Pending {
-    index: usize,
-    request_id: String,
-    deadline: u64,
-    setup: bool,
-    step: usize,
-    consumed: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -43,10 +25,9 @@ pub(super) struct State {
     pub setup: Option<CompactionMessage>,
     view: Option<CompactionMessage>,
     fold: Option<CompactionMessage>,
-    request: Option<Pending>,
+    /// The runner issued its Setup call, and no error ended its run since.
+    setup_issued: bool,
     request_count: usize,
-    checked_step: Option<usize>,
-    wait: Option<(u64, u64)>,
     sealed_setup_crash: bool,
 }
 
@@ -66,8 +47,7 @@ impl Providers {
 }
 
 struct Provider {
-    script: CompactionScript,
-    now: u64,
+    setup: CompactionSetup,
     calls: Vec<CompactionCall>,
     models: Vec<ModelCall>,
 }
@@ -100,68 +80,30 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
     match record["kind"].as_str().unwrap_or_default() {
         "compaction_request" => {
             state.request_count += 1;
-            state.request = Some(Pending {
-                index: record["index"].as_u64().unwrap() as usize,
-                request_id: record["request_id"].as_str().unwrap().into(),
-                deadline: record["deadline"].as_u64().unwrap(),
-                setup: record["setup"].as_bool().unwrap(),
-                step: record["step"].as_u64().unwrap() as usize,
-                consumed: false,
-            });
+            state.setup_issued = true;
         }
         "compaction_message" => {
             let m = decode_message(&record["message"]);
-            if record["setup"] == true {
-                state.setup = Some(m.clone());
-            }
+            state.setup = Some(m.clone());
             state.fold = Some(m);
-            if let Some(r) = state.request.as_mut() {
-                r.consumed = true;
-            }
-            if record["setup"] != true {
-                state.checked_step = Some(record["step"].as_u64().unwrap() as usize);
-            }
         }
         "compaction_fold" => {
             state.view = Some(decode_message(&record["message"]));
             state.fold = None;
         }
-        "compaction_answer" | "compaction_timeout" => {
-            state.checked_step = Some(record["step"].as_u64().unwrap() as usize);
-            if let Some(r) = state.request.as_mut() {
-                r.consumed = true;
-            }
-        }
-        "compaction_wait" => {
-            state.wait = Some((
-                record["start"].as_u64().unwrap(),
-                record["bound"].as_u64().unwrap(),
-            ));
-        }
-        "compaction_wait_exit" => {
-            state.wait = None;
-        }
         "terminal" if record.get("error").is_some() => {
-            state.request = None;
-            state.checked_step = None;
-            state.wait = None;
+            state.setup_issued = false;
         }
         "resume"
             if state.setup.is_some()
-                && state.request.as_ref().is_some_and(|r| r.setup)
+                && state.setup_issued
                 && defect == CompactionDefect::RerunRecordedSetup =>
         {
             state.setup = None;
             state.fold = None;
-            state.request = None;
+            state.setup_issued = false;
         }
-        "resume" if defect == CompactionDefect::ForgetRecordedFold && state.view.is_some() => {
-            state.fold = None;
-        }
-        "terminal"
-            if record["state"] == "interrupted"
-                && state.request.as_ref().is_some_and(|r| r.setup) =>
-        {
+        "terminal" if record["state"] == "interrupted" && state.setup_issued => {
             state.sealed_setup_crash = true;
         }
         "send" if state.sealed_setup_crash => {
@@ -169,7 +111,7 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
             match defect {
                 CompactionDefect::RerunSetupOnResumeSend => {
                     state.setup = None;
-                    state.request = None;
+                    state.setup_issued = false;
                 }
                 CompactionDefect::ChangeSetupResumeView => {
                     state.view.as_mut().unwrap().replacement[1] = "changed-kept-summary".into();
@@ -220,7 +162,7 @@ impl Module {
         if !self.world.compaction.lock().unwrap().seal_setup_crash
             || state.setup.is_none()
             || state.view.is_none()
-            || !state.request.as_ref().is_some_and(|r| r.setup)
+            || !state.setup_issued
         {
             return Ok(false);
         }
@@ -234,10 +176,6 @@ impl Module {
             json!({"kind":"terminal", "run_id":run_id, "state":state}),
         )?;
         Ok(true)
-    }
-
-    fn compaction_now(&self, session: &str) -> u64 {
-        self.world.compaction.lock().unwrap().sessions[session].now
     }
 
     fn compaction_error(
@@ -262,44 +200,17 @@ impl Module {
         )
     }
 
-    fn issue_compaction(
-        &self,
-        session: &str,
-        run_id: &str,
-        setup: bool,
-        step: usize,
-    ) -> Result<(), Killed> {
+    /// Call Setup on the session's scripted provider and record its answer.
+    fn issue_setup(&self, session: &str, run_id: &str) -> Result<(), Killed> {
         let sess = self.sessions.lock().unwrap()[session].clone();
-        let (index, now, timeout, action) = {
-            let providers = self.world.compaction.lock().unwrap();
-            let p = &providers.sessions[session];
-            let action = if setup {
-                match &p.script.setup {
-                    CompactionSetup::Ready(m) => {
-                        CompactionStep::Answer(CompactionAnswer::Message(m.clone()))
-                    }
-                    CompactionSetup::Refuse {
-                        code,
-                        reason,
-                        provider_code,
-                    } => CompactionStep::Answer(CompactionAnswer::Refuse {
-                        code: code.clone(),
-                        reason: reason.clone(),
-                        provider_code: provider_code.clone(),
-                    }),
-                    CompactionSetup::Unavailable => CompactionStep::Hold(CompactionAnswer::Noop),
-                }
-            } else {
-                p.script
-                    .steps
-                    .get(step)
-                    .cloned()
-                    .unwrap_or(CompactionStep::Answer(CompactionAnswer::Noop))
-            };
-            (p.calls.len(), p.now, p.script.call_timeout_ms, action)
-        };
+        let setup = self.world.compaction.lock().unwrap().sessions[session]
+            .setup
+            .clone();
         let id = format!("{}-request-{}", sess.lineage, sess.compaction.request_count);
-        self.commit(session,json!({"kind":"compaction_request","index":index,"request_id":id,"setup":setup,"step":step,"deadline":now+timeout}))?;
+        self.commit(
+            session,
+            json!({"kind":"compaction_request","request_id":id}),
+        )?;
         self.world
             .compaction
             .lock()
@@ -309,110 +220,40 @@ impl Module {
             .unwrap()
             .calls
             .push(CompactionCall {
-                kind: if setup {
-                    CompactionCallKind::Setup
-                } else {
-                    CompactionCallKind::Step
-                },
                 request_id: id.clone(),
-                issued_at_ms: now,
-                deadline_ms: now + timeout,
             });
-        if setup
-            && self.world.compaction.lock().unwrap().sessions[session]
-                .script
-                .setup
-                == CompactionSetup::Unavailable
-        {
-            let code = if self.world.defects.compaction == CompactionDefect::UnavailableAsRefusal {
-                cortexkit_role_compaction_provider::errors::RefuseCode::ProviderBusy.as_str()
-            } else {
-                "compaction_unavailable"
-            };
-            return self.compaction_error(session, run_id, code, "Setup call failed", None);
-        }
-        match action {
-            CompactionStep::Answer(answer) => self.receive_compaction(session, index, None, answer),
-            CompactionStep::Hold(CompactionAnswer::Message(m))
-                if self.world.defects.compaction == CompactionDefect::FoldBeforeAnswer =>
-            {
-                // This defect folds prepared provider content before delivery,
-                // bypassing the runner's answer fence.
-                self.commit(
-                    session,
-                    json!({"kind":"compaction_fold","message":encode(&m)}),
-                )
-            }
-            CompactionStep::Hold(_) => Ok(()),
-        }
-    }
-
-    fn receive_compaction(
-        &self,
-        session: &str,
-        index: usize,
-        request: Option<String>,
-        answer: CompactionAnswer,
-    ) -> Result<(), Killed> {
-        let (now, call) = {
-            let providers = self.world.compaction.lock().unwrap();
-            let p = &providers.sessions[session];
-            (p.now, p.calls[index].clone())
-        };
-        let sess = self.sessions.lock().unwrap()[session].clone();
-        let Some(pending) = sess.compaction.request.clone() else {
-            return Ok(());
-        };
-        let id = request.unwrap_or(call.request_id);
-        let defect = self.world.defects.compaction;
-        let late = now >= call.deadline_ms;
-        let stale = id != pending.request_id || index != pending.index;
-        let consumed = pending.consumed;
-        let allowed = (!late || defect == CompactionDefect::ApplyLate)
-            && (!stale || defect == CompactionDefect::ApplyStale)
-            && (!consumed
-                || (late && defect == CompactionDefect::ApplyLate)
-                || defect == CompactionDefect::ApplyTwoViews);
-        if !allowed {
-            return self.commit(session,json!({"kind":"compaction_discard","request_id":id,"late":late,"stale":stale,"consumed":consumed}));
-        }
-        let run_id = sess.runs.last().unwrap().run_id.clone();
-        match answer {
-            CompactionAnswer::Message(m) => {
-                if sess
-                    .compaction
-                    .view
-                    .as_ref()
-                    .is_some_and(|old| old.version >= m.version)
+        match setup {
+            CompactionSetup::Unavailable => {
+                let code = if self.world.defects.compaction
+                    == CompactionDefect::UnavailableAsRefusal
                 {
-                    return self.commit(
-                        session,
-                        json!({"kind":"compaction_answer","step":pending.step}),
-                    );
-                }
-                self.commit(session,json!({"kind":"compaction_message","setup":pending.setup,"step":pending.step,"message":encode(&m)}))?;
-                self.commit(
-                    session,
-                    json!({"kind":"compaction_fold","message":encode(&m)}),
-                )
+                    cortexkit_role_compaction_provider::errors::RefuseCode::ProviderBusy.as_str()
+                } else {
+                    "compaction_unavailable"
+                };
+                self.compaction_error(session, run_id, code, "Setup call failed", None)
             }
-            CompactionAnswer::Noop => self.commit(
-                session,
-                json!({"kind":"compaction_answer","step":pending.step}),
-            ),
-            CompactionAnswer::Wait { bound_ms, .. } => self.commit(
-                session,
-                json!({"kind":"compaction_wait","start":now,"bound":bound_ms}),
-            ),
-            CompactionAnswer::Refuse {
+            CompactionSetup::Refuse {
                 code,
                 reason,
                 provider_code,
-            } => self.compaction_error(session, &run_id, code.as_str(), &reason, provider_code),
+            } => self.compaction_error(session, run_id, code.as_str(), &reason, provider_code),
+            CompactionSetup::Ready(m) => {
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_message","setup":true,"message":encode(&m)}),
+                )?;
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_fold","message":encode(&m)}),
+                )
+            }
         }
     }
 
-    /// Drive the actual fake timer/state machine, before any model request.
+    /// Before any model request: fold a recorded Setup answer, call Setup if
+    /// none is recorded, then capture the request at the scripted model and
+    /// hold it until released.
     pub(super) fn prepare_compaction(
         &self,
         session: &str,
@@ -429,16 +270,15 @@ impl Module {
         {
             return Ok(true);
         }
-        let mut state = self.sessions.lock().unwrap()[session].compaction.clone();
-        if let Some(m) = state.fold.take() {
+        let state = self.sessions.lock().unwrap()[session].compaction.clone();
+        if let Some(m) = state.fold {
             self.commit(
                 session,
                 json!({"kind":"compaction_fold","message":encode(&m)}),
             )?;
         }
         if state.setup.is_none() {
-            self.issue_compaction(session, run_id, true, step)?;
-            state = self.sessions.lock().unwrap()[session].compaction.clone();
+            self.issue_setup(session, run_id)?;
         }
         if self.sessions.lock().unwrap()[session]
             .run(run_id)
@@ -447,65 +287,6 @@ impl Module {
             != "active"
         {
             return Ok(false);
-        }
-        if let Some((start, bound)) = state.wait {
-            let (cap, fits) = {
-                let providers = self.world.compaction.lock().unwrap();
-                let s = &providers.sessions[session].script;
-                (
-                    s.wait_cap_ms.min(s.prompt_cache_lifetime_ms),
-                    s.request_tokens + s.output_limit + s.safety_margin <= s.context_window,
-                )
-            };
-            let elapsed = self.compaction_now(session) - start;
-            let effective_cap =
-                cap + u64::from(self.world.defects.compaction == CompactionDefect::ExceedWaitCap);
-            if elapsed >= effective_cap {
-                self.commit(session, json!({"kind":"compaction_wait_exit"}))?;
-                if !fits {
-                    self.compaction_error(
-                        session,
-                        run_id,
-                        "compaction_wait_exceeded",
-                        "request cannot be shown to fit",
-                        None,
-                    )?;
-                    return Ok(false);
-                }
-                self.commit(session, json!({"kind":"compaction_answer","step":step}))?;
-            } else if elapsed >= bound {
-                self.commit(session, json!({"kind":"compaction_wait_exit"}))?;
-                self.issue_compaction(session, run_id, false, step)?;
-                return Ok(false);
-            } else {
-                return Ok(false);
-            }
-            state = self.sessions.lock().unwrap()[session].compaction.clone();
-        }
-        if state.checked_step != Some(step) {
-            let outstanding = state
-                .request
-                .as_ref()
-                .filter(|p| !p.setup && p.step == step && !p.consumed);
-            if let Some(p) = outstanding {
-                if self.compaction_now(session) < p.deadline {
-                    return Ok(false);
-                }
-                if self.world.defects.compaction == CompactionDefect::TimeoutEndsUnavailable {
-                    self.compaction_error(
-                        session,
-                        run_id,
-                        "compaction_unavailable",
-                        "step timed out",
-                        None,
-                    )?;
-                    return Ok(false);
-                }
-                self.commit(session, json!({"kind":"compaction_timeout","step":step}))?;
-            } else {
-                self.issue_compaction(session, run_id, false, step)?;
-                return self.prepare_compaction(session, run_id, step);
-            }
         }
         // Capture at the model boundary, independently of session.read.
         let sess = self.sessions.lock().unwrap()[session].clone();
@@ -605,17 +386,16 @@ impl FakeSubject {
             .sessions
             .contains_key(session)
     }
-    pub(super) fn install_compaction(&self, session: &str, script: CompactionScript) {
+    pub(super) fn install_compaction(&self, session: &str, setup: CompactionSetup) {
         let world = self.world();
         let mut providers = world.compaction.lock().unwrap();
         if let Some(p) = providers.sessions.get_mut(session) {
-            p.script = script;
+            p.setup = setup;
         } else {
             providers.sessions.insert(
                 session.into(),
                 Provider {
-                    script,
-                    now: 0,
+                    setup,
                     calls: Vec::new(),
                     models: Vec::new(),
                 },
@@ -654,30 +434,6 @@ impl FakeSubject {
                 .map_err(|Killed| HarnessError::new("killed during compaction"))?;
         }
         Ok(())
-    }
-    pub(super) fn advance_compaction(&self, session: &str, ms: u64) -> Result<(), HarnessError> {
-        self.world()
-            .compaction
-            .lock()
-            .unwrap()
-            .sessions
-            .get_mut(session)
-            .unwrap()
-            .now += ms;
-        self.drive_compaction_modules(session)
-    }
-    pub(super) fn deliver_compaction(
-        &self,
-        session: &str,
-        index: usize,
-        request: Option<String>,
-        answer: CompactionAnswer,
-    ) -> Result<(), HarnessError> {
-        for m in self.compaction_modules(session) {
-            m.receive_compaction(session, index, request.clone(), answer.clone())
-                .map_err(|Killed| HarnessError::new("killed after answer"))?;
-        }
-        self.drive_compaction_modules(session)
     }
     pub(super) fn release_model(&self, session: &str) -> Result<(), HarnessError> {
         {

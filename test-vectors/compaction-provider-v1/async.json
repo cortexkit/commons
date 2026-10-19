@@ -1,0 +1,5162 @@
+{
+  "session": {
+    "harness": "opencode",
+    "project_root": "/work/demo",
+    "session": "ses_1",
+    "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+    "account": "acme",
+    "runner_module_id": "thalamus-harness",
+    "provider_module_id": "ck-mc"
+  },
+  "transcript": {
+    "lineage_id": "lin_a",
+    "messages": [
+      {
+        "ordinal": 1,
+        "mid": "m1",
+        "parts": [
+          "prt_1a"
+        ],
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Fix the parser."
+            }
+          ]
+        }
+      },
+      {
+        "ordinal": 2,
+        "mid": "m2",
+        "parts": [
+          "prt_2a",
+          "prt_2b"
+        ],
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reading the parser."
+            },
+            {
+              "type": "tool_use",
+              "id": "call_1",
+              "name": "read",
+              "input": {
+                "path": "src/parser.rs"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "ordinal": 3,
+        "mid": "m3",
+        "parts": [
+          "prt_3a",
+          "prt_3b"
+        ],
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_1",
+              "content": "fn parse() { /* 4,000 lines */ }"
+            },
+            {
+              "type": "image",
+              "source": "screenshot-1.png"
+            }
+          ]
+        }
+      },
+      {
+        "ordinal": 4,
+        "mid": "m4",
+        "parts": [
+          "prt_4a"
+        ],
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+            }
+          ]
+        }
+      },
+      {
+        "ordinal": 5,
+        "mid": "m5",
+        "parts": [
+          "prt_5a"
+        ],
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Now add tests."
+            }
+          ]
+        }
+      },
+      {
+        "ordinal": 6,
+        "mid": "m6",
+        "parts": [
+          "prt_6a"
+        ],
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Added three tests."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "notices": [
+    {
+      "name": "first notice after a user message",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:1",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "digest": "86f1773244a1808218bb08064725e9fbb76f476a5c01a8d78be9d19c94070b06"
+    },
+    {
+      "name": "tool step with usage, applied view and marker",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:5",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "5",
+        "lineage_id": "lin_a",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "64000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "marker_outcome:applied:cut-1",
+        "last_usage": "61000:58000:2000:850",
+        "applied_view_version": "3"
+      },
+      "digest": "b204761e9eead132da22a84d565d7080eff74bcf2362ef787300aa0bb511f918"
+    },
+    {
+      "name": "model change and cache expiry",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:6",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "6",
+        "lineage_id": "lin_a",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "64100",
+        "model": "openai/gpt-5",
+        "window": "400000",
+        "events": "model_change,ttl_expired",
+        "last_usage": "61000:58000:2000:850",
+        "applied_view_version": "3"
+      },
+      "digest": "336b9dcd0bf52f0ffae1f64673b47d22229a9b1069506aef4b9fd7e9afe0766f"
+    },
+    {
+      "name": "surface change with a deferred marker",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:7",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "7",
+        "lineage_id": "lin_a",
+        "through_ordinal": "5",
+        "through_digest": "91b261cb563d0533f0ca4f7da657ecb0e26570ef2e9785d3374b1a9121f7f7f6",
+        "est_tokens": "66000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "surface_change,marker_outcome:deferred:cut-2",
+        "applied_view_version": "4"
+      },
+      "digest": "432245d89c48e1e6bad0bbf754ba59e748719441032a97de0b8feff7297b1926"
+    },
+    {
+      "name": "revert discards the current view",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:8",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "8",
+        "lineage_id": "lin_a",
+        "through_ordinal": "3",
+        "through_digest": "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958",
+        "est_tokens": "9000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "revert_below:4,view_discarded:3"
+      },
+      "digest": "b6dd16a22217810e6346cb9c2cbd7e52d0b76767609e4910b20374f9a659275a"
+    },
+    {
+      "name": "view refused for a split tool pair",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:9",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
+        "est_tokens": "70000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_refused:5:tool_pair_split",
+        "applied_view_version": "4"
+      },
+      "digest": "a5e157b3c60537f0880e10b1112fb1db9fead538a1ac6fe15efa40c2b4ef4c3e"
+    },
+    {
+      "name": "view refused for an unknown part",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:10",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "10",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
+        "est_tokens": "70100",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_refused:6:unknown_part",
+        "applied_view_version": "4"
+      },
+      "digest": "6d9ad42573fdba0a5abf10da38e8470ca327772edb7b678826c90cde1041507c"
+    },
+    {
+      "name": "view deferred until a provider-safe boundary",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:11",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "11",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
+        "est_tokens": "70200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_deferred:6:signed_reasoning",
+        "applied_view_version": "4"
+      },
+      "digest": "ab9ab171da09e2a6223c14ba3ee807a24d6dd5ed5424f340d02254a0fdce9a90"
+    },
+    {
+      "name": "view applied with a companion edit",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:12",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "12",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "c810441f47371f02fbf907f654c62a99220e962def10fe1ea0b921551093dd08",
+        "est_tokens": "41000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_companion:6:strip_signed_reasoning",
+        "applied_view_version": "6"
+      },
+      "digest": "eacfb5b09efc81b2dafa2013d61835b1de84eda8faa4ddde5d05040cec883ad5"
+    },
+    {
+      "name": "window unknown",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:2",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "2",
+        "lineage_id": "lin_a",
+        "through_ordinal": "2",
+        "through_digest": "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b",
+        "est_tokens": "1500",
+        "model": "anthropic/claude-sonnet-4-5"
+      },
+      "digest": "283e93e3bd49f55593857f27ab3a408870412338529c303f658c87a507a0cc31"
+    },
+    {
+      "name": "a fork moves the session to a new lineage, declaring its descent",
+      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:13",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "13",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "65000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "digest": "845894e2a378d023891d73702f1cc1abb43b78b2ed847bbecd2e88c40d19ba49"
+    }
+  ],
+  "notices_accepted": [
+    {
+      "name": "a header this contract does not define is ignored and not digested",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "trace_id": "abc"
+      },
+      "digest": "86f1773244a1808218bb08064725e9fbb76f476a5c01a8d78be9d19c94070b06",
+      "events": []
+    },
+    {
+      "name": "an unknown event token decodes and is ignored",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "5",
+        "lineage_id": "lin_a",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "64000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "marker_outcome:applied:cut-1,cache_warmed:5m",
+        "last_usage": "61000:58000:2000:850",
+        "applied_view_version": "3"
+      },
+      "digest": "fb3f27696ef31fa0f964f5040b07661996e3ccc80deacbce35c81887073cd4cb",
+      "events": [
+        "marker_outcome:applied:cut-1",
+        "cache_warmed:5m"
+      ]
+    }
+  ],
+  "notices_refused": [
+    {
+      "name": "no seq",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "missing:seq"
+    },
+    {
+      "name": "no through_digest",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "missing:through_digest"
+    },
+    {
+      "name": "no model",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "window": "200000"
+      },
+      "problem": "missing:model"
+    },
+    {
+      "name": "seq zero",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "0",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:seq"
+    },
+    {
+      "name": "seq with a leading zero",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "01",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:seq"
+    },
+    {
+      "name": "seq with a sign",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "+1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:seq"
+    },
+    {
+      "name": "through_digest in uppercase",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "EFC959960E9C3392A28C897F298CA6651073D4D263C7F241EB7956ED87267FC1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:through_digest"
+    },
+    {
+      "name": "session_ref is the raw session id",
+      "headers": {
+        "session_ref": "ses_1",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:session_ref"
+    },
+    {
+      "name": "model with a space",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "claude sonnet",
+        "window": "200000"
+      },
+      "problem": "malformed:model"
+    },
+    {
+      "name": "model over 256 bytes",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "window": "200000"
+      },
+      "problem": "malformed:model"
+    },
+    {
+      "name": "window not a number",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200k"
+      },
+      "problem": "malformed:window"
+    },
+    {
+      "name": "empty events",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": ""
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "an empty event token",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "model_change,"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "a space after a comma",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "model_change, ttl_expired"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "argument on an event that takes none",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "model_change:x"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "revert_below without an ordinal",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "revert_below"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "unknown marker outcome",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "marker_outcome:maybe:cut-1",
+        "applied_view_version": "3"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "marker without a cut id",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "marker_outcome:applied",
+        "applied_view_version": "3"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_discarded of version zero",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "revert_below:2,view_discarded:0"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_refused with an uppercase reason",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_refused:4:Tool_Split"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_refused without a reason",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_refused:4"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_deferred without a reason",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_deferred:6"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_companion with an uppercase edit",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_companion:6:Strip"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_companion of version zero",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_companion:0:strip_signed_reasoning"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "duplicate event token",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "model_change,model_change"
+      },
+      "problem": "duplicate_event"
+    },
+    {
+      "name": "more than 32 event tokens",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "e0,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15,e16,e17,e18,e19,e20,e21,e22,e23,e24,e25,e26,e27,e28,e29,e30,e31,e32"
+      },
+      "problem": "too_many_events"
+    },
+    {
+      "name": "events over 1024 bytes",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "e0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e2_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e3_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e4_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e5_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e6_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e7_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e8_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,e9_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "problem": "malformed:events"
+    },
+    {
+      "name": "view_discarded without revert_below",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "view_discarded:3"
+      },
+      "problem": "view_discarded_without_revert_below"
+    },
+    {
+      "name": "marker_outcome without applied_view_version",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "events": "marker_outcome:applied:cut-1"
+      },
+      "problem": "marker_outcome_without_applied_view_version"
+    },
+    {
+      "name": "applied_view_version zero",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "applied_view_version": "0"
+      },
+      "problem": "malformed:applied_view_version"
+    },
+    {
+      "name": "last_usage with three parts",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "last_usage": "1:2:3"
+      },
+      "problem": "malformed:last_usage"
+    },
+    {
+      "name": "no lineage_id",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "missing:lineage_id"
+    },
+    {
+      "name": "lineage_id with a space",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:lineage_id"
+    },
+    {
+      "name": "lineage_id over 256 bytes",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "problem": "malformed:lineage_id"
+    },
+    {
+      "name": "descends_from without a digest",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:3"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from with a leading-zero ordinal",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:03:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from with an uppercase digest",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:3:2C817FE268CC6E06FA84AC216A44A34654869704235FB05B92E77F06D1BB8958"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from without an old lineage",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": ":3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "problem": "malformed:descends_from"
+    },
+    {
+      "name": "descends_from naming the notice's own lineage",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "1",
+        "lineage_id": "lin_a",
+        "through_ordinal": "1",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "problem": "malformed:descends_from"
+    }
+  ],
+  "view_ready": [
+    {
+      "name": "view 3 is ready",
+      "subject": "ck.acme.event.ck-mc.compaction.view_ready.v1",
+      "message_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "bus_digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+    }
+  ],
+  "view_ready_refused": [
+    {
+      "name": "view_version zero",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "0",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "problem": "malformed:view_version"
+    },
+    {
+      "name": "no digest",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4"
+      },
+      "problem": "missing:digest"
+    },
+    {
+      "name": "covers_through not a number",
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "m4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "problem": "malformed:covers_through"
+    }
+  ],
+  "views": [
+    {
+      "name": "insertion head before every message",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 1,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 1,
+          "mid": "m1"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 0,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 0,
+            "to": 2
+          }
+        ],
+        "digest": "c396fbdd11cade6565d73b72288f6d327a00c0114875cf6090022cb36f2bf94e"
+      },
+      "assembled": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<session-history>The user asked to fix the parser.</session-history>"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Fix the parser."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reading the parser."
+            },
+            {
+              "type": "tool_use",
+              "id": "call_1",
+              "name": "read",
+              "input": {
+                "path": "src/parser.rs"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_1",
+              "content": "fn parse() { /* 4,000 lines */ }"
+            },
+            {
+              "type": "image",
+              "source": "screenshot-1.png"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Now add tests."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Added three tests."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "part edits inside a keep range: a dropped tool output and a stripped image",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "assembled": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<session-history>The user asked to fix the parser.</session-history>"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reading the parser."
+            },
+            {
+              "type": "tool_use",
+              "id": "call_1",
+              "name": "read",
+              "input": {
+                "path": "src/parser.rs"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_1",
+              "content": "[dropped §3§]"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Now add tests."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Added three tests."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "compressed text inside a kept message",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 4,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 5,
+          "mid": "m5"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 6,
+            "edits": [
+              {
+                "ordinal": 4,
+                "mid": "m4",
+                "part": "prt_4a",
+                "bytes": "{\"type\":\"text\",\"text\":\"Fixed: the parser dropped trailing commas.\"}"
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-2",
+          "through_ordinal": 1
+        },
+        "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+      },
+      "assembled": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<session-history>The user asked to fix the parser.</session-history>"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reading the parser."
+            },
+            {
+              "type": "tool_use",
+              "id": "call_1",
+              "name": "read",
+              "input": {
+                "path": "src/parser.rs"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_1",
+              "content": "fn parse() { /* 4,000 lines */ }"
+            },
+            {
+              "type": "image",
+              "source": "screenshot-1.png"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Fixed: the parser dropped trailing commas."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Now add tests."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Added three tests."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "whole-message fold between kept ranges",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 5,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 3
+          },
+          {
+            "kind": "replace",
+            "from": 3,
+            "to": 4,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"<folded>parser.rs, 4,000 lines</folded>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 4,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-3",
+          "through_ordinal": 1
+        },
+        "digest": "c88645ec6ba481907e3df8948770ef9f70e949d63e5f6755a398dd6c8c1f4006"
+      },
+      "assembled": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<session-history>The user asked to fix the parser.</session-history>"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reading the parser."
+            },
+            {
+              "type": "tool_use",
+              "id": "call_1",
+              "name": "read",
+              "input": {
+                "path": "src/parser.rs"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_1",
+              "content": "<folded>parser.rs, 4,000 lines</folded>"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Now add tests."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Added three tests."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "views_refused": [
+    {
+      "name": "session_ref is not a session reference",
+      "view": {
+        "session_ref": "ses_1",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "46d7a4c3282bc2c64b700c5fde832b285635361b2864389398e6af3f1fb39fdb"
+      },
+      "problem": "session_ref"
+    },
+    {
+      "name": "version zero",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 0,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "0c3908f1ca6fdbf1e54997fe4d7b59fefc68764b0ea0d88d966e199164cb387a"
+      },
+      "problem": "version_zero"
+    },
+    {
+      "name": "digest in uppercase",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "BA88E024BAE6303E4623EC9FC000B178D7A3EF7CC9FAC110ADC8E15530D05367"
+      },
+      "problem": "digest_malformed"
+    },
+    {
+      "name": "no ranges",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [],
+        "digest": "5a83fd27c1a3c6da28dd419a0640ef54aa884a35a9b4ad519e6a03daa360c248"
+      },
+      "problem": "no_ranges"
+    },
+    {
+      "name": "first range does not start at 0",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 1,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "4000fb9aa4e5468c21529e23481f0d041d659ad6ec42de60f4d25e2c224b1d08"
+      },
+      "problem": "gap"
+    },
+    {
+      "name": "a hole between ranges",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 3,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "c9f73e35f5adbc13d644077909b1fe1583b847bfa83c455a8f88f0dc89160a47"
+      },
+      "problem": "gap"
+    },
+    {
+      "name": "an empty keep range",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 2
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ec9dc6f7f23544ec04e4a8fa282174142f1c150cf4544a7461881d69faac1ae9"
+      },
+      "problem": "inverted"
+    },
+    {
+      "name": "an inverted replace range",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "replace",
+            "from": 2,
+            "to": 1,
+            "bytes": "[]"
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "b746567843f434ad26156b73f4f14bc0c2eb0e36dd45255b491decc35899a0a1"
+      },
+      "problem": "inverted"
+    },
+    {
+      "name": "ranges end before the coverage",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 4
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "413b997443fa977de319fb3fbaae729dbdb6785f9e6f5f8cd7eaee72c5b99424"
+      },
+      "problem": "coverage_end"
+    },
+    {
+      "name": "ranges run past the coverage",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 7
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "c275ea468c230be8ecce343341c924225be6a02bcab1548755fb33e218aabc99"
+      },
+      "problem": "coverage_end"
+    },
+    {
+      "name": "replacement bytes are not a JSON array",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "{\"role\":\"user\"}"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "b01e85ad224c6122f03e3f715ee860141b99dc22ed2648f5fa10d5ef0f19ba7f"
+      },
+      "problem": "replacement_not_array"
+    },
+    {
+      "name": "cut not on a range boundary",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 0
+        },
+        "digest": "aefd852ebce347e2a0c397a9cc0d1901c03ea4ccbb490afce911edcc166ac59c"
+      },
+      "problem": "cut"
+    },
+    {
+      "name": "cut after a kept range",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 2
+        },
+        "digest": "ee88810e8b46a2736f7079f3fb24e9cc2df3d877337c9eda08d384f05dcf6199"
+      },
+      "problem": "cut"
+    },
+    {
+      "name": "cut beyond the coverage",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 9
+        },
+        "digest": "df49515599c830fc3487167443e90ef6cd80d2dd72c493340a9294ff12c73e35"
+      },
+      "problem": "cut"
+    },
+    {
+      "name": "cut id with a space",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut 1",
+          "through_ordinal": 1
+        },
+        "digest": "16584e41a9734d5061b7db37c4161692d33d460ca6255bcfda413006a60835c6"
+      },
+      "problem": "cut"
+    }
+  ],
+  "views_undecodable": [
+    {
+      "name": "unknown range kind",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "summarize",
+            "from": 0,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      }
+    },
+    {
+      "name": "range named by message ids",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "keep",
+            "from": "m1",
+            "to": "m4"
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      }
+    },
+    {
+      "name": "no digest",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        }
+      }
+    },
+    {
+      "name": "negative version",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": -1,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      }
+    }
+  ],
+  "edits_refused": [
+    {
+      "name": "edit above its keep range",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 5,
+                "mid": "m5",
+                "part": "prt_5a",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "e60ba18025163ee5a74634456808d19257abbe8e72bc5b7a185f1b933b924376"
+      },
+      "problem": "edit_outside_range"
+    },
+    {
+      "name": "edit below its keep range",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 1,
+                "mid": "m1",
+                "part": "prt_1a",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "445c00fd3d7d4c98b9f2d916fa1ace58693bd091c5bd463862b7896ceaa036b5"
+      },
+      "problem": "edit_outside_range"
+    },
+    {
+      "name": "edits out of ordinal order",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 4,
+                "mid": "m4",
+                "part": "prt_4a",
+                "bytes": "{\"type\":\"text\",\"text\":\"Fixed: the parser dropped trailing commas.\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "7b9568ff3657712f7b1d25150b27f2afabd13e460f925767422b596cc929dcdb"
+      },
+      "problem": "edit_order"
+    },
+    {
+      "name": "two edits of one part",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "9b438cf89fc8327894ea910c1fc5f27e18e3f83e32e20361c07e8533c0867a12"
+      },
+      "problem": "duplicate_edit"
+    },
+    {
+      "name": "empty part key",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "890190cc9143c6b4e33faa13544ccce215208b7e1cfde88e67e1bb1ff954c2b9"
+      },
+      "problem": "edit_part"
+    },
+    {
+      "name": "part key over 256 bytes",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "bf0b8d4db52f0a2c28109d57eb08253aa43712929de4ae93140d163ec29b001d"
+      },
+      "problem": "edit_part"
+    },
+    {
+      "name": "both bytes and drop",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "6fb08e86355cf049e6bf1481f976ea2d5dfbfbb50262fe1da01a896098ed6d95"
+      },
+      "problem": "edit_action"
+    },
+    {
+      "name": "neither bytes nor drop",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a"
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "64bfe1f8457fde3065547507cf47568ae56cbf534cdaa7d713d2ef5bc24d1d39"
+      },
+      "problem": "edit_action"
+    },
+    {
+      "name": "edit bytes are not JSON",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\": \"tool_result\""
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "3a1a4c2d5fdad31c5f97ae3fb6fb18ad35481a20ffff3390fe1eb9a714b97d7a"
+      },
+      "problem": "edit_not_json"
+    }
+  ],
+  "dispositions": [
+    {
+      "name": "newer view over the current transcript applies",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "apply"
+    },
+    {
+      "name": "first view applies",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 1,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 1,
+          "mid": "m1"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 0,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 0,
+            "to": 2
+          }
+        ],
+        "digest": "c396fbdd11cade6565d73b72288f6d327a00c0114875cf6090022cb36f2bf94e"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "1",
+        "covers_through": "1",
+        "digest": "c396fbdd11cade6565d73b72288f6d327a00c0114875cf6090022cb36f2bf94e"
+      },
+      "current_version": null,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "apply"
+    },
+    {
+      "name": "same version as the current view is stale",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 3,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "stale"
+    },
+    {
+      "name": "revert truncated below the coverage: discard",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 7,
+          "mid": "m7",
+          "parts": [
+            "prt_7a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Try again."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "discard"
+    },
+    {
+      "name": "another message now at the coverage ordinal: discard",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4b",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "discard"
+    },
+    {
+      "name": "an edited message now has another id: discard",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3b",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "discard"
+    },
+    {
+      "name": "view over another lineage: discard",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_b",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "discard"
+    },
+    {
+      "name": "edit names a part key the message does not have",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 6,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3z",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "digest": "817cd377ee42e2052cf71bc19d56c5bfbaeeaa9ae9bab54c42cac36f9f932568"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "6",
+        "covers_through": "4",
+        "digest": "817cd377ee42e2052cf71bc19d56c5bfbaeeaa9ae9bab54c42cac36f9f932568"
+      },
+      "current_version": 4,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "refused:unknown_part"
+    },
+    {
+      "name": "digest differs from the announced digest",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "rejected:digest_mismatch"
+    },
+    {
+      "name": "bytes changed but the digest member kept",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"rm -rf /\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "rejected:digest_mismatch"
+    },
+    {
+      "name": "fetched view is not the announced version",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "4",
+        "covers_through": "4",
+        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "rejected:not_requested"
+    },
+    {
+      "name": "malformed view is rejected before any prefix check",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 3,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 3,
+            "to": 5
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-1",
+          "through_ordinal": 1
+        },
+        "digest": "c9f73e35f5adbc13d644077909b1fe1583b847bfa83c455a8f88f0dc89160a47"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "3",
+        "covers_through": "4",
+        "digest": "c9f73e35f5adbc13d644077909b1fe1583b847bfa83c455a8f88f0dc89160a47"
+      },
+      "current_version": 1,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 7,
+          "mid": "m7",
+          "parts": [
+            "prt_7a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Try again."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "rejected:gap"
+    },
+    {
+      "name": "edits of one message out of its part order",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 6,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 4,
+          "mid": "m4"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 5,
+            "edits": [
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3b",
+                "drop": true
+              },
+              {
+                "ordinal": 3,
+                "mid": "m3",
+                "part": "prt_3a",
+                "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+              }
+            ]
+          }
+        ],
+        "digest": "5fa06633eb4f05d91f599ce2a9ed4006d7ec4c07bb0af6d5af3c1fe4d5a52494"
+      },
+      "ready": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": "6",
+        "covers_through": "4",
+        "digest": "5fa06633eb4f05d91f599ce2a9ed4006d7ec4c07bb0af6d5af3c1fe4d5a52494"
+      },
+      "current_version": 4,
+      "lineage_id": "lin_a",
+      "transcript": [
+        {
+          "ordinal": 1,
+          "mid": "m1",
+          "parts": [
+            "prt_1a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the parser."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 2,
+          "mid": "m2",
+          "parts": [
+            "prt_2a",
+            "prt_2b"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Reading the parser."
+              },
+              {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "read",
+                "input": {
+                  "path": "src/parser.rs"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 3,
+          "mid": "m3",
+          "parts": [
+            "prt_3a",
+            "prt_3b"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "fn parse() { /* 4,000 lines */ }"
+              },
+              {
+                "type": "image",
+                "source": "screenshot-1.png"
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 4,
+          "mid": "m4",
+          "parts": [
+            "prt_4a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "I traced the bug: the parser drops trailing commas because the loop exits early. Fixed in parse()."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 5,
+          "mid": "m5",
+          "parts": [
+            "prt_5a"
+          ],
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Now add tests."
+              }
+            ]
+          }
+        },
+        {
+          "ordinal": 6,
+          "mid": "m6",
+          "parts": [
+            "prt_6a"
+          ],
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Added three tests."
+              }
+            ]
+          }
+        }
+      ],
+      "outcome": "rejected:edit_order"
+    }
+  ],
+  "view_get": {
+    "requests": [
+      {
+        "name": "fetch view 3",
+        "request": {
+          "method": "view.get",
+          "params": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "view_version": 3
+          }
+        }
+      }
+    ],
+    "answers": [
+      {
+        "name": "the view",
+        "answer": {
+          "answer": "view",
+          "view": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "view_version": 3,
+            "lineage_id": "lin_a",
+            "covers_through": {
+              "ordinal": 4,
+              "mid": "m4"
+            },
+            "ranges": [
+              {
+                "kind": "replace",
+                "from": 0,
+                "to": 2,
+                "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+              },
+              {
+                "kind": "keep",
+                "from": 2,
+                "to": 5,
+                "edits": [
+                  {
+                    "ordinal": 3,
+                    "mid": "m3",
+                    "part": "prt_3a",
+                    "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+                  },
+                  {
+                    "ordinal": 3,
+                    "mid": "m3",
+                    "part": "prt_3b",
+                    "drop": true
+                  }
+                ]
+              }
+            ],
+            "cut": {
+              "cut_id": "cut-1",
+              "through_ordinal": 1
+            },
+            "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+          }
+        }
+      },
+      {
+        "name": "unknown version",
+        "answer": {
+          "answer": "refuse",
+          "code": "unknown_version",
+          "reason": "view 2 was superseded and dropped"
+        }
+      },
+      {
+        "name": "unknown session",
+        "answer": {
+          "answer": "refuse",
+          "code": "unknown_session",
+          "reason": "no view state for this session"
+        }
+      }
+    ],
+    "undecodable_answers": [
+      {
+        "name": "unknown answer",
+        "answer": {
+          "answer": "latest",
+          "view": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "view_version": 3,
+            "lineage_id": "lin_a",
+            "covers_through": {
+              "ordinal": 4,
+              "mid": "m4"
+            },
+            "ranges": [
+              {
+                "kind": "replace",
+                "from": 0,
+                "to": 2,
+                "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+              },
+              {
+                "kind": "keep",
+                "from": 2,
+                "to": 5,
+                "edits": [
+                  {
+                    "ordinal": 3,
+                    "mid": "m3",
+                    "part": "prt_3a",
+                    "bytes": "{\"type\":\"tool_result\",\"tool_use_id\":\"call_1\",\"content\":\"[dropped \\u00a73\\u00a7]\"}"
+                  },
+                  {
+                    "ordinal": 3,
+                    "mid": "m3",
+                    "part": "prt_3b",
+                    "drop": true
+                  }
+                ]
+              }
+            ],
+            "cut": {
+              "cut_id": "cut-1",
+              "through_ordinal": 1
+            },
+            "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+          }
+        }
+      },
+      {
+        "name": "refuse without a code",
+        "answer": {
+          "answer": "refuse",
+          "reason": "gone"
+        }
+      }
+    ]
+  },
+  "ride": {
+    "requests": [
+      {
+        "name": "cache expired",
+        "request": {
+          "method": "compaction.ride",
+          "params": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "cause": "ttl_expired",
+            "deadline_ms": 1500
+          }
+        }
+      },
+      {
+        "name": "model changed",
+        "request": {
+          "method": "compaction.ride",
+          "params": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "cause": "model_change",
+            "deadline_ms": 1500
+          }
+        }
+      },
+      {
+        "name": "surface changed",
+        "request": {
+          "method": "compaction.ride",
+          "params": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "cause": "surface_change",
+            "deadline_ms": 1500
+          }
+        }
+      },
+      {
+        "name": "ceiling reached",
+        "request": {
+          "method": "compaction.ride",
+          "params": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "cause": "ceiling",
+            "deadline_ms": 30000
+          }
+        }
+      },
+      {
+        "name": "cause this crate does not know, kept as received",
+        "request": {
+          "method": "compaction.ride",
+          "params": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "cause": "provider_switch",
+            "deadline_ms": 1500
+          }
+        }
+      }
+    ],
+    "requests_refused": [
+      {
+        "name": "zero deadline",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ttl_expired",
+          "deadline_ms": 0
+        },
+        "problem": "deadline_out_of_range"
+      },
+      {
+        "name": "deadline over five minutes",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ceiling",
+          "deadline_ms": 300001
+        },
+        "problem": "deadline_out_of_range"
+      },
+      {
+        "name": "a rewrite ride over ten seconds",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ttl_expired",
+          "deadline_ms": 10001
+        },
+        "problem": "deadline_out_of_range"
+      },
+      {
+        "name": "a model-change ride over ten seconds",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "model_change",
+          "deadline_ms": 30000
+        },
+        "problem": "deadline_out_of_range"
+      },
+      {
+        "name": "raw session id",
+        "params": {
+          "session_ref": "ses_1",
+          "cause": "ttl_expired",
+          "deadline_ms": 1500
+        },
+        "problem": "session_ref"
+      }
+    ],
+    "answers": [
+      {
+        "name": "a view",
+        "answer": {
+          "answer": "view",
+          "view": {
+            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "view_version": 4,
+            "lineage_id": "lin_a",
+            "covers_through": {
+              "ordinal": 5,
+              "mid": "m5"
+            },
+            "ranges": [
+              {
+                "kind": "replace",
+                "from": 0,
+                "to": 2,
+                "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+              },
+              {
+                "kind": "keep",
+                "from": 2,
+                "to": 6,
+                "edits": [
+                  {
+                    "ordinal": 4,
+                    "mid": "m4",
+                    "part": "prt_4a",
+                    "bytes": "{\"type\":\"text\",\"text\":\"Fixed: the parser dropped trailing commas.\"}"
+                  }
+                ]
+              }
+            ],
+            "cut": {
+              "cut_id": "cut-2",
+              "through_ordinal": 1
+            },
+            "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+          }
+        }
+      },
+      {
+        "name": "nothing",
+        "answer": {
+          "answer": "nothing"
+        }
+      }
+    ],
+    "undecodable_answers": [
+      {
+        "name": "unknown answer",
+        "answer": {
+          "answer": "later"
+        }
+      },
+      {
+        "name": "view answer without a view",
+        "answer": {
+          "answer": "view"
+        }
+      }
+    ]
+  },
+  "ceiling": {
+    "setup_answer": {
+      "answer": "ready",
+      "request_id": "req-setup-1",
+      "initial": {
+        "compaction_id": "head",
+        "version": 1,
+        "range": {
+          "from": 0,
+          "to": 0
+        },
+        "replacement": []
+      },
+      "ceiling": {
+        "at_share": 0.9,
+        "on_overflow": true,
+        "wait_ms": 30000
+      }
+    },
+    "policies": [
+      {
+        "name": "share only",
+        "policy": {
+          "at_share": 0.85,
+          "wait_ms": 20000
+        }
+      },
+      {
+        "name": "share and overflow",
+        "policy": {
+          "at_share": 0.9,
+          "on_overflow": true,
+          "wait_ms": 30000
+        }
+      },
+      {
+        "name": "the whole window, longest wait",
+        "policy": {
+          "at_share": 1.0,
+          "wait_ms": 300000
+        }
+      }
+    ],
+    "policies_refused": [
+      {
+        "name": "share zero",
+        "policy": {
+          "at_share": 0.0,
+          "wait_ms": 30000
+        },
+        "problem": "share_out_of_range"
+      },
+      {
+        "name": "share above one",
+        "policy": {
+          "at_share": 1.2,
+          "wait_ms": 30000
+        },
+        "problem": "share_out_of_range"
+      },
+      {
+        "name": "wait zero",
+        "policy": {
+          "at_share": 0.9,
+          "wait_ms": 0
+        },
+        "problem": "wait_out_of_range"
+      },
+      {
+        "name": "wait over five minutes",
+        "policy": {
+          "at_share": 0.9,
+          "wait_ms": 300001
+        },
+        "problem": "wait_out_of_range"
+      }
+    ],
+    "reached": [
+      {
+        "size": 179999,
+        "window": 200000,
+        "reached": false
+      },
+      {
+        "size": 180000,
+        "window": 200000,
+        "reached": true
+      },
+      {
+        "size": 250000,
+        "window": 200000,
+        "reached": true
+      }
+    ],
+    "decisions": [
+      {
+        "name": "a view brought it under the ceiling",
+        "size": 120000,
+        "window": 200000,
+        "overflowed": false,
+        "end": "view_applied",
+        "decision": "send"
+      },
+      {
+        "name": "still at the ceiling when the wait ran out",
+        "size": 185000,
+        "window": 200000,
+        "overflowed": false,
+        "end": "timed_out",
+        "decision": "refuse:view_timeout"
+      },
+      {
+        "name": "a view arrived but still at the ceiling",
+        "size": 190000,
+        "window": 200000,
+        "overflowed": false,
+        "end": "view_applied",
+        "decision": "refuse:view_timeout"
+      },
+      {
+        "name": "provider unreachable",
+        "size": 185000,
+        "window": 200000,
+        "overflowed": false,
+        "end": "provider_unavailable",
+        "decision": "refuse:provider_unavailable"
+      },
+      {
+        "name": "over the window after a switch to a smaller model",
+        "size": 150000,
+        "window": 128000,
+        "overflowed": false,
+        "end": "view_applied",
+        "decision": "refuse:over_window"
+      },
+      {
+        "name": "overflow error, no newer view: never resend the same request",
+        "size": 150000,
+        "window": 200000,
+        "overflowed": true,
+        "end": "timed_out",
+        "decision": "refuse:view_timeout"
+      },
+      {
+        "name": "overflow error, newer view applied",
+        "size": 150000,
+        "window": 200000,
+        "overflowed": true,
+        "end": "view_applied",
+        "decision": "send"
+      }
+    ]
+  },
+  "descent": [
+    {
+      "name": "descent from the held lineage with a matching digest keeps state through the cut",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "outcome": "keep_through:3"
+    },
+    {
+      "name": "an old lineage id containing ':' parses from the right",
+      "held_lineage": "run:fork:1",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "run:fork:2",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "run:fork:1:2:f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+      },
+      "outcome": "keep_through:2"
+    },
+    {
+      "name": "a digest that differs from the recorded one resyncs",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:3:e04013e94d36a3644ccf7945e5c51570d87103b6820058aefb1ec3cafeb750ab"
+      },
+      "outcome": "resync"
+    },
+    {
+      "name": "no descends_from header: full resync",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "outcome": "resync"
+    },
+    {
+      "name": "descent from a lineage the provider does not hold resyncs",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_z:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "outcome": "resync"
+    },
+    {
+      "name": "descent through an ordinal the provider never recorded resyncs",
+      "held_lineage": "lin_a",
+      "recorded_digests": [
+        [
+          1,
+          "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+        ],
+        [
+          2,
+          "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+        ],
+        [
+          3,
+          "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+        ],
+        [
+          4,
+          "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+        ]
+      ],
+      "headers": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "20",
+        "lineage_id": "lin_b",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "descends_from": "lin_a:9:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      },
+      "outcome": "resync"
+    }
+  ],
+  "id_collision": {
+    "notice_headers": {
+      "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+      "seq": "3",
+      "lineage_id": "lin_a",
+      "through_ordinal": "3",
+      "through_digest": "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958",
+      "est_tokens": "1200",
+      "model": "anthropic/claude-sonnet-4-5",
+      "window": "200000"
+    },
+    "view_ready_headers": {
+      "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+      "view_version": "3",
+      "covers_through": "4",
+      "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+    },
+    "notice_id": "357f07b24fd03982c83220c3c73f52fd:advanced:3",
+    "view_ready_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3"
+  }
+}

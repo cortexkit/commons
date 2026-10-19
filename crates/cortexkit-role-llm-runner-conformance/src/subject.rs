@@ -53,6 +53,21 @@ pub enum Capability {
     /// `session.adopt`: the owner takes over a session the host started
     /// with a plan applied, without sending a prompt.
     Adopt,
+    /// Runner-owned part tags on `session.read` and `session.resolve`.
+    Tags,
+    /// `run.tool_calls`: a run's tool calls as a paged list.
+    RunToolCalls,
+    /// `session.send` with `delivery_order`, plan-named senders and plan
+    /// templates.
+    DeliveryOrder,
+    /// The runner adapter can hold a session's next request at the context
+    /// ceiling, as a missing compaction view would, and end the wait either
+    /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
+    HoldContextCeiling,
+    /// The runner adapter can change a session's metadata in the host (a
+    /// title, a timestamp the host keeps), a change that does not reach the
+    /// model. See [`LlmRunnerSubject::change_host_metadata`].
+    HostMetadataChange,
     /// The runner under test can move its retention clock forward on request, so expiry and deletion happen without waiting in real time. For tests only; release builds must not offer it.
     RetentionClock,
     /// The runner adapter's scripted tool provider can hold a received call
@@ -88,6 +103,9 @@ impl Capability {
         Self::InputTokenCap,
         Self::StructuredOutput,
         Self::Adopt,
+        Self::Tags,
+        Self::RunToolCalls,
+        Self::DeliveryOrder,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -96,6 +114,8 @@ impl Capability {
             Some(group) => group.to_owned(),
             None => match self {
                 Self::HoldToolCalls => "hold_tool_calls".to_owned(),
+                Self::HoldContextCeiling => "hold_context_ceiling".to_owned(),
+                Self::HostMetadataChange => "host_metadata_change".to_owned(),
                 Self::RetentionClock => "advance_retention_clock".to_owned(),
                 Self::KillAt(point) => format!("kill_at:{point}"),
                 _ => unreachable!("every other capability is a group"),
@@ -124,7 +144,14 @@ impl Capability {
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
             Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
             Self::Adopt => groups::ADOPT,
-            Self::HoldToolCalls | Self::RetentionClock | Self::KillAt(_) => return None,
+            Self::Tags => groups::TAGS,
+            Self::RunToolCalls => groups::RUN_TOOL_CALLS,
+            Self::DeliveryOrder => groups::DELIVERY_ORDER,
+            Self::HoldToolCalls
+            | Self::HoldContextCeiling
+            | Self::HostMetadataChange
+            | Self::RetentionClock
+            | Self::KillAt(_) => return None,
         })
     }
 
@@ -299,6 +326,27 @@ impl ScriptedTurn {
     }
 }
 
+/// A module the suite names in a session plan's `senders`, and the route
+/// identity it reaches the session with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PlanSenderIdentity {
+    /// The stamp a route opened by that module carries.
+    pub stamp: RouteStamp,
+    /// The module id the plan names, which the runner matches against the
+    /// stamp's attested principal.
+    pub module: String,
+}
+
+impl PlanSenderIdentity {
+    pub fn new(stamp: RouteStamp, module: impl Into<String>) -> Self {
+        Self {
+            stamp,
+            module: module.into(),
+        }
+    }
+}
+
 /// The native-record fixture for the unknown-origin attribution rule.
 /// Its ordinal and marker come from fixture construction, never from a read reply.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -427,6 +475,70 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// Like [`Self::send_fields`], but with `members` added to the first
+    /// send's plan beside whatever the adapter puts there (`render_tags` for
+    /// the tags cases, `senders` for the delivery-order cases). Return
+    /// `None` when the runner cannot admit such a plan. Required with
+    /// [`Capability::DeliveryOrder`], and by the tags case that renders tags.
+    fn send_fields_with_plan(
+        &self,
+        _session: &str,
+        _first: bool,
+        _members: &Map<String, Value>,
+    ) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// A module other than the owner and the stranger, which the
+    /// delivery-order cases name in a plan's `senders`. Required with
+    /// [`Capability::DeliveryOrder`].
+    fn plan_sender(&self) -> Option<PlanSenderIdentity> {
+        None
+    }
+
+    /// Whether the scripted model's route supports a turn-scoped system
+    /// message, so `turn_system` can be possible. When `false`, the
+    /// delivery-order template case is inapplicable.
+    fn turn_system_supported(&self) -> bool {
+        false
+    }
+
+    /// Hold `session`'s next model request at the context ceiling, as a
+    /// session whose compaction view has not arrived would be held, until
+    /// [`Self::end_context_ceiling_wait`]. Called before the send that
+    /// reaches it. Required by [`Capability::HoldContextCeiling`].
+    async fn hold_context_ceiling(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "context-ceiling holds are not implemented",
+        ))
+    }
+
+    /// End the held wait: with `view_arrived`, a view arrives and the run
+    /// goes on; without, the wait's bound passes with no view and the run
+    /// ends `context_ceiling`. Required by [`Capability::HoldContextCeiling`].
+    async fn end_context_ceiling_wait(
+        &self,
+        _session: &str,
+        _view_arrived: bool,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "context-ceiling holds are not implemented",
+        ))
+    }
+
+    /// Change `session`'s metadata in the host, outside the role, as a
+    /// person's app might (rename it, touch a timestamp), in a way that does
+    /// not reach the model. Required by [`Capability::HostMetadataChange`].
+    async fn change_host_metadata(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "host metadata changes are not implemented",
+        ))
+    }
+
     /// The module id the runner records as `dispatched_to` for a call to
     /// the scripted tool provider.
     fn tool_provider_module(&self) -> String;
@@ -488,25 +600,25 @@ pub trait LlmRunnerSubject: Harness {
         Ok(AttributionFixture::NotSupported)
     }
 
-    /// Install the scripted compaction provider and controlled clock for
-    /// `session`. Initial installation must precede admission, and the
-    /// session plan must name that provider. Replacing an installed script
-    /// changes the provider's configured answers, not its captured calls,
-    /// clock or the runner's persistent records.
-    /// Translate replacement text to the runner's message schema; preserve
-    /// ranges, ids, versions and request ids verbatim. Configure the runner's
-    /// timers and token estimator from [`crate::CompactionScript`].
-    /// Required when the runner adapter declares `compaction`; cases do not
-    /// call this method without that capability.
-    async fn install_compaction_script(
+    /// Install the scripted compaction provider for `session`, answering the
+    /// runner's Setup call with `setup`. Initial installation must precede
+    /// admission, and the session plan must name that provider. Installing
+    /// again changes the provider's configured answer, not its captured
+    /// calls or the runner's persistent records. Translate replacement text
+    /// to the runner's message schema; preserve ranges, ids and versions
+    /// verbatim. The provider must hold every model answer until
+    /// [`Self::release_compaction_model`]. Required when the runner adapter
+    /// declares `compaction`; cases do not call this method without that
+    /// capability.
+    async fn install_compaction_setup(
         &self,
         _session: &str,
-        _script: crate::CompactionScript,
+        _setup: crate::CompactionSetup,
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new("scripted compaction is not implemented"))
     }
 
-    /// Return provider calls observed at the scripted provider and canonical
+    /// Return the Setup calls observed at the scripted provider and canonical
     /// inputs captured from requests received by the scripted model. Keep
     /// both observations outside the runner process and its persistent state
     /// directory so a runner crash cannot erase them. Do not reconstruct
@@ -517,23 +629,6 @@ pub trait LlmRunnerSubject: Harness {
     ) -> Result<crate::CompactionObservation, HarnessError> {
         Err(HarnessError::new(
             "compaction observation is not implemented",
-        ))
-    }
-
-    /// Advance the injected runner/provider clock by `milliseconds` and
-    /// complete all work due at the resulting instant, including timer
-    /// handlers and durable terminal records, before returning. Time must
-    /// advance only through this method. The clock and scripted provider must
-    /// survive runner crashes. Advance the runner's actual timers; advancing
-    /// only adapter timestamps while runner timers use another clock is not
-    /// acceptable for deadline and cap checks.
-    async fn advance_compaction_clock(
-        &self,
-        _session: &str,
-        _milliseconds: u64,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "controlled compaction clock is not implemented",
         ))
     }
 
@@ -552,26 +647,8 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Deliver `answer` for `calls[call_index]` returned by
-    /// [`Self::compaction_observation`]; the zero-based call list includes
-    /// Setup. Deliver late, stale and duplicate answers to the runner's
-    /// answer-disposition path, even after timeout; the runner adapter must
-    /// not filter them. `request_id: None` echoes the indexed call's id;
-    /// `Some(id)` must send `id` verbatim so cases can check the fence.
-    async fn answer_compaction(
-        &self,
-        _session: &str,
-        _call_index: usize,
-        _request_id: Option<String>,
-        _answer: crate::CompactionAnswer,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "compaction answer delivery is not implemented",
-        ))
-    }
-
-    /// Release exactly one held model call for `session`. Compaction scripts
-    /// must hold every model answer, letting cases inspect the canonical
+    /// Release exactly one held model call for `session`. A session with a
+    /// scripted compaction provider holds every model answer, letting cases inspect the canonical
     /// input and durable records before the answer lets the runner prepare
     /// another model request.
     async fn release_compaction_model(&self, _session: &str) -> Result<(), HarnessError> {

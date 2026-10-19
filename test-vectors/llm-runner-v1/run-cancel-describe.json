@@ -3,7 +3,7 @@
     {
       "name": "legacy run_cancel group without cancellation point metadata",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.1",
         "capabilities": ["run_cancel"],
         "session_capabilities_from": "baseline"
@@ -12,7 +12,7 @@
     {
       "name": "both known cancellation points advertised",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.2",
         "capabilities": ["run_cancel"],
         "session_capabilities_from": "baseline",
@@ -22,7 +22,7 @@
     {
       "name": "unknown points tolerated without implying consumer support",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.2",
         "capabilities": ["run_cancel"],
         "session_capabilities_from": "baseline",
@@ -34,7 +34,7 @@
     {
       "name": "cancellation point metadata without run_cancel group",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.2",
         "session_capabilities_from": "baseline",
         "run_cancel": {"at": ["now", "step_boundary"]}
@@ -44,7 +44,7 @@
     {
       "name": "empty cancellation point list",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.2",
         "capabilities": ["run_cancel"],
         "session_capabilities_from": "baseline",
@@ -55,7 +55,7 @@
     {
       "name": "required now cancellation point omitted",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.2",
         "capabilities": ["run_cancel"],
         "session_capabilities_from": "baseline",
@@ -66,7 +66,7 @@
     {
       "name": "duplicate cancellation point",
       "answer": {
-        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "compaction.ready", "run.cancel"], "stability": "alpha"}],
+        "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "run.cancel"], "stability": "alpha"}],
         "implementation_version": "0.2.2",
         "capabilities": ["run_cancel"],
         "session_capabilities_from": "baseline",

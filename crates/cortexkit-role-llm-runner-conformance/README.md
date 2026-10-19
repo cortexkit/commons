@@ -57,26 +57,20 @@ vocabulary section and identifies the governing contract sections.
   session content; an unclassified op fails the check. Retention cases send a
   unique `title` along with prompt and tool-result markers; a runner that
   stores caller titles must erase them too.
-- For `compaction`, a provider backed by `CompactionScript`, included in
-  the session plan when installed. The runner adapter must convert
-  replacement text to the runner's schema, preserve ids/versions/ranges,
-  and omit `call_when` so it
-  is called every step. `compaction_observation` captures actual provider
-  calls and canonical inputs at the scripted model boundary outside the
-  runner's process/state root; it must not reconstruct inputs from the
-  configured provider answers or `session.read` responses. Hold every model
-  answer until `release_compaction_model`; select model turns by emitted answers, since
-  compaction can hide earlier assistant messages.
-- The compaction runner/provider clock is injected, starts at zero and
-  advances only through `advance_compaction_clock`, which drains all due
-  work before returning. Configure the actual call timers, engine WAIT
-  cap, prompt-cache lifetime and token estimator from the script. This
-  avoids scheduler tolerances hiding a cap violation. `answer_compaction`
-  must deliver late/stale/duplicate responses to the runner's disposition
-  path; the runner adapter must not discard them. `durable_compaction_setup`
-  must read the initial answer from persistent runner storage while a model call is
-  held, never from an in-memory cache, the configured provider answer or a
-  `session.read` model page.
+- For `compaction`, a scripted provider whose Setup answer is installed with
+  `install_compaction_setup(session, CompactionSetup)`, included in the
+  session plan when installed. The runner adapter must convert replacement
+  text to the runner's schema and preserve ids, versions and ranges.
+  `compaction_observation` captures actual Setup calls and canonical inputs
+  at the scripted model boundary outside the runner's process and state root;
+  it must not reconstruct inputs from the configured answer or `session.read`
+  responses. Hold every model answer until `release_compaction_model`.
+  `durable_compaction_setup` must read the initial answer from persistent
+  runner storage while a model call is held, never from an in-memory cache,
+  the configured provider answer or a `session.read` model page. The
+  compaction cases check Setup only: the runner half of compaction-provider
+  0.3.0 §3 (advance notices, views, rides, the ceiling, native markers) has
+  no live case yet.
 - Retention time can be controlled separately. A subject opts in by declaring
   `Capability::RetentionClock` and implementing
   `LlmRunnerSubject::advance_retention_clock`; the adapter must advance the
@@ -104,8 +98,7 @@ from `session.baseline` has no admission reply to compare.
 | Case | Requires |
 |---|---|
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
-| `compaction_fence_crash_replays_model_view` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `CompactionApplied`; answer durable before fold |
-| `model_view_half_open_ranges_and_travel`, `compaction_wait_cap`, `compaction_late_or_stale_answers_discarded`, `compaction_step_timeout_uses_last_view`, `compaction_one_view_per_step` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
+| `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
@@ -218,11 +211,10 @@ suite against its real process and unpaused clock.
 These cases, planned in §15 of the role contract, belong to a later
 subset:
 
-- compaction: `compaction_ready_reasks_after_wait`,
-  `compaction_ready_stale_request_ignored`,
-  `compaction_ready_other_caller_refused`, `compaction_cursor_never_skips`,
-  `compaction_item_without_group_refused_writes_nothing`, and
-  `crash_at_CompactionApplied`;
+- compaction: the runner half of compaction-provider 0.3.0 §3 (advance
+  notices, views applied at step boundaries, rides, the ceiling, native
+  markers), `compaction_item_without_group_refused_writes_nothing` and
+  `crash_at_CompactionApplied` (a fetched view recorded, not yet rendered);
 - `model_view`: `model_view_differs_only_by_compaction`,
   `model_view_entry_sources`, `model_view_replacement_once_on_its_first_page`,
   `model_view_after_mid_refused`, `model_view_names_compaction_state`;
@@ -315,3 +307,53 @@ The cases compare the transcript before and after every adoption: the
 lineage, the last ordinal, the last run and its state, and every message.
 They never compare a plan identity with a digest of their own; they compare
 the identities the runner reports with each other.
+
+## Tags
+
+The seven `tags_*` cases run only when the subject declares
+`Capability::Tags` (the `tags` group); otherwise each is reported as skipped,
+by name, and the suite sends no `session.resolve`. They require `queue` and
+`transcript_reads`, and read the live `role.describe` before resolving. They
+check part rows (a stable key per exposed part, at least one tagged part per
+entry, each tag a well-formed `§N§` used once), that a later run never reuses
+or lowers numbers, that tags exist whether or not the plan renders them,
+`session.resolve`'s exact stored content (with a character range counted in
+Unicode scalar values) and its `unknown_tag`, `tag` and `range` refusals, and
+that a model-written `§N§` is stored and dispatched as written. The rendered
+case needs the defaulted `send_fields_with_plan(session, first, members)`
+hook, which adds members (here `render_tags`) to the first send's plan.
+
+## Run tool calls
+
+The three `run_tool_calls_*` cases run only with `Capability::RunToolCalls`.
+They follow `next` one call a page and check dispatch order, names, ids,
+exact `args`, outcomes, the dispatch module, stored result sizes and the
+carrying ordinal; `unknown_run`, a misspelled cursor and `limit: 0`; and, with
+held tool calls, `indeterminate` until the result is stored.
+
+## Delivery order
+
+The eight `delivery_order_*` cases run only with `Capability::DeliveryOrder`.
+They need `send_fields_with_plan` (to name `senders` in the plan) and
+`plan_sender()`, the route identity and module id of a sender the plan
+names. `turn_system_supported()` says whether the scripted route takes a
+turn-scoped system message: the template case then expects `turn_system`,
+and otherwise the same rendered text at user authority. They check that a
+list without `idle_start` never starts a run, that the first possible mode
+wins (with a held tool call for `tool_result`), dedupe, expiry, the refusal
+by name of `template`, `dedupe_key` and `expires_at_ms` sent without a list in
+`delivery`, plan-named senders and the `idle_start`
+grant, and that an out-of-range slot refuses the send. The list rides in
+`delivery` as an array. `delivery_order_list_refused_without_group` runs only
+when the subject does not declare the group: such a runner must refuse a
+list naming `delivery`.
+
+## Context ceiling and read stability
+
+`run_context_ceiling_wait_is_not_a_stall` needs the harness capability
+`Capability::HoldContextCeiling` and the hooks `hold_context_ceiling` and
+`end_context_ceiling_wait`. `read_stable_across_host_metadata_change` needs
+`Capability::HostMetadataChange` and `change_host_metadata`. At
+`crash_at_StepRecorded`, session B first finishes one run so its lineage can
+be read before the kill: a recovery that drops the never-sent call or its
+step must leave B on a new lineage.

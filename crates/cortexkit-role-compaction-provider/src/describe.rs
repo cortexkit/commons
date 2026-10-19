@@ -53,13 +53,10 @@ pub struct RoleDescribe {
     /// inherited history, persist its parent lineage and inclusive cut, and
     /// refuse a later declaration that contradicts that saved ancestry.
     /// Callers may send setup `descends_from` only when this is true;
-    /// absent or false means use the first step or hook instead.
+    /// absent or false means callers omit it, and the provider treats the
+    /// session's first lineage as a root.
     #[serde(default, skip_serializing_if = "is_false")]
     pub setup_descends_from: bool,
-    /// Optional Claude Code capabilities, also selected at transform.declare.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_code:
-        Option<cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -106,14 +103,6 @@ impl RoleDescribe {
 
     pub fn with_setup_descends_from(mut self) -> Self {
         self.setup_descends_from = true;
-        self
-    }
-
-    pub fn with_claude_code(
-        mut self,
-        bundle: cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities,
-    ) -> Self {
-        self.claude_code = Some(bundle);
         self
     }
 

@@ -39,8 +39,7 @@ shipping runner with this document.
 - [pinned] A runner lists `llm-runner/v1` in its manifest's
   `capabilities.provides` (`PROVIDES`). A module may serve several majors.
 - [pinned] Required ops (`REQUIRED_OPS`): `role.describe` and
-  `session.baseline`. `compaction.ready` is not required: it belongs to the
-  `compaction` group (§3, §11.1).
+  `session.baseline`.
 - [pinned] `session.baseline` is required of every runner whether or not a
   given consumer calls it: it is where a session's owner reads what was
   frozen and the session-level capabilities after a lost admission reply
@@ -51,16 +50,16 @@ shipping runner with this document.
   not required: it is the `compaction` group.
 - [pinned] Everything else is a declared capability group (§3), including
   the operations not every runner serves: `run.status`, `run.cancel`,
-  `session.retract` and `session.adopt`. A runner serves a group only if it
-  declares it, and a consumer uses a group only if it is declared.
+  `run.tool_calls`, `session.retract`, `session.adopt` and
+  `session.resolve`. A runner serves a group only if it declares it, and a
+  consumer uses a group only if it is declared.
 - [pinned] A consumer refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it. The check lives in the
   consumer, never in the daemon.
 - [pinned] Every role op is a request `{method, params}` on the runner's
   session-bound management route: `method` is the op's name and `params` its
   request. The session it acts on is the session the route is bound to; no
-  request names its session, except `compaction.ready`, which arrives on the
-  compaction provider's module-level route (§11.1).
+  request names its session.
 
 ## 2. `role.describe`
 
@@ -123,19 +122,24 @@ shipping runner with this document.
 | `queue` | `session.send` with `delivery: "queue"` | §9 |
 | `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
 | `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
-| `compaction` | `compaction.ready`, and the calls of §11.1 the runner makes | §11.1 |
+| `compaction` | `session.read`, `session.resolve` (it requires `tags`), and the runner half of compaction-provider 0.3.0 §3 | §11.1 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
 | `adopt` | `session.adopt` | §9.5 |
+| `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
+| `run_tool_calls` | `run.tool_calls` | §6.3 |
+| `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
-  `structured_output` and `adopt` are each declared on their own: a runner
-  may serve any of them without the others, and without `run_ops` or
+  `structured_output`, `adopt`, `tags`, `run_tool_calls` and
+  `delivery_order` are each declared on their own: a runner may serve any of them without the others,
+  and without `run_ops` or `transcript_reads`. `tags` adds fields to
+  `session.read`, so it requires that op (and `session.resolve`), not all of
   `transcript_reads`.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
@@ -147,6 +151,18 @@ shipping runner with this document.
 - [pinned] A caller MUST NOT send `session.adopt` unless the runner
   advertises `adopt` (§9.5). `check_describe` checks the group for
   `session.adopt`; it adds no discovery metadata.
+- [pinned] A caller MUST NOT send `session.resolve` unless the runner
+  advertises `tags`, nor `run.tool_calls` unless it advertises
+  `run_tool_calls` (§9.6, §6.3). `check_describe` checks each group for its
+  ops; neither adds discovery metadata.
+- [pinned] A caller MUST NOT send a list in `delivery`, nor a plan naming
+  `senders`, unless the runner advertises `delivery_order` (§9.7). A caller
+  MUST NOT send `dedupe_key`, `expires_at_ms` or `template` on a send whose
+  `delivery` is not a list: runners tolerate unknown send fields, so an
+  older runner would ignore those members and deliver the send as a legacy
+  `queue` (a reminder starting a run, a template send going out as an empty
+  prompt). Beside a list they fail closed, because every runner without the
+  group, older ones included, refuses the whole send naming `delivery`.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -158,11 +174,15 @@ shipping runner with this document.
   until a second consumer exists.
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue
   without being able to abort a model stream.
-- [pinned] `compaction` is all of §11.1 or none of it: Setup, the per-step
-  status with its cursor rules, the request fence, durable `WAIT` and its
-  timeout, `REFUSE`, and the inbound `compaction.ready`. A runner that hosts
-  no sessions of its own (one that only steers sessions another runner
-  hosts) declares none of it, never a stub.
+- [pinned] `compaction` is all of §11.1 or none of it: Setup, advance
+  notices, views applied at step boundaries, rides, the ceiling and native
+  markers. A runner that hosts no sessions of its own (one that only steers
+  sessions another runner hosts) declares none of it, never a stub.
+- [pinned] `compaction` requires `tags`: an answer declaring it without
+  `tags` is malformed, and `check_describe` refuses it by name
+  (`compaction_without_tags`), because a compaction provider addresses every
+  view edit by part key and tag. The group lists `tags`' ops,
+  `session.read` and `session.resolve`.
 - [pinned] A compaction provider requires `compaction` of any runner it
   serves. A session starter never pairs a plan's `compaction_item` with a
   runner that lacks it, and the runner refuses such a plan at admission
@@ -232,6 +252,43 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] Each message (`ReadMessage`) carries `ordinal`, `mid` and its
   final values: what later steps render and what executed. The raw view and
   the model view then differ only by compaction.
+- [pinned] **Only finished messages.** `session.read` returns only messages
+  the runner will no longer change. A message still being generated (a
+  model step streaming, a tool result being written) is never an entry
+  until it completes. This is stricter than, and contains, the final-values
+  rule above; streaming progress reaches a consumer through the stream
+  (§7), never through a partial entry.
+- [pinned] **Read stability.** Once `session.read` has returned an entry
+  under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
+  `written_at`, `delivered_as`, and its part keys and tags never change
+  under that lineage. Envelope members that report later state move forward
+  only as their own rules say (`run.final`, §6; `tool_calls`'
+  `call_key`, `dispatched_to` and `indeterminate`, §5). A runner that reads
+  from a host freezes the bytes it first ingested and serves its own
+  journal, never the host's live history. A host change that reaches the
+  model (a revert, an edited part) and a recovery that drops or rewrites a
+  written message (§14, property 4) start a new lineage, so reads of the old
+  one are refused `lineage_changed`; changed bytes never appear under the
+  same lineage. A reader may treat changed bytes under one lineage as a
+  runner defect.
+- [pinned] **Bookkeeping stays out.** Host records a runner writes for its
+  own compaction bookkeeping (a host's native compaction message, summary or
+  entry) are outside the transcript: they never appear in `session.read`
+  and are never rendered to the model on top of the view.
+- [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
+  originals?, tool_calls?, tags?, role?, written_at?, delivered_as?}`. Every
+  runner-neutral fact a consumer relies on rides in the envelope, never only
+  inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
+  `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
+  when (`written_at`, milliseconds since the Unix epoch, of the write or of
+  the runner's first ingest of a message its host stored), its part tags
+  (`tags`, §9.6), its run (`run`, §6), its tool calls (`tool_calls`, §5) and,
+  for a `delivery_order` send, the mode it went out in (`delivered_as`,
+  §9.7). `role` and `written_at` are
+  optional: a runner sets them whenever it knows them, which is always for a
+  message it wrote itself, and an absent one means not known. A consumer
+  never decodes `message` for any of these facts, so a reader of several
+  runners needs none of their schemas for them.
 - [pinned] The message body (`message`) is in the runner's own schema,
   opaque to the role and decoded as JSON. A neutral message schema is not in
   v1 (see "Not in v1").
@@ -263,6 +320,29 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
   malformed; it is not a refusal.
 
+### 4.4 Serializer profiles
+
+- [pinned] A serializer profile names the schema of an entry's `message`
+  body (`serializer_profile`). It is the value a session's providers
+  receive as their plan item's `params.serializer_profile`, which the
+  step-transform-provider and compaction-provider contracts pin; they name
+  `opencode-aisdk`. This role defines `anthropic-messages`
+  (`serializer_profile::ANTHROPIC_MESSAGES`).
+- [pinned] **`anthropic-messages`.** An entry's body is the message exactly
+  as the client sent it in its Anthropic Messages request, with
+  `cache_control` members removed in two places only: at the message's
+  top-level content blocks, whatever their type, and in the `text`, `image`
+  and `document` blocks nested in a `tool_result`'s content
+  (`serializer_profile::strip_cache_control`). Never inside a `tool_use`
+  block's `input`, never inside a block of a type the profile does not
+  name, and a string `content` is kept as sent.
+- [pinned] Read stability (§4.2) applies: the runner serves the form it
+  first ingested (`serializer_profile::ingest`). A client re-sending the
+  same message with its cache marker moved (a string `content` turning
+  into a one-block array, or back) does not change the entry.
+- [pinned] For such a session, a compaction view's `replace` and edit
+  `bytes` (compaction-provider 0.3.0) are in this profile's message format.
+
 ## 5. `dispatch_attribution`
 
 - [pinned] The runner records the module each tool call was dispatched to.
@@ -284,8 +364,9 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
   [pinned] The answer is `{run_id, state, reason?, error?, detail?, final_message?:
-  {ordinal, mid, text}, structured_output?}` (`RunResult`; `structured_output`
-  is §9.4's result, on an ended run admitted with it), and a run that has not ended answers
+  {ordinal, mid, text}, structured_output?, context_ceiling?}` (`RunResult`;
+  `structured_output` is §9.4's result, on an ended run admitted with it;
+  `context_ceiling` is below), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
   are concatenated exactly as emitted, with nothing inserted, so a JSON
@@ -302,8 +383,8 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   it a second. `interrupted` (the runner stopped or crashed under the run) is
   distinct from `cancelled` (a caller stopped it).
 - [pinned] States (`run::states`): `active` and `paused`, which are not
-  terminal, and the terminal states `completed`, `max_steps`, `budget_exhausted`, `cancelled`,
-  `error` and `interrupted`. States are decoded open: a runner's own state
+  terminal, and the terminal states `completed`, `max_steps`, `budget_exhausted`,
+  `context_ceiling`, `cancelled`, `error` and `interrupted`, each its own variant of the non-exhaustive `RunState`. States are decoded open: a runner's own state
   (broca's `transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
 - [pinned] Structured output adds no state. A run that calls `submit_result`
@@ -320,14 +401,51 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   the session's measured input sum (§9.3), and `cause` is `limit_reached` or
   `usage_unreported`. Under `usage_unreported`, `spent` is the sum of measured
   steps before the unreported step; that step is never counted as zero.
-- [pinned] A hard stop (`max_steps`, `stop_when`, or `budget_exhausted`) leaves
+- [pinned] `context_ceiling` ends a run whose session's context reached its
+  ceiling at a step boundary: the runner does not send the next request, so
+  it never sends one over the model's window. It is handled exactly like
+  `budget_exhausted`: each decodes as its own variant
+  (`RunState::ContextCeiling`, `RunState::BudgetExhausted`;
+  `is_context_ceiling`, `is_budget_exhausted` and `is_terminal` recognise
+  them), never `error` and never a `provider_code`,
+  because no model or provider failed. Both `run.result` and `run.status`
+  carry `context_ceiling: {window, size, cause}`
+  (`errors::ContextCeilingDetail`), the detail of the `context_ceiling`
+  refusal (§12.1). A caller that routes between models MUST NOT charge
+  backoff to the model, or mark it unhealthy, for it. A send that would start
+  or join a run while the context is already at or over the ceiling is
+  refused `context_ceiling` instead, writing nothing (§9).
+- [pinned] **Waiting at the ceiling.** A run the runner holds at the
+  ceiling while it waits for a compaction view (up to the provider's bound,
+  300 s, say) is waiting, not stalled. It stays in the non-terminal state
+  `active` and names `reason: context_ceiling_wait`
+  (`run::RUN_REASON_CONTEXT_CEILING_WAIT`, `RunReason::ContextCeilingWait`)
+  on `run.status`, on `session.head`'s `last_run_state` and on the stream
+  event that reports the wait (§7), with `deadline_ms`, the absolute time
+  the wait ends in milliseconds since the Unix epoch, on `run.status`
+  (`RunStatus::context_ceiling_wait`) and on that event. This reuses the
+  shape a non-terminal run already uses to say why it is not moving, a
+  state with an open `reason`, as `paused` does with `auth_required`; it is
+  not `paused`, because a paused run waits for a caller's retry and changes
+  how sends behind it are admitted (§9), while this wait ends on its own. A
+  watchdog MUST NOT nudge or stop a run waiting this way before
+  `deadline_ms`. The wait ends in progress, when a view arrived (the reason
+  and deadline are gone), or in the terminal `context_ceiling` state with
+  `cause: view_timeout`.
+- [pinned] A provider's own refusal of a request as too long is different:
+  that is the provider refusing, and the run ends `error` with
+  `provider_code: context_overflow` (§12.2). A runner reports
+  `context_ceiling` only for a stop it decided itself before sending.
+- [pinned] A hard stop (`max_steps`, `stop_when`, `budget_exhausted` or
+  `context_ceiling`) leaves
   no dangling tool calls: every pending, undispatched call receives the
   runner's native not-executed result in the same durable commit as the run's
   terminal state. `stop_when` names a runner's hard-stop condition, not an
   additional role state. The result is the same refusal-before-dispatch shape
   used for hook denials such as `pre_tool_denied`; body layout stays
-  runner-specific (§12.3). For `budget_exhausted`, its refusal code is
-  `budget_exhausted` wherever that runner places a refusal code. No dispatch
+  runner-specific (§12.3). For `budget_exhausted` and `context_ceiling`, its
+  refusal code is the state's name wherever that runner places a refusal
+  code. No dispatch
   intent is recorded for these calls.
 - [pinned] The same rule covers a step that calls `submit_result` (§9.4): no
   call of that step is dispatched before the step completes, and every call
@@ -361,7 +479,8 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   role code, the provider's carries the finer one.
 - [pinned] A run error without a finer code omits `provider_detail_code`.
   `compaction_unavailable` never carries one, because no answer arrived.
-- [pinned] An unknown `run_id` is refused `unknown_run`.
+- [pinned] An unknown `run_id` is refused `unknown_run`, by `run.result`
+  and `run.tool_calls` alike (§6.3).
 - [pinned] **Run attribution.** Each message records which run and episode
   produced it, and whether it is that run's final message.
   [pinned] It rides as `run: {run_id, episode, final}` (`RunAttribution`),
@@ -382,21 +501,26 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?}`,
+  structured_output?, context_ceiling?, deadline_ms?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason`, `usage` and
   `retries_used` stay runner members, not pinned.
   - `state` is a run state as in `run.result` (`run::states`), decoded open
     (`RunState::parse`): a consumer does not treat an unknown state as
     terminal.
-  - `reason`, where the runner names one: why a paused run is paused, or
-    why an ended run ended. It is an open string; the known pause reasons
-    are `auth_required` and `restart`.
+  - `reason`, where the runner names one: why a paused run is paused, why
+    an active run is waiting, or why an ended run ended. It is an open
+    string; the known pause reasons are `auth_required` and `restart`, and
+    the known waiting reason is `context_ceiling_wait` (§6).
+  - `deadline_ms`: with `reason: context_ceiling_wait`, when the wait ends
+    (§6); absent otherwise.
   - `error`: on a run that ended `error`, the same run error `run.result`
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
   - `detail`: on `budget_exhausted`, exactly the detail `run.result` carries (§6).
   - `structured_output`: exactly what `run.result` carries for the run (§9.4).
+  - `context_ceiling`: on `context_ceiling`, exactly the detail `run.result`
+    carries (§6).
 - [pinned] `undelivered_steers` is the list of `send_id`s of the steers
   this run accepted and never rendered to the model before it ended, in
   the order they were accepted. On the status of a run that has ended:
@@ -478,6 +602,70 @@ run.
 - [pinned] On an expired session, `run.cancel` answers `expired`, writes
   nothing, and never acts on a lineage started after the expiry (§9.1).
 
+### 6.3 `run_tool_calls`: `run.tool_calls`
+
+A runner that declares `run_tool_calls` serves `run.tool_calls`: every tool
+call a run made, as a list, so a consumer (core's citations, say) learns
+what a run called without decoding any message body.
+
+- [pinned] The request is `{run_id, after?, limit?}`
+  (`tool_calls::ToolCallsRequest`), strict: an unknown field is refused
+  `invalid_params` naming it, because a misspelled cursor would answer the
+  first page again. An unknown `run_id` is refused `unknown_run`, as
+  `run.result` refuses one (§6).
+- [pinned] The answer is a page `{run_id, calls, next?}`
+  (`tool_calls::ToolCallsPage`), decoded leniently. Each call is
+  `{tool_call_id, call_key?, name, args, outcome, result_bytes?,
+  dispatched_to?, ordinal}` (`tool_calls::RunToolCall`):
+  - `tool_call_id` is the model's id, display only and not unique (§5);
+    `call_key` is the call's key, present once the call was prepared or
+    dispatched (§11.3); `dispatched_to` is the module the call was
+    dispatched to, absent for a call never dispatched (§5);
+  - `name` is the model-facing tool name;
+  - `args` is the arguments object exactly as dispatched, or, for a call
+    never dispatched, exactly as the model asked for it. It is never
+    truncated or rewritten;
+  - `outcome` is an open string (`tool_calls::outcomes`): `succeeded` (it
+    executed and its result is not an error), `failed` (it executed and its
+    result is an error), `refused` (refused before it executed: a hook
+    denial, a person's decline or an expired approval, a drained route, or
+    a tool provider's refusal), `not_executed` (a hard stop's never-executed
+    result, §6: `max_steps`, `stop_when`, `budget_exhausted`,
+    `context_ceiling`, `skipped_after_submit`, or a run sealed `interrupted`
+    with the call never sent), or `indeterminate` (a durable dispatch intent
+    and no result, which `session.read` shows as `indeterminate: true` (§5),
+    or a call closed `outcome_unknown` after a restart: it may or may not
+    have run). A consumer treats an outcome it does not know as not known to
+    have succeeded;
+  - `result_bytes` is the length in bytes of the result the runner stored
+    for the call, in its own stored encoding, absent when none is stored;
+  - `ordinal` is the transcript ordinal of the message carrying the call.
+    One message can carry several calls, so an ordinal does not identify a
+    call.
+- [pinned] Calls are in dispatch order: the order the model asked for them
+  across the run's steps, which is the order the runner dispatches them. A
+  call never dispatched keeps its place. A run's list only grows: once a call
+  is listed, its place, `tool_call_id`, `call_key` (once present), `name`,
+  `args` and `ordinal` never change; its `outcome`, `result_bytes` and
+  `dispatched_to` move forward as the call does.
+- [pinned] Paging is `session.read`'s (§4.2), by count and by bytes. A page
+  holds at most `limit` calls (absent means the runner's default, and a
+  value above its maximum is capped to it; `limit: 0` is refused
+  `invalid_params {field: "limit"}`) and stops at the runner's byte cap. It
+  carries `next` whenever it stops before the end of the list as it stands;
+  the caller passes it back as `after` for the following page. `next` is an
+  opaque string: the caller only passes back a value the runner gave for the
+  same run, and an `after` the runner never gave for it is refused
+  `invalid_params {field: "after"}`. A run still in progress may list more
+  calls after a page that carried no `next`.
+- [pinned] A single call larger than the byte cap comes alone on its page,
+  over the cap, and is never cut short. The complete encoded reply is served
+  whole when it fits the 4,194,304-byte transport frame limit, including its
+  21-byte header; otherwise the runner refuses `reply_too_large` with
+  `subject: {kind: "tool_call", run_id, tool_call_id, call_key?}` (§12.1).
+- [pinned] It reads what the run's durable records say, as `run.result`
+  does, and writes nothing.
+
 ## 7. `streaming`: `session.subscribe`
 
 - [pinned] A page and its `head` come from one snapshot. A subscription from
@@ -489,9 +677,11 @@ run.
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
   never replayed.
-- [pinned] A stream event that names why a run is paused uses `reason`, an
-  open string with known values `auth_required` and `restart`, as
-  `run.status` does (§6.1).
+- [pinned] A stream event that names why a run is paused or waiting uses
+  `reason`, an open string with known values `auth_required`, `restart` and
+  `context_ceiling_wait`, as `run.status` does (§6.1). A runner reports a
+  wait at the context ceiling with a durable `control` event carrying
+  `reason: context_ceiling_wait` and `deadline_ms` when the wait starts.
 
 ## 8. `model_view`
 
@@ -589,7 +779,21 @@ run.
   (`SendRequest::check_delivery`).
 - [pinned] A runner that admits sessions declares `queue`, because its first
   send is one.
-- [pinned] Owner sends MUST carry both `send_id` and `prompt`.
+- [pinned] `delivery` is a string or a list. A string keeps the meaning
+  above exactly. A list is the ordered list of delivery modes of the
+  `delivery_order` group (§9.7), accepted only by a runner that declares the
+  group; any other runner refuses it `invalid_params {field: "delivery"}`.
+- [pinned] A send that would start or join a run while the session's
+  context is at or over its ceiling is refused `context_ceiling {window,
+  size, cause}` and writes nothing (§6, §12.1).
+- [pinned] Owner sends MUST carry a `send_id`. `prompt` is optional in the
+  type (`SendRequest::prompt`, `Option<String>`) only so that a template
+  send can omit it: a send naming a plan `template` (§9.7) carries no
+  `prompt` member, and every other send carries a non-empty `prompt`. A
+  runner checks this before writing anything (`SendRequest::check_prompt`):
+  a template send carrying `prompt`, even an empty one, and a send without a
+  template and without a non-empty `prompt`, are refused `invalid_params
+  {field: "template"}`.
   `session.adopt` (§9.5) is not a send: it carries a `send_id` and a plan,
   and no prompt.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
@@ -615,8 +819,9 @@ run.
   caller is refused `scope_owner_mismatch`.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. Except for the scoped closed `budget`
-  rules on an `input_token_cap` runner (§9.3) and the strict
-  `structured_output` member (§9.4), the request is lenient: a
+  rules on an `input_token_cap` runner (§9.3), the strict
+  `structured_output` member (§9.4) and the strict `delivery_order` members
+  on a `delivery_order` runner (§9.7), the request is lenient: a
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
 - [pinned] A `steer` or `interrupt` into an existing session takes every
@@ -1074,6 +1279,270 @@ without a prompt.
   (§12.1) concerns a scoped send into a session recorded without a scope,
   and is unchanged.
 
+### 9.6 `tags`: runner-owned part tags
+
+The runner owns the transcript, so it owns short, stable addresses for its
+parts: tags. A consumer (a context manager, a model referring to an earlier
+message, a tool using part of an earlier output) names a part by its tag, and the
+runner answers with the exact stored content.
+
+**Assignment.**
+
+- [pinned] A runner that declares `tags` gives every part it exposes a
+  stable key (`part`), and a tag to every part it tags. It tags at least
+  every part that carries text: user text, a tool result's text and the
+  model's text. It may tag others (a tool call, a reasoning block); a part
+  with nothing to address by text (an image, say) may stay untagged. A tag is
+  `§N§` (`tags::SIGIL`), `N` a positive decimal integer without a leading
+  zero that fits a `u64` (`tags::parse_tag`, `tags::format_tag`). That one
+  spelling is the tag: no other spelling names it.
+- [pinned] Tags are per session, durable and never reused: not across a
+  fork, a reset or a restart. A fork continues numbering after its parent's
+  highest tag (`tags::next_after`), and numbers are assigned in increasing
+  order.
+- [pinned] A part is tagged at write time: before the runner stores it, or,
+  for a part its host stored itself (in-process hosts store the model's
+  text before any hook sees it), at the runner's first ingest of that part.
+  Both readings conform. Either way the tag is recorded durably in the
+  runner's ledger, keyed by (message, part), and every later read and
+  resolve answers it byte-identical.
+- [pinned] Once a part is exposed, its key never changes, tagged or not;
+  once assigned, its tag and its stored content never change. A compaction
+  provider addresses part-level view edits by that key.
+
+**What the model writes.**
+
+- [pinned] A runner stores what the model wrote byte for byte. A `§N§` the
+  model writes is never a tag, wherever it appears, and is never rewritten
+  in storage: `session.read` and `session.resolve` answer it as written.
+- [pinned] In a signed thinking block, in encrypted reasoning, or in a tool
+  call's arguments, a model-written `§N§` stays as written in every
+  rendering too: editing it would break the signature or change what the
+  tool was asked. A tool call's arguments are dispatched exactly as the
+  model wrote them.
+- [pinned] Correcting a model-written `§N§` in the model's text (so the
+  model does not later read its own invention as a tag) is allowed only in
+  the rendering, and only where two conditions hold. First, the provider's
+  text part carries no provider state (an Anthropic text block, say). Where
+  a text part carries provider state (a thought signature, ChatGPT's
+  `phase`, encrypted reasoning beside it), the assistant's tags are
+  metadata only and a stray `§N§` is rendered as written. Second, the
+  corrected rendering is fixed at the runner's first render of that message
+  and never changes afterwards, so every later request carries the same
+  bytes. This is the runner's provider duty: it applies the rule per
+  provider and model, and a consumer never sees the difference in a read.
+
+**Reads.**
+
+- [pinned] On a runner that declares `tags`, every `session.read` entry
+  carries `tags: [{part, tag?}]` (`tags::PartTag`), one row per part the
+  runner exposes, in the message's part order, beside the message as
+  `tool_calls` are: `tag` is present on a tagged part and absent on an
+  untagged one, so a reader learns every part's key, tagged or not, from
+  the rows alone. `part` is the runner's own key for the part within its
+  message schema (an index or a part id), opaque to consumers: the key its
+  ledger records the tag under and the one `session.resolve` answers with.
+  Decoding stays lenient: a reader of a runner without `tags` finds no
+  `tags`. Where a message came from (its attestation) is not in this
+  revision.
+- [pinned] No digest rides on an entry: a reader computes one from the
+  bytes it reads.
+
+**Resolve.**
+
+- [pinned] `session.resolve {tag, range?}` (`tags::ResolveRequest`) is
+  strict: an unknown field is refused `invalid_params` naming it, and the
+  request names no session (§1). `range` is `{start, end}`
+  (`tags::CharRange`), a half-open range of the part's content counted in
+  Unicode scalar values: not bytes, and not UTF-16 code units, so a range
+  names the same text in every language.
+- [pinned] The answer is `{tag, ordinal, mid, part, content, range?}`
+  (`tags::ResolveReply`), decoded leniently: `content` is the
+  part's exact stored content, or the requested range of it
+  (`tags::slice`). For a text part that is its text; for any other part
+  (a tool call, a reasoning block, a structured result) it is the runner's
+  own stored encoding of the part, the same bytes on every resolve. `range`
+  echoes the request's.
+- [pinned] A malformed tag is refused `invalid_params {field: "tag"}`; a
+  well-formed tag the session never assigned is refused `unknown_tag`,
+  terminal, since tags are never reused (§12.1). A range whose `start` is
+  after its `end`, or whose `end` is past the content, is refused
+  `invalid_params {field: "range"}`; an empty range within the content
+  answers `""`.
+- [pinned] Resolve writes nothing.
+
+**Visibility.**
+
+- [pinned] With `render_tags: true`, the runner renders a tagged part's tag
+  as an exact prefix: the tag, one space (U+0020), then the part's text
+  (`tags::render_text`, `tags::RENDER_SEPARATOR`). It does so for user
+  text, for a tool result's first text block, and for the model's text only
+  where the provider's text part carries no provider state and the
+  rendering is fixed at the first render (above); assistant text that
+  carries provider state renders as stored, its tag metadata only. A part
+  with no text (an image, a tool call, a reasoning or thinking block), an
+  empty text part and an untagged part carry no prefix. A compaction
+  provider builds the same bytes for a drop placeholder; `tags.json` pins
+  rendered parts.
+
+- [pinned] Whether tags are rendered to the model is the session's fetch
+  plan's `render_tags` member (`tags::PLAN_RENDER_TAGS`), composed by core
+  in the same plan object `SendRequest::plan` carries (§10.1): `true`
+  renders each part's tag; absent, `null` or `false` renders none. A plan
+  carrying a non-boolean, or `render_tags: true` to a runner without `tags`,
+  is refused at admission `invalid_params {field: "plan.render_tags"}`,
+  writing nothing (`tags::check_plan`, `SendRequest::check_render_tags`).
+- [pinned] Tags exist either way: a runner that declares `tags` assigns,
+  records, reads and resolves them whether or not the plan renders them.
+  `render_tags` is part of the plan, so it is frozen with it, and a later
+  plan that differs in it is `plan_drift` like any other difference.
+
+### 9.7 `delivery_order`: ordered delivery modes, plan senders and templates
+
+A send does not always want to become a turn. A module's reminder should
+ride the next request the session makes anyway, never start one; text a
+plan vouches for may go out with system authority. `delivery_order` lets
+a send say, in order, how it may be delivered, and lets the session's plan
+say who may send and which texts are system text.
+
+**The list.**
+
+- [pinned] A runner that declares `delivery_order` accepts `delivery:
+  [mode, ...]` on `session.send`: the ordered list rides in `delivery`
+  itself, as an array (`SendRequest::delivery_order`; read with the members
+  below as `delivery_order::DeliveryOrder`), with modes
+  (`delivery_order::Mode`):
+  - `tool_result`: rendered with the next tool result, the first time that
+    result is sent;
+  - `turn_system`: a turn-scoped system message (Anthropic's `clear_at:
+    next_user_message`), for template text only (below);
+  - `steer`: a user message into the run in progress, at its next step;
+  - `idle_start`: a user message that starts a run on an idle session.
+- [pinned] `delivery` is decoded once, as a string or a list
+  (`SendRequest`): a list that is not of these modes, empty, or naming a
+  mode twice is refused `invalid_params {field: "delivery"}`, writing
+  nothing, as an unknown string is.
+- [pinned] At each request boundary, the runner takes the first mode in the
+  list that is possible there (`delivery_order::choose`,
+  `delivery_order::Boundary`): `tool_result` needs a tool result about to be
+  sent for the first time; `turn_system` needs a provider that supports it,
+  a runner that owns the request, and the authority rule below; `steer`
+  needs a run in progress; `idle_start` needs an idle session. When none is
+  possible, the send stays queued, durably, for the next boundary.
+- [pinned] **A list without `idle_start` never starts a run.** It waits,
+  queued, for a request the session makes anyway.
+- [pinned] A string `delivery` is unchanged, and maps onto lists
+  (`delivery_order::legacy_equivalent`): `queue`, or an absent `delivery`,
+  is `[idle_start]` (it waits durably and starts the next turn once the run
+  ends); `steer` is `[steer, idle_start]`. `interrupt` has no list form and
+  stays its own mode.
+- [pinned] **Why the overload is safe.** A runner that does not declare the
+  group refuses a list in `delivery` with `invalid_params {field:
+  "delivery"}`, writing nothing (`SendRequest::check_delivery_order`), and
+  an older runner's strict decode of `delivery` already refuses an array the
+  same way. A list therefore never goes out as a legacy `queue` on a runner
+  that cannot honour it: the send fails loudly instead.
+- [pinned] The members `dedupe_key`, `expires_at_ms` and `template` are
+  valid only on a send whose `delivery` is a list
+  (`delivery_order::MEMBERS`). On a runner that declares the group, a send
+  carrying any of them with a string or absent `delivery` is refused
+  `invalid_params` naming that member, writing nothing.
+- [pinned] The list, with its members, is part of the send's identity
+  (§9): the same `send_id` with another list is refused `send_id_reuse`
+  naming `delivery`. A retry with the same `send_id` is the same send
+  and answers its current state. Idempotency is keyed by the sender and
+  `send_id`, so two senders' `send_id`s never collide.
+
+**Dedupe and expiry.**
+
+- [pinned] `dedupe_key?` (a non-empty string) replaces a queued,
+  undelivered send from the same sender carrying the same key
+  (`delivery_order::replaces`); a delivered send, another sender's or
+  another key's is never replaced. `dedupe_key` is not `send_id`: a retry
+  under the same `send_id` is the same send, never a replacement.
+- [pinned] A replaced send ends in the terminal send state `superseded`
+  (`send::states::SUPERSEDED`), and is never delivered. A caller observes it
+  by re-sending its `send_id`, which answers `{state: "superseded"}`.
+- [pinned] `expires_at_ms?` (milliseconds since the Unix epoch) drops a
+  send still undelivered at that time, durably, in the terminal send state
+  `expired` (`send::states::EXPIRED`, `delivery_order::expired`); it is then
+  never delivered, and a re-send of its `send_id` answers `{state:
+  "expired"}`. A send whose time has passed when it arrives is dropped at
+  its first boundary.
+- [pinned] Until it is delivered, a queued send answers `pending` with its
+  `submission_id`, as a queued send does today (§9).
+
+**What is written.**
+
+- [pinned] A delivered send is a transcript entry of its own, carrying
+  `delivered_as: {mode, call_key?}` (`delivery_order::EntryDelivery`) in its
+  envelope (§4.2): the mode it went out in, and for `tool_result` the
+  `call_key` of the tool result it went out with. Readers and a resumed run
+  render exactly what was sent from that entry. Once delivered, it is resent
+  byte-identical on every later request.
+- [pinned] `tool_result` never changes the stored tool result. The runner
+  records that send S was delivered with result R, and renders R followed
+  by S's text from that record, so a resume renders the same bytes.
+
+**Text and authority.**
+
+- [pinned] A send has one text, whatever mode carries it: its `prompt`, or,
+  for a send naming a plan template, the text the runner renders from that
+  template and the send's slots. A template send carries `template: {id,
+  digest, slots}` (`delivery_order::TemplateUse`, strict) and no `prompt`
+  member at all; a template beside a `prompt`, empty or not, or a send
+  without a template and without a non-empty `prompt`, is refused
+  `invalid_params {field: "template"}` (`SendRequest::check_prompt`, which
+  `SendRequest::delivery_order` applies).
+- [pinned] The runner renders the template from the plan's template for
+  that sender and the send's slots, validating every slot itself
+  (`delivery_order::render`); the sender's word is never enough. A send
+  whose template cannot render has no text, so it is refused at admission
+  `invalid_params {field: "template"}`, writing nothing
+  (`delivery_order::TemplateProblem`): the sender's plan entry declares no
+  template with that id, its digest differs, a slot is missing or
+  undeclared, or a value is not a value of its slot (the wrong type, out of
+  range, an unassigned tag, an unlisted enum value).
+- [pinned] `tool_result`, `steer` and `idle_start` deliver at user
+  authority. `turn_system` is possible only for a rendered template, and
+  only where the provider supports a turn-scoped system message and the
+  runner owns the request. Where it is not, the runner falls through to the
+  next mode in the list, carrying the same rendered text at user authority.
+  A send without a template never goes out as `turn_system`.
+- [pinned] A template is `{id, text, slots}` (`delivery_order::Template`):
+  `text` holds `{name}` placeholders, `name` in `[a-z0-9_]+`, and no other
+  brace; every placeholder names a declared slot and every slot is used. Its
+  digest is lowercase hex SHA-256 over its RFC 8785 (JCS) bytes
+  (`delivery_order::template_digest`). Slots are typed
+  (`delivery_order::Slot`), and none takes free text: `integer {min, max}`
+  (inclusive), `percentage` (an integer from 0 to 100), `tag` (a tag this
+  session assigned, §9.6) and `enum {values}` (one of the listed values).
+  Integers render in decimal; a tag and an enum value render as themselves.
+
+**Senders.**
+
+- [pinned] The plan's optional `senders: [{module, idle_start?,
+  templates?}]` (`delivery_order::PlanSender`) names the modules other than
+  the owner whose sends the session admits, and the templates each may use.
+  It is malformed (a module twice, a template id twice within a sender, a
+  placeholder without a slot or a slot without a placeholder, an integer
+  slot with `min` over `max`, an enum with no value, an unknown member or
+  slot type) or present on a runner without the group, and is then refused
+  at admission `invalid_params {field: "plan.senders"}`, writing nothing
+  (`delivery_order::check_plan`). The owner's own templates, when it has
+  any, are an entry naming the owner.
+- [pinned] On a runner that declares `delivery_order`, a send from anyone
+  but the owner is admitted only when the plan names the sender, matched on
+  the route's attested principal, never on a request field
+  (`delivery_order::admit`); any other caller is refused
+  `scope_owner_mismatch`, writing nothing. This replaces §9's permission to
+  admit unkeyed non-owner sends on such a runner.
+- [pinned] A named sender may list `idle_start`, and so start a run, only
+  when its entry grants `idle_start: true`; otherwise its list (or its
+  string `queue` or `steer`, which stand for lists holding `idle_start`) is
+  refused `invalid_params {field: "delivery"}`. `interrupt` stays the
+  owner's.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -1162,14 +1631,18 @@ without a prompt.
   (`SendRequest::check_compaction_item`).
 - [pinned] The `compaction_item` names the session's compaction provider as
   `provider`, a module id, inside `compaction_item: {provider, preset,
-  params}`, frozen with the plan (`plan_compaction_provider`). It gates
-  `compaction.ready` (§11.1): only that provider may send it.
+  params}`, frozen with the plan (`plan_compaction_provider`). It is the
+  provider the runner calls Setup on and sends notices and rides to (§11.1).
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
   versions for life.
 - [pinned] The plan travels as `plan` on the session's first send, carried
   verbatim (`SendRequest::plan`); its shape is the fetch-plan section's.
+- [pinned] The plan's optional `render_tags` member decides whether part
+  tags are rendered to the model (§9.6); absent means off. Its optional
+  `senders` member names the session's other senders and their templates
+  (§9.7); absent means the owner alone.
 
 ### 10.2 `session_change`: mid-session changes
 
@@ -1209,66 +1682,41 @@ owes.
 - [pinned] A runner that declares `compaction` owes everything in this
   section; a runner that does not owes none of it, and never calls a
   compaction provider.
-
-- [pinned] Setup is called once when a session starts. Its initial
-  CompactionMessage is recorded before the first model call, and once
-  recorded Setup never runs again for the session.
-- [pinned] The per-step status carries the messages added since the
-  provider's last call, with the ordinal cursor they start after, so a
-  provider never depends on reading the runner's storage. It also carries the
-  id and version of the last applied CompactionMessage, so a provider that
-  lost its counter resumes above it.
-- [pinned] The cursor is kept per provider per session, scoped to
-  `lineage_id`, written in the same record as that call's answer, and
-  advances only once the answer is durable. A crash re-sends messages; it
-  never skips them. `NOOP` advances it.
-- [pinned] A CompactionMessage applies only if its version is higher than
-  the last applied and it answers the newest issued request (the request
-  fence). An answer applies only if it names the newest issued request and
-  arrives before that call's deadline. An answer arriving at or after the
-  deadline is late: it is recorded and never applied. Every applied
-  CompactionMessage, `WAIT` entry and exit, and call timeout is durable before
-  the request it affects is sent.
-- [pinned] A runner applies at most one view per step. Accepting a view
-  consumes that step's answer fence; a second view for the same step is
-  refused by the version and fence check, even if it names the same newest
-  request, arrives before its deadline and carries a higher version.
-- [pinned] `REFUSE` ends the run `error`. The run error's `provider_code`
-  is the answer's role `code` (`RefuseCode` in the compaction-provider
-  contract), with `provider` and `reason`; the answer's optional finer
-  code, which the provider's wire names `provider_code`, becomes the run
-  error's `provider_detail_code` (§6). Nothing is added to history, no
-  model call is made for the refused step, and the session remains
-  usable: the next send calls the provider again.
-- [pinned] A failed or timed-out step call is not a refusal. The runner
-  records it and sends with the last applied CompactionMessage; an
-  over-window request then goes through the runner's own overflow handling,
-  which never truncates history or sends it unmanaged. The run does not end
-  `compaction_unavailable`.
+- [pinned] It implements the runner half of compaction-provider 0.3.0 §3,
+  which that contract defines (its §4 to §10) and this one does not restate:
+  - Setup (`compaction.setup`), called once when a session starts. Its
+    initial CompactionMessage is recorded before the first model call, and
+    once recorded Setup never runs again for the session;
+  - advance notices on ck-bus after every committed transcript change the
+    provider should see, from which the provider reads with `session.read`
+    (§4) and `session.resolve` (§9.6);
+  - views: fetched with `view.get` on `view_ready`, checked, written durably
+    to the runner's write-ahead log and applied only at a step boundary,
+    then rendered for every request until a newer view applies, including
+    across restarts and while the provider is down;
+  - rides (`compaction.ride`) when the runner's prefix is being rewritten
+    anyway, and at the ceiling;
+  - the ceiling Setup sets, with the `context_ceiling` refusal and run state
+    and the `context_ceiling_wait` status (§6);
+  - native markers, where the runner's host has them, kept outside the
+    transcript (§4.2).
+- [pinned] It requires `tags` (§9.6): views address parts by their key and
+  tag.
+- [pinned] A Setup `REFUSE` ends the run `error`. The run error's
+  `provider_code` is the answer's role `code` (`RefuseCode` in the
+  compaction-provider contract), with `provider` and `reason`; the answer's
+  optional finer code, which the provider's wire names `provider_code`,
+  becomes the run error's `provider_detail_code` (§6). Nothing is added to
+  history, no model call is made, and the session remains usable: the next
+  send calls Setup again.
 - [pinned] `compaction_unavailable` is Setup-only: Setup failed or timed
   out with no answer. No model call is made, the run error carries no
   `provider_detail_code`, and the session remains usable: the next send
   calls Setup again, because no initial CompactionMessage was recorded.
-- [pinned] `compaction.ready {session, request_id}` (`CompactionReady`):
-  after a `WAIT`, the provider signals that it is done, and the runner calls
-  again with a fresh status instead of waiting out the bound. It is a hint;
-  the bound is the backstop. `session` is echoed verbatim from the status
-  that carried the `WAIT`, and is opaque to the provider; `request_id` is
-  that status's request id.
-- [pinned] The ready is fenced like the answers: it acts only when
-  `request_id` is the newest request the runner issued for the session. A
-  ready for an older request, or before any was issued, is ignored, and is
-  not an error (`CompactionReady::check`). An answer applies only if it names
-  the newest issued request and arrives before that call's deadline. An
-  answer arriving at or after the deadline is late: it is recorded and never
-  applied.
-- [pinned] The runner accepts `compaction.ready` only from the session's
-  frozen compaction provider: the route's caller stamp must equal the
-  provider of the plan's `compaction_item`. Any other caller, and any caller
-  for a session without a `compaction_item`, is refused
-  `not_session_compaction_provider`, and the session is not woken.
-- [pinned] The status and answers are the `compaction-provider/v1` role's
-  shapes, not this crate's.
+- [pinned] The runner serves no compaction op: every call goes from the
+  runner to the provider, and the provider learns what changed from
+  notices. The shapes are the `compaction-provider/v1` role's, not this
+  crate's.
 
 ### 11.2 Hook call sites
 
@@ -1312,17 +1760,19 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction` | `field` | no |
+| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
-| `reply_too_large` | the complete encoded `session.read` reply, or a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`) or `{kind: "run", run_id}`; no message content or value | no: terminal for this request; lowering `max_bytes` cannot shrink a message or atomic group |
-| `unknown_run` | `run.result` names no run of the session | — | no |
+| `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
+| `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
+| `unknown_tag` | `session.resolve` names a well-formed tag the session never assigned (§9.6) | — | no |
+| `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
-| `send_id_reuse` | a `send_id` reused with another payload or mode, or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
+| `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9), `session.baseline`, `run.cancel`, `session.retract` or `session.adopt` (§9.5) | the accepted identity | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract` or `session.adopt` (§9.5) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
@@ -1332,7 +1782,6 @@ treats it as a terminal refusal of that one request.
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
-| `not_session_compaction_provider` | a `compaction.ready` from anyone but the session's frozen compaction provider | — | no |
 | `rung_unsupported` | a `session.refresh` or `session.refresh_policy` whose policy names a rung the session does not support for that surface | — | no |
 | `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | — | no |
 | `already_applied` | a `session.refresh_policy` for a generation already applied | — | no |
@@ -1358,10 +1807,9 @@ The provider codes this role names:
 
 | Provider code | When |
 |---|---|
-| `compaction_unavailable` | Setup only: Setup failed or timed out with no answer; no model call is made, and no `provider_detail_code` is carried. A failed or timed-out step call never writes it (§11.1) |
-| `compaction_wait_exceeded` | a compaction `WAIT` hit its cap and the request could not be shown to fit |
+| `compaction_unavailable` | Setup only: Setup failed or timed out with no answer; no model call is made, and no `provider_detail_code` is carried (§11.1) |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
-| `context_overflow` | the request exceeds the model's context window |
+| `context_overflow` | the provider refused the request as exceeding the model's context window. Not the ceiling: a stop the runner decides itself before sending is the `context_ceiling` run state or refusal (§6, §12.1), never this code |
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |
 | `response_deadline` | the provider's response deadline ended the request |
 | `account_limit_exhausted` | the provider account's usage limit is exhausted |
@@ -1375,9 +1823,10 @@ The provider codes this role names:
 | `insufficient_quota` | a legacy alias of `billing_exhausted`, for already recorded run errors only |
 
 A compaction `REFUSE` adds the compaction-provider contract's `RefuseCode`
-values (its §11) as `provider_code`; this role does not repeat them. Their
-retryability, and that of the two compaction codes above, is the
-compaction-provider contract's.
+values (its §10) as `provider_code`; this role does not repeat them. Their
+retryability, and that of `compaction_unavailable`, is the
+compaction-provider contract's. A stop at the context ceiling is never a
+provider code: it is the `context_ceiling` refusal or run state (§6).
 
 - [pinned] A consumer MUST treat `cyber_policy`, `bio_policy`,
   `misalignment_policy_violation` and `content_filter` as provider policy
@@ -1392,9 +1841,8 @@ compaction-provider contract's.
 
 These are run errors, not request-refusal codes. Plan-fetch refusals, such
 as `plan_param_refused`, are send refusals and do not belong in this list.
-`errors::provider_codes::CODES` in the role crate still lists only the
-three compaction and PreUser codes above; it must add the newly pinned
-provider codes.
+`errors::provider_codes::CODES` in the role crate lists every provider code
+above.
 
 ### 12.3 Tool-result reasons (`errors::tool_result_reasons`)
 
@@ -1414,6 +1862,10 @@ provider codes.
 - [pinned] `budget_exhausted`: the session input cap stopped the call before
   dispatch (§9.3). It is marked not executed, with no dispatch intent, using
   the same native result as other hard stops (§6).
+- [pinned] `context_ceiling`: the session's context reached its ceiling at
+  a step boundary, which ended the run `context_ceiling` before the call was
+  dispatched (§6). It is marked not executed, with no dispatch intent, using
+  the same native result as other hard stops.
 - [pinned] Where the reason sits in a message body is the runner's message
   schema.
 
@@ -1423,19 +1875,25 @@ provider codes.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
   strings): `role.describe`, every reply and event a consumer decodes
   (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
-  `SendReply`, `BaselineReply`, `AdoptReply`, and the `run.status`,
-  `run.cancel` and `session.retract` answers), and `compaction.ready`. One
+  `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
+  `ToolCallsPage`, and the `run.status`, `run.cancel` and `session.retract`
+  answers). A run call's `outcome`, a ceiling's
+  `cause` and a read entry's `delivered_as.mode` are open strings. One
   exception: a model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `run.result`, `run.status`,
-  `session.subscribe`, `session.baseline` and `session.adopt` requests. A
+  `run.tool_calls`, `session.subscribe`, `session.baseline`,
+  `session.adopt` and `session.resolve` requests. A
   runner refuses an unknown field with `invalid_params` naming it.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
   `session.send` tolerates unknown fields (a newer owner against an older
   runner degrades rather than fails), but `delivery` refuses an unknown value
-  naming the field. `retention` is a recognized field even on a runner without
+  naming the field: a string it does not know, or a list (on a runner
+  without `delivery_order`), or a malformed list. `retention` is a recognized field even on a runner without
   its group, and is refused there (§9.1), never treated as an unknown extra.
-  `view` on `session.read` is strict the same way.
+  `view` on `session.read` is strict the same way, and so are the list
+  members `dedupe_key`, `expires_at_ms` and `template` on a runner that
+  declares `delivery_order` (§9.7).
   `run.cancel` remains lenient on fields, but a runner that advertises
   `run_cancel.at` refuses unlisted `at` values (§6.2).
 - [pinned] A capability is declared only by being listed (`role.describe`)
@@ -1477,6 +1935,10 @@ state root (`cortexkit-role-harness`):
    follow-up transcript carries its id or `call_key`, attribution, or result.
    The assistant step's text may also be dropped, or retained exactly once
    without the call. The same shape is preserved through the follow-up.
+   Dropping or rewriting a written message starts a new lineage, whether or
+   not a reader saw the message (the runner cannot know), so read stability
+   (§4.2) holds without exception: reads of the old lineage are refused
+   `lineage_changed`, and a reader resyncs from the new one.
 5. [pinned] **Replay, not re-invocation.** Applied compaction and every hook
    output replay from durable state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
@@ -1501,7 +1963,7 @@ points join it with the runner's approve-gate work.
 |---|---|---|
 | `Admitted` | the start record; no model request sent | 1, 6 |
 | `SendRecorded` | a send's message with its `send_id` (and PreUser output); no reply sent | 6 |
-| `CompactionApplied` | a compaction answer to apply; its request not sent | 5 |
+| `CompactionApplied` | a fetched view recorded in the write-ahead log; the step that first renders it not sent | 5 |
 | `FoldRecorded` | a prefix rebuild applying a pending change; its request not sent | 5 |
 | `StepRecorded` | an assistant step with its PostAssistant output; no dispatch intent | 4, 5 |
 | `DispatchIntent` | a call's dispatch intent; the call may have been sent | 4, 7 |
@@ -1549,14 +2011,12 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `run_cancel_unlisted_at_refused` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; `invalid_params` naming `at`, no state or transcript change |
 | `run_cancel_step_boundary_escalates_to_now` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; terminal reached without releasing the model |
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `FoldRecorded` (initial answer/fold durable before first model call) |
-| `compaction_fence_crash_replays_model_view` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `CompactionApplied` (step answer durable before fold) |
-| `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; live head insertion precedes/travels with message zero, summaries stay whole on their first page, and the exclusive-end message survives |
-| `compaction_wait_cap`, `compaction_late_or_stale_answers_discarded`, `compaction_step_timeout_uses_last_view`, `compaction_one_view_per_step` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; scripted provider and injected runner/model clock |
-| `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer refusal codes |
+| `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; Setup's head insertion precedes and travels with message zero over both caps and is not repeated on the next page, and the held model request carries the canonical view |
+| `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer Setup refusal codes |
+| the runner half of compaction-provider 0.3.0 §3 (notices, views, rides, the ceiling, native markers) | no live case yet; a later conformance release adds them |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
-| `compaction_ready_reasks_after_wait`, `compaction_ready_stale_request_ignored`, `compaction_ready_other_caller_refused`, `compaction_cursor_never_skips` | `compaction`, and a compaction provider in the plan |
 | `compaction_item_without_group_refused_writes_nothing` | a subject that does not declare `compaction` |
 | `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals`, `oversize_message_alone_on_its_page`, `never_written_session_empty_page`, `never_written_session_empty_head`, `describe_states_max_bytes` | `transcript_reads` |
 | `run_result_completed_final_text`, `run_result_text_parts_joined_unchanged`, `run_result_completed_no_text_is_empty`, `run_result_interrupted_not_cancelled`, `run_attribution_per_message` | `run_ops` |
@@ -1573,7 +2033,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
 | `send_id_retry_settled_same_answer` | `steer` or `queue`, and `run_ops` |
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
-| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
+| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result; a recovery that drops the call or its step moves the session to a new lineage | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
 | `retention_honoured`, `retention_no_content_served`, `retention_shorten_continues_lineage`, `retention_equal_noop`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
 | `retention_run_status_expired` | the above; not applicable unless the major lists `run.status` (§6.1) |
@@ -1585,7 +2045,20 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `adopt_binds_owner_without_a_run`, `adopt_exact_repeat_replays_reply`, `adopt_send_id_reuse_names_plan`, `adopt_plan_drift_refused`, `adopt_other_owner_refused`, `adopt_same_owner_readopts` | `adopt`, `transcript_reads`; the adapter's host-start hook and host plans; the live `role.describe` must declare `adopt` before any `session.adopt` is sent; reported as a named skip without `adopt` |
 | `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
 | `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
+| `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
+| `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_members_without_list_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
+| `delivery_order_list_refused_without_group` | `queue`, `transcript_reads`; not applicable when `delivery_order` is declared: a list in `delivery` is refused `invalid_params` naming `delivery` and writes nothing |
+| `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
+| `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
+| `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_refused` | the above; the rendered text goes out as `turn_system` where the adapter says its scripted route supports it, and as the same text at user authority otherwise; an out-of-range slot, and a template send carrying an empty `prompt`, are refused naming `template` and write nothing |
+| `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |
+| `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
+| `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
+
+The `context_ceiling` refusal and run state (§6, §12.1) have no live case:
+the suite has no way to bring a runner's context to its ceiling. They are
+tested against `context-ceiling.json` in this crate.
 
 Consumer-side rules no live runner can be made to exercise (an unknown run
 state, an unknown event kind, a describe answer with a partial group, a
@@ -1622,18 +2095,15 @@ the decision; the items it governs are pinned above.
   `capabilities`, the shape `tool-provider/v1` uses (§2).
 - **Q3. The session-capability source.** Settled as drafted:
   `session_capabilities_from: "admission" | "baseline"` (§2).
-- **Q4. `compaction.ready`.** Settled, as the compaction provider's role
-  owner proposed: not a required op but a `compaction` group, all or nothing,
-  owning everything in §11.1 plus the inbound `compaction.ready {session,
-  request_id}`. A runner that only steers sessions it does not host declares
-  none of it. `REQUIRED_OPS` drops to `role.describe` and
-  `session.baseline`. `session` is echoed verbatim from the status that
-  carried the `WAIT` and is opaque to the provider; `request_id` is fenced to
-  the newest issued request, and a ready for an older one is ignored. A
-  ready from anyone but the session's frozen compaction provider is refused
-  `not_session_compaction_provider`. A plan with a `compaction_item` on a
-  runner without the group is refused at admission `invalid_params {field:
-  "plan.compaction_item"}` and writes nothing (§3, §10.1, §11.1).
+- **Q4. Hosting compaction.** Settled: not a required op but a
+  `compaction` group, all or nothing, owning everything in §11.1. A runner
+  that only steers sessions it does not host declares none of it.
+  `REQUIRED_OPS` is `role.describe` and `session.baseline`. In 0.3.0 the
+  group is the runner half of compaction-provider 0.3.0 §3 and requires
+  `tags`; the synchronous `compaction.ready` op it once owned is removed. A
+  plan with a `compaction_item` on a runner without the group is refused at
+  admission `invalid_params {field: "plan.compaction_item"}` and writes
+  nothing (§3, §10.1, §11.1).
 - **Q5. Head metadata.** Settled as drafted: its own op `session.head`, with
   `updated_at` in milliseconds since the epoch and `last_run_state` as
   `{run_id, state, reason?}` (§4.3).

@@ -9,13 +9,6 @@
 //!   CompactionMessage must be durable before the first model request, and a
 //!   recorded initial CompactionMessage prevents another Setup call
 //!   (runner §11.1; compaction-provider §4).
-//! - A **step** prepares one model request, either for a user turn or after
-//!   tool results. When called, the compaction provider receives a status for
-//!   that request (runner §11.1; compaction-provider §6).
-//! - A **fence** is the per-request check that rejects an answer naming a
-//!   request other than the newest, or a second view answer for an already
-//!   accepted step. Passing the fence does not bypass the deadline or version
-//!   checks (runner §11.1; compaction-provider §9).
 //! - A **fold** applies a recorded CompactionMessage to the canonical model
 //!   view before the affected model request is sent (runner §§8, 14).
 //! - A **role code** is the compaction refusal's `code` (`RefuseCode`), which
@@ -23,7 +16,7 @@
 //!   diagnostic `provider_code`. Run errors name the role code `provider_code`
 //!   and the finer code `provider_detail_code`; the finer code must not replace
 //!   the role code or decide retryability (runner §§6, 11.1;
-//!   compaction-provider §11).
+//!   compaction-provider §10).
 //! - A **held model call** is a test mechanism: the scripted model captures a
 //!   runner request but withholds its answer until explicitly released. It
 //!   lets a case inspect the canonical input and durable records before the
@@ -31,9 +24,8 @@
 //!   11.1 describe the view and persistence rules being checked).
 //! - The **kill ledger** is the conformance driver's record of completed kills
 //!   and their mechanisms. Its **kill points** name durable boundaries where
-//!   the harness stops the runner. `CompactionApplied` leaves an answer durable
-//!   before its fold; `FoldRecorded` leaves the prefix rebuild durable. At both
-//!   points the affected model request has not been sent. The ledger must
+//!   the harness stops the runner. `FoldRecorded` leaves Setup's prefix
+//!   rebuild durable before the affected model request is sent. The ledger must
 //!   contain at least one real process kill (runner §§14, 15).
 //!
 //! # Runner adapter
@@ -79,8 +71,10 @@
 mod adopt;
 mod cancel;
 mod cases;
+mod ceiling;
 mod compaction;
 mod crash;
+mod delivery_order;
 mod drive;
 mod input_token_cap;
 mod report;
@@ -89,19 +83,18 @@ mod route;
 mod runner;
 mod structured_output;
 mod subject;
+mod tags;
+mod tool_calls;
 
-pub use compaction::{
-    CompactionAnswer, CompactionCall, CompactionCallKind, CompactionMessage, CompactionObservation,
-    CompactionScript, CompactionSetup, CompactionStep,
-};
+pub use compaction::{CompactionCall, CompactionMessage, CompactionObservation, CompactionSetup};
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;
 pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES, NARROWINGS};
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
-    AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, Script,
-    ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage, ToolResultObservation,
+    AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
+    Script, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage, ToolResultObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

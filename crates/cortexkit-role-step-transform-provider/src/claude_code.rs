@@ -1,5 +1,11 @@
 //! Optional Claude Code negotiation and connection-scoped admission.
 //!
+//! The capability bundle was shared with compaction-provider/v1's native
+//! Claude Code lane (its former §19), which compaction-provider 0.3.0
+//! removed together with `compaction.step`: a 0.3.0 provider no longer
+//! negotiates it on Setup. These checks are kept as written until the lane
+//! is re-specified (CONTRACT.md §14).
+//!
 //! None of these checks authenticates a caller. The transport supplies the
 //! daemon-attested principal and connection identity, never request body data.
 

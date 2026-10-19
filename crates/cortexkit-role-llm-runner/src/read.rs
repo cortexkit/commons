@@ -574,6 +574,41 @@ pub struct ReadMessage {
     /// declares `dispatch_attribution`, for messages that carry tool calls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
+    /// One row per part the runner exposes, in part order: the part's
+    /// stable key, and its `§N§` tag when the part is tagged. Neither
+    /// changes once assigned. Present on a runner that declares `tags`. No
+    /// digest rides here: a reader computes one from the bytes it reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<crate::tags::PartTag>,
+    /// The message's role (`role::USER`, `role::ASSISTANT`, `role::TOOL`,
+    /// `role::SYSTEM`), decoded as an open string, so a consumer learns who
+    /// spoke without decoding `message`. Absent when the runner does not
+    /// know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// When the message was written (or first ingested, for a message the
+    /// host stored itself), in milliseconds since the Unix epoch. Absent
+    /// when the runner does not know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_at: Option<u64>,
+    /// On the entry a `delivery_order` send wrote when it was delivered: the
+    /// mode it went out in and, for `tool_result`, the tool result it went
+    /// out with, so readers and a resumed run render exactly what was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_as: Option<crate::delivery_order::EntryDelivery>,
+}
+
+/// The roles a read entry's `role` names. Decoded as open strings: a
+/// runner's own role decodes as itself.
+pub mod role {
+    /// A message into the session: a prompt, a send, a wake or a reminder.
+    pub const USER: &str = "user";
+    /// The model's own output.
+    pub const ASSISTANT: &str = "assistant";
+    /// A tool's result, on a runner that stores it as a message of its own.
+    pub const TOOL: &str = "tool";
+    /// System text the runner stores in the transcript.
+    pub const SYSTEM: &str = "system";
 }
 
 impl ReadMessage {
@@ -585,7 +620,31 @@ impl ReadMessage {
             run: None,
             originals: None,
             tool_calls: Vec::new(),
+            tags: Vec::new(),
+            role: None,
+            written_at: None,
+            delivered_as: None,
         }
+    }
+
+    pub fn with_delivered_as(mut self, delivered_as: crate::delivery_order::EntryDelivery) -> Self {
+        self.delivered_as = Some(delivered_as);
+        self
+    }
+
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+
+    pub fn with_written_at(mut self, written_at: u64) -> Self {
+        self.written_at = Some(written_at);
+        self
+    }
+
+    pub fn with_tags(mut self, tags: Vec<crate::tags::PartTag>) -> Self {
+        self.tags = tags;
+        self
     }
 
     pub fn with_run(mut self, run: RunAttribution) -> Self {

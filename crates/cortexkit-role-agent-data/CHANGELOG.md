@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Dev-dependency on cortexkit-role-llm-runner 0.3.0 (was 0.2.1), for the `session_ref` vector test. Nothing changes for callers: the published API and the wire are unchanged.
+
 ## 0.2.0
 
 - Breaking: `DivergedEntry` is no longer `Copy` and gains an optional,

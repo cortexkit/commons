@@ -7,7 +7,7 @@ reviewed.
 
 | File | What it pins | Checked by |
 |---|---|---|
-| `role-describe.json` | `role.describe` answers a consumer accepts (with the capabilities each declares, including a `plans` runner and a steer-only runner with no `compaction` group and runners declaring `compaction` and `session_change`), canonical answers (one stating the `max_bytes` cap), a missing `stability` read as `alpha`, and answers it refuses with the problem: a missing major or required op, a declared group missing one of its ops (including `plans` without `session.send`, `interrupt`, `compaction` without `compaction.ready` and `session_change` without `session.flush_prefix`), no session-capability source, `transcript_reads` without `max_bytes` | `describe_vectors_check_as_recorded` (including a canonical `plans` declaration round-trip) |
+| `role-describe.json` | `role.describe` answers a consumer accepts (with the capabilities each declares, including a `plans` runner and a steer-only runner with no `compaction` group and runners declaring `compaction` and `session_change`), canonical answers (one stating the `max_bytes` cap), a missing `stability` read as `alpha`, and answers it refuses with the problem: a missing major or required op, a declared group missing one of its ops (including `plans` without `session.send`, `interrupt`, `compaction` without `session.resolve` and `session_change` without `session.flush_prefix`), `compaction` without `tags` (`compaction_without_tags`), no session-capability source, `transcript_reads` without `max_bytes` | `describe_vectors_check_as_recorded` (including a canonical `plans` declaration round-trip) |
 | `read-requests.json` | `session.read` requests for each mode (tail, range, after), with the mode each selects, and refused requests with the `invalid_params` field: `after_mid` without `lineage_id`, `after_mid` with `from_ordinal`, a misspelled cursor, an unknown view, `after_mid` on the model view (naming `view`) | the wire crate's request round-trip and mode tests |
 | `read-pages.json` | pages: a tail page, a page stopped by its byte cap with `next_from_ordinal`, a single message over the cap alone and whole on its page, run and dispatch attribution, originals, a denied call with no dispatch target, an empty transcript, a never-written session's empty page with no `lineage_id`; runner extras a decoder ignores; pages a decoder refuses (no `mid`, a non-object `head`); pages without a lineage that still carry messages or a next ordinal; the `lineage_changed` and `unknown_mid` refusals with the requests that get them; model-view pages (both `source` kinds, the compaction state absent before any compaction and named after it), model-view pages a consumer rejects with the problem, model-view entries it cannot decode, and the replacement-once series: the page holding a replacement's `first_ordinal` returns it whole, the next page and a read from inside its range do not repeat it, and a page that does is rejected | the wire crate's page and model-view tests |
 | `head.json` | the `session.head` request, a request it refuses, answers with and without a last run, a never-written session's answer with every member absent, and answers inconsistent with their lineage (no lineage but another member present; a lineage without `updated_at`) | the wire crate's head test |
@@ -16,8 +16,6 @@ reviewed.
 | `send.json` | owner `session.send` requests per delivery mode, with a mark, and with a plan and runner parameters; refused requests (unknown mode, no `send_id`); delivery checks against the modes a runner declares, with the `delivery_unsupported` refusal for an undeclared one; admission checks of a plan's `compaction_item` against the `compaction` group, with the `invalid_params {field: "plan.compaction_item"}` refusal; replies, including the admission reply's baseline; refusals with their retryability and named field | `send_vectors_decode_and_round_trip`, `undeclared_delivery_modes_are_refused_by_name`, and `a_compaction_item_is_refused_at_admission_without_the_compaction_group` |
 | `plans.json` | first send with a plan admitted by a `plans` runner (and its admission baseline), plan-less sends, and sends with a plan refused without `plans` as `invalid_params {field: "plan"}`; identical-repeat/no-op and different-plan/`plan_drift` envelopes with the unchanged baseline | `a_plan_is_refused_without_the_plans_group` executes capability admission and round-trips requests/reply; `frozen_plan_vectors_round_trip` round-trips requests, baseline and drift detail only (no runner fetch/freeze or comparison implementation in this wire crate) |
 | `baseline.json` | the `session.baseline` request, a request it refuses, the `not_yet` answer, a fresh and a changed baseline, and the non-owner refusal | the wire crate's baseline test |
-| `compaction-ready.json` | the `compaction.ready {session, request_id}` request, extras a runner ignores, requests missing a member, and checks: a ready for the newest request from the session's compaction provider calls again, one for an older request or before any is ignored, and one from another module or into a session without a compaction provider is refused `not_session_compaction_provider` | the wire crate's compaction tests |
-| `fence.json` | provider-answer fence cases matching `compaction-provider/v1`: a stale request is superseded, an answer to the newest request exactly at its deadline is late, and one just before applies | `compaction_answer_fence_vectors_round_trip` checks metadata round-tripping only; these document §11.1 cases, not executable application checks in this crate. Answer shapes belong to the provider's role; a runner implements the fence |
 | `session-change.json` | the `session_change` group's refusals (`rung_unsupported`, `pending_superseded`, `already_applied`), each with the op that gets it and its retryability | the wire crate's session-change test |
 | `errors.json` | every refusal code the role defines, plus one it does not, with whether a caller retries it | the wire crate's retryability test |
 | `reply-too-large.json` | terminal `reply_too_large` refusals for an oversized raw message and model-view atomic group, identifying each without content | `reply_too_large_is_named_terminal_and_carries_only_safe_details` |
@@ -95,3 +93,85 @@ symbolic, as in `plans.json`. `adopt-describe.json` pins the group's
 discovery, its missing-op refusal and an answer without the group. Checked by
 the `adopt::tests` and `describe::adopt_tests` modules of the wire crate,
 which apply the pinned order of checks to every case.
+
+# Tags
+
+`tags.json` pins the `tags` group: the one spelling of a tag (valid and
+invalid spellings, including a leading zero, a non-ASCII digit and a number
+past `u64`); a fork continuing after its parent's highest number; read
+entries carrying `tags` (one row per exposed part, every tag used once, an image part keyed but untagged) with `role`
+and `written_at` in the envelope; a model-written `§N§` stored as written in
+a text part and in tool-call arguments; `session.resolve` requests, requests
+refused by field, and cases against a ledger of stored parts (the whole
+part, a character range, a range counted in Unicode scalar values, an empty
+range at the end, a tool-call part in the runner's stored encoding,
+`unknown_tag`, malformed tags, a range past the content and one starting
+after its end); and the plan's `render_tags` member, off when absent or
+`null`, refused when not a boolean or when `true` without the group; and rendered parts, the tag, one space and the text, on the kinds that carry it, and nothing on parts without text.
+`tags-describe.json` pins the group's discovery, its missing-op refusal and
+an answer without the group. Checked by the `tags::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Delivery order
+
+`delivery-order.json` pins the `delivery_order` group: the string
+`delivery` equivalences (`queue` and absent are `[idle_start]`, `steer` is
+`[steer, idle_start]`, `interrupt` has none); sends whose `delivery` is a
+list, with `dedupe_key`, `expires_at_ms` and `template`; `delivery` values
+that do not decode, each naming `delivery` (an empty list, a mode twice, a
+legacy mode inside a list, a number, an unknown string); sends refused by
+member (a member beside a string or absent `delivery`, malformed members, a
+template beside a prompt, an empty prompt without a template); a runner
+without the group refusing a list naming `delivery` while the string still
+works; mode choices at boundaries (fall-through order, order winning over what else
+is possible, a list without `idle_start` never starting a run, `queue`
+waiting for the run to end); a plan sender's typed template with uses that
+render or name their problem (a percentage over 100 or written as a string,
+an integer outside its bounds, an unassigned tag, free text in a tag slot,
+an unlisted enum value, missing and undeclared slots, another digest, an
+unknown template); what goes out (a rendered template as system text, or
+as the same text at user authority after a fall-through, a plain prompt at
+user authority) and the refusal naming `template` of every template that
+cannot render; template sends, which carry no `prompt`, and the refusals of
+a template beside a prompt (empty or not) and of a send with neither; plans with senders, valid and refused
+(including a string slot); admission of the owner, named senders with and
+without the `idle_start` grant, and unnamed modules refused
+`scope_owner_mismatch` even when a request field names a sender; dedupe and
+expiry; `superseded` and `expired` send states; and entries recording each
+mode. Template digests are SHA-256 over JCS bytes and are checked by
+recomputation. `delivery-order-describe.json` pins the group's discovery.
+Checked by the `delivery_order::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Run tool calls
+
+`run-tool-calls.json` pins `run.tool_calls`: requests, requests refused by
+field (a misspelled cursor, a named session, no `run_id`); pages following
+`next` under a `limit`, in dispatch order, with one call for each named
+outcome (a reused model id is a different call), and a run with no calls;
+and refusals: `unknown_run`, a cursor never given, `limit: 0`, and
+`reply_too_large` naming the call. `run-tool-calls-describe.json` pins the
+group's discovery. Checked by the `tool_calls::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Context ceiling
+
+`context-ceiling.json` pins the `context_ceiling` refusal of a send, one per
+documented cause, writing nothing; `run.result` and `run.status` of a run
+that ended in the `context_ceiling` state with its detail and no error; a
+cause this role does not name and an unknown member, both tolerated; and,
+for contrast, a provider's own overflow, which ends `error` with
+`context_overflow`. Checked by the `errors::context_ceiling_tests` module of
+the wire crate.
+
+# Serializer profile `anthropic-messages`
+
+`serializer-anthropic-messages.json` pins the profile's entry bodies:
+`cache_control` removed at every allowed place (top-level content blocks of
+a user and an assistant message, and `text`, `image` and `document` blocks
+nested in a `tool_result`) and kept inside `tool_use` input, in a nested
+block of another type and inside an unknown block; string content and a
+`tool_result` with string content; and resends that move the cache marker
+(a string turning into a one-block array, and back), where the entry keeps
+the first-ingested form. Checked by the `serializer_profile::tests` module
+of the wire crate.

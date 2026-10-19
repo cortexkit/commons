@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- Requires cortexkit-role-llm-runner 0.3.0, a breaking release (was 0.2.0). Nothing this crate exports changes type; its `errors::runner_codes` constants keep their values. The minor bump follows the role contract: compaction-provider 0.3.0 removed `compaction.step`, `compaction.ready`, the request fence and `wait`, its host runner lane (former §18) and its native Claude Code lane (former §19), on which this contract's §13 host runner lane and §14 Claude Code capability lean. CONTRACT.md now marks each such reference as removed, with a note at the head of §13.1 and §14.1; the lanes themselves are kept as written until they are re-specified on advance notices and views, and a caller relying on them can no longer pair them with a compaction-provider 0.3.0 provider.
+
 ## 0.2.3
 
 - Contract wording only (§13.2), no code or wire change: the host advances

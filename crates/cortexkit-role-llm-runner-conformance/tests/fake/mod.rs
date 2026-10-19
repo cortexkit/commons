@@ -41,6 +41,7 @@ use cortexkit_role_llm_runner_conformance::{
         adopt::{check_drift, AdoptReply, AdoptRequest, PLAN_FIELD},
         baseline::{Baseline, BaselineItem, BaselineReply},
         capabilities as groups,
+        delivery_order::{self as order, DeliveryOrder, Mode},
         describe::{Major, Retention, RoleDescribe},
         errors, ops, points,
         read::{
@@ -56,8 +57,8 @@ use cortexkit_role_llm_runner_conformance::{
         subscribe::{SubscribeFrom, SubscribeRequest},
         PROVIDES,
     },
-    Capability, LlmRunnerSubject, ModelRequestObservation, Reply, RouteFailure, RunnerRoute,
-    Script, ScriptedPart, SubscribeOutcome, SCRIPTED_TOOL,
+    Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity, Reply, RouteFailure,
+    RunnerRoute, Script, ScriptedPart, SubscribeOutcome, SCRIPTED_TOOL,
 };
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
@@ -66,6 +67,11 @@ mod compaction;
 pub use compaction::CompactionDefect;
 
 pub const TOOL_MODULE: &str = "fake.tools";
+/// The module id (and route principal) of the sender the delivery-order
+/// cases name in a session plan's `senders` member.
+pub const SENDER_MODULE: &str = "fake.sender";
+/// How long the fake holds a run at the context ceiling before its bound.
+const CEILING_WAIT_MS: u64 = 300_000;
 pub const RETENTION_MAX: u64 = 4;
 const RETENTION_DELETE_MS: u64 = 100;
 // Self-tests neutralize this switch to prove their named failure assertions
@@ -204,6 +210,45 @@ pub struct Defects {
     /// `session.adopt` from a caller other than the recorded owner takes the
     /// session over instead of being refused `scope_owner_mismatch`.
     pub adopt_takes_over_owner: bool,
+    /// Tag numbering starts again at each run, so a later run reuses the
+    /// numbers an earlier one assigned.
+    pub tags_reused_across_runs: bool,
+    /// Model-written `§N§` sequences are stripped from stored text parts and
+    /// from tool-call arguments.
+    pub tags_rewrite_model_text: bool,
+    /// `run.tool_calls` lists a run's calls in reverse dispatch order.
+    pub run_tool_calls_reversed: bool,
+    /// A `delivery_order` list without `idle_start` starts a run on an idle
+    /// session.
+    pub order_starts_runs_without_idle_start: bool,
+    /// A template send's slots are substituted without validation, so an
+    /// out-of-range value renders and goes out as system text.
+    pub order_template_slots_unchecked: bool,
+    /// A `delivery_order` send from a module the plan does not name is
+    /// admitted.
+    pub order_admits_any_sender: bool,
+    /// A send with the same `dedupe_key` queues beside the earlier one
+    /// instead of replacing it.
+    pub order_dedupe_keeps_both: bool,
+    /// `expires_at_ms` is ignored: an expired send is still delivered.
+    pub order_expiry_ignored: bool,
+    /// The last possible mode of a list wins instead of the first.
+    pub order_last_possible_mode: bool,
+    /// A runner without the `delivery_order` group accepts a list in
+    /// `delivery`, delivering it as a legacy `queue`.
+    pub order_list_accepted_without_group: bool,
+    /// A list member (`template`, `dedupe_key`, `expires_at_ms`) beside a
+    /// string or absent `delivery` is ignored instead of refused.
+    pub order_members_without_list_accepted: bool,
+    /// A template send carrying `"prompt": ""` is accepted as if it carried
+    /// no prompt, instead of refused naming `template`.
+    pub order_template_with_empty_prompt_accepted: bool,
+    /// A recovery that drops a never-sent call from history keeps the
+    /// session's lineage.
+    pub drop_keeps_lineage: bool,
+    /// `session.read` serves the host's live record, so a host-side metadata
+    /// change shows up in an entry's bytes under the same lineage.
+    pub read_serves_live_host_metadata: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -258,6 +303,10 @@ struct World {
     run_result_calls: AtomicUsize,
     /// Every `session.adopt` request received, served or not.
     adopt_calls: AtomicUsize,
+    /// Whether the scripted route supports a turn-scoped system message.
+    turn_system: bool,
+    /// Sessions whose next model request waits at the context ceiling.
+    ceiling_holds: Mutex<BTreeSet<String>>,
     /// How many `run.result` reads of an ended run still answer `active`,
     /// modelling a runner that reports the run as ended only a moment after
     /// the send returns.
@@ -318,6 +367,29 @@ struct Msg {
     run_id: String,
     /// The keys of the calls an assistant message carries, in order.
     calls: Vec<String>,
+    /// One row per part: its key and its tag number, if tagged.
+    tags: Vec<(String, Option<u64>)>,
+    /// For an entry written by a delivered `delivery_order` send: the mode
+    /// it went out in, as the entry's `delivered_as`.
+    delivered_as: Option<Value>,
+}
+
+/// A `session.send` carrying a `delivery_order` list that the fake
+/// accepted, queued until a boundary where one of its modes is possible.
+#[derive(Clone, Debug)]
+struct Queued {
+    send_id: String,
+    sender: String,
+    text: String,
+    modes: Vec<Mode>,
+    dedupe_key: Option<String>,
+    expires_at_ms: Option<u64>,
+    /// The text is a plan template's rendering.
+    system: bool,
+    /// The request as received, for idempotency.
+    request: Value,
+    /// `pending`, `delivered`, `superseded` or `expired`.
+    state: String,
 }
 
 #[derive(Clone, Debug)]
@@ -346,6 +418,9 @@ struct RunRec {
     structured_output: Option<Value>,
     /// The structured output its terminal record carries.
     structured_output_result: Option<Value>,
+    /// The `{window, size, cause}` detail of a run that ended in the
+    /// `context_ceiling` state.
+    ceiling: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -384,6 +459,19 @@ struct Sess {
     calls: BTreeMap<String, CallRec>,
     /// The kind of every record, in order: the durable control events.
     events: Vec<String>,
+    /// The highest tag number assigned.
+    last_tag: u64,
+    /// The non-owner senders the session's admitted plan names.
+    senders: Vec<order::PlanSender>,
+    /// Accepted `delivery_order` sends, keyed by sender and `send_id`, and
+    /// those keys in arrival order.
+    ordered: BTreeMap<String, Queued>,
+    queue: Vec<String>,
+    /// Host-side metadata changes made outside the role.
+    host_meta: u64,
+    /// The run waiting at the context ceiling, and the time its wait ends
+    /// (milliseconds since the Unix epoch).
+    ceiling_wait: Option<(String, u64)>,
 }
 
 impl Sess {
@@ -397,12 +485,33 @@ impl Sess {
 
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.messages.len() as u64;
+        // Text-bearing parts are tagged; a tool call keeps a key but no tag.
+        let parts: Vec<bool> = match body["parts"].as_array() {
+            Some(parts) => parts
+                .iter()
+                .map(|part| part["type"] != "tool_call")
+                .collect(),
+            None => vec![true],
+        };
+        let tags = parts
+            .into_iter()
+            .enumerate()
+            .map(|(index, tagged)| {
+                let tag = tagged.then(|| {
+                    self.last_tag += 1;
+                    self.last_tag
+                });
+                (index.to_string(), tag)
+            })
+            .collect();
         self.messages.push(Msg {
             ordinal,
             mid: format!("{}.m{ordinal}", self.lineage),
             body,
             run_id: run_id.to_owned(),
             calls,
+            tags,
+            delivered_as: None,
         });
         ordinal
     }
@@ -737,6 +846,7 @@ impl Module {
                     lineage: text("lineage"),
                     plan_digest: record["plan_digest"].as_str().map(str::to_owned),
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
+                    senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
                     ..Sess::default()
                 },
             );
@@ -753,6 +863,49 @@ impl Module {
             sess.last_activity = record["at"].as_u64().unwrap_or_default();
         }
         match kind.as_str() {
+            "host_meta" => sess.host_meta += 1,
+            "ordered" => {
+                let id = text("id");
+                sess.queue.push(id.clone());
+                sess.ordered.insert(
+                    id,
+                    Queued {
+                        send_id: text("send_id"),
+                        sender: text("sender"),
+                        text: text("text"),
+                        modes: serde_json::from_value(record["modes"].clone()).unwrap_or_default(),
+                        dedupe_key: record["dedupe_key"].as_str().map(str::to_owned),
+                        expires_at_ms: record["expires_at_ms"].as_u64(),
+                        system: record["system"] == json!(true),
+                        request: record["request"].clone(),
+                        state: "pending".into(),
+                    },
+                );
+            }
+            "order_end" => {
+                if let Some(queued) = sess.ordered.get_mut(&text("id")) {
+                    queued.state = text("state");
+                }
+            }
+            "order_delivered" => {
+                let id = text("id");
+                let Some(queued) = sess.ordered.get_mut(&id) else {
+                    return;
+                };
+                queued.state = "delivered".into();
+                let role = if record["delivered_as"]["mode"] == order::modes::TURN_SYSTEM {
+                    "system"
+                } else {
+                    "user"
+                };
+                let body = json!({ "role": role, "text": queued.text });
+                let ordinal = sess.push(body, &text("run_id"), Vec::new());
+                sess.messages[ordinal as usize].delivered_as = Some(record["delivered_as"].clone());
+            }
+            "ceiling_wait" => {
+                sess.ceiling_wait = Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
+            }
+            "ceiling_view" => sess.ceiling_wait = None,
             "adopt" => {
                 sess.owner = text("owner");
                 sess.adopts.insert(
@@ -795,11 +948,17 @@ impl Module {
                     sess.title = Some(title.into());
                 }
                 let run_id = text("run_id");
+                if kind == "send" && self.world.defects.tags_reused_across_runs {
+                    sess.last_tag = 0;
+                }
                 let ordinal = sess.push(
                     json!({ "role": "user", "text": text("prompt") }),
                     &run_id,
                     Vec::new(),
                 );
+                if let Some(delivered) = record.get("delivered_as").filter(|d| !d.is_null()) {
+                    sess.messages[ordinal as usize].delivered_as = Some(delivered.clone());
+                }
                 sess.sends.insert(
                     text("send_id"),
                     SendRec {
@@ -827,6 +986,7 @@ impl Module {
                             .filter(|frozen| !frozen.is_null())
                             .cloned(),
                         structured_output_result: None,
+                        ceiling: None,
                     });
                 }
             }
@@ -864,6 +1024,11 @@ impl Module {
             }
             "drop_step" => {
                 let run_id = text("run_id");
+                // Dropping a written message starts a new lineage, so no
+                // reader sees changed bytes under the old one.
+                if !self.world.defects.drop_keeps_lineage {
+                    sess.lineage = format!("{}-r", sess.lineage);
+                }
                 sess.calls.retain(|_, call| call.run_id != run_id);
                 if record["keep_text"] == json!(true) {
                     for message in sess
@@ -946,8 +1111,10 @@ impl Module {
                     .rev()
                     .find(|m| m.run_id == run_id && m.body["role"] == "assistant")
                     .map(|m| m.ordinal);
+                sess.ceiling_wait = None;
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
+                    run.ceiling = record.get("context_ceiling").cloned();
                     run.error = record.get("error").cloned();
                     run.detail = record.get("detail").cloned();
                     run.structured_output_result = record.get("structured_output").cloned();
@@ -1020,6 +1187,20 @@ impl Module {
                     json!({"kind":"terminal", "run_id":run_id, "state":"cancelled"}),
                 );
             }
+            if self.world.ceiling_holds.lock().unwrap().contains(session) {
+                // The request would reach the ceiling: wait for a view.
+                if sess.ceiling_wait.is_none() {
+                    self.commit(
+                        session,
+                        json!({ "kind": "ceiling_wait", "run_id": run_id,
+                                "deadline_ms": self.world.now() + CEILING_WAIT_MS }),
+                    )?;
+                }
+                return Ok(());
+            }
+            if self.deliver_at_step(session, run_id)? {
+                continue;
+            }
             // The model consumed a turn even if recovery removed it from history.
             if !self.prepare_compaction(session, run_id, turn_index)? {
                 return Ok(());
@@ -1088,11 +1269,18 @@ impl Module {
             let mut tools = Vec::new();
             for (index, part) in turn.parts.iter().enumerate() {
                 match part {
-                    ScriptedPart::Text(text) => parts.push(json!({ "type": "text", "text": text })),
+                    ScriptedPart::Text(text) => {
+                        parts.push(json!({ "type": "text", "text": self.model_text(text) }))
+                    }
                     ScriptedPart::Reasoning(text) => {
                         parts.push(json!({ "type": "reasoning", "text": text }))
                     }
                     ScriptedPart::ToolCall(call) => {
+                        let mut call = call.clone();
+                        if self.world.defects.tags_rewrite_model_text {
+                            call.arguments = strip_tags_value(&call.arguments);
+                        }
+                        let call = &call;
                         let key = if self.world.defects.call_key_from_model_id {
                             format!("key-{}", call.tool_call_id)
                         } else {
@@ -1185,6 +1373,129 @@ impl Module {
         }
     }
 
+    /// The model's text as stored: byte for byte, unless the defect strips
+    /// model-written tags.
+    fn model_text(&self, text: &str) -> String {
+        if self.world.defects.tags_rewrite_model_text {
+            strip_tags(text)
+        } else {
+            text.to_owned()
+        }
+    }
+
+    /// The first possible mode of `modes` at `boundary`, or the last one
+    /// under the defect.
+    fn choose(&self, modes: &[Mode], boundary: &order::Boundary) -> Option<Mode> {
+        if self.world.defects.order_last_possible_mode {
+            modes
+                .iter()
+                .rev()
+                .copied()
+                .find(|mode| boundary.possible(*mode))
+        } else {
+            order::choose(modes, boundary)
+        }
+    }
+
+    /// Drop a queued send whose time has passed. Answers whether it did.
+    fn expire(&self, session: &str, id: &str, queued: &Queued) -> Result<bool, Killed> {
+        if self.world.defects.order_expiry_ignored
+            || !order::expired(queued.expires_at_ms, self.world.now())
+        {
+            return Ok(false);
+        }
+        self.commit(
+            session,
+            json!({ "kind": "order_end", "id": id, "state": "expired" }),
+        )?;
+        Ok(true)
+    }
+
+    /// The boundary before run `run_id`'s next model request: deliver every
+    /// queued send whose list has a mode possible there. Answers whether any
+    /// was delivered.
+    fn deliver_at_step(&self, session: &str, run_id: &str) -> Result<bool, Killed> {
+        let sess = self.sessions.lock().unwrap()[session].clone();
+        let result_key = sess
+            .messages
+            .last()
+            .filter(|m| m.body["role"] == "tool")
+            .and_then(|m| m.body["call_key"].as_str())
+            .map(str::to_owned);
+        let mut delivered = false;
+        for id in &sess.queue {
+            let queued = &sess.ordered[id];
+            if queued.state != "pending" || self.expire(session, id, queued)? {
+                continue;
+            }
+            let mut boundary = order::Boundary::default().with_run_in_progress();
+            if result_key.is_some() {
+                boundary = boundary.with_tool_result();
+            }
+            if queued.system && self.world.turn_system {
+                boundary = boundary.with_turn_system();
+            }
+            let Some(mode) = self.choose(&queued.modes, &boundary) else {
+                continue;
+            };
+            let mut delivered_as = json!({ "mode": mode.as_str() });
+            if mode == Mode::ToolResult {
+                delivered_as["call_key"] = json!(result_key);
+            }
+            self.commit(
+                session,
+                json!({ "kind": "order_delivered", "id": id, "run_id": run_id,
+                        "delivered_as": delivered_as }),
+            )?;
+            delivered = true;
+        }
+        Ok(delivered)
+    }
+
+    /// The boundary of an idle session: a queued send whose list names
+    /// `idle_start` starts a run, one at a time.
+    fn deliver_idle(&self, session: &str) -> Result<(), Killed> {
+        loop {
+            let Some(sess) = self.sessions.lock().unwrap().get(session).cloned() else {
+                return Ok(());
+            };
+            if sess.runs.iter().any(|run| run.state == "active") {
+                return Ok(());
+            }
+            let mut started = None;
+            for id in &sess.queue {
+                let queued = &sess.ordered[id];
+                if queued.state != "pending" || self.expire(session, id, queued)? {
+                    continue;
+                }
+                let idle = order::Boundary::default().with_idle();
+                let mut chosen = self.choose(&queued.modes, &idle);
+                if chosen.is_none() && self.world.defects.order_starts_runs_without_idle_start {
+                    chosen = Some(Mode::IdleStart);
+                }
+                if chosen == Some(Mode::IdleStart) {
+                    started = Some((id.clone(), queued.text.clone()));
+                    break;
+                }
+            }
+            let Some((id, text)) = started else {
+                return Ok(());
+            };
+            let run_id = format!("run-{}", sess.runs.len() + 1);
+            self.commit(
+                session,
+                json!({ "kind": "order_end", "id": id, "state": "delivered" }),
+            )?;
+            self.commit(
+                session,
+                json!({ "kind": "send", "send_id": format!("order:{id}"), "prompt": text,
+                        "delivery": groups::QUEUE, "run_id": run_id, "admitted": false,
+                        "delivered_as": { "mode": order::modes::IDLE_START } }),
+            )?;
+            self.drive(session, &run_id)?;
+        }
+    }
+
     /// Record the scripted result of the held call with `arguments`, then
     /// continue its run.
     fn complete_held(&self, arguments: &Value) -> Result<(), Killed> {
@@ -1207,7 +1518,8 @@ impl Module {
             &session,
             json!({ "kind": "result", "call_key": key, "content": content }),
         )?;
-        self.drive(&session, &run_id)
+        self.drive(&session, &run_id)?;
+        self.deliver_idle(&session)
     }
 
     fn handle(
@@ -1239,7 +1551,13 @@ impl Module {
         }
         let reply = match method {
             "session.list" | "session.export" => Ok(self.listing(session)),
-            "run.status" if self.world.advertise_status => Ok(self.run_result(session, params)),
+            "run.status" if self.world.advertise_status => Ok(self.run_status(session, params)),
+            ops::SESSION_RESOLVE if self.world.serves(groups::TAGS) => {
+                Ok(self.resolve(session, &params))
+            }
+            ops::RUN_TOOL_CALLS if self.world.serves(groups::RUN_TOOL_CALLS) => {
+                Ok(self.tool_calls(session, &params))
+            }
             ops::SESSION_READ | ops::SESSION_HEAD => {
                 self.world.transcript_calls.fetch_add(1, Ordering::SeqCst);
                 if !self.world.serves(groups::TRANSCRIPT_READS) {
@@ -1594,14 +1912,55 @@ impl Module {
             return Ok(invalid("retention"));
         }
         if let Some(delivery) = params.get(DELIVERY_FIELD) {
-            if !matches!(delivery.as_str(), Some("queue" | "steer" | "interrupt")) {
+            // A list is decoded below, and refused there on a runner without
+            // the group; any other value must be a known mode.
+            if !delivery.is_array()
+                && !matches!(delivery.as_str(), Some("queue" | "steer" | "interrupt"))
+            {
                 return Ok(invalid(DELIVERY_FIELD));
             }
         }
+        let listed = params.get(DELIVERY_FIELD).is_some_and(Value::is_array);
         let mut request: SendRequest = match serde_json::from_value(params) {
             Ok(request) => request,
+            Err(_) if listed => return Ok(invalid(DELIVERY_FIELD)),
             Err(_) => return Ok(invalid("prompt")),
         };
+        if let Err(field) = request.check_delivery_order(&self.world.groups) {
+            if !self.world.defects.order_list_accepted_without_group {
+                return Ok(invalid(field));
+            }
+        }
+        // A send that is not a list send must carry a non-empty prompt; a
+        // list send's prompt is checked with its members below.
+        if request.delivery_order.is_none() || !self.world.serves(groups::DELIVERY_ORDER) {
+            if let Err(field) = request.check_prompt() {
+                return Ok(invalid(field));
+            }
+        }
+        if self.world.serves(groups::DELIVERY_ORDER) {
+            match request.delivery_order() {
+                Err(_)
+                    if request.delivery_order.is_none()
+                        && self.world.defects.order_members_without_list_accepted => {}
+                Err(_)
+                    if request.prompt.as_deref() == Some("")
+                        && self.world.defects.order_template_with_empty_prompt_accepted =>
+                {
+                    // The defect reads a template send's empty prompt as no
+                    // prompt at all.
+                    request.prompt = None;
+                    let wanted = request
+                        .delivery_order()
+                        .expect("only the prompt was wrong")
+                        .expect("a list send");
+                    return self.ordered_send(stamp, session, &request, wanted);
+                }
+                Err(field) => return Ok(invalid(field)),
+                Ok(Some(wanted)) => return self.ordered_send(stamp, session, &request, wanted),
+                Ok(None) => {}
+            }
+        }
         let delivery = request.delivery().as_str().to_owned();
         let old = self.sessions.lock().unwrap().get(session).cloned();
         let mut existing = old.clone().filter(|s| s.expired_at.is_none());
@@ -1714,7 +2073,7 @@ impl Module {
                 return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
             }
             if let Some(send) = sess.sends.get(&request.send_id) {
-                if send.prompt != request.prompt && !self.world.defects.reuse_accepted {
+                if send.prompt != request.prompt_text() && !self.world.defects.reuse_accepted {
                     return Ok(refuse(
                         errors::SEND_ID_REUSE,
                         Some(json!({ "field": "prompt" })),
@@ -1744,7 +2103,7 @@ impl Module {
                 self.commit(
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
-                            "prompt": request.prompt, "delivery": delivery,
+                            "prompt": request.prompt_text(), "delivery": delivery,
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
                             "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
                 )?;
@@ -1768,6 +2127,16 @@ impl Module {
             ));
         }
         let admitted = existing.is_none();
+        if let Some(plan) = request.plan.as_ref().filter(|_| admitted) {
+            for check in [
+                cortexkit_role_llm_runner::tags::check_plan(plan, &self.world.groups),
+                order::check_plan(plan, &self.world.groups),
+            ] {
+                if let Err(field) = check {
+                    return Ok(invalid(field));
+                }
+            }
+        }
         if admitted {
             let lineage = if old.is_some() && defect != RetentionDefect::ReuseLineage {
                 format!("lin-{session}-{}", self.world.now())
@@ -1778,6 +2147,7 @@ impl Module {
                 session,
                 json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
                         "tools": tools,
+                        "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "plan_digest": request.plan.as_ref().map(plan_digest) }),
             )?;
         }
@@ -1787,15 +2157,121 @@ impl Module {
         );
         self.commit(
             session,
-            json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt,
+            json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "retention":request.retention, "title":request.runner_params.get("title"),
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
                     "structured_output": frozen }),
         )?;
         self.drive(session, &run_id)?;
+        self.deliver_idle(session)?;
         let send = self.sessions.lock().unwrap()[session].sends[&request.send_id].clone();
         Ok(self.send_reply(session, &send))
+    }
+
+    /// A `delivery_order` send into an admitted session: admitted by the
+    /// plan's senders, rendered from a plan template when it names one,
+    /// replacing a queued send with its `dedupe_key`, then queued for the
+    /// next boundary where one of its modes is possible.
+    fn ordered_send(
+        &self,
+        stamp: &RouteStamp,
+        session: &str,
+        request: &SendRequest,
+        wanted: DeliveryOrder,
+    ) -> Result<Reply, Killed> {
+        let Some(sess) = self.sessions.lock().unwrap().get(session).cloned() else {
+            // The fake takes lists only into sessions an owner admitted.
+            return Ok(invalid(order::FIELD));
+        };
+        let caller = stamp.principal.as_str();
+        if !self.world.defects.order_admits_any_sender {
+            if let Err((code, field)) =
+                order::admit(caller, Some(&sess.owner), &sess.senders, &wanted.modes)
+            {
+                return Ok(refuse(code, field.map(|field| json!({ "field": field }))));
+            }
+        }
+        let id = format!("{caller} {}", request.send_id);
+        let params = serde_json::to_value(request).expect("a send serializes");
+        if let Some(queued) = sess.ordered.get(&id) {
+            if queued.request != params {
+                return Ok(refuse(
+                    errors::SEND_ID_REUSE,
+                    Some(json!({ "field": order::FIELD })),
+                ));
+            }
+            return Ok(ordered_reply(queued));
+        }
+        let (text, system) = match &wanted.template {
+            None => (request.prompt_text().to_owned(), false),
+            Some(template) => {
+                let templates = sess
+                    .senders
+                    .iter()
+                    .find(|sender| sender.module == caller)
+                    .map(|sender| sender.templates.clone())
+                    .unwrap_or_default();
+                let assigned = |n: u64| (1..=sess.last_tag).contains(&n);
+                match order::render(&templates, template, assigned) {
+                    Ok(text) => (text, true),
+                    Err(_) if self.world.defects.order_template_slots_unchecked => {
+                        (unchecked_render(&templates, template), true)
+                    }
+                    Err(_) => return Ok(invalid(order::TEMPLATE_FIELD)),
+                }
+            }
+        };
+        if !self.world.defects.order_dedupe_keeps_both {
+            for queued_id in &sess.queue {
+                let queued = &sess.ordered[queued_id];
+                if order::replaces(
+                    caller,
+                    wanted.dedupe_key.as_deref(),
+                    &queued.sender,
+                    queued.dedupe_key.as_deref(),
+                    queued.state != "pending",
+                ) {
+                    self.commit(
+                        session,
+                        json!({ "kind": "order_end", "id": queued_id, "state": "superseded" }),
+                    )?;
+                }
+            }
+        }
+        self.commit(
+            session,
+            json!({ "kind": "ordered", "id": id, "send_id": request.send_id, "sender": caller,
+                    "text": text, "modes": wanted.modes, "dedupe_key": wanted.dedupe_key,
+                    "expires_at_ms": wanted.expires_at_ms, "system": system,
+                    "request": params }),
+        )?;
+        self.deliver_idle(session)?;
+        let queued = self.sessions.lock().unwrap()[session].ordered[&id].clone();
+        Ok(ordered_reply(&queued))
+    }
+
+    /// Start or end a context-ceiling hold on `session`. Ending it without a
+    /// view ends the waiting run `context_ceiling`; with one, the run goes
+    /// on.
+    fn end_ceiling_wait(&self, session: &str, view_arrived: bool) -> Result<(), Killed> {
+        self.world.ceiling_holds.lock().unwrap().remove(session);
+        let waiting = self.sessions.lock().unwrap()[session].ceiling_wait.clone();
+        let Some((run_id, _)) = waiting else {
+            return Ok(());
+        };
+        if view_arrived {
+            self.commit(session, json!({ "kind": "ceiling_view" }))?;
+            self.drive(session, &run_id)?;
+            self.deliver_idle(session)
+        } else {
+            self.commit(
+                session,
+                json!({ "kind": "terminal", "run_id": run_id, "state": "context_ceiling",
+                        "context_ceiling": { "window": 200_000, "size": 199_000,
+                                             "cause": errors::context_ceiling_causes::VIEW_TIMEOUT } }),
+            )
+        }
     }
 
     fn read(&self, session: &str, params: &Value) -> Reply {
@@ -1926,8 +2402,31 @@ impl Module {
                 entry
             })
             .collect();
-        let mut message =
-            ReadMessage::new(m.ordinal, &m.mid, m.body.clone()).with_tool_calls(tool_calls);
+        let mut body = m.body.clone();
+        if self.world.defects.read_serves_live_host_metadata && sess.host_meta > 0 {
+            body["host_title"] = json!(format!("renamed {}", sess.host_meta));
+        }
+        let mut message = ReadMessage::new(m.ordinal, &m.mid, body).with_tool_calls(tool_calls);
+        if let Some(role) = m.body["role"].as_str() {
+            message = message.with_role(role);
+        }
+        if self.world.serves(groups::TAGS) {
+            message = message.with_tags(
+                m.tags
+                    .iter()
+                    .map(|(part, tag)| match tag {
+                        Some(n) => cortexkit_role_llm_runner::tags::PartTag::tagged(
+                            part,
+                            cortexkit_role_llm_runner::tags::format_tag(*n).unwrap(),
+                        ),
+                        None => cortexkit_role_llm_runner::tags::PartTag::untagged(part),
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(delivered) = &m.delivered_as {
+            message = message.with_delivered_as(serde_json::from_value(delivered.clone()).unwrap());
+        }
         if !m.run_id.is_empty() && !self.world.defects.attribution_missing_run {
             let is_final = if self.world.defects.attribution_wrong_final {
                 sess.messages
@@ -1991,7 +2490,11 @@ impl Module {
                 } else {
                     run.state.clone()
                 },
-                reason: None,
+                reason: sess
+                    .ceiling_wait
+                    .as_ref()
+                    .filter(|(waiting, _)| *waiting == run.run_id)
+                    .map(|_| cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT.to_owned()),
             });
         }
         respond(head)
@@ -2043,6 +2546,9 @@ impl Module {
         if let Some(detail) = &run.detail {
             result = result.with_detail(serde_json::from_value(detail.clone()).unwrap());
         }
+        if let Some(ceiling) = &run.ceiling {
+            result = result.with_context_ceiling(serde_json::from_value(ceiling.clone()).unwrap());
+        }
         if let Some(frozen) = &run.structured_output {
             if RunState::parse(&result.state).is_terminal() {
                 result = result.with_structured_output(match &run.structured_output_result {
@@ -2052,6 +2558,168 @@ impl Module {
             }
         }
         respond(result)
+    }
+
+    /// `run.status`: the `run.result` answer, plus the waiting reason and
+    /// deadline of a run held at the context ceiling.
+    fn run_status(&self, session: &str, params: Value) -> Reply {
+        let run_id = params["run_id"].as_str().unwrap_or_default().to_owned();
+        let mut reply = self.run_result(session, params);
+        if let Reply::Response(body) = &mut reply {
+            let waiting = self
+                .sessions
+                .lock()
+                .unwrap()
+                .get(session)
+                .and_then(|sess| sess.ceiling_wait.clone());
+            if let Some((waiting_run, deadline)) = waiting.filter(|(run, _)| *run == run_id) {
+                debug_assert_eq!(waiting_run, run_id);
+                body["reason"] = json!(cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT);
+                body["deadline_ms"] = json!(deadline);
+            }
+        }
+        reply
+    }
+
+    /// The content of part `part` of `message`, as stored.
+    fn part_content(message: &Msg, part: &str) -> String {
+        match message.body["parts"].as_array() {
+            Some(parts) => {
+                let part = &parts[part.parse::<usize>().unwrap_or_default()];
+                match part["text"].as_str() {
+                    Some(text) if part["type"] != "tool_call" => text.to_owned(),
+                    _ => part.to_string(),
+                }
+            }
+            None => match message.body["text"].as_str() {
+                Some(text) => text.to_owned(),
+                None => message.body["content"].to_string(),
+            },
+        }
+    }
+
+    fn resolve(&self, session: &str, params: &Value) -> Reply {
+        if let Some(field) = unknown_field(params, &["tag", "range"]) {
+            return invalid(&field);
+        }
+        let request: cortexkit_role_llm_runner::tags::ResolveRequest =
+            match serde_json::from_value(params.clone()) {
+                Ok(request) => request,
+                Err(error) if error.to_string().contains("tag") => return invalid("tag"),
+                Err(_) => return invalid("range"),
+            };
+        let number = match request.number() {
+            Ok(number) => number,
+            Err(field) => return invalid(field),
+        };
+        let sessions = self.sessions.lock().unwrap();
+        let found = sessions.get(session).and_then(|sess| {
+            sess.messages.iter().find_map(|m| {
+                m.tags
+                    .iter()
+                    .find(|(_, tag)| *tag == Some(number))
+                    .map(|(part, _)| (m, part.clone()))
+            })
+        });
+        let Some((message, part)) = found else {
+            return refuse(errors::UNKNOWN_TAG, None);
+        };
+        let content = Self::part_content(message, &part);
+        let sliced = match cortexkit_role_llm_runner::tags::slice(&content, request.range.as_ref())
+        {
+            Ok(sliced) => sliced,
+            Err(field) => return invalid(field),
+        };
+        let mut reply = cortexkit_role_llm_runner::tags::ResolveReply::new(
+            &request.tag,
+            message.ordinal,
+            &message.mid,
+            part,
+            sliced,
+        );
+        if let Some(range) = request.range {
+            reply = reply.with_range(range);
+        }
+        respond(reply)
+    }
+
+    fn tool_calls(&self, session: &str, params: &Value) -> Reply {
+        use cortexkit_role_llm_runner::tool_calls::{
+            outcomes, RunToolCall, ToolCallsPage, ToolCallsRequest,
+        };
+        if let Some(field) = unknown_field(params, &["run_id", "after", "limit"]) {
+            return invalid(&field);
+        }
+        let request: ToolCallsRequest = match serde_json::from_value(params.clone()) {
+            Ok(request) => request,
+            Err(_) => return invalid("run_id"),
+        };
+        if let Err(field) = request.check() {
+            return invalid(field);
+        }
+        let sessions = self.sessions.lock().unwrap();
+        let Some(sess) = sessions
+            .get(session)
+            .filter(|s| s.run(&request.run_id).is_some())
+        else {
+            return refuse(errors::UNKNOWN_RUN, None);
+        };
+        let mut calls = Vec::new();
+        for message in sess.messages.iter().filter(|m| m.run_id == request.run_id) {
+            for key in &message.calls {
+                let call = &sess.calls[key];
+                let outcome = match (call.intent, call.result) {
+                    (true, true) => outcomes::SUCCEEDED,
+                    (true, false) => outcomes::INDETERMINATE,
+                    (false, true) => outcomes::NOT_EXECUTED,
+                    (false, false) => continue,
+                };
+                let name = message.body["parts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|part| part["type"] == "tool_call" && part["arguments"] == call.arguments)
+                    .and_then(|part| part["tool"].as_str())
+                    .unwrap_or(SCRIPTED_TOOL);
+                let mut listed = RunToolCall::new(
+                    &call.tool_call_id,
+                    name,
+                    call.arguments.clone(),
+                    outcome,
+                    message.ordinal,
+                )
+                .with_call_key(key);
+                if call.intent {
+                    listed = listed.with_dispatched_to(TOOL_MODULE);
+                }
+                if call.result {
+                    let stored = sess.messages.iter().find(|m| {
+                        m.body["role"] == "tool"
+                            && (m.body["call_key"] == json!(key)
+                                || m.body["tool_call_id"] == json!(call.tool_call_id))
+                    });
+                    if let Some(stored) = stored {
+                        listed = listed.with_result_bytes(stored.body.to_string().len() as u64);
+                    }
+                }
+                calls.push(listed);
+            }
+        }
+        if self.world.defects.run_tool_calls_reversed {
+            calls.reverse();
+        }
+        let from = match request.after.as_deref().map(str::parse::<usize>) {
+            None => 0,
+            Some(Ok(after)) if after <= calls.len() => after,
+            Some(_) => return invalid(cortexkit_role_llm_runner::tool_calls::AFTER_FIELD),
+        };
+        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).min(MAXIMUM_LIMIT) as usize;
+        let end = (from + limit).min(calls.len());
+        let mut page = ToolCallsPage::new(&request.run_id, calls[from..end].to_vec());
+        if end < calls.len() {
+            page = page.with_next(end.to_string());
+        }
+        respond(page)
     }
 
     fn subscribe(&self, session: &str, params: Value) -> SubscribeOutcome {
@@ -2183,6 +2851,64 @@ fn validate(schema: &Value, value: &Value, path: &str, errors: &mut Vec<String>)
 }
 
 /// The opaque position after the `seq`-th durable event.
+/// `text` without any `§N§` sequence.
+fn strip_tags(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('§') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + '§'.len_utf8()..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && after[digits..].starts_with('§') {
+            rest = &after[digits + '§'.len_utf8()..];
+        } else {
+            out.push('§');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn strip_tags_value(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(strip_tags(text)),
+        Value::Array(values) => Value::Array(values.iter().map(strip_tags_value).collect()),
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .map(|(k, v)| (k.clone(), strip_tags_value(v)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// The answer to a `delivery_order` send, or its re-send: `pending` while
+/// queued, then its terminal state.
+fn ordered_reply(queued: &Queued) -> Reply {
+    match queued.state.as_str() {
+        "pending" => respond(SendReply::new("pending").with_submission_id(&queued.send_id)),
+        "delivered" => respond(SendReply::new("finished")),
+        other => respond(SendReply::new(other)),
+    }
+}
+
+/// The defect's rendering: slot values substituted with no check at all.
+fn unchecked_render(templates: &[order::Template], template: &order::TemplateUse) -> String {
+    let Some(found) = templates.iter().find(|t| t.id == template.id) else {
+        return String::new();
+    };
+    let mut text = found.text.clone();
+    for (name, value) in &template.slots {
+        let value = value
+            .as_str()
+            .map_or_else(|| value.to_string(), str::to_owned);
+        text = text.replace(&format!("{{{name}}}"), &value);
+    }
+    text
+}
+
 fn cursor(seq: usize) -> Map<String, Value> {
     let mut position = Map::new();
     position.insert("seq".into(), json!(seq));
@@ -2259,6 +2985,8 @@ pub struct FakeSubject {
     /// so the suite's poll bound passes in no time; a duration makes that
     /// bound real time, as on a runner that polls a live process.
     pub pause_for: Option<Duration>,
+    /// Whether the scripted route supports a turn-scoped system message.
+    pub turn_system: bool,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -2274,10 +3002,14 @@ pub fn served() -> BTreeSet<Capability> {
         Capability::DispatchAttribution,
         Capability::Streaming,
         Capability::Compaction,
+        // `compaction` requires `tags`, whose ops the group lists.
+        Capability::Tags,
         Capability::ModelView,
         Capability::Steer,
         Capability::Queue,
         Capability::HoldToolCalls,
+        Capability::HoldContextCeiling,
+        Capability::HostMetadataChange,
     ]
     .into()
 }
@@ -2315,6 +3047,7 @@ impl FakeSubject {
             omit_first_steer_receipt: false,
             early_held_steer_receipt: None,
             pause_for: None,
+            turn_system: true,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
         }
@@ -2368,6 +3101,8 @@ impl FakeSubject {
                     transcript_calls: AtomicUsize::new(0),
                     run_result_calls: AtomicUsize::new(0),
                     adopt_calls: AtomicUsize::new(0),
+                    turn_system: self.turn_system,
+                    ceiling_holds: Mutex::new(BTreeSet::new()),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
                 })
             })
@@ -2561,6 +3296,69 @@ impl LlmRunnerSubject for FakeSubject {
             .unwrap_or_default())
     }
 
+    fn send_fields_with_plan(
+        &self,
+        session: &str,
+        first: bool,
+        members: &Map<String, Value>,
+    ) -> Option<Map<String, Value>> {
+        let mut fields = self.send_fields(session, first);
+        if let Some(plan) = fields.get_mut("plan").and_then(Value::as_object_mut) {
+            plan.extend(members.clone());
+        }
+        Some(fields)
+    }
+
+    fn plan_sender(&self) -> Option<PlanSenderIdentity> {
+        Some(PlanSenderIdentity::new(
+            RouteStamp {
+                principal: SENDER_MODULE.into(),
+                scope: None,
+            },
+            SENDER_MODULE,
+        ))
+    }
+
+    fn turn_system_supported(&self) -> bool {
+        self.turn_system
+    }
+
+    async fn hold_context_ceiling(&self, session: &str) -> Result<(), HarnessError> {
+        self.world()
+            .ceiling_holds
+            .lock()
+            .unwrap()
+            .insert(session.to_owned());
+        Ok(())
+    }
+
+    async fn end_context_ceiling_wait(
+        &self,
+        session: &str,
+        view_arrived: bool,
+    ) -> Result<(), HarnessError> {
+        let modules = self.modules.lock().unwrap().clone();
+        let module = modules
+            .iter()
+            .rev()
+            .find(|module| module.alive.load(Ordering::SeqCst))
+            .ok_or_else(|| HarnessError::new("no module is running"))?;
+        module
+            .end_ceiling_wait(session, view_arrived)
+            .map_err(|Killed| HarnessError::new("the module was killed"))
+    }
+
+    async fn change_host_metadata(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({ "kind": "host_meta" }))
+            .map_err(|Killed| HarnessError::new("the module was killed"))
+    }
+
     fn host_plan(&self, _session: &str, alternate: bool) -> Option<Map<String, Value>> {
         let mut plan = Map::new();
         plan.insert("tools".into(), json!([SCRIPTED_TOOL]));
@@ -2643,12 +3441,12 @@ impl LlmRunnerSubject for FakeSubject {
         )
     }
 
-    async fn install_compaction_script(
+    async fn install_compaction_setup(
         &self,
         session: &str,
-        script: cortexkit_role_llm_runner_conformance::CompactionScript,
+        setup: cortexkit_role_llm_runner_conformance::CompactionSetup,
     ) -> Result<(), HarnessError> {
-        self.install_compaction(session, script);
+        self.install_compaction(session, setup);
         Ok(())
     }
     async fn compaction_observation(
@@ -2656,13 +3454,6 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
     ) -> Result<cortexkit_role_llm_runner_conformance::CompactionObservation, HarnessError> {
         Ok(self.observe_compaction(session))
-    }
-    async fn advance_compaction_clock(
-        &self,
-        session: &str,
-        milliseconds: u64,
-    ) -> Result<(), HarnessError> {
-        self.advance_compaction(session, milliseconds)
     }
     async fn advance_retention_clock(
         &self,
@@ -2680,15 +3471,6 @@ impl LlmRunnerSubject for FakeSubject {
             }
         }
         Ok(())
-    }
-    async fn answer_compaction(
-        &self,
-        session: &str,
-        call_index: usize,
-        request_id: Option<String>,
-        answer: cortexkit_role_llm_runner_conformance::CompactionAnswer,
-    ) -> Result<(), HarnessError> {
-        self.deliver_compaction(session, call_index, request_id, answer)
     }
     async fn release_compaction_model(&self, session: &str) -> Result<(), HarnessError> {
         self.release_model(session)

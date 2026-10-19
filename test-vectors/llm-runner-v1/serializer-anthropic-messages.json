@@ -1,0 +1,308 @@
+{
+  "profile": "anthropic-messages",
+  "strip": [
+    {
+      "name": "markers at every allowed place in a user message: top-level blocks, and text, image and document blocks inside a tool_result; a nested search_result and anything inside an unknown block keep theirs",
+      "sent": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "look at this",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "iVBORw0KGgo="
+            },
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "fn main() {}",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "AAAA"
+                },
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "document",
+                "source": {
+                  "type": "text",
+                  "media_type": "text/plain",
+                  "data": "notes"
+                },
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "search_result",
+                "source": "https://example.com",
+                "title": "t",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "x"
+                  }
+                ],
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          },
+          {
+            "type": "future_block",
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "payload": {
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          }
+        ]
+      },
+      "entry": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "look at this"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "iVBORw0KGgo="
+            }
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": [
+              {
+                "type": "text",
+                "text": "fn main() {}"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "AAAA"
+                }
+              },
+              {
+                "type": "document",
+                "source": {
+                  "type": "text",
+                  "media_type": "text/plain",
+                  "data": "notes"
+                }
+              },
+              {
+                "type": "search_result",
+                "source": "https://example.com",
+                "title": "t",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "x"
+                  }
+                ],
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          },
+          {
+            "type": "future_block",
+            "payload": {
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "an assistant message: top-level markers removed, a marker inside tool_use input kept, signed thinking untouched",
+      "sent": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "plan",
+            "signature": "sig-1"
+          },
+          {
+            "type": "text",
+            "text": "reading",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_1",
+            "name": "read",
+            "input": {
+              "path": "a.rs",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            },
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      },
+      "entry": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "plan",
+            "signature": "sig-1"
+          },
+          {
+            "type": "text",
+            "text": "reading"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_1",
+            "name": "read",
+            "input": {
+              "path": "a.rs",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "string content has no block to carry a marker",
+      "sent": {
+        "role": "user",
+        "content": "hello"
+      },
+      "entry": {
+        "role": "user",
+        "content": "hello"
+      }
+    },
+    {
+      "name": "a tool_result with string content",
+      "sent": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_2",
+            "content": "ok",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      },
+      "entry": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_2",
+            "content": "ok"
+          }
+        ]
+      }
+    }
+  ],
+  "resends": [
+    {
+      "name": "string content first, re-sent as a one-block array carrying the moved marker: the entry keeps the string",
+      "first": {
+        "role": "user",
+        "content": "fix the build"
+      },
+      "resent": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "fix the build",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      },
+      "entry": {
+        "role": "user",
+        "content": "fix the build"
+      }
+    },
+    {
+      "name": "a one-block array first, re-sent as a string once the marker moved on: the entry keeps the array",
+      "first": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "run the tests",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      },
+      "resent": {
+        "role": "user",
+        "content": "run the tests"
+      },
+      "entry": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "run the tests"
+          }
+        ]
+      }
+    }
+  ]
+}

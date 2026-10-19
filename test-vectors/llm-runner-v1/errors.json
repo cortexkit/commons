@@ -21,6 +21,14 @@
       "retryable": false
     },
     {
+      "code": "unknown_tag",
+      "retryable": false
+    },
+    {
+      "code": "context_ceiling",
+      "retryable": false
+    },
+    {
       "code": "expired",
       "retryable": false
     },
@@ -79,10 +87,6 @@
     {
       "code": "scope_not_synced",
       "retryable": true
-    },
-    {
-      "code": "not_session_compaction_provider",
-      "retryable": false
     },
     {
       "code": "rung_unsupported",

@@ -1,29 +1,64 @@
-//! The shared descent rule for setup, step and hook declarations.
+//! Lineage references and the descent rule for Setup.
 //!
-//! A provider keeps one link per session lineage in the same conversation.
-//! It must validate retained history and durably save the resulting link
-//! before replying. Restore links only from provider-owned records, never
-//! caller JSON: a caller cannot certify that the provider holds a prefix.
+//! A lineage is one line of a conversation's history, with its own ordinals.
+//! A session that continues another lineage (a fork, say) declares the
+//! inherited prefix on `compaction.setup` with `descends_from`. The provider
+//! keeps one link per lineage: it validates the retained history and saves
+//! the link durably before replying. Links are restored only from the
+//! provider's own records, never from caller JSON: a caller cannot certify
+//! that the provider holds a prefix.
 
 use serde::{Deserialize, Serialize};
 
-use crate::{errors, status::DescendsFrom};
+use crate::errors;
 
-/// An undeclared lineage can still acquire descent on a later step or hook.
+/// History inherited by the current lineage: the parent lineage and the last
+/// ordinal inherited, inclusive.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct DescendsFrom {
+    pub lineage_id: String,
+    pub through_ordinal: u64,
+}
+
+impl DescendsFrom {
+    pub fn new(lineage_id: impl Into<String>, through_ordinal: u64) -> Self {
+        Self {
+            lineage_id: lineage_id.into(),
+            through_ordinal,
+        }
+    }
+}
+
+/// A message the runner wrote, by its place in the lineage.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct MessageRef {
+    pub ordinal: u64,
+    /// The runner's opaque message id.
+    pub mid: String,
+}
+
+/// The descent saved for one lineage; absent for a root lineage.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DescentLink {
     descends_from: Option<DescendsFrom>,
 }
 
-/// A rejected declaration never changes the saved link.
+/// Why a declaration was refused. A refused declaration never changes the
+/// saved link.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DescentProblem {
+    /// The parent, the cut, or a message of the retained prefix is not held.
     HistoryUnreadable,
+    /// The Setup's `descends_from` names a different parent or cut than the
+    /// link the provider already saved for this lineage.
     Conflict,
 }
 
 impl DescentProblem {
+    /// The refusal code: `history_unreadable` in a `refuse` answer, or
+    /// `invalid_params` as an `ERROR`.
     pub fn code(self) -> &'static str {
         match self {
             Self::HistoryUnreadable => errors::refuse_codes::HISTORY_UNREADABLE,
@@ -31,6 +66,7 @@ impl DescentProblem {
         }
     }
 
+    /// The field an `invalid_params` refusal names.
     pub fn field(self) -> Option<&'static str> {
         match self {
             Self::HistoryUnreadable => None,
@@ -45,9 +81,10 @@ impl DescentLink {
     }
 
     /// Validate and save the first declaration; absence and identical repeats
-    /// are no-ops. `holds_prefix` must check the named parent and cut exist in
-    /// this conversation and every retained message through the cut is held.
-    /// It is not called for an absent, repeated or conflicting declaration.
+    /// (a Setup repeated after a failure) are no-ops. `holds_prefix` must check
+    /// that the named parent and cut exist in this conversation and that every
+    /// retained message through the cut is held. It is not called for an
+    /// absent, repeated or conflicting declaration.
     pub fn declare(
         &mut self,
         declaration: Option<&DescendsFrom>,
@@ -74,28 +111,10 @@ impl DescentLink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{setup::SetupRequest, status::StepStatus, vectors};
-    use cortexkit_role_step_transform_provider::hook::HookCall;
+    use crate::{setup::SetupRequest, vectors};
     use serde_json::Value;
 
-    fn declaration(name: &str, call: &Value) -> Option<DescendsFrom> {
-        match call["method"].as_str().unwrap() {
-            "compaction.setup" => {
-                vectors::round_trip::<SetupRequest>(name, &call["request"]).descends_from
-            }
-            "compaction.step" => {
-                vectors::round_trip::<StepStatus>(name, &call["request"]).descends_from
-            }
-            "transform.hook" => {
-                let hook = vectors::round_trip::<HookCall>(name, &call["request"]);
-                hook.descends_from
-                    .map(|link| DescendsFrom::new(link.lineage_id, link.through_ordinal))
-            }
-            method => panic!("{name}: unknown method {method}"),
-        }
-    }
-
-    fn check_vectors(conflicts: bool) {
+    fn check_vectors(conflicts: bool) -> usize {
         let file = vectors::load("setup-descent.json");
         let mut checked = 0;
         for case in vectors::cases(&file, "checks") {
@@ -113,7 +132,9 @@ mod tests {
             }))
             .unwrap();
             for call in calls {
-                let requested = declaration(name, call);
+                assert_eq!(call["method"], "compaction.setup", "{name}");
+                let requested =
+                    vectors::round_trip::<SetupRequest>(name, &call["request"]).descends_from;
                 let before = link.clone();
                 let mut history_checks = 0;
                 let result = link.declare(requested.as_ref(), |declaration| {
@@ -157,16 +178,16 @@ mod tests {
                 link = serde_json::from_value(serde_json::to_value(&link).unwrap()).unwrap();
             }
         }
-        assert_eq!(checked, if conflicts { 5 } else { 8 });
+        checked
     }
 
     #[test]
-    fn descent_vectors_validate_history_and_preserve_step_and_hook_paths() {
-        check_vectors(false);
+    fn descent_vectors_validate_history_and_repeat_idempotently() {
+        assert_eq!(check_vectors(false), 4);
     }
 
     #[test]
     fn descent_vectors_refuse_conflicting_lineage_declarations() {
-        check_vectors(true);
+        assert_eq!(check_vectors(true), 2);
     }
 }

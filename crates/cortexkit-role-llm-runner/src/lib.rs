@@ -16,14 +16,14 @@
 //! would silently change the question are strict.
 //!
 //! The session an op acts on is the session the route is bound to; no
-//! request in this crate names its session, except `compaction.ready` (in the
-//! `compaction` group), which arrives on a module-level route.
+//! request in this crate names its session.
 
 #![forbid(unsafe_code)]
 
 pub mod adopt;
 pub mod baseline;
 pub mod compaction;
+pub mod delivery_order;
 pub mod describe;
 pub mod errors;
 pub mod points;
@@ -31,11 +31,14 @@ pub mod read;
 pub mod retract;
 pub mod run;
 pub mod send;
+pub mod serializer_profile;
 pub mod session_ref;
 pub mod structured_output;
 pub mod subscribe;
+pub mod tags;
+pub mod tool_calls;
 
-pub use run::RUN_STATE_BUDGET_EXHAUSTED;
+pub use run::RUN_REASON_CONTEXT_CEILING_WAIT;
 
 pub use session_ref::session_ref;
 
@@ -56,10 +59,6 @@ pub mod ops {
     /// The session's current baseline, answered only to the session's owner.
     /// Required.
     pub const SESSION_BASELINE: &str = "session.baseline";
-    /// A compaction provider's signal that a step it asked the runner to
-    /// hold may be asked about again. In `compaction`: the one op of the
-    /// compaction interface the runner serves rather than calls.
-    pub const COMPACTION_READY: &str = "compaction.ready";
     /// A page of the transcript. In `transcript_reads`, and in every group
     /// that adds fields to a page.
     pub const SESSION_READ: &str = "session.read";
@@ -92,6 +91,12 @@ pub mod ops {
     /// already applied, without a prompt: no run starts and nothing is
     /// written to the transcript. In `adopt`.
     pub const SESSION_ADOPT: &str = "session.adopt";
+    /// The exact stored content of the message part a runner tag names, or a
+    /// character range of it. In `tags`.
+    pub const SESSION_RESOLVE: &str = "session.resolve";
+    /// Every tool call a run made, in order, without message bodies. In
+    /// `run_tool_calls`.
+    pub const RUN_TOOL_CALLS: &str = "run.tool_calls";
 }
 
 /// Ops every `llm-runner/v1` module must list in `role.describe`. A consumer
@@ -136,10 +141,13 @@ pub mod capabilities {
     /// `session.baseline`. Identical later plans do not fetch again; different
     /// plans are refused to preserve the session's frozen manifest.
     pub const PLANS: &str = "plans";
-    /// The compaction interface: the runner calls the session's compaction
-    /// provider (Setup, the per-step status, the request fence, durable
-    /// `WAIT` and its timeout, `REFUSE`) and serves `compaction.ready`. A
-    /// runner that hosts no sessions of its own declares none of it.
+    /// Hosting a compaction provider: the runner half of
+    /// compaction-provider 0.3.0 §3 (Setup, advance notices, views applied at
+    /// step boundaries, rides, the ceiling and native markers). Requires
+    /// [`TAGS`], whose ops it lists: an answer declaring it without `tags`
+    /// is malformed. The runner also implements the `context_ceiling`
+    /// refusal and run state and the `context_ceiling_wait` status. A runner
+    /// that hosts no sessions of its own declares none of it.
     pub const COMPACTION: &str = "compaction";
     /// Mid-session changes from the session's owner: `session.refresh`,
     /// `session.refresh_policy` and `session.flush_prefix`. A runner without
@@ -158,6 +166,16 @@ pub mod capabilities {
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
     pub const ADOPT: &str = "adopt";
+    /// Runner-owned tags: a durable `§N§` per message part on
+    /// `session.read` entries, resolved by `session.resolve`.
+    pub const TAGS: &str = "tags";
+    /// `run.tool_calls`: a run's tool calls as a paged list, read without
+    /// decoding message bodies.
+    pub const RUN_TOOL_CALLS: &str = "run_tool_calls";
+    /// `session.send` with `delivery_order`: an ordered list of delivery
+    /// modes, plan-named senders and plan templates for system-authority
+    /// text.
+    pub const DELIVERY_ORDER: &str = "delivery_order";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -183,7 +201,10 @@ pub mod capabilities {
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
         (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
-        (COMPACTION, &[ops::COMPACTION_READY]),
+        (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
+        (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
+        (DELIVERY_ORDER, &[ops::SESSION_SEND]),
+        (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (
             SESSION_CHANGE,
             &[
@@ -292,9 +313,10 @@ pub(crate) mod vectors {
         "refuse-later-plan-after-planless-first-episode.json",
         "refuse-tool-name-collision.json",
         "baseline.json",
-        "compaction-ready.json",
+        "context-ceiling.json",
+        "delivery-order.json",
+        "delivery-order-describe.json",
         "errors.json",
-        "fence.json",
         "head.json",
         "input-token-cap.json",
         "input-token-cap-results.json",
@@ -307,13 +329,18 @@ pub(crate) mod vectors {
         "run-result.json",
         "run-cancel.json",
         "run-cancel-describe.json",
+        "run-tool-calls.json",
+        "run-tool-calls-describe.json",
         "send.json",
+        "serializer-anthropic-messages.json",
         "session-change.json",
         "session-ref.json",
         "structured-output.json",
         "structured-output-describe.json",
         "structured-output-results.json",
         "subscribe.json",
+        "tags.json",
+        "tags-describe.json",
     ];
 
     pub fn dir() -> String {
@@ -401,7 +428,6 @@ mod tests {
         let role_ops = [
             ops::ROLE_DESCRIBE,
             ops::SESSION_BASELINE,
-            ops::COMPACTION_READY,
             ops::SESSION_READ,
             ops::SESSION_HEAD,
             ops::RUN_RESULT,
@@ -414,6 +440,8 @@ mod tests {
             ops::SESSION_REFRESH_POLICY,
             ops::SESSION_FLUSH_PREFIX,
             ops::SESSION_ADOPT,
+            ops::SESSION_RESOLVE,
+            ops::RUN_TOOL_CALLS,
         ];
         for (group, group_ops) in capabilities::GROUPS {
             assert!(!group_ops.is_empty(), "{group} names no op");
@@ -431,7 +459,7 @@ mod tests {
         );
         assert_eq!(
             capabilities::group_ops(capabilities::COMPACTION),
-            Some(&[ops::COMPACTION_READY][..])
+            Some(&[ops::SESSION_READ, ops::SESSION_RESOLVE][..])
         );
         // A group's ops are never required of every runner: a runner that
         // declares no group serves only the required ops.

@@ -534,6 +534,13 @@ change to ordinary runner admission or observation.
 
 ### 13.1 Admission and observation
 
+- [pinned] compaction-provider 0.3.0 removed `compaction.step`,
+  `compaction.ready`, the request fence and `wait`, and its host runner lane
+  (its former §18). The references to them below describe the
+  compaction-provider/v1 0.2.x lane this section was written against; a
+  compaction-provider 0.3.0 provider offers none of them. This lane is kept
+  as written until it is re-specified on advance notices and views.
+
 - [pinned] Admission is keyed only on the frozen plan item's params and the
   route's bind `(project_root, session, harness)` under the route's
   authenticated principal. For direct callers, the bind harness must be
@@ -554,7 +561,7 @@ change to ordinary runner admission or observation.
   §13.4. Missing or unrecognised required opt-ins grant no exception. The
   same frozen params are passed on declaration, Setup and hooks.
 - [pinned] Only an admitted caller in this section may use an empty runner-group set
-  without `transcript_reads` or a `compaction.ready` service. This grants no
+  without `transcript_reads` or a `compaction.ready` service (removed in compaction-provider 0.3.0). This grants no
   runner-only operation, runner/Broca transcript read or other session.
   A cross-session request refuses `invalid_params`, naming `session` (or
   `project_root` for a project mismatch). Ordinary runners still undergo full
@@ -569,7 +576,7 @@ change to ordinary runner admission or observation.
   `observation: "answer"` or `serializer_profile: "opencode-aisdk"`, on
   `transform.declare` refuses `invalid_params`, with `detail.field` naming
   `params.observation` or `params.serializer_profile`, respectively.
-  `compaction.setup` has the same rule (compaction-provider/v1 §18.1).
+  `compaction.setup` had the same rule (compaction-provider/v1 §18.1, removed in compaction-provider 0.3.0).
   Authentication/admission is separate from the pure declaration (§4, §8).
 - [pinned] Answer observation makes zero `session.read` calls, including
   restart and bootstrap. Ingest is not observation; a hook answer alone is
@@ -618,8 +625,8 @@ change to ordinary runner admission or observation.
 - [pinned] After a timeout or partial failure the host freezes the whole
   message raw and reports every subject, including answered ones, until a
   later call answers. It clears the resend list only then. The same two
-  optional fields occur on `compaction.step`, not Setup
-  (compaction-provider/v1 §18.2).
+  optional fields occurred on `compaction.step`, not Setup
+  (compaction-provider/v1 §18.2; both removed in compaction-provider 0.3.0).
 
 ### 13.3 Part identity, pass barrier and size
 
@@ -646,7 +653,7 @@ change to ordinary runner admission or observation.
 - [pinned] A pass with no hooked append may place `pass_complete: true` on
   MC's internal `state_sync` request for a zero-append chain change. That use
   is MC-internal, not an op or field added to either commons role.
-  `pass_complete` is not on `compaction.step` or any provider answer;
+  `pass_complete` is not on `compaction.step` (removed in compaction-provider 0.3.0) or any provider answer;
   `subject_part` is not top-level on a compaction step or its answer.
 - [pinned] Host encoded hook and status requests are capped at 3 MiB
   (3,145,728 bytes), counting all fields, including `unserved_subjects` and
@@ -660,7 +667,7 @@ change to ordinary runner admission or observation.
 ### 13.4 Companion compaction departures
 
 - [pinned] Only an admitted answer-observation host uses immediate status
-  paging (compaction-provider/v1 §18.3): it re-pages only on `more: true`,
+  paging (compaction-provider/v1 §18.3, removed in compaction-provider 0.3.0): it re-pages only on `more: true`,
   immediately with a fresh `request_id` under the same request fence, not on
   ready or `bound_ms`. The provider releases the conversation lock before
   answering and spawns no scan. Incomplete history may answer `wait` only
@@ -669,7 +676,7 @@ change to ordinary runner admission or observation.
   `wait` on a final page is an unavailable call, never a retry loop. Absent
   `newest` means no written message, not a reason to scan.
 - [pinned] Only that lane departs from compaction-provider/v1 §6's full
-  suffix/final-value rule (§18.4). `after_ordinal` is the highest contiguous
+  suffix/final-value rule (§18.4, removed in compaction-provider 0.3.0). `after_ordinal` is the highest contiguous
   ordinal whose messages have every hook answered (`ingested = true` in
   host records); later `messages` contains only entries not fully ingested,
   oldest first, as opaque pre-op JSON. An unavailable/frozen-raw message is
@@ -709,6 +716,14 @@ change to ordinary runner admission or observation.
 ## 14. Optional native Claude Code capability
 
 ### 14.1 Publication and admission
+
+- [pinned] compaction-provider 0.3.0 removed its native Claude Code lane
+  (its former §19), including the shared `claude_code` bundle on Setup,
+  `raw_view`, `compaction.view.read` and its receipts, together with
+  `compaction.step`. The references to them below describe the
+  compaction-provider/v1 0.2.x lane; a compaction-provider 0.3.0 provider
+  offers none of them. This capability is kept as written until it is
+  re-specified.
 
 - [pinned] `role.describe`, `transform.declare` requests and declarations gain
   optional typed `claude_code: ClaudeCodeCapabilities`. Every existing member
@@ -750,7 +765,7 @@ change to ordinary runner admission or observation.
   No codec epoch is implied by this contract or by synthetic vectors.
   Profile/provider generations are separate data fields, not session-id edits.
   `bootstrap_complete` advertises support for the typed completion receipt in
-  compaction-provider/v1 §19.7. The format identifier belongs inside that
+  compaction-provider/v1 §19.7 (removed in compaction-provider 0.3.0). The format identifier belongs inside that
   receipt, not in the discovery bundle. Setup ready or compaction noop alone
   never proves bootstrap complete. Publication remains fenced until complete
   native source admission and safe view validation. Durable memory ownership
@@ -775,10 +790,10 @@ change to ordinary runner admission or observation.
 
 - [pinned] The admitted pair uses the §13 answer-observation protocol: no
   transcript reads, including restart/bootstrap, and no `compaction.ready`
-  service requirement. It may use an empty runner-group set locally, without
+  service requirement (removed in compaction-provider 0.3.0). It may use an empty runner-group set locally, without
   globally changing `role.describe.runner_groups`. Ingress `more=true` fences
   view execution and immediately requests the next contiguous page with a
-  fresh request ID. This `compaction.step` paging admits original messages;
+  fresh request ID. This `compaction.step` paging (removed in compaction-provider 0.3.0) admits original messages;
   `compaction.view.read` separately retrieves frozen replacement bytes.
   A final-page history gap refuses `history_unreadable`, never an unbounded
   wait or transcript read.
@@ -800,7 +815,7 @@ change to ordinary runner admission or observation.
   negotiated lane. Larger ingress requires a separately negotiated chunked
   immutable payload capability, not view retrieval. None is implied here.
 - [pinned] Native endpoint/raw replacement retrieval, required geometry and
-  notice dispatch acknowledgements follow compaction-provider/v1 §19. The
+  notice dispatch acknowledgements follow compaction-provider/v1 §19 (removed in compaction-provider 0.3.0). The
   `pass_complete` scheduling barrier and ordinal service watermark are not
   notice acknowledgements and do not prove HTTP dispatch. A pending notice is
   never armed off the negotiated, attested lane; a plan requesting the notice
@@ -837,4 +852,4 @@ change to ordinary runner admission or observation.
   by provider generation and profile generation. A new native generation never
   overwrites old state or changes memory ownership; bootstrap resumes within
   the same generation and lineage. Its typed final-ingress completion receipt,
-  source evidence and conflict/replay rules are compaction-provider/v1 §19.7.
+  source evidence and conflict/replay rules are compaction-provider/v1 §19.7 (removed in compaction-provider 0.3.0).

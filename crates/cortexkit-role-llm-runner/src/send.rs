@@ -142,15 +142,108 @@ pub fn delivery_unsupported_detail(delivery: Delivery) -> Value {
     serde_json::json!({ DELIVERY_FIELD: delivery.as_str() })
 }
 
-fn deserialize_delivery<'de, D>(deserializer: D) -> Result<Option<Delivery>, D::Error>
+/// `delivery` on the wire: a legacy mode string, or the ordered list of
+/// the `delivery_order` group.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+enum WireDelivery {
+    Mode(Delivery),
+    Order(Vec<crate::delivery_order::Mode>),
+}
+
+/// Decode `delivery` as a mode string or a mode list, reading JSON `null`
+/// as absent. Anything else, an unknown mode, an empty list or a list
+/// naming a mode twice is refused with a message naming `delivery`.
+fn deserialize_delivery<'de, D>(deserializer: D) -> Result<Option<WireDelivery>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    crate::strict::optional(
-        deserializer,
-        DELIVERY_FIELD,
-        "\"queue\", \"steer\" or \"interrupt\"",
-    )
+    let refused = |value: &Value| {
+        serde::de::Error::custom(format!(
+            "{DELIVERY_FIELD} must be \"queue\", \"steer\" or \"interrupt\", or a non-empty \
+             list of distinct delivery_order modes; got {value}"
+        ))
+    };
+    let value = match Option::<Value>::deserialize(deserializer)? {
+        None | Some(Value::Null) => return Ok(None),
+        Some(value) => value,
+    };
+    if value.is_array() {
+        let modes: Vec<crate::delivery_order::Mode> =
+            serde_json::from_value(value.clone()).map_err(|_| refused(&value))?;
+        let mut distinct = modes.clone();
+        distinct.sort();
+        distinct.dedup();
+        if modes.is_empty() || distinct.len() != modes.len() {
+            return Err(refused(&value));
+        }
+        return Ok(Some(WireDelivery::Order(modes)));
+    }
+    serde_json::from_value(value.clone())
+        .map(|mode| Some(WireDelivery::Mode(mode)))
+        .map_err(|_| refused(&value))
+}
+
+/// The wire shape of a `session.send` request, which [`SendRequest`] is
+/// decoded from and encoded to, so `delivery` takes either form in one
+/// field.
+#[derive(Clone, Deserialize, Serialize)]
+struct WireSendRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
+    send_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_delivery"
+    )]
+    delivery: Option<WireDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plan: Option<Map<String, Value>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_retention"
+    )]
+    retention: Option<u64>,
+    #[serde(flatten)]
+    runner_params: Map<String, Value>,
+}
+
+impl From<WireSendRequest> for SendRequest {
+    fn from(wire: WireSendRequest) -> Self {
+        let (delivery, delivery_order) = match wire.delivery {
+            None => (None, None),
+            Some(WireDelivery::Mode(mode)) => (Some(mode), None),
+            Some(WireDelivery::Order(modes)) => (None, Some(modes)),
+        };
+        Self {
+            prompt: wire.prompt,
+            send_id: wire.send_id,
+            delivery,
+            delivery_order,
+            plan: wire.plan,
+            retention: wire.retention,
+            runner_params: wire.runner_params,
+        }
+    }
+}
+
+impl From<SendRequest> for WireSendRequest {
+    fn from(request: SendRequest) -> Self {
+        let delivery = match (request.delivery_order, request.delivery) {
+            (Some(modes), _) => Some(WireDelivery::Order(modes)),
+            (None, mode) => mode.map(WireDelivery::Mode),
+        };
+        Self {
+            prompt: request.prompt,
+            send_id: request.send_id,
+            delivery,
+            plan: request.plan,
+            retention: request.retention,
+            runner_params: request.runner_params,
+        }
+    }
 }
 
 fn deserialize_retention<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
@@ -244,54 +337,98 @@ impl Budget {
 /// Non-exhaustive so later optional members are additive: build one with
 /// [`SendRequest::new`] and the `with_*` setters, or decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(from = "WireSendRequest", into = "WireSendRequest")]
 #[non_exhaustive]
 pub struct SendRequest {
-    /// The prompt text.
-    pub prompt: String,
+    /// The prompt text: required, and not empty, on every send but a
+    /// template send, which carries no `prompt` and whose text the runner
+    /// renders from the plan's template ([`Self::check_prompt`]).
+    pub prompt: Option<String>,
     /// The idempotency key. The owner derives it from what it delivers,
     /// never from the attempt.
     pub send_id: String,
-    /// Absent means [`Delivery::Queue`].
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_delivery"
-    )]
+    /// A legacy mode string. Absent means [`Delivery::Queue`], unless the
+    /// wire `delivery` was a list, which is [`Self::delivery_order`].
     pub delivery: Option<Delivery>,
+    /// The ordered list of the `delivery_order` group, carried on the wire
+    /// as an array in `delivery` itself. A runner without the group refuses
+    /// it naming `delivery` ([`Self::check_delivery_order`]), and an older
+    /// runner's strict decode of `delivery` refuses an array the same way,
+    /// so a list never goes out as a legacy `queue` by mistake. At most one
+    /// of `delivery` and `delivery_order` is set.
+    pub delivery_order: Option<Vec<crate::delivery_order::Mode>>,
     /// The session's fetch plan, carried verbatim when the runner declares
     /// `plans`. The first send establishes the session's plan and freezes its
     /// fetched manifest. An identical later repeat does not fetch again;
     /// a different plan is refused as `plan_drift` so an ordinary send cannot
     /// replace the session's frozen manifest.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Map<String, Value>>,
     /// Whole-session retention in seconds. Frozen on the first send;
     /// subsequent sends may only shorten it. Absent initially means forever.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_retention"
-    )]
     pub retention: Option<u64>,
     /// The runner's own send parameters, kept as received.
-    #[serde(flatten)]
     pub runner_params: Map<String, Value>,
 }
 
 impl SendRequest {
+    /// A send of `prompt`.
     pub fn new(prompt: impl Into<String>, send_id: impl Into<String>) -> Self {
         Self {
-            prompt: prompt.into(),
+            prompt: Some(prompt.into()),
             send_id: send_id.into(),
             delivery: None,
+            delivery_order: None,
             plan: None,
             retention: None,
             runner_params: Map::new(),
         }
     }
 
+    /// A template send built from `order`: it carries no `prompt`, sends
+    /// `order.modes` as the list in `delivery`, and puts `order`'s
+    /// `dedupe_key`, `expires_at_ms` and `template` in `runner_params`.
+    pub fn template(
+        send_id: impl Into<String>,
+        order: &crate::delivery_order::DeliveryOrder,
+    ) -> Self {
+        let mut request = Self::new(String::new(), send_id).with_delivery_order(order);
+        request.prompt = None;
+        request
+    }
+
+    /// The prompt, or `""` for a send without one.
+    pub fn prompt_text(&self) -> &str {
+        self.prompt.as_deref().unwrap_or_default()
+    }
+
+    /// The `invalid_params` field for a send whose `prompt` does not match
+    /// its kind, or `Ok`. A send naming a `template` (a list member, read
+    /// from `runner_params`) carries no `prompt` at all: the runner renders
+    /// its one text, and a `prompt` beside it, even an empty one, would be a
+    /// second text. Every other send carries a non-empty `prompt`. Both
+    /// refusals name `template`, since the template is what decides which
+    /// shape the send must have.
+    pub fn check_prompt(&self) -> Result<(), &'static str> {
+        let template = self
+            .runner_params
+            .contains_key(crate::delivery_order::TEMPLATE_FIELD);
+        let prompt = self.prompt.as_deref().is_some_and(|text| !text.is_empty());
+        let ok = if template {
+            self.prompt.is_none()
+        } else {
+            prompt
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(crate::delivery_order::TEMPLATE_FIELD)
+        }
+    }
+
+    /// A legacy mode string, replacing any list.
     pub fn with_delivery(mut self, delivery: Delivery) -> Self {
         self.delivery = Some(delivery);
+        self.delivery_order = None;
         self
     }
 
@@ -440,6 +577,69 @@ impl SendRequest {
         }
     }
 
+    /// The `delivery_order` send: its list (the array in `delivery`) with the
+    /// members that ride beside it (`dedupe_key`, `expires_at_ms`,
+    /// `template`, read from `runner_params` without moving them). `Ok(None)`
+    /// for a send without a list. On a malformed send, the field of the
+    /// `invalid_params` refusal: a member sent without a list (with a string
+    /// or absent `delivery`) is refused naming that member, because an older
+    /// runner would ignore it, while it refuses the whole send when the list
+    /// rides in `delivery`. The `prompt` must match the send's kind
+    /// ([`Self::check_prompt`]), or the send is refused naming `template`.
+    pub fn delivery_order(
+        &self,
+    ) -> Result<Option<crate::delivery_order::DeliveryOrder>, &'static str> {
+        let order = crate::delivery_order::DeliveryOrder::decode(
+            self.delivery_order.as_deref(),
+            &self.runner_params,
+        )?;
+        if order.is_some() {
+            self.check_prompt()?;
+        }
+        Ok(order)
+    }
+
+    /// A runner that does not declare `delivery_order` (in `declared`, its
+    /// module-level capabilities) refuses a send whose `delivery` is a list
+    /// with `invalid_params` naming `delivery`, as an older runner's strict
+    /// decode does: it never delivers the list as a legacy mode. A runner
+    /// that declares the group passes; it checks the members with
+    /// [`Self::delivery_order`].
+    pub fn check_delivery_order<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        let declares = declared
+            .iter()
+            .any(|name| name.as_ref() == crate::capabilities::DELIVERY_ORDER);
+        if self.delivery_order.is_some() && !declares {
+            Err(DELIVERY_FIELD)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Make this a `delivery_order` send: `order`'s list in `delivery`
+    /// (replacing any legacy mode) and its members in `runner_params`.
+    pub fn with_delivery_order(mut self, order: &crate::delivery_order::DeliveryOrder) -> Self {
+        for member in crate::delivery_order::MEMBERS {
+            self.runner_params.remove(*member);
+        }
+        self.delivery = None;
+        self.delivery_order = Some(order.modes.clone());
+        self.runner_params.extend(order.to_members());
+        self
+    }
+
+    /// Admission's check of the plan's `render_tags` against `declared` (a
+    /// runner's module-level capabilities): `Err` with the `field` of an
+    /// `invalid_params` refusal (`plan.render_tags`) for a value that is not
+    /// a boolean, or `true` on a runner without `tags`. A request without a
+    /// plan passes.
+    pub fn check_render_tags<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        match &self.plan {
+            Some(plan) => crate::tags::check_plan(plan, declared),
+            None => Ok(()),
+        }
+    }
+
     /// Admission's check of the request's `plan` against `declared` (a
     /// runner's module-level capabilities): `Err` with the `field` of an
     /// `invalid_params` refusal (`plan.compaction_item`) when the plan names
@@ -466,6 +666,15 @@ pub mod states {
     pub const PENDING: &str = "pending";
     /// The run is paused; `pause_reason` may explain why.
     pub const PAUSED: &str = "paused";
+    /// A `delivery_order` send replaced, while still queued and undelivered,
+    /// by a later send from the same sender with the same `dedupe_key`.
+    /// Terminal: it is never delivered. A re-send of its `send_id` answers
+    /// this state.
+    pub const SUPERSEDED: &str = "superseded";
+    /// A `delivery_order` send dropped, undelivered, at its `expires_at_ms`.
+    /// Terminal: it is never delivered. A re-send of its `send_id` answers
+    /// this state.
+    pub const EXPIRED: &str = "expired";
 }
 
 /// A send state, classified without rejecting a runner's additional states.
@@ -476,6 +685,8 @@ pub enum SendState {
     Finished,
     Pending,
     Paused,
+    Superseded,
+    Expired,
     Unknown(String),
 }
 impl SendState {
@@ -485,6 +696,8 @@ impl SendState {
             states::FINISHED => Self::Finished,
             states::PENDING => Self::Pending,
             states::PAUSED => Self::Paused,
+            states::SUPERSEDED => Self::Superseded,
+            states::EXPIRED => Self::Expired,
             other => Self::Unknown(other.into()),
         }
     }
@@ -952,5 +1165,47 @@ mod input_cap_tests {
             .budget()
             .unwrap()
             .is_some());
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn only_a_template_send_omits_its_prompt() {
+        let plain: SendRequest =
+            serde_json::from_value(json!({"prompt": "hi", "send_id": "s"})).unwrap();
+        assert_eq!(plain.check_prompt(), Ok(()));
+        assert_eq!(plain.prompt_text(), "hi");
+        for request in [
+            json!({"send_id": "s"}),
+            json!({"prompt": "", "send_id": "s"}),
+        ] {
+            let request: SendRequest = serde_json::from_value(request).unwrap();
+            assert_eq!(
+                request.check_prompt(),
+                Err(crate::delivery_order::TEMPLATE_FIELD)
+            );
+        }
+        let template = json!({"id": "t", "digest": "d"});
+        let bare: SendRequest = serde_json::from_value(
+            json!({"send_id": "s", "delivery": ["steer"], "template": template}),
+        )
+        .unwrap();
+        assert_eq!(bare.check_prompt(), Ok(()));
+        assert_eq!(serde_json::to_value(&bare).unwrap().get("prompt"), None);
+        for prompt in ["", "words"] {
+            let carrying: SendRequest = serde_json::from_value(
+                json!({"prompt": prompt, "send_id": "s", "delivery": ["steer"], "template": template}),
+            )
+            .unwrap();
+            assert_eq!(
+                carrying.check_prompt(),
+                Err(crate::delivery_order::TEMPLATE_FIELD),
+                "{prompt:?}"
+            );
+        }
     }
 }

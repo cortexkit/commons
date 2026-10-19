@@ -82,10 +82,7 @@ where
         let outcome = match gate(spec, &declared) {
             Some(outcome) => outcome,
             None => {
-                let result = if matches!(
-                    spec.name,
-                    "compaction_setup_durable_once" | "compaction_fence_crash_replays_model_view"
-                ) {
+                let result = if spec.name == "compaction_setup_durable_once" {
                     compaction::crash_case(
                         subject,
                         &mut driver,
