@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     describe::{check_describe, DescribeProblem, RoleDescribe},
-    setup::SetupAnswer,
+    setup::{accept_mode, session_mode, CompactionMode, SetupAnswer, SetupRequest},
     status::MessageRef,
     vectors, OpRequest,
 };
@@ -557,4 +557,90 @@ fn ceiling_absent_keeps_existing_setup_bytes() {
             assert_eq!(ceiling, None, "{}", name(case));
         }
     }
+}
+
+fn mode_of(value: &Value) -> Option<CompactionMode> {
+    (!value.is_null()).then(|| serde_json::from_value(value.clone()).unwrap())
+}
+
+#[test]
+fn setup_mode_vectors_decode_strictly() {
+    let file = file();
+    let mode = &file["mode"];
+    let requested: Vec<Option<CompactionMode>> = vectors::cases(mode, "requests")
+        .iter()
+        .map(|case| {
+            vectors::round_trip::<SetupRequest>(name(case), &case["request"]).compaction_mode
+        })
+        .collect();
+    assert_eq!(
+        requested,
+        [
+            None,
+            Some(CompactionMode::Sync),
+            Some(CompactionMode::Async)
+        ]
+    );
+    for case in vectors::cases(mode, "undecodable_requests") {
+        vectors::refused::<SetupRequest>(name(case), &case["request"]);
+    }
+    for case in vectors::cases(mode, "answers") {
+        let answer = vectors::round_trip::<SetupAnswer>(name(case), &case["answer"]);
+        if let Some(retryable) = case.get("retryable") {
+            assert_eq!(answer.retryable(), retryable.as_bool(), "{}", name(case));
+        }
+    }
+    for case in vectors::cases(mode, "undecodable_answers") {
+        vectors::refused::<SetupAnswer>(name(case), &case["answer"]);
+    }
+}
+
+#[test]
+fn session_is_async_only_when_asked_and_echoed() {
+    let file = file();
+    let answers = vectors::cases(&file["mode"], "answers");
+    let ready: SetupAnswer = serde_json::from_value(answers[1]["answer"].clone()).unwrap();
+    let refused: SetupAnswer = serde_json::from_value(answers[2]["answer"].clone()).unwrap();
+    for case in vectors::cases(&file["mode"], "session_mode") {
+        let answer = match case["echo"].as_str() {
+            Some("refuse") => refused.clone(),
+            echo => {
+                let mut answer = ready.clone();
+                if let SetupAnswer::Ready {
+                    compaction_mode, ..
+                } = &mut answer
+                {
+                    *compaction_mode = echo.map(|_| mode_of(&case["echo"]).unwrap());
+                }
+                answer
+            }
+        };
+        let expected: CompactionMode = serde_json::from_value(case["mode"].clone()).unwrap();
+        assert_eq!(
+            session_mode(mode_of(&case["requested"]), &answer),
+            expected,
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn provider_accepts_async_only_for_a_runner_declaring_compaction_async() {
+    let file = file();
+    for case in vectors::cases(&file["mode"], "acceptance") {
+        let capabilities: Vec<String> =
+            serde_json::from_value(case["runner_capabilities"].clone()).unwrap();
+        let outcome = match accept_mode(
+            mode_of(&case["requested"]),
+            case["provider_declares_async"].as_bool().unwrap(),
+            &capabilities,
+        ) {
+            Ok(Some(CompactionMode::Async)) => "echo:async".to_owned(),
+            Ok(Some(CompactionMode::Sync)) => "echo:sync".to_owned(),
+            Ok(None) => "no_echo".to_owned(),
+            Err(code) => format!("refuse:{}", code.as_str()),
+        };
+        assert_eq!(outcome, case["outcome"].as_str().unwrap(), "{}", name(case));
+    }
+    assert_eq!(super::RUNNER_GROUP, "compaction_async");
 }

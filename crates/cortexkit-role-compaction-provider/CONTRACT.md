@@ -516,7 +516,7 @@ The admitted host lane departs from ready-or-bound paging only under §18.3.
   In llm-runner run errors, this answer's role `code` maps to `provider_code`
   and its optional finer `provider_code` maps to `provider_detail_code`,
   diagnostics only, never replacing the role code or deciding retryability.
-- [pinned] `code` is one of the four codes below (`RefuseCode`). Each has a
+- [pinned] `code` is one of the five codes below (`RefuseCode`). Each has a
   fixed retryability, which tells the session's owner whether retrying
   without the user acting makes sense (the provider was only busy) or the
   user must act (switch model, fix configuration). The answer carries no
@@ -543,6 +543,7 @@ The admitted host lane departs from ready-or-bound paging only under §18.3.
 | `provider_busy` | the provider is busy with the session's history past the wait cap | yes |
 | `misconfigured` | the configuration for this preset and params cannot be used | no |
 | `history_unreadable` | required history is missing, including a cursor gap or a declared inherited prefix the provider does not hold | yes |
+| `async_not_supported` | Setup only: the runner asked for `compaction_mode: "async"` but its `llm-runner/v1` `role.describe` does not list `compaction_async` (§20.1) | no |
 
 ## 12. The model view
 
@@ -641,6 +642,7 @@ in this table is not retryable.
 | `provider_busy` | yes | Setup, step |
 | `misconfigured` | no | Setup, step |
 | `history_unreadable` | yes | Setup, step |
+| `async_not_supported` | no | Setup |
 | `not_session_compaction_provider` | no | — |
 | `compaction_unavailable` | no | Setup |
 | `compaction_wait_exceeded` | yes | step |

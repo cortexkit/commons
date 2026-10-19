@@ -505,6 +505,62 @@ describe = {
     ],
 }
 
+SETUP_REQUEST = {"session": "ses_1", "harness": "opencode", "request_id": "cr-000001", "params": {},
+                 "composition": {}, "model": MODEL, "context_window": 200000, "now": 1790000000000}
+READY = {"answer": "ready", "request_id": "cr-000001",
+         "initial": {"compaction_id": "head", "version": 1, "range": {"from": 0, "to": 0}, "replacement": []}}
+
+
+def with_mode(obj, m):
+    return obj if m is None else {**obj, "compaction_mode": m}
+
+
+mode = {
+    "requests": [
+        {"name": "no mode: sync, the bytes before the mode existed", "request": SETUP_REQUEST},
+        {"name": "sync asked explicitly", "request": with_mode(SETUP_REQUEST, "sync")},
+        {"name": "async asked", "request": with_mode(SETUP_REQUEST, "async")},
+    ],
+    "undecodable_requests": [
+        {"name": "unknown mode is refused, never read as sync", "request": with_mode(SETUP_REQUEST, "turbo")},
+        {"name": "mode in uppercase", "request": with_mode(SETUP_REQUEST, "ASYNC")},
+    ],
+    "answers": [
+        {"name": "ready echoing async", "answer": with_mode(READY, "async")},
+        {"name": "ready with no echo", "answer": READY},
+        {"name": "refused: the runner does not declare compaction_async",
+         "answer": {"answer": "refuse", "request_id": "cr-000001", "code": "async_not_supported",
+                    "reason": "the runner's describe does not list compaction_async"},
+         "retryable": False},
+    ],
+    "undecodable_answers": [
+        {"name": "ready echoing an unknown mode", "answer": with_mode(READY, "turbo")},
+    ],
+    "session_mode": [
+        {"requested": None, "echo": None, "mode": "sync"},
+        {"requested": "sync", "echo": None, "mode": "sync"},
+        {"requested": "sync", "echo": "sync", "mode": "sync"},
+        {"requested": "async", "echo": "async", "mode": "async"},
+        {"requested": "async", "echo": None, "mode": "sync"},
+        {"requested": "async", "echo": "sync", "mode": "sync"},
+        {"requested": "sync", "echo": "async", "mode": "sync"},
+        {"requested": None, "echo": "async", "mode": "sync"},
+        {"requested": "async", "echo": "refuse", "mode": "sync"},
+    ],
+    "acceptance": [
+        {"name": "both sides declare async", "requested": "async", "provider_declares_async": True,
+         "runner_capabilities": ["transcript_reads", "compaction", "compaction_async"], "outcome": "echo:async"},
+        {"name": "runner describe lacks compaction_async", "requested": "async", "provider_declares_async": True,
+         "runner_capabilities": ["transcript_reads", "compaction"], "outcome": "refuse:async_not_supported"},
+        {"name": "provider does not declare async", "requested": "async", "provider_declares_async": False,
+         "runner_capabilities": ["compaction", "compaction_async"], "outcome": "no_echo"},
+        {"name": "sync request", "requested": "sync", "provider_declares_async": True,
+         "runner_capabilities": ["compaction", "compaction_async"], "outcome": "no_echo"},
+        {"name": "no mode asked", "requested": None, "provider_declares_async": True,
+         "runner_capabilities": ["compaction", "compaction_async"], "outcome": "no_echo"},
+    ],
+}
+
 doc = {
     "session": {"harness": "opencode", "project_root": "/work/demo", "session": "ses_1", "session_ref": SR,
                 "account": ACCT, "runner_module_id": RUNNER, "provider_module_id": PROVIDER},
@@ -523,6 +579,7 @@ doc = {
     "view_get": view_get,
     "ride": ride,
     "ceiling": ceiling,
+    "mode": mode,
 }
 
 with open(OUT, "w") as f:

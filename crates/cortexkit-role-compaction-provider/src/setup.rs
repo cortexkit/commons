@@ -74,6 +74,72 @@ pub struct SetupRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_code:
         Option<cortexkit_role_step_transform_provider::claude_code::ClaudeCodeCapabilities>,
+    /// The compaction mode the runner asks for (CONTRACT.md §20.1). Absent
+    /// means `sync`, the behaviour before the mode existed. A runner sends
+    /// `async` only when the provider's `role.describe` declares the `async`
+    /// group and the runner's own declares `compaction_async`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_mode: Option<CompactionMode>,
+}
+
+/// How a session's compaction runs. Strict on value: an unknown mode does
+/// not decode, and is never read as `sync`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionMode {
+    /// The runner calls `compaction.step` (CONTRACT.md §6–§10).
+    Sync,
+    /// Advance notices, views, `view.get` and `compaction.ride` (CONTRACT.md
+    /// §20); the runner never calls `compaction.step`.
+    Async,
+}
+
+/// The mode a session runs in, from what its Setup asked for and the answer:
+/// `async` only if the request asked for `async` and a `ready` answer echoes
+/// `async`. Every other combination, including a `ready` answer without the
+/// echo, is `sync`.
+pub fn session_mode(requested: Option<CompactionMode>, answer: &SetupAnswer) -> CompactionMode {
+    let echoed = match answer {
+        SetupAnswer::Ready {
+            compaction_mode, ..
+        } => *compaction_mode,
+        SetupAnswer::Refuse { .. } => None,
+    };
+    if requested == Some(CompactionMode::Async) && echoed == Some(CompactionMode::Async) {
+        CompactionMode::Async
+    } else {
+        CompactionMode::Sync
+    }
+}
+
+/// The provider's decision on the mode a Setup asks for, as the `compaction_mode`
+/// its `ready` answer echoes. `provider_declares_async` is whether the
+/// provider's own `role.describe` lists the `async` group;
+/// `runner_capabilities` is the `capabilities` list of the runner's
+/// `llm-runner/v1` `role.describe`, which the provider reads over its own
+/// llm-runner route. An `async` request from a provider that declares the
+/// group is echoed `async` when the runner lists
+/// [`crate::async_group::RUNNER_GROUP`], and refused
+/// [`RefuseCode::AsyncNotSupported`] when it does not. A provider may instead
+/// answer that request in sync mode by omitting the echo; this helper takes
+/// the refusing choice. Every other request gets no echo, so its answer keeps
+/// the bytes it had before the mode existed.
+pub fn accept_mode(
+    requested: Option<CompactionMode>,
+    provider_declares_async: bool,
+    runner_capabilities: &[String],
+) -> Result<Option<CompactionMode>, RefuseCode> {
+    if requested != Some(CompactionMode::Async) || !provider_declares_async {
+        return Ok(None);
+    }
+    if runner_capabilities
+        .iter()
+        .any(|capability| capability == crate::async_group::RUNNER_GROUP)
+    {
+        Ok(Some(CompactionMode::Async))
+    } else {
+        Err(RefuseCode::AsyncNotSupported)
+    }
 }
 
 impl SetupRequest {
@@ -108,7 +174,13 @@ impl SetupRequest {
             newest: None,
             now,
             claude_code: None,
+            compaction_mode: None,
         }
+    }
+
+    pub fn with_compaction_mode(mut self, mode: CompactionMode) -> Self {
+        self.compaction_mode = Some(mode);
+        self
     }
 
     pub fn with_claude_code(
@@ -270,6 +342,13 @@ pub enum SetupAnswer {
         /// for the provider but still never sends over the window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ceiling: Option<CeilingPolicy>,
+        /// The mode the provider accepted, echoed only for a Setup that asked
+        /// for `async` and was accepted in it. The session is in async mode
+        /// only when this is `async` and the request asked for `async`
+        /// ([`session_mode`]); a runner that asked for `async` and gets no
+        /// echo runs the session in sync mode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compaction_mode: Option<CompactionMode>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own

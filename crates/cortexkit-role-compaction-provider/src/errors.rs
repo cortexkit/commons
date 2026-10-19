@@ -15,7 +15,8 @@
 //! Every named code has a fixed retryability ([`KnownCode::retryable`]:
 //! `true` means the runner may retry without the user acting) and a fixed
 //! set of calls after which it may end a run ([`KnownCode::ends_run_at`]):
-//! the four `refuse` codes after Setup or a step call,
+//! four of the five `refuse` codes after Setup or a step call,
+//! `async_not_supported` after Setup only,
 //! `compaction_unavailable` after Setup only, `compaction_wait_exceeded`
 //! after a step call only, and the ERROR and ready-refusal codes never.
 //!
@@ -97,13 +98,17 @@ impl KnownCode {
             Self::InvalidParams
             | Self::WindowTooSmall
             | Self::Misconfigured
+            | Self::AsyncNotSupported
             | Self::NotSessionCompactionProvider
             | Self::CompactionUnavailable => false,
         }
     }
 
     /// Whether a run may end `error` with this code because of `call`.
-    /// The four `refuse` codes may end it after either call.
+    /// `window_too_small`, `provider_busy`, `misconfigured` and
+    /// `history_unreadable` may end it after either call.
+    /// `async_not_supported` may end it only after Setup, the one call that
+    /// asks for a compaction mode.
     /// `compaction_unavailable` may end it only after Setup: when a step
     /// call fails or times out, the run does not end at all, because the
     /// runner sends the request with the last applied CompactionMessage.
@@ -116,7 +121,7 @@ impl KnownCode {
             | Self::ProviderBusy
             | Self::Misconfigured
             | Self::HistoryUnreadable => true,
-            Self::CompactionUnavailable => call == Call::Setup,
+            Self::CompactionUnavailable | Self::AsyncNotSupported => call == Call::Setup,
             Self::CompactionWaitExceeded => call == Call::Step,
             Self::InvalidParams | Self::Transient | Self::NotSessionCompactionProvider => false,
         }
@@ -138,6 +143,7 @@ known_codes! {
     ProviderBusy => refuse_codes::PROVIDER_BUSY,
     Misconfigured => refuse_codes::MISCONFIGURED,
     HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
+    AsyncNotSupported => refuse_codes::ASYNC_NOT_SUPPORTED,
     NotSessionCompactionProvider => runner_codes::NOT_SESSION_COMPACTION_PROVIDER,
     CompactionUnavailable => runner_codes::COMPACTION_UNAVAILABLE,
     CompactionWaitExceeded => runner_codes::COMPACTION_WAIT_EXCEEDED,
@@ -169,7 +175,7 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
     detail?.get("field")?.as_str()
 }
 
-/// The `code` of a `refuse` answer: one of the role's four codes, each with
+/// The `code` of a `refuse` answer: one of the role's five codes, each with
 /// a fixed retryability. A code this crate does not know still decodes, as
 /// [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
 /// answer undecodable; it is never retryable. A provider's own, finer reason
@@ -180,6 +186,9 @@ pub enum RefuseCode {
     ProviderBusy,
     Misconfigured,
     HistoryUnreadable,
+    /// Setup only: the runner asked for async mode, but its `llm-runner/v1`
+    /// `role.describe` does not list the `compaction_async` group.
+    AsyncNotSupported,
     /// A code this role does not name, kept as received.
     Unknown(String),
 }
@@ -191,6 +200,7 @@ impl RefuseCode {
             Self::ProviderBusy => refuse_codes::PROVIDER_BUSY,
             Self::Misconfigured => refuse_codes::MISCONFIGURED,
             Self::HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
+            Self::AsyncNotSupported => refuse_codes::ASYNC_NOT_SUPPORTED,
             Self::Unknown(code) => code,
         }
     }
@@ -202,6 +212,7 @@ impl RefuseCode {
             refuse_codes::PROVIDER_BUSY => Self::ProviderBusy,
             refuse_codes::MISCONFIGURED => Self::Misconfigured,
             refuse_codes::HISTORY_UNREADABLE => Self::HistoryUnreadable,
+            refuse_codes::ASYNC_NOT_SUPPORTED => Self::AsyncNotSupported,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -227,7 +238,7 @@ impl<'de> Deserialize<'de> for RefuseCode {
     }
 }
 
-/// The spellings of the four [`RefuseCode`]s.
+/// The spellings of the five [`RefuseCode`]s.
 pub mod refuse_codes {
     /// The model's window cannot hold the smallest view the provider can
     /// build. The user has to switch to a larger model. Not retryable.
@@ -241,12 +252,18 @@ pub mod refuse_codes {
     /// The provider needed history it could not read (a gap after its
     /// cursor, and no transcript it can reach). Retryable.
     pub const HISTORY_UNREADABLE: &str = "history_unreadable";
+    /// Setup only: the runner asked for `compaction_mode: "async"`, but its
+    /// `llm-runner/v1` `role.describe` does not list the `compaction_async`
+    /// group. Not retryable: the runner's next Setup for the session asks
+    /// for `sync`.
+    pub const ASYNC_NOT_SUPPORTED: &str = "async_not_supported";
 
     pub const ALL: &[&str] = &[
         WINDOW_TOO_SMALL,
         PROVIDER_BUSY,
         MISCONFIGURED,
         HISTORY_UNREADABLE,
+        ASYNC_NOT_SUPPORTED,
     ];
 
     /// Whether this `refuse` code may be retried without the user acting. Only
@@ -422,6 +439,7 @@ mod tests {
             (RefuseCode::ProviderBusy, true),
             (RefuseCode::Misconfigured, false),
             (RefuseCode::HistoryUnreadable, true),
+            (RefuseCode::AsyncNotSupported, false),
         ];
         assert_eq!(expected.len(), refuse_codes::ALL.len());
         for (code, retryable) in expected {

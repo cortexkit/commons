@@ -4851,5 +4851,244 @@
         "decision": "send"
       }
     ]
+  },
+  "mode": {
+    "requests": [
+      {
+        "name": "no mode: sync, the bytes before the mode existed",
+        "request": {
+          "session": "ses_1",
+          "harness": "opencode",
+          "request_id": "cr-000001",
+          "params": {},
+          "composition": {},
+          "model": "anthropic/claude-sonnet-4-5",
+          "context_window": 200000,
+          "now": 1790000000000
+        }
+      },
+      {
+        "name": "sync asked explicitly",
+        "request": {
+          "session": "ses_1",
+          "harness": "opencode",
+          "request_id": "cr-000001",
+          "params": {},
+          "composition": {},
+          "model": "anthropic/claude-sonnet-4-5",
+          "context_window": 200000,
+          "now": 1790000000000,
+          "compaction_mode": "sync"
+        }
+      },
+      {
+        "name": "async asked",
+        "request": {
+          "session": "ses_1",
+          "harness": "opencode",
+          "request_id": "cr-000001",
+          "params": {},
+          "composition": {},
+          "model": "anthropic/claude-sonnet-4-5",
+          "context_window": 200000,
+          "now": 1790000000000,
+          "compaction_mode": "async"
+        }
+      }
+    ],
+    "undecodable_requests": [
+      {
+        "name": "unknown mode is refused, never read as sync",
+        "request": {
+          "session": "ses_1",
+          "harness": "opencode",
+          "request_id": "cr-000001",
+          "params": {},
+          "composition": {},
+          "model": "anthropic/claude-sonnet-4-5",
+          "context_window": 200000,
+          "now": 1790000000000,
+          "compaction_mode": "turbo"
+        }
+      },
+      {
+        "name": "mode in uppercase",
+        "request": {
+          "session": "ses_1",
+          "harness": "opencode",
+          "request_id": "cr-000001",
+          "params": {},
+          "composition": {},
+          "model": "anthropic/claude-sonnet-4-5",
+          "context_window": 200000,
+          "now": 1790000000000,
+          "compaction_mode": "ASYNC"
+        }
+      }
+    ],
+    "answers": [
+      {
+        "name": "ready echoing async",
+        "answer": {
+          "answer": "ready",
+          "request_id": "cr-000001",
+          "initial": {
+            "compaction_id": "head",
+            "version": 1,
+            "range": {
+              "from": 0,
+              "to": 0
+            },
+            "replacement": []
+          },
+          "compaction_mode": "async"
+        }
+      },
+      {
+        "name": "ready with no echo",
+        "answer": {
+          "answer": "ready",
+          "request_id": "cr-000001",
+          "initial": {
+            "compaction_id": "head",
+            "version": 1,
+            "range": {
+              "from": 0,
+              "to": 0
+            },
+            "replacement": []
+          }
+        }
+      },
+      {
+        "name": "refused: the runner does not declare compaction_async",
+        "answer": {
+          "answer": "refuse",
+          "request_id": "cr-000001",
+          "code": "async_not_supported",
+          "reason": "the runner's describe does not list compaction_async"
+        },
+        "retryable": false
+      }
+    ],
+    "undecodable_answers": [
+      {
+        "name": "ready echoing an unknown mode",
+        "answer": {
+          "answer": "ready",
+          "request_id": "cr-000001",
+          "initial": {
+            "compaction_id": "head",
+            "version": 1,
+            "range": {
+              "from": 0,
+              "to": 0
+            },
+            "replacement": []
+          },
+          "compaction_mode": "turbo"
+        }
+      }
+    ],
+    "session_mode": [
+      {
+        "requested": null,
+        "echo": null,
+        "mode": "sync"
+      },
+      {
+        "requested": "sync",
+        "echo": null,
+        "mode": "sync"
+      },
+      {
+        "requested": "sync",
+        "echo": "sync",
+        "mode": "sync"
+      },
+      {
+        "requested": "async",
+        "echo": "async",
+        "mode": "async"
+      },
+      {
+        "requested": "async",
+        "echo": null,
+        "mode": "sync"
+      },
+      {
+        "requested": "async",
+        "echo": "sync",
+        "mode": "sync"
+      },
+      {
+        "requested": "sync",
+        "echo": "async",
+        "mode": "sync"
+      },
+      {
+        "requested": null,
+        "echo": "async",
+        "mode": "sync"
+      },
+      {
+        "requested": "async",
+        "echo": "refuse",
+        "mode": "sync"
+      }
+    ],
+    "acceptance": [
+      {
+        "name": "both sides declare async",
+        "requested": "async",
+        "provider_declares_async": true,
+        "runner_capabilities": [
+          "transcript_reads",
+          "compaction",
+          "compaction_async"
+        ],
+        "outcome": "echo:async"
+      },
+      {
+        "name": "runner describe lacks compaction_async",
+        "requested": "async",
+        "provider_declares_async": true,
+        "runner_capabilities": [
+          "transcript_reads",
+          "compaction"
+        ],
+        "outcome": "refuse:async_not_supported"
+      },
+      {
+        "name": "provider does not declare async",
+        "requested": "async",
+        "provider_declares_async": false,
+        "runner_capabilities": [
+          "compaction",
+          "compaction_async"
+        ],
+        "outcome": "no_echo"
+      },
+      {
+        "name": "sync request",
+        "requested": "sync",
+        "provider_declares_async": true,
+        "runner_capabilities": [
+          "compaction",
+          "compaction_async"
+        ],
+        "outcome": "no_echo"
+      },
+      {
+        "name": "no mode asked",
+        "requested": null,
+        "provider_declares_async": true,
+        "runner_capabilities": [
+          "compaction",
+          "compaction_async"
+        ],
+        "outcome": "no_echo"
+      }
+    ]
   }
 }

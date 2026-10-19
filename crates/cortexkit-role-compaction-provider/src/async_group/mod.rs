@@ -37,6 +37,13 @@ mod vector_tests;
 /// and keeps calling `compaction.step`, unless the provider lists this group.
 pub const GROUP: &str = "async";
 
+/// The `llm-runner/v1` describe group a runner lists when it implements its
+/// half of async mode. Defined by that role in `cortexkit-role-llm-runner`
+/// 0.2.7; this constant quotes the spelling until this crate depends on that
+/// release. A runner asks Setup for `compaction_mode: "async"` only when it
+/// lists this group and the provider lists [`GROUP`].
+pub const RUNNER_GROUP: &str = "compaction_async";
+
 /// The ops a provider that declares [`GROUP`] must serve.
 pub const GROUP_OPS: &[&str] = &[crate::ops::VIEW_GET, crate::ops::COMPACTION_RIDE];
 
