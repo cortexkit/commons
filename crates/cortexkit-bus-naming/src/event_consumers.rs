@@ -45,12 +45,18 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_magic-context",
         filter_subjects: &[
             "event.thalamus-harness.compaction.>",
+            "event.thalamus.compaction.>",
             "event.broca.compaction.>",
         ],
     },
     EventConsumer {
         module_id: "thalamus-harness",
         durable: "m_thalamus-harness",
+        filter_subjects: &["event.magic-context.compaction.>"],
+    },
+    EventConsumer {
+        module_id: "thalamus",
+        durable: "m_thalamus",
         filter_subjects: &["event.magic-context.compaction.>"],
     },
     EventConsumer {

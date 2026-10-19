@@ -58,10 +58,11 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             mc.consumer.filter_subjects,
             [
                 format!("ck.{account}.event.thalamus-harness.compaction.>"),
+                format!("ck.{account}.event.thalamus.compaction.>"),
                 format!("ck.{account}.event.broca.compaction.>"),
             ]
         );
-        for durable in ["m_thalamus-harness", "m_broca"] {
+        for durable in ["m_thalamus-harness", "m_thalamus", "m_broca"] {
             let reader = specs
                 .iter()
                 .find(|spec| spec.consumer.durable == durable)

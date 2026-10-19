@@ -647,7 +647,12 @@ fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() 
     use cortexkit_bus_naming::{participant_permissions, AllowEntry, Operation};
     use std::collections::BTreeSet;
     let account = AccountNames::derive("box_readers").unwrap();
-    for module_id in ["prefrontal-core", "astrocyte"] {
+    for module_id in [
+        "prefrontal-core",
+        "astrocyte",
+        "thalamus-harness",
+        "thalamus",
+    ] {
         let baseline = participant_permissions(&account, "UPFC", "ordinary", &[])
             .unwrap()
             .into_iter()

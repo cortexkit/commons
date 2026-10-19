@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6
+
+- Add `thalamus` (the Claude Code gateway) as a reader of Magic Context's
+  compaction notices through `m_thalamus`, and widen `magic-context`'s filter to
+  also read `event.thalamus.compaction.>`. Thalamus gets the same
+  own-durable-only pull, acknowledgement and consumer-info grants as
+  `thalamus-harness`.
+
 ## 0.2.5
 
 - Add three readers to the event-consumer table for compaction between
