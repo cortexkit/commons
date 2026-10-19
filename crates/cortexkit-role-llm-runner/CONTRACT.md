@@ -182,7 +182,9 @@ shipping runner with this document.
   no sessions of its own (one that only steers sessions another runner
   hosts) declares none of it, never a stub.
 - [pinned] A compaction provider requires `compaction` of any runner it
-  serves. A session starter never pairs a plan's `compaction_item` with a
+  serves, and that runner implements the runner half of compaction-provider
+  0.3.0 §20, with `tags`, `context_ceiling` and the `context_ceiling_wait`
+  status (§11.1). A session starter never pairs a plan's `compaction_item` with a
   runner that lacks it, and the runner refuses such a plan at admission
   (§10.1) as `invalid_params {field: "plan.compaction_item"}`
   (`SendRequest::check_compaction_item`), so a session never runs with a
@@ -317,6 +319,29 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   members, and an answer with `lineage_id` carries `updated_at`
   (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
   malformed; it is not a refusal.
+
+### 4.4 Serializer profiles
+
+- [pinned] A serializer profile names the schema of an entry's `message`
+  body (`serializer_profile`). It is the value a session's providers
+  receive as their plan item's `params.serializer_profile`, which the
+  step-transform-provider and compaction-provider contracts pin; they name
+  `opencode-aisdk`. This role defines `anthropic-messages`
+  (`serializer_profile::ANTHROPIC_MESSAGES`).
+- [pinned] **`anthropic-messages`.** An entry's body is the message exactly
+  as the client sent it in its Anthropic Messages request, with
+  `cache_control` members removed in two places only: at the message's
+  top-level content blocks, whatever their type, and in the `text`, `image`
+  and `document` blocks nested in a `tool_result`'s content
+  (`serializer_profile::strip_cache_control`). Never inside a `tool_use`
+  block's `input`, never inside a block of a type the profile does not
+  name, and a string `content` is kept as sent.
+- [pinned] Read stability (§4.2) applies: the runner serves the form it
+  first ingested (`serializer_profile::ingest`). A client re-sending the
+  same message with its cache marker moved (a string `content` turning
+  into a one-block array, or back) does not change the entry.
+- [pinned] For such a session, a compaction view's `replace` and edit
+  `bytes` (compaction-provider 0.3.0) are in this profile's message format.
 
 ## 5. `dispatch_attribution`
 
@@ -1653,6 +1678,12 @@ owes.
 - [pinned] A runner that declares `compaction` owes everything in this
   section; a runner that does not owes none of it, and never calls a
   compaction provider.
+- [pinned] A runner using a compaction provider implements the runner half
+  of compaction-provider 0.3.0 §20, which that contract defines and this
+  one does not restate. It requires `tags` (§9.6), the `context_ceiling`
+  refusal and run state, and the `context_ceiling_wait` status (§6). Where
+  the rules below describe the provider exchange differently, compaction-
+  provider 0.3.0 governs.
 
 - [pinned] Setup is called once when a session starts. Its initial
   CompactionMessage is recorded before the first model call, and once

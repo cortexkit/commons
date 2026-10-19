@@ -32,6 +32,7 @@ pub mod read;
 pub mod retract;
 pub mod run;
 pub mod send;
+pub mod serializer_profile;
 pub mod session_ref;
 pub mod structured_output;
 pub mod subscribe;
@@ -337,6 +338,7 @@ pub(crate) mod vectors {
         "run-tool-calls.json",
         "run-tool-calls-describe.json",
         "send.json",
+        "serializer-anthropic-messages.json",
         "session-change.json",
         "session-ref.json",
         "structured-output.json",

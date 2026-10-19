@@ -165,3 +165,15 @@ cause this role does not name and an unknown member, both tolerated; and,
 for contrast, a provider's own overflow, which ends `error` with
 `context_overflow`. Checked by the `errors::context_ceiling_tests` module of
 the wire crate.
+
+# Serializer profile `anthropic-messages`
+
+`serializer-anthropic-messages.json` pins the profile's entry bodies:
+`cache_control` removed at every allowed place (top-level content blocks of
+a user and an assistant message, and `text`, `image` and `document` blocks
+nested in a `tool_result`) and kept inside `tool_use` input, in a nested
+block of another type and inside an unknown block; string content and a
+`tool_result` with string content; and resends that move the cache marker
+(a string turning into a one-block array, and back), where the entry keeps
+the first-ingested form. Checked by the `serializer_profile::tests` module
+of the wire crate.
