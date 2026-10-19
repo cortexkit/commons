@@ -1281,8 +1281,8 @@ the ride request and the ceiling pause (§20.5).
     that describe over its own llm-runner route. It may instead accept the
     Setup in sync mode by omitting the echo. `setup::accept_mode` is the
     reference for the refusing choice. `async_not_supported` is not
-    retryable and ends a run only after Setup; the runner's next Setup for
-    the session asks for `sync`.
+    retryable as asked: the runner sends its next Setup for the session
+    with `compaction_mode: "sync"`, or none.
   - `compaction_mode` is strict on value in both places: an unknown mode
     does not decode and is never read as `sync`. A provider refuses such a
     Setup `invalid_params` naming `compaction_mode`, and a runner treats such
