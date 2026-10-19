@@ -15,7 +15,7 @@ pub struct CaseSpec {
 
 use Capability::{
     ApprovalExecution, CallKey, CallModes, Cancellation, CatalogCapabilityFilter, ContentV1,
-    DisableTool, HeldCalls, LateResults, SchemaPin, ScopeStamp, SystemText,
+    DisableTool, HeldCalls, HeldReplyV1, LateResults, SchemaPin, ScopeStamp, SystemText,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -120,6 +120,11 @@ pub const CASES: &[CaseSpec] = &[
         name: "tool_result_content_v1_valid",
         requires: &[ContentV1],
         checks: "each declared content/v1 tool returns an opaque legacy body to an undeclared route and a valid content/v1 body to a route whose consumer declares support",
+    },
+    CaseSpec {
+        name: "tool_result_held_reply_route_gating",
+        requires: &[HeldReplyV1, HeldCalls, LateResults, ScopeStamp, CallKey, ContentV1, ApprovalExecution],
+        checks: "a provider advertising late_results sends a valid held reply only on routes declaring both held-reply/v1 and content/v1, then delivers the approved call's answer through late_results",
     },
     CaseSpec {
         name: "terminal_frame_on_refusal",

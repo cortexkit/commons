@@ -443,9 +443,63 @@ On a route with both declarations, the tool returns the following body
 The existing catalog vectors pin unchanged encoded bytes and digests when
 `result_format` is absent.
 
+### Held first replies: `held-reply/v1`
+
+A consumer that understands held first replies declares the string
+`held-reply/v1` alongside `content/v1` in its `route.open`
+`consumer_capabilities`. The daemon relays that list verbatim on the provider's
+route bind as `RouteBindRequest.consumer_capabilities`. Like `content/v1`, this
+is an unverified consumer statement and grants no permission or authority.
+
+A provider sends a held reply only on a route whose bind declared **both**
+`held-reply/v1` and `content/v1`, for a tool whose catalog entry opts into
+`result_format: "content/v1"`. On every other route the provider sends today's
+body unchanged: a `content/v1` body without the marker for a content-only
+consumer, or the legacy body when `content/v1` is not declared. The decision
+is made separately for each route from its bind, never from anything in a call
+and never from `call_mode`. `HELD_REPLY_V1` names the consumer capability;
+`consumer_reads_held_reply_v1` checks the two bind declarations. Providers also
+check the tool opt-in and the call/provider prerequisites below.
+
+`ToolResult` gains the optional top-level `held` member:
+
+```json
+{
+  "content": [{"type": "text", "text": "Please approve the consent card."}],
+  "held": {"reason": "consent", "detail": {"ask_id": "provider-owned-id"}}
+}
+```
+
+- `content` remains required, nonempty model-facing interim content. A consumer
+  may show it, but **must not treat it as the call's final answer**.
+- With `held` present, `isError` must be absent or false. `held` with
+  `isError: true` is malformed.
+- `reason` is an open snake_case string with exactly the `errorCode` grammar:
+  lowercase letters and digits in nonempty underscore-separated words,
+  starting with a letter. Unknown reasons are kept, not refused. The first
+  documented values are `consent`, `login_handoff` and `login_capture`.
+- `detail`, when present, is a JSON object, owned by the provider and opaque
+  to the role. A non-object, including explicit `null`, is malformed.
+- A provider may send `held` only for a call that carried a `call_key`, and
+  only if it declares the `late_results` session capability. The held reply is
+  **not** the call's answer: the answer is the §7 `late_results` entry for that
+  `(carrier, call_key)`, of kind `result`, `not_started` or `expired`.
+  `tool.withdraw` applies unchanged (§5).
+- `held` means a person must act and the answer comes later. Refusals no person
+  can fix, such as busy, validation failure or unavailable consent, are ordinary
+  final replies and never carry `held`.
+
+`result::validate` returns typed `ResultProblem`s for held/error conflicts,
+invalid reason grammar and non-object detail. It does not have route, catalog
+or call context; providers enforce those prerequisites before sending.
+`test-vectors/tool-provider-v1/held-reply-v1.json` pins the valid reasons,
+malformed bodies and route-bind gating decision table.
+
 ## 5. `tool.withdraw`
 
 Served by a provider that can hold a call past its reply.
+This includes a call whose first reply carries `held` (§4.1,
+`held-reply/v1`); the marker changes neither withdrawal nor caller policy.
 
 - The request is `{name: "tool.withdraw", arguments: {call_key, carrier?,
   scope?}}` (`WithdrawArguments`). It has no top-level `call_key`; one that is
@@ -523,6 +577,8 @@ A provider that settles calls later declares the `late_results` session
 capability. The custodian (the scope's owner for a direct call, or the
 carrier of an onward call) pulls; the provider never pushes, and serves an
 entry only to a caller whose verified principal is its custodian.
+For a held first reply (§4.1, `held-reply/v1`), this entry, not the interim
+`content`, is the call's answer, correlated by `(carrier, call_key)`.
 
 - Request: `late_results {since: cursor | null, limit?}`
   (`LateResultsRequest`). `since: null` reads from the start.
@@ -593,6 +649,7 @@ CI against its real module over a real route; never against a double.
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
 | `tool_result_content_v1_valid` | a catalog tool declaring `result_format: "content/v1"` |
+| `tool_result_held_reply_route_gating` | `held-reply/v1` suite fixture, `held_calls`, `late_results`, `scope_stamp`, `call_key`, `approval_execution`, a catalog tool declaring `content/v1` |
 | `terminal_frame_on_cancel` | `cancellation` |
 | `call_key_malformed_refused`, `call_key_well_formed_accepted` | `call_key` |
 | `schema_pin_current_accepted`, `schema_pin_malformed_refused` | `schema_pin` |

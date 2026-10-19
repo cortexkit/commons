@@ -1,0 +1,62 @@
+{
+  "valid": [
+    {
+      "name": "held_consent",
+      "body": {"content": [{"type": "text", "text": "Please approve the consent card."}], "held": {"reason": "consent", "detail": {"ask_id": "opaque-ask", "provider_data": [1, null]}}}
+    },
+    {
+      "name": "held_login_handoff",
+      "body": {"content": [{"type": "text", "text": "Finish signing in in the browser."}], "isError": false, "held": {"reason": "login_handoff"}}
+    },
+    {
+      "name": "held_login_capture",
+      "body": {"content": [{"type": "text", "text": "Complete the login capture."}], "held": {"reason": "login_capture", "detail": {}}}
+    },
+    {
+      "name": "held_unknown_reason",
+      "body": {"content": [{"type": "text", "text": "A person must complete another step."}], "held": {"reason": "provider_step_v2", "detail": {"reason": "opaque"}}}
+    }
+  ],
+  "invalid": [
+    {
+      "name": "held_with_is_error_true",
+      "body": {"content": [{"type": "text", "text": "Wait for approval."}], "isError": true, "errorCode": "consent_required", "held": {"reason": "consent"}},
+      "member": "held", "reason": "must not accompany isError: true"
+    },
+    {
+      "name": "held_bad_reason",
+      "body": {"content": [{"type": "text", "text": "Wait."}], "held": {"reason": "login-handoff"}},
+      "member": "held.reason", "reason": "must be a nonempty snake_case code"
+    },
+    {
+      "name": "held_nonobject_detail",
+      "body": {"content": [{"type": "text", "text": "Wait."}], "held": {"reason": "consent", "detail": []}},
+      "member": "held.detail", "reason": "must be a JSON object"
+    },
+    {
+      "name": "held_null_detail",
+      "body": {"content": [{"type": "text", "text": "Wait."}], "held": {"reason": "consent", "detail": null}},
+      "member": "held.detail", "reason": "must be a JSON object"
+    },
+    {
+      "name": "held_empty_content",
+      "body": {"content": [], "held": {"reason": "consent"}},
+      "member": "content", "reason": "must contain at least one part"
+    }
+  ],
+  "decode_invalid": [
+    {"name": "held_missing_content", "body": {"held": {"reason": "consent"}}},
+    {"name": "held_missing_reason", "body": {"content": [{"type": "text", "text": "Wait."}], "held": {}}},
+    {"name": "held_nonstring_reason", "body": {"content": [{"type": "text", "text": "Wait."}], "held": {"reason": 42}}}
+  ],
+  "gating": [
+    {"name": "absent", "consumer_capabilities": null, "held": false},
+    {"name": "empty", "consumer_capabilities": [], "held": false},
+    {"name": "content_only", "consumer_capabilities": ["content/v1"], "held": false},
+    {"name": "held_only", "consumer_capabilities": ["held-reply/v1"], "held": false},
+    {"name": "both", "consumer_capabilities": ["content/v1", "held-reply/v1"], "held": true},
+    {"name": "both_with_other", "consumer_capabilities": ["other/v1", "held-reply/v1", "content/v1"], "held": true},
+    {"name": "wrong_content_version", "consumer_capabilities": ["content/v2", "held-reply/v1"], "held": false},
+    {"name": "wrong_held_version", "consumer_capabilities": ["content/v1", "held-reply/v2"], "held": false}
+  ]
+}

@@ -48,6 +48,9 @@ pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
 /// The route-bind capability a consumer declares when it decodes `content/v1` results.
 pub const CONTENT_V1_CAPABILITY: &str = "content/v1";
 
+/// The route-bind capability a consumer declares when it understands held replies.
+pub const HELD_REPLY_V1: &str = "held-reply/v1";
+
 /// Whether a route's bind says that its consumer decodes `content/v1` results.
 ///
 /// Providers use this bind-scoped declaration, together with the tool's
@@ -58,6 +61,20 @@ pub fn consumer_reads_content_v1(consumer_capabilities: Option<&[String]>) -> bo
             .iter()
             .any(|capability| capability == CONTENT_V1_CAPABILITY)
     })
+}
+
+/// Whether a route's bind permits the `held-reply/v1` marker.
+///
+/// Both consumer declarations are required. Providers must also check that the
+/// tool uses `content/v1`, the call has a `call_key`, and they advertise
+/// `late_results`. Neither per-call arguments nor `call_mode` grant support.
+pub fn consumer_reads_held_reply_v1(consumer_capabilities: Option<&[String]>) -> bool {
+    consumer_reads_content_v1(consumer_capabilities)
+        && consumer_capabilities.is_some_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| capability == HELD_REPLY_V1)
+        })
 }
 
 /// Names of the role's ops, as the `name` of the request that carries them.

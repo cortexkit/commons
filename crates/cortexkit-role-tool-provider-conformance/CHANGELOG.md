@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2
+
+- Require cortexkit-role-tool-provider 0.9.2 and add
+  `tool_result_held_reply_route_gating`. A `HeldReplyV1` suite fixture exercises
+  a provider advertising `late_results` on routes with absent, empty, single
+  and both consumer declarations; only the both-declared route carries `held`.
+  The case validates the interim body and checks the approved call's late answer.
+- Add `held_reply_call` with a backward-compatible default and runner tests for
+  incorrect gating, missing markers and malformed held replies.
+
 ## 0.9.1
 
 - Add `catalog_emits_events_boolean`, which requires nothing and checks from

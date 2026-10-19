@@ -59,6 +59,8 @@ pub struct ToolResult {
     pub is_error: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<HeldReply>,
 }
 
 impl ToolResult {
@@ -68,6 +70,7 @@ impl ToolResult {
             structured_content: None,
             is_error: None,
             error_code: None,
+            held: None,
         }
     }
 
@@ -76,12 +79,61 @@ impl ToolResult {
         self
     }
 
+    /// Mark an interim reply that needs a person to act before a late answer.
+    pub fn with_held(mut self, held: HeldReply) -> Self {
+        self.held = Some(held);
+        self
+    }
+
+    pub fn held(&self) -> Option<&HeldReply> {
+        self.held.as_ref()
+    }
+
     /// Mark an error with the provider's stable snake_case code.
     pub fn with_error(mut self, code: impl Into<String>) -> Self {
         self.is_error = Some(true);
         self.error_code = Some(code.into());
         self
     }
+}
+
+/// Why a person must act before the call's answer arrives via `late_results`.
+///
+/// Reasons are open snake_case strings. The first documented values are
+/// `consent`, `login_handoff` and `login_capture`; unknown values are preserved.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HeldReply {
+    pub reason: String,
+    /// Provider-owned opaque JSON object. Validate after decoding to reject
+    /// non-object values without interpreting the object's members.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_held_detail"
+    )]
+    pub detail: Option<Value>,
+}
+
+impl HeldReply {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            detail: None,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: Map<String, Value>) -> Self {
+        self.detail = Some(Value::Object(detail));
+        self
+    }
+}
+
+fn deserialize_held_detail<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Value>, D::Error> {
+    // Preserve explicit null so validation distinguishes it from an absent detail.
+    Value::deserialize(deserializer).map(Some)
 }
 
 /// One ordered model-facing content part. Unknown types retain their raw JSON.
@@ -221,6 +273,21 @@ fn problem(member: impl Into<String>, reason: &'static str) -> ResultProblem {
 pub fn validate(result: &ToolResult) -> Result<(), ResultProblem> {
     if result.content.is_empty() {
         return Err(problem("content", "must contain at least one part"));
+    }
+    if let Some(held) = &result.held {
+        if result.is_error == Some(true) {
+            return Err(problem("held", "must not accompany isError: true"));
+        }
+        if !is_snake_case(&held.reason) {
+            return Err(problem("held.reason", "must be a nonempty snake_case code"));
+        }
+        if held
+            .detail
+            .as_ref()
+            .is_some_and(|detail| !detail.is_object())
+        {
+            return Err(problem("held.detail", "must be a JSON object"));
+        }
     }
     match (result.is_error, result.error_code.as_deref()) {
         (Some(true), None) => return Err(problem("errorCode", "required when isError is true")),

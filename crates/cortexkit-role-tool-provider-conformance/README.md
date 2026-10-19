@@ -7,8 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.9.0
-pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.9.0. Versions
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.9.2
+pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.9.2. Versions
 0.8.x pair with subc-protocol 0.32; versions 0.7.x pair with protocol 0.31,
 and versions 0.6.x pair with protocol 0.30.
 
@@ -37,6 +37,22 @@ Subjects with a catalog tool that opts into `content/v1` must implement
 real route-opening path. The method receives the exact consumer capability
 list to send when opening the route; it must not add that declaration to a
 call body.
+
+## Held first replies: `held-reply/v1`
+
+Declare the suite fixture capability `Capability::HeldReplyV1` and supply
+`held_reply_call(marker)` for a person-gated tool opting into `content/v1`.
+The default reuses `held_call`. This suite capability is not a new provider
+advertisement; the provider must advertise the existing `late_results`
+session capability. The case also requires the scoped, keyed held-call and
+approval-execution fixtures and a live `content/v1` catalog declaration.
+
+`tool_result_held_reply_route_gating` opens scoped routes with absent, empty,
+content-only, held-only and both consumer declarations. Each call carries a
+fresh key; only the both-declared route must carry a valid `held` marker.
+The case approves each call and checks that its `(carrier, call_key)` answer
+arrives through `late_results`. Missing fixtures produce named skips, never
+passes. Existing withdraw and crash cases still apply.
 
 ## Per-tool call modes
 

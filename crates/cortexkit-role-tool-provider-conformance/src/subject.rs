@@ -51,6 +51,10 @@ pub enum Capability {
     /// At least one catalog tool declares `result_format: "content/v1"`.
     /// Inferred by the runner, not an opt-out subject flag.
     ContentV1,
+    /// The provider and harness can exercise a `content/v1` call that sends
+    /// a held reply when both consumer capabilities are declared.
+    /// See [`ToolProviderSubject::held_reply_call`].
+    HeldReplyV1,
     /// The provider advertises `tool-catalog-capability-filter/v1` in
     /// `role.describe`. Inferred from the live answer, not a subject flag.
     CatalogCapabilityFilter,
@@ -71,6 +75,7 @@ impl Capability {
             Self::SystemText => "system_text",
             Self::CallModes => "call_modes",
             Self::ContentV1 => "content/v1",
+            Self::HeldReplyV1 => "held-reply/v1",
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
         }
     }
@@ -219,6 +224,13 @@ pub trait ToolProviderSubject: Harness {
     /// [`Capability::HeldCalls`]. The runner watches `marker` to prove the
     /// action never ran.
     fn held_call(&self, marker: &Path) -> Option<CallSpec>;
+
+    /// A person-gated `content/v1` call for the held-reply route-gating case.
+    /// Required by [`Capability::HeldReplyV1`]. The default reuses `held_call`;
+    /// override when that tool does not opt into `content/v1`.
+    fn held_reply_call(&self, marker: &Path) -> Option<CallSpec> {
+        self.held_call(marker)
+    }
 
     /// Resolve once the provider holds the call sent with `call_key`, that is,
     /// once the provider has filed the call's approval question.

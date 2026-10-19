@@ -147,6 +147,59 @@ async fn content_v1_is_sent_only_to_a_route_that_declares_support() {
 }
 
 #[tokio::test]
+async fn held_reply_requires_both_route_declarations() {
+    let report = run(&FakeSubject::new(Defects {
+        held_on_content_only: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "tool_result_held_reply_route_gating");
+    assert!(reason.contains("held marker disagrees"), "{reason}");
+    assert!(reason.contains("[\"content/v1\"]"), "{reason}");
+    assert_passed(&report, "tool_result_content_v1_valid");
+}
+
+#[tokio::test]
+async fn held_reply_case_requires_a_positive_held_marker() {
+    let report = run(&FakeSubject::new(Defects {
+        omit_held_marker: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "tool_result_held_reply_route_gating");
+    assert!(reason.contains("held marker disagrees"), "{reason}");
+    assert_passed(&report, "tool_result_content_v1_valid");
+}
+
+#[tokio::test]
+async fn held_reply_case_validates_the_interim_body() {
+    let report = run(&FakeSubject::new(Defects {
+        held_is_error: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "tool_result_held_reply_route_gating");
+    assert!(
+        reason.contains("held: must not accompany isError: true"),
+        "{reason}"
+    );
+    assert_passed(&report, "tool_result_content_v1_valid");
+}
+
+#[tokio::test]
+async fn undeclared_held_reply_fixture_is_skipped_by_name() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::HeldReplyV1);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("tool_result_held_reply_route_gating"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::HeldReplyV1],
+        })
+    );
+}
+
+#[tokio::test]
 async fn opaque_tools_skip_content_v1_by_name_never_pass() {
     let mut subject = FakeSubject::new(Defects {
         opaque_result: true,

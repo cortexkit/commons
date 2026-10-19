@@ -22,7 +22,7 @@ use cortexkit_role_tool_provider::{
     ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    CallMode, CATALOG_CAPABILITY_FILTER, CONTENT_V1_CAPABILITY, PROVIDES,
+    CallMode, CATALOG_CAPABILITY_FILTER, CONTENT_V1_CAPABILITY, HELD_REPLY_V1, PROVIDES,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -311,6 +311,7 @@ where
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
             "tool_result_content_v1_valid" => self.tool_result_content_v1_valid().await,
+            "tool_result_held_reply_route_gating" => self.held_reply_route_gating(mint).await,
             "terminal_frame_on_refusal" => self.terminal_frame_on_refusal().await,
             "terminal_frame_on_cancel" => self.terminal_frame_on_cancel().await,
             "call_key_malformed_refused" => self.call_key_malformed_refused().await,
@@ -477,6 +478,99 @@ where
                 let result: ToolResult = serde_json::from_value(body)
                     .map_err(|e| format!("{name}: content/v1 reply does not decode: {e}"))?;
                 validate(&result).map_err(|e| format!("{name}: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn held_reply_route_gating(&self, mint: &mut KeyMint) -> CaseResult {
+        let principals = self.principals()?;
+        let stamp = principals.stamp(&principals.carrier);
+        let owner = self.owner_route().await?;
+        // Expected decisions are independent of the provider's gating helper.
+        for (declarations, expected_held) in [
+            (None, false),
+            (Some(vec![]), false),
+            (Some(vec![CONTENT_V1_CAPABILITY.to_owned()]), false),
+            (Some(vec![HELD_REPLY_V1.to_owned()]), false),
+            (
+                Some(vec![
+                    CONTENT_V1_CAPABILITY.to_owned(),
+                    HELD_REPLY_V1.to_owned(),
+                ]),
+                true,
+            ),
+        ] {
+            let route = match declarations {
+                None => self.route(&stamp).await?,
+                Some(ref caps) => self
+                    .subject
+                    .route_with_consumer_capabilities(self.handle.inner(), &stamp, caps)
+                    .await
+                    .map_err(|e| format!("opening held-reply route: {e}"))?,
+            };
+            let key = mint.next("held-reply");
+            let (name, arguments) = self
+                .subject
+                .held_reply_call(&self.marker(&key))
+                .ok_or("no held_reply_call fixture supplied")?;
+            let catalog = self.catalog(&route).await?;
+            if !catalog.declares(session_capabilities::LATE_RESULTS) {
+                return Err("held replies require the late_results catalog capability".into());
+            }
+            if !catalog.tools.iter().any(|tool| {
+                tool.name == name && tool.result_format == Some(ResultFormat::ContentV1)
+            }) {
+                return Err(format!(
+                    "{name}: held_reply_call tool must declare content/v1"
+                ));
+            }
+            let body = expect_response(
+                &name,
+                request(&route, call_body(&name, arguments, Some(&key))).await?,
+            )?;
+            if body.get("held").is_some() != expected_held {
+                return Err(format!(
+                    "{name}: held marker disagrees with route declarations {declarations:?}"
+                ));
+            }
+            if expected_held
+                || declarations
+                    .as_ref()
+                    .is_some_and(|caps| caps.iter().any(|cap| cap == CONTENT_V1_CAPABILITY))
+            {
+                if serde_json::to_vec(&body).map_err(|e| e.to_string())?.len() >= MAX_RESULT_BYTES {
+                    return Err(format!(
+                        "{name}: reply: serialized reply must be under 3 MiB"
+                    ));
+                }
+                let result: ToolResult = serde_json::from_value(body)
+                    .map_err(|e| format!("{name}: content/v1 held reply does not decode: {e}"))?;
+                validate(&result).map_err(|e| format!("{name}: {e}"))?;
+            }
+            self.subject
+                .await_held(&key)
+                .await
+                .map_err(|e| e.to_string())?;
+            if self.marker(&key).exists() {
+                return Err(format!("{name}: held call ran before approval"));
+            }
+            self.subject
+                .approve(&key)
+                .await
+                .map_err(|e| e.to_string())?;
+            self.subject.settle().await;
+            let late = pull(&owner, Value::Null).await?;
+            if !late.entries.iter().any(|entry| {
+                entry.call_key == key
+                    && entry.custodian == principals.scope.owner
+                    && entry.scope_ref == principals.scope.scope_ref
+                    && entry.scope_epoch == principals.scope.scope_epoch
+                    && entry.kind == kinds::RESULT
+            }) {
+                return Err(format!(
+                    "{name}: no result late answer for approved held call {key}"
+                ));
             }
         }
         Ok(())

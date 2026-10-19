@@ -39,7 +39,7 @@ use cortexkit_role_tool_provider_conformance::{
             composition_digest, params_for_capabilities, schema_digest, select_by_capabilities,
             serves_call_mode, system_text_digest, CatalogRequest, CatalogTool,
         },
-        consumer_reads_content_v1,
+        consumer_reads_content_v1, consumer_reads_held_reply_v1,
         describe::{Major, RoleDescribe},
         errors,
         late_results::{
@@ -159,6 +159,12 @@ pub struct Defects {
     pub omit_catalog_capability_filter: bool,
     /// The quick tool's `emits_events` is this JSON text instead of `false`.
     pub emits_events_override: Option<&'static str>,
+    /// Send the `held` marker to content-only routes without `held-reply/v1`.
+    pub held_on_content_only: bool,
+    /// Omit the held marker even on a fully declared route.
+    pub omit_held_marker: bool,
+    /// Mark a held reply as an error.
+    pub held_is_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -672,6 +678,28 @@ impl Module {
         Ok(match name {
             ops::ROLE_DESCRIBE => vec![ObservedFrame::Response(self.describe())],
             ops::TOOL_CATALOG => reply(self.catalog(&request.arguments)),
+            QUICK if request.arguments.get("hold_for_person") == Some(&Value::Bool(true)) => {
+                let frames = self.hold(stamp, &request);
+                if !self.defects.opaque_result
+                    && consumer_reads_content_v1(consumer_capabilities)
+                    && matches!(frames.as_slice(), [ObservedFrame::Response(_)])
+                {
+                    let mut body = json!({"content": [{"type": "text", "text": "Please approve the consent card."}]});
+                    if !self.defects.omit_held_marker
+                        && (self.defects.held_on_content_only
+                            || consumer_reads_held_reply_v1(consumer_capabilities))
+                    {
+                        body["held"] = json!({"reason": "consent"});
+                        if self.defects.held_is_error {
+                            body["isError"] = json!(true);
+                            body["errorCode"] = json!("consent_required");
+                        }
+                    }
+                    vec![ObservedFrame::Response(body)]
+                } else {
+                    frames
+                }
+            }
             QUICK
                 if !self.defects.opaque_result
                     && (self.defects.ignore_consumer_capabilities
@@ -906,6 +934,7 @@ impl FakeSubject {
                 Capability::LateResults,
                 Capability::SystemText,
                 Capability::CallModes,
+                Capability::HeldReplyV1,
             ]
             .into(),
             system_text_arguments: Some(json!({
@@ -1079,6 +1108,13 @@ impl ToolProviderSubject for FakeSubject {
 
     fn held_call(&self, marker: &Path) -> Option<CallSpec> {
         Some((HELD.into(), json!({ "marker": marker })))
+    }
+
+    fn held_reply_call(&self, marker: &Path) -> Option<CallSpec> {
+        Some((
+            QUICK.into(),
+            json!({"hold_for_person": true, "marker": marker}),
+        ))
     }
 
     async fn await_held(&self, call_key: &str) -> Result<(), HarnessError> {

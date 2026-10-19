@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.2
+
+- Add `ToolResult::held`, `held()` and `with_held`, plus the non-exhaustive
+  `HeldReply` type for person-gated interim replies. Unknown snake_case reasons
+  and opaque object detail round-trip; validation rejects held/error conflicts,
+  bad reasons and non-object detail (including explicit null).
+- Add `HELD_REPLY_V1` and `consumer_reads_held_reply_v1`: held markers require
+  both route-bind consumer declarations, a `content/v1` tool, a call key and
+  provider `late_results` support. Legacy routes and final refusals are unchanged.
+  The final answer arrives through `late_results`, not the interim content.
+- Add held reply and gating vectors. This is additive: `ToolResult` was already
+  non-exhaustive, so external struct-literal construction was already disallowed.
+
 ## 0.9.1
 
 - Add optional per-tool `emits_events` (`CatalogTool::emits_events`,
