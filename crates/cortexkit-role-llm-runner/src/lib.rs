@@ -179,13 +179,6 @@ pub mod capabilities {
     /// modes, plan-named senders and plan templates for system-authority
     /// text.
     pub const DELIVERY_ORDER: &str = "delivery_order";
-    /// The runner half of compaction-provider 0.3.0's `async` mode (its
-    /// §20): advance notices, views fetched and applied at step boundaries,
-    /// rides, the Setup ceiling, and `context_ceiling` with its
-    /// `context_ceiling_wait` status. Requires [`TAGS`]: an answer declaring
-    /// it without `tags` is malformed. The mode is chosen per conversation by
-    /// that Setup, not by this declaration.
-    pub const COMPACTION_ASYNC: &str = "compaction_async";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -214,7 +207,6 @@ pub mod capabilities {
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
-        (COMPACTION_ASYNC, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (COMPACTION, &[ops::COMPACTION_READY]),
         (
             SESSION_CHANGE,
@@ -325,7 +317,6 @@ pub(crate) mod vectors {
         "refuse-tool-name-collision.json",
         "baseline.json",
         "compaction-ready.json",
-        "compaction-async-describe.json",
         "context-ceiling.json",
         "delivery-order.json",
         "delivery-order-describe.json",

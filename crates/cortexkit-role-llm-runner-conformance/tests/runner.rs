@@ -1980,14 +1980,3 @@ async fn a_drop_recovery_keeping_its_lineage_fails_the_step_recorded_crash_case(
         assert!(reason.contains("new lineage"), "{recovery:?}: {reason}");
     }
 }
-
-#[tokio::test]
-async fn a_describe_declaring_compaction_async_without_tags_is_refused() {
-    let report = run(&FakeSubject::new(Defects {
-        claim_compaction_async_without_tags: true,
-        ..Defects::default()
-    }))
-    .await;
-    let reason = failed(&report, "role_describe_groups_complete");
-    assert!(reason.contains("compaction_async without tags"), "{reason}");
-}

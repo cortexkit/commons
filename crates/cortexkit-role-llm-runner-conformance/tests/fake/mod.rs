@@ -243,8 +243,6 @@ pub struct Defects {
     /// A recovery that drops a never-sent call from history keeps the
     /// session's lineage.
     pub drop_keeps_lineage: bool,
-    /// role.describe declares `compaction_async` without `tags`.
-    pub claim_compaction_async_without_tags: bool,
     /// `session.read` serves the host's live record, so a host-side metadata
     /// change shows up in an entry's bytes under the same lineage.
     pub read_serves_live_host_metadata: bool,
@@ -1739,9 +1737,6 @@ impl Module {
         let mut capabilities = self.world.groups.clone();
         if self.world.defects.claim_unserved_group {
             capabilities.push(groups::INTERRUPT.to_owned());
-        }
-        if self.world.defects.claim_compaction_async_without_tags {
-            capabilities.push(groups::COMPACTION_ASYNC.to_owned());
         }
         let mut served: Vec<String> = vec![ops::ROLE_DESCRIBE.into(), ops::SESSION_BASELINE.into()];
         if self.world.serves(groups::RETENTION) {

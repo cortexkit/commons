@@ -134,14 +134,12 @@ shipping runner with this document.
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
-| `compaction_async` | `session.read`, `session.resolve` (it requires `tags`); the runner half of compaction-provider 0.3.0's `async` mode | §11.1 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
   `structured_output`, `adopt`, `tags`, `run_tool_calls` and
-  `delivery_order` are each declared on their own (`compaction_async` is
-  the one group that requires another, below): a runner may serve any of them without the others,
+  `delivery_order` are each declared on their own: a runner may serve any of them without the others,
   and without `run_ops` or `transcript_reads`. `tags` adds fields to
   `session.read`, so it requires that op (and `session.resolve`), not all of
   `transcript_reads`.
@@ -167,10 +165,6 @@ shipping runner with this document.
   `queue` (a reminder starting a run, a template send going out as an empty
   prompt). Beside a list they fail closed, because every runner without the
   group, older ones included, refuses the whole send naming `delivery`.
-- [pinned] `compaction_async` requires `tags`: an answer declaring it
-  without `tags` is malformed, and `check_describe` refuses it by name
-  (`compaction_async_without_tags`), because async compaction addresses
-  every view edit by part key and tag. It adds no discovery metadata (§11.1).
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -1659,18 +1653,6 @@ owes.
 - [pinned] A runner that declares `compaction` owes everything in this
   section; a runner that does not owes none of it, and never calls a
   compaction provider.
-- [pinned] Synchronous `compaction.step` is used unless the conversation's
-  Setup selected async mode.
-- [pinned] **`compaction_async`.** A runner declares the `compaction_async`
-  group when it serves the runner half of compaction-provider 0.3.0's
-  `async` mode (that contract's §20, which this role does not restate): it
-  publishes advance notices, fetches and applies views at step boundaries,
-  sends rides, honours the ceiling Setup sets, and implements `tags` (§9.6),
-  the `context_ceiling` refusal and run state, and the
-  `context_ceiling_wait` status (§6). The mode is selected per conversation,
-  not by the declaration: Setup carries `compaction_mode: "async"`, and the
-  provider must echo it; without that, the conversation uses the
-  synchronous interface below.
 
 - [pinned] Setup is called once when a session starts. Its initial
   CompactionMessage is recorded before the first model call, and once
@@ -2031,7 +2013,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; live head insertion precedes/travels with message zero, summaries stay whole on their first page, and the exclusive-end message survives |
 | `compaction_wait_cap`, `compaction_late_or_stale_answers_discarded`, `compaction_step_timeout_uses_last_view`, `compaction_one_view_per_step` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; scripted provider and injected runner/model clock |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer refusal codes |
-| `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | —; `role_describe_groups_complete` also fails a live answer that declares `compaction_async` without `tags` |
+| `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
 | `compaction_ready_reasks_after_wait`, `compaction_ready_stale_request_ignored`, `compaction_ready_other_caller_refused`, `compaction_cursor_never_skips` | `compaction`, and a compaction provider in the plan |

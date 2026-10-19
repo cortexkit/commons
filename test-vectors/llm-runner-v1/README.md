@@ -165,11 +165,3 @@ cause this role does not name and an unknown member, both tolerated; and,
 for contrast, a provider's own overflow, which ends `error` with
 `context_overflow`. Checked by the `errors::context_ceiling_tests` module of
 the wire crate.
-
-# Async compaction
-
-`compaction-async-describe.json` pins the `compaction_async` group's
-discovery: an answer declaring it with `tags` and both ops, one declaring it
-without `tags` (refused `compaction_async_without_tags`), one missing
-`session.resolve` (refused for both groups), and one without the group.
-Checked by `describe::tags_and_tool_calls_tests`.

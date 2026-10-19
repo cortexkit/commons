@@ -419,15 +419,6 @@ where
         let major = describe
             .major(PROVIDES)
             .ok_or_else(|| format!("role.describe lists no {PROVIDES} major"))?;
-        // Async compaction addresses every view edit by tag, so its group
-        // is malformed without `tags`.
-        if describe.declares(groups::COMPACTION_ASYNC) && !describe.declares(groups::TAGS) {
-            return Err(format!(
-                "role.describe declares {} without {}, which it requires",
-                groups::COMPACTION_ASYNC,
-                groups::TAGS
-            ));
-        }
         for (group, group_ops) in groups::GROUPS {
             if !describe.declares(group) {
                 continue;
