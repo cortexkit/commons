@@ -1695,6 +1695,10 @@ async fn only_these_fail(
         assert!(reason.contains(text), "{name}: {reason}");
     }
     for name in cases_of(prefixes) {
+        // A case that needs the capability left undeclared cannot be asked.
+        if matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })) {
+            continue;
+        }
         if !failing.iter().any(|(failing, _)| *failing == name) {
             assert_passed(&report, name);
         }
@@ -1776,8 +1780,38 @@ async fn without_turn_system_a_template_goes_out_as_the_same_text_at_user_author
     subject.turn_system = false;
     let report = run(&subject).await;
     for name in cases_of(ORDER_PREFIXES) {
-        assert_passed(&report, name);
+        if !matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })) {
+            assert_passed(&report, name);
+        }
     }
+}
+
+#[tokio::test]
+async fn a_runner_without_the_group_refuses_a_list_and_one_accepting_it_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert_passed(&report, "delivery_order_list_refused_without_group");
+    let report = run(&FakeSubject::new(Defects {
+        order_list_accepted_without_group: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "delivery_order_list_refused_without_group");
+    assert!(reason.contains("not refused"), "{reason}");
+    assert_others_passed(&report, &["delivery_order_list_refused_without_group"]);
+}
+
+#[tokio::test]
+async fn a_template_send_with_a_string_delivery_accepted_fails_by_name() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects {
+            order_members_without_list_accepted: true,
+            ..Defects::default()
+        },
+        &[("delivery_order_members_without_list_refused", "not refused")],
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1853,10 +1887,10 @@ async fn delivery_order_defects_each_fail_their_case() {
         ),
         (
             Defects {
-                order_legacy_and_list_accepted: true,
+                order_members_without_list_accepted: true,
                 ..Defects::default()
             },
-            "delivery_order_with_legacy_delivery_refused",
+            "delivery_order_members_without_list_refused",
             "not refused",
         ),
     ] {
@@ -1900,7 +1934,11 @@ async fn without_the_new_groups_their_cases_skip_by_name() {
         (Capability::RunToolCalls, TOOL_CALL_PREFIXES),
         (Capability::DeliveryOrder, ORDER_PREFIXES),
     ] {
-        for name in cases_of(prefixes) {
+        // The one case that asks a runner without the group runs here.
+        for name in cases_of(prefixes)
+            .into_iter()
+            .filter(|name| *name != "delivery_order_list_refused_without_group")
+        {
             assert!(
                 matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&capability)),
                 "{name}: {:?}",

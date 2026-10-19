@@ -3,16 +3,20 @@
 //! whose text may go out with system authority.
 //!
 //! A runner that declares `delivery_order`
-//! ([`crate::capabilities::DELIVERY_ORDER`]) accepts `delivery_order:
-//! [mode, ...]` on a send ([`DeliveryOrder`]). At each request boundary it
+//! ([`crate::capabilities::DELIVERY_ORDER`]) accepts `delivery: [mode, ...]`
+//! on a send, the ordered list riding in `delivery` itself
+//! ([`DeliveryOrder`]). At each request boundary it
 //! takes the first mode in the list that is possible there ([`choose`]); if
 //! none is, the send stays queued, durably, for the next boundary. A list
 //! without `idle_start` never starts a run.
 //!
-//! The legacy string `delivery` is unchanged and maps onto lists
+//! A string `delivery` keeps its meaning and maps onto lists
 //! ([`legacy_equivalent`]): `queue` (or absent) is `[idle_start]`, `steer` is
-//! `[steer, idle_start]`, and `interrupt` has no list form. A send carrying
-//! both is refused naming `delivery_order`.
+//! `[steer, idle_start]`, and `interrupt` has no list form. The overload
+//! fails closed: a runner without the group refuses a list naming `delivery`,
+//! as an older runner's strict decode of `delivery` already does, so a list
+//! never goes out as a legacy `queue`. The members that ride with a list
+//! (`dedupe_key`, `expires_at_ms`, `template`) are valid only beside one.
 //!
 //! A send has one text whatever mode carries it: its `prompt`, or, for a
 //! send naming a plan `template` (with an empty `prompt`), the text the
@@ -31,16 +35,18 @@ use sha2::{Digest, Sha256};
 
 use crate::{capabilities, errors, send::Delivery};
 
-/// The send member holding the ordered list, and the `field` an
-/// `invalid_params` refusal names for a malformed list, a list beside a
-/// legacy `delivery`, or a mode the sender's grant excludes.
-pub const FIELD: &str = "delivery_order";
+/// The send member holding the ordered list, `delivery`, and the `field`
+/// an `invalid_params` refusal names for a malformed list, a list sent to a
+/// runner without the group, or a mode the sender's grant excludes.
+pub const FIELD: &str = crate::send::DELIVERY_FIELD;
 /// The send member naming a queued send's replacement key.
 pub const DEDUPE_KEY_FIELD: &str = "dedupe_key";
 /// The send member giving the time after which a queued send is dropped.
 pub const EXPIRES_AT_FIELD: &str = "expires_at_ms";
 /// The send member naming the plan template a `turn_system` delivery renders.
 pub const TEMPLATE_FIELD: &str = "template";
+/// The members valid only beside a list in `delivery`.
+pub const MEMBERS: &[&str] = &[DEDUPE_KEY_FIELD, EXPIRES_AT_FIELD, TEMPLATE_FIELD];
 
 /// One delivery mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -179,14 +185,10 @@ impl DeliveryOrder {
         self.modes.contains(&Mode::IdleStart)
     }
 
-    /// The send members (`delivery_order` and, when set, `dedupe_key`,
-    /// `expires_at_ms`, `template`) to put beside the role's on a send.
+    /// The members that ride beside the list, as set (`dedupe_key`,
+    /// `expires_at_ms`, `template`); the list itself rides in `delivery`.
     pub fn to_members(&self) -> Map<String, Value> {
         let mut members = Map::new();
-        members.insert(
-            FIELD.into(),
-            serde_json::to_value(&self.modes).expect("modes serialize"),
-        );
         if let Some(key) = &self.dedupe_key {
             members.insert(DEDUPE_KEY_FIELD.into(), Value::from(key.as_str()));
         }
@@ -202,34 +204,36 @@ impl DeliveryOrder {
         members
     }
 
-    /// Read the members from a send's `runner_params`. `legacy` is whether
-    /// the send also carries a legacy `delivery`. `Ok(None)` when the send
-    /// carries none of them. On a malformed send, the field of the
-    /// `invalid_params` refusal: [`FIELD`] for a list beside a legacy
-    /// `delivery`, a list that is not an array of known modes, an empty list
-    /// or a mode twice; [`DEDUPE_KEY_FIELD`], [`EXPIRES_AT_FIELD`] or
-    /// [`TEMPLATE_FIELD`] for a malformed member, or for one sent without a
-    /// list.
-    pub fn decode(params: &Map<String, Value>, legacy: bool) -> Result<Option<Self>, &'static str> {
-        let Some(raw) = params.get(FIELD) else {
-            for member in [DEDUPE_KEY_FIELD, EXPIRES_AT_FIELD, TEMPLATE_FIELD] {
-                if params.contains_key(member) {
+    /// The members as a send carries them: the list as an array in
+    /// `delivery`, beside [`Self::to_members`].
+    pub fn to_send_members(&self) -> Map<String, Value> {
+        let mut members = self.to_members();
+        members.insert(
+            FIELD.into(),
+            serde_json::to_value(&self.modes).expect("modes serialize"),
+        );
+        members
+    }
+
+    /// Build the list's send from `modes` (the array a send's `delivery`
+    /// carried, already checked by its decode) and the members in `params`.
+    /// `Ok(None)` without a list. On a malformed send, the field of the
+    /// `invalid_params` refusal: a member without a list is refused naming
+    /// that member, as is a malformed member ([`DEDUPE_KEY_FIELD`],
+    /// [`EXPIRES_AT_FIELD`], [`TEMPLATE_FIELD`]).
+    pub fn decode(
+        modes: Option<&[Mode]>,
+        params: &Map<String, Value>,
+    ) -> Result<Option<Self>, &'static str> {
+        let Some(modes) = modes else {
+            for member in MEMBERS {
+                if params.contains_key(*member) {
                     return Err(member);
                 }
             }
             return Ok(None);
         };
-        if legacy {
-            return Err(FIELD);
-        }
-        let modes: Vec<Mode> = serde_json::from_value(raw.clone()).map_err(|_| FIELD)?;
-        let mut seen = modes.clone();
-        seen.sort();
-        seen.dedup();
-        if modes.is_empty() || seen.len() != modes.len() {
-            return Err(FIELD);
-        }
-        let mut order = Self::new(modes);
+        let mut order = Self::new(modes.to_vec());
         if let Some(key) = params.get(DEDUPE_KEY_FIELD) {
             match key.as_str() {
                 Some(key) if !key.is_empty() => order.dedupe_key = Some(key.to_owned()),
@@ -709,6 +713,17 @@ mod tests {
                 );
             }
         }
+        // A malformed `delivery` does not decode, and the error names it.
+        for case in vectors::cases(&file, "undecodable") {
+            let name = case["name"].as_str().unwrap();
+            let field = case["field"].as_str().unwrap();
+            let error =
+                serde_json::from_value::<SendRequest>(case["request"].clone()).expect_err(name);
+            assert!(error.to_string().contains(field), "{name}: {error}");
+        }
+        // A member without a list, or a malformed member, decodes and is
+        // refused naming it.
+        let mut without_list = false;
         for case in vectors::cases(&file, "refused_requests") {
             let name = case["name"].as_str().unwrap();
             let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();
@@ -717,7 +732,12 @@ mod tests {
                 Err(case["field"].as_str().unwrap()),
                 "{name}"
             );
+            without_list |= request.delivery_order.is_none();
         }
+        assert!(
+            without_list,
+            "no vector refuses a member sent without a list"
+        );
         for case in vectors::cases(&file, "without_group") {
             let name = case["name"].as_str().unwrap();
             let request: SendRequest = serde_json::from_value(case["request"].clone()).unwrap();

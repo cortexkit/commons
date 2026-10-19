@@ -116,14 +116,16 @@ an answer without the group. Checked by the `tags::tests` and
 
 # Delivery order
 
-`delivery-order.json` pins the `delivery_order` group: the legacy
+`delivery-order.json` pins the `delivery_order` group: the string
 `delivery` equivalences (`queue` and absent are `[idle_start]`, `steer` is
-`[steer, idle_start]`, `interrupt` has none); sends carrying a list with
-its `dedupe_key`, `expires_at_ms` and `template`, and sends refused by field
-(a list beside a legacy `delivery`, empty, a mode twice, a legacy mode, not a
-list, members without a list, malformed members); a runner without the
-group refusing each member by name while the legacy field still works;
-mode choices at boundaries (fall-through order, order winning over what else
+`[steer, idle_start]`, `interrupt` has none); sends whose `delivery` is a
+list, with `dedupe_key`, `expires_at_ms` and `template`; `delivery` values
+that do not decode, each naming `delivery` (an empty list, a mode twice, a
+legacy mode inside a list, a number, an unknown string); sends refused by
+member (a member beside a string or absent `delivery`, malformed members, a
+template beside a prompt, an empty prompt without a template); a runner
+without the group refusing a list naming `delivery` while the string still
+works; mode choices at boundaries (fall-through order, order winning over what else
 is possible, a list without `idle_start` never starting a run, `queue`
 waiting for the run to end); a plan sender's typed template with uses that
 render or name their problem (a percentage over 100 or written as a string,

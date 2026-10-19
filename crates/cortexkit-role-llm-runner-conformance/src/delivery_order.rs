@@ -43,7 +43,8 @@ where
         "delivery_order_first_possible_mode" => passed(first_possible(case).await),
         "delivery_order_dedupe_supersedes_queued" => passed(dedupe(case).await),
         "delivery_order_expired_never_delivered" => passed(expiry(case).await),
-        "delivery_order_with_legacy_delivery_refused" => passed(with_legacy(case).await),
+        "delivery_order_members_without_list_refused" => passed(members_without_list(case).await),
+        "delivery_order_list_refused_without_group" => passed(list_without_group(case).await),
         "delivery_order_unnamed_sender_refused" => passed(unnamed_sender(case).await),
         "delivery_order_template_renders_as_system" => passed(template_renders(case).await),
         "delivery_order_bad_slot_refused" => passed(bad_slot(case).await),
@@ -125,7 +126,14 @@ where
     call(
         route,
         ops::SESSION_SEND,
-        params(case, session, None, prompt, send_id, &order.to_members()),
+        params(
+            case,
+            session,
+            None,
+            prompt,
+            send_id,
+            &order.to_send_members(),
+        ),
     )
     .await
 }
@@ -453,35 +461,117 @@ where
     .await
 }
 
-async fn with_legacy<S>(case: &Case<'_, S>) -> Check
+/// `members` added to a send of `prompt` into `session`, beside the
+/// subject's fields and the role's.
+async fn send_with<S>(
+    case: &Case<'_, S>,
+    session: &Session<S::Route>,
+    prompt: &str,
+    members: &Map<String, Value>,
+) -> Result<Reply, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
-    let (session, _) = ordered_session(case, "order-legacy", Vec::new(), false).await?;
+    call(
+        &session.route,
+        ops::SESSION_SEND,
+        params(
+            case,
+            session,
+            None,
+            prompt,
+            &case.mint.next("send"),
+            members,
+        ),
+    )
+    .await
+}
+
+async fn members_without_list<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (session, _) = ordered_session(case, "order-members", Vec::new(), false).await?;
     let before = snapshot(&session.route).await?;
-    let mut members = DeliveryOrder::new(vec![Mode::Steer]).to_members();
-    members.insert("delivery".into(), json!("steer"));
-    let what = "a send carrying both delivery and delivery_order";
+    let template = DeliveryOrder::new(vec![Mode::TurnSystem, Mode::Steer])
+        .with_template(template_use(json!(82)))
+        .to_members();
+    let keyed = DeliveryOrder::new(vec![Mode::Steer])
+        .with_dedupe_key(case.mint.next("key"))
+        .to_members();
+    let expiring = DeliveryOrder::new(vec![Mode::Steer])
+        .with_expires_at_ms(1)
+        .to_members();
+    let mut steer = Map::new();
+    steer.insert("delivery".into(), json!("steer"));
+    let with = |mut members: Map<String, Value>, extra: &Map<String, Value>| {
+        members.extend(extra.clone());
+        members
+    };
+    // Without a list an older runner would ignore each of these members, so
+    // a runner of the group refuses them by name.
+    for (what, prompt, members, field) in [
+        (
+            "a template send with a string delivery",
+            String::new(),
+            with(template, &steer),
+            TEMPLATE_FIELD,
+        ),
+        (
+            "a dedupe_key with no delivery",
+            case.mint.next("keyed"),
+            keyed,
+            cortexkit_role_llm_runner::delivery_order::DEDUPE_KEY_FIELD,
+        ),
+        (
+            "expires_at_ms with a string delivery",
+            case.mint.next("expiring"),
+            with(expiring, &steer),
+            cortexkit_role_llm_runner::delivery_order::EXPIRES_AT_FIELD,
+        ),
+    ] {
+        let error = expect_error(what, send_with(case, &session, &prompt, &members).await?)?;
+        expect_field(what, &error, errors::INVALID_PARAMS, field)?;
+        if !same(&before, &snapshot(&session.route).await?) {
+            return Err(format!("{what} was refused but changed the transcript"));
+        }
+    }
+    Ok(())
+}
+
+async fn list_without_group<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut session = case
+        .open(
+            "order-without-group",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![case.mint.text("plain-answer").0])],
+            },
+        )
+        .await?;
+    let opening = case.mint.next("opening");
+    send_and_wait(case, &mut session, None, &opening, &Map::new()).await?;
+    let before = snapshot(&session.route).await?;
+    let what = "a list in delivery on a runner without delivery_order";
+    let members = DeliveryOrder::new(vec![Mode::Steer, Mode::IdleStart]).to_send_members();
     let error = expect_error(
         what,
-        call(
-            &session.route,
-            ops::SESSION_SEND,
-            params(
-                case,
-                &session,
-                None,
-                &case.mint.next("both"),
-                &case.mint.next("send"),
-                &members,
-            ),
-        )
-        .await?,
+        send_with(case, &session, &case.mint.next("listed"), &members).await?,
     )?;
     expect_field(what, &error, errors::INVALID_PARAMS, FIELD)?;
-    if !same(&before, &snapshot(&session.route).await?) {
-        return Err(format!("{what} was refused but changed the transcript"));
+    for _ in 0..QUIET_POLLS {
+        if !same(&before, &snapshot(&session.route).await?) {
+            return Err(format!(
+                "{what} was refused but changed the transcript: the list must never go out as \
+                 a legacy mode"
+            ));
+        }
+        case.subject.pause().await;
     }
     Ok(())
 }

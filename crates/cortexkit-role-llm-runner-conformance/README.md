@@ -348,9 +348,13 @@ names. `turn_system_supported()` says whether the scripted route takes a
 turn-scoped system message: the template case then expects `turn_system`,
 and otherwise the same rendered text at user authority. They check that a
 list without `idle_start` never starts a run, that the first possible mode
-wins (with a held tool call for `tool_result`), dedupe, expiry, the refusal of
-a list beside a legacy `delivery`, plan-named senders and the `idle_start`
-grant, and that an out-of-range slot refuses the send.
+wins (with a held tool call for `tool_result`), dedupe, expiry, the refusal
+by name of `template`, `dedupe_key` and `expires_at_ms` sent without a list in
+`delivery`, plan-named senders and the `idle_start`
+grant, and that an out-of-range slot refuses the send. The list rides in
+`delivery` as an array. `delivery_order_list_refused_without_group` runs only
+when the subject does not declare the group: such a runner must refuse a
+list naming `delivery`.
 
 ## Context ceiling and read stability
 

@@ -234,9 +234,12 @@ pub struct Defects {
     pub order_expiry_ignored: bool,
     /// The last possible mode of a list wins instead of the first.
     pub order_last_possible_mode: bool,
-    /// A send carrying both `delivery` and `delivery_order` is accepted, the
-    /// list winning.
-    pub order_legacy_and_list_accepted: bool,
+    /// A runner without the `delivery_order` group accepts a list in
+    /// `delivery`, delivering it as a legacy `queue`.
+    pub order_list_accepted_without_group: bool,
+    /// A list member (`template`, `dedupe_key`, `expires_at_ms`) beside a
+    /// string or absent `delivery` is ignored instead of refused.
+    pub order_members_without_list_accepted: bool,
     /// A recovery that drops a never-sent call from history keeps the
     /// session's lineage.
     pub drop_keeps_lineage: bool,
@@ -1906,24 +1909,30 @@ impl Module {
             return Ok(invalid("retention"));
         }
         if let Some(delivery) = params.get(DELIVERY_FIELD) {
-            if !matches!(delivery.as_str(), Some("queue" | "steer" | "interrupt")) {
+            // A list is decoded below, and refused there on a runner without
+            // the group; any other value must be a known mode.
+            if !delivery.is_array()
+                && !matches!(delivery.as_str(), Some("queue" | "steer" | "interrupt"))
+            {
                 return Ok(invalid(DELIVERY_FIELD));
             }
         }
+        let listed = params.get(DELIVERY_FIELD).is_some_and(Value::is_array);
         let mut request: SendRequest = match serde_json::from_value(params) {
             Ok(request) => request,
+            Err(_) if listed => return Ok(invalid(DELIVERY_FIELD)),
             Err(_) => return Ok(invalid("prompt")),
         };
         if let Err(field) = request.check_delivery_order(&self.world.groups) {
-            return Ok(invalid(field));
+            if !self.world.defects.order_list_accepted_without_group {
+                return Ok(invalid(field));
+            }
         }
         if self.world.serves(groups::DELIVERY_ORDER) {
-            let decoded = if self.world.defects.order_legacy_and_list_accepted {
-                DeliveryOrder::decode(&request.runner_params, false)
-            } else {
-                request.delivery_order()
-            };
-            match decoded {
+            match request.delivery_order() {
+                Err(_)
+                    if request.delivery_order.is_none()
+                        && self.world.defects.order_members_without_list_accepted => {}
                 Err(field) => return Ok(invalid(field)),
                 Ok(Some(wanted)) => return self.ordered_send(stamp, session, &request, wanted),
                 Ok(None) => {}

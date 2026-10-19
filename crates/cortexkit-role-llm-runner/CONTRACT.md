@@ -133,7 +133,7 @@ shipping runner with this document.
 | `adopt` | `session.adopt` | §9.5 |
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
-| `delivery_order` | `session.send` with `delivery_order`, plan-named senders and plan templates | §9.7 |
+| `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
@@ -157,12 +157,14 @@ shipping runner with this document.
   advertises `tags`, nor `run.tool_calls` unless it advertises
   `run_tool_calls` (§9.6, §6.3). `check_describe` checks each group for its
   ops; neither adds discovery metadata.
-- [pinned] A caller MUST NOT send `delivery_order` or its members
-  (`dedupe_key`, `expires_at_ms`, `template`), nor a plan naming `senders`,
-  unless the runner advertises `delivery_order` (§9.7). A runner of this
-  revision without the group refuses them by name; an older runner, lenient
-  on send fields, would ignore them and deliver the send as a legacy
-  `queue`, starting a run, which is why the caller's check comes first.
+- [pinned] A caller MUST NOT send a list in `delivery`, nor a plan naming
+  `senders`, unless the runner advertises `delivery_order` (§9.7). A caller
+  MUST NOT send `dedupe_key`, `expires_at_ms` or `template` on a send whose
+  `delivery` is not a list: runners tolerate unknown send fields, so an
+  older runner would ignore those members and deliver the send as a legacy
+  `queue` (a reminder starting a run, a template send going out as an empty
+  prompt). Beside a list they fail closed, because every runner without the
+  group, older ones included, refuses the whole send naming `delivery`.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -751,10 +753,10 @@ what a run called without decoding any message body.
   (`SendRequest::check_delivery`).
 - [pinned] A runner that admits sessions declares `queue`, because its first
   send is one.
-- [pinned] A runner that declares `delivery_order` also accepts an ordered
-  list of delivery modes in a separate `delivery_order` member (§9.7). The
-  string `delivery` keeps its meaning exactly; a send carrying both is
-  refused `invalid_params {field: "delivery_order"}`.
+- [pinned] `delivery` is a string or a list. A string keeps the meaning
+  above exactly. A list is the ordered list of delivery modes of the
+  `delivery_order` group (§9.7), accepted only by a runner that declares the
+  group; any other runner refuses it `invalid_params {field: "delivery"}`.
 - [pinned] A send that would start or join a run while the session's
   context is at or over its ceiling is refused `context_ceiling {window,
   size, cause}` and writes nothing (§6, §12.1).
@@ -1375,19 +1377,21 @@ say who may send and which texts are system text.
 
 **The list.**
 
-- [pinned] A runner that declares `delivery_order` accepts an optional
-  `delivery_order: [mode, ...]` on `session.send`
-  (`delivery_order::DeliveryOrder`, read with
-  `SendRequest::delivery_order`), with modes (`delivery_order::Mode`):
+- [pinned] A runner that declares `delivery_order` accepts `delivery:
+  [mode, ...]` on `session.send`: the ordered list rides in `delivery`
+  itself, as an array (`SendRequest::delivery_order`; read with the members
+  below as `delivery_order::DeliveryOrder`), with modes
+  (`delivery_order::Mode`):
   - `tool_result`: rendered with the next tool result, the first time that
     result is sent;
   - `turn_system`: a turn-scoped system message (Anthropic's `clear_at:
     next_user_message`), for template text only (below);
   - `steer`: a user message into the run in progress, at its next step;
   - `idle_start`: a user message that starts a run on an idle session.
-- [pinned] The list is strict: not an array of these modes, empty, or a
-  mode twice is refused `invalid_params {field: "delivery_order"}`, writing
-  nothing.
+- [pinned] `delivery` is decoded once, as a string or a list
+  (`SendRequest`): a list that is not of these modes, empty, or naming a
+  mode twice is refused `invalid_params {field: "delivery"}`, writing
+  nothing, as an unknown string is.
 - [pinned] At each request boundary, the runner takes the first mode in the
   list that is possible there (`delivery_order::choose`,
   `delivery_order::Boundary`): `tool_result` needs a tool result about to be
@@ -1397,21 +1401,25 @@ say who may send and which texts are system text.
   possible, the send stays queued, durably, for the next boundary.
 - [pinned] **A list without `idle_start` never starts a run.** It waits,
   queued, for a request the session makes anyway.
-- [pinned] The legacy string `delivery` is unchanged, and maps onto lists
+- [pinned] A string `delivery` is unchanged, and maps onto lists
   (`delivery_order::legacy_equivalent`): `queue`, or an absent `delivery`,
   is `[idle_start]` (it waits durably and starts the next turn once the run
   ends); `steer` is `[steer, idle_start]`. `interrupt` has no list form and
-  stays its own mode. A send carrying both `delivery` and `delivery_order`
-  is refused `invalid_params {field: "delivery_order"}`, so a caller never
-  has two answers.
-- [pinned] A runner of this revision that does not declare the group
-  refuses a send carrying `delivery_order`, `dedupe_key`, `expires_at_ms`
-  or `template` with `invalid_params` naming that member, writing nothing
-  (`SendRequest::check_delivery_order`): it never delivers such a send
-  another way. A caller still checks discovery first (§3).
+  stays its own mode.
+- [pinned] **Why the overload is safe.** A runner that does not declare the
+  group refuses a list in `delivery` with `invalid_params {field:
+  "delivery"}`, writing nothing (`SendRequest::check_delivery_order`), and
+  an older runner's strict decode of `delivery` already refuses an array the
+  same way. A list therefore never goes out as a legacy `queue` on a runner
+  that cannot honour it: the send fails loudly instead.
+- [pinned] The members `dedupe_key`, `expires_at_ms` and `template` are
+  valid only on a send whose `delivery` is a list
+  (`delivery_order::MEMBERS`). On a runner that declares the group, a send
+  carrying any of them with a string or absent `delivery` is refused
+  `invalid_params` naming that member, writing nothing.
 - [pinned] The list, with its members, is part of the send's identity
   (§9): the same `send_id` with another list is refused `send_id_reuse`
-  naming `delivery_order`. A retry with the same `send_id` is the same send
+  naming `delivery`. A retry with the same `send_id` is the same send
   and answers its current state. Idempotency is keyed by the sender and
   `send_id`, so two senders' `send_id`s never collide.
 
@@ -1452,8 +1460,8 @@ say who may send and which texts are system text.
   for a send naming a plan template, the text the runner renders from that
   template and the send's slots. A template send carries `template: {id,
   digest, slots}` (`delivery_order::TemplateUse`, strict) and an empty
-  `prompt`; a template beside a non-empty `prompt`, or a `delivery_order`
-  send with an empty `prompt` and no template, is refused `invalid_params
+  `prompt`; a template beside a non-empty `prompt`, or a send with a list
+  in `delivery`, an empty `prompt` and no template, is refused `invalid_params
   {field: "template"}` (`SendRequest::delivery_order`). The empty `prompt` is
   a transitional encoding: `prompt` becomes optional at the next breaking
   release.
@@ -1502,8 +1510,8 @@ say who may send and which texts are system text.
   admit unkeyed non-owner sends on such a runner.
 - [pinned] A named sender may list `idle_start`, and so start a run, only
   when its entry grants `idle_start: true`; otherwise its list (or its
-  legacy `queue` or `steer`, which stand for lists holding `idle_start`) is
-  refused `invalid_params {field: "delivery_order"}`. `interrupt` stays the
+  string `queue` or `steer`, which stand for lists holding `idle_start`) is
+  refused `invalid_params {field: "delivery"}`. `interrupt` stays the
   owner's.
 
 ## 10. `session.baseline` and the admission reply
@@ -1748,7 +1756,7 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a send's `delivery_order` beside a legacy `delivery`, a malformed list or member, a member sent to a runner without the group, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
+| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
@@ -1756,7 +1764,7 @@ treats it as a terminal refusal of that one request.
 | `unknown_tag` | `session.resolve` names a well-formed tag the session never assigned (§9.6) | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
-| `send_id_reuse` | a `send_id` reused with another payload or mode (another `delivery_order` list included, §9.7), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
+| `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose delivery mode the runner does not declare | `delivery` | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
@@ -1878,10 +1886,12 @@ provider codes.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
   `session.send` tolerates unknown fields (a newer owner against an older
   runner degrades rather than fails), but `delivery` refuses an unknown value
-  naming the field. `retention` is a recognized field even on a runner without
+  naming the field: a string it does not know, or a list (on a runner
+  without `delivery_order`), or a malformed list. `retention` is a recognized field even on a runner without
   its group, and is refused there (§9.1), never treated as an unknown extra.
-  `view` on `session.read` is strict the same way, and so are the
-  `delivery_order` members on a runner that declares the group (§9.7).
+  `view` on `session.read` is strict the same way, and so are the list
+  members `dedupe_key`, `expires_at_ms` and `template` on a runner that
+  declares `delivery_order` (§9.7).
   `run.cancel` remains lenient on fields, but a runner that advertises
   `run_cancel.at` refuses unlisted `at` values (§6.2).
 - [pinned] A capability is declared only by being listed (`role.describe`)
@@ -2036,7 +2046,8 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
 | `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
 | `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
-| `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_with_legacy_delivery_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
+| `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_members_without_list_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
+| `delivery_order_list_refused_without_group` | `queue`, `transcript_reads`; not applicable when `delivery_order` is declared: a list in `delivery` is refused `invalid_params` naming `delivery` and writes nothing |
 | `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
 | `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
 | `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_refused` | the above; the rendered text goes out as `turn_system` where the adapter says its scripted route supports it, and as the same text at user authority otherwise; an out-of-range slot is refused naming `template` and writes nothing |
