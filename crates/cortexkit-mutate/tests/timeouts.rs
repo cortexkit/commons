@@ -6,12 +6,11 @@
 
 mod support;
 
-use std::{
-    fs,
-    path::Path,
-    process::Command,
-    time::{Duration, Instant},
-};
+use std::{fs, path::Path, process::Command};
+// The hang tests are Unix-only (they rely on process groups), and so are the
+// helpers that time them.
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 /// Deadline for the fixture row's test runs. Short, but long enough for an
@@ -149,6 +148,7 @@ impl Fixture {
 
     /// The pids the hanging test recorded, each with what it is: the test
     /// process, then the helper it started in a new process group.
+    #[cfg(unix)]
     fn hang_pids(&self) -> Vec<(&'static str, String)> {
         let pids = fs::read_to_string(self.root().join(".git/hang-pids"))
             .expect("the hanging test started");
@@ -193,6 +193,7 @@ fn assert_gone(pids: &[(&str, String)]) {
 
 /// Assert `ms` is at least the row's deadline but not far beyond it: the
 /// deadline, the SIGTERM grace period and slack for a loaded machine.
+#[cfg(unix)]
 fn assert_within_budget(ms: &serde_json::Value) {
     let ms = ms.as_u64().unwrap();
     assert!(
