@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Close pooled read-only connections before checkpointing and closing the SQLite
+  writer. Previously, the writer closed first, leaving `-wal` and `-shm` beside
+  the main database; restoring a saved `store.db` could then replay those newer
+  WAL frames and silently undo the restore or mix database states.
+
 ## 0.3.0
 
 - File-backed SQLite writer opens now claim a persistent

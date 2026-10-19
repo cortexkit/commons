@@ -328,11 +328,33 @@ mod sqlite_backend {
     /// serializes writer access via [`SqliteStore::with_conn`], and offers opt-in
     /// pooled read-only snapshots via [`SqliteStore::with_read`].
     pub struct SqliteStore {
-        conn: Mutex<Connection>,
+        // Read-only connections must close before the writer so SQLite can remove
+        // its WAL and shared-memory files when the final connection closes.
         readers: Option<ReadPool>,
+        conn: Mutex<Connection>,
         epoch: u64,
-        // The held lease releases on drop; kept alive for the store's lifetime.
+        // The held lease releases on drop; kept last so it remains held through
+        // the writer's checkpoint and close.
         _lease: Box<dyn LeaseHandle>,
+    }
+
+    impl Drop for SqliteStore {
+        fn drop(&mut self) {
+            // A checked-out reader borrows the store, so only idle connections can
+            // remain here. Close them before checkpointing through the writer.
+            drop(self.readers.take());
+
+            let conn = self
+                .conn
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // This is best-effort: a busy or failed checkpoint must never panic
+            // during destruction. Closing the writer still gives SQLite its normal
+            // opportunity to checkpoint and remove the sidecar files.
+            let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                row.get::<_, i64>(0)
+            });
+        }
     }
 
     impl SqliteStore {
@@ -361,8 +383,8 @@ mod sqlite_backend {
                 }
             }
             SqliteStore {
-                conn: Mutex::new(conn),
                 readers: None,
+                conn: Mutex::new(conn),
                 epoch,
                 _lease: Box::new(NoLease(cortexkit_lease::LeaseKey::new(
                     "test", "sqlite", "test",
@@ -612,7 +634,6 @@ mod sqlite_backend {
         }
 
         Ok(SqliteStore {
-            conn: Mutex::new(conn),
             readers: if path.is_empty()
                 || path == ":memory:"
                 || path == "file::memory:"
@@ -622,6 +643,7 @@ mod sqlite_backend {
             } else {
                 Some(ReadPool::new(path, options))
             },
+            conn: Mutex::new(conn),
             epoch,
             _lease: lease,
         })
@@ -1255,6 +1277,127 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
+    }
+
+    fn insert_shutdown_rows(store: &SqliteStore, names: &[&str]) {
+        store
+            .with_conn(|conn| {
+                conn.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS shutdown_rows (name TEXT PRIMARY KEY);",
+                )?;
+                for name in names {
+                    conn.execute("INSERT INTO shutdown_rows (name) VALUES (?1)", [name])?;
+                }
+                Ok(())
+            })
+            .expect("write shutdown rows");
+    }
+
+    fn shutdown_rows(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<String>> {
+        let mut statement = conn.prepare("SELECT name FROM shutdown_rows ORDER BY name")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+    }
+
+    fn assert_wal_sidecars_removed(path: &std::path::Path) {
+        assert!(path.is_file(), "main database file remains at rest");
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+            assert!(
+                !sidecar.exists(),
+                "SQLite sidecar remained after store drop: {}",
+                sidecar.display()
+            );
+        }
+    }
+
+    fn assert_rows_in_main_file(path: &std::path::Path, expected: &[&str]) {
+        let conn = rusqlite::Connection::open(path).expect("reopen main database file");
+        assert_eq!(
+            shutdown_rows(&conn).expect("read rows from reopened main file"),
+            expected,
+            "reopened main database contains every committed row"
+        );
+    }
+
+    #[test]
+    fn dropping_store_with_read_pool_removes_wal_and_shm() {
+        let (root, descriptor) = tmp();
+        let path = std::path::PathBuf::from(sqlite_path(&descriptor));
+        let store = open_sqlite_with(&descriptor, SqliteOpenOptions::default()).expect("open");
+        insert_shutdown_rows(&store, &["one", "two", "three"]);
+        let rows = store
+            .with_read(shutdown_rows)
+            .expect("read all committed rows through the pool");
+        assert_eq!(rows, ["one", "three", "two"]);
+
+        drop(store);
+
+        assert_wal_sidecars_removed(&path);
+        assert_rows_in_main_file(&path, &["one", "three", "two"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dropping_store_without_read_pool_removes_wal_and_shm() {
+        let (root, descriptor) = tmp();
+        let path = std::path::PathBuf::from(sqlite_path(&descriptor));
+        std::fs::create_dir_all(&root).expect("create database directory");
+        let conn = rusqlite::Connection::open(&path).expect("open file database");
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .expect("enable WAL");
+        let store = SqliteStore::for_test(conn, 1);
+        insert_shutdown_rows(&store, &["alpha", "beta"]);
+
+        drop(store);
+
+        assert_wal_sidecars_removed(&path);
+        assert_rows_in_main_file(&path, &["alpha", "beta"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn restoring_closed_database_does_not_replay_later_wal_rows() {
+        let (root, descriptor) = tmp();
+        let path = std::path::PathBuf::from(sqlite_path(&descriptor));
+        let backup = root.join("backup.db");
+
+        {
+            let store = open_sqlite(&descriptor).expect("open initial database");
+            insert_shutdown_rows(&store, &["backup"]);
+            assert_eq!(
+                store
+                    .with_read(shutdown_rows)
+                    .expect("read backup rows through the pool"),
+                ["backup"]
+            );
+        }
+        assert_wal_sidecars_removed(&path);
+        std::fs::copy(&path, &backup).expect("copy self-contained database backup");
+
+        {
+            let store = open_sqlite(&descriptor).expect("reopen database");
+            insert_shutdown_rows(&store, &["later"]);
+            assert_eq!(
+                store
+                    .with_read(shutdown_rows)
+                    .expect("read later rows through the pool"),
+                ["backup", "later"]
+            );
+        }
+        assert_wal_sidecars_removed(&path);
+
+        std::fs::remove_file(&path).expect("remove later database before restore");
+        std::fs::rename(&backup, &path).expect("restore saved main database file");
+        let store = open_sqlite(&descriptor).expect("open restored database");
+        let rows = store
+            .with_conn(shutdown_rows)
+            .expect("read restored database rows");
+        assert_eq!(rows, ["backup"]);
+        drop(store);
+
+        assert_wal_sidecars_removed(&path);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     const M1: &[Migration] = &[Migration {
