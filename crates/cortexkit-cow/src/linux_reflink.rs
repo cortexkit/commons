@@ -217,7 +217,7 @@ mod imp {
 
         // SAFETY: both file descriptors are valid for the duration of the call.
         // FICLONE copies metadata into `dst_file` and does not retain either fd.
-        let rc = unsafe { libc::ioctl(dst_file.as_raw_fd(), FICLONE, src_file.as_raw_fd()) };
+        let rc = unsafe { libc::ioctl(dst_file.as_raw_fd(), FICLONE as _, src_file.as_raw_fd()) };
         if rc != 0 {
             let err = std::io::Error::last_os_error();
             let _ = fs::remove_file(dst);
@@ -260,11 +260,11 @@ mod imp {
     fn set_times_nofollow(path: &Path, meta: &fs::Metadata) -> std::io::Result<()> {
         let times = [
             libc::timespec {
-                tv_sec: meta.atime() as libc::time_t,
+                tv_sec: meta.atime() as _,
                 tv_nsec: meta.atime_nsec() as libc::c_long,
             },
             libc::timespec {
-                tv_sec: meta.mtime() as libc::time_t,
+                tv_sec: meta.mtime() as _,
                 tv_nsec: meta.mtime_nsec() as libc::c_long,
             },
         ];

@@ -427,11 +427,11 @@ fn filetime_set(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()
         .map_err(|err| std::io::Error::other(err.to_string()))?;
     let times = [
         libc::timespec {
-            tv_sec: dur.as_secs() as libc::time_t,
+            tv_sec: dur.as_secs() as _,
             tv_nsec: 0,
         },
         libc::timespec {
-            tv_sec: dur.as_secs() as libc::time_t,
+            tv_sec: dur.as_secs() as _,
             tv_nsec: dur.subsec_nanos() as libc::c_long,
         },
     ];

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Build for 64-bit Linux with musl. The `FICLONE` ioctl request and the
+  timestamp seconds passed to `utimensat` were typed for glibc; they now take
+  the type each libc expects.
+
 ## 0.1.0 — First commons release
 
 - First published release: copy-on-write workspace isolation (APFS, btrfs, ZFS,
