@@ -4,15 +4,13 @@ use cortexkit_role_tool_provider::{
         check_reply, reply_deadline_ms, schema_digest, CatalogAnswer, CatalogTool, HoldArgument,
         Reply,
     },
+    vectors,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 fn vectors() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/reply-deadline.json"
-    ))
-    .unwrap()
+    serde_json::from_str(vectors::REPLY_DEADLINE_JSON).unwrap()
 }
 
 fn assert_deadline(case: &Value, vectors: &Value) {
@@ -116,10 +114,7 @@ fn reply_validation_vectors_hold_and_name_tool_and_member() {
 }
 
 fn existing_catalog() -> Value {
-    let vectors: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/catalog-answers.json"
-    ))
-    .unwrap();
+    let vectors: Value = serde_json::from_str(vectors::CATALOG_ANSWERS_JSON).unwrap();
     let mut full = vectors["full"].clone();
     // The vector's unknown extension was already ignored by the old decoder.
     // Compare the known catalog content, not preservation of unknown fields.

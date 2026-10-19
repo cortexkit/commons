@@ -9,13 +9,20 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-tool-provider"
-version = "0.9.2"
+version = "0.9.3"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Wire contract of the CortexKit tool-provider/v1 role: role.describe, tool.catalog, call_key, tool.withdraw and late-result names."
 publish = true
+# Ship the shared vector files with the crate so the optional `vectors` module
+# works for consumers who install this package without a repository checkout.
+include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
+
+[features]
+# Compiles the shared vectors into the public `vectors` module.
+test-vectors = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -23,3 +30,27 @@ serde_jcs = "0.2"
 serde_json = "1"
 sha2 = "0.10"
 subc-protocol = "0.32"
+
+[[test]]
+name = "call_modes"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "content_v1"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "emits_events"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "held_reply_v1"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "reply_deadline"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

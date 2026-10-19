@@ -1,9 +1,9 @@
 # `tool-provider/v1` — role contract
 
 Stability: **alpha**. This document is the role definition; the Rust types in
-this crate are its wire shapes, `test-vectors/tool-provider-v1/` at the
-repository root holds its vectors, and `cortexkit-role-tool-provider-conformance`
-is its suite. Every item below is **pinned**: a provider must do it, and a
+this crate are its wire shapes, and `test-vectors/tool-provider-v1/` inside
+this crate holds the shared vectors. The `cortexkit-role-tool-provider-conformance`
+crate is its suite. Every item below is **pinned**: a provider must do it, and a
 consumer may rely on it. Nothing in this revision is open.
 
 A tool provider is any module that serves tool definitions and executes calls

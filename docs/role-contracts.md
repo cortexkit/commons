@@ -6,7 +6,7 @@ A role crate defines the wire types and validation shared by an implementation a
 
 | Role or capability | Normative contract | JSON vectors | Conformance runner |
 |---|---|---|---|
-| `tool-provider/v1` | [Contract](../crates/cortexkit-role-tool-provider/CONTRACT.md) | [Vectors](../test-vectors/tool-provider-v1/) | [Tool-provider suite](../crates/cortexkit-role-tool-provider-conformance/README.md) |
+| `tool-provider/v1` | [Contract](../crates/cortexkit-role-tool-provider/CONTRACT.md) | [Vectors](../crates/cortexkit-role-tool-provider/test-vectors/tool-provider-v1/) | [Tool-provider suite](../crates/cortexkit-role-tool-provider-conformance/README.md) |
 | `llm-runner/v1` | [Contract](../crates/cortexkit-role-llm-runner/CONTRACT.md) | [Vectors](../test-vectors/llm-runner-v1/) | [LLM-runner suite](../crates/cortexkit-role-llm-runner-conformance/README.md) |
 | `classifier/v1` | [Contract](../crates/cortexkit-role-classifier/CONTRACT.md) | [Crate-local vectors](../crates/cortexkit-role-classifier/tests/vectors/) | [Classifier suite](../crates/cortexkit-role-classifier-conformance/README.md) |
 | `compaction-provider/v1` | [Contract](../crates/cortexkit-role-compaction-provider/CONTRACT.md) | [Vectors](../test-vectors/compaction-provider-v1/) | No separate runner crate yet |
@@ -25,4 +25,4 @@ Use the runner README linked above for its subject/route adapters, setup, and su
 
 ## Packaging vectors
 
-Vector locations currently vary, as the table shows. A published crate cannot rely on files outside its package directory. If it reads or embeds vectors, include those bytes inside the crate's package. The tool-provider suite, for example, embeds its own [vector copies](../crates/cortexkit-role-tool-provider-conformance/vectors/) and [tests that they match](../crates/cortexkit-role-tool-provider-conformance/tests/vendored_vectors.rs) the shared originals. See [contribution guidance](../CONTRIBUTING.md#versions-and-packaged-test-vectors) for the package check and versioning rule.
+Vector locations currently vary, as the table shows. A published crate cannot rely on files outside its package directory. If it reads or embeds vectors, include those bytes inside the crate's package. The tool-provider wire crate packages its shared vectors and exposes them through the `test-vectors` feature; the conformance crate enables that feature and reads the same bytes instead of keeping private copies. See [contribution guidance](../CONTRIBUTING.md#versions-and-packaged-test-vectors) for the package check and versioning rule.

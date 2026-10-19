@@ -26,6 +26,8 @@ pub mod late_results;
 pub mod points;
 pub mod result;
 pub mod scope;
+#[cfg(any(test, feature = "test-vectors"))]
+pub mod vectors;
 pub mod withdraw;
 
 /// The daemon's bind-mode vocabulary and the manifest capability promising
@@ -342,21 +344,5 @@ mod capability_tag_tests {
                 "{tag}"
             );
         }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod vectors {
-    //! The shared test vectors, read from the repository's `test-vectors`
-    //! directory so the wire crate, the conformance runner and any other
-    //! implementation check the same bytes.
-
-    pub fn load(name: &str) -> serde_json::Value {
-        let path = format!(
-            "{}/../../test-vectors/tool-provider-v1/{name}",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"))
     }
 }

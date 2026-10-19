@@ -1,15 +1,12 @@
 use cortexkit_role_tool_provider::{
     consumer_reads_held_reply_v1,
     result::{validate, ContentPart, HeldReply, ToolResult},
-    CONTENT_V1_CAPABILITY, HELD_REPLY_V1,
+    vectors, CONTENT_V1_CAPABILITY, HELD_REPLY_V1,
 };
 use serde_json::{json, Value};
 
 fn vectors() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/held-reply-v1.json"
-    ))
-    .unwrap()
+    serde_json::from_str(vectors::HELD_REPLY_V1_JSON).unwrap()
 }
 
 fn check_vector(group: &str, name: &str) {

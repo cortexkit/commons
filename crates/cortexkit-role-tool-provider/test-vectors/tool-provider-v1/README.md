@@ -1,7 +1,7 @@
 # `tool-provider/v1` test vectors
 
 The shared bytes every `tool-provider/v1` implementation and consumer checks.
-The role document is `crates/cortexkit-role-tool-provider/CONTRACT.md`.
+The role document is [`CONTRACT.md`](../../CONTRACT.md).
 
 | File | What it pins | Checked by |
 |---|---|---|
@@ -20,7 +20,10 @@ The role document is `crates/cortexkit-role-tool-provider/CONTRACT.md`.
 | `emits-events.json` | per-tool `emits_events`: `false`, `true` and absent entries that decode and round-trip, an explicit `null` that decodes as absent and encodes without the member, and non-boolean values a decoder refuses | the wire crate's `emits_events` tests, which also check that the existing catalog vectors, which never declare it, keep their bytes and digests; the runner's `catalog_emits_events_boolean` checks that every live declaration is a JSON boolean |
 | `composition-digest.json` | the `composition_digest` rule: each composition with its exact JCS bytes and digest, and objects that differ only in key order (same digest) | the wire crate's `composition_digest` test |
 | `late-results.json` | the `late_results` request, reply, ack, entry kinds (including an unknown one) and malformed entries | the wire crate's late-result tests |
-| `catalog-capabilities.json` | accepted `params.capabilities` filters and every refusal: unknown params, malformed, unsorted or repeated tags, and unserved tags | the wire crate's capability-selection and refusal tests; the conformance runner keeps a vendored copy |
+| `catalog-capabilities.json` | accepted `params.capabilities` filters and every refusal: unknown params, malformed, unsorted or repeated tags, and unserved tags | the wire crate's capability-selection and refusal tests |
+
+`SHA256SUMS` pins every file in this directory, including this README. The
+wire crate checks these sums when its `test-vectors` feature is enabled.
 
 Changing a vector changes the contract: bump the role crate's version and say
 why in the commit.
@@ -31,8 +34,7 @@ the 3 MiB refusal without checking in a multi-MiB string. The result-format
 omission test also compares encoded catalog bytes and the existing
 `call-modes.json` digest pins; the older vectors remain unchanged.
 
-The conformance crate compiles in copies of `call-key.json`, `schema-pin.json`
-and `catalog-capabilities.json`
-(`crates/cortexkit-role-tool-provider-conformance/vectors/`),
-because a published crate cannot read files outside its own directory. Its
-`vendored_vectors` test fails until a changed vector is copied there too.
+The conformance crate reads `call-key.json` and `schema-pin.json` from the
+wire crate's public `vectors` module. Its dependency enables the
+`test-vectors` feature, so the published conformance package needs no vendored
+copies or repository checkout.

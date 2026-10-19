@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+
+- Use `cortexkit-role-tool-provider` 0.9.3 and read call-key and schema-pin
+  vector bytes through its `test-vectors` feature instead of keeping copies in
+  this crate. The suite's conformance cases and results are unchanged.
+
 ## 0.9.2
 
 - Require cortexkit-role-tool-provider 0.9.2 and add

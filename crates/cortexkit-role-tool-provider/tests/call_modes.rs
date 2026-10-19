@@ -1,15 +1,12 @@
 use cortexkit_role_tool_provider::{
     catalog::{check_modes, serves_call_mode, CatalogAnswer, CatalogTool},
-    CallMode, CALL_MODES_CAPABILITY,
+    vectors, CallMode, CALL_MODES_CAPABILITY,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 fn vectors() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/call-modes.json"
-    ))
-    .unwrap()
+    serde_json::from_str(vectors::CALL_MODES_JSON).unwrap()
 }
 
 // Catalog digests are provider-defined. These vectors pin one scheme: SHA-256
@@ -23,10 +20,7 @@ fn content_digest(mut catalog: Value) -> String {
 #[test]
 fn classic_default_omission_preserves_catalog_digest() {
     let case = &vectors()["digests"][0];
-    let original: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/catalog-answers.json"
-    ))
-    .unwrap();
+    let original: Value = serde_json::from_str(vectors::CATALOG_ANSWERS_JSON).unwrap();
     let mut original = original["full"].clone();
     // CatalogTool ignores unknown extensions, including future_member;
     // compare the modeled catalog content rather than that extension.

@@ -37,13 +37,11 @@ use crate::{
 /// The shared vectors, compiled in so every provider's CI checks the same
 /// bytes the wire crate's own tests check.
 ///
-/// They are read from copies inside this crate, not from the repository's
-/// `test-vectors/` directory, because a published crate contains only its own
-/// directory: a path outside it does not exist when crates.io builds the
-/// package. `tests/vendored_vectors.rs` fails if a copy differs from the
-/// repository's file.
-const CALL_KEY_VECTORS: &str = include_str!("../vectors/call-key.json");
-const SCHEMA_PIN_VECTORS: &str = include_str!("../vectors/schema-pin.json");
+/// The bytes come from the wire crate's public `vectors` module. Its
+/// `test-vectors` feature is enabled by this crate's dependency, so consumers
+/// need neither vendored copies nor a repository checkout.
+const CALL_KEY_VECTORS: &str = cortexkit_role_tool_provider::vectors::CALL_KEY_JSON;
+const SCHEMA_PIN_VECTORS: &str = cortexkit_role_tool_provider::vectors::SCHEMA_PIN_JSON;
 
 /// A tool name no provider serves, for the refusal case.
 const UNSERVED_TOOL: &str = "conformance.not-a-served-tool";

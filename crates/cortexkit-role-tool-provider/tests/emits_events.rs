@@ -1,15 +1,15 @@
 //! Per-tool `emits_events`: the vectors in `emits-events.json`, and proof
 //! that catalogs which never declare it keep their exact bytes and digests.
 
-use cortexkit_role_tool_provider::catalog::{schema_digest, CatalogAnswer, CatalogTool};
+use cortexkit_role_tool_provider::{
+    catalog::{schema_digest, CatalogAnswer, CatalogTool},
+    vectors,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 fn vectors() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/emits-events.json"
-    ))
-    .unwrap()
+    serde_json::from_str(vectors::EMITS_EVENTS_JSON).unwrap()
 }
 
 fn cases(group: &str) -> Vec<Value> {
@@ -18,14 +18,8 @@ fn cases(group: &str) -> Vec<Value> {
 
 #[test]
 fn absent_emits_events_preserves_existing_catalog_bytes_and_digests() {
-    let answers: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/catalog-answers.json"
-    ))
-    .unwrap();
-    let modes: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/call-modes.json"
-    ))
-    .unwrap();
+    let answers: Value = serde_json::from_str(vectors::CATALOG_ANSWERS_JSON).unwrap();
+    let modes: Value = serde_json::from_str(vectors::CALL_MODES_JSON).unwrap();
     let mut full = answers["full"].clone();
     // Unknown catalog extensions are intentionally not modeled by CatalogTool,
     // so this one would not survive a decode and re-encode.

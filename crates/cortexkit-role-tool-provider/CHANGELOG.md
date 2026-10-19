@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3
+
+- Ship all shared `tool-provider/v1` vectors inside the crate package, expose
+  their bytes through the opt-in `test-vectors` feature, and pin every vector
+  and the README with `SHA256SUMS`. This lets consumers use the published bytes
+  without a repository checkout.
+- Point the wire crate's vector tests at the feature module and verify the
+  package contents match the embedded bytes and their checksums.
+
 ## 0.9.2
 
 - Add `ToolResult::held`, `held()` and `with_held`, plus the non-exhaustive

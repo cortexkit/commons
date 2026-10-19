@@ -1,15 +1,13 @@
 use cortexkit_role_tool_provider::{
     catalog::{schema_digest, CatalogAnswer, CatalogTool},
     result::{validate, ContentPart, ImageContent, ResultFormat, ToolResult, MAX_RESULT_BYTES},
+    vectors,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 fn vectors() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/content-v1.json"
-    ))
-    .unwrap()
+    serde_json::from_str(vectors::CONTENT_V1_JSON).unwrap()
 }
 
 fn check_vector(group: &str, name: &str) {
@@ -243,14 +241,8 @@ fn unknown_parts_cannot_bypass_known_part_validation_when_constructed() {
 
 #[test]
 fn absent_result_format_preserves_existing_catalog_bytes_and_pinned_digests() {
-    let vectors: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/call-modes.json"
-    ))
-    .unwrap();
-    let original: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/tool-provider-v1/catalog-answers.json"
-    ))
-    .unwrap();
+    let vectors: Value = serde_json::from_str(vectors::CALL_MODES_JSON).unwrap();
+    let original: Value = serde_json::from_str(vectors::CATALOG_ANSWERS_JSON).unwrap();
     let mut original = original["full"].clone();
     // Unknown catalog extensions are intentionally not modeled by CatalogTool.
     original["tools"][1]
