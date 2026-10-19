@@ -31,6 +31,9 @@ pub mod problem_names {
     pub const EMPTY_RUN_CANCEL_AT: &str = "empty_run_cancel_at";
     pub const MISSING_RUN_CANCEL_NOW: &str = "missing_run_cancel_now";
     pub const DUPLICATE_RUN_CANCEL_AT: &str = "duplicate_run_cancel_at";
+    /// The answer declares `compaction_async` without `tags`, which async
+    /// compaction addresses every view edit by.
+    pub const COMPACTION_ASYNC_WITHOUT_TAGS: &str = "compaction_async_without_tags";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -339,6 +342,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.session_capabilities_from.is_none() {
         problems.push(DescribeProblem::MissingSessionCapabilitiesSource);
     }
+    if describe.declares(capabilities::COMPACTION_ASYNC) && !describe.declares(capabilities::TAGS) {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::COMPACTION_ASYNC_WITHOUT_TAGS.into(),
+        ));
+    }
     if let Some(cancel) = &describe.run_cancel {
         if !describe.declares(capabilities::RUN_CANCEL) {
             problems.push(DescribeProblem::Undecodable(
@@ -384,6 +392,9 @@ mod tests {
                 problem_names::EMPTY_RUN_CANCEL_AT => problem_names::EMPTY_RUN_CANCEL_AT,
                 problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,
                 problem_names::DUPLICATE_RUN_CANCEL_AT => problem_names::DUPLICATE_RUN_CANCEL_AT,
+                problem_names::COMPACTION_ASYNC_WITHOUT_TAGS => {
+                    problem_names::COMPACTION_ASYNC_WITHOUT_TAGS
+                }
                 _ => "undecodable",
             },
             DescribeProblem::MissingMajor { .. } => "missing_major",
@@ -738,6 +749,37 @@ mod tags_and_tool_calls_tests {
             capabilities::DELIVERY_ORDER,
             crate::ops::SESSION_SEND,
         );
+    }
+
+    #[test]
+    fn compaction_async_requires_tags_and_its_ops() {
+        let file = vectors::load("compaction-async-describe.json");
+        let answer: RoleDescribe = vectors::round_trip("compaction_async", &file["accept"]);
+        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
+        assert!(
+            answer.declares(capabilities::COMPACTION_ASYNC) && answer.declares(capabilities::TAGS)
+        );
+        assert_eq!(
+            check_describe(&file["without_tags"]),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::COMPACTION_ASYNC_WITHOUT_TAGS.into()
+            )])
+        );
+        assert_eq!(
+            check_describe(&file["refuse"]),
+            Err(vec![
+                DescribeProblem::GroupIncomplete {
+                    capability: capabilities::TAGS,
+                    op: crate::ops::SESSION_RESOLVE
+                },
+                DescribeProblem::GroupIncomplete {
+                    capability: capabilities::COMPACTION_ASYNC,
+                    op: crate::ops::SESSION_RESOLVE
+                }
+            ])
+        );
+        let without = check_describe(&file["without"]).unwrap();
+        assert!(!without.declares(capabilities::COMPACTION_ASYNC));
     }
 
     #[test]

@@ -9,7 +9,8 @@
 - Add `delivery_order_list_refused_without_group`, run only when the subject does not declare `delivery_order`: a list in `delivery` is refused naming `delivery` and writes nothing, the refusal that makes the overload of `delivery` safe.
 - Add `run_context_ceiling_wait_is_not_a_stall` (harness capability `HoldContextCeiling`) and `read_stable_across_host_metadata_change` (harness capability `HostMetadataChange`).
 - `crash_at_StepRecorded` now gives session B one finished run before the kill and fails a recovery that drops the never-sent call or its step without moving B to a new lineage.
-- Breaking: `Capability` gains `Tags`, `RunToolCalls`, `DeliveryOrder`, `HoldContextCeiling` and `HostMetadataChange`, so an exhaustive `match` needs the new arms.
+- `role_describe_groups_complete` also fails a live `role.describe` declaring `compaction_async` without `tags`.
+- Breaking: `Capability` gains `Tags`, `RunToolCalls`, `DeliveryOrder`, `CompactionAsync`, `HoldContextCeiling` and `HostMetadataChange`, so an exhaustive `match` needs the new arms.
 - `LlmRunnerSubject` gains defaulted `send_fields_with_plan`, `plan_sender`, `turn_system_supported`, `hold_context_ceiling`, `end_context_ceiling_wait` and `change_host_metadata` hooks; the new `PlanSenderIdentity` is non-exhaustive with a constructor.
 - The reference fake's defects (tag reuse, rewritten model tags, reversed tool calls, runs started without `idle_start`, unchecked template slots, unnamed senders admitted, dedupe and expiry ignored, last possible mode, a list accepted without the group, list members accepted without a list, drop recovery keeping its lineage, reads serving live host metadata) each fail their named cases in the suite's own tests.
 

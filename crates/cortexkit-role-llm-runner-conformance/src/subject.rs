@@ -60,6 +60,9 @@ pub enum Capability {
     /// `session.send` with `delivery_order`, plan-named senders and plan
     /// templates.
     DeliveryOrder,
+    /// The runner half of compaction-provider's `async` mode. Requires
+    /// [`Capability::Tags`]; no case requires it yet beyond discovery.
+    CompactionAsync,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -106,6 +109,7 @@ impl Capability {
         Self::Tags,
         Self::RunToolCalls,
         Self::DeliveryOrder,
+        Self::CompactionAsync,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -147,6 +151,7 @@ impl Capability {
             Self::Tags => groups::TAGS,
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
+            Self::CompactionAsync => groups::COMPACTION_ASYNC,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
