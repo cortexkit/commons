@@ -363,7 +363,8 @@ provider.
   2. It discards its held copy of the session's messages, its per-part
      index, and every unpublished view built from them. It resets its cursor
      to none. Derived state (summaries, say) may be kept only if its sources
-     re-validate by content digest after the re-read.
+     re-validate by content digest after the re-read, as §5.3 states for
+     work anchored on message ids and part keys.
   3. It re-reads the whole current lineage from its first message, through
      at least the newest `through_ordinal` it has seen.
   4. It publishes a new view, at a higher version, built only from re-read
@@ -375,6 +376,38 @@ provider.
   current view, and the ceiling still applies.
 - [pinned] The provider never repairs or rewrites the runner's transcript.
   Tags are the runner's, so nothing needs repair after an outage.
+
+### 5.3 Runner state lost
+
+- [pinned] A runner that loses or scrubs its own tag or view state (for
+  example after restoring an older store) MUST continue the session under a
+  new `lineage_id`, announced on its next notice without `descends_from`. It
+  claims no truncation: `revert_below` means truncation only, and the runner
+  does not send it for lost state. Having lost its view, it renders Setup's
+  initial CompactionMessage and omits `applied_view_version` until a newer
+  view applies (§7).
+- [pinned] Tag numbers after the loss follow three rules. Within a session
+  the runner MUST NOT give a tag number to a different part than the one it
+  had before. New tag assignments go above the floor: every tag number the
+  session may have used before the loss, as for a fork in `llm-runner/v1`
+  (`tags::next_after`). A runner whose restored state cannot tell it the
+  highest number it handed out jumps past any number it could have used. A
+  part whose restored state still records its tag MAY keep that number.
+- [pinned] A provider never relies on tag numbers across lineages. It
+  re-anchors by message id, part key and content digest.
+- [pinned] A provider that sees a new lineage without descent drops its
+  runner-side copy of the session: its tag index, its cursor, and its record
+  of which view the runner renders. It then re-reads the whole new lineage
+  with `session.read` (the resync of §5.2). View versions still only rise
+  (§6): the next view carries a version above every version the provider has
+  published.
+- [pinned] The provider may keep derived work anchored on a message id, or
+  on a message id plus part key, when the re-read transcript still has that
+  message or part with a matching content digest. Summaries, memories and
+  queued drops are examples. A queued drop is re-addressed by the part's new
+  tag, never by its old tag number. Work whose message or part is gone, or
+  whose digest differs, is discarded. Tag numbers never carry across
+  lineages.
 
 ## 6. Views: provider to runner
 
@@ -546,7 +579,7 @@ provider.
 
 ## 8. Ride request and ceiling
 
-- [pinned] `compaction.ride {session_ref, cause, deadline_ms}`
+- [pinned] `compaction.ride {session_ref, cause, deadline_ms, overflow?}`
   (`ride::RideRequest`) is a synchronous call on the compaction route. The
   runner sends it only when its prefix is being rewritten anyway (`cause`
   `ttl_expired`, `model_change` or `surface_change`), or when a request
@@ -560,6 +593,18 @@ provider.
   `wait_ms`: its `deadline_ms` is the time left of that wait, at most 300,000
   (`ceiling::MAX_CEILING_WAIT_MS`). `RideRequest::check` refuses a deadline
   out of range (`deadline_out_of_range`).
+- [pinned] Optional `overflow: {reported_limit_tokens?}` (`ride::Overflow`)
+  is allowed only with `cause: "ceiling"`. Present, it says the ride follows a
+  model provider error stating that the request exceeded the model's context
+  window. `reported_limit_tokens` (`u64`) is the limit that error stated, set
+  only when the runner parsed one from it and never guessed or filled from
+  the model catalog; `overflow: {}` is valid. Absent, the ceiling came from
+  the runner's own count, and a provider never reads absence as "no overflow
+  happened". On any other cause a provider ignores `overflow`; it is not a
+  refusal, and `RideRequest::check` does not fail on it.
+  `RideRequest::ceiling_overflow` returns it for a `ceiling` ride only.
+  `overflow` and `reported_limit_tokens` are omitted when absent, never
+  encoded as `null`.
 - [pinned] A rewrite-cause ride never ends a run: whatever its outcome, the
   runner sends the request, under the ride's view or its current one. Only
   a `ceiling` ride can end in the run being refused (`context_ceiling`,
@@ -582,7 +627,8 @@ provider.
   300,000. `on_overflow` is omitted when false (`CeilingPolicy::check`,
   `share_out_of_range`, `wait_out_of_range`).
 - [pinned] At the ceiling the runner sends `compaction.ride` with `cause:
-  "ceiling"` and `deadline_ms` set to the time left of `wait_ms`. If that call
+  "ceiling"` and `deadline_ms` set to the time left of `wait_ms`, carrying
+  `overflow` when the pause follows a model provider's overflow error. If that call
   brings no view that fits, it keeps waiting for a `view_ready` until
   `wait_ms` has passed in total. Then it decides (`CeilingPolicy::decide`),
   in order:
@@ -744,7 +790,8 @@ code not in this table is not retryable.
 
 - [pinned] **Lenient** (unknown fields ignored): `role.describe`, the Setup
   request, the fields of every answer, the fields of `view.get` and
-  `compaction.ride` requests, of a view, its cut and its part edits, and of
+  `compaction.ride` requests and of their `overflow`, of a view, its cut and
+  its part edits, and of
   `ceiling`. Unknown notice and view-ready headers are ignored. A part
   edit's `ordinal`, `mid` and `part` are required.
 - [pinned] **Strict on values**: `answer` in every answer, because a runner
@@ -813,7 +860,8 @@ views and sends rides. It will check:
 | `fork_descent_kept`, `fork_descent_digest_mismatch_resyncs`, `fork_without_descent_resyncs` | §5.1 |
 | `view_immutable`, `view_version_rises`, `view_get_never_another_version` | §6 |
 | `part_edits_well_formed` | §6: a provider's part edits are sorted, one per part, inside their keep range, and name part keys the runner's `session.read` returned |
-| `ride_answers_within_deadline`, `ride_unknown_cause_nothing` | §8 |
+| `ride_answers_within_deadline`, `ride_unknown_cause_nothing`, `ride_overflow_ignored_off_ceiling` | §8 |
+| `lineage_reset_drops_runner_copy` | §5.3: a new lineage without descent drops the tag index, cursor and rendered-view record, re-reads, and keeps only derived work whose message or part re-validates by digest |
 | `crash_at_<point>` for each point in §15 | §15 |
 
 Runner-side rules no live provider can exercise (a fetched view's

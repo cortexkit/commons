@@ -456,6 +456,22 @@ ride = {
         {"name": "ceiling reached", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000}}},
         {"name": "cause this crate does not know, kept as received", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "provider_switch", "deadline_ms": 1500}}},
     ],
+    "overflow_requests": [
+        {"name": "ceiling after an overflow error that stated a limit",
+         "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000,
+                    "overflow": {"reported_limit_tokens": 200000}},
+         "ceiling_overflow": {"reported_limit_tokens": 200000}},
+        {"name": "ceiling after an overflow error with no parsable limit",
+         "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000, "overflow": {}},
+         "ceiling_overflow": {}},
+        {"name": "ceiling from the runner's own count: no overflow member",
+         "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000},
+         "ceiling_overflow": None},
+        {"name": "overflow on a rewrite cause is ignored, not refused",
+         "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 1500,
+                    "overflow": {"reported_limit_tokens": 128000}},
+         "ceiling_overflow": None},
+    ],
     "requests_refused": [
         {"name": "zero deadline", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 0}, "problem": "deadline_out_of_range"},
         {"name": "deadline over five minutes", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},
@@ -528,6 +544,19 @@ descent = [
               f"lin_a:9:{digest_of(3)}"),
 ]
 
+# A runner that lost its own tag or view state continues under a new lineage
+# with no descent and claims no truncation; the provider resyncs.
+state_loss = {
+    "held_lineage": "lin_a",
+    "recorded_digests": [[o, digest_of(o)] for o in (1, 2, 3, 4)],
+    "notices": [
+        notice("before the loss", 30, 4, applied=3, est="64000")["headers"],
+        notice("after restoring an older store: new lineage, no descent, no revert", 31, 4,
+               lineage="lin_c", est="9000")["headers"],
+    ],
+    "outcome": "resync",
+}
+
 id_collision = {
     "notice_headers": notice("notice 3", 3, 3)["headers"],
     "view_ready_headers": ready_headers(V3),
@@ -554,6 +583,7 @@ doc = {
     "ceiling": ceiling,
     "descent": descent,
     "id_collision": id_collision,
+    "state_loss": state_loss,
 }
 
 with open(OUT, "w") as f:

@@ -4670,6 +4670,53 @@
         }
       }
     ],
+    "overflow_requests": [
+      {
+        "name": "ceiling after an overflow error that stated a limit",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ceiling",
+          "deadline_ms": 30000,
+          "overflow": {
+            "reported_limit_tokens": 200000
+          }
+        },
+        "ceiling_overflow": {
+          "reported_limit_tokens": 200000
+        }
+      },
+      {
+        "name": "ceiling after an overflow error with no parsable limit",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ceiling",
+          "deadline_ms": 30000,
+          "overflow": {}
+        },
+        "ceiling_overflow": {}
+      },
+      {
+        "name": "ceiling from the runner's own count: no overflow member",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ceiling",
+          "deadline_ms": 30000
+        },
+        "ceiling_overflow": null
+      },
+      {
+        "name": "overflow on a rewrite cause is ignored, not refused",
+        "params": {
+          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "cause": "ttl_expired",
+          "deadline_ms": 1500,
+          "overflow": {
+            "reported_limit_tokens": 128000
+          }
+        },
+        "ceiling_overflow": null
+      }
+    ],
     "requests_refused": [
       {
         "name": "zero deadline",
@@ -5158,5 +5205,50 @@
     },
     "notice_id": "357f07b24fd03982c83220c3c73f52fd:advanced:3",
     "view_ready_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3"
+  },
+  "state_loss": {
+    "held_lineage": "lin_a",
+    "recorded_digests": [
+      [
+        1,
+        "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1"
+      ],
+      [
+        2,
+        "f85f8e2b95385e937430f388f73eb29baf69f14087edbcfeeb7ac869cb79a67b"
+      ],
+      [
+        3,
+        "2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
+      ],
+      [
+        4,
+        "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd"
+      ]
+    ],
+    "notices": [
+      {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "30",
+        "lineage_id": "lin_a",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "64000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "applied_view_version": "3"
+      },
+      {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "seq": "31",
+        "lineage_id": "lin_c",
+        "through_ordinal": "4",
+        "through_digest": "b3f13a2bd0f8ee7a5e35ad55ad5ef86cf4c66cca15420abae3f975155cb2aebd",
+        "est_tokens": "9000",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      }
+    ],
+    "outcome": "resync"
   }
 }

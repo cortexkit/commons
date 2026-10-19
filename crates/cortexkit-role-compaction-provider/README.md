@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-compaction-provider = "0.3.0"
+cortexkit-role-compaction-provider = "0.3.1"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [role/conformance guide](../../docs/role-contracts.md) for the available suites and vector locations.

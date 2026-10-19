@@ -14,7 +14,7 @@ use crate::{
         self, descent_outcome, AdvanceNotice, DescentOutcome, Event, LastUsage, MarkerOutcome,
         NoticeDescent, ViewReady,
     },
-    ride::{RideAnswer, RideCause, RideRequest},
+    ride::{Overflow, RideAnswer, RideCause, RideRequest},
     setup::SetupAnswer,
     vectors,
     view::{
@@ -619,4 +619,104 @@ fn descends_from_parses_from_the_right() {
     ] {
         assert_eq!(NoticeDescent::parse(&bad), None, "{bad}");
     }
+}
+
+#[test]
+fn ceiling_overflow_round_trips_with_and_without_a_limit() {
+    let file = file();
+    for case in vectors::cases(&file["ride"], "overflow_requests") {
+        let name = name(case);
+        let request = vectors::round_trip::<RideRequest>(name, &case["params"]);
+        assert_eq!(request.check(), Ok(()), "{name}");
+        // Rides on other causes are covered by
+        // `overflow_on_a_non_ceiling_ride_is_ignored`.
+        if request.cause == RideCause::Ceiling {
+            let expected: Option<Overflow> =
+                serde_json::from_value(case["ceiling_overflow"].clone()).unwrap();
+            assert_eq!(request.ceiling_overflow(), expected.as_ref(), "{name}");
+        }
+    }
+    let session_ref = str_of(&file, "session_ref");
+    let limited = RideRequest::new(session_ref, RideCause::Ceiling, 30000)
+        .with_overflow(Overflow::new().with_reported_limit_tokens(200000));
+    assert_eq!(
+        serde_json::to_value(&limited).unwrap(),
+        vectors::cases(&file["ride"], "overflow_requests")[0]["params"]
+    );
+    let unparsed =
+        RideRequest::new(session_ref, RideCause::Ceiling, 30000).with_overflow(Overflow::new());
+    assert_eq!(
+        serde_json::to_value(&unparsed).unwrap(),
+        vectors::cases(&file["ride"], "overflow_requests")[1]["params"]
+    );
+}
+
+#[test]
+fn overflow_is_absent_by_default_and_never_encoded_as_null() {
+    let file = file();
+    let request = RideRequest::new(str_of(&file, "session_ref"), RideCause::Ceiling, 30000);
+    assert_eq!(request.overflow, None);
+    let encoded = serde_json::to_value(&request).unwrap();
+    assert!(encoded.get("overflow").is_none(), "{encoded}");
+    let empty = serde_json::to_value(Overflow::new()).unwrap();
+    assert_eq!(empty, serde_json::json!({}));
+}
+
+#[test]
+fn overflow_on_a_non_ceiling_ride_is_ignored() {
+    let file = file();
+    for case in vectors::cases(&file["ride"], "overflow_requests") {
+        let request: RideRequest = serde_json::from_value(case["params"].clone()).unwrap();
+        if request.cause != RideCause::Ceiling {
+            assert!(request.overflow.is_some(), "{}", name(case));
+            assert_eq!(request.ceiling_overflow(), None, "{}", name(case));
+            assert!(case["ceiling_overflow"].is_null(), "{}", name(case));
+        }
+    }
+    let session_ref = str_of(&file, "session_ref");
+    for cause in [
+        RideCause::TtlExpired,
+        RideCause::ModelChange,
+        RideCause::SurfaceChange,
+        RideCause::Unknown("provider_switch".into()),
+    ] {
+        let request = RideRequest::new(session_ref, cause.clone(), 1500)
+            .with_overflow(Overflow::new().with_reported_limit_tokens(128000));
+        assert_eq!(request.check(), Ok(()), "{cause:?}");
+        assert_eq!(request.ceiling_overflow(), None, "{cause:?}");
+    }
+}
+
+#[test]
+fn lost_runner_state_continues_under_a_new_lineage_and_resyncs() {
+    let file = file();
+    let case = &file["state_loss"];
+    let notices: Vec<AdvanceNotice> = case["notices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|headers_json| AdvanceNotice::from_headers(&headers(headers_json)).unwrap())
+        .collect();
+    let (before, after) = (&notices[0], &notices[1]);
+    assert_eq!(before.session_ref, after.session_ref);
+    assert_eq!(before.lineage_id, case["held_lineage"].as_str().unwrap());
+    assert_ne!(after.lineage_id, before.lineage_id);
+    assert_eq!(after.descends_from, None);
+    assert!(after.applied_view_version.is_none());
+    assert!(!after
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::RevertBelow(_))));
+    let recorded: BTreeMap<u64, String> =
+        serde_json::from_value::<Vec<(u64, String)>>(case["recorded_digests"].clone())
+            .unwrap()
+            .into_iter()
+            .collect();
+    let outcome = descent_outcome(
+        &before.lineage_id,
+        |ordinal| recorded.get(&ordinal).cloned(),
+        after.descends_from.as_ref(),
+    );
+    assert_eq!(outcome, DescentOutcome::Resync);
+    assert_eq!(case["outcome"], "resync");
 }

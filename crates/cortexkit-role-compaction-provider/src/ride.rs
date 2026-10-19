@@ -84,6 +84,39 @@ pub struct RideRequest {
     /// for a rewrite cause; for `ceiling`, the time left of the ceiling
     /// policy's `wait_ms`, at most [`MAX_CEILING_WAIT_MS`].
     pub deadline_ms: u64,
+    /// On a `ceiling` ride only: present when the ride follows a model
+    /// provider error saying the request exceeded the model's context window.
+    /// Absent means the ceiling came from the runner's own count; a provider
+    /// never reads absence as "no overflow happened". On any other cause a
+    /// provider ignores it; read it with [`RideRequest::ceiling_overflow`].
+    /// Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overflow: Option<Overflow>,
+}
+
+/// The overflow a `ceiling` ride follows: the model provider refused the
+/// request as larger than the model's context window. `{}` is valid.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Overflow {
+    /// The window limit, in tokens, that the model provider's error stated.
+    /// Set only when the runner parsed one from the error, never guessed or
+    /// filled from the model catalog. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_limit_tokens: Option<u64>,
+}
+
+impl Overflow {
+    /// An overflow whose error stated no limit the runner could parse.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the limit the model provider's error stated.
+    pub fn with_reported_limit_tokens(mut self, tokens: u64) -> Self {
+        self.reported_limit_tokens = Some(tokens);
+        self
+    }
 }
 
 /// Why a ride request is not acceptable.
@@ -109,9 +142,28 @@ impl RideRequest {
             session_ref: session_ref.into(),
             cause,
             deadline_ms,
+            overflow: None,
         }
     }
 
+    /// Mark the ride as following a context-window overflow. Meaningful only
+    /// with `cause: "ceiling"`.
+    pub fn with_overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = Some(overflow);
+        self
+    }
+
+    /// The overflow this ride follows, only when its cause is `ceiling`. On
+    /// any other cause the member carries no meaning and this returns `None`.
+    pub fn ceiling_overflow(&self) -> Option<&Overflow> {
+        match self.cause {
+            RideCause::Ceiling => self.overflow.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Check the session reference and the deadline. `overflow` is never a
+    /// reason to fail: on a cause other than `ceiling` it is ignored.
     pub fn check(&self) -> Result<(), RideProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(RideProblem::SessionRef);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- `RideRequest` gains optional `overflow` (`ride::Overflow {reported_limit_tokens}`, both non-exhaustive, built with `Overflow::new`, `with_reported_limit_tokens` and `RideRequest::with_overflow`). Present on a `ceiling` ride, it says the ride follows a model provider error stating that the request exceeded the context window; `reported_limit_tokens` is the limit that error stated, set only when the runner parsed one; `overflow: {}` is valid. Absent means the ceiling came from the runner's own count, never "no overflow happened". On any other cause a provider ignores it: `RideRequest::check` does not fail on it, and `RideRequest::ceiling_overflow` returns it for a `ceiling` ride only. Both members are omitted when absent, never encoded as `null`.
+- CONTRACT.md §5.3, runner state lost: a runner that loses or scrubs its own tag or view state continues the session under a new `lineage_id` with no `descends_from`, and claims no truncation (`revert_below` means truncation only). Within a session it never gives a tag number to a different part; new tags go above the floor (every tag number the session may have used before the loss; a runner that cannot tell jumps past any number it could have used), and a part whose restored state still records its tag may keep it. A provider seeing a new lineage without descent drops its tag index, cursor and rendered-view record and re-reads; it may keep derived work (summaries, memories, queued drops) anchored on a message id, or a message id plus part key, whose message or part the re-read still has with a matching content digest, and discards the rest. A queued drop is re-addressed by the part's new tag. Tag numbers never carry across lineages.
+- Vectors: `async.json` gains `ride.overflow_requests` (with a limit, `{}`, absent, and ignored on a rewrite cause) and `state_loss` (a notice sequence with the same session, a new lineage, no descent and no revert); `ASYNC_SHA256SUMS` is refreshed. No existing vector changes meaning.
+- Patch release: `RideRequest` was already non-exhaustive and the new member is optional, so no Rust caller or wire byte breaks.
+
+
 ## 0.3.0
 
 Compaction moves off the runner's hot path, and the synchronous per-step call is removed. A provider of this role now serves `role.describe`, `compaction.setup`, `view.get` and `compaction.ride`; a runner that pairs with one (the `llm-runner/v1` `compaction` group) implements the runner's side: Setup, advance notices, view application, rides and the ceiling.
