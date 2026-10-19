@@ -48,7 +48,7 @@ use cortexkit_role_llm_runner_conformance::{
             HeadMeta, LastRunState, ReadMessage, ReadMode, ReadPage, ReadRequest, ReadView,
             RunAttribution, ToolCallAttribution,
         },
-        run::{FinalMessage, RunResult, RunResultRequest, RunState},
+        run::{FinalMessage, RunResult, RunResultRequest, RunState, RunUsage, StepUsage},
         send::{
             delivered_as, delivery_unsupported_detail, Delivered, SendReply, SendRequest,
             DELIVERY_FIELD,
@@ -107,6 +107,9 @@ pub enum RetentionDefect {
     Status,
 }
 const DEFAULT_MAX_BYTES: u64 = 64 * 1024;
+/// The provider and model the fake reports every step's usage under.
+const FAKE_PROVIDER: &str = "scripted";
+const FAKE_MODEL: &str = "scripted-model";
 const MAXIMUM_MAX_BYTES: u64 = 1024 * 1024;
 const DEFAULT_LIMIT: u64 = 100;
 const MAXIMUM_LIMIT: u64 = 1000;
@@ -249,6 +252,10 @@ pub struct Defects {
     /// `session.read` serves the host's live record, so a host-side metadata
     /// change shows up in an entry's bytes under the same lineage.
     pub read_serves_live_host_metadata: bool,
+    /// A run's `usage` reports `reasoning_tokens` as `0` when no step
+    /// reported any, at the top and in every `by_model` entry, instead of
+    /// leaving the total absent.
+    pub usage_absent_reasoning_as_zero: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -421,6 +428,8 @@ struct RunRec {
     /// The `{window, size, cause}` detail of a run that ended in the
     /// `context_ceiling` state.
     ceiling: Option<Value>,
+    /// What the scripted model reported for the run's completed steps.
+    usage: RunUsage,
 }
 
 #[derive(Clone, Debug)]
@@ -987,6 +996,7 @@ impl Module {
                             .cloned(),
                         structured_output_result: None,
                         ceiling: None,
+                        usage: RunUsage::new(),
                     });
                 }
             }
@@ -1001,6 +1011,19 @@ impl Module {
                     sess.input_unreported = true;
                 }
                 let run_id = text("run_id");
+                let reported = &record["usage"];
+                let mut step = StepUsage::unreported();
+                if !reported.is_null() {
+                    let count = |field: &str| reported[field].as_u64().unwrap_or_default();
+                    step = step
+                        .with_input_tokens(count("input_tokens"))
+                        .with_cached_input_tokens(count("cached_input_tokens"))
+                        .with_cache_write_tokens(count("cache_write_tokens"))
+                        .with_output_tokens(count("output_tokens"));
+                }
+                if let Some(run) = sess.run_mut(&run_id) {
+                    run.usage.record_step(FAKE_PROVIDER, FAKE_MODEL, None, step);
+                }
                 let mut keys = Vec::new();
                 for call in record["calls"].as_array().into_iter().flatten() {
                     let key = call["call_key"].as_str().unwrap_or_default().to_owned();
@@ -1295,6 +1318,14 @@ impl Module {
                 }
             }
             let no_calls = calls.is_empty();
+            // The scripted model reports these four counts and never
+            // reasoning; a turn without usage reports nothing.
+            let usage = turn.usage.as_ref().map(|usage| {
+                json!({ "input_tokens": usage.input_tokens,
+                        "cached_input_tokens": usage.cache_read_tokens,
+                        "cache_write_tokens": usage.cache_write_tokens,
+                        "output_tokens": usage.output_tokens })
+            });
             let input_spent = turn.usage.as_ref().map(|usage| {
                 sess.input_spent
                     .saturating_add(usage.input_tokens)
@@ -1303,7 +1334,8 @@ impl Module {
             });
             self.commit(
                 session,
-                json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls, "input_spent":input_spent }),
+                json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls,
+                        "input_spent": input_spent, "usage": usage }),
             )?;
             if let Some(limit) = sess.input_cap {
                 let cause = match input_spent {
@@ -2556,6 +2588,20 @@ impl Module {
                     None => judge(frozen, None, Vec::new()),
                 });
             }
+        }
+        // Usage on every ended run, and on a running one once a step has
+        // completed; `run.status` answers the same.
+        if self.world.serves(groups::RUN_USAGE)
+            && (RunState::parse(&result.state).is_terminal() || run.usage.steps > 0)
+        {
+            let mut usage = run.usage.clone();
+            if self.world.defects.usage_absent_reasoning_as_zero {
+                usage.reasoning_tokens.get_or_insert(0);
+                for entry in &mut usage.by_model {
+                    entry.reasoning_tokens.get_or_insert(0);
+                }
+            }
+            result = result.with_usage(usage);
         }
         respond(result)
     }

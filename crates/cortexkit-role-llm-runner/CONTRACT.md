@@ -3,9 +3,12 @@
 Stability: **alpha, draft**. Approved by the role's owner with the
 decisions recorded under "Open questions", every one of which is now
 settled; nothing here ships until the design room signs off. This document is the role definition; the
-Rust types in this crate are its wire shapes, `test-vectors/llm-runner-v1/` at
-the repository root holds its vectors, and a separate `-conformance` crate
-will hold its suite (§15).
+Rust types in this crate are its wire shapes, this crate's
+`test-vectors/llm-runner-v1/` holds its vectors (they ship in its package, and
+the `test-vectors` feature exposes them as the public `vectors` module, with
+a `SHA256SUMS` pinning every file), and a separate `-conformance` crate will
+hold its suite (§15). Paths to vector files below are relative to this
+crate.
 
 Derives from the CK extensibility design r7.3, §3.2–§3.5, §5, §6, §9.3, §10,
 §12.1, §13.2 and §16.7–§16.8, with `session.send` delivery modes replacing
@@ -131,12 +134,13 @@ shipping runner with this document.
 | `adopt` | `session.adopt` | §9.5 |
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
+| `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
-  `structured_output`, `adopt`, `tags`, `run_tool_calls` and
+  `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage` and
   `delivery_order` are each declared on their own: a runner may serve any of them without the others,
   and without `run_ops` or `transcript_reads`. `tags` adds fields to
   `session.read`, so it requires that op (and `session.resolve`), not all of
@@ -155,6 +159,13 @@ shipping runner with this document.
   advertises `tags`, nor `run.tool_calls` unless it advertises
   `run_tool_calls` (§9.6, §6.3). `check_describe` checks each group for its
   ops; neither adds discovery metadata.
+- [pinned] `run_usage` adds `usage` to `run.result` and `run.status`
+  (§6.4) and no op of its own; `check_describe` checks the group for
+  `run.result`, the op whose answer it extends, and it adds no discovery
+  metadata. A runner that declares it without `run_status` reports usage on
+  `run.result` alone. A runner that does not declare it may still send
+  `usage`, but a consumer relies on it only from a runner that declares the
+  group.
 - [pinned] A caller MUST NOT send a list in `delivery`, nor a plan naming
   `senders`, unless the runner advertises `delivery_order` (§9.7). A caller
   MUST NOT send `dedupe_key`, `expires_at_ms` or `template` on a send whose
@@ -364,9 +375,9 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
   [pinned] The answer is `{run_id, state, reason?, error?, detail?, final_message?:
-  {ordinal, mid, text}, structured_output?, context_ceiling?}` (`RunResult`;
+  {ordinal, mid, text}, structured_output?, context_ceiling?, usage?}` (`RunResult`;
   `structured_output` is §9.4's result, on an ended run admitted with it;
-  `context_ceiling` is below), and a run that has not ended answers
+  `context_ceiling` is below; `usage` is the run's token usage, §6.4), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
   are concatenated exactly as emitted, with nothing inserted, so a JSON
@@ -501,9 +512,9 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?}`,
+  structured_output?, context_ceiling?, deadline_ms?, usage?}`,
   decoded leniently: a runner's own members ride beside these.
-  `indeterminate_tool_calls`, `final_step_finish_reason`, `usage` and
+  `indeterminate_tool_calls`, `final_step_finish_reason` and
   `retries_used` stay runner members, not pinned.
   - `state` is a run state as in `run.result` (`run::states`), decoded open
     (`RunState::parse`): a consumer does not treat an unknown state as
@@ -521,6 +532,8 @@ state, polled without reading the transcript.
   - `structured_output`: exactly what `run.result` carries for the run (§9.4).
   - `context_ceiling`: on `context_ceiling`, exactly the detail `run.result`
     carries (§6).
+  - `usage`: the run's token usage so far, on a runner that declares
+    `run_usage` (§6.4).
 - [pinned] `undelivered_steers` is the list of `send_id`s of the steers
   this run accepted and never rendered to the model before it ended, in
   the order they were accepted. On the status of a run that has ended:
@@ -665,6 +678,58 @@ what a run called without decoding any message body.
   `subject: {kind: "tool_call", run_id, tool_call_id, call_key?}` (§12.1).
 - [pinned] It reads what the run's durable records say, as `run.result`
   does, and writes nothing.
+
+### 6.4 `run_usage`: per-run token usage
+
+A runner that declares `run_usage` reports what its model providers
+reported for a run's steps as `usage` on `run.result` (§6) and `run.status`
+(§6.1), so a consumer (the phone's agent page, core) shows every worker
+run's token usage whichever runner served it.
+
+- [pinned] `usage` is `{steps, unreported_steps, input_tokens?,
+  cached_input_tokens?, cache_write_tokens?, output_tokens?,
+  reasoning_tokens?, by_model}` (`usage::RunUsage`), decoded leniently:
+  - `steps` is the number of completed model steps in the run;
+  - `unreported_steps` is the number of those steps whose provider reported
+    no usage field at all;
+  - each of the five totals is the sum over the steps that reported that
+    field;
+  - `by_model` is `[{provider, model, variant?, steps, unreported_steps,
+    input_tokens?, cached_input_tokens?, cache_write_tokens?,
+    output_tokens?, reasoning_tokens?}]` (`usage::ModelUsage`), the same
+    counts and totals per model selection.
+- [pinned] A step counts as reported if its provider reported any usage
+  field, even `output_tokens: 0`. A step that reported nothing counts in
+  `unreported_steps`, and in no total.
+- [pinned] A total is absent, never `0`, until some step reports it. An
+  absent total means "not known". A present total is a lower bound whenever
+  `unreported_steps > 0`, or some reported steps omitted that field
+  (`reasoning_tokens` reported on only some steps, say). A runner MUST NOT
+  write a total no step reported as `0`.
+- [pinned] `by_model` has one entry per distinct `(provider, model,
+  variant)`, in order of first use in the run; `variant` is absent when the
+  selection names none. The entries' `steps`, `unreported_steps` and each
+  total sum to the top-level ones; a total absent from every entry is absent
+  at the top (`RunUsage::consistent`). A consumer treats a usage that breaks
+  this as malformed.
+- [pinned] A run with no completed step reports `{"steps": 0,
+  "unreported_steps": 0}`, with every total absent and `by_model` empty or
+  absent. A decoder reads an absent `by_model` as empty; a usage with
+  `steps > 0` MUST carry it. `RunUsage` always encodes it.
+- [pinned] Usage counts what the provider billed or reported for this run's
+  steps only, never steps of earlier runs in the session.
+- [pinned] A runner that declares `run_usage` includes `usage` on every
+  `run.result` of an ended run, and on `run.status` once a step of the run
+  has completed. It MAY include it earlier, with `steps: 0`. Before a step
+  has completed, a consumer accepts `usage` present or absent; on a running
+  run's `run.result` it is optional.
+- [pinned] An absent `usage` means the runner does not report usage (or, on
+  a `run_usage` runner, that no step has completed yet). A consumer MUST NOT
+  read an absent `usage`, or an absent total, as zero.
+- [pinned] `usage` is the same on `run.status` and `run.result` for the same
+  run at the same moment.
+- [pinned] Vectors: the `run_status.usage_*.json` files in
+  `test-vectors/llm-runner-v1/`.
 
 ## 7. `streaming`: `session.subscribe`
 
@@ -2054,6 +2119,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
+| `run_usage_counts_reported_steps` | `run_usage`, `queue`, `run_ops`; after a two-step scripted run whose provider reports input, cache-read, cache-write and output counts but no reasoning, `run.result` carries `usage` with `steps: 2`, the scripted totals, `by_model` summing to them, and `reasoning_tokens` absent rather than `0`; `run.status`, where the major lists it, carries the same `usage`; reported as a named skip without `run_usage` |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
 
 The `context_ceiling` refusal and run state (§6, §12.1) have no live case:

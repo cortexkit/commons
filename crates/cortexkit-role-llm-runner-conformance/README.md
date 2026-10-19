@@ -331,6 +331,18 @@ exact `args`, outcomes, the dispatch module, stored result sizes and the
 carrying ordinal; `unknown_run`, a misspelled cursor and `limit: 0`; and, with
 held tool calls, `indeterminate` until the result is stored.
 
+## Run usage
+
+`run_usage_counts_reported_steps` runs only with `Capability::RunUsage` (the
+`run_usage` group) and needs `queue` and `run_ops`. Its scripted model reports
+input, cache-read, cache-write and output counts on both steps of a two-step
+run, and no reasoning; the runner adapter must pass those counts to the runner
+as its provider would, and report no usage field the script does not set.
+`run.result` must then carry `usage` with `steps: 2`, no unreported step,
+exactly the scripted totals, `by_model` summing to them, and
+`reasoning_tokens` absent, not `0`. Where the subject declares `run_status`,
+the ended run's `run.status` must carry the same `usage`.
+
 ## Delivery order
 
 The eight `delivery_order_*` cases run only with `Capability::DeliveryOrder`.

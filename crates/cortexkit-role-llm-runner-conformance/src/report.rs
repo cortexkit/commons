@@ -52,6 +52,7 @@ const STRUCTURED: &[Capability] = &[Capability::StructuredOutput, Queue, Transcr
 const ADOPT: &[Capability] = &[Capability::Adopt, TranscriptReads];
 const TAGS: &[Capability] = &[Capability::Tags, Queue, TranscriptReads];
 const TOOL_CALLS: &[Capability] = &[Capability::RunToolCalls, Queue, TranscriptReads];
+const USAGE: &[Capability] = &[Capability::RunUsage, Queue, RunOps];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
 const STRUCTURED_RESTART: &[Capability] = &[
     Capability::StructuredOutput,
@@ -85,6 +86,8 @@ pub const CASES: &[CaseSpec] = &[
         "an unknown run_id is refused unknown_run; a run without calls lists none; a misspelled cursor and limit 0 are refused invalid_params by name"),
     case("run_tool_calls_indeterminate_until_result", &[Capability::RunToolCalls, Queue, TranscriptReads, HoldToolCalls],
         "a held call lists as indeterminate with no stored result, then as succeeded with one once released"),
+    case("run_usage_counts_reported_steps", USAGE,
+        "after a two-step run whose scripted model reports input, cache-read, cache-write and output counts but no reasoning, run.result carries usage with steps 2, no unreported step, exactly the scripted totals, by_model summing to them, and reasoning_tokens absent rather than 0; run.status, where served, carries the same usage"),
     case("run_context_ceiling_wait_is_not_a_stall", &[Queue, TranscriptReads, Capability::HoldContextCeiling],
         "a run held at the context ceiling reads active with reason context_ceiling_wait on session.head (and on run.status with a deadline_ms, where served); with a view it completes, without one it ends context_ceiling with cause view_timeout and no error"),
     case("delivery_order_never_starts_a_run", ORDER,

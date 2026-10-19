@@ -11,7 +11,7 @@
 # suite.
 [package]
 name = "cortexkit-role-llm-runner"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,8 +19,17 @@ authors.workspace = true
 description = "Wire contract of the CortexKit llm-runner/v1 role: role.describe, transcript reads, run results, subscriptions, owner sends and the session baseline."
 publish = true
 
+[features]
+# Compiles the vectors in this crate's `test-vectors/llm-runner-v1/` into the
+# crate as the public `vectors` module.
+test-vectors = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

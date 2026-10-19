@@ -7,7 +7,7 @@ A role crate defines the wire types and validation shared by an implementation a
 | Role or capability | Normative contract | JSON vectors | Conformance runner |
 |---|---|---|---|
 | `tool-provider/v1` | [Contract](../crates/cortexkit-role-tool-provider/CONTRACT.md) | [Vectors](../crates/cortexkit-role-tool-provider/test-vectors/tool-provider-v1/) | [Tool-provider suite](../crates/cortexkit-role-tool-provider-conformance/README.md) |
-| `llm-runner/v1` | [Contract](../crates/cortexkit-role-llm-runner/CONTRACT.md) | [Vectors](../test-vectors/llm-runner-v1/) | [LLM-runner suite](../crates/cortexkit-role-llm-runner-conformance/README.md) |
+| `llm-runner/v1` | [Contract](../crates/cortexkit-role-llm-runner/CONTRACT.md) | [Vectors](../crates/cortexkit-role-llm-runner/test-vectors/llm-runner-v1/) | [LLM-runner suite](../crates/cortexkit-role-llm-runner-conformance/README.md) |
 | `classifier/v1` | [Contract](../crates/cortexkit-role-classifier/CONTRACT.md) | [Crate-local vectors](../crates/cortexkit-role-classifier/tests/vectors/) | [Classifier suite](../crates/cortexkit-role-classifier-conformance/README.md) |
 | `compaction-provider/v1` | [Contract](../crates/cortexkit-role-compaction-provider/CONTRACT.md) | [Vectors](../test-vectors/compaction-provider-v1/) | No separate runner crate yet |
 | `step-transform-provider/v1` | [Contract](../crates/cortexkit-role-step-transform-provider/CONTRACT.md) | [Vectors](../test-vectors/step-transform-provider-v1/) | No separate runner crate yet |

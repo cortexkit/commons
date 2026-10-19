@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Require cortexkit-role-llm-runner 0.3.1 and add `run_usage_counts_reported_steps`, run only when the subject declares the new `run_usage` group (otherwise reported as skipped, by name). After a two-step run whose scripted model reports input, cache-read, cache-write and output counts but no reasoning, `run.result` must carry `usage` with `steps: 2`, no unreported step, exactly the scripted totals mapped to `input_tokens`, `cached_input_tokens`, `cache_write_tokens` and `output_tokens`, a `by_model` that sums to them (`RunUsage::consistent`), and `reasoning_tokens` absent rather than `0`. Where the subject declares `run_status`, the ended run's `run.status` must carry the same `usage`. The case never reads `run.status` before the first step, where `usage` may be present or absent.
+- Breaking: `Capability` gains `RunUsage` and is now `#[non_exhaustive]`, so a `match` on it outside this crate needs a wildcard (`_`) arm; later groups then arrive without a breaking release. `Capability::GROUPS` lists `RunUsage` after `RunToolCalls`, in the order of the role's `capabilities::GROUPS`.
+- The reference fake reports usage when it declares `run_usage`; its new defect, reporting an absent `reasoning_tokens` as `0`, fails the case by name in the suite's own tests.
+
 ## 0.7.1
 
 - `run_tool_calls_listed_in_dispatch_order` no longer gives two sibling tool calls in one step the same model id. A real provider never repeats an id within one response, and a host that keys tool parts by id (OpenCode does) stored the two siblings as one part, so the case failed a correct runner. Siblings now have distinct ids that sort against dispatch order, and the next step's call reuses the first id, so ordering or identifying calls by model id still fails.

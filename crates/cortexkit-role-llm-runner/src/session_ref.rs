@@ -64,10 +64,8 @@ mod tests {
 
     #[test]
     fn matches_the_pinned_vectors() {
-        let vectors: Vectors = serde_json::from_str(include_str!(
-            "../../../test-vectors/llm-runner-v1/session-ref.json"
-        ))
-        .unwrap();
+        let vectors: Vectors =
+            serde_json::from_str(crate::vectors::file("session-ref.json").unwrap()).unwrap();
         assert!(vectors.cases.len() >= 4);
         for case in vectors.cases {
             let Bind {

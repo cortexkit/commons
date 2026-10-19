@@ -140,6 +140,9 @@ where
             name if name.starts_with("run_tool_calls_") => crate::tool_calls::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
+            name if name.starts_with("run_usage_") => crate::run_usage::run(self, name)
+                .await
+                .map(|()| Ending::Passed),
             name if name.starts_with("delivery_order_") => {
                 crate::delivery_order::run(self, name).await
             }

@@ -30,6 +30,7 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         Capability::Adopt,
         Capability::Tags,
         Capability::RunToolCalls,
+        Capability::RunUsage,
         Capability::DeliveryOrder,
     ] {
         if report.outcome(case)
@@ -136,6 +137,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::Adopt);
     subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
+    subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     let started = Instant::now();
     let report = run(&subject).await;
@@ -387,6 +389,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::StructuredOutput,
                     Capability::Adopt,
                     Capability::RunToolCalls,
+                    Capability::RunUsage,
                     Capability::DeliveryOrder,
                     Capability::HoldToolCalls
                 ]
@@ -738,6 +741,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::StructuredOutput,
                     Capability::Adopt,
                     Capability::RunToolCalls,
+                    Capability::RunUsage,
                     Capability::DeliveryOrder
                 ],
                 "{}",
@@ -967,6 +971,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::Adopt);
     subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
+    subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.held_paused = true;
     let report = run(&subject).await;
@@ -984,6 +989,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::Adopt);
     subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
+    subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.advertise_status = false;
     let report = run(&subject).await;
@@ -1649,6 +1655,40 @@ async fn only_these_fail(
 const TAG_PREFIXES: &[&str] = &["tags_"];
 const TOOL_CALL_PREFIXES: &[&str] = &["run_tool_calls_"];
 const ORDER_PREFIXES: &[&str] = &["delivery_order_"];
+const USAGE_PREFIXES: &[&str] = &["run_usage_"];
+
+#[tokio::test]
+async fn a_runner_reporting_usage_passes_and_an_absent_reasoning_total_as_zero_fails_by_name() {
+    only_these_fail(
+        Capability::RunUsage,
+        USAGE_PREFIXES,
+        Defects::default(),
+        &[],
+    )
+    .await;
+    only_these_fail(
+        Capability::RunUsage,
+        USAGE_PREFIXES,
+        Defects {
+            usage_absent_reasoning_as_zero: true,
+            ..Defects::default()
+        },
+        &[(
+            "run_usage_counts_reported_steps",
+            "reports reasoning_tokens as 0, but the scripted model reported no reasoning_tokens",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn run_status_carries_the_same_usage_as_run_result() {
+    let mut subject = declaring(Capability::RunUsage, Defects::default());
+    subject.capabilities.insert(Capability::RunStatus);
+    subject.advertise_status = true;
+    let report = run(&subject).await;
+    assert_passed(&report, "run_usage_counts_reported_steps");
+}
 
 #[tokio::test]
 async fn a_tagging_runner_passes_the_tags_cases() {
@@ -1874,6 +1914,7 @@ async fn without_the_new_groups_their_cases_skip_by_name() {
     // only the other two groups are left undeclared here.
     for (capability, prefixes) in [
         (Capability::RunToolCalls, TOOL_CALL_PREFIXES),
+        (Capability::RunUsage, USAGE_PREFIXES),
         (Capability::DeliveryOrder, ORDER_PREFIXES),
     ] {
         // The one case that asks a runner without the group runs here.

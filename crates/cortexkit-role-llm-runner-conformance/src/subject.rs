@@ -12,7 +12,11 @@ use serde_json::{Map, Value};
 /// A capability a conformance case requires of the runner or its harness.
 /// A case whose requirement the runner adapter does not declare is reported as
 /// skipped with the missing names, never as passed.
+///
+/// Non-exhaustive: the role adds groups over time, so a `match` outside this
+/// crate keeps a wildcard arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum Capability {
     /// The `transcript_reads` group: `session.read` and `session.head`.
     TranscriptReads,
@@ -57,6 +61,8 @@ pub enum Capability {
     Tags,
     /// `run.tool_calls`: a run's tool calls as a paged list.
     RunToolCalls,
+    /// Per-run token usage (`usage`) on `run.result` and `run.status`.
+    RunUsage,
     /// `session.send` with `delivery_order`, plan-named senders and plan
     /// templates.
     DeliveryOrder,
@@ -105,6 +111,7 @@ impl Capability {
         Self::Adopt,
         Self::Tags,
         Self::RunToolCalls,
+        Self::RunUsage,
         Self::DeliveryOrder,
     ];
 
@@ -146,6 +153,7 @@ impl Capability {
             Self::Adopt => groups::ADOPT,
             Self::Tags => groups::TAGS,
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
+            Self::RunUsage => groups::RUN_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::HoldToolCalls
             | Self::HoldContextCeiling

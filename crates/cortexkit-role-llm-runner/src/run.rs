@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::structured_output::{SkippedSibling, StructuredOutputResult};
+pub use crate::usage::{ModelUsage, RunUsage, StepUsage};
 
 /// Run state names. A state not listed here decodes as [`RunState::Other`],
 /// keeping its name, and a consumer treats it as unclassified.
@@ -186,6 +187,11 @@ pub struct RunResult {
     /// and the cause. Absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
+    /// The run's token usage (§6.4). A runner that declares `run_usage`
+    /// always includes it once the run has ended. Absent means the runner
+    /// does not report usage, never zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<RunUsage>,
 }
 
 impl RunResult {
@@ -199,11 +205,17 @@ impl RunResult {
             final_message: None,
             structured_output: None,
             context_ceiling: None,
+            usage: None,
         }
     }
 
     pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
         self.context_ceiling = Some(detail);
+        self
+    }
+
+    pub fn with_usage(mut self, usage: RunUsage) -> Self {
+        self.usage = Some(usage);
         self
     }
 
@@ -446,6 +458,12 @@ pub struct RunStatus {
     /// healthy until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_ms: Option<u64>,
+    /// The run's token usage so far (§6.4). A runner that declares
+    /// `run_usage` always includes it once a step of the run has completed,
+    /// and may include it earlier with `steps: 0`. Absent means not
+    /// reported, never zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<RunUsage>,
 }
 impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
@@ -458,6 +476,7 @@ impl RunStatus {
             structured_output: None,
             context_ceiling: None,
             deadline_ms: None,
+            usage: None,
         }
     }
     /// An `active` run waiting at the context ceiling until `deadline_ms`.
@@ -492,6 +511,10 @@ impl RunStatus {
     }
     pub fn with_undelivered_steers(mut self, steers: Vec<String>) -> Self {
         self.undelivered_steers = Some(steers);
+        self
+    }
+    pub fn with_usage(mut self, usage: RunUsage) -> Self {
+        self.usage = Some(usage);
         self
     }
     pub fn run_state(&self) -> RunState {

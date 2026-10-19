@@ -1,7 +1,12 @@
 # `llm-runner/v1` test vectors
 
 The shared bytes every `llm-runner/v1` implementation and consumer checks.
-The role document is `crates/cortexkit-role-llm-runner/CONTRACT.md`. This
+The role document is `crates/cortexkit-role-llm-runner/CONTRACT.md`. The
+files live in that crate's `test-vectors/llm-runner-v1/` and ship in its
+package; with the crate's `test-vectors` feature, its public `vectors` module
+carries every file's bytes. `SHA256SUMS` pins every file, and a test checks
+that every file here is listed in `vectors::FILES` with its exact bytes and
+its SHA-256. This
 role is a draft: these vectors change with the contract until it is
 reviewed.
 
@@ -175,3 +180,17 @@ block of another type and inside an unknown block; string content and a
 (a string turning into a one-block array, and back), where the entry keeps
 the first-ingested form. Checked by the `serializer_profile::tests` module
 of the wire crate.
+
+# Run usage
+
+`run_status.usage_plain.json`, `run_status.usage_unreported_step.json`,
+`run_status.usage_model_switch.json` and `run_status.usage_reasoning.json`
+are `run.status` bodies a runner (Broca) produced from its real run loop,
+each carrying a `usage` (contract §6.4) beside runner members the role does
+not type (`final_step_finish_reason`, `retries_used`): three reported steps
+on one model; three steps of which one reported no usage (and one reported
+only `output_tokens: 0`, so the totals are the first step's); one step on one
+model and two on another with a variant; and three reported steps on one
+model, as in `usage_plain`, with `reasoning_tokens` reported on two of them. Each `usage` round-trips byte for byte, its
+`by_model` sums to its totals, and an absent total decodes as `None`.
+Checked by the `usage::tests` module of the wire crate.
