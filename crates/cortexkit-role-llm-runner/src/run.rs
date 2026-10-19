@@ -10,6 +10,11 @@ pub use crate::structured_output::{SkippedSibling, StructuredOutputResult};
 
 pub const RUN_STATE_BUDGET_EXHAUSTED: &str = "budget_exhausted";
 
+/// The terminal state of a run that reached its session's context ceiling
+/// at a step boundary. Like `budget_exhausted` it is not an error: no
+/// provider failed.
+pub const RUN_STATE_CONTEXT_CEILING: &str = "context_ceiling";
+
 /// Run state names. A state not listed here decodes as [`RunState::Other`],
 /// keeping its name, and a consumer treats it as unclassified.
 pub mod states {
@@ -23,6 +28,10 @@ pub mod states {
     pub const MAX_STEPS: &str = "max_steps";
     /// The session's input-token cap was reached, or usage was unreported.
     pub const BUDGET_EXHAUSTED: &str = super::RUN_STATE_BUDGET_EXHAUSTED;
+    /// The session's context reached its ceiling at a step boundary, so the
+    /// runner sent no further request. Carried with `context_ceiling`
+    /// detail; never `error`, because no model or provider failed.
+    pub const CONTEXT_CEILING: &str = super::RUN_STATE_CONTEXT_CEILING;
     /// A caller cancelled the run.
     pub const CANCELLED: &str = "cancelled";
     /// The run ended with an error, carried in `error`.
@@ -62,13 +71,19 @@ impl RunState {
         matches!(self, Self::Other(state) if state == RUN_STATE_BUDGET_EXHAUSTED)
     }
 
+    pub fn is_context_ceiling(&self) -> bool {
+        matches!(self, Self::Other(state) if state == RUN_STATE_CONTEXT_CEILING)
+    }
+
     /// Whether the state is terminal. Unrecognized strings answer `false`;
-    /// budget exhaustion is recognized without adding an enum variant.
+    /// budget exhaustion and the context ceiling are recognized without
+    /// adding enum variants.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
             Self::Completed | Self::MaxSteps | Self::Cancelled | Self::Error | Self::Interrupted
         ) || self.is_budget_exhausted()
+            || self.is_context_ceiling()
     }
 }
 
@@ -143,6 +158,10 @@ pub struct RunResult {
     /// and whether that validated. Absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<StructuredOutputResult>,
+    /// On a run that ended `context_ceiling`: the window, the request's size
+    /// and the cause. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
 }
 
 impl RunResult {
@@ -155,7 +174,13 @@ impl RunResult {
             error: None,
             final_message: None,
             structured_output: None,
+            context_ceiling: None,
         }
+    }
+
+    pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
+        self.context_ceiling = Some(detail);
+        self
     }
 
     pub fn with_structured_output(mut self, structured_output: StructuredOutputResult) -> Self {
@@ -330,13 +355,23 @@ impl RunStatusRequest {
     }
 }
 
-/// Known reasons for a pause. Other reasons survive decoding unchanged.
+/// The `reason` of an `active` run waiting at its session's context ceiling
+/// for a compaction view, with `deadline_ms` beside it on `run.status`. The
+/// run is waiting, not stalled; the wait ends in progress (a view arrived)
+/// or in the terminal `context_ceiling` state.
+pub const RUN_REASON_CONTEXT_CEILING_WAIT: &str = "context_ceiling_wait";
+
+/// Known reasons a run names on `run.status`, `session.head` and stream
+/// events: why a paused run is paused, or why an active run is waiting.
+/// Other reasons survive decoding unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(from = "String", into = "String")]
 #[non_exhaustive]
 pub enum RunReason {
     AuthRequired,
     Restart,
+    /// An `active` run held at the context ceiling until `deadline_ms`.
+    ContextCeilingWait,
     Unknown(String),
 }
 impl From<String> for RunReason {
@@ -344,6 +379,7 @@ impl From<String> for RunReason {
         match value.as_str() {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
+            RUN_REASON_CONTEXT_CEILING_WAIT => Self::ContextCeilingWait,
             _ => Self::Unknown(value),
         }
     }
@@ -353,6 +389,7 @@ impl From<RunReason> for String {
         match value {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
+            RunReason::ContextCeilingWait => RUN_REASON_CONTEXT_CEILING_WAIT.into(),
             RunReason::Unknown(s) => s,
         }
     }
@@ -377,6 +414,14 @@ pub struct RunStatus {
     /// Exactly what `run.result` carries for the same run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<StructuredOutputResult>,
+    /// Exactly what `run.result` carries for the same run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
+    /// With `reason: context_ceiling_wait`: when the wait ends, in
+    /// milliseconds since the Unix epoch. A watchdog treats the run as
+    /// healthy until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_ms: Option<u64>,
 }
 impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
@@ -387,7 +432,23 @@ impl RunStatus {
             error: None,
             undelivered_steers: None,
             structured_output: None,
+            context_ceiling: None,
+            deadline_ms: None,
         }
+    }
+    /// An `active` run waiting at the context ceiling until `deadline_ms`.
+    pub fn context_ceiling_wait(deadline_ms: u64) -> Self {
+        let mut status = Self::new(states::ACTIVE).with_reason(RunReason::ContextCeilingWait);
+        status.deadline_ms = Some(deadline_ms);
+        status
+    }
+    pub fn with_deadline_ms(mut self, deadline_ms: u64) -> Self {
+        self.deadline_ms = Some(deadline_ms);
+        self
+    }
+    pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
+        self.context_ceiling = Some(detail);
+        self
     }
     pub fn with_structured_output(mut self, structured_output: StructuredOutputResult) -> Self {
         self.structured_output = Some(structured_output);

@@ -95,3 +95,85 @@ symbolic, as in `plans.json`. `adopt-describe.json` pins the group's
 discovery, its missing-op refusal and an answer without the group. Checked by
 the `adopt::tests` and `describe::adopt_tests` modules of the wire crate,
 which apply the pinned order of checks to every case.
+
+# Tags
+
+`tags.json` pins the `tags` group: the one spelling of a tag (valid and
+invalid spellings, including a leading zero, a non-ASCII digit and a number
+past `u64`); a fork continuing after its parent's highest number; read
+entries carrying `tags` (one row per exposed part, every tag used once, an image part keyed but untagged) with `role`
+and `written_at` in the envelope; a model-written `§N§` stored as written in
+a text part and in tool-call arguments; `session.resolve` requests, requests
+refused by field, and cases against a ledger of stored parts (the whole
+part, a character range, a range counted in Unicode scalar values, an empty
+range at the end, a tool-call part in the runner's stored encoding,
+`unknown_tag`, malformed tags, a range past the content and one starting
+after its end); and the plan's `render_tags` member, off when absent or
+`null`, refused when not a boolean or when `true` without the group; and rendered parts, the tag, one space and the text, on the kinds that carry it, and nothing on parts without text.
+`tags-describe.json` pins the group's discovery, its missing-op refusal and
+an answer without the group. Checked by the `tags::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Delivery order
+
+`delivery-order.json` pins the `delivery_order` group: the string
+`delivery` equivalences (`queue` and absent are `[idle_start]`, `steer` is
+`[steer, idle_start]`, `interrupt` has none); sends whose `delivery` is a
+list, with `dedupe_key`, `expires_at_ms` and `template`; `delivery` values
+that do not decode, each naming `delivery` (an empty list, a mode twice, a
+legacy mode inside a list, a number, an unknown string); sends refused by
+member (a member beside a string or absent `delivery`, malformed members, a
+template beside a prompt, an empty prompt without a template); a runner
+without the group refusing a list naming `delivery` while the string still
+works; mode choices at boundaries (fall-through order, order winning over what else
+is possible, a list without `idle_start` never starting a run, `queue`
+waiting for the run to end); a plan sender's typed template with uses that
+render or name their problem (a percentage over 100 or written as a string,
+an integer outside its bounds, an unassigned tag, free text in a tag slot,
+an unlisted enum value, missing and undeclared slots, another digest, an
+unknown template); what goes out (a rendered template as system text, or
+as the same text at user authority after a fall-through, a plain prompt at
+user authority) and the refusal naming `template` of every template that
+cannot render; template sends with an empty `prompt`, and the refusals of a
+template beside a prompt or an empty prompt without one; plans with senders, valid and refused
+(including a string slot); admission of the owner, named senders with and
+without the `idle_start` grant, and unnamed modules refused
+`scope_owner_mismatch` even when a request field names a sender; dedupe and
+expiry; `superseded` and `expired` send states; and entries recording each
+mode. Template digests are SHA-256 over JCS bytes and are checked by
+recomputation. `delivery-order-describe.json` pins the group's discovery.
+Checked by the `delivery_order::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Run tool calls
+
+`run-tool-calls.json` pins `run.tool_calls`: requests, requests refused by
+field (a misspelled cursor, a named session, no `run_id`); pages following
+`next` under a `limit`, in dispatch order, with one call for each named
+outcome (a reused model id is a different call), and a run with no calls;
+and refusals: `unknown_run`, a cursor never given, `limit: 0`, and
+`reply_too_large` naming the call. `run-tool-calls-describe.json` pins the
+group's discovery. Checked by the `tool_calls::tests` and
+`describe::tags_and_tool_calls_tests` modules of the wire crate.
+
+# Context ceiling
+
+`context-ceiling.json` pins the `context_ceiling` refusal of a send, one per
+documented cause, writing nothing; `run.result` and `run.status` of a run
+that ended in the `context_ceiling` state with its detail and no error; a
+cause this role does not name and an unknown member, both tolerated; and,
+for contrast, a provider's own overflow, which ends `error` with
+`context_overflow`. Checked by the `errors::context_ceiling_tests` module of
+the wire crate.
+
+# Serializer profile `anthropic-messages`
+
+`serializer-anthropic-messages.json` pins the profile's entry bodies:
+`cache_control` removed at every allowed place (top-level content blocks of
+a user and an assistant message, and `text`, `image` and `document` blocks
+nested in a `tool_result`) and kept inside `tool_use` input, in a nested
+block of another type and inside an unknown block; string content and a
+`tool_result` with string content; and resends that move the cache marker
+(a string turning into a one-block array, and back), where the entry keeps
+the first-ingested form. Checked by the `serializer_profile::tests` module
+of the wire crate.

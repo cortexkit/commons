@@ -1,0 +1,704 @@
+{
+  "spellings": {
+    "valid": [
+      {
+        "tag": "§1§",
+        "number": 1
+      },
+      {
+        "tag": "§42§",
+        "number": 42
+      },
+      {
+        "tag": "§18446744073709551615§",
+        "number": 18446744073709551615
+      }
+    ],
+    "invalid": [
+      "§0§",
+      "§01§",
+      "1",
+      "§1",
+      "1§",
+      "§§",
+      "§-1§",
+      "§+1§",
+      "§1.0§",
+      "§1§ ",
+      " §1§",
+      "§1§2§",
+      "§١§",
+      "§18446744073709551616§"
+    ]
+  },
+  "fork": {
+    "parent_highest": 7,
+    "first_new": "§8§"
+  },
+  "read_entries": [
+    {
+      "name": "the person's prompt, typed in the harness",
+      "entry": {
+        "ordinal": 0,
+        "mid": "m0",
+        "message": {
+          "role": "user",
+          "text": "fix the build"
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§1§"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000000000
+      }
+    },
+    {
+      "name": "the model's answer: one tag per part",
+      "entry": {
+        "ordinal": 1,
+        "mid": "m1",
+        "message": {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Looking at héllo wörld"
+            },
+            {
+              "type": "reasoning",
+              "text": "check a.rs",
+              "signature": "sig-1"
+            },
+            {
+              "type": "tool_call",
+              "id": "call_1",
+              "name": "read",
+              "arguments": {
+                "path": "a.rs",
+                "quote": "§1§"
+              }
+            }
+          ]
+        },
+        "run": {
+          "run_id": "run-1",
+          "episode": "ep-1",
+          "final": false
+        },
+        "tool_calls": [
+          {
+            "tool_call_id": "call_1",
+            "call_key": "k-1",
+            "dispatched_to": "aft",
+            "indeterminate": false
+          }
+        ],
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§2§"
+          },
+          {
+            "part": "1",
+            "tag": "§3§"
+          },
+          {
+            "part": "2",
+            "tag": "§4§"
+          }
+        ],
+        "role": "assistant",
+        "written_at": 1790000001000
+      }
+    },
+    {
+      "name": "a tool result stored as its own message",
+      "entry": {
+        "ordinal": 2,
+        "mid": "m2",
+        "message": {
+          "role": "tool",
+          "call_key": "k-1",
+          "content": "fn main() {}"
+        },
+        "run": {
+          "run_id": "run-1",
+          "episode": "ep-1",
+          "final": false
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§5§"
+          }
+        ],
+        "role": "tool",
+        "written_at": 1790000002000
+      }
+    },
+    {
+      "name": "the owner's send",
+      "entry": {
+        "ordinal": 3,
+        "mid": "m3",
+        "message": {
+          "role": "user",
+          "text": "now run the tests"
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§6§"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000003000
+      }
+    },
+    {
+      "name": "a wake",
+      "entry": {
+        "ordinal": 4,
+        "mid": "m4",
+        "message": {
+          "role": "user",
+          "text": "wake: CI finished"
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§7§"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000004000
+      }
+    },
+    {
+      "name": "a peer's message carried by the owner",
+      "entry": {
+        "ordinal": 5,
+        "mid": "m5",
+        "message": {
+          "role": "user",
+          "text": "from reviewer: looks good"
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§8§"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000005000
+      }
+    },
+    {
+      "name": "a reminder the runner placed",
+      "entry": {
+        "ordinal": 6,
+        "mid": "m6",
+        "message": {
+          "role": "user",
+          "text": "<system-reminder>context is 80% full</system-reminder>"
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§9§"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000006000
+      }
+    },
+    {
+      "name": "a host-made notice",
+      "entry": {
+        "ordinal": 7,
+        "mid": "m7",
+        "message": {
+          "role": "user",
+          "text": "[session resumed]"
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§10§"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000007000
+      }
+    },
+    {
+      "name": "a model-written tag stays in the stored text as written",
+      "entry": {
+        "ordinal": 8,
+        "mid": "m8",
+        "message": {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "as §2§ says"
+            }
+          ]
+        },
+        "run": {
+          "run_id": "run-1",
+          "episode": "ep-1",
+          "final": true
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§11§"
+          }
+        ],
+        "role": "assistant",
+        "written_at": 1790000008000
+      }
+    },
+    {
+      "name": "an image part has a row and a stable key, but no tag",
+      "entry": {
+        "ordinal": 9,
+        "mid": "m9",
+        "message": {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "what is this?"
+            },
+            {
+              "type": "image",
+              "media_type": "image/png",
+              "data_ref": "blob-1"
+            }
+          ]
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§12§"
+          },
+          {
+            "part": "1"
+          }
+        ],
+        "role": "user",
+        "written_at": 1790000009000
+      }
+    }
+  ],
+  "ledger": [
+    {
+      "tag": "§1§",
+      "ordinal": 0,
+      "mid": "m0",
+      "part": "0",
+      "content": "fix the build"
+    },
+    {
+      "tag": "§2§",
+      "ordinal": 1,
+      "mid": "m1",
+      "part": "0",
+      "content": "Looking at héllo wörld"
+    },
+    {
+      "tag": "§4§",
+      "ordinal": 1,
+      "mid": "m1",
+      "part": "2",
+      "content": "{\"name\":\"read\",\"arguments\":{\"path\":\"a.rs\",\"quote\":\"§1§\"}}"
+    },
+    {
+      "tag": "§11§",
+      "ordinal": 8,
+      "mid": "m8",
+      "part": "0",
+      "content": "as §2§ says"
+    }
+  ],
+  "resolve_requests": [
+    {
+      "name": "a whole part",
+      "request": {
+        "tag": "§1§"
+      }
+    },
+    {
+      "name": "a range",
+      "request": {
+        "tag": "§1§",
+        "range": {
+          "start": 0,
+          "end": 3
+        }
+      }
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "naming its session",
+      "request": {
+        "tag": "§1§",
+        "session": "s"
+      },
+      "field": "session"
+    },
+    {
+      "name": "no tag",
+      "request": {
+        "range": {
+          "start": 0,
+          "end": 1
+        }
+      },
+      "field": "tag"
+    },
+    {
+      "name": "a range without its end",
+      "request": {
+        "tag": "§1§",
+        "range": {
+          "start": 0
+        }
+      },
+      "field": "end"
+    },
+    {
+      "name": "a range with a member of its own",
+      "request": {
+        "tag": "§1§",
+        "range": {
+          "start": 0,
+          "end": 1,
+          "length": 1
+        }
+      },
+      "field": "length"
+    }
+  ],
+  "resolve_cases": [
+    {
+      "name": "whole part",
+      "request": {
+        "tag": "§1§"
+      },
+      "reply": {
+        "tag": "§1§",
+        "ordinal": 0,
+        "mid": "m0",
+        "part": "0",
+        "content": "fix the build"
+      }
+    },
+    {
+      "name": "a character range",
+      "request": {
+        "tag": "§1§",
+        "range": {
+          "start": 4,
+          "end": 9
+        }
+      },
+      "reply": {
+        "tag": "§1§",
+        "ordinal": 0,
+        "mid": "m0",
+        "part": "0",
+        "content": "the b",
+        "range": {
+          "start": 4,
+          "end": 9
+        }
+      }
+    },
+    {
+      "name": "a range counted in Unicode scalar values, not bytes",
+      "request": {
+        "tag": "§2§",
+        "range": {
+          "start": 11,
+          "end": 16
+        }
+      },
+      "reply": {
+        "tag": "§2§",
+        "ordinal": 1,
+        "mid": "m1",
+        "part": "0",
+        "content": "héllo",
+        "range": {
+          "start": 11,
+          "end": 16
+        }
+      }
+    },
+    {
+      "name": "an empty range at the end",
+      "request": {
+        "tag": "§2§",
+        "range": {
+          "start": 22,
+          "end": 22
+        }
+      },
+      "reply": {
+        "tag": "§2§",
+        "ordinal": 1,
+        "mid": "m1",
+        "part": "0",
+        "content": "",
+        "range": {
+          "start": 22,
+          "end": 22
+        }
+      }
+    },
+    {
+      "name": "a tool-call part in the runner's stored encoding, its arguments untouched",
+      "request": {
+        "tag": "§4§"
+      },
+      "reply": {
+        "tag": "§4§",
+        "ordinal": 1,
+        "mid": "m1",
+        "part": "2",
+        "content": "{\"name\":\"read\",\"arguments\":{\"path\":\"a.rs\",\"quote\":\"§1§\"}}"
+      }
+    },
+    {
+      "name": "a model-written tag resolved as stored",
+      "request": {
+        "tag": "§11§"
+      },
+      "reply": {
+        "tag": "§11§",
+        "ordinal": 8,
+        "mid": "m8",
+        "part": "0",
+        "content": "as §2§ says"
+      }
+    },
+    {
+      "name": "a tag the session never assigned",
+      "request": {
+        "tag": "§999§"
+      },
+      "refusal": {
+        "code": "unknown_tag"
+      }
+    },
+    {
+      "name": "a number without its sigils",
+      "request": {
+        "tag": "4"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "tag"
+        }
+      }
+    },
+    {
+      "name": "a leading zero",
+      "request": {
+        "tag": "§04§"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "tag"
+        }
+      }
+    },
+    {
+      "name": "a range past the content",
+      "request": {
+        "tag": "§1§",
+        "range": {
+          "start": 0,
+          "end": 14
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "range"
+        }
+      }
+    },
+    {
+      "name": "a range that starts after it ends",
+      "request": {
+        "tag": "§1§",
+        "range": {
+          "start": 5,
+          "end": 3
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "range"
+        }
+      }
+    }
+  ],
+  "plans": [
+    {
+      "name": "absent means off",
+      "declares": [
+        "plans",
+        "tags"
+      ],
+      "plan": {
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "render_tags": false
+    },
+    {
+      "name": "null means off",
+      "declares": [
+        "plans",
+        "tags"
+      ],
+      "plan": {
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "render_tags": null
+      },
+      "render_tags": false
+    },
+    {
+      "name": "rendered on a tags runner",
+      "declares": [
+        "plans",
+        "tags"
+      ],
+      "plan": {
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "render_tags": true
+      },
+      "render_tags": true
+    },
+    {
+      "name": "off needs no tags group",
+      "declares": [
+        "plans"
+      ],
+      "plan": {
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "render_tags": false
+      },
+      "render_tags": false
+    },
+    {
+      "name": "rendering refused without tags",
+      "declares": [
+        "plans"
+      ],
+      "plan": {
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "render_tags": true
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "plan.render_tags"
+        }
+      }
+    },
+    {
+      "name": "not a boolean",
+      "declares": [
+        "plans",
+        "tags"
+      ],
+      "plan": {
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "render_tags": "yes"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "plan.render_tags"
+        }
+      }
+    }
+  ],
+  "rendered_parts": [
+    {
+      "name": "user text: the tag, one space, the text",
+      "kind": "user_text",
+      "tag": "§1§",
+      "text": "fix the build",
+      "rendered": "§1§ fix the build"
+    },
+    {
+      "name": "a tool result's first text block",
+      "kind": "tool_result_text",
+      "tag": "§5§",
+      "text": "fn main() {}",
+      "rendered": "§5§ fn main() {}"
+    },
+    {
+      "name": "assistant text where the text part carries no provider state",
+      "kind": "assistant_text",
+      "tag": "§2§",
+      "text": "Looking at héllo wörld",
+      "rendered": "§2§ Looking at héllo wörld"
+    },
+    {
+      "name": "assistant text carrying provider state: metadata only",
+      "kind": "assistant_text_with_provider_state",
+      "tag": "§11§",
+      "text": "as §2§ says",
+      "rendered": "as §2§ says"
+    },
+    {
+      "name": "a tool call has no text and carries none",
+      "kind": "no_text",
+      "tag": "§4§",
+      "text": "",
+      "rendered": ""
+    },
+    {
+      "name": "an image carries none",
+      "kind": "no_text",
+      "tag": null,
+      "text": "",
+      "rendered": ""
+    },
+    {
+      "name": "an empty text part carries none",
+      "kind": "user_text",
+      "tag": "§13§",
+      "text": "",
+      "rendered": ""
+    },
+    {
+      "name": "an untagged text part renders unchanged",
+      "kind": "user_text",
+      "tag": null,
+      "text": "hello",
+      "rendered": "hello"
+    },
+    {
+      "name": "text that already starts with a sigil gets the prefix all the same",
+      "kind": "user_text",
+      "tag": "§14§",
+      "text": "§1§ quoted",
+      "rendered": "§14§ §1§ quoted"
+    }
+  ]
+}

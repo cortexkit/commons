@@ -21,6 +21,14 @@
       "retryable": false
     },
     {
+      "code": "unknown_tag",
+      "retryable": false
+    },
+    {
+      "code": "context_ceiling",
+      "retryable": false
+    },
+    {
       "code": "expired",
       "retryable": false
     },
