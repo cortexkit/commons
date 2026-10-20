@@ -1,0 +1,7 @@
+{
+  "text": "<wake in=\"90s\"/>",
+  "expected": {
+    "name": "wake",
+    "in_ms": 90000
+  }
+}

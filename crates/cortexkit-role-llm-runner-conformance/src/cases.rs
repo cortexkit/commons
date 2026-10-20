@@ -143,6 +143,9 @@ where
             name if name.starts_with("run_usage_") => crate::run_usage::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
+            name if name.starts_with("turn_directives_") => {
+                crate::directives::run(self, name).await
+            }
             "send_status_unknown_send_refused" => passed(crate::follow::unknown_send(self).await),
             "max_steps_seals_pending_calls"
             | "max_output_tokens_caps_response"

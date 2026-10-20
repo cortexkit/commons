@@ -1,0 +1,7 @@
+{
+  "text": "<wake in=\"0s\"/>",
+  "expected": {
+    "name": "wake",
+    "error": "bad_duration"
+  }
+}

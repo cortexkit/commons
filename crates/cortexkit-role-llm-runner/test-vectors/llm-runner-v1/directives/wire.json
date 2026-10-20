@@ -1,0 +1,27 @@
+{
+  "send": {
+    "prompt": "reply then wake",
+    "send_id": "wake-1",
+    "directives": [
+      "wake"
+    ],
+    "generation": {
+      "temperature": 0.25
+    }
+  },
+  "result": {
+    "run_id": "run-wake",
+    "state": "completed",
+    "final_message": {
+      "ordinal": 1,
+      "mid": "m1",
+      "text": "<wake in=\"90s\"/>"
+    },
+    "directives": [
+      {
+        "name": "wake",
+        "in_ms": 90000
+      }
+    ]
+  }
+}

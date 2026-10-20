@@ -1,0 +1,7 @@
+{
+  "text": "<wake in=\"1s\">a<b</wake>",
+  "expected": {
+    "name": "wake",
+    "error": "bad_note"
+  }
+}

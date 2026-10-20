@@ -530,6 +530,47 @@ impl SendRequest {
             .insert(member.into(), Value::from(limit));
     }
 
+    /// Read the requested directive names without altering their wire bytes.
+    /// Invalid values name `directives` for an `invalid_params` refusal.
+    pub fn directives(&self) -> Result<Option<Vec<crate::directives::DirectiveName>>, String> {
+        let Some(raw) = self.runner_params.get("directives") else {
+            return Ok(None);
+        };
+        let names: Vec<crate::directives::DirectiveName> =
+            serde_json::from_value(raw.clone()).map_err(|_| "directives".to_owned())?;
+        if names
+            .iter()
+            .enumerate()
+            .any(|(i, name)| names[..i].contains(name))
+        {
+            return Err("directives".into());
+        }
+        Ok(Some(names))
+    }
+
+    /// Set the requested names, which the runner freezes at admission,
+    /// preserving all other parameters.
+    pub fn with_directives(mut self, names: Vec<crate::directives::DirectiveName>) -> Self {
+        self.runner_params.insert(
+            "directives".into(),
+            serde_json::to_value(names).expect("directive names serialize"),
+        );
+        self
+    }
+
+    /// Check a joining steer against its run's frozen names. An omitted member
+    /// inherits the run's value, like the run limits (§9.3.1).
+    pub fn check_directives(
+        &self,
+        frozen: &[crate::directives::DirectiveName],
+    ) -> Result<(), String> {
+        if self.directives()?.is_some_and(|names| names != frozen) {
+            Err("directives".into())
+        } else {
+            Ok(())
+        }
+    }
+
     /// Offer no tools, including plan tools and host built-ins.
     pub fn with_no_tools(mut self) -> Self {
         self.runner_params

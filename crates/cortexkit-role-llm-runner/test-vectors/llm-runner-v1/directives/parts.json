@@ -1,0 +1,22 @@
+{
+  "parts": [
+    {
+      "type": "text",
+      "text": "done <wake in=\""
+    },
+    {
+      "type": "tool",
+      "name": "example",
+      "input": {}
+    },
+    {
+      "type": "text",
+      "text": "90s\"/>"
+    }
+  ],
+  "text": "done <wake in=\"90s\"/>",
+  "expected": {
+    "name": "wake",
+    "in_ms": 90000
+  }
+}

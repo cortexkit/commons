@@ -10,10 +10,20 @@ fn the_public_module_carries_every_file() {
         env!("CARGO_MANIFEST_DIR"),
         vectors::DIR
     );
-    let on_disk = std::fs::read_dir(&dir)
-        .unwrap()
-        .filter(|entry| entry.as_ref().unwrap().file_name() != "SHA256SUMS")
-        .count();
+    fn count_files(path: &std::path::Path) -> usize {
+        std::fs::read_dir(path)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() {
+                    count_files(&entry.path())
+                } else {
+                    usize::from(entry.file_name() != "SHA256SUMS")
+                }
+            })
+            .sum()
+    }
+    let on_disk = count_files(std::path::Path::new(&dir));
     assert_eq!(vectors::FILES.len(), on_disk);
     for (name, contents) in vectors::FILES {
         assert_eq!(vectors::file(name), Some(*contents), "{name}");

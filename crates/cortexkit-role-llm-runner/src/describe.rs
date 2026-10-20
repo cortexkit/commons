@@ -766,3 +766,36 @@ mod tags_and_tool_calls_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod directive_group_tests {
+    use super::*;
+
+    #[test]
+    fn directive_and_interrupt_reason_groups_require_only_their_ops() {
+        for (group, required) in [
+            (
+                capabilities::TURN_DIRECTIVES,
+                &[crate::ops::SESSION_SEND, crate::ops::RUN_RESULT][..],
+            ),
+            (
+                capabilities::INTERRUPT_REASON,
+                &[crate::ops::RUN_RESULT][..],
+            ),
+        ] {
+            let mut ops: Vec<String> = crate::REQUIRED_OPS.iter().map(|op| (*op).into()).collect();
+            ops.extend(required.iter().map(|op| (*op).into()));
+            let describe =
+                RoleDescribe::new(vec![Major::new(crate::PROVIDES, ops, "alpha")], "0.3.5")
+                    .with_capabilities(vec![group.into()])
+                    .with_session_capabilities_from("baseline");
+            assert!(check_describe(&serde_json::to_value(&describe).unwrap()).is_ok());
+            for op in required {
+                let mut missing = describe.clone();
+                missing.majors[0].ops.retain(|value| value != op);
+                let problems = check_describe(&serde_json::to_value(missing).unwrap()).unwrap_err();
+                assert!(problems.iter().any(|problem| matches!(problem, DescribeProblem::GroupIncomplete { capability, op: missing } if *capability == group && missing == op)));
+            }
+        }
+    }
+}

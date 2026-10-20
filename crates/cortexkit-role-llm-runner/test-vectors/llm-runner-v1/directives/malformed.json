@@ -1,0 +1,7 @@
+{
+  "text": "<wake later/>",
+  "expected": {
+    "name": "wake",
+    "error": "malformed"
+  }
+}

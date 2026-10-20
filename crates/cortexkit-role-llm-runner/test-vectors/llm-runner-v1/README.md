@@ -219,3 +219,20 @@ siblings), and names the malformed-value refusals for each member plus the
 later-plan-tools refusal. `run-parameters-describe.json` declares all three
 independent groups; `run_parameter_groups_are_independent_and_require_send`
 also checks each group alone and without its required `session.send` op.
+
+## Trailing directives and interrupted reasons
+
+`directives/*.json` (except `wire.json`) are `{text, expected}` parser cases:
+`expected` is a wake result object or null. They cover every form/error,
+closed and unclosed fences, mid-text tags, trailing whitespace, empty notes,
+nine-digit hours and multibyte notes at 200/201 bytes. `parts.json` also
+carries two text parts separated by a tool part and their joined final text.
+`directives/wire.json` pins a send with raw directive parameters and a result
+answer; its send round-trips byte for byte. `directives::tests` consumes every
+parser vector and checks frozen/invalid requests and open consumer decoding.
+
+`interrupt-reasons.json` pins both known interrupted-run reasons, an absent
+historical reason and a runner-specific reason, decoded on result/status/head.
+`run-tool-calls.json` now carries `position` and finished-call `result_ordinal`:
+message-array results at the next ordinal and embedded results at the same
+ordinal, including repeated model ids across sibling positions.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.4
+
+- Require llm-runner 0.3.5 and add `Capability::TurnDirectives` and `Capability::InterruptReason` to the non-exhaustive enum.
+- Add seven named turn-directive cases, gated on the new group with named skips: each completed wake form appears on result and, where served, status without text edits; max_steps, cancelled and unrequested runs report none; unknown/non-array/duplicate names are refused. Seven independent fake defects fail only their matching cases.
+- Add requesting-message sibling-position and open/finished result-ordinal cases under `run_tool_calls`; swapped positions and a premature result_ordinal each fail by name.
+- Add a graceful handle-stop/restart case for `interrupt_reason`, checking runner_shutdown on result/head and on status where served. The fake distinguishes an orderly handle drop from a crash-cut handle and records the reason durably; omitting that shutdown reason fails by name.
+- Additive patch: no new adapter hooks, and callers not using new groups retain their wire shapes. Existing optional run-tool-call fields decode older runners, while the updated contract requires declaring runners to emit them.
+
 ## 0.8.3
 
 - Require llm-runner 0.3.4. Add the independent `Capability::{MaxSteps,MaxOutputTokens,NoTools}` variants to the already non-exhaustive enum.

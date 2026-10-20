@@ -3,9 +3,10 @@
 //!
 //! A runner that declares `send_status`
 //! ([`crate::capabilities::SEND_STATUS`]) answers `send.status {send_id}`
-//! from its durable record of that send, with exactly the [`SendReply`] a
-//! re-send of the same `send_id` with the same body would get at that
-//! moment. It writes nothing and delivers nothing. A `send_id` the session
+//! from its durable record of that send, with the [`SendReply`] a re-send
+//! of the same body would get, except that `send.status` never acts. A run
+//! paused for re-authentication stays paused, reporting `pause_reason`;
+//! only the caller's re-send may re-drive it. It writes and delivers nothing. A `send_id` the session
 //! has no record of, for the caller, is refused
 //! [`crate::errors::UNKNOWN_SEND`].
 //!
@@ -47,7 +48,8 @@ impl SendStatusRequest {
 }
 
 /// The `send.status` answer: the [`SendReply`] a re-send of the same
-/// `send_id` would get. Decoded leniently, as that reply is.
+/// `send_id` would get, except that it never acts (in particular, it never
+/// resumes a paused run). Decoded leniently, as that reply is.
 pub type SendStatusReply = SendReply;
 
 #[cfg(test)]

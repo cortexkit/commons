@@ -8,7 +8,9 @@ use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{CompactionDefect, Defects, FakeSubject, RetentionDefect, StepRecovery};
+use fake::{
+    CompactionDefect, Defects, DirectiveDefect, FakeSubject, RetentionDefect, StepRecovery,
+};
 use std::time::{Duration, Instant};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
@@ -36,6 +38,8 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::MaxSteps,
     Capability::MaxOutputTokens,
     Capability::NoTools,
+    Capability::TurnDirectives,
+    Capability::InterruptReason,
     Capability::StructuredOutput,
     Capability::Adopt,
     Capability::Tags,
@@ -164,6 +168,8 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
         Capability::NoTools,
+        Capability::TurnDirectives,
+        Capability::InterruptReason,
     ]);
     let started = Instant::now();
     let report = run(&subject).await;
@@ -455,6 +461,8 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::MaxSteps,
                     Capability::MaxOutputTokens,
                     Capability::NoTools,
+                    Capability::TurnDirectives,
+                    Capability::InterruptReason,
                     Capability::StructuredOutput,
                     Capability::Adopt,
                     Capability::RunToolCalls,
@@ -811,6 +819,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::MaxSteps,
                     Capability::MaxOutputTokens,
                     Capability::NoTools,
+                    Capability::TurnDirectives,
+                    Capability::InterruptReason,
                     Capability::StructuredOutput,
                     Capability::Adopt,
                     Capability::RunToolCalls,
@@ -1052,6 +1062,8 @@ async fn retention_paused_non_terminal_run_passes() {
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
         Capability::NoTools,
+        Capability::TurnDirectives,
+        Capability::InterruptReason,
     ]);
     subject.held_paused = true;
     let report = run(&subject).await;
@@ -1076,6 +1088,8 @@ async fn retention_status_is_inapplicable_when_not_served() {
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
         Capability::NoTools,
+        Capability::TurnDirectives,
+        Capability::InterruptReason,
     ]);
     subject.advertise_status = false;
     let report = run(&subject).await;
@@ -2400,4 +2414,196 @@ async fn no_tools_without_plan_session_support_skips_later_send_case_by_name() {
         report.outcome(name)
     );
     assert!(report.render().contains(name));
+}
+
+const DIRECTIVE_CASES: &[&str] = &[
+    "turn_directives_in",
+    "turn_directives_note",
+    "turn_directives_off",
+    "turn_directives_max_steps_reports_none",
+    "turn_directives_cancelled_reports_none",
+    "turn_directives_not_requested_reports_none",
+    "turn_directives_unknown_refused",
+];
+
+fn directing(defect: DirectiveDefect) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        directives: defect,
+        ..Defects::default()
+    });
+    subject
+        .capabilities
+        .extend([Capability::TurnDirectives, Capability::MaxSteps]);
+    subject
+}
+
+#[tokio::test]
+async fn turn_directives_declared_cases_pass() {
+    let report = run(&directing(DirectiveDefect::None)).await;
+    for name in DIRECTIVE_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn turn_directives_undeclared_skips_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in DIRECTIVE_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::TurnDirectives)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+        assert!(report.render().contains(&format!("SKIP {name}")));
+    }
+}
+
+#[tokio::test]
+async fn turn_directives_each_defect_fails_only_its_named_case() {
+    for (defect, name) in [
+        (DirectiveDefect::In, DIRECTIVE_CASES[0]),
+        (DirectiveDefect::Note, DIRECTIVE_CASES[1]),
+        (DirectiveDefect::Off, DIRECTIVE_CASES[2]),
+        (DirectiveDefect::MaxSteps, DIRECTIVE_CASES[3]),
+        (DirectiveDefect::Cancelled, DIRECTIVE_CASES[4]),
+        (DirectiveDefect::Unrequested, DIRECTIVE_CASES[5]),
+        (DirectiveDefect::Unknown, DIRECTIVE_CASES[6]),
+    ] {
+        let report = run(&directing(defect)).await;
+        let reason = failed(&report, name);
+        assert_none_failed_but(&report, &[name]);
+        for other in DIRECTIVE_CASES {
+            if *other != name {
+                assert_eq!(
+                    report.outcome(other),
+                    Some(&CaseOutcome::Passed),
+                    "{other}: {}",
+                    report.render()
+                );
+            }
+        }
+        println!("NON-VACUITY BREAK {name}: {reason}; other directive cases passed");
+    }
+}
+
+macro_rules! directive_case {
+    ($test:ident, $case:literal) => {
+        #[tokio::test]
+        async fn $test() {
+            let report = run(&directing(DirectiveDefect::None)).await;
+            assert_eq!(
+                report.outcome($case),
+                Some(&CaseOutcome::Passed),
+                "{}",
+                report.render()
+            );
+        }
+    };
+}
+directive_case!(turn_directives_case_in, "turn_directives_in");
+directive_case!(turn_directives_case_note, "turn_directives_note");
+directive_case!(turn_directives_case_off, "turn_directives_off");
+directive_case!(
+    turn_directives_case_max_steps_reports_none,
+    "turn_directives_max_steps_reports_none"
+);
+directive_case!(
+    turn_directives_case_cancelled_reports_none,
+    "turn_directives_cancelled_reports_none"
+);
+directive_case!(
+    turn_directives_case_not_requested_reports_none,
+    "turn_directives_not_requested_reports_none"
+);
+directive_case!(
+    turn_directives_case_unknown_refused,
+    "turn_directives_unknown_refused"
+);
+
+#[tokio::test]
+async fn run_tool_calls_new_locations_pass() {
+    let report = run(&declaring(Capability::RunToolCalls, Defects::default())).await;
+    for name in [
+        "run_tool_calls_positions_identify_siblings",
+        "run_tool_calls_result_ordinal_tracks_storage",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn swapped_tool_call_positions_fail_by_name() {
+    only_these_fail(
+        Capability::RunToolCalls,
+        TOOL_CALL_PREFIXES,
+        Defects {
+            run_tool_calls_positions_swapped: true,
+            ..Defects::default()
+        },
+        &[("run_tool_calls_positions_identify_siblings", "positions")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn open_tool_call_result_ordinal_fails_by_name() {
+    only_these_fail(
+        Capability::RunToolCalls,
+        TOOL_CALL_PREFIXES,
+        Defects {
+            run_tool_calls_open_result_ordinal: true,
+            ..Defects::default()
+        },
+        &[(
+            "run_tool_calls_result_ordinal_tracks_storage",
+            "no result_ordinal",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn interrupt_reason_shutdown_survives_restart() {
+    let report = run(&declaring(Capability::InterruptReason, Defects::default())).await;
+    assert_eq!(
+        report.outcome("interrupt_reason_shutdown_durable"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn interrupted_shutdown_without_reason_fails_by_name() {
+    only_these_fail(
+        Capability::InterruptReason,
+        &["interrupt_reason_"],
+        Defects {
+            interrupt_shutdown_reason_missing: true,
+            ..Defects::default()
+        },
+        &[("interrupt_reason_shutdown_durable", "runner_shutdown")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn interrupt_reason_undeclared_skips_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert!(
+        matches!(report.outcome("interrupt_reason_shutdown_durable"), Some(CaseOutcome::Skipped { missing }) if missing == &[Capability::InterruptReason])
+    );
 }

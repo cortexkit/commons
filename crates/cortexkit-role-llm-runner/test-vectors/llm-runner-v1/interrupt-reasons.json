@@ -1,0 +1,8 @@
+{
+  "results": [
+    {"run_id": "stopped", "state": "interrupted", "reason": "runner_shutdown"},
+    {"run_id": "died", "state": "interrupted", "reason": "runner_crash"},
+    {"run_id": "older", "state": "interrupted"},
+    {"run_id": "custom", "state": "interrupted", "reason": "host_replaced"}
+  ]
+}

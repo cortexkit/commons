@@ -107,6 +107,10 @@ where
                     crate::structured_output::restart(subject, work_dir, &declared, &mint)
                         .await
                         .map(|()| Ending::Passed)
+                } else if spec.name == "interrupt_reason_shutdown_durable" {
+                    crate::interrupt_reason::shutdown(subject, work_dir, &declared, &mint)
+                        .await
+                        .map(|()| Ending::Passed)
                 } else if spec.name == crate::follow::RESEND_CASE
                     || spec.name == crate::follow::STATUS_CASE
                 {

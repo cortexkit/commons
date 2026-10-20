@@ -58,6 +58,10 @@ pub enum Capability {
     MaxOutputTokens,
     /// An empty `tools` list suppresses plan tools and host built-ins.
     NoTools,
+    /// Stable trailing directives on completed runs, requested at admission.
+    TurnDirectives,
+    /// Durable reasons recorded when sealing interrupted runs.
+    InterruptReason,
     /// Schema-shaped run output on `session.send.structured_output`.
     StructuredOutput,
     /// `session.adopt`: the owner takes over a session the host started
@@ -119,6 +123,8 @@ impl Capability {
         Self::MaxSteps,
         Self::MaxOutputTokens,
         Self::NoTools,
+        Self::TurnDirectives,
+        Self::InterruptReason,
         Self::StructuredOutput,
         Self::Adopt,
         Self::Tags,
@@ -165,6 +171,8 @@ impl Capability {
             Self::MaxSteps => groups::MAX_STEPS,
             Self::MaxOutputTokens => groups::MAX_OUTPUT_TOKENS,
             Self::NoTools => groups::NO_TOOLS,
+            Self::TurnDirectives => groups::TURN_DIRECTIVES,
+            Self::InterruptReason => groups::INTERRUPT_REASON,
             Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
             Self::Adopt => groups::ADOPT,
             Self::Tags => groups::TAGS,

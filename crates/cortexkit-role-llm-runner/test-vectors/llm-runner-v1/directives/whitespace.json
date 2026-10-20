@@ -1,0 +1,7 @@
+{
+  "text": "done\n<wake off/> \n\t",
+  "expected": {
+    "name": "wake",
+    "off": true
+  }
+}

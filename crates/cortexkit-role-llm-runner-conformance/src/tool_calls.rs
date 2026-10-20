@@ -30,7 +30,9 @@ where
     match name {
         "run_tool_calls_listed_in_dispatch_order" => dispatch_order(case).await,
         "run_tool_calls_unknown_run_refused" => unknown_run(case).await,
-        "run_tool_calls_indeterminate_until_result" => indeterminate(case).await,
+        "run_tool_calls_indeterminate_until_result" => indeterminate(case, false).await,
+        "run_tool_calls_positions_identify_siblings" => positions(case).await,
+        "run_tool_calls_result_ordinal_tracks_storage" => indeterminate(case, true).await,
         other => Err(format!("unknown run_tool_calls case {other}")),
     }
 }
@@ -244,7 +246,7 @@ where
     Ok(())
 }
 
-async fn indeterminate<S>(case: &Case<'_, S>) -> Check
+async fn indeterminate<S>(case: &Case<'_, S>, locations: bool) -> Check
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
@@ -293,6 +295,15 @@ where
             ))
         }
     }
+    if locations {
+        let call = &during[0];
+        if call.result_ordinal.is_some() || call.position != Some(0) {
+            return Err(format!(
+                "open call must have position 0 and no result_ordinal: {call:?}"
+            ));
+        }
+        carried(&read_all(&session.route).await?.1, call, &held.arguments)?;
+    }
     case.subject
         .release_tool_call(&held.arguments)
         .await
@@ -301,10 +312,80 @@ where
         let after = list(&session.route, &run_id, 10).await?;
         if let [call] = after.as_slice() {
             if call.outcome == outcomes::SUCCEEDED && call.result_bytes.is_some() {
+                if locations {
+                    let ordinal = call
+                        .result_ordinal
+                        .filter(|ordinal| *ordinal >= call.ordinal)
+                        .ok_or_else(|| {
+                            format!("finished call needs result_ordinal >= ordinal: {call:?}")
+                        })?;
+                    let (_, messages) = read_all(&session.route).await?;
+                    if !messages.iter().any(|message| {
+                        message.ordinal == ordinal
+                            && message
+                                .message
+                                .to_string()
+                                .contains(&crate::drive::result_marker(&held))
+                    }) {
+                        return Err(format!(
+                            "result_ordinal {ordinal} does not locate the stored result"
+                        ));
+                    }
+                }
                 return Ok(());
             }
         }
         case.subject.pause().await;
     }
     Err("after its release, the held call never listed as succeeded with a stored result".into())
+}
+
+async fn positions<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let first = case.mint.call("position-first");
+    let second = case.mint.call("position-second");
+    let mut session = case
+        .open(
+            "call-positions",
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![
+                        ScriptedPart::Reasoning("not a call".into()),
+                        ScriptedPart::ToolCall(first.clone()),
+                        ScriptedPart::Text("between calls".into()),
+                        ScriptedPart::ToolCall(second.clone()),
+                    ]),
+                    ScriptedTurn::new(vec![ScriptedPart::Text("done".into())]),
+                ],
+            },
+        )
+        .await?;
+    crate::tags::require_declared(&session.route, groups::RUN_TOOL_CALLS, ops::RUN_TOOL_CALLS)
+        .await?;
+    send_and_wait(case, &mut session, None, "call position probe", &Map::new()).await?;
+    let calls = list(&session.route, &last_run(&session.route).await?, 10).await?;
+    if calls.len() != 2 {
+        return Err(format!("expected two calls, got {calls:?}"));
+    }
+    let (_, messages) = read_all(&session.route).await?;
+    let mut ordinal = None;
+    for (position, scripted) in [first, second].iter().enumerate() {
+        let listed = calls
+            .iter()
+            .find(|call| call.args == scripted.arguments)
+            .ok_or("missing scripted call")?;
+        if listed.position != Some(position as u32)
+            || ordinal.is_some_and(|ordinal| ordinal != listed.ordinal)
+        {
+            return Err(format!(
+                "sibling positions must be 0 and 1 at the same requesting ordinal: {calls:?}"
+            ));
+        }
+        ordinal = Some(listed.ordinal);
+        carried(&messages, listed, &scripted.arguments)?;
+    }
+    Ok(())
 }

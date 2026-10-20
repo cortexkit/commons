@@ -1,0 +1,7 @@
+{
+  "text": "<wake off/>",
+  "expected": {
+    "name": "wake",
+    "off": true
+  }
+}

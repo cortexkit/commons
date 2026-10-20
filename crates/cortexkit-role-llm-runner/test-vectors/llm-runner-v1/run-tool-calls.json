@@ -60,7 +60,9 @@
             "outcome": "succeeded",
             "result_bytes": 412,
             "dispatched_to": "aft",
-            "ordinal": 1
+            "ordinal": 1,
+            "position": 0,
+            "result_ordinal": 2
           },
           {
             "tool_call_id": "call_2",
@@ -72,7 +74,9 @@
             "outcome": "failed",
             "result_bytes": 96,
             "dispatched_to": "aft",
-            "ordinal": 1
+            "ordinal": 1,
+            "position": 1,
+            "result_ordinal": 2
           }
         ],
         "next": "2"
@@ -97,7 +101,9 @@
             },
             "outcome": "refused",
             "result_bytes": 58,
-            "ordinal": 3
+            "ordinal": 3,
+            "position": 0,
+            "result_ordinal": 4
           },
           {
             "tool_call_id": "call_4",
@@ -108,7 +114,8 @@
             },
             "outcome": "indeterminate",
             "dispatched_to": "exec",
-            "ordinal": 5
+            "ordinal": 5,
+            "position": 0
           }
         ],
         "next": "4"
@@ -132,7 +139,9 @@
             },
             "outcome": "not_executed",
             "result_bytes": 64,
-            "ordinal": 7
+            "ordinal": 7,
+            "position": 0,
+            "result_ordinal": 8
           }
         ]
       }
@@ -145,6 +154,46 @@
       "page": {
         "run_id": "run-2",
         "calls": []
+      }
+    },
+    {
+      "name": "embedded results and repeated model id across sibling positions",
+      "request": {
+        "run_id": "run-1",
+        "limit": 2
+      },
+      "page": {
+        "run_id": "run-1",
+        "calls": [
+          {
+            "tool_call_id": "call_1",
+            "call_key": "lin.1.0",
+            "name": "read",
+            "args": {
+              "path": "a.rs"
+            },
+            "outcome": "succeeded",
+            "result_bytes": 412,
+            "dispatched_to": "aft",
+            "ordinal": 1,
+            "position": 0,
+            "result_ordinal": 1
+          },
+          {
+            "tool_call_id": "call_1",
+            "call_key": "lin.1.1",
+            "name": "read",
+            "args": {
+              "path": "missing.rs"
+            },
+            "outcome": "failed",
+            "result_bytes": 96,
+            "dispatched_to": "aft",
+            "ordinal": 1,
+            "position": 1,
+            "result_ordinal": 1
+          }
+        ]
       }
     }
   ],

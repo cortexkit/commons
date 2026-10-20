@@ -140,16 +140,22 @@ shipping runner with this document.
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 | `send_status` | `send.status` | §9.8 |
+| `turn_directives` | `session.send` with `directives`; its answer on `run.result` and `run.status` where served | §9.9 |
+| `interrupt_reason` | `run.result` with durable `reason`; the same on `run.status` and `last_run_state` where served | §6.5 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
   `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage`,
   `delivery_order`, `send_status`, `max_steps`, `max_output_tokens` and
-  `no_tools` are each declared on their own: a runner may serve any of them without the others,
+  `no_tools`, `turn_directives` and `interrupt_reason` are each declared on their own: a runner may serve any of them without the others,
   and without `run_ops` or `transcript_reads`. `tags` adds fields to
   `session.read`, so it requires that op (and `session.resolve`), not all of
   `transcript_reads`.
+- [pinned] A caller MUST NOT send `directives` unless the runner advertises
+  `turn_directives` (§9.9). `check_describe` checks the group for
+  `session.send` and `run.result`; `run.status` carries the same answer when
+  the runner also serves `run_status`. It adds no discovery metadata.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
@@ -387,9 +393,10 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
   [pinned] The answer is `{run_id, state, reason?, error?, detail?, final_message?:
-  {ordinal, mid, text}, structured_output?, context_ceiling?, usage?}` (`RunResult`;
+  {ordinal, mid, text}, structured_output?, context_ceiling?, usage?, directives?}` (`RunResult`;
   `structured_output` is §9.4's result, on an ended run admitted with it;
-  `context_ceiling` is below; `usage` is the run's token usage, §6.4), and a run that has not ended answers
+  `context_ceiling` is below; `usage` is the run's token usage, §6.4;
+  `directives` is §9.9's parsed trailing tag), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
   are concatenated exactly as emitted, with nothing inserted, so a JSON
@@ -524,7 +531,7 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?, usage?}`,
+  structured_output?, context_ceiling?, deadline_ms?, usage?, directives?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason` and
   `retries_used` stay runner members, not pinned.
@@ -544,6 +551,7 @@ state, polled without reading the transcript.
   - `structured_output`: exactly what `run.result` carries for the run (§9.4).
   - `context_ceiling`: on `context_ceiling`, exactly the detail `run.result`
     carries (§6).
+  - `directives`: exactly what `run.result` carries for the run (§9.9).
   - `usage`: the run's token usage so far, on a runner that declares
     `run_usage` (§6.4).
 - [pinned] `undelivered_steers` is the list of `send_id`s of the steers
@@ -641,7 +649,7 @@ what a run called without decoding any message body.
 - [pinned] The answer is a page `{run_id, calls, next?}`
   (`tool_calls::ToolCallsPage`), decoded leniently. Each call is
   `{tool_call_id, call_key?, name, args, outcome, result_bytes?,
-  dispatched_to?, ordinal}` (`tool_calls::RunToolCall`):
+  dispatched_to?, ordinal, position?, result_ordinal?}` (`tool_calls::RunToolCall`):
   - `tool_call_id` is the model's id, display only and not unique (§5);
     `call_key` is the call's key, present once the call was prepared or
     dispatched (§11.3); `dispatched_to` is the module the call was
@@ -664,9 +672,27 @@ what a run called without decoding any message body.
     have succeeded;
   - `result_bytes` is the length in bytes of the result the runner stored
     for the call, in its own stored encoding, absent when none is stored;
-  - `ordinal` is the transcript ordinal of the message carrying the call.
-    One message can carry several calls, so an ordinal does not identify a
-    call.
+  - `ordinal` is the `session.read` ordinal of the assistant message that
+    requested the call, for open and finished calls alike. An open call is
+    listed at the ordinal its requesting message has, or will take once
+    written. One message can carry several calls;
+  - `position` (`Option<u32>`) is the 0-based index of the call among that
+    message's tool-call blocks in planned order, not among all its parts.
+    It is optional on the wire so older runners still decode, but a runner
+    declaring `run_tool_calls` MUST send it from 0.3.5 on. Callers match an
+    entry by `(ordinal, position)`, never by `tool_call_id` (which may repeat)
+    or by array order;
+  - `result_ordinal` (`Option<u64>`) is the `session.read` ordinal of the
+    entry holding this call's result, absent while open and present once the
+    result is durably written. A runner declaring `run_tool_calls` MUST send
+    it for every finished call from 0.3.5 on. Callers locate a result through
+    it, never by assuming a transcript layout. For example, a message-array
+    layout such as `anthropic-messages` can store a batch's results in one
+    tool-role entry at `ordinal + 1`, in planned order, while an embedded
+    layout such as `opencode-aisdk` stores output in the requesting entry's
+    tool part, with `result_ordinal == ordinal`. These are layout examples,
+    not rules callers rely on. Callers read `outcome` to learn what happened,
+    independently of the profile's result encoding.
 - [pinned] Calls are in dispatch order: the order the model asked for them
   across the run's steps, which is the order the runner dispatches them. A
   call never dispatched keeps its place. A run's list only grows: once a call
@@ -742,6 +768,21 @@ run's token usage whichever runner served it.
   run at the same moment.
 - [pinned] Vectors: the `run_status.usage_*.json` files in
   `test-vectors/llm-runner-v1/`.
+
+### 6.5 `interrupt_reason`: durable interrupted-run reasons
+
+- [pinned] A runner declaring `interrupt_reason` records a reason durably
+  when it seals an `interrupted` run. Known values are `runner_shutdown`
+  (`run::interrupt_reasons::RUNNER_SHUTDOWN`), sealed during a planned stop,
+  and `runner_crash` (`RUNNER_CRASH`), sealed at the next start after the
+  runner died. Runner-specific values are allowed: `reason` stays decoded
+  open, with no new wire member.
+- [pinned] The recorded value is the same on `run.result`, `run.status` and
+  `session.head`'s `last_run_state`, wherever those surfaces are served.
+  It survives restart. Absence means none was recorded (including runs
+  sealed before the runner adopted this group), never a reason guessed
+  from the current process's lifetime. `check_describe` checks the group
+  for `run.result`; it adds no discovery metadata.
 
 ## 7. `streaming`: `session.subscribe`
 
@@ -898,7 +939,8 @@ run's token usage whichever runner served it.
   `delivery`, never read as `queue`. Except for the scoped closed `budget`
   rules on an `input_token_cap` runner (§9.3), the strict
   `structured_output` member (§9.4), the declared run-limit members (§9.3.1)
-  and the strict `delivery_order` members
+  and the strict `directives` member on a `turn_directives` runner (§9.9)
+  and `delivery_order` members
   on a `delivery_order` runner (§9.7), the request is lenient: a
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
@@ -1719,8 +1761,9 @@ re-send their bodies.
   strict: an unknown field is refused `invalid_params` naming it, because a
   misspelled `send_id` would otherwise ask about another send. It names no
   session (§1), and carries no part of the send's body.
-- [pinned] The answer is exactly what a re-send of that `send_id`, with the
-  body it was accepted with, would answer at that moment: a `SendReply`
+- [pinned] The answer is what a re-send of that `send_id`, with the
+  body it was accepted with, would answer at that moment, **except that
+  `send.status` never acts**: a `SendReply`
   (`send_status::SendStatusReply`), with §9's `state`, `run_id`,
   `submission_id` and `delivered` rules, and the same durability: a
   queued send's final `step`, `turn` or `unknown` answer survives a runner
@@ -1732,13 +1775,88 @@ re-send their bodies.
   refused `unknown_send`, terminal (§12.1); nothing is written.
 - [pinned] `send.status` writes nothing and dispatches nothing: it never
   admits, delivers, re-queues or retries a send, and it is not activity
-  for retention (§9.1).
+  for retention (§9.1). Where a re-send would itself act by re-driving a run
+  paused for re-authentication, `send.status` reports the current durable fate:
+  `state: "paused"` with its `pause_reason`, and the run stays paused.
+  Resuming is the caller's choice, by re-sending the accepted body.
 - [pinned] A caller sends `send.status` only to a runner that declares
   `send_status` (§3). Against any other runner it falls back to re-sending
-  the full body under the same `send_id`, which answers the same way.
+  the full body under the same `send_id`. This ordinary `session.send` retry
+  may act as §9 describes, including re-driving a paused run.
 - [pinned] Vectors: `send-status.json` (requests, refused requests,
   replies, and the `unknown_send` refusal) and `send-status-describe.json`
   in `test-vectors/llm-runner-v1/`.
+
+### 9.9 `turn_directives`: trailing wake tags
+
+- [pinned] A lead agent may end its final reply with a tag asking its caller
+  to wake it later. A caller sends `directives: ["wake"]` only to a runner
+  declaring `turn_directives` (§3). The array remains at
+  `SendRequest::runner_params["directives"]`, on the wire beside `prompt`;
+  `SendRequest::directives` reads typed `directives::DirectiveName` values
+  without changing the raw bytes, and `with_directives` builds the array
+  without replacing sibling parameters. An empty array requests none.
+- [pinned] On a declaring runner an unknown name, a non-array (including
+  `null`), a non-string element or a duplicate is refused `invalid_params
+  {field: "directives"}` before anything is written. Names are frozen at run
+  admission like §9.3.1's run limits. An omitted member on a joining steer
+  inherits the run's names; an explicit different array is refused naming
+  `directives` (`SendRequest::check_directives`), under §9's existing
+  first-differing-field steer rule. Without the group, existing lenient
+  runner-parameter decoding is unchanged.
+- [pinned] Evaluation happens only for `state: "completed"`, only when the
+  run was admitted with the name, and only on `final_message.text` exactly
+  as §6 defines it: text parts joined in order with the empty separator,
+  reasoning excluded. This is the stored model output. It never includes
+  text the runner itself added for the model, such as rendered tags or
+  reminders. The runner never edits that text to remove or normalize a
+  directive. Every other terminal state, every non-terminal state, and a
+  completed run with `text: ""` report no directives; absence is not an error.
+- [pinned] `RunResult::directives` and `RunStatus::directives` are optional
+  arrays of `directives::Directive`, valued `[{name: "wake", in_ms}]`,
+  `[{name: "wake", in_ms, note}]`, `[{name: "wake", off: true}]` or
+  `[{name: "wake", error: "<reason>"}]`. They are absent, not `[]`, when no
+  directive was found or the run did not request the group. `run.status`,
+  where served, carries exactly the same value as `run.result`. A runner
+  MAY echo that value on its own run-end stream event; only `run.result`
+  and `run.status` are pinned surfaces. Consumers decode names and errors
+  open (`DirectiveError`), like `reason`; the parser produces only the
+  closed `WakeError` reasons below.
+- [pinned] **Grammar stability.** A directive name's grammar never changes.
+  A new grammar requires a new name, so re-parsing durable text gives the
+  same answer forever. `directives::parse_trailing(&str)` returns
+  `Option<WakeDirective>` (`In`, `Off` or `Error`), without range policy.
+- [pinned] The tag is the last non-whitespace content, outside fenced code.
+  Whitespace trimming uses Unicode whitespace (`str::trim`/`trim_end`). A
+  fence line's first non-blank content is a run of at least three backticks
+  or tildes. It closes only on a line with the same character, at least that
+  many characters, and whitespace only after them. An unclosed fence runs
+  to the end; a tag inside it does not count. Indentation is whitespace.
+- [pinned] The exact forms are `<wake in="90s"/>`,
+  `<wake in="3m">note</wake>` and `<wake off/>`. There is exactly one ASCII
+  space after `wake`, and optionally one ASCII space immediately before
+  `/>` or the opening tag's `>`. No other attribute spacing, tabs, single
+  quotes, extra attributes, spaces in `</wake>`, or paired `off` form are
+  accepted. Attribute values use double quotes only. Notes are literal
+  UTF-8, not XML entity-decoded.
+- [pinned] `in` is one to nine ASCII digits followed by `s`, `m` or `h`,
+  nonzero, with no sign or decimal point; leading zeros are accepted.
+  Milliseconds use checked `u64` arithmetic (even `999999999h` fits).
+  The parser reports `in_ms` as written; scheduling range policy, such as
+  30 seconds to 24 hours, belongs to the caller, not the parser.
+- [pinned] A note is trimmed, then limited to 200 UTF-8 bytes, not
+  characters; an empty trimmed note means no `note`. A non-empty note has
+  no control characters (`char::is_control`) and no `<`.
+- [pinned] A trailing candidate starting with `<wake` that does not match
+  is an error, never silently ignored: `bad_duration` for an invalid or
+  zero duration; `note_too_long` for over 200 bytes; `bad_note` for a control
+  character or `<`; `malformed` for any other syntax. Syntax is checked
+  before note contents, note contents before duration. A complete tag
+  followed by more non-whitespace text is mid-text and means no directive,
+  even when the tag is malformed. Other trailing content means none.
+- [pinned] Vectors in `test-vectors/llm-runner-v1/directives/` pin parser
+  outcomes and the wire send/result. The parts vector joins two text parts
+  with a tool part between them, excluding the tool part, under §6.
 
 ## 10. `session.baseline` and the admission reply
 
@@ -1957,7 +2075,7 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
+| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
@@ -2274,6 +2392,11 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
 | `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_refused` | the above; the rendered text goes out as `turn_system` where the adapter says its scripted route supports it, and as the same text at user authority otherwise; an out-of-range slot, and a template send carrying an empty `prompt`, are refused naming `template` and write nothing |
 | `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |
+| `run_tool_calls_positions_identify_siblings` | `run_tool_calls`, `queue`, `transcript_reads`; two sibling calls have positions 0 and 1 at their requesting message's ordinal, independent of intervening text/reasoning parts |
+| `run_tool_calls_result_ordinal_tracks_storage` | `run_tool_calls`, `queue`, `transcript_reads`, held tool call; no result ordinal while open, and a finished call's `result_ordinal >= ordinal` locates the stored result |
+| `interrupt_reason_shutdown_durable` | `interrupt_reason`, `queue`, `transcript_reads`, `run_ops`, held tool call; orderly handle stop and restart preserve `runner_shutdown` across result, status where served and `last_run_state` |
+| `turn_directives_in`, `turn_directives_note`, `turn_directives_off`, `turn_directives_not_requested_reports_none`, `turn_directives_unknown_refused` | `turn_directives`, `queue` (`run_ops` for result cases); scripted trailing tags on completed runs report exactly the requested forms, unrequested tags report none, invalid names/shapes/duplicates are refused naming `directives`; `run.status` is checked where served |
+| `turn_directives_max_steps_reports_none`, `turn_directives_cancelled_reports_none` | the above plus `max_steps`, or `run_cancel` and held tool calls; non-completed runs report no directives, including the held non-terminal state |
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_usage_counts_reported_steps` | `run_usage`, `queue`, `run_ops`; after a two-step scripted run whose provider reports input, cache-read, cache-write and output counts but no reasoning, `run.result` carries `usage` with `steps: 2`, the scripted totals, `by_model` summing to them, and `reasoning_tokens` absent rather than `0`; `run.status`, where the major lists it, carries the same `usage`; reported as a named skip without `run_usage` |

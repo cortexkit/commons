@@ -79,6 +79,19 @@ const RETENTION_DELETE_MS: u64 = 100;
 const RETENTION_DEFECTS_ENABLED: bool = true;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DirectiveDefect {
+    #[default]
+    None,
+    In,
+    Note,
+    Off,
+    MaxSteps,
+    Cancelled,
+    Unrequested,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RetentionDefect {
     #[default]
     None,
@@ -275,6 +288,13 @@ pub struct Defects {
     /// step, ref}` without `run_id`, on a re-send and on `send.status`, so
     /// the answer never says which run the steer joined.
     pub delivered_steer_without_run_id: bool,
+    /// A planned-stop seal deliberately omits its durable reason.
+    pub interrupt_shutdown_reason_missing: bool,
+    /// Sibling call positions are reversed without changing the listed calls.
+    pub run_tool_calls_positions_swapped: bool,
+    /// An open call falsely claims a stored result location.
+    pub run_tool_calls_open_result_ordinal: bool,
+    pub directives: DirectiveDefect,
     /// The model-response limit is ignored.
     pub max_steps_ignored: bool,
     /// The max_steps terminal is written without its pending calls' results.
@@ -453,11 +473,13 @@ struct SendRec {
 
 #[derive(Clone, Debug)]
 struct RunRec {
+    directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
     max_steps: Option<u64>,
     max_output_tokens: Option<u64>,
     no_tools: bool,
     run_id: String,
     state: String,
+    reason: Option<String>,
     final_ordinal: Option<u64>,
     final_text: Option<String>,
     error: Option<Value>,
@@ -883,6 +905,14 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
         }
+        if self.world.serves(groups::INTERRUPT_REASON)
+            && record["kind"] == "terminal"
+            && record["state"] == "interrupted"
+            && record.get("reason").is_none()
+        {
+            record["reason"] =
+                json!(cortexkit_role_llm_runner::run::interrupt_reasons::RUNNER_CRASH);
+        }
         record["session"] = json!(session);
         record["at"] = json!(self.world.now());
         let mut file = OpenOptions::new()
@@ -1060,11 +1090,14 @@ impl Module {
                 );
                 if kind == "send" {
                     sess.runs.push(RunRec {
+                        directives: serde_json::from_value(record["directives"].clone())
+                            .unwrap_or_default(),
                         max_steps: record["max_steps"].as_u64(),
                         max_output_tokens: record["max_output_tokens"].as_u64(),
                         no_tools: record["no_tools"] == true,
                         run_id,
                         state: "active".into(),
+                        reason: None,
                         final_ordinal: None,
                         final_text: None,
                         error: None,
@@ -1241,6 +1274,7 @@ impl Module {
                 sess.ceiling_wait = None;
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
+                    run.reason = record["reason"].as_str().map(str::to_owned);
                     run.ceiling = record.get("context_ceiling").cloned();
                     run.error = record.get("error").cloned();
                     run.detail = record.get("detail").cloned();
@@ -2153,6 +2187,17 @@ impl Module {
         let delivery = request.delivery().as_str().to_owned();
         let old = self.sessions.lock().unwrap().get(session).cloned();
         let mut existing = old.clone().filter(|s| s.expired_at.is_none());
+        let directives = if self.world.serves(groups::TURN_DIRECTIVES) {
+            match request.directives() {
+                Ok(names) => names.unwrap_or_default(),
+                Err(field) if self.world.defects.directives != DirectiveDefect::Unknown => {
+                    return Ok(invalid(&field))
+                }
+                Err(_) => vec![],
+            }
+        } else {
+            vec![]
+        };
         let max_steps = match request.max_steps() {
             Ok(limit) => limit,
             Err(field) => return Ok(invalid(&field)),
@@ -2304,6 +2349,9 @@ impl Module {
                 if delivery != groups::STEER || !self.world.serves(groups::STEER) {
                     return Ok(refuse(errors::TRANSIENT, None));
                 }
+                if let Err(field) = request.check_directives(&run.directives) {
+                    return Ok(invalid(&field));
+                }
                 for (differs, field) in [
                     (
                         max_steps.is_some_and(|limit| Some(limit) != run.max_steps),
@@ -2408,6 +2456,7 @@ impl Module {
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "retention":request.retention, "title":request.runner_params.get("title"),
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
+                    "directives":directives,
                     "max_steps":max_steps, "max_output_tokens":max_output_tokens,
                     "no_tools":no_tools == Some(true),
                     "structured_output": frozen }),
@@ -2747,7 +2796,8 @@ impl Module {
                     .ceiling_wait
                     .as_ref()
                     .filter(|(waiting, _)| *waiting == run.run_id)
-                    .map(|_| cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT.to_owned()),
+                    .map(|_| cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT.to_owned())
+                    .or_else(|| run.reason.clone()),
             });
         }
         respond(head)
@@ -2792,6 +2842,47 @@ impl Module {
                 mid,
                 text: run.final_text.clone().unwrap_or_default(),
             });
+        }
+        if let Some(reason) = &run.reason {
+            result = result.with_reason(reason);
+        }
+        let directive_defect = self.world.defects.directives;
+        let requested =
+            !run.directives.is_empty() || directive_defect == DirectiveDefect::Unrequested;
+        let evaluate = run.state == "completed"
+            || (directive_defect == DirectiveDefect::MaxSteps && run.state == "max_steps")
+            || (directive_defect == DirectiveDefect::Cancelled && run.state == "cancelled");
+        if self.world.serves(groups::TURN_DIRECTIVES) && requested && evaluate {
+            let text = sessions[session]
+                .messages
+                .iter()
+                .rev()
+                .find(|message| message.run_id == run.run_id && message.body["parts"].is_array())
+                .map(|message| {
+                    message.body["parts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|part| part["type"] == "text")
+                        .filter_map(|part| part["text"].as_str())
+                        .collect::<String>()
+                })
+                .unwrap_or_default();
+            if let Some(parsed) = cortexkit_role_llm_runner::directives::parse_trailing(&text) {
+                let suppress = match directive_defect {
+                    DirectiveDefect::In => {
+                        text.ends_with("<wake in=\"90s\"/>")
+                            && run.state == "completed"
+                            && !run.directives.is_empty()
+                    }
+                    DirectiveDefect::Note => text.ends_with("</wake>"),
+                    DirectiveDefect::Off => text.ends_with("<wake off/>"),
+                    _ => false,
+                };
+                if !suppress {
+                    result = result.with_directives(vec![parsed.into()]);
+                }
+            }
         }
         if let Some(error) = &run.error {
             result = result.with_error(serde_json::from_value(error.clone()).unwrap());
@@ -2971,7 +3062,7 @@ impl Module {
         };
         let mut calls = Vec::new();
         for message in sess.messages.iter().filter(|m| m.run_id == request.run_id) {
-            for key in &message.calls {
+            for (position, key) in message.calls.iter().enumerate() {
                 let call = &sess.calls[key];
                 let outcome = match (call.intent, call.result) {
                     (true, true) => outcomes::SUCCEEDED,
@@ -2993,7 +3084,19 @@ impl Module {
                     outcome,
                     message.ordinal,
                 )
-                .with_call_key(key);
+                .with_call_key(key)
+                .with_position(
+                    if self.world.defects.run_tool_calls_positions_swapped
+                        && message.calls.len() == 2
+                    {
+                        1 - position as u32
+                    } else {
+                        position as u32
+                    },
+                );
+                if !call.result && self.world.defects.run_tool_calls_open_result_ordinal {
+                    listed = listed.with_result_ordinal(message.ordinal);
+                }
                 if call.intent {
                     listed = listed.with_dispatched_to(TOOL_MODULE);
                 }
@@ -3001,10 +3104,14 @@ impl Module {
                     let stored = sess.messages.iter().find(|m| {
                         m.body["role"] == "tool"
                             && (m.body["call_key"] == json!(key)
-                                || m.body["tool_call_id"] == json!(call.tool_call_id))
+                                || (m.body.get("call_key").is_none()
+                                    && m.run_id == call.run_id
+                                    && m.body["tool_call_id"] == json!(call.tool_call_id)))
                     });
                     if let Some(stored) = stored {
-                        listed = listed.with_result_bytes(stored.body.to_string().len() as u64);
+                        listed = listed
+                            .with_result_bytes(stored.body.to_string().len() as u64)
+                            .with_result_ordinal(stored.ordinal);
                     }
                 }
                 calls.push(listed);
@@ -3250,6 +3357,26 @@ pub struct FakeHandle(Arc<Module>);
 
 impl Drop for FakeHandle {
     fn drop(&mut self) {
+        if self.0.alive.load(Ordering::SeqCst) && self.0.world.serves(groups::INTERRUPT_REASON) {
+            let active: Vec<_> = self
+                .0
+                .sessions
+                .lock()
+                .unwrap()
+                .iter()
+                .flat_map(|(name, sess)| {
+                    sess.runs
+                        .iter()
+                        .filter(|run| run.state == "active")
+                        .map(move |run| (name.clone(), run.run_id.clone()))
+                })
+                .collect();
+            for (session, run) in active {
+                let reason = (!self.0.world.defects.interrupt_shutdown_reason_missing)
+                    .then_some(cortexkit_role_llm_runner::run::interrupt_reasons::RUNNER_SHUTDOWN);
+                let _ = self.0.commit(&session, json!({"kind":"terminal", "run_id":run, "state":"interrupted", "reason":reason}));
+            }
+        }
         self.0.alive.store(false, Ordering::SeqCst);
     }
 }

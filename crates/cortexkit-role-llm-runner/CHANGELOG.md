@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.5
+
+- Add the independent `turn_directives` group (§9.9), opt-in frozen `directives: ["wake"]`, typed `SendRequest` accessors/builders, and optional `RunResult::directives` / `RunStatus::directives`. Existing sends and results without the group keep their wire bytes.
+- Add the stable shared `directives::parse_trailing` parser: completed runs evaluate stored final text only, outside fenced code, without rewriting it. Duration, note, off and closed parser errors have packaged vectors; consumers decode names/errors open. Scheduling range policy remains the caller's.
+- Pin that `send.status` never acts, even when a re-send would re-drive a run paused for authentication: it reports `paused` and `pause_reason`, leaving resumption to the caller.
+- Pin `run.tool_calls`' requesting-message `ordinal`; add optional `position: u32` and `result_ordinal: u64` plus builders. Declaring runners MUST send position, and result_ordinal for finished calls, from this release. Consumers match `(ordinal, position)` and locate stored results through result_ordinal, not model ids, list order or profile-specific layouts. Vectors cover both result layouts and repeated model ids across sibling positions.
+- Add `interrupt_reason` with durable, open `reason` values on interrupted seals, known `runner_shutdown` and `runner_crash` constants, and result/status/head decode vectors. Never infer an absent historical reason.
+
 ## 0.3.4
 
 - Add three independent describe groups, `max_steps`, `max_output_tokens` and `no_tools`, each requiring `session.send`, with matching `capabilities` constants. Callers send each member only after its group is declared; undeclared members retain the existing honour-or-refuse-by-name rule.

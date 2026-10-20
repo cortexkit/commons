@@ -22,8 +22,8 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    Compaction, DispatchAttribution, HoldToolCalls, Interrupt, KillAt, ModelView, Queue, Retention,
-    RunOps, Steer, Streaming, TranscriptReads,
+    Compaction, DispatchAttribution, HoldToolCalls, Interrupt, KillAt, MaxSteps, ModelView, Queue,
+    Retention, RunCancel, RunOps, Steer, Streaming, TranscriptReads, TurnDirectives,
 };
 
 const fn case(
@@ -64,6 +64,26 @@ const STRUCTURED_RESTART: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("interrupt_reason_shutdown_durable", &[Capability::InterruptReason, Queue, TranscriptReads, RunOps, HoldToolCalls],
+        "an orderly handle stop during a held run records interrupted reason runner_shutdown, preserved on restart across result, status and last_run_state"),
+    case("run_tool_calls_positions_identify_siblings", TOOL_CALLS,
+        "two calls in one assistant message carry positions 0 and 1 at the same requesting ordinal, independent of text/reasoning parts and list order"),
+    case("run_tool_calls_result_ordinal_tracks_storage", &[Capability::RunToolCalls, Queue, TranscriptReads, HoldToolCalls],
+        "an open call has no result_ordinal; after durable completion result_ordinal >= ordinal locates the stored result"),
+    case("turn_directives_in", &[TurnDirectives, Queue, RunOps],
+        "completed final text ending in a self-closing wake tag reports its duration on run.result and run.status where declared, without editing text"),
+    case("turn_directives_note", &[TurnDirectives, Queue, RunOps],
+        "completed final text ending in a wake tag with a note reports its duration and note on both pinned surfaces where served"),
+    case("turn_directives_off", &[TurnDirectives, Queue, RunOps],
+        "completed final text ending in wake off reports off:true"),
+    case("turn_directives_max_steps_reports_none", &[TurnDirectives, Queue, RunOps, MaxSteps],
+        "a max_steps run with a trailing wake tag reports no directives"),
+    case("turn_directives_cancelled_reports_none", &[TurnDirectives, Queue, RunOps, RunCancel, HoldToolCalls],
+        "a held non-terminal run and its cancelled terminal with a trailing wake tag report no directives"),
+    case("turn_directives_not_requested_reports_none", &[TurnDirectives, Queue, RunOps],
+        "a completed run not admitted with directives reports none even with a trailing tag"),
+    case("turn_directives_unknown_refused", &[TurnDirectives, Queue],
+        "unknown, non-array and duplicate directives are refused invalid_params naming directives"),
     case("max_steps_seals_pending_calls", &[Capability::MaxSteps, Queue, TranscriptReads, RunOps],
         "a tool-calling model ends at the response limit in max_steps, with every pending call sealed before the terminal is observable and none dispatched"),
     case("max_output_tokens_caps_response", &[Capability::MaxOutputTokens, Capability::RunUsage, Queue, TranscriptReads, RunOps],

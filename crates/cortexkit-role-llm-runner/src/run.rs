@@ -192,6 +192,9 @@ pub struct RunResult {
     /// does not report usage, never zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RunUsage>,
+    /// Parsed trailing directives, only on completed runs admitted with them (§9.9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directives: Option<Vec<crate::directives::Directive>>,
 }
 
 impl RunResult {
@@ -206,11 +209,17 @@ impl RunResult {
             structured_output: None,
             context_ceiling: None,
             usage: None,
+            directives: None,
         }
     }
 
     pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
         self.context_ceiling = Some(detail);
+        self
+    }
+
+    pub fn with_directives(mut self, directives: Vec<crate::directives::Directive>) -> Self {
+        self.directives = Some(directives);
         self
     }
 
@@ -263,6 +272,14 @@ impl RunResult {
             _ => true,
         }
     }
+}
+
+/// Durable reasons recorded when sealing an interrupted run (§6.5).
+pub mod interrupt_reasons {
+    /// The runner sealed the run during a planned stop.
+    pub const RUNNER_SHUTDOWN: &str = "runner_shutdown";
+    /// The next runner start sealed a run left open by process death.
+    pub const RUNNER_CRASH: &str = "runner_crash";
 }
 
 /// What a final message's text parts are joined with: nothing. Text parts
@@ -464,6 +481,9 @@ pub struct RunStatus {
     /// reported, never zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RunUsage>,
+    /// Parsed trailing directives, only on completed runs admitted with them (§9.9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directives: Option<Vec<crate::directives::Directive>>,
 }
 impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
@@ -477,6 +497,7 @@ impl RunStatus {
             context_ceiling: None,
             deadline_ms: None,
             usage: None,
+            directives: None,
         }
     }
     /// An `active` run waiting at the context ceiling until `deadline_ms`.
@@ -513,6 +534,11 @@ impl RunStatus {
         self.undelivered_steers = Some(steers);
         self
     }
+    pub fn with_directives(mut self, directives: Vec<crate::directives::Directive>) -> Self {
+        self.directives = Some(directives);
+        self
+    }
+
     pub fn with_usage(mut self, usage: RunUsage) -> Self {
         self.usage = Some(usage);
         self
@@ -914,5 +940,33 @@ mod input_cap_tests {
                 .detail,
             Some(detail)
         );
+    }
+}
+
+#[cfg(test)]
+mod interrupt_reason_tests {
+    use super::*;
+    use crate::{read::LastRunState, vectors};
+
+    #[test]
+    fn interrupted_reasons_decode_open_without_guessing_absence() {
+        let file = vectors::load("interrupt-reasons.json");
+        for raw in vectors::cases(&file, "results") {
+            let result: RunResult = vectors::round_trip("interrupted reason", raw);
+            let status: RunStatus = serde_json::from_value(raw.clone()).unwrap();
+            let last: LastRunState = serde_json::from_value(raw.clone()).unwrap();
+            assert_eq!(status.reason.map(String::from), result.reason);
+            assert_eq!(last.reason, result.reason);
+        }
+        assert_eq!(
+            file["results"][0]["reason"],
+            interrupt_reasons::RUNNER_SHUTDOWN
+        );
+        assert_eq!(
+            file["results"][1]["reason"],
+            interrupt_reasons::RUNNER_CRASH
+        );
+        let old: RunResult = serde_json::from_value(file["results"][2].clone()).unwrap();
+        assert_eq!(old.reason, None);
     }
 }

@@ -129,8 +129,17 @@ pub struct RunToolCall {
     /// dispatched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatched_to: Option<String>,
-    /// The ordinal of the transcript message carrying the call.
+    /// The `session.read` ordinal of the requesting assistant message, for
+    /// open and finished calls (or the ordinal it will take once written).
     pub ordinal: u64,
+    /// Zero-based index among that message's tool-call blocks, in planned
+    /// order. Optional for older senders; declaring runners send it from 0.3.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<u32>,
+    /// The `session.read` ordinal of the entry holding the durably stored result. Absent while open;
+    /// declaring runners send it for every finished call from 0.3.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_ordinal: Option<u64>,
 }
 
 impl RunToolCall {
@@ -150,7 +159,19 @@ impl RunToolCall {
             result_bytes: None,
             dispatched_to: None,
             ordinal,
+            position: None,
+            result_ordinal: None,
         }
+    }
+
+    pub fn with_position(mut self, position: u32) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    pub fn with_result_ordinal(mut self, ordinal: u64) -> Self {
+        self.result_ordinal = Some(ordinal);
+        self
     }
 
     pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
@@ -242,6 +263,16 @@ mod tests {
             let mut last = None;
             for call in &page.calls {
                 assert!(call.args.is_object(), "{name}: args must be an object");
+                assert!(call.position.is_some(), "{name}: position");
+                if call.result_bytes.is_some() {
+                    assert!(
+                        call.result_ordinal
+                            .is_some_and(|ordinal| ordinal >= call.ordinal),
+                        "{name}: result_ordinal"
+                    );
+                } else {
+                    assert!(call.result_ordinal.is_none(), "{name}: open call");
+                }
                 assert!(
                     last.is_none_or(|last| last <= call.ordinal),
                     "{name}: out of order"
@@ -269,6 +300,22 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(future.outcome, "future");
+        assert_eq!(future.position, None);
+        assert_eq!(future.result_ordinal, None);
+        let repeat: ToolCallsPage = serde_json::from_value(
+            file["pages"].as_array().unwrap().last().unwrap()["page"].clone(),
+        )
+        .unwrap();
+        assert_eq!(repeat.calls[0].tool_call_id, repeat.calls[1].tool_call_id);
+        assert_eq!(repeat.calls[0].ordinal, repeat.calls[1].ordinal);
+        assert_eq!(
+            (repeat.calls[0].position, repeat.calls[1].position),
+            (Some(0), Some(1))
+        );
+        assert_eq!(
+            repeat.calls[0].result_ordinal,
+            Some(repeat.calls[0].ordinal)
+        );
     }
 
     #[test]

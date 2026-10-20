@@ -50,6 +50,74 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/delivery-order.json"),
     ),
     (
+        "directives/200-byte-note.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/200-byte-note.json"),
+    ),
+    (
+        "directives/bad-duration.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/bad-duration.json"),
+    ),
+    (
+        "directives/bad-note.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/bad-note.json"),
+    ),
+    (
+        "directives/empty-note.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/empty-note.json"),
+    ),
+    (
+        "directives/empty.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/empty.json"),
+    ),
+    (
+        "directives/fenced.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/fenced.json"),
+    ),
+    (
+        "directives/in.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/in.json"),
+    ),
+    (
+        "directives/malformed.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/malformed.json"),
+    ),
+    (
+        "directives/max-hours.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/max-hours.json"),
+    ),
+    (
+        "directives/mid-text.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/mid-text.json"),
+    ),
+    (
+        "directives/note.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/note.json"),
+    ),
+    (
+        "directives/off.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/off.json"),
+    ),
+    (
+        "directives/parts.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/parts.json"),
+    ),
+    (
+        "directives/too-long.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/too-long.json"),
+    ),
+    (
+        "directives/unclosed-fence.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/unclosed-fence.json"),
+    ),
+    (
+        "directives/whitespace.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/whitespace.json"),
+    ),
+    (
+        "directives/wire.json",
+        include_str!("../test-vectors/llm-runner-v1/directives/wire.json"),
+    ),
+    (
         "errors.json",
         include_str!("../test-vectors/llm-runner-v1/errors.json"),
     ),
@@ -68,6 +136,10 @@ pub const FILES: &[(&str, &str)] = &[
     (
         "input-token-cap.json",
         include_str!("../test-vectors/llm-runner-v1/input-token-cap.json"),
+    ),
+    (
+        "interrupt-reasons.json",
+        include_str!("../test-vectors/llm-runner-v1/interrupt-reasons.json"),
     ),
     (
         "plans.json",
@@ -299,11 +371,19 @@ mod tests {
     #[test]
     fn every_vector_file_on_disk_is_listed_with_its_bytes() {
         let dir = dir();
-        let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .filter(|name| name != "SHA256SUMS")
-            .collect();
+        fn collect(dir: &std::path::Path, prefix: &str, names: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let entry = entry.unwrap();
+                let name = format!("{prefix}{}", entry.file_name().to_str().unwrap());
+                if entry.file_type().unwrap().is_dir() {
+                    collect(&entry.path(), &format!("{name}/"), names);
+                } else if name != "SHA256SUMS" {
+                    names.push(name);
+                }
+            }
+        }
+        let mut on_disk = Vec::new();
+        collect(std::path::Path::new(&dir), "", &mut on_disk);
         on_disk.sort();
         let mut listed: Vec<String> = FILES.iter().map(|(name, _)| name.to_string()).collect();
         listed.sort();

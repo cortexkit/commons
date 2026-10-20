@@ -25,6 +25,7 @@ pub mod baseline;
 pub mod compaction;
 pub mod delivery_order;
 pub mod describe;
+pub mod directives;
 pub mod errors;
 pub mod points;
 pub mod read;
@@ -172,6 +173,10 @@ pub mod capabilities {
     pub const MAX_OUTPUT_TOKENS: &str = "max_output_tokens";
     /// `tools: []` suppresses all tools, including plan tools and built-ins.
     pub const NO_TOOLS: &str = "no_tools";
+    /// Stable trailing tags parsed from a completed run's stored final text.
+    pub const TURN_DIRECTIVES: &str = "turn_directives";
+    /// Durable reasons for interrupted run seals, without inferring missing history.
+    pub const INTERRUPT_REASON: &str = "interrupt_reason";
     /// Schema-shaped run output on `session.send` (`structured_output`),
     /// reported on `run.result` and `run.status`.
     pub const STRUCTURED_OUTPUT: &str = "structured_output";
@@ -221,6 +226,8 @@ pub mod capabilities {
         (MAX_STEPS, &[ops::SESSION_SEND]),
         (MAX_OUTPUT_TOKENS, &[ops::SESSION_SEND]),
         (NO_TOOLS, &[ops::SESSION_SEND]),
+        (TURN_DIRECTIVES, &[ops::SESSION_SEND, ops::RUN_RESULT]),
+        (INTERRUPT_REASON, &[ops::RUN_RESULT]),
         (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
