@@ -117,14 +117,22 @@ from `session.baseline` has no admission reply to compare.
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing` | `queue`, and `transcript_reads` (inapplicable without it) |
 | `delivery_change_writes_nothing` | `queue`, `steer` or `interrupt` as the other mode, and `transcript_reads` (inapplicable without it) |
 | `unknown_delivery_refused` | `queue`, `transcript_reads` |
-| `guaranteed_steer_never_pending_or_unknown` | `queue`, `transcript_reads`; inapplicable without `steer`, when the runner declares `steer_receipt: confirm` (its steer receipts may be `pending` or `unknown`), or without `hold_tool_calls`; sends a steer, and its re-send with the same `send_id`, into a turn kept running by a held tool call (receipts may be absent while it is held), then re-sends once more after the run ends, which must carry `step` or `turn` |
+| `guaranteed_steer_never_pending_or_unknown` | `run_ops`, `queue`, `transcript_reads`; inapplicable without `steer`, when the runner declares `steer_receipt: confirm` (its steer receipts may be `pending` or `unknown`), or without `hold_tool_calls`; a delivered step receipt names the joined run |
+| `steer_without_run_ops_reports_state_and_step` | `steer`, `queue`, `transcript_reads`, `hold_tool_calls`; runs only when `run_ops` is not declared; a steer into an active turn answers `active` or `finished`, with `delivered.as: "step"`, non-empty `ref` and no `run_id` |
 | `resend_steer_delivered_stable` | `queue`, `transcript_reads`; inapplicable without `steer` |
 | `undeclared_delivery_refused` | `queue`, `transcript_reads`, and `steer` or `interrupt` left undeclared |
 | `crash_at_Admitted`, `crash_at_SendRecorded`, `crash_at_StepRecorded`, `crash_at_ToolResultRecorded`, `crash_at_Terminal` | `queue`, `transcript_reads`, the kill point |
 | `crash_at_DispatchIntent` | `queue`, `transcript_reads`, `dispatch_attribution`, the kill point |
 | `tags_resolve_left_lineage_refused` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, kill point `StepRecorded`; inapplicable unless the seal drops a tagged part onto a new lineage |
-| `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; restarts its own runner |
-| `send_status_answers_as_a_resend_after_restart` | `send_status` and the above |
+| `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer` |
+| `delivery_order_members_without_list_refused` | `delivery_order`, `queue`, `transcript_reads` |
+| `delivery_order_first_possible_mode` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls` |
+| `delivery_order_template_renders_as_system` | `delivery_order`, `queue`, `transcript_reads`; needs `steer` for fallback or a route that supports `turn_system`; inapplicable if neither is available |
+| `delivery_order_bad_slot_refused` | `delivery_order`, `queue`, `transcript_reads` |
+| `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; retracts a pending `[tool_result]` send, then releases the held call and confirms the send was never delivered |
+| `delivery_order_undeclared_mode_refused` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; runs when `steer` is not declared, refuses a `[steer]`-only list as `delivery_unsupported` with the sent list in `detail.delivery`, and proves `[steer, idle_start]` waits for and starts an idle turn |
+| `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, `hold_tool_calls`; restarts its own runner |
+| `send_status_answers_as_a_resend_after_restart` | `send_status`, the above; the live `role.describe` must declare `send_status` before any `send.status` is sent |
 | `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads` |
 | `retention_honoured`, `retention_no_content_served`, `retention_equal_noop`, `retention_shorten_continues_lineage`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
 | `retention_run_status_expired` | same; not applicable if `run.status` is not advertised |

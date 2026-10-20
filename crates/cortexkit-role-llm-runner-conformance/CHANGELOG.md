@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5
+
+- Require llm-runner 0.3.6.
+- Add `steer_without_run_ops_reports_state_and_step`, which runs only when the runner does not declare `run_ops`. A scripted steer into an active turn must answer with state `active` or `finished`, `delivered.as: "step"`, a non-empty `ref` and no `run_id`. `step` is never a state value.
+- Add `delivery_order_retract_pending_tool_result`, gated on `retract` and `delivery_order`: while a tool call holds the run before its result, a `[tool_result]` send answers pending with a `submission_id`, retract answers `retracted` and then `not_pending`, and releasing the call does not deliver the send. The fake now keeps this withdrawn submission out of later delivery boundaries.
+- Add `delivery_order_undeclared_mode_refused`, gated on `delivery_order`, `queue`, a held tool call and the absence of `steer`. A `[steer]`-only list must be refused `delivery_unsupported` with its exact array in `detail.delivery`; `[steer, idle_start]` is accepted because `queue` declares `idle_start`, but waits for the run to end and then delivers only as `idle_start`. Cases that require steer delivery also require the `steer` group; template fallback is inapplicable if neither `steer` nor `turn_system` is available. A fake defect that queues the all-undeclared list fails this case by name in `queuing_a_list_with_no_declared_mode_fails_by_name`.
+- Keep the durable re-send and `send.status` cases gated on `run_ops`; both still require `run_id` for their delivered `step` answers. The fake defect that returns `state: "step"` fails the no-`run_ops` case by name in `a_steer_reply_with_state_step_fails_only_the_no_run_ops_case`; the fake defect that omits `run_id` while declaring `run_ops` fails the re-send and status cases by name in `a_delivered_steer_without_its_run_while_declaring_run_ops_fails_both_follow_cases`. The fake does not simulate provider switches, so the stored `turn_system` rendering rule has no separate case.
+
 ## 0.8.4
 
 - Require llm-runner 0.3.5 and add `Capability::TurnDirectives` and `Capability::InterruptReason` to the non-exhaustive enum.

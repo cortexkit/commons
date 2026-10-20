@@ -14,13 +14,17 @@ use cortexkit_role_llm_runner::{
     },
     errors, ops,
     read::{HeadMeta, ReadMessage},
-    send::{states as send_states, SendReply},
+    retract::{RetractReply, RetractRequest},
+    send::{states as send_states, DeliveredAs, SendReply},
 };
 use serde_json::{json, Map, Value};
 
 use crate::{
     cases::{Case, Ending, Session},
-    drive::{call, decode, expect_code, expect_error, expect_field, expect_ok, head, read_all},
+    drive::{
+        call, decode, expect_code, expect_error, expect_field, expect_ok, head, read_all,
+        wait_run_end,
+    },
     route::{Reply, RunnerRoute},
     subject::{LlmRunnerSubject, PlanSenderIdentity, Script, ScriptedPart, ScriptedTurn},
     tags::{params, require_declared, send_and_wait},
@@ -41,6 +45,10 @@ where
     match name {
         "delivery_order_never_starts_a_run" => passed(never_starts(case).await),
         "delivery_order_first_possible_mode" => passed(first_possible(case).await),
+        "delivery_order_undeclared_mode_refused" => passed(undeclared_mode_refused(case).await),
+        "delivery_order_retract_pending_tool_result" => {
+            passed(retract_pending_tool_result(case).await)
+        }
         "delivery_order_dedupe_supersedes_queued" => passed(dedupe(case).await),
         "delivery_order_expired_never_delivered" => passed(expiry(case).await),
         "delivery_order_members_without_list_refused" => passed(members_without_list(case).await),
@@ -266,6 +274,170 @@ where
     delivered_once(&messages, &marker, modes::STEER)
 }
 
+async fn undeclared_mode_refused<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut held = case.mint.call("undeclared-steer-held-call");
+    held.hold = true;
+    let (session, _) = ordered_session(
+        case,
+        "order-undeclared-steer",
+        vec![
+            ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+            ScriptedTurn::new(vec![case.mint.text("after-undeclared-steer").0]),
+            ScriptedTurn::new(vec![case.mint.text("after-idle-start").0]),
+        ],
+        false,
+    )
+    .await?;
+    let run_prompt = case.mint.next("undeclared-steer-held-run");
+    expect_ok(
+        "the owner's held turn",
+        call(
+            &session.route,
+            ops::SESSION_SEND,
+            params(
+                case,
+                &session,
+                None,
+                &run_prompt,
+                &case.mint.next("send"),
+                &Map::new(),
+            ),
+        )
+        .await?,
+    )?;
+    case.subject
+        .await_tool_call(&held.arguments)
+        .await
+        .map_err(|e| format!("waiting for the held call: {e}"))?;
+    let held_state = async {
+        let running = head(&session.route)
+            .await?
+            .last_run_state
+            .ok_or("the held turn has no run state")?;
+        if running.state != cortexkit_role_llm_runner::run::states::ACTIVE {
+            return Err(format!("the held turn is {}, not active", running.state));
+        }
+        Ok::<_, String>(())
+    }
+    .await;
+    if let Err(error) = held_state {
+        let _ = case.subject.release_tool_call(&held.arguments).await;
+        return Err(error);
+    }
+
+    let refusal = async {
+        let before = snapshot(&session.route).await?;
+        let invalid_prompt = case.mint.next("undeclared-steer-only");
+        let shared_send_id = case.mint.next("send");
+        let invalid_order = DeliveryOrder::new(vec![Mode::Steer]);
+        let error = expect_error(
+            "a list containing only undeclared steer",
+            ordered(
+                case,
+                &session,
+                &session.route,
+                &invalid_prompt,
+                &shared_send_id,
+                &invalid_order,
+            )
+            .await?,
+        )
+        .map_err(|error| format!("expected delivery_unsupported: {error}"))?;
+        expect_code(
+            "a list containing only undeclared steer",
+            &error,
+            errors::DELIVERY_UNSUPPORTED,
+        )?;
+        let expected = json!([modes::STEER]);
+        if error.detail.as_ref().and_then(|detail| detail.get(FIELD)) != Some(&expected) {
+            return Err(format!(
+                "delivery_unsupported detail.delivery was {:?}, not the sent list {expected}",
+                error.detail
+            ));
+        }
+        if !same(&before, &snapshot(&session.route).await?) {
+            return Err("the undeclared-mode list was refused but wrote nothing".into());
+        }
+
+        let marker = case.mint.next("declared-idle-start");
+        let valid_id = shared_send_id;
+        let valid_order = DeliveryOrder::new(vec![Mode::Steer, Mode::IdleStart]);
+        let reply: SendReply = decode(
+            "a list with declared idle_start",
+            expect_ok(
+                "a list with declared idle_start",
+                ordered(
+                    case,
+                    &session,
+                    &session.route,
+                    &marker,
+                    &valid_id,
+                    &valid_order,
+                )
+                .await?,
+            )?,
+        )?;
+        if reply.state != send_states::PENDING {
+            return Err(format!(
+                "the list with declared idle_start answered state {:?}, not pending while held",
+                reply.state
+            ));
+        }
+        let (_, messages) = read_all(&session.route).await?;
+        never_delivered(&messages, &marker, "the queued mixed-mode send")?;
+        Ok::<_, String>((marker, valid_id, valid_order))
+    }
+    .await;
+    let released = case
+        .subject
+        .release_tool_call(&held.arguments)
+        .await
+        .map_err(|e| format!("releasing the held call: {e}"));
+    let (marker, valid_id, valid_order) = refusal?;
+    released?;
+    let mut final_reply = None;
+    for _ in 0..crate::drive::MAX_POLLS {
+        let reply: SendReply = decode(
+            "re-sending the mixed-mode list",
+            expect_ok(
+                "re-sending the mixed-mode list",
+                ordered(
+                    case,
+                    &session,
+                    &session.route,
+                    &marker,
+                    &valid_id,
+                    &valid_order,
+                )
+                .await?,
+            )?,
+        )?;
+        if reply.state != send_states::PENDING {
+            final_reply = Some(reply);
+            break;
+        }
+        case.subject.pause().await;
+    }
+    let final_reply =
+        final_reply.ok_or("the mixed-mode list stayed pending after the run ended")?;
+    let receipt = final_reply
+        .delivered
+        .as_ref()
+        .ok_or("the mixed-mode list was accepted but has no delivered receipt")?;
+    if receipt.r#as() != DeliveredAs::Turn {
+        return Err(format!(
+            "the mixed-mode list delivered as {:?}, not idle_start's turn",
+            receipt.r#as
+        ));
+    }
+    let (_, messages) = read_all(&session.route).await?;
+    delivered_once(&messages, &marker, modes::IDLE_START)
+}
+
 async fn first_possible<S>(case: &Case<'_, S>) -> Check
 where
     S: LlmRunnerSubject,
@@ -381,6 +553,134 @@ where
             other.len()
         )),
     }
+}
+
+async fn retract_pending_tool_result<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut held = case.mint.call("retract-held-tool-result");
+    held.hold = true;
+    let (session, _) = ordered_session(
+        case,
+        "order-retract-pending-tool-result",
+        vec![
+            ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+            ScriptedTurn::new(vec![case.mint.text("after-retract").0]),
+        ],
+        false,
+    )
+    .await?;
+    require_declared(&session.route, groups::RETRACT, "retract").await?;
+
+    let run_prompt = case.mint.next("retract-held-run");
+    let run_reply: SendReply = decode(
+        "the owner's held turn",
+        expect_ok(
+            "the owner's held turn",
+            call(
+                &session.route,
+                ops::SESSION_SEND,
+                params(
+                    case,
+                    &session,
+                    None,
+                    &run_prompt,
+                    &case.mint.next("send"),
+                    &Map::new(),
+                ),
+            )
+            .await?,
+        )?,
+    )?;
+    case.subject
+        .await_tool_call(&held.arguments)
+        .await
+        .map_err(|e| format!("waiting for the held call: {e}"))?;
+    let held_state = async {
+        let running = head(&session.route)
+            .await?
+            .last_run_state
+            .ok_or("the held turn has no run state")?;
+        if running.state != cortexkit_role_llm_runner::run::states::ACTIVE {
+            return Err(format!("the held turn is {}, not active", running.state));
+        }
+        Ok::<_, String>(())
+    }
+    .await;
+    if let Err(error) = held_state {
+        let _ = case.subject.release_tool_call(&held.arguments).await;
+        return Err(error);
+    }
+
+    let marker = case.mint.next("retract-before-tool-result");
+    let send_id = case.mint.next("send");
+    let order = DeliveryOrder::new(vec![Mode::ToolResult]);
+    let outcome = async {
+        let pending: SendReply = decode(
+            "the waiting tool_result send",
+            expect_ok(
+                "the waiting tool_result send",
+                ordered(case, &session, &session.route, &marker, &send_id, &order).await?,
+            )?,
+        )?;
+        if pending.state != send_states::PENDING {
+            return Err(format!(
+                "the waiting tool_result send answered state {:?}, not pending",
+                pending.state
+            ));
+        }
+        let submission_id = pending
+            .submission_id
+            .filter(|submission_id| !submission_id.is_empty())
+            .ok_or("the pending tool_result send omitted a non-empty submission_id")?;
+        let retract = || {
+            serde_json::to_value(RetractRequest::new(submission_id.clone()))
+                .expect("a retract request serializes")
+        };
+        let first: RetractReply = decode(
+            "session.retract",
+            expect_ok(
+                "session.retract",
+                call(&session.route, ops::SESSION_RETRACT, retract()).await?,
+            )?,
+        )?;
+        if first != RetractReply::Retracted {
+            return Err(format!("session.retract answered {first:?}, not retracted"));
+        }
+        let second: RetractReply = decode(
+            "session.retract retry",
+            expect_ok(
+                "session.retract retry",
+                call(&session.route, ops::SESSION_RETRACT, retract()).await?,
+            )?,
+        )?;
+        if second != RetractReply::NotPending {
+            return Err(format!(
+                "the second session.retract answered {second:?}, not not_pending"
+            ));
+        }
+        Ok::<_, String>(())
+    }
+    .await;
+    let released = case
+        .subject
+        .release_tool_call(&held.arguments)
+        .await
+        .map_err(|e| format!("releasing the held call: {e}"));
+    outcome?;
+    released?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        None,
+        &run_reply,
+    )
+    .await?;
+    let (_, messages) = read_all(&session.route).await?;
+    never_delivered(&messages, &marker, "retracted tool_result send")
 }
 
 async fn dedupe<S>(case: &Case<'_, S>) -> Check

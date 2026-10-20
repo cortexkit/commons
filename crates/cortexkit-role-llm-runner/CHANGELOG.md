@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6
+
+- A delivered steer reports the run's `active` or `finished` state, while `step` belongs only to `delivered.as`. Its stored-message `ref` is always present; `run_id` is present only when the runner declares `run_ops`. A caller without that run capability stops following a delivered `step` with no `run_id`, treating it as neither an error nor a reason to poll `run.status`. The same reply rule covers durable re-sends and `send.status`.
+- A `delivery_order` send still waiting for its next possible boundary is a queued send. A runner declaring `retract` answers it `pending` with a `submission_id`, and `session.retract` withdraws it until delivery; a `guaranteed` steer already accepted into its run is not pending and is not withdrawn.
+- A `delivery_order` list with no declared mode is refused immediately as `delivery_unsupported`, with the original array in `detail.delivery` and no writes. A list with one declared mode remains accepted; its undeclared members can never be chosen. `delivery-order.json` and the conformance case cover a `steer`-only list against a runner that declares `queue` but not `steer`.
+- A stored `turn_system` entry keeps its bytes and role after a model switch. If the next provider cannot accept turn-scoped system messages, the runner sends the same text at user authority instead of dropping the entry or failing the request; `session.read` stays unchanged.
+- Add a packaged `send.json` reply for a runner without `run_ops`, alongside the existing delivered-step reply with `run_id`.
+
 ## 0.3.5
 
 - Add the independent `turn_directives` group (§9.9), opt-in frozen `directives: ["wake"]`, typed `SendRequest` accessors/builders, and optional `RunResult::directives` / `RunStatus::directives`. Existing sends and results without the group keep their wire bytes.

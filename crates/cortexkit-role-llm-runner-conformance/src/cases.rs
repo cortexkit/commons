@@ -10,7 +10,7 @@ use cortexkit_role_llm_runner::{
     errors, ops,
     read::{HeadMeta, ReadMessage, ReadPage, ReadRequest, ToolCallAttribution},
     run::{join_text_parts, states as run_states},
-    send::{Delivered, DeliveredAs, SendReply, DELIVERY_FIELD},
+    send::{states, Delivered, DeliveredAs, SendReply, DELIVERY_FIELD},
     subscribe::{kinds, SubscribeEvent, SubscribeFrom, SubscribeRequest},
     PROVIDES,
 };
@@ -129,6 +129,9 @@ where
             "guaranteed_steer_never_pending_or_unknown" => {
                 self.guaranteed_steer_never_pending_or_unknown().await
             }
+            "steer_without_run_ops_reports_state_and_step" => {
+                self.steer_without_run_ops_reports_state_and_step().await
+            }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
             name if name.starts_with("adopt_") => {
@@ -152,7 +155,16 @@ where
             | "no_tools_offered_to_model"
             | "no_tools_later_plan_send_refused" => crate::run_parameters::run(self, name).await,
             name if name.starts_with("delivery_order_") => {
-                crate::delivery_order::run(self, name).await
+                if name == "delivery_order_template_renders_as_system"
+                    && !self.declares(Capability::Steer)
+                    && !self.subject.turn_system_supported()
+                {
+                    Ok(Ending::Inapplicable(
+                        "the runner declares neither steer nor a supported turn_system mode".into(),
+                    ))
+                } else {
+                    crate::delivery_order::run(self, name).await
+                }
             }
             "read_stable_across_host_metadata_change" => {
                 passed(self.read_stable_across_host_metadata_change().await)
@@ -1911,6 +1923,112 @@ where
                     }
                 }
             }
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn steer_without_run_ops_reports_state_and_step(&self) -> Result<Ending, String> {
+        let describe: RoleDescribe = decode("role.describe", self.describe().await?)?;
+        if !describe.declares(groups::STEER) || !self.declares(Capability::Steer) {
+            return Ok(Ending::Inapplicable(
+                "the runner does not declare steer".into(),
+            ));
+        }
+        if describe.declares(groups::RUN_OPS) {
+            return Err(
+                "the runner declares run_ops, but this case requires it to be absent".into(),
+            );
+        }
+        if !self.declares(Capability::HoldToolCalls) {
+            return Ok(Ending::Inapplicable(
+                "the suite cannot hold a running turn without hold_tool_calls".into(),
+            ));
+        }
+
+        let mut held = self.mint.call("held_steer_without_run_ops");
+        held.hold = true;
+        let (done, _) = self.mint.text("done");
+        let mut session = self
+            .open(
+                "steer-without-run-ops",
+                Script {
+                    turns: vec![
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+                        ScriptedTurn::new(vec![done]),
+                    ],
+                },
+            )
+            .await?;
+        let send_id = self.mint.next("send");
+        let prompt = self.mint.next("prompt");
+        session.first = Some((send_id.clone(), prompt.clone()));
+        let steer_id = self.mint.next("steer");
+        let steer_prompt = self.mint.next("prompt");
+
+        let probe = async {
+            let observed = async {
+                self.subject
+                    .await_tool_call(&held.arguments)
+                    .await
+                    .map_err(|e| format!("the tool provider never held the call: {e}"))?;
+                let running = head(&session.route)
+                    .await?
+                    .last_run_state
+                    .ok_or("the held turn has no run state")?;
+                if running.state != run_states::ACTIVE {
+                    return Err(format!("the held turn is {}, not active", running.state));
+                }
+                let reply: SendReply = decode(
+                    "session.send steer",
+                    expect_ok(
+                        "session.send steer",
+                        self.send_raw(&session, &steer_prompt, &steer_id, Some(groups::STEER))
+                            .await?,
+                    )?,
+                )?;
+                Ok::<_, String>(reply)
+            }
+            .await;
+            let released = self
+                .subject
+                .release_tool_call(&held.arguments)
+                .await
+                .map_err(|e| format!("releasing the held call: {e}"));
+            let reply = observed?;
+            released?;
+            Ok::<_, String>(reply)
+        };
+        let (sent, observed) = join(self.send_raw(&session, &prompt, &send_id, None), probe).await;
+        expect_ok("session.send", sent?)?;
+        let reply = observed?;
+        if !matches!(reply.state.as_str(), states::ACTIVE | states::FINISHED) {
+            return Err(format!(
+                "session.send steer answered state {:?}, not active or finished",
+                reply.state
+            ));
+        }
+        let delivered = reply
+            .delivered
+            .as_ref()
+            .ok_or("session.send steer omitted delivered")?;
+        if delivered.r#as() != DeliveredAs::Step {
+            return Err(format!(
+                "session.send steer answered delivered.as {:?}, not step",
+                delivered.r#as
+            ));
+        }
+        if !delivered
+            .r#ref
+            .as_deref()
+            .is_some_and(|reference| !reference.is_empty())
+        {
+            return Err("session.send steer delivered step without a non-empty ref".into());
+        }
+        if reply.run_id.is_some() {
+            return Err(format!(
+                "session.send steer answered run_id {:?} without declaring run_ops",
+                reply.run_id
+            ));
         }
         Ok(Ending::Passed)
     }

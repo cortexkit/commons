@@ -9,7 +9,7 @@
 # Not published while the role crate itself is a draft.
 [package]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.8.4"
+version = "0.8.5"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -21,7 +21,7 @@ publish = true
 async-trait = "0.1"
 cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
 cortexkit-role-compaction-provider = { version = "0.3.0", path = "../cortexkit-role-compaction-provider" }
-cortexkit-role-llm-runner = { version = "0.3.5", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.3.6", path = "../cortexkit-role-llm-runner" }
 futures-util = { version = "0.3", default-features = false }
 serde = "1"
 serde_json = "1"

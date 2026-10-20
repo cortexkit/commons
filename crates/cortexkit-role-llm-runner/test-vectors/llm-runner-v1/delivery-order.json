@@ -1361,5 +1361,29 @@
       },
       "field": "template"
     }
+  ],
+  "undeclared_mode_lists": [
+    {
+      "name": "a delivery list with no declared mode",
+      "declares": [
+        "delivery_order",
+        "queue"
+      ],
+      "request": {
+        "prompt": "steer-only reminder",
+        "send_id": "undeclared-steer",
+        "delivery": [
+          "steer"
+        ]
+      },
+      "refusal": {
+        "code": "delivery_unsupported",
+        "detail": {
+          "delivery": [
+            "steer"
+          ]
+        }
+      }
+    }
   ]
 }

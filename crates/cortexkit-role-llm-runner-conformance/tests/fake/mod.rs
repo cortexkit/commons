@@ -48,6 +48,7 @@ use cortexkit_role_llm_runner_conformance::{
             HeadMeta, LastRunState, ReadMessage, ReadMode, ReadPage, ReadRequest, ReadView,
             RunAttribution, ToolCallAttribution,
         },
+        retract::{RetractReply, RetractRequest},
         run::{FinalMessage, RunResult, RunResultRequest, RunState, RunUsage, StepUsage},
         send::{
             delivered_as, delivery_unsupported_detail, Delivered, SendReply, SendRequest,
@@ -210,6 +211,9 @@ pub struct Defects {
     pub held_steer_after_release_unstable: bool,
     /// A re-send of a delivered steer changes its receipt.
     pub resend_steer_unstable: bool,
+    /// Answer a steer into a running turn with `state: "step"` instead of
+    /// the turn's `active` or `finished` state.
+    pub steer_reply_state_step: bool,
     /// Every answer to a send names a submission_id of its own, so a retry
     /// names another one than the send was answered with.
     pub retry_new_submission_id: bool,
@@ -263,6 +267,8 @@ pub struct Defects {
     /// A list member (`template`, `dedupe_key`, `expires_at_ms`) beside a
     /// string or absent `delivery` is ignored instead of refused.
     pub order_members_without_list_accepted: bool,
+    /// Queue a list even when none of its modes is declared by the runner.
+    pub order_undeclared_modes_queued: bool,
     /// A template send carrying `"prompt": ""` is accepted as if it carried
     /// no prompt, instead of refused naming `template`.
     pub order_template_with_empty_prompt_accepted: bool,
@@ -285,8 +291,8 @@ pub struct Defects {
     /// old content.
     pub resolve_left_lineage_tags: bool,
     /// A queued send delivered as a steer is answered `delivered: {as:
-    /// step, ref}` without `run_id`, on a re-send and on `send.status`, so
-    /// the answer never says which run the steer joined.
+    /// step, ref}` without `run_id` even though the runner declares `run_ops`,
+    /// on a re-send and on `send.status`.
     pub delivered_steer_without_run_id: bool,
     /// A planned-stop seal deliberately omits its durable reason.
     pub interrupt_shutdown_reason_missing: bool,
@@ -1603,17 +1609,23 @@ impl Module {
         }
     }
 
-    /// The first possible mode of `modes` at `boundary`, or the last one
-    /// under the defect.
-    fn choose(&self, modes: &[Mode], boundary: &order::Boundary) -> Option<Mode> {
+    /// The first possible declared member of a wire list at `boundary`; a
+    /// legacy string keeps its equivalent modes. The defect picks the last
+    /// possible member instead.
+    fn choose(&self, modes: &[Mode], boundary: &order::Boundary, list_form: bool) -> Option<Mode> {
+        let declared: Vec<Mode> = modes
+            .iter()
+            .copied()
+            .filter(|mode| !list_form || mode.is_declared(&self.world.groups))
+            .collect();
         if self.world.defects.order_last_possible_mode {
-            modes
+            declared
                 .iter()
                 .rev()
                 .copied()
                 .find(|mode| boundary.possible(*mode))
         } else {
-            order::choose(modes, boundary)
+            order::choose(&declared, boundary)
         }
     }
 
@@ -1655,7 +1667,11 @@ impl Module {
             if queued.system && self.world.turn_system {
                 boundary = boundary.with_turn_system();
             }
-            let Some(mode) = self.choose(&queued.modes, &boundary) else {
+            let Some(mode) = self.choose(
+                &queued.modes,
+                &boundary,
+                queued.request[DELIVERY_FIELD].is_array(),
+            ) else {
                 continue;
             };
             let mut delivered_as = json!({ "mode": mode.as_str() });
@@ -1689,7 +1705,11 @@ impl Module {
                     continue;
                 }
                 let idle = order::Boundary::default().with_idle();
-                let mut chosen = self.choose(&queued.modes, &idle);
+                let mut chosen = self.choose(
+                    &queued.modes,
+                    &idle,
+                    queued.request[DELIVERY_FIELD].is_array(),
+                );
                 if chosen.is_none() && self.world.defects.order_starts_runs_without_idle_start {
                     chosen = Some(Mode::IdleStart);
                 }
@@ -1760,6 +1780,7 @@ impl Module {
                 | ops::SESSION_HEAD
                 | ops::RUN_RESULT
                 | ops::RUN_CANCEL
+                | ops::SESSION_RETRACT
                 | "run.status"
         ) {
             if let Some(reply) = self.expiry_reply(session) {
@@ -1805,6 +1826,9 @@ impl Module {
                     // its op.
                     Ok(refuse("unknown_method", Some(json!({ "method": method }))))
                 }
+            }
+            ops::SESSION_RETRACT if self.world.serves(groups::RETRACT) => {
+                self.retract(stamp, session, params)
             }
             ops::RUN_CANCEL if self.world.serves(groups::RUN_CANCEL) => {
                 self.cancel(stamp, session, params)
@@ -2027,10 +2051,18 @@ impl Module {
                 .with_run_id(&run.run_id)
                 .with_reason(&run.state)
         };
+        let defects = &self.world.defects;
+        if send.delivery == groups::STEER && send.steered_into_running {
+            if !self.world.serves(groups::RUN_OPS) {
+                reply.run_id = None;
+            }
+            if defects.steer_reply_state_step {
+                reply.state = delivered_as::STEP.to_owned();
+            }
+        }
         if send.admitted {
             reply = reply.with_baseline(baseline());
         }
-        let defects = &self.world.defects;
         if defects.retry_new_submission_id {
             reply = reply.with_submission_id(format!("sub-{}-{}", run.run_id, send.resend_count));
         }
@@ -2093,6 +2125,9 @@ impl Module {
                         .with_delivered(Delivered::new(delivered_as::STEP).with_ref(&send.row_id));
                 } else if let Some(receipt) = &self.world.early_held_steer_receipt {
                     reply = reply.with_delivered(receipt.clone());
+                } else if !self.world.serves(groups::RUN_OPS) {
+                    reply = reply
+                        .with_delivered(Delivered::new(delivered_as::STEP).with_ref(&send.row_id));
                 }
             } else if let Some(receipt) = self
                 .world
@@ -2490,6 +2525,18 @@ impl Module {
                 return Ok(refuse(code, field.map(|field| json!({ "field": field }))));
             }
         }
+        if request.delivery_order.is_some()
+            && !self.world.defects.order_undeclared_modes_queued
+            && !wanted
+                .modes
+                .iter()
+                .any(|mode| mode.is_declared(&self.world.groups))
+        {
+            return Ok(refuse(
+                errors::DELIVERY_UNSUPPORTED,
+                Some(delivery_unsupported_detail(&wanted.modes)),
+            ));
+        }
         let id = format!("{caller} {}", request.send_id);
         let params = serde_json::to_value(request).expect("a send serializes");
         if let Some(queued) = sess.ordered.get(&id) {
@@ -2499,7 +2546,15 @@ impl Module {
                     Some(json!({ "field": order::FIELD })),
                 ));
             }
-            return Ok(ordered_reply(&self.world.defects, &sess, queued));
+            if queued.state == "retracted" {
+                return Ok(refuse(errors::SEND_RETRACTED, None));
+            }
+            return Ok(ordered_reply(
+                &self.world.defects,
+                self.world.serves(groups::RUN_OPS),
+                &sess,
+                queued,
+            ));
         }
         let (text, system) = match &wanted.template {
             None => (request.prompt_text().to_owned(), false),
@@ -2548,6 +2603,7 @@ impl Module {
         let sess = self.sessions.lock().unwrap()[session].clone();
         Ok(ordered_reply(
             &self.world.defects,
+            self.world.serves(groups::RUN_OPS),
             &sess,
             &sess.ordered[&id],
         ))
@@ -2978,12 +3034,46 @@ impl Module {
             {
                 return respond(SendReply::new("pending").with_submission_id(&queued.send_id));
             }
-            return ordered_reply(&self.world.defects, &sess, queued);
+            return ordered_reply(
+                &self.world.defects,
+                self.world.serves(groups::RUN_OPS),
+                &sess,
+                queued,
+            );
         }
         match sess.sends.get(&request.send_id) {
             Some(send) => self.send_reply(session, send),
             None => refuse(errors::UNKNOWN_SEND, None),
         }
+    }
+
+    /// Withdraw a still-pending `delivery_order` submission durably.
+    fn retract(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        let request: RetractRequest = match serde_json::from_value(params) {
+            Ok(request) => request,
+            Err(_) => return Ok(invalid("submission_id")),
+        };
+        let Some(sess) = self.sessions.lock().unwrap().get(session).cloned() else {
+            return Ok(respond(RetractReply::NotPending));
+        };
+        if sess.owner != stamp.principal {
+            return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+        }
+        let id = sess
+            .ordered
+            .iter()
+            .find(|(_, queued)| {
+                queued.send_id == request.submission_id && queued.state == "pending"
+            })
+            .map(|(id, _)| id.clone());
+        let Some(id) = id else {
+            return Ok(respond(RetractReply::NotPending));
+        };
+        self.commit(
+            session,
+            json!({ "kind": "order_end", "id": id, "state": "retracted" }),
+        )?;
+        Ok(respond(RetractReply::Retracted))
     }
 
     fn resolve(&self, session: &str, params: &Value) -> Reply {
@@ -3299,9 +3389,10 @@ fn strip_tags_value(value: &Value) -> Value {
 /// The answer to a `delivery_order` send, or its re-send: `pending` while
 /// queued; once delivered, the state of the run that carried it, that run,
 /// and how it went in; otherwise its terminal state. With
-/// `Defects::delivered_steer_without_run_id` set, a steer's answer leaves
-/// the run out.
-fn ordered_reply(defects: &Defects, sess: &Sess, queued: &Queued) -> Reply {
+/// `Defects::delivered_steer_without_run_id` set while the runner declares
+/// `run_ops`, a steer's answer leaves the run out. Without `run_ops`, a `step`
+/// receipt also omits `run_id` by design.
+fn ordered_reply(defects: &Defects, run_ops: bool, sess: &Sess, queued: &Queued) -> Reply {
     match (queued.state.as_str(), &queued.delivery) {
         ("pending", _) => respond(SendReply::new("pending").with_submission_id(&queued.send_id)),
         ("delivered", Some(delivery)) => {
@@ -3310,12 +3401,13 @@ fn ordered_reply(defects: &Defects, sess: &Sess, queued: &Queued) -> Reply {
                 Some(run) => SendReply::new("finished").with_reason(&run.state),
                 None => SendReply::new("finished"),
             };
-            let reply =
-                if defects.delivered_steer_without_run_id && delivery.r#as == delivered_as::STEP {
-                    reply
-                } else {
-                    reply.with_run_id(&delivery.run_id)
-                };
+            let omit_run_id = delivery.r#as == delivered_as::STEP
+                && (!run_ops || defects.delivered_steer_without_run_id);
+            let reply = if omit_run_id {
+                reply
+            } else {
+                reply.with_run_id(&delivery.run_id)
+            };
             respond(reply.with_delivered(Delivered::new(delivery.r#as).with_ref(&delivery.r#ref)))
         }
         ("delivered", None) => respond(SendReply::new("finished")),
@@ -3458,6 +3550,7 @@ pub fn served() -> BTreeSet<Capability> {
         Capability::ModelView,
         Capability::Steer,
         Capability::Queue,
+        Capability::Retract,
         Capability::HoldToolCalls,
         Capability::HoldContextCeiling,
         Capability::HostMetadataChange,

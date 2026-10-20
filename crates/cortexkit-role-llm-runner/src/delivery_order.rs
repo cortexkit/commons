@@ -81,6 +81,18 @@ impl Mode {
     pub fn is_user_authority(self) -> bool {
         self != Self::TurnSystem
     }
+
+    /// Whether the runner declares this list mode through its module-level
+    /// capability groups. `delivery_order` declares the list-only modes;
+    /// `steer` and `idle_start` reuse the legacy `steer` and `queue` groups.
+    pub fn is_declared<S: AsRef<str>>(self, declared: &[S]) -> bool {
+        let group = match self {
+            Self::ToolResult | Self::TurnSystem => crate::capabilities::DELIVERY_ORDER,
+            Self::Steer => crate::capabilities::STEER,
+            Self::IdleStart => crate::capabilities::QUEUE,
+        };
+        declared.iter().any(|name| name.as_ref() == group)
+    }
 }
 
 /// The modes' spellings, as a read entry's `delivered_as.mode` names them.
@@ -686,6 +698,18 @@ mod tests {
     }
 
     #[test]
+    fn list_modes_follow_their_individual_capability_declarations() {
+        let list_group = [crate::capabilities::DELIVERY_ORDER];
+        assert!(Mode::ToolResult.is_declared(&list_group));
+        assert!(Mode::TurnSystem.is_declared(&list_group));
+        assert!(!Mode::Steer.is_declared(&list_group));
+        assert!(!Mode::IdleStart.is_declared(&list_group));
+
+        assert!(Mode::Steer.is_declared(&[crate::capabilities::STEER]));
+        assert!(Mode::IdleStart.is_declared(&[crate::capabilities::QUEUE]));
+    }
+
+    #[test]
     fn sends_decode_their_list_or_refuse_by_field() {
         let file = file();
         for case in vectors::cases(&file, "requests") {
@@ -756,6 +780,27 @@ mod tests {
                 }
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }
+        }
+        for case in vectors::cases(&file, "undeclared_mode_lists") {
+            let name = case["name"].as_str().unwrap();
+            let request: SendRequest = vectors::round_trip(name, &case["request"]);
+            let order = request.delivery_order().unwrap().expect("a list");
+            let declared = declared(case);
+            assert_eq!(request.check_delivery_order(&declared), Ok(()), "{name}");
+            assert!(
+                !order.modes.iter().any(|mode| mode.is_declared(&declared)),
+                "{name} has a declared mode"
+            );
+            assert_eq!(
+                case["refusal"]["code"],
+                crate::errors::DELIVERY_UNSUPPORTED,
+                "{name}"
+            );
+            assert_eq!(
+                crate::send::delivery_unsupported_detail(&order.modes),
+                case["refusal"]["detail"],
+                "{name}"
+            );
         }
     }
 

@@ -23,7 +23,7 @@ pub struct CaseSpec {
 
 use Capability::{
     Compaction, DispatchAttribution, HoldToolCalls, Interrupt, KillAt, MaxSteps, ModelView, Queue,
-    Retention, RunCancel, RunOps, Steer, Streaming, TranscriptReads, TurnDirectives,
+    Retention, Retract, RunCancel, RunOps, Steer, Streaming, TranscriptReads, TurnDirectives,
 };
 
 const fn case(
@@ -54,6 +54,7 @@ const TAGS: &[Capability] = &[Capability::Tags, Queue, TranscriptReads];
 const TOOL_CALLS: &[Capability] = &[Capability::RunToolCalls, Queue, TranscriptReads];
 const USAGE: &[Capability] = &[Capability::RunUsage, Queue, RunOps];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
+const ORDER_STEER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads, Steer];
 const STRUCTURED_RESTART: &[Capability] = &[
     Capability::StructuredOutput,
     Queue,
@@ -120,27 +121,44 @@ pub const CASES: &[CaseSpec] = &[
         "after a two-step run whose scripted model reports input, cache-read, cache-write and output counts but no reasoning, run.result carries usage with steps 2, no unreported step, exactly the scripted totals, by_model summing to them, and reasoning_tokens absent rather than 0; run.status, where served, carries the same usage"),
     case("run_context_ceiling_wait_is_not_a_stall", &[Queue, TranscriptReads, Capability::HoldContextCeiling],
         "a run held at the context ceiling reads active with reason context_ceiling_wait on session.head (and on run.status with a deadline_ms, where served); with a view it completes, without one it ends context_ceiling with cause view_timeout and no error"),
-    case("delivery_order_never_starts_a_run", ORDER,
+    case("delivery_order_never_starts_a_run", ORDER_STEER,
         "a list without idle_start on an idle session answers pending and changes nothing, then rides the owner's next turn as a steer, delivered once"),
-    case("delivery_order_first_possible_mode", &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
-        "on an idle session [tool_result, steer, idle_start] starts a run through idle_start; during a held call [tool_result, idle_start] goes out with that call's result, recording its call_key"),
-    case("delivery_order_dedupe_supersedes_queued", ORDER,
+    case(
+        "delivery_order_first_possible_mode",
+        &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
+        "on an idle session [tool_result, steer, idle_start] starts a run through idle_start; during a held call [tool_result, idle_start] goes out with that call's result, recording its call_key",
+    ),
+    CaseSpec {
+        name: "delivery_order_undeclared_mode_refused",
+        requires: &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
+        requires_any: &[],
+        requires_undeclared_any: &[Steer],
+        checks: "on a runner without steer, a [steer] list is refused delivery_unsupported with the same list in detail.delivery and writes nothing; [steer, idle_start] is accepted while a run is active, does not deliver the undeclared steer, then starts at idle_start",
+    },
+    case(
+        "delivery_order_retract_pending_tool_result",
+        &[Retract, Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
+        "while a held tool call leaves [tool_result] impossible, its pending send has a submission_id; session.retract answers retracted then not_pending, and after the call is released the send is never delivered",
+    ),
+    case("delivery_order_dedupe_supersedes_queued", ORDER_STEER,
         "a second queued send with the same dedupe_key replaces the first, whose re-send answers superseded and which is never delivered"),
-    case("delivery_order_expired_never_delivered", ORDER,
+    case("delivery_order_expired_never_delivered", ORDER_STEER,
         "a send past its expires_at_ms is never delivered, and its re-send answers expired"),
     case("delivery_order_members_without_list_refused", ORDER,
         "template with a string delivery, dedupe_key with no delivery and expires_at_ms with a string delivery are each refused invalid_params naming the member, writing nothing"),
     CaseSpec { name: "delivery_order_list_refused_without_group", requires: &[Queue, TranscriptReads], requires_any: &[], requires_undeclared_any: &[Capability::DeliveryOrder],
         checks: "on a runner without delivery_order, a list in delivery is refused invalid_params naming delivery and writes nothing, so it never goes out as a legacy queue" },
-    case("delivery_order_unnamed_sender_refused", ORDER,
+    case("delivery_order_unnamed_sender_refused", ORDER_STEER,
         "a module the plan does not name is refused scope_owner_mismatch, even naming the plan sender in a request field; the plan sender without the idle_start grant is refused listing idle_start; its steer is delivered once"),
     case("delivery_order_template_renders_as_system", ORDER,
         "a template send carrying an empty prompt is refused invalid_params naming template and writes nothing; a plan sender's template send with valid slots and no prompt goes out once with the rendered text, as turn_system where the adapter's route supports it and as a steer otherwise"),
     case("delivery_order_bad_slot_refused", ORDER,
         "a template send whose percentage slot is 101 is refused invalid_params naming template, writes nothing, and nothing goes out as turn_system"),
-    case("delivery_order_steer_receipt_durable_across_restart", &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
+    case(
+        "delivery_order_steer_receipt_durable_across_restart",
+        &[Capability::DeliveryOrder, Queue, TranscriptReads, RunOps, HoldToolCalls, Steer],
         "on its own state root, a [steer] list sent while a run waits on a held call answers pending with a submission_id and is delivered once as a steer when the call is released; a re-send of its send_id answers delivered step with a ref and run_id the run it joined, and after a harness restart answers the same receipt and run_id"),
-    case("send_status_answers_as_a_resend_after_restart", &[Capability::SendStatus, Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],
+    case("send_status_answers_as_a_resend_after_restart", &[Capability::SendStatus, Capability::DeliveryOrder, Queue, TranscriptReads, RunOps, HoldToolCalls, Steer],
         "the same delivered steer: send.status answers exactly what its re-send answers before the restart, and after a harness restart answers delivered step with the joined run's run_id, never pending, and the same as a re-send then"),
     case("send_status_unknown_send_refused", &[Capability::SendStatus, Queue, TranscriptReads],
         "send.status of a settled send answers exactly what its re-send answers; one of a send_id the session has no record of is refused unknown_send, and one carrying an unknown field is refused invalid_params naming it"),
@@ -404,9 +422,16 @@ pub const CASES: &[CaseSpec] = &[
     },
     case(
         "guaranteed_steer_never_pending_or_unknown",
-        SENDS,
+        &[RunOps, Queue, TranscriptReads],
         "on a guaranteed runner with hold_tool_calls, a steer and its same-send_id re-send are answered while the held turn is still active, naming that run, with any receipt step or turn; after the run ends, a final re-send must carry step or turn, equal to every earlier receipt",
     ),
+    CaseSpec {
+        name: "steer_without_run_ops_reports_state_and_step",
+        requires: &[Steer, Queue, TranscriptReads, HoldToolCalls],
+        requires_any: &[],
+        requires_undeclared_any: &[RunOps],
+        checks: "a steer sent into an active turn answers with state active or finished, delivered.as step and a non-empty ref, without run_id; step is never a state",
+    },
     case(
         "resend_steer_delivered_stable",
         SENDS,
@@ -488,7 +513,7 @@ pub const NARROWINGS: &[&str] = &[
     "the fetch plan's shape is not pinned (CONTRACT §10), so the subject builds each session's first-send fields and the suite never inspects a plan or a baseline's items",
     "the tags cases check part rows, tags and resolve answers, never how a tag is rendered to the model; durability of tags across a restart is driven only by tags_resolve_left_lineage_refused, after the StepRecorded crash",
     "tags_resolve_left_lineage_refused cannot read the dropped part's tag, because the kill comes before any read of the cut step; tags are assigned in increasing order and the follow-up's are assigned after the drop, so it resolves every number below the new lineage's highest tag that no part read from that lineage carries (at most 64 of them), which the rule refuses whether the session assigned it under the old lineage or never",
-    "the send_status and steer-receipt restart cases restart their own runner on their own state root with the harness restart hook, without a kill, so they do not count toward the real-kill rule; they check the answer a delivered steer gets, never how the runner records it",
+    "the send_status and steer-receipt restart cases restart their own runner on their own state root with the harness restart hook, without a kill, so they do not count toward the real-kill rule; they run only when `run_ops` is declared, check a delivered steer's joined run, and the separate no-`run_ops` case checks a direct steer's state and step receipt",
     "delivery_order cases observe deliveries through read entries' delivered_as and the send's text; the rendered request is not inspected, so turn_system support is the adapter's word (turn_system_supported)",
     "the context-ceiling refusal of a send has no live case: the suite cannot bring a runner's context to its ceiling except through the adapter's held wait",
     "adopt cases start sessions through the subject's host-start hook, with plans the subject builds (host_plan); a plan's identity is the runner's, so the suite compares identities only with each other, never with a digest of its own",

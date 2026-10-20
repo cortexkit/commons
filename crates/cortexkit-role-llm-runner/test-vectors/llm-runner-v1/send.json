@@ -164,6 +164,17 @@
       }
     },
     {
+      "name": "steer delivered as step without run_id",
+      "admitted": false,
+      "reply": {
+        "state": "active",
+        "delivered": {
+          "as": "step",
+          "ref": "row-43"
+        }
+      }
+    },
+    {
       "name": "steer delivered as turn without ref",
       "admitted": false,
       "reply": {

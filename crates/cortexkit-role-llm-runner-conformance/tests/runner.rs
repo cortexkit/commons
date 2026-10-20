@@ -46,6 +46,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::RunToolCalls,
     Capability::RunUsage,
     Capability::DeliveryOrder,
+    Capability::Retract,
     Capability::SendStatus,
 ];
 
@@ -55,6 +56,53 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         if !missing.is_empty() && missing.iter().all(|group| OPTIONAL_GROUPS.contains(group)) {
             return;
         }
+    }
+    if case == NO_RUN_OPS_STEER_CASE {
+        if matches!(
+            report.outcome(case),
+            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("run_ops")
+        ) {
+            return;
+        }
+        if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
+            let needs = [
+                Capability::Steer,
+                Capability::Queue,
+                Capability::TranscriptReads,
+                Capability::HoldToolCalls,
+            ];
+            if !missing.is_empty() && missing.iter().all(|capability| needs.contains(capability)) {
+                return;
+            }
+        }
+    }
+    if case == UNDECLARED_MODE_CASE {
+        if matches!(
+            report.outcome(case),
+            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("steer")
+        ) {
+            return;
+        }
+        if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
+            let needs = [
+                Capability::DeliveryOrder,
+                Capability::Queue,
+                Capability::TranscriptReads,
+                Capability::HoldToolCalls,
+            ];
+            if !missing.is_empty() && missing.iter().all(|capability| needs.contains(capability)) {
+                return;
+            }
+        }
+    }
+    if case == "delivery_order_template_renders_as_system"
+        && matches!(
+            report.outcome(case),
+            Some(CaseOutcome::Inapplicable { reason })
+                if reason.contains("neither steer nor a supported turn_system mode")
+        )
+    {
+        return;
     }
     if case == LEFT_LINEAGE_CASE
         && matches!(
@@ -1718,6 +1766,13 @@ fn declaring(capability: Capability, defects: Defects) -> FakeSubject {
     subject
 }
 
+/// A fake declaring `delivery_order` and `queue`, but not `steer`.
+fn delivery_order_without_steer(defects: Defects) -> FakeSubject {
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.capabilities.remove(&Capability::Steer);
+    subject
+}
+
 /// The cases a capability gates, by name prefix.
 fn cases_of(prefixes: &[&str]) -> Vec<&'static str> {
     CASES
@@ -1764,10 +1819,23 @@ const RESEND_CASE: &str = "delivery_order_steer_receipt_durable_across_restart";
 const STATUS_CASE: &str = "send_status_answers_as_a_resend_after_restart";
 const UNKNOWN_SEND_CASE: &str = "send_status_unknown_send_refused";
 
-/// A fake declaring `delivery_order` and `send_status`.
+/// The step-receipt case for a runner that does not declare `run_ops`.
+const NO_RUN_OPS_STEER_CASE: &str = "steer_without_run_ops_reports_state_and_step";
+/// The ordered-list declaration case, which is inapplicable when `steer` is declared.
+const UNDECLARED_MODE_CASE: &str = "delivery_order_undeclared_mode_refused";
+
+/// A fake that does not declare `run_ops`.
+fn without_run_ops(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.remove(&Capability::RunOps);
+    subject
+}
+
+/// A fake declaring `delivery_order`, `send_status` and `run_ops`.
 fn following(defects: Defects) -> FakeSubject {
     let mut subject = declaring(Capability::DeliveryOrder, defects);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.insert(Capability::RunOps);
     subject
 }
 
@@ -1817,11 +1885,34 @@ async fn send_status_answering_pending_after_a_restart_fails_only_the_status_cas
     assert_passed(&report, UNKNOWN_SEND_CASE);
 }
 
-/// A delivered steer answered without the run it joined: the re-send case
-/// and the `send.status` case both fail by name, each naming the joined
-/// run, and nothing else fails.
+/// A faithful runner without `run_ops` answers a steer with the turn state
+/// and a step receipt, without a run id.
 #[tokio::test]
-async fn a_delivered_steer_answered_without_its_run_fails_both_follow_cases() {
+async fn a_runner_without_run_ops_answers_with_run_state_and_step_receipt() {
+    let report = run(&without_run_ops(Defects::default())).await;
+    assert_passed(&report, NO_RUN_OPS_STEER_CASE);
+    assert_none_failed_but(&report, &[]);
+}
+
+/// The fake defect supplies `state: "step"` on a delivered steer; only the
+/// no-`run_ops` receipt case must fail, by its report name.
+#[tokio::test]
+async fn a_steer_reply_with_state_step_fails_only_the_no_run_ops_case() {
+    let report = run(&without_run_ops(Defects {
+        steer_reply_state_step: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, NO_RUN_OPS_STEER_CASE);
+    assert!(reason.contains("not active or finished"), "{reason}");
+    assert_none_failed_but(&report, &[NO_RUN_OPS_STEER_CASE]);
+}
+
+/// A delivered steer answered without the run it joined while the fake
+/// declares `run_ops`: the re-send case and the `send.status` case both fail
+/// by name, each naming the joined run, and nothing else fails.
+#[tokio::test]
+async fn a_delivered_steer_without_its_run_while_declaring_run_ops_fails_both_follow_cases() {
     let report = run(&following(Defects {
         delivered_steer_without_run_id: true,
         ..Defects::default()
@@ -2018,6 +2109,35 @@ async fn a_runner_honouring_delivery_order_passes_its_cases() {
         &[],
     )
     .await;
+}
+
+#[tokio::test]
+async fn a_delivery_order_runner_checks_declared_list_modes() {
+    let report = run(&delivery_order_without_steer(Defects::default())).await;
+    assert_passed(&report, UNDECLARED_MODE_CASE);
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn queuing_a_list_with_no_declared_mode_fails_by_name() {
+    let report = run(&delivery_order_without_steer(Defects {
+        order_undeclared_modes_queued: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, UNDECLARED_MODE_CASE);
+    assert!(reason.contains("delivery_unsupported"), "{reason}");
+    assert_none_failed_but(&report, &[UNDECLARED_MODE_CASE]);
+}
+
+#[tokio::test]
+async fn a_delivery_order_send_pending_before_a_tool_result_can_be_retracted() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Retract);
+    subject.capabilities.insert(Capability::DeliveryOrder);
+    let report = run(&subject).await;
+    assert_passed(&report, "delivery_order_retract_pending_tool_result");
+    assert_none_failed_but(&report, &[]);
 }
 
 #[tokio::test]

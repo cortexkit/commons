@@ -78,6 +78,7 @@ pub struct Delivered {
     #[serde(rename = "as")]
     pub r#as: String,
     /// An opaque string: a stored row id, or the run id when `as` is `turn`.
+    /// Required when `as` is `step`, including on a runner without `run_ops`.
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub r#ref: Option<String>,
 }
@@ -137,9 +138,10 @@ impl Delivery {
     }
 }
 
-/// The `detail` of a `delivery_unsupported` refusal for `delivery`.
-pub fn delivery_unsupported_detail(delivery: Delivery) -> Value {
-    serde_json::json!({ DELIVERY_FIELD: delivery.as_str() })
+/// The `detail` of a `delivery_unsupported` refusal for `delivery`, either a
+/// legacy mode string or the ordered list as it was sent.
+pub fn delivery_unsupported_detail(delivery: impl Serialize) -> Value {
+    serde_json::json!({ DELIVERY_FIELD: delivery })
 }
 
 /// `delivery` on the wire: a legacy mode string, or the ordered list of
@@ -712,8 +714,9 @@ impl SendRequest {
     /// module-level capabilities) refuses a send whose `delivery` is a list
     /// with `invalid_params` naming `delivery`, as an older runner's strict
     /// decode does: it never delivers the list as a legacy mode. A runner
-    /// that declares the group passes; it checks the members with
-    /// [`Self::delivery_order`].
+    /// declaring the group passes this list-form check and then validates the
+    /// members with [`Self::delivery_order`] and their declarations with
+    /// [`crate::delivery_order::Mode::is_declared`].
     pub fn check_delivery_order<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
         let declares = declared
             .iter()
@@ -819,13 +822,19 @@ impl SendState {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct SendReply {
-    /// One of [`states`]; any other value decodes as a plain string.
+    /// One of [`states`]; any other value decodes as a plain string. A
+    /// delivered steer uses the run's `active` or `finished` state; `step` is
+    /// a value of `Delivered::as`, never a state.
     pub state: String,
+    /// On a delivered `step` receipt, required when the runner declares
+    /// `run_ops` and absent when it does not. The `Delivered::ref` remains
+    /// required either way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     /// The id of a queued submission, on a `pending` reply. Opaque: a caller
-    /// never derives a run id from it. Once the send is delivered, `run_id`
-    /// names the run that carried it.
+    /// never derives a run id from it. Once delivered, `run_id`, when present,
+    /// names the run that carried the send; a runner without `run_ops` omits it
+    /// for a delivered `step` receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submission_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -838,12 +847,13 @@ pub struct SendReply {
     /// same `send_id` gets the same facts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<Baseline>,
-    /// Steer delivery receipt, when applicable. For a queued send once
-    /// delivered: `step` with the stored row as `ref` when it went into a
-    /// running run, `turn` with the run as `ref` when it started one, and
-    /// `unknown` when delivery cannot be confirmed, each with `run_id` naming
-    /// that run when known. These three are durable: a restart never turns
-    /// them back into `pending` or absent.
+    /// Steer delivery receipt, when applicable. For a delivered send: `step`
+    /// has the stored row as `ref` and includes `run_id` only when the runner
+    /// declares `run_ops`; `turn` has the run as `ref` and its `run_id` names
+    /// the run it started; `unknown` includes `run_id` when the runner knows
+    /// the run it was handed to. A `step` receipt always has a `ref`. These
+    /// three are durable: a restart never turns them back into `pending` or
+    /// absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered: Option<Delivered>,
 }
@@ -946,6 +956,13 @@ mod tests {
                 case["admitted"].as_bool().unwrap(),
                 "{name}"
             );
+            if name == "steer delivered as step without run_id" {
+                assert_eq!(reply.state, "active", "{name}");
+                assert_eq!(reply.run_id, None, "{name}");
+                let delivered = reply.delivered.as_ref().expect("step receipt");
+                assert_eq!(delivered.r#as(), DeliveredAs::Step, "{name}");
+                assert_eq!(delivered.r#ref.as_deref(), Some("row-43"), "{name}");
+            }
         }
         for case in vectors::cases(&file, "refusals") {
             let name = case["name"].as_str().unwrap();
@@ -1109,7 +1126,7 @@ mod tests {
         assert!(tested_as.contains(delivered_as::PENDING));
         assert!(tested_as.contains(delivered_as::UNKNOWN));
         assert!(tested_as.contains("future_delivery"));
-        assert_eq!(tested_with_ref, 5);
+        assert_eq!(tested_with_ref, 6);
         assert_eq!(tested_without_ref, 4);
     }
 
