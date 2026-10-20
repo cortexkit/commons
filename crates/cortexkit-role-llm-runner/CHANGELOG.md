@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.7
+
+- Name a third interrupted-run reason, `host_exited` (`run::interrupt_reasons::HOST_EXITED`): the harness host the runner drives exited while the runner itself stayed up. Consumers can match it without a runner's private string.
+
 ## 0.3.6
 
 - A delivered steer reports the run's `active` or `finished` state, while `step` belongs only to `delivered.as`. Its stored-message `ref` is always present; `run_id` is present only when the runner declares `run_ops`. A caller without that run capability stops following a delivered `step` with no `run_id`, treating it as neither an error nor a reason to poll `run.status`. The same reply rule covers durable re-sends and `send.status`.

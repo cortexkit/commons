@@ -774,9 +774,11 @@ run's token usage whichever runner served it.
 - [pinned] A runner declaring `interrupt_reason` records a reason durably
   when it seals an `interrupted` run. Known values are `runner_shutdown`
   (`run::interrupt_reasons::RUNNER_SHUTDOWN`), sealed during a planned stop,
-  and `runner_crash` (`RUNNER_CRASH`), sealed at the next start after the
-  runner died. Runner-specific values are allowed: `reason` stays decoded
-  open, with no new wire member.
+  `runner_crash` (`RUNNER_CRASH`), sealed at the next start after the
+  runner died, and `host_exited` (`HOST_EXITED`), sealed when the harness
+  host the runner drives exited while the runner itself stayed up.
+  Runner-specific values are allowed: `reason` stays decoded open, with no
+  new wire member.
 - [pinned] The recorded value is the same on `run.result`, `run.status` and
   `session.head`'s `last_run_state`, wherever those surfaces are served.
   It survives restart. Absence means none was recorded (including runs

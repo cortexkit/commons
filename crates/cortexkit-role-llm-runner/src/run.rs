@@ -281,6 +281,9 @@ pub mod interrupt_reasons {
     pub const RUNNER_SHUTDOWN: &str = "runner_shutdown";
     /// The next runner start sealed a run left open by process death.
     pub const RUNNER_CRASH: &str = "runner_crash";
+    /// The harness host the runner drives exited while the runner itself
+    /// stayed up, so the run could not continue.
+    pub const HOST_EXITED: &str = "host_exited";
 }
 
 /// What a final message's text parts are joined with: nothing. Text parts
