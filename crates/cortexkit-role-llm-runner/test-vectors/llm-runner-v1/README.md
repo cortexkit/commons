@@ -146,6 +146,11 @@ without the `idle_start` grant, and unnamed modules refused
 expiry; `superseded` and `expired` send states; and entries recording each
 mode. Template digests are SHA-256 over JCS bytes and are checked by
 recomputation. `delivery-order-describe.json` pins the group's discovery.
+`delivery-order-modes-describe.json` pins a runner advertising only `steer`
+and the six malformed describe cases: an unknown name, a duplicate, an empty
+list, missing `steer`, missing `queue`, and missing `delivery_order`.
+Its declared and undeclared expectations are checked by
+`describe::delivery_order_modes_tests`.
 Checked by the `delivery_order::tests` and
 `describe::tags_and_tool_calls_tests` modules of the wire crate.
 

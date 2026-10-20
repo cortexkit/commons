@@ -82,7 +82,26 @@ where
         let outcome = match gate(spec, &declared) {
             Some(outcome) => outcome,
             None => {
-                let result = if spec.name == "compaction_setup_durable_once" {
+                let mode_gate = match &main {
+                    Ok(handle) => {
+                        crate::delivery_order::inapplicable(
+                            &Case {
+                                subject,
+                                handle,
+                                declared: &declared,
+                                mint: &mint,
+                            },
+                            spec.name,
+                        )
+                        .await
+                    }
+                    Err(_) => Ok(None),
+                };
+                let result = if let Err(error) = mode_gate {
+                    Err(error)
+                } else if let Ok(Some(reason)) = mode_gate {
+                    Ok(Ending::Inapplicable(reason))
+                } else if spec.name == "compaction_setup_durable_once" {
                     compaction::crash_case(
                         subject,
                         &mut driver,

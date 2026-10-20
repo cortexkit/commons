@@ -716,7 +716,7 @@ impl SendRequest {
     /// decode does: it never delivers the list as a legacy mode. A runner
     /// declaring the group passes this list-form check and then validates the
     /// members with [`Self::delivery_order`] and their declarations with
-    /// [`crate::delivery_order::Mode::is_declared`].
+    /// [`crate::delivery_order::Mode::is_declared_by`], including any describe narrowing.
     pub fn check_delivery_order<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
         let declares = declared
             .iter()

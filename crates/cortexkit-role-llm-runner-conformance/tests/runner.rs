@@ -1823,6 +1823,41 @@ const UNKNOWN_SEND_CASE: &str = "send_status_unknown_send_refused";
 const NO_RUN_OPS_STEER_CASE: &str = "steer_without_run_ops_reports_state_and_step";
 /// The ordered-list declaration case, which is inapplicable when `steer` is declared.
 const UNDECLARED_MODE_CASE: &str = "delivery_order_undeclared_mode_refused";
+const DECLARED_MODES_CASE: &str = "delivery_order_declared_modes_respected";
+
+fn steer_only_lists(defects: Defects) -> FakeSubject {
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.delivery_order_modes = Some(vec!["steer".into()]);
+    subject
+}
+
+#[tokio::test]
+async fn a_runner_advertising_only_steer_lists_passes() {
+    let report = run(&steer_only_lists(Defects::default())).await;
+    assert_passed(&report, DECLARED_MODES_CASE);
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn ignoring_delivery_order_modes_fails_by_name() {
+    let report = run(&steer_only_lists(Defects {
+        order_modes_ignored: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, DECLARED_MODES_CASE);
+    assert!(reason.contains("delivery_unsupported"), "{reason}");
+    assert_none_failed_but(&report, &[DECLARED_MODES_CASE]);
+}
+
+#[tokio::test]
+async fn delivery_order_modes_case_is_inapplicable_without_the_member() {
+    let report = run(&declaring(Capability::DeliveryOrder, Defects::default())).await;
+    assert!(
+        matches!(report.outcome(DECLARED_MODES_CASE), Some(CaseOutcome::Inapplicable { reason })
+        if reason.contains("delivery_order_modes"))
+    );
+}
 
 /// A fake that does not declare `run_ops`.
 fn without_run_ops(defects: Defects) -> FakeSubject {

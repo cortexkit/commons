@@ -36,6 +36,59 @@ type Check = Result<(), String>;
 /// a run.
 const QUIET_POLLS: usize = 5;
 
+const ALL_MODES: &[Mode] = &[
+    Mode::ToolResult,
+    Mode::TurnSystem,
+    Mode::Steer,
+    Mode::IdleStart,
+];
+
+/// A scenario requiring a delivery mode is inapplicable when the runner does not declare it.
+pub(crate) async fn inapplicable<S>(
+    case: &Case<'_, S>,
+    name: &str,
+) -> Result<Option<String>, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let required: &[Mode] = match name {
+        "delivery_order_declared_modes_respected" => &[],
+        "delivery_order_first_possible_mode" => &[Mode::ToolResult, Mode::IdleStart],
+        "delivery_order_retract_pending_tool_result" => &[Mode::ToolResult],
+        "delivery_order_undeclared_mode_refused" => &[Mode::IdleStart],
+        "delivery_order_never_starts_a_run"
+        | "delivery_order_dedupe_supersedes_queued"
+        | "delivery_order_expired_never_delivered"
+        | "delivery_order_unnamed_sender_refused"
+        | "delivery_order_steer_receipt_durable_across_restart"
+        | "send_status_answers_as_a_resend_after_restart" => &[Mode::Steer],
+        "delivery_order_template_renders_as_system" => {
+            if case.subject.turn_system_supported() {
+                &[Mode::TurnSystem]
+            } else {
+                &[Mode::Steer]
+            }
+        }
+        _ => return Ok(None),
+    };
+    let describe = case.checked_describe().await?;
+    if name == "delivery_order_declared_modes_respected" && describe.delivery_order_modes.is_none()
+    {
+        return Ok(Some(
+            "role.describe does not advertise delivery_order_modes".into(),
+        ));
+    }
+    Ok(required.iter().find_map(|mode| {
+        (!mode.is_declared_by(&describe)).then(|| {
+            format!(
+                "role.describe does not declare the {} list mode",
+                mode.as_str()
+            )
+        })
+    }))
+}
+
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
@@ -43,6 +96,7 @@ where
 {
     let passed = |check: Check| check.map(|()| Ending::Passed);
     match name {
+        "delivery_order_declared_modes_respected" => passed(declared_modes_respected(case).await),
         "delivery_order_never_starts_a_run" => passed(never_starts(case).await),
         "delivery_order_first_possible_mode" => passed(first_possible(case).await),
         "delivery_order_undeclared_mode_refused" => passed(undeclared_mode_refused(case).await),
@@ -58,6 +112,89 @@ where
         "delivery_order_bad_slot_refused" => passed(bad_slot(case).await),
         other => Err(format!("unknown delivery_order case {other}")),
     }
+}
+
+/// All non-empty ordered subsets: delivery lists have no duplicate modes.
+fn mode_lists(remaining: &[Mode]) -> Vec<Vec<Mode>> {
+    let mut lists = Vec::new();
+    for (index, mode) in remaining.iter().enumerate() {
+        lists.push(vec![*mode]);
+        let mut rest = remaining.to_vec();
+        rest.remove(index);
+        for tail in mode_lists(&rest) {
+            let mut list = vec![*mode];
+            list.extend(tail);
+            lists.push(list);
+        }
+    }
+    lists
+}
+
+async fn declared_modes_respected<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let describe = case.checked_describe().await?;
+    let lists = mode_lists(ALL_MODES);
+    let turns = lists
+        .iter()
+        .map(|_| ScriptedTurn::new(vec![case.mint.text("listed-mode-answer").0]))
+        .collect();
+    let (session, route) = ordered_session(case, "declared-modes", turns, true).await?;
+    // The plan sender has the idle_start grant and a template, permitting every list shape.
+    for list in lists
+        .iter()
+        .filter(|list| !list.iter().any(|mode| mode.is_declared_by(&describe)))
+    {
+        let before = snapshot(&session.route).await?;
+        let order = DeliveryOrder::new(list.clone()).with_template(template_use(json!(50)));
+        let error = expect_error(
+            &format!("the all-undeclared list {list:?}"),
+            ordered(
+                case,
+                &session,
+                &route,
+                "",
+                &case.mint.next("refused"),
+                &order,
+            )
+            .await?,
+        )
+        .map_err(|error| format!("expected delivery_unsupported for {list:?}: {error}"))?;
+        expect_code(
+            "an all-undeclared list",
+            &error,
+            errors::DELIVERY_UNSUPPORTED,
+        )?;
+        if error.detail.as_ref().and_then(|detail| detail.get(FIELD)) != Some(&json!(list)) {
+            return Err(format!(
+                "delivery_unsupported did not echo {list:?} in detail.delivery"
+            ));
+        }
+        if !same(&before, &snapshot(&session.route).await?) {
+            return Err(format!("refusing {list:?} wrote to the transcript"));
+        }
+    }
+    for list in lists
+        .into_iter()
+        .filter(|list| list.iter().any(|mode| mode.is_declared_by(&describe)))
+    {
+        let order = DeliveryOrder::new(list.clone()).with_template(template_use(json!(50)));
+        expect_ok(
+            &format!("a list with a listed mode {list:?}"),
+            ordered(
+                case,
+                &session,
+                &route,
+                "",
+                &case.mint.next("accepted"),
+                &order,
+            )
+            .await?,
+        )?;
+    }
+    Ok(())
 }
 
 /// The template the template cases declare in the plan, in the plan

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.8
+
+- Add optional `RoleDescribe.delivery_order_modes` and `with_delivery_order_modes` so a runner can name only the list modes it can ever land. Absence keeps the existing group mapping. Presence only narrows it; `steer` still requires `steer`, and `idle_start` still requires `queue`. Legacy string deliveries are unchanged.
+- Add `Mode::is_declared_by` for describe-aware decisions; keep `is_declared` as the absent-member mapping. `check_describe` rejects unknown or duplicate mode names, an empty list, missing mode groups, or the member without `delivery_order`. Packaged vectors cover each refusal and a runner advertising only `steer`.
+- A list containing only undeclared modes, including modes excluded by this member, is refused immediately as `delivery_unsupported` with the original array in `detail.delivery`, rather than waiting for a boundary it can never reach. The `steer` group does not require `run_ops`: a runner may steer turns it does not own.
+
 ## 0.3.7
 
 - Name a third interrupted-run reason, `host_exited` (`run::interrupt_reasons::HOST_EXITED`): the harness host the runner drives exited while the runner itself stayed up. Consumers can match it without a runner's private string.

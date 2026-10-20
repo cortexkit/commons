@@ -127,6 +127,7 @@ from `session.baseline` has no admission reply to compare.
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer` |
 | `delivery_order_members_without_list_refused` | `delivery_order`, `queue`, `transcript_reads` |
 | `delivery_order_first_possible_mode` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls` |
+| `delivery_order_declared_modes_respected` | `delivery_order`, `queue`, `transcript_reads`; inapplicable without live `delivery_order_modes`; all lists containing only undeclared modes are refused with `detail.delivery` and no writes, and lists with a listed mode are accepted |
 | `delivery_order_template_renders_as_system` | `delivery_order`, `queue`, `transcript_reads`; needs `steer` for fallback or a route that supports `turn_system`; inapplicable if neither is available |
 | `delivery_order_bad_slot_refused` | `delivery_order`, `queue`, `transcript_reads` |
 | `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; retracts a pending `[tool_result]` send, then releases the held call and confirms the send was never delivered |

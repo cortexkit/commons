@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.6
+
+- Require llm-runner 0.3.8. Add `delivery_order_declared_modes_respected`, gated on the live describe answer advertising `delivery_order_modes`. It tries every non-empty ordered list of distinct modes: lists containing only undeclared modes must be refused `delivery_unsupported` with the original `detail.delivery` and no transcript writes; lists containing a listed mode must be accepted.
+- Mode-specific delivery scenarios are inapplicable when the describe answer excludes the modes they need. The fake can advertise only `steer`; a fake that ignores the member fails the new case by name in `ignoring_delivery_order_modes_fails_by_name`.
+
 ## 0.8.5
 
 - Require llm-runner 0.3.6.

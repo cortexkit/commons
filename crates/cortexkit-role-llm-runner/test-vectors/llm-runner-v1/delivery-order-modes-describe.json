@@ -1,0 +1,73 @@
+{
+  "accept": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "steer-gateway-1",
+      "capabilities": ["delivery_order", "steer", "queue"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": ["steer"]
+    },
+    "declared": ["steer"],
+    "undeclared": ["tool_result", "turn_system", "idle_start"]
+  },
+  "unknown": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "unknown-mode-1",
+      "capabilities": ["delivery_order"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": ["interrupt"]
+    },
+    "problem": "unknown_delivery_order_mode"
+  },
+  "duplicate": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "duplicate-mode-1",
+      "capabilities": ["delivery_order", "steer"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": ["steer", "steer"]
+    },
+    "problem": "duplicate_delivery_order_mode"
+  },
+  "empty": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "empty-modes-1",
+      "capabilities": ["delivery_order"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": []
+    },
+    "problem": "empty_delivery_order_modes"
+  },
+  "steer_without_group": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "missing-steer-1",
+      "capabilities": ["delivery_order"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": ["steer"]
+    },
+    "problem": "delivery_order_steer_undeclared"
+  },
+  "idle_start_without_group": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "missing-queue-1",
+      "capabilities": ["delivery_order"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": ["idle_start"]
+    },
+    "problem": "delivery_order_idle_start_undeclared"
+  },
+  "without_delivery_order": {
+    "describe": {
+      "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
+      "implementation_version": "missing-delivery-order-1",
+      "capabilities": ["steer"],
+      "session_capabilities_from": "baseline",
+      "delivery_order_modes": ["steer"]
+    },
+    "problem": "delivery_order_modes_undeclared"
+  }
+}

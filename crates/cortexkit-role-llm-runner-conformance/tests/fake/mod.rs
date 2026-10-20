@@ -269,6 +269,8 @@ pub struct Defects {
     pub order_members_without_list_accepted: bool,
     /// Queue a list even when none of its modes is declared by the runner.
     pub order_undeclared_modes_queued: bool,
+    /// Use capability groups alone, ignoring the advertised mode restriction.
+    pub order_modes_ignored: bool,
     /// A template send carrying `"prompt": ""` is accepted as if it carried
     /// no prompt, instead of refused naming `template`.
     pub order_template_with_empty_prompt_accepted: bool,
@@ -345,6 +347,7 @@ struct World {
     /// so a test can prove its defect actually took effect.
     held_steer_break_answers: AtomicUsize,
     groups: Vec<String>,
+    delivery_order_modes: Option<Vec<String>>,
     scripts: Mutex<BTreeMap<String, Script>>,
     model_calls: Mutex<BTreeSet<(String, String, usize)>>,
     /// What each session's scripted route reports about schema-constrained
@@ -383,6 +386,14 @@ impl World {
     }
     fn serves(&self, group: &str) -> bool {
         self.groups.iter().any(|served| served == group)
+    }
+
+    fn declares_mode(&self, mode: Mode) -> bool {
+        let mut describe = RoleDescribe::default().with_capabilities(self.groups.clone());
+        if !self.defects.order_modes_ignored {
+            describe.delivery_order_modes = self.delivery_order_modes.clone();
+        }
+        mode.is_declared_by(&describe)
     }
 
     /// The scripted tool provider: count the call, and answer its scripted
@@ -1616,7 +1627,7 @@ impl Module {
         let declared: Vec<Mode> = modes
             .iter()
             .copied()
-            .filter(|mode| !list_form || mode.is_declared(&self.world.groups))
+            .filter(|mode| !list_form || self.world.declares_mode(*mode))
             .collect();
         if self.world.defects.order_last_possible_mode {
             declared
@@ -2010,6 +2021,7 @@ impl Module {
         if self.world.steer_receipt_confirm {
             describe = describe.with_steer_receipt("confirm");
         }
+        describe.delivery_order_modes = self.world.delivery_order_modes.clone();
         if self.world.serves(groups::RETENTION) {
             describe = describe.with_retention(RETENTION_MAX, self.world.retention_delete_ms);
         }
@@ -2530,7 +2542,7 @@ impl Module {
             && !wanted
                 .modes
                 .iter()
-                .any(|mode| mode.is_declared(&self.world.groups))
+                .any(|mode| self.world.declares_mode(*mode))
         {
             return Ok(refuse(
                 errors::DELIVERY_UNSUPPORTED,
@@ -3506,6 +3518,7 @@ pub struct FakeSubject {
     pub defects: Defects,
     pub step_recovery: StepRecovery,
     pub capabilities: BTreeSet<Capability>,
+    pub delivery_order_modes: Option<Vec<String>>,
     pub seal_compaction_setup_crash: bool,
     pub kill_points: Vec<&'static str>,
     /// Report every kill as a real process kill, which this in-process fake
@@ -3583,6 +3596,7 @@ impl FakeSubject {
             defects,
             step_recovery: StepRecovery::Resume,
             capabilities: served(),
+            delivery_order_modes: None,
             without_plans: false,
             seal_compaction_setup_crash: false,
             kill_points: KILL_POINTS.to_vec(),
@@ -3631,6 +3645,7 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .collect(),
+                    delivery_order_modes: self.delivery_order_modes.clone(),
                     scripts: Mutex::new(BTreeMap::new()),
                     model_calls: Mutex::new(BTreeSet::new()),
                     structured_output_support: Mutex::new(BTreeMap::new()),

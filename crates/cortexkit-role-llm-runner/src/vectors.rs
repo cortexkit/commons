@@ -46,6 +46,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/delivery-order-describe.json"),
     ),
     (
+        "delivery-order-modes-describe.json",
+        include_str!("../test-vectors/llm-runner-v1/delivery-order-modes-describe.json"),
+    ),
+    (
         "delivery-order.json",
         include_str!("../test-vectors/llm-runner-v1/delivery-order.json"),
     ),

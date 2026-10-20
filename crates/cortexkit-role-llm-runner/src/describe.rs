@@ -31,6 +31,12 @@ pub mod problem_names {
     pub const EMPTY_RUN_CANCEL_AT: &str = "empty_run_cancel_at";
     pub const MISSING_RUN_CANCEL_NOW: &str = "missing_run_cancel_now";
     pub const DUPLICATE_RUN_CANCEL_AT: &str = "duplicate_run_cancel_at";
+    pub const DELIVERY_ORDER_MODES_UNDECLARED: &str = "delivery_order_modes_undeclared";
+    pub const EMPTY_DELIVERY_ORDER_MODES: &str = "empty_delivery_order_modes";
+    pub const UNKNOWN_DELIVERY_ORDER_MODE: &str = "unknown_delivery_order_mode";
+    pub const DUPLICATE_DELIVERY_ORDER_MODE: &str = "duplicate_delivery_order_mode";
+    pub const DELIVERY_ORDER_STEER_UNDECLARED: &str = "delivery_order_steer_undeclared";
+    pub const DELIVERY_ORDER_IDLE_START_UNDECLARED: &str = "delivery_order_idle_start_undeclared";
     /// The answer declares `compaction` without `tags`, which a compaction
     /// provider addresses every view edit by.
     pub const COMPACTION_WITHOUT_TAGS: &str = "compaction_without_tags";
@@ -74,6 +80,10 @@ pub struct RoleDescribe {
     /// ([`steer_receipt`]). Absent means [`steer_receipt::GUARANTEED`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steer_receipt: Option<String>,
+    /// List modes this runner can ever land. Absence uses the capability-group
+    /// mapping; presence narrows it. Validated by [`check_describe`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_order_modes: Option<Vec<String>>,
     /// Limits required when the `retention` capability group is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<Retention>,
@@ -206,6 +216,12 @@ impl RoleDescribe {
         self
     }
 
+    /// Narrow the declared list modes (their capability groups must also be listed).
+    pub fn with_delivery_order_modes(mut self, modes: Vec<String>) -> Self {
+        self.delivery_order_modes = Some(modes);
+        self
+    }
+
     /// The steer delivery receipt policy, with absence read as [`steer_receipt::GUARANTEED`].
     pub fn steer_receipt(&self) -> &str {
         self.steer_receipt
@@ -290,7 +306,7 @@ pub enum DescribeProblem {
 
 /// Decode `raw` and check it lists an `llm-runner/v1` major with every
 /// required op, every op of each declared group, and a session-capability
-/// source, plus any advertised cancellation points. Every problem is returned,
+/// source, plus any advertised cancellation points and delivery list modes. Every problem is returned,
 /// not only the first. Unknown
 /// capabilities and an unknown source value are tolerated.
 pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>> {
@@ -347,6 +363,41 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::COMPACTION_WITHOUT_TAGS.into(),
         ));
     }
+    if let Some(modes) = &describe.delivery_order_modes {
+        use crate::delivery_order::modes as names;
+        if !describe.declares(capabilities::DELIVERY_ORDER) {
+            problems.push(DescribeProblem::Undecodable(
+                problem_names::DELIVERY_ORDER_MODES_UNDECLARED.into(),
+            ));
+        }
+        if modes.is_empty() {
+            problems.push(DescribeProblem::Undecodable(
+                problem_names::EMPTY_DELIVERY_ORDER_MODES.into(),
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for mode in modes {
+            let problem = match mode.as_str() {
+                names::TOOL_RESULT | names::TURN_SYSTEM => None,
+                names::STEER if !describe.declares(capabilities::STEER) => {
+                    Some(problem_names::DELIVERY_ORDER_STEER_UNDECLARED)
+                }
+                names::IDLE_START if !describe.declares(capabilities::QUEUE) => {
+                    Some(problem_names::DELIVERY_ORDER_IDLE_START_UNDECLARED)
+                }
+                names::STEER | names::IDLE_START => None,
+                _ => Some(problem_names::UNKNOWN_DELIVERY_ORDER_MODE),
+            };
+            if let Some(problem) = problem {
+                problems.push(DescribeProblem::Undecodable(problem.into()));
+            }
+            if !seen.insert(mode) {
+                problems.push(DescribeProblem::Undecodable(
+                    problem_names::DUPLICATE_DELIVERY_ORDER_MODE.into(),
+                ));
+            }
+        }
+    }
     if let Some(cancel) = &describe.run_cancel {
         if !describe.declares(capabilities::RUN_CANCEL) {
             problems.push(DescribeProblem::Undecodable(
@@ -376,6 +427,136 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Ok(describe)
     } else {
         Err(problems)
+    }
+}
+
+#[cfg(test)]
+mod delivery_order_modes_tests {
+    use super::*;
+    use crate::delivery_order::Mode;
+    use serde_json::json;
+
+    fn vectors() -> Value {
+        serde_json::from_str(crate::vectors::file("delivery-order-modes-describe.json").unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn advertised_delivery_order_modes_narrow_group_mapping() {
+        let vector = &vectors()["accept"];
+        let describe = check_describe(&vector["describe"]).unwrap();
+        for mode in serde_json::from_value::<Vec<Mode>>(vector["declared"].clone()).unwrap() {
+            assert!(mode.is_declared_by(&describe), "{}", mode.as_str());
+        }
+        for mode in serde_json::from_value::<Vec<Mode>>(vector["undeclared"].clone()).unwrap() {
+            assert!(!mode.is_declared_by(&describe), "{}", mode.as_str());
+        }
+        assert!(!describe.declares(capabilities::RUN_OPS));
+        let mut absent = describe.clone();
+        absent.delivery_order_modes = None;
+        for mode in [
+            Mode::ToolResult,
+            Mode::TurnSystem,
+            Mode::Steer,
+            Mode::IdleStart,
+        ] {
+            assert_eq!(
+                mode.is_declared_by(&absent),
+                mode.is_declared(&absent.capabilities)
+            );
+            assert!(mode.is_declared_by(&absent));
+        }
+        let built = absent.with_delivery_order_modes(vec!["steer".into()]);
+        assert_eq!(built, describe);
+        assert_eq!(serde_json::to_value(built).unwrap(), vector["describe"]);
+    }
+
+    fn refused(case: &str) {
+        let vector = &vectors()[case];
+        assert_eq!(
+            check_describe(&vector["describe"]),
+            Err(vec![DescribeProblem::Undecodable(
+                vector["problem"].as_str().unwrap().into()
+            )]),
+            "{case}",
+        );
+    }
+
+    #[test]
+    fn listed_steer_requires_steer_group() {
+        refused("steer_without_group");
+    }
+
+    #[test]
+    fn listed_idle_start_requires_queue_group() {
+        refused("idle_start_without_group");
+    }
+
+    #[test]
+    fn delivery_order_modes_require_delivery_order_group() {
+        refused("without_delivery_order");
+    }
+
+    #[test]
+    fn delivery_order_modes_reject_unknown_names() {
+        refused("unknown");
+    }
+
+    #[test]
+    fn delivery_order_modes_reject_duplicates() {
+        refused("duplicate");
+    }
+
+    #[test]
+    fn delivery_order_modes_reject_empty_list() {
+        refused("empty");
+    }
+
+    #[test]
+    fn delivery_order_modes_reject_wrong_wire_types() {
+        for invalid in [json!("steer"), json!([3]), json!({"steer": true})] {
+            let mut raw = vectors()["accept"]["describe"].clone();
+            raw["delivery_order_modes"] = invalid;
+            assert!(matches!(check_describe(&raw), Err(problems)
+                if matches!(problems.as_slice(), [DescribeProblem::Undecodable(_)])));
+        }
+    }
+
+    #[test]
+    fn listed_modes_never_add_missing_groups() {
+        for (mode, group) in [
+            (Mode::ToolResult, capabilities::DELIVERY_ORDER),
+            (Mode::TurnSystem, capabilities::DELIVERY_ORDER),
+            (Mode::Steer, capabilities::STEER),
+            (Mode::IdleStart, capabilities::QUEUE),
+        ] {
+            let describe =
+                RoleDescribe::default().with_delivery_order_modes(vec![mode.as_str().into()]);
+            assert!(!mode.is_declared_by(&describe));
+            let describe =
+                describe.with_capabilities(vec![group.into(), capabilities::DELIVERY_ORDER.into()]);
+            assert!(mode.is_declared_by(&describe));
+        }
+    }
+
+    /// `is_declared_by` must hold the narrowing rule on its own, because a
+    /// caller may hold a describe answer it never passed through
+    /// `check_describe`: listing `steer` or `idle_start` with only the
+    /// `delivery_order` group still leaves that mode undeclared.
+    #[test]
+    fn a_listed_mode_without_its_own_group_stays_undeclared() {
+        for mode in [Mode::Steer, Mode::IdleStart] {
+            let describe = RoleDescribe::default()
+                .with_capabilities(vec![capabilities::DELIVERY_ORDER.into()])
+                .with_delivery_order_modes(vec![mode.as_str().into()]);
+            assert!(!mode.is_declared_by(&describe), "{}", mode.as_str());
+        }
+        let unlisted =
+            RoleDescribe::default().with_capabilities(vec![capabilities::DELIVERY_ORDER.into()]);
+        assert!(Mode::ToolResult.is_declared_by(&unlisted));
+        assert!(Mode::TurnSystem.is_declared_by(&unlisted));
+        assert!(!Mode::Steer.is_declared_by(&unlisted));
+        assert!(!Mode::IdleStart.is_declared_by(&unlisted));
     }
 }
 

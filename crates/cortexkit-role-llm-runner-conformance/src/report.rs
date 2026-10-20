@@ -123,6 +123,8 @@ pub const CASES: &[CaseSpec] = &[
         "a run held at the context ceiling reads active with reason context_ceiling_wait on session.head (and on run.status with a deadline_ms, where served); with a view it completes, without one it ends context_ceiling with cause view_timeout and no error"),
     case("delivery_order_never_starts_a_run", ORDER_STEER,
         "a list without idle_start on an idle session answers pending and changes nothing, then rides the owner's next turn as a steer, delivered once"),
+    case("delivery_order_declared_modes_respected", ORDER,
+        "when role.describe advertises delivery_order_modes, every ordered list of only undeclared modes is refused delivery_unsupported with detail.delivery and no writes; every list containing a listed mode is accepted"),
     case(
         "delivery_order_first_possible_mode",
         &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls],

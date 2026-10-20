@@ -68,7 +68,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -96,7 +96,16 @@ shipping runner with this document.
   relies on is checked strictly (`check_describe`): the `llm-runner/v1`
   major, its required ops, every op of each declared group, the
   session-capability source, and the byte cap when `transcript_reads` is
-  declared, and optional cancellation-point metadata (§3).
+  declared, optional cancellation-point metadata (§3), and optional delivery
+  list mode metadata (§9.7).
+- [pinned] `delivery_order_modes` optionally lists the delivery list modes the
+  runner can ever land (§9.7). Absent means the capability-group mapping is
+  unchanged; present means only its listed modes count as declared, still
+  requiring their groups. `check_describe` refuses an unknown mode name, a
+  duplicate, an empty list, a listed `steer` without the `steer` group, a listed
+  `idle_start` without `queue`, or the member without the `delivery_order`
+  group. The member is an array of strings (`Option<Vec<String>>` in
+  `RoleDescribe`, built with `with_delivery_order_modes`).
 - [pinned] The answer describes the runner build, never a session. A consumer
   may cache it for as long as it talks to the same module incarnation.
 - [pinned] Stability is data, never part of a capability name. Each major
@@ -1651,9 +1660,19 @@ say who may send and which texts are system text.
   nothing, as an unknown string is.
 - [pinned] For a list, `tool_result` and `turn_system` are modes of the
   `delivery_order` group; `steer` requires the `steer` group, and `idle_start`
-  requires the `queue` group (§3, `delivery_order::Mode::is_declared`).
+  requires the `queue` group (§3). The `steer` group does not require `run_ops`,
+  since a runner may land steers into turns it does not own (the delivered-steer
+  rule in §9).
+  Without `role.describe.delivery_order_modes`, this is the unchanged mapping
+  (`delivery_order::Mode::is_declared`). When the member is present, only its
+  listed modes count as declared, still requiring the groups above
+  (`Mode::is_declared_by`): the member only narrows, never adds a capability.
+  For example, a runner declaring `delivery_order` and `steer` with
+  `delivery_order_modes: ["steer"]` declares only `steer` for lists, not
+  `tool_result`, `turn_system` or `idle_start`, even if it also declares `queue`.
+  This member does not narrow legacy string delivery modes.
   `interrupt` has no list form. A structurally valid list with no declared
-  member is refused at once as `delivery_unsupported`, with
+  member after this narrowing is refused at once as `delivery_unsupported`, with
   `detail.delivery` equal to the list as sent, and writes nothing. A list
   with at least one declared member is accepted; each undeclared member is
   impossible at every boundary and is skipped, never delivered in another
@@ -1665,10 +1684,12 @@ say who may send and which texts are system text.
   a runner that owns the request, and the authority rule below; `steer`
   needs a run in progress; `idle_start` needs an idle session. When none is
   possible, the send stays queued, durably, for the next boundary.
-  `turn_system` counts as declared wherever `delivery_order` is, even on a
-  runner whose provider can never take it, so a sender lists at least one
-  user-authority mode after `turn_system`: a list of `turn_system` alone can
-  wait on such a runner until the send expires.
+  Without `delivery_order_modes`, `turn_system` counts as declared wherever
+  `delivery_order` is, even on a runner whose provider can never take it, so
+  a sender lists at least one user-authority mode after `turn_system`: a list
+  of `turn_system` alone can wait on such a runner until the send expires. A
+  runner that can never land `turn_system` should advertise
+  `delivery_order_modes` without it, so such a list is refused at once.
 - [pinned] A `delivery_order` send still waiting for its next possible
   boundary is a queued send under §9.2. It answers `pending` with a
   `submission_id` on a runner that declares `retract`, and `session.retract`
@@ -2445,6 +2466,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `delivery_order_list_refused_without_group` | `queue`, `transcript_reads`; not applicable when `delivery_order` is declared: a list in `delivery` is refused `invalid_params` naming `delivery` and writes nothing |
 | `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
 | `delivery_order_undeclared_mode_refused` | `delivery_order`, `queue`, `transcript_reads`, held tool call, and `steer` left undeclared; `[steer]` is refused `delivery_unsupported` with the exact list in `detail.delivery` and writes nothing; `[steer, idle_start]` is accepted, skips the undeclared `steer` at the active boundary, then starts at the idle boundary; inapplicable when `steer` is declared |
+| `delivery_order_declared_modes_respected` | `delivery_order`, `queue`, `transcript_reads`, and the live describe member `delivery_order_modes`; all non-empty ordered lists of distinct undeclared modes are refused `delivery_unsupported` with the original list in `detail.delivery` and no writes; every list containing a listed mode is accepted |
 | `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, and a held tool call; a `[tool_result]` send waits with `pending` and `submission_id`, `session.retract` answers `retracted` then `not_pending`, and after the call is released the send is never delivered |
 | `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, and a held tool call; on a separate storage directory for this case, the harness restart hook (without a process kill): a `[steer]` list sent while a run waits on a held call answers `pending` with a `submission_id`, is delivered once as a steer when the call is released, and a re-send of its `send_id` answers `delivered: {as: "step", ref}` with `run_id` the run it joined, before the restart and unchanged after it; reported as a named skip without `delivery_order`, `steer` or `run_ops` |
 | `send_status_answers_as_a_resend_after_restart` | `send_status`, `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, and a held tool call; `send.status` of the same send answers what a re-send answers, `step` with the joined run's `run_id`, before the restart and after it, never `pending`; the live `role.describe` must declare `send_status` before any `send.status` is sent; reported as a named skip without `send_status`, `delivery_order`, `steer` or `run_ops` |

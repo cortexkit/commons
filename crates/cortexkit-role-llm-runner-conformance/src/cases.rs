@@ -393,7 +393,7 @@ where
         self.describe_on(&session.route).await
     }
 
-    async fn checked_describe(&self) -> Result<RoleDescribe, String> {
+    pub(crate) async fn checked_describe(&self) -> Result<RoleDescribe, String> {
         let raw = self.describe().await?;
         check_describe(&raw)
             .map_err(|problems| format!("check_describe refused {raw}: {problems:?}"))

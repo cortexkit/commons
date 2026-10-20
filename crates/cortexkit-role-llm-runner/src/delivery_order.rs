@@ -82,8 +82,9 @@ impl Mode {
         self != Self::TurnSystem
     }
 
-    /// Whether the runner declares this list mode through its module-level
-    /// capability groups. `delivery_order` declares the list-only modes;
+    /// The absent-`delivery_order_modes` mapping from module-level capability
+    /// groups. Use [`Self::is_declared_by`] when a describe answer is available.
+    /// `delivery_order` declares the list-only modes;
     /// `steer` and `idle_start` reuse the legacy `steer` and `queue` groups.
     pub fn is_declared<S: AsRef<str>>(self, declared: &[S]) -> bool {
         let group = match self {
@@ -92,6 +93,17 @@ impl Mode {
             Self::IdleStart => crate::capabilities::QUEUE,
         };
         declared.iter().any(|name| name.as_ref() == group)
+    }
+
+    /// Whether the runner declares this list mode after optional narrowing.
+    /// A listed mode never bypasses its capability group. Validate the answer
+    /// with [`crate::describe::check_describe`] before relying on it.
+    pub fn is_declared_by(self, describe: &crate::describe::RoleDescribe) -> bool {
+        self.is_declared(&describe.capabilities)
+            && describe.delivery_order_modes.as_ref().is_none_or(|modes| {
+                describe.declares(crate::capabilities::DELIVERY_ORDER)
+                    && modes.iter().any(|mode| mode == self.as_str())
+            })
     }
 }
 
