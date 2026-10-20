@@ -1,5 +1,6 @@
 //! Withdrawal uses the authenticated route's namespace, never a sender name
-//! supplied in params. A claimed item cannot be withdrawn as pending work.
+//! supplied in params. Only a pending item can be withdrawn; once a scheduler
+//! has claimed it for delivery, withdraw answers `already_delivered`.
 
 use serde::{Deserialize, Serialize};
 

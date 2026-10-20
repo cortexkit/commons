@@ -100,8 +100,8 @@ validation, size limits, quotas or template checks. An identical parsed request
 apart from the optional replay annotation. A different request under the same
 key is `idempotency_conflict`, even after scope end or authorization loss.
 Replacement, withdrawal, expiry, delivery and daemon restart do not erase the
-receipt. Keep receipts at least as long as the sender's retry horizon; seven
-days is proposed, not a universal finite bound.
+receipt. Keep receipts at least as long as any sender may still retry; seven
+days is the recommended minimum.
 
 ### Replacement and attention
 
