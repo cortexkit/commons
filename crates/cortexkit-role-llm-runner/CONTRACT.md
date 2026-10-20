@@ -1663,6 +1663,10 @@ say who may send and which texts are system text.
   a runner that owns the request, and the authority rule below; `steer`
   needs a run in progress; `idle_start` needs an idle session. When none is
   possible, the send stays queued, durably, for the next boundary.
+  `turn_system` counts as declared wherever `delivery_order` is, even on a
+  runner whose provider can never take it, so a sender lists at least one
+  user-authority mode after `turn_system`: a list of `turn_system` alone can
+  wait on such a runner until the send expires.
 - [pinned] A `delivery_order` send still waiting for its next possible
   boundary is a queued send under §9.2. It answers `pending` with a
   `submission_id` on a runner that declares `retract`, and `session.retract`
