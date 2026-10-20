@@ -32,7 +32,8 @@ impl WakeError {
     }
 }
 
-/// Consumer-side error decoding keeps future reasons, like a run's `reason`.
+/// A parser error reason as a consumer decodes it. Reasons this crate doesn't
+/// know yet decode as `Unknown` rather than failing, as a run's `reason` does.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(from = "String", into = "String")]
 #[non_exhaustive]

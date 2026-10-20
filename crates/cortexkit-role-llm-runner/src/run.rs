@@ -192,7 +192,8 @@ pub struct RunResult {
     /// does not report usage, never zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RunUsage>,
-    /// Parsed trailing directives, only on completed runs admitted with them (§9.9).
+    /// Trailing directives parsed from the final text. Present only on a
+    /// completed run whose send asked for them in `directives` (§9.9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directives: Option<Vec<crate::directives::Directive>>,
 }
@@ -481,7 +482,8 @@ pub struct RunStatus {
     /// reported, never zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RunUsage>,
-    /// Parsed trailing directives, only on completed runs admitted with them (§9.9).
+    /// Trailing directives parsed from the final text. Present only on a
+    /// completed run whose send asked for them in `directives` (§9.9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directives: Option<Vec<crate::directives::Directive>>,
 }

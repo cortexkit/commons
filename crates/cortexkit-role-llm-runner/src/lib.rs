@@ -175,7 +175,8 @@ pub mod capabilities {
     pub const NO_TOOLS: &str = "no_tools";
     /// Stable trailing tags parsed from a completed run's stored final text.
     pub const TURN_DIRECTIVES: &str = "turn_directives";
-    /// Durable reasons for interrupted run seals, without inferring missing history.
+    /// An interrupted run records why it was sealed (`reason`), durably. A run
+    /// sealed before the runner adopted this group has none, and none is guessed.
     pub const INTERRUPT_REASON: &str = "interrupt_reason";
     /// Schema-shaped run output on `session.send` (`structured_output`),
     /// reported on `run.result` and `run.status`.
