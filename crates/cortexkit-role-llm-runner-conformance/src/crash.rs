@@ -17,9 +17,9 @@ use std::{collections::BTreeSet, path::Path};
 
 use cortexkit_role_harness::{CrashDriver, KillPoint, Trigger};
 use cortexkit_role_llm_runner::{
-    errors::tool_result_reasons,
+    errors::{self, tool_result_reasons},
     ops, points,
-    read::{HeadMeta, ReadMessage},
+    read::{HeadMeta, ReadMessage, ReadRequest},
     run::{RunResult, RunState},
     send::SendReply,
 };
@@ -27,8 +27,8 @@ use cortexkit_role_llm_runner::{
 use crate::{
     cases::entries_for,
     drive::{
-        call, check_unique, decode, expect_ok, head, holding, read_all, result_marker, run_result,
-        send_params, wait_run_end, Mint, MAX_POLLS,
+        call, check_unique, decode, expect_code, expect_ok, head, holding, read_all, read_refusal,
+        result_marker, run_result, send_params, wait_run_end, Mint, MAX_POLLS,
     },
     route::RunnerRoute,
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn},
@@ -69,6 +69,14 @@ pub struct CrashObservation {
     /// that drops or rewrites the cut step must move B to a new lineage.
     lineage_before_b: Option<String>,
     lineage_after_b: Option<String>,
+    /// At `StepRecorded`, session B's transcript read before the kill, after
+    /// its earlier run ended. A recovery that keeps B's lineage must read
+    /// these messages back unchanged.
+    before_b: Vec<ReadMessage>,
+    /// At `StepRecorded`, when B's lineage changed across the restart: `Ok`
+    /// when a read naming the old lineage was refused `lineage_changed`, or
+    /// what was answered instead. Absent when the lineage did not change.
+    old_lineage_read: Option<Result<(), String>>,
 }
 
 /// The kill point a case's scenario cuts at, if it is a crash case.
@@ -161,6 +169,7 @@ where
         .map_err(|e| format!("opening the route of {name_b}: {e}"))?;
     let mut lineage_before_b = None;
     let mut earlier_run = None;
+    let mut before_b = Vec::new();
     if earlier_b {
         let params = send_params(
             subject,
@@ -181,6 +190,7 @@ where
         let head_before = head(&route_b).await?;
         lineage_before_b = head_before.lineage_id;
         earlier_run = head_before.last_run_state.map(|last| last.run_id);
+        before_b = read_all(&route_b).await?.1;
     }
     let prompt = mint.next("prompt");
     let params_b = send_params(
@@ -247,6 +257,18 @@ where
     let (_, after_b) = read_all(&route_b).await?;
     let head_b = head(&route_b).await?;
     let head_b_lineage = head_b.lineage_id.clone();
+    let old_lineage_read = match &lineage_before_b {
+        Some(old) if head_b_lineage.as_ref() != Some(old) => {
+            let what = "a read naming B's lineage from before the kill";
+            let request = ReadRequest::tail().with_lineage_id(old);
+            Some(
+                read_refusal(&route_b, what, &request)
+                    .await
+                    .and_then(|error| expect_code(what, &error, errors::LINEAGE_CHANGED)),
+            )
+        }
+        _ => None,
+    };
     let invocations_after = subject.tool_invocations(&b_call.arguments).await;
     let run_result = match (
         &head_b.last_run_state,
@@ -313,6 +335,8 @@ where
         sealed_follow_up,
         lineage_before_b,
         lineage_after_b: head_b_lineage,
+        before_b,
+        old_lineage_read,
     })
 }
 
@@ -577,8 +601,19 @@ fn expect_kept_step(messages: &[ReadMessage], observed: &CrashObservation) -> Re
     expect_holding(messages, &observed.step_text, 1, "the durable step's text")
 }
 
-/// Sealing may retain a closed call or remove it entirely, but the follow-up
-/// must preserve that choice so no dangling call enters later model history.
+/// A run sealed `interrupted` around a durable step whose call was never
+/// sent has two valid shapes (`CONTRACT.md` §14, property 4), and the
+/// follow-up must preserve the chosen one so no dangling call enters later
+/// model history:
+///
+/// - (a) drop the call, which rewrites a written message and so moves the
+///   session to a new lineage, whose old reads are refused `lineage_changed`;
+/// - (b) keep the call and append its never-executed result in the commit
+///   that ends the run, which only appends and so keeps the lineage.
+///
+/// The cut-run transcript decides the shape: no attribution entry for the
+/// call is shape (a), an entry is shape (b). A failure names the shape it
+/// was checked against.
 fn check_sealed_history(
     observed: &CrashObservation,
     cut: &[ReadMessage],
@@ -596,69 +631,165 @@ fn check_sealed_history(
         contains_id(&m.message, id) || keys.iter().any(|key| contains_id(&m.message, key))
     };
     if entries_for(cut, id).is_empty() {
-        let text_copies = holding(cut, &observed.step_text);
-        if text_copies > 1 {
-            return Err("the dropped call's assistant text is held more than once".into());
-        }
-        for messages in [cut, follow_up] {
-            if !entries_for(messages, id).is_empty() || messages.iter().any(carries_call) {
-                return Err("the dropped call remains in attribution or message history".into());
-            }
-            expect_holding(
-                messages,
-                &result_marker(&observed.call),
-                0,
-                "the dropped call's result",
-            )?;
-            expect_holding(
-                messages,
-                &observed.step_text,
-                text_copies,
-                "the dropped call's assistant text",
-            )?;
+        check_dropped(observed, cut, follow_up, &carries_call).map_err(|reason| {
+            format!("closest to shape (a), the call dropped on a new lineage: {reason}")
+        })
+    } else {
+        check_kept(observed, cut, follow_up, &carries_call).map_err(|reason| {
+            format!(
+                "closest to shape (b), the call kept and closed in the sealing commit: {reason}"
+            )
+        })
+    }
+}
+
+/// Shape (a): the never-sent call is gone from the cut-run and follow-up
+/// transcripts, and the session is on a new lineage whose predecessor's
+/// reads are refused.
+fn check_dropped(
+    observed: &CrashObservation,
+    cut: &[ReadMessage],
+    follow_up: &[ReadMessage],
+    carries_call: &dyn Fn(&ReadMessage) -> bool,
+) -> Result<(), String> {
+    let id = &observed.call.tool_call_id;
+    let text_copies = holding(cut, &observed.step_text);
+    if text_copies > 1 {
+        return Err("the dropped call's assistant text is held more than once".into());
+    }
+    for messages in [cut, follow_up] {
+        if !entries_for(messages, id).is_empty() || messages.iter().any(carries_call) {
+            return Err("the dropped call remains in attribution or message history".into());
         }
         expect_holding(
-            follow_up,
-            &observed.final_text,
-            1,
-            "the later assistant turn",
+            messages,
+            &result_marker(&observed.call),
+            0,
+            "the dropped call's result",
         )?;
-        // Dropping the call (and maybe its text) rewrote a written message,
-        // so the recovery must have started a new lineage (§4.2, §14).
-        if observed.lineage_before_b.is_none()
-            || observed.lineage_after_b == observed.lineage_before_b
-        {
+        expect_holding(
+            messages,
+            &observed.step_text,
+            text_copies,
+            "the dropped call's assistant text",
+        )?;
+    }
+    expect_holding(
+        follow_up,
+        &observed.final_text,
+        1,
+        "the later assistant turn",
+    )?;
+    // Dropping the call (and maybe its text) rewrote a written message,
+    // so the recovery must have started a new lineage (§4.2, §14).
+    if observed.lineage_before_b.is_none() || observed.lineage_after_b == observed.lineage_before_b
+    {
+        return Err(format!(
+            "the recovery dropped the never-sent call from history but kept lineage {:?}: \
+             dropping or rewriting a written message starts a new lineage",
+            observed.lineage_after_b
+        ));
+    }
+    match &observed.old_lineage_read {
+        Some(Ok(())) => Ok(()),
+        Some(Err(reason)) => Err(format!(
+            "the lineage moved from {:?} to {:?}, but {reason}",
+            observed.lineage_before_b, observed.lineage_after_b
+        )),
+        None => Err("the lineage moved, but no read of the old lineage was observed".into()),
+    }
+}
+
+/// Shape (b): the lineage is unchanged and every message read before the
+/// kill reads back the same; the call is kept, not indeterminate, and the
+/// message right after it carries its result, already in the transcript
+/// read once the run ended. The follow-up only appends: the sealed
+/// transcript reads back unchanged and no message it writes carries the
+/// call, so the result was not written by a later commit.
+fn check_kept(
+    observed: &CrashObservation,
+    cut: &[ReadMessage],
+    follow_up: &[ReadMessage],
+    carries_call: &dyn Fn(&ReadMessage) -> bool,
+) -> Result<(), String> {
+    let id = &observed.call.tool_call_id;
+    match (&observed.lineage_before_b, &observed.lineage_after_b) {
+        (Some(before), Some(after)) if before == after => {}
+        (before, after) => {
             return Err(format!(
-                "the recovery dropped the never-sent call from history but kept lineage {:?}: \
-                 dropping or rewriting a written message starts a new lineage",
-                observed.lineage_after_b
+                "the kept call needs the lineage unchanged, but it read {before:?} before the kill \
+                 and {after:?} after it"
+            ))
+        }
+    }
+    for message in &observed.before_b {
+        let after = cut.iter().find(|after| after.ordinal == message.ordinal);
+        if after != Some(message) {
+            return Err(format!(
+                "ordinal {} read {message:?} before the kill and {after:?} after the seal under \
+                 the same lineage: a seal that keeps the lineage only appends, so a message \
+                 already read never changes",
+                message.ordinal
             ));
         }
-    } else {
-        // The result may be written when the run is sealed or only when the
-        // owner's next send renders the history, so the cut-run transcript may
-        // hold it or not; by the follow-up's turn there must be exactly one.
-        for (messages, allowed) in [(cut, 0..=1), (follow_up, 1..=1)] {
-            expect_kept_step(messages, observed)?;
-            let results = messages
-                .iter()
-                .filter(|m| m.tool_calls.is_empty() && carries_call(m))
-                .count();
-            if !allowed.contains(&results) {
-                return Err(format!("dangling call {id}: expected one result before the later assistant turn, found {results}"));
-            }
-            if messages
-                .iter()
-                .filter(|m| !m.tool_calls.is_empty() && carries_call(m))
-                .count()
-                > 1
-            {
-                return Err("the kept call is carried by more than one message".into());
-            }
-        }
-        result_before_turn(follow_up, id, &observed.final_text)?;
     }
-    Ok(())
+    expect_kept_step(cut, observed)?;
+    let calls: Vec<_> = cut
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| !m.tool_calls.is_empty() && carries_call(m))
+        .collect();
+    let [(at, call_message)] = calls.as_slice() else {
+        return Err(format!(
+            "the kept call is carried by {} messages, not one",
+            calls.len()
+        ));
+    };
+    let results = cut
+        .iter()
+        .filter(|m| m.tool_calls.is_empty() && carries_call(m))
+        .count();
+    let next = cut.get(at + 1);
+    if results != 1 || !next.is_some_and(|m| m.tool_calls.is_empty() && carries_call(m)) {
+        return Err(format!(
+            "dangling call {id}: once the run ended interrupted, the message right after the call \
+             at ordinal {} must carry its never-executed result, written in the commit that ended \
+             the run; found ordinal {:?} next and {results} messages carrying a result",
+            call_message.ordinal,
+            next.map(|m| m.ordinal)
+        ));
+    }
+    for message in cut {
+        let after = follow_up
+            .iter()
+            .find(|after| after.ordinal == message.ordinal);
+        if !after.is_some_and(|after| after.mid == message.mid && after.message == message.message)
+        {
+            return Err(format!(
+                "ordinal {} read {message:?} once the run ended and {after:?} after the owner's \
+                 follow-up",
+                message.ordinal
+            ));
+        }
+    }
+    let written_later: Vec<u64> = follow_up
+        .iter()
+        .filter(|m| !cut.iter().any(|sealed| sealed.ordinal == m.ordinal) && carries_call(m))
+        .map(|m| m.ordinal)
+        .collect();
+    if !written_later.is_empty() {
+        return Err(format!(
+            "dangling call {id} after the run ended: it is closed by ordinals {written_later:?}, \
+             written later; its result belongs in the commit that ended the run, not a later one"
+        ));
+    }
+    expect_kept_step(follow_up, observed)?;
+    expect_holding(
+        follow_up,
+        &observed.final_text,
+        1,
+        "the later assistant turn",
+    )
 }
 
 /// Result bodies are runner-specific. Join a non-call message to the call

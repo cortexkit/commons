@@ -280,8 +280,10 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   model (a revert, an edited part) and a recovery that drops or rewrites a
   written message (§14, property 4) start a new lineage, so reads of the old
   one are refused `lineage_changed`; changed bytes never appear under the
-  same lineage. A reader may treat changed bytes under one lineage as a
-  runner defect.
+  same lineage. A recovery that only appends, such as closing a never-sent
+  call with its never-executed result (§14, property 4, shape (b)), keeps
+  the lineage, because no byte already written changes. A reader may treat
+  changed bytes under one lineage as a runner defect.
 - [pinned] **Bookkeeping stays out.** Host records a runner writes for its
   own compaction bookkeeping (a host's native compaction message, summary or
   entry) are outside the transcript: they never appear in `session.read`
@@ -1995,15 +1997,35 @@ state root (`cortexkit-role-harness`):
    either resumes the run and dispatches it exactly once, or seals the run
    `interrupted` without dispatching it. Either way the call is never marked
    indeterminate, its tool runs at most once, and no later request carries
-   the call without a result; a runner may drop the never-sent call from
-   history. In that dropped shape, neither the cut-run transcript nor the
-   follow-up transcript carries its id or `call_key`, attribution, or result.
-   The assistant step's text may also be dropped, or retained exactly once
-   without the call. The same shape is preserved through the follow-up.
-   Dropping or rewriting a written message starts a new lineage, whether or
-   not a reader saw the message (the runner cannot know), so read stability
-   (§4.2) holds without exception: reads of the old lineage are refused
-   `lineage_changed`, and a reader resyncs from the new one.
+   the call without a result. A seal has exactly two valid shapes for such a
+   written but never-dispatched call, and the follow-up preserves the shape
+   the seal chose:
+   - **(a) Drop it.** The runner drops the never-sent call from history.
+     Neither the cut-run transcript nor the follow-up transcript carries its
+     id or `call_key`, attribution, or result. The assistant step's text may
+     also be dropped, or retained exactly once without the call. Dropping or
+     rewriting a written message starts a new lineage, whether or not a
+     reader saw the message (the runner cannot know): reads of the old
+     lineage are refused `lineage_changed`, and a reader resyncs from the
+     new one.
+   - **(b) Keep it and close it.** The runner keeps the call and appends a
+     never-executed result for it in the same durable commit as the run's
+     `interrupted` terminal state, the shape a hard stop gives every
+     pending, undispatched call (§6): the runner's native not-executed
+     result, the same refusal-before-dispatch shape used for hook denials,
+     with its body layout runner-specific (§12.3) and no dispatch intent
+     recorded. The result is written directly after the message carrying
+     the call. The call is never dispatched and never reported
+     indeterminate; `run.tool_calls` (§6.3) lists it with `outcome:
+     not_executed`; no later model request carries the call without its
+     result; and the follow-up never writes a second result for it. Nothing
+     written is dropped or rewritten, so the lineage stays the same and
+     every message already read keeps its bytes.
+
+   Read stability (§4.2) holds without exception in both shapes above:
+   dropping the call (a) moves to a new lineage because it changes written
+   bytes, and keeping and closing it (b) keeps the lineage only because it
+   appends and changes none.
 5. [pinned] **Replay, not re-invocation.** Applied compaction and every hook
    output replay from durable state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
@@ -2098,7 +2120,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
 | `send_id_retry_settled_same_answer` | `steer` or `queue`, and `run_ops` |
 | `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
-| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result; a recovery that drops the call or its step moves the session to a new lineage | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
+| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result; a seal either drops the call (or its step) and moves the session to a new lineage whose old reads are refused `lineage_changed`, or keeps the call and lineage with its never-executed result in the message right after it, already written once the run ended, and every message read before the kill unchanged | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
 | `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
 | `retention_honoured`, `retention_no_content_served`, `retention_shorten_continues_lineage`, `retention_equal_noop`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
 | `retention_run_status_expired` | the above; not applicable unless the major lists `run.status` (§6.1) |

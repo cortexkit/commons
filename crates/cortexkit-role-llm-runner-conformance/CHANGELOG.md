@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1
+
+- `crash_at_StepRecorded` accepts both seal shapes that llm-runner 0.3.2 (CONTRACT §14, property 4) names for the never-sent call, and fails anything else, naming the shape it was closest to (`closest to shape (a)` when the cut-run transcript has no attribution entry for the call, `closest to shape (b)` when it has one) and why:
+  - (a) the call is absent from the cut-run and follow-up transcripts, the session is on a new lineage, and a read naming the old lineage is refused `lineage_changed` (the refusal is new: 0.8.0 checked only that the lineage moved);
+  - (b) the lineage is unchanged, every message of session B read before the kill reads back identical, the call is kept and not indeterminate, the message right after the one carrying it holds its never-executed result once the run has ended `interrupted`, and the owner's follow-up leaves that transcript unchanged and writes no message carrying the call.
+- Narrowed: 0.8.0 also passed a kept call whose result was written only when the owner's next send arrived. That result is in a later commit than the run's end, and the transcript read between the two holds a dangling call, so the case now fails it.
+- The reference fake's keep-the-call seal writes the never-executed result in the record that ends the run. Two new defects each fail the case by name in the suite's own tests: writing the result only at the owner's next send, and changing the bytes of a message read before the kill while keeping the lineage. The existing defect that never writes the result fails it with the shape (b) reason.
+- Still requires cortexkit-role-llm-runner 0.3 (0.3.1 or later); nothing in this release needs a newer type.
+
 ## 0.8.0
 
 - Require cortexkit-role-llm-runner 0.3.1 and add `run_usage_counts_reported_steps`, run only when the subject declares the new `run_usage` group (otherwise reported as skipped, by name). After a two-step run whose scripted model reports input, cache-read, cache-write and output counts but no reasoning, `run.result` must carry `usage` with `steps: 2`, no unreported step, exactly the scripted totals mapped to `input_tokens`, `cached_input_tokens`, `cache_write_tokens` and `output_tokens`, a `by_model` that sums to them (`RunUsage::consistent`), and `reasoning_tokens` absent rather than `0`. Where the subject declares `run_status`, the ended run's `run.status` must carry the same `usage`. The case never reads `run.status` before the first step, where `usage` may be present or absent.

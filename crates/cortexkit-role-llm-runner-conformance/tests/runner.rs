@@ -301,9 +301,49 @@ async fn step_recorded_sealed_dangling_call_fails() {
     let report = run(&subject).await;
     let reason = failed(&report, "crash_at_StepRecorded");
     assert!(reason.contains("sealed branch:"), "{reason}");
+    assert!(reason.contains("closest to shape (b)"), "{reason}");
     assert!(reason.contains("dangling call call_b"), "{reason}");
-    assert!(reason.contains("expected one result before"), "{reason}");
+    assert!(reason.contains("never-executed result"), "{reason}");
     assert_passed(&report, "crash_at_DispatchIntent");
+}
+
+/// A seal that keeps the call but writes its never-executed result only
+/// when the owner's next send arrives: the transcript read between the
+/// commit that ended the run and that send holds a dangling call.
+#[tokio::test]
+async fn step_recorded_kept_call_result_in_a_later_commit_fails() {
+    let mut subject = FakeSubject::new(Defects {
+        sealed_result_in_later_commit: true,
+        ..Defects::default()
+    });
+    subject.step_recovery = StepRecovery::SealInterrupted;
+    let report = run(&subject).await;
+    let reason = failed(&report, "crash_at_StepRecorded");
+    assert!(reason.contains("sealed branch:"), "{reason}");
+    assert!(reason.contains("closest to shape (b)"), "{reason}");
+    assert!(reason.contains("dangling call call_b"), "{reason}");
+    // Both the read once the run ended and the follow-up's read catch this
+    // defect; each reason names the commit that ended the run.
+    assert!(reason.contains("the commit that ended the run"), "{reason}");
+    assert_others_passed(&report, &["crash_at_StepRecorded"]);
+}
+
+/// A seal that keeps the call and its lineage but changes the bytes of a
+/// message read before the kill.
+#[tokio::test]
+async fn step_recorded_kept_call_rewriting_a_read_message_fails() {
+    let mut subject = FakeSubject::new(Defects {
+        sealed_rewrites_read_message: true,
+        ..Defects::default()
+    });
+    subject.step_recovery = StepRecovery::SealInterrupted;
+    let report = run(&subject).await;
+    let reason = failed(&report, "crash_at_StepRecorded");
+    assert!(reason.contains("sealed branch:"), "{reason}");
+    assert!(reason.contains("closest to shape (b)"), "{reason}");
+    assert!(reason.contains("(rewritten)"), "{reason}");
+    assert!(reason.contains("a message already read"), "{reason}");
+    assert_others_passed(&report, &["crash_at_StepRecorded"]);
 }
 
 #[tokio::test]

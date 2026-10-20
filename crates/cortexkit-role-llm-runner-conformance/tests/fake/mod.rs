@@ -160,6 +160,13 @@ pub struct Defects {
     pub sealed_call_indeterminate: bool,
     /// Sealing leaves the never-sent call dangling in the next model history.
     pub sealed_call_without_result: bool,
+    /// A seal that keeps the never-sent call ends the run without its
+    /// never-executed result and writes the result only when the owner's
+    /// next send arrives, in a later commit.
+    pub sealed_result_in_later_commit: bool,
+    /// A seal that keeps the never-sent call also changes the bytes of the
+    /// session's first message, already read, under the same lineage.
+    pub sealed_rewrites_read_message: bool,
     /// Sealing hides attribution but leaves the dangling call in the raw message.
     pub sealed_call_without_attribution: bool,
     /// Resumption invokes a never-sent call twice, breaking at-most-once dispatch.
@@ -772,19 +779,24 @@ impl Module {
                             json!({ "kind": "drop_step", "run_id": run_id,
                             "keep_text": self.world.step_recovery == StepRecovery::SealDropCall }),
                         )?;
-                    } else if !self.world.defects.sealed_call_without_result {
-                        for (key, _) in &pending {
-                            self.commit(
-                                &session,
-                                json!({ "kind": "result", "call_key": key,
-                                "content": "not run" }),
-                            )?;
-                        }
                     }
+                    // Keeping the call closes it with a never-executed result
+                    // in the same record that ends the run, as a hard stop does.
+                    let keep = self.world.step_recovery == StepRecovery::SealInterrupted;
+                    let defects = &self.world.defects;
+                    let sealed: Vec<&String> = pending
+                        .iter()
+                        .map(|(key, _)| key)
+                        .filter(|_| {
+                            keep && !defects.sealed_call_without_result
+                                && !defects.sealed_result_in_later_commit
+                        })
+                        .collect();
                     self.commit(
                         &session,
                         json!({ "kind": "terminal", "run_id": run_id,
-                        "state": "interrupted" }),
+                        "state": "interrupted", "sealed": sealed,
+                        "rewrite_read": keep && defects.sealed_rewrites_read_message }),
                     )?;
                 } else {
                     if self.world.defects.dispatch_twice_on_resume {
@@ -1093,6 +1105,22 @@ impl Module {
             }
             "terminal" => {
                 let run_id = text("run_id");
+                for key in record["sealed"].as_array().into_iter().flatten() {
+                    let key = key.as_str().unwrap_or_default();
+                    if let Some(call) = sess.calls.get_mut(key) {
+                        call.result = true;
+                    }
+                    sess.push(
+                        json!({"role":"tool", "call_key":key, "content":{"executed":false}}),
+                        &run_id,
+                        Vec::new(),
+                    );
+                }
+                if record["rewrite_read"] == json!(true) {
+                    if let Some(first) = sess.messages.first_mut() {
+                        first.body["text"] = json!(format!("{} (rewritten)", first.body["text"]));
+                    }
+                }
                 for blocked in record["blocked"].as_array().into_iter().flatten() {
                     let key = blocked["call_key"].as_str().unwrap();
                     if let Some(call) = sess.calls.get_mut(key) {
@@ -2187,6 +2215,32 @@ impl Module {
             "run-{}",
             self.sessions.lock().unwrap()[session].runs.len() + 1
         );
+        if self.world.defects.sealed_result_in_later_commit {
+            // A recovery that kept a never-sent call and ended its run
+            // `interrupted` without a result closes that call only now, in a
+            // later commit than the one that ended the run.
+            let open: Vec<String> = {
+                let sessions = self.sessions.lock().unwrap();
+                let sess = &sessions[session];
+                sess.calls
+                    .iter()
+                    .filter(|(_, call)| {
+                        !call.intent
+                            && !call.result
+                            && sess
+                                .run(&call.run_id)
+                                .is_some_and(|run| run.state == "interrupted")
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect()
+            };
+            for key in open {
+                self.commit(
+                    session,
+                    json!({ "kind": "result", "call_key": key, "content": {"executed": false} }),
+                )?;
+            }
+        }
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),

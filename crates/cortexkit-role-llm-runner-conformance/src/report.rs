@@ -389,7 +389,7 @@ pub const CASES: &[CaseSpec] = &[
     case(
         "crash_at_StepRecorded",
         &[Queue, TranscriptReads, DispatchAttribution, KillAt(points::STEP_RECORDED)],
-        "killed at StepRecorded and restarted: observations show either one dispatch and a continued run with a result before the later model turn, or zero dispatches and an interrupted run followed by an owner follow-up with a result before its assistant turn; the call is not indeterminate and the step is not generated again",
+        "killed at StepRecorded and restarted: observations show either one dispatch and a continued run with a result before the later model turn, or zero dispatches and an interrupted run sealed in one of two shapes: the call dropped on a new lineage whose old reads are refused lineage_changed, or the call kept on the same lineage with its never-executed result in the message right after it, every message read before the kill unchanged, and an owner follow-up that only appends; the call is not indeterminate and the step is not generated again",
     ),
     case(
         "crash_at_DispatchIntent",
@@ -460,11 +460,12 @@ pub const NARROWINGS: &[&str] = &[
     "message bodies are in the runner's own schema (§4.2), so the suite finds a scripted prompt, text part or tool result by a unique marker string inside a message body, and counts messages holding it",
     "where a tool result's reason sits is the runner's schema (§12.3), so crash_at_DispatchIntent only checks that some message holds the string outcome_unknown",
     "subscribe_from_head_no_gap_no_duplicate compares a replay from the head with a replay from start on an idle session; the live handoff race is not exercised",
-    "retention_honoured checks lineage_changed for the expired lineage after a fresh send; other ways of changing lineage are not exercised",
+    "lineage_changed for an old lineage is checked by retention_honoured, for the expired lineage after a fresh send, and by crash_at_StepRecorded, after a recovery that drops a never-sent call; other ways of changing lineage are not exercised",
     "replay, not re-invocation (§14, 5) covers the model, tool and compaction provider (recorded Setup/step answers survive CompactionApplied before fold); step-transform hooks are not in this subset",
     "the crash guarantee that each resume writes one informational record (§14, 8) is not checked: where that record sits is the runner's schema",
     "a call's indeterminate window between a restart and its outcome_unknown close is not observable reliably, so crash_at_DispatchIntent checks the state after the close",
     "a run cut at DispatchIntent is expected to end interrupted, as the role's points list states for that point; StepRecorded accepts either one dispatch with continuation or zero dispatches with interrupted state; ToolResultRecorded checks only that the run has one terminal state that is not cancelled",
+    "a StepRecorded seal that keeps the call must hold its never-executed result in the transcript read once the run has ended; a result written in a separate commit that the runner makes before any read can reach it (during its own resume) cannot be told apart from one written in the commit that ended the run",
     "StepRecorded checks transcript ordering rather than model inputs; compaction cases independently capture canonical inputs at the scripted model boundary",
     "compaction timing cases require an injected runner/provider clock and drain due work exactly at configured deadlines; the engine-wide WAIT cap and prompt-cache lifetime are configured by the script, since the contract pins no numeric cap",
     "Setup durability is inspected from the runner's durable store while its first model request is held, never inferred from the provider script or model view",

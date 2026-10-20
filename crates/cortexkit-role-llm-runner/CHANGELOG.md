@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- CONTRACT §14 property 4 now names the two valid shapes of a seal around a written but never-dispatched tool call (a run cut after its step was durable but before the call's dispatch intent). (a) Drop the call, which rewrites a written message and so moves the session to a new lineage whose old reads are refused `lineage_changed` (the existing text). (b) Keep the call and append a never-executed result for it in the same durable commit as the run's `interrupted` terminal state, directly after the message carrying the call: the shape the hard-stop rule (§6) already gives every pending, undispatched call (`max_steps`, `stop_when`, `budget_exhausted`, `context_ceiling`), with no dispatch intent recorded. In shape (b) the call is never dispatched and never reported indeterminate, `run.tool_calls` (§6.3) lists it with `outcome: not_executed`, no later model request carries it without its result, the follow-up writes no second result, and every message already read keeps its bytes, so the lineage stays the same. Broca seals this way.
+- Read stability (§4.2) stays absolute: its paragraph now says that a recovery that only appends, such as shape (b), keeps the lineage because no written byte changes. §15's `crash_at_StepRecorded` row lists both shapes.
+- Text only: no type, constant or vector changes.
+
 ## 0.3.1
 
 - Add per-run token usage, behind the new `run_usage` describe group (`capabilities::RUN_USAGE`, checked by `check_describe` for `run.result`, the op whose answer it extends): `run.result` and `run.status` gain an optional `usage` (`RunResult::usage`, `RunStatus::usage`, `with_usage`), standardizing the shape Broca already sends. A runner declaring the group includes it on every ended run's `run.result`, and on `run.status` once a step has completed (it may send `steps: 0` earlier). An absent `usage`, or an absent total, means not known, never zero.

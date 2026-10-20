@@ -158,10 +158,10 @@ every report prints them. In short:
   only as that string in some message.
 - The subscription handoff is checked by comparing replays on an idle
   session, not the live race.
-- Two §14 crash guarantees are not checked: that a read naming the old
-  lineage after a lineage change is refused (nothing in this subset changes
-  a lineage), and that each resume writes one informational record (where
-  it sits is the runner's schema). "Replay, not re-invocation" is checked
+- That a read naming the old lineage after a lineage change is refused is
+  checked only after a retention expiry and after a `StepRecorded` recovery
+  that drops the never-sent call. That each resume writes one informational
+  record is not checked (where it sits is the runner's schema). "Replay, not re-invocation" is checked
    for the model, tool and compaction provider; step-transform hooks remain
    outside this subset. The indeterminate
   window between a restart and the close is not observed; whether a run cut
@@ -367,5 +367,11 @@ list naming `delivery`.
 `end_context_ceiling_wait`. `read_stable_across_host_metadata_change` needs
 `Capability::HostMetadataChange` and `change_host_metadata`. At
 `crash_at_StepRecorded`, session B first finishes one run so its lineage can
-be read before the kill: a recovery that drops the never-sent call or its
-step must leave B on a new lineage.
+be read before the kill. A seal that drops the never-sent call or its step
+must leave B on a new lineage, and a read naming the old one must be
+refused `lineage_changed`. A seal that keeps the call must keep B's lineage,
+read back every message of B read before the kill unchanged, and hold the
+call's never-executed result in the message right after it once the run has
+ended `interrupted`; the owner's follow-up must leave that transcript as it
+was and write no message carrying the call. A failure names the shape it
+was closest to.
