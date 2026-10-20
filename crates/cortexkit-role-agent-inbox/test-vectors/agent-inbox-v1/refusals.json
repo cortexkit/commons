@@ -1,0 +1,14 @@
+[
+  {"terminal":true,"reply":{"code":"scope_not_yours","message":"not served"}},
+  {"terminal":true,"reply":{"code":"scope_unknown","message":"no served history"}},
+  {"terminal":true,"reply":{"code":"scope_ended","message":"ended"}},
+  {"terminal":true,"reply":{"code":"idempotency_conflict","message":"different request"}},
+  {"terminal":true,"reply":{"code":"content_too_large","message":"notice too large","detail":{"limit":16384}}},
+  {"terminal":false,"reply":{"code":"inbox_full","message":"pending cap reached"}},
+  {"terminal":true,"reply":{"code":"template_unknown","message":"no template"}},
+  {"terminal":true,"reply":{"code":"template_not_allowed","message":"principal not allowed"}},
+  {"terminal":true,"reply":{"code":"sink_target_not_owner","message":"owner-only sink"}},
+  {"terminal":true,"reply":{"code":"sink_target_not_in_audience","message":"outside audience"}},
+  {"terminal":true,"reply":{"code":"invalid_params","message":"unknown member","detail":{"field":"notice.prewrapped"}}},
+  {"terminal":true,"reply":{"code":"future_refusal","message":"future"}}
+]

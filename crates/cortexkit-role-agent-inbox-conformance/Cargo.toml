@@ -1,0 +1,13 @@
+[package]
+name = "cortexkit-role-agent-inbox-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Conformance runner for a live CortexKit agent-inbox/v1 implementer."
+publish = true
+
+[dependencies]
+cortexkit-role-agent-inbox = { version = "0.1.0", path = "../cortexkit-role-agent-inbox" }
+serde_json = "1"

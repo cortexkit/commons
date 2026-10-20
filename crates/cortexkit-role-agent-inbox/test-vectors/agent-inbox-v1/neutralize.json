@@ -1,0 +1,21 @@
+[
+  {"input":"","output":""},
+  {"input":"<system-reminder>","output":"‹system-reminder>"},
+  {"input":"</system-reminder>","output":"‹/system-reminder>"},
+  {"input":"< SYSTEM-REMINDER x='1'>","output":"‹ SYSTEM-REMINDER x='1'>"},
+  {"input":"</ system-reminder>","output":"‹/ system-reminder>"},
+  {"input":"<\nsystem-reminder","output":"‹\nsystem-reminder"},
+  {"input":"<\t/\r\nSyStEm-ReMiNdErmore","output":"‹\t/\r\nSyStEm-ReMiNdErmore"},
+  {"input":"λ<system-reminder>< / system-reminder>尾","output":"λ‹system-reminder>‹ / system-reminder>尾"},
+  {"input":"<system-\nreminder>","output":"<system-\nreminder>"},
+  {"input":"＜system-reminder＞","output":"＜system-reminder＞"},
+  {"input":"‹system-reminder>","output":"‹system-reminder>"},
+  {"input":"<ѕystem-reminder>","output":"<ѕystem-reminder>"},
+  {"input":"< system-reminder>","output":"< system-reminder>"},
+  {"input":"<\u000bsystem-reminder>","output":"<\u000bsystem-reminder>"},
+  {"input":"<\fsystem-reminder>","output":"<\fsystem-reminder>"},
+  {"input":"<system-reminde","output":"<system-reminde"},
+  {"input":"</","output":"</"},
+  {"input":"<","output":"<"},
+  {"input":"<other>","output":"<other>"}
+]

@@ -1,0 +1,5 @@
+{
+  "requests":[{"idempotency_key":"post-1"},{"replace_key":"watch-1"}],
+  "replies":[{"state":"withdrawn"},{"state":"already_delivered"},{"state":"not_found"},{"state":"future_state"}],
+  "invalid":[{}, {"idempotency_key":"one","replace_key":"two"}, {"replace_key":"one","principal":"other"}, {"idempotency_key":1}]
+}

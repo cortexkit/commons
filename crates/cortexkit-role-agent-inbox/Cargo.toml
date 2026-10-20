@@ -1,0 +1,24 @@
+# Pure wire types and deterministic checks; no transport or runtime.
+[package]
+name = "cortexkit-role-agent-inbox"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract, neutralization and vectors for the CortexKit agent-inbox/v1 capability."
+publish = true
+
+[features]
+test-vectors = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+sha2 = "0.10"
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

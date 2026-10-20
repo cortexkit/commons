@@ -23,6 +23,8 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-push-seal](crates/cortexkit-push-seal/README.md) | HPKE encryption of push-notification payloads for a recipient device. | Not published |
 | [cortexkit-resource-busy](crates/cortexkit-resource-busy/README.md) | Shared refusal detail for exclusive resources held by another caller. | Not published |
 | [cortexkit-role-agent-data](crates/cortexkit-role-agent-data/README.md) | Wire contract and vectors for the `agent-data/v1` capability. | [0.2.0](https://crates.io/crates/cortexkit-role-agent-data) |
+| [cortexkit-role-agent-inbox](crates/cortexkit-role-agent-inbox/README.md) | Wire contract, neutralization and vectors for `agent-inbox/v1`. | Not published (0.1.0) |
+| [cortexkit-role-agent-inbox-conformance](crates/cortexkit-role-agent-inbox-conformance/README.md) | Conformance runner for a live agent inbox implementation. | Not published (0.1.0) |
 | [cortexkit-role-classifier](crates/cortexkit-role-classifier/README.md) | Wire contract and vectors for `classifier/v1`. | Not published |
 | [cortexkit-role-classifier-conformance](crates/cortexkit-role-classifier-conformance/README.md) | Conformance runner for a live classifier implementation. | Not published |
 | [cortexkit-role-compaction-provider](crates/cortexkit-role-compaction-provider/README.md) | Wire contract and vectors for `compaction-provider/v1`. | [0.2.4](https://crates.io/crates/cortexkit-role-compaction-provider) |

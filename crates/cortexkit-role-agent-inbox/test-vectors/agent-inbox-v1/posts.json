@@ -1,0 +1,27 @@
+{
+  "requests": [
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"text","content":{"text":"Finished"},"attention":"wake"}},
+    {"scope":{"scope_ref":"flow","epoch":2},"notice":{"idempotency_key":"template","content":{"template":{"id":"echo","slots":{"message":"value","count":3}}},"attention":"ride","target_agent":"agent","replace_key":"status","deliver_after_ms":2000,"expires_at_ms":3000,"links":[{"label":"Result","url":"https://example.test/"}],"data":{"run":"one"}}},
+    {"flow_id":"flow-owner","notice":{"idempotency_key":"notice-id","content":{"text":"Flow recovered"},"attention":"silent"}}
+  ],
+  "replies": [
+    {"state":"accepted","item_id":"item-1"},
+    {"state":"accepted","item_id":"item-1","replayed":true},
+    {"state":"future_state","item_id":"future-item"}
+  ],
+  "invalid": [
+    {"scope":{"scope_ref":"head","epoch":1,"sender":"forged"},"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake"}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"text":"text","template":{"id":"echo","slots":{}}},"attention":"wake"}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"urgent"}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake","prewrapped":true}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake","data":[]}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake","deliver_after_ms":-1}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"template":{"id":"echo","slots":{},"unknown":1}},"attention":"wake"}},
+    {"scope":{"scope_ref":"head","epoch":1},"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake"},"sender":"forged"}
+  ],
+  "invalid_semantics": [
+    {"notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake"}},
+    {"scope":{"scope_ref":"head","epoch":1},"flow_id":"flow","notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake"}},
+    {"flow_id":"flow","notice":{"idempotency_key":"key","content":{"text":"text"},"attention":"wake","target_agent":"not-owner"}}
+  ]
+}
