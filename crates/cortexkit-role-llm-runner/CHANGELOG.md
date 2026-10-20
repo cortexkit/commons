@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+
+- Add three independent describe groups, `max_steps`, `max_output_tokens` and `no_tools`, each requiring `session.send`, with matching `capabilities` constants. Callers send each member only after its group is declared; undeclared members retain the existing honour-or-refuse-by-name rule.
+- CONTRACT §9.3.1 pins positive `stop_when.max_steps` (one model response per step, ending `max_steps` under §6's atomic hard-stop rule), positive per-response `generation.max_output_tokens` (frozen at admission, capped to the lesser of request and model maximum, never refused for a lower model maximum), and `tools: []` (no plan tools or host built-ins). Non-empty tool lists stay runner-specific; a plan session refuses any later `tools` member. Joining steers retain §9's first-differing-field refusal rule.
+- Add `SendRequest::{max_steps,max_output_tokens,no_tools}` accessors that name malformed field paths and matching `with_*` builders. All values remain in `runner_params` at their existing wire positions; limit builders preserve sibling members. `no_tools()` returns `None` for absence, `Some(true)` for an empty list and `Some(false)` for a runner-specific non-empty list.
+- Add packaged `run-parameters.json` and `run-parameters-describe.json` vectors, byte-for-byte raw-parameter round-trip and malformed-value tests. No existing wire shapes or vector JSON bytes change.
+
 ## 0.3.3
 
 - `session.resolve` answers about the session's current lineage (CONTRACT §9.6). A tag whose part is in the current lineage resolves with that part's current `ordinal` and `mid`, including a part carried across a lineage change that kept its tag. A well-formed tag that no part of the current lineage carries is refused `unknown_tag`, terminal: one the session never assigned, and one assigned only under a lineage the session has left (a fork, a §14 shape-(a) drop, a retention expiry), since tags are never reused and a left lineage never returns. This replaces "a well-formed tag the session never assigned" in §9.6, in the §12.1 error table and on `errors::UNKNOWN_TAG`.

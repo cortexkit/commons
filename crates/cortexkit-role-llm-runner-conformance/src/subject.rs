@@ -52,6 +52,12 @@ pub enum Capability {
     Retention,
     /// The durable session input-token cap on `session.send.budget`.
     InputTokenCap,
+    /// Positive model-response limit in `stop_when.max_steps`.
+    MaxSteps,
+    /// Positive per-response output cap in `generation.max_output_tokens`.
+    MaxOutputTokens,
+    /// An empty `tools` list suppresses plan tools and host built-ins.
+    NoTools,
     /// Schema-shaped run output on `session.send.structured_output`.
     StructuredOutput,
     /// `session.adopt`: the owner takes over a session the host started
@@ -110,6 +116,9 @@ impl Capability {
         Self::SessionChange,
         Self::Retention,
         Self::InputTokenCap,
+        Self::MaxSteps,
+        Self::MaxOutputTokens,
+        Self::NoTools,
         Self::StructuredOutput,
         Self::Adopt,
         Self::Tags,
@@ -153,6 +162,9 @@ impl Capability {
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
+            Self::MaxSteps => groups::MAX_STEPS,
+            Self::MaxOutputTokens => groups::MAX_OUTPUT_TOKENS,
+            Self::NoTools => groups::NO_TOOLS,
             Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
             Self::Adopt => groups::ADOPT,
             Self::Tags => groups::TAGS,
@@ -193,6 +205,9 @@ pub struct ScriptedTurn {
     pub parts: Vec<ScriptedPart>,
     /// Report exactly these counts, or omit input usage entirely for `None`.
     /// Adapters must not fill in missing usage with an estimate or zero.
+    /// For output-cap cases, the scripted provider honours the maximum it
+    /// actually receives, truncating the response and reporting its actual
+    /// output usage rather than the full, untruncated scripted count.
     pub usage: Option<ScriptedUsage>,
 }
 
@@ -229,6 +244,8 @@ impl ToolResultObservation {
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelRequestObservation {
+    /// The output-token maximum actually sent to the model, if any.
+    pub max_output_tokens: Option<u64>,
     /// The names of the tools the request offered, in request order.
     pub tools: Vec<String>,
     /// The schema the request asked the provider to shape the final text
@@ -240,6 +257,11 @@ pub struct ModelRequestObservation {
 }
 
 impl ModelRequestObservation {
+    pub fn with_max_output_tokens(mut self, limit: u64) -> Self {
+        self.max_output_tokens = Some(limit);
+        self
+    }
+
     pub fn new(tools: Vec<String>) -> Self {
         Self {
             tools,
@@ -448,7 +470,8 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Every model request the scripted model received for `session`, in
     /// order, across kills and restarts. Keep the record outside the runner
-    /// and its state root. Required with [`Capability::StructuredOutput`].
+    /// and its state root. Required with [`Capability::StructuredOutput`],
+    /// [`Capability::NoTools`] and [`Capability::MaxOutputTokens`].
     async fn model_requests(
         &self,
         _session: &str,

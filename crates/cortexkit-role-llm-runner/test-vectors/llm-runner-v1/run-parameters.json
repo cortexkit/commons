@@ -1,0 +1,31 @@
+{
+  "send": {
+    "prompt": "A bounded tool-free run",
+    "send_id": "run-parameters",
+    "stop_when": {"max_steps": 2, "vendor_stop": "kept"},
+    "generation": {"max_output_tokens": 16, "temperature": 0.25},
+    "tools": []
+  },
+  "runner_params_bytes": "{\"generation\":{\"max_output_tokens\":16,\"temperature\":0.25},\"stop_when\":{\"max_steps\":2,\"vendor_stop\":\"kept\"},\"tools\":[]}",
+  "refuse": [
+    {
+      "name": "zero step limit",
+      "params": {"prompt":"start","send_id":"bad-steps","stop_when":{"max_steps":0}},
+      "error": {"code":"invalid_params","detail":{"field":"stop_when.max_steps"}}
+    },
+    {
+      "name": "fractional output cap",
+      "params": {"prompt":"start","send_id":"bad-output","generation":{"max_output_tokens":1.5}},
+      "error": {"code":"invalid_params","detail":{"field":"generation.max_output_tokens"}}
+    },
+    {
+      "name": "tools must be a list",
+      "params": {"prompt":"start","send_id":"bad-tools","tools":null},
+      "error": {"code":"invalid_params","detail":{"field":"tools"}}
+    }
+  ],
+  "later_plan_send": {
+    "params": {"prompt":"next","send_id":"later","tools":[]},
+    "error": {"code":"invalid_params","detail":{"field":"tools"}}
+  }
+}

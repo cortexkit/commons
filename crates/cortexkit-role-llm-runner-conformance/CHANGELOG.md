@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.3
+
+- Require llm-runner 0.3.4. Add the independent `Capability::{MaxSteps,MaxOutputTokens,NoTools}` variants to the already non-exhaustive enum.
+- Add four named, discovery-gated cases: `max_steps_seals_pending_calls` (two responses, pending siblings sealed at the terminal without dispatch), `max_output_tokens_caps_response` (positive dispatched maximum and single-response usage at or below the requested cap, also admitting a request above the model maximum), `no_tools_offered_to_model` (an unsuppressed control offers tools, the suppressed request offers none), and `no_tools_later_plan_send_refused` (empty and non-empty later lists both refused naming `tools` without writes). Missing groups are named skips; the output case also requires `run_usage`, and the late-tools case is inapplicable by name when the adapter cannot create a fetch-plan session.
+- `ModelRequestObservation` gains optional `max_output_tokens` and a builder, recorded from the dispatched request. `model_requests` is now required when declaring `no_tools` or `max_output_tokens` as well as `structured_output`. In output-cap cases the scripted provider honours the maximum it actually receives and reports the truncated response's actual usage.
+- Add five fake defects, each failing only its named case: ignored step limit and unsealed pending calls fail `max_steps_seals_pending_calls`; ignored output cap fails `max_output_tokens_caps_response`; offered tools despite an empty list fails `no_tools_offered_to_model`; ignored later-plan tools fails `no_tools_later_plan_send_refused`. The fake stores limits per run, counts model responses, caps its whitespace-tokenized response at its model maximum, and seals pending calls in the terminal record.
+- Additive patch: no role wire bytes change and existing adapters need no new hooks unless they declare the new groups.
+
 ## 0.8.2
 
 - Require cortexkit-role-llm-runner 0.3.3. `Capability` gains `SendStatus` (the new `send_status` group), listed last in `Capability::GROUPS`; `Capability` is already `#[non_exhaustive]`, so this is additive.

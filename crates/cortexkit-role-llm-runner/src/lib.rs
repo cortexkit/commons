@@ -166,6 +166,12 @@ pub mod capabilities {
     pub const RETENTION: &str = "retention";
     /// Durable, lower-only session input-token budgets on `session.send`.
     pub const INPUT_TOKEN_CAP: &str = "input_token_cap";
+    /// Positive model-response limit in `stop_when.max_steps`.
+    pub const MAX_STEPS: &str = "max_steps";
+    /// Positive per-response output cap in `generation.max_output_tokens`.
+    pub const MAX_OUTPUT_TOKENS: &str = "max_output_tokens";
+    /// `tools: []` suppresses all tools, including plan tools and built-ins.
+    pub const NO_TOOLS: &str = "no_tools";
     /// Schema-shaped run output on `session.send` (`structured_output`),
     /// reported on `run.result` and `run.status`.
     pub const STRUCTURED_OUTPUT: &str = "structured_output";
@@ -212,6 +218,9 @@ pub mod capabilities {
         (PLANS, &[ops::SESSION_SEND]),
         (RETENTION, &[ops::SESSION_SEND]),
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
+        (MAX_STEPS, &[ops::SESSION_SEND]),
+        (MAX_OUTPUT_TOKENS, &[ops::SESSION_SEND]),
+        (NO_TOOLS, &[ops::SESSION_SEND]),
         (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),

@@ -469,6 +469,74 @@ impl SendRequest {
             .map_err(|_| "budget".into())
     }
 
+    /// Read the positive model-response limit without changing raw parameters.
+    /// An error is the offending path for an `invalid_params` refusal.
+    pub fn max_steps(&self) -> Result<Option<u64>, String> {
+        self.positive_limit("stop_when", "max_steps")
+    }
+
+    /// Read the positive per-response output cap, preserving the raw value.
+    pub fn max_output_tokens(&self) -> Result<Option<u64>, String> {
+        self.positive_limit("generation", "max_output_tokens")
+    }
+
+    fn positive_limit(&self, parent: &str, member: &str) -> Result<Option<u64>, String> {
+        let Some(raw) = self.runner_params.get(parent) else {
+            return Ok(None);
+        };
+        let object = raw.as_object().ok_or_else(|| parent.to_owned())?;
+        object.get(member).map_or(Ok(None), |value| {
+            value
+                .as_u64()
+                .filter(|limit| *limit > 0)
+                .map(Some)
+                .ok_or_else(|| format!("{parent}.{member}"))
+        })
+    }
+
+    /// Whether `tools` explicitly requests no tools. Absence is `None`;
+    /// a non-empty, runner-specific list is `Some(false)`. A non-list names `tools`.
+    pub fn no_tools(&self) -> Result<Option<bool>, String> {
+        self.runner_params.get("tools").map_or(Ok(None), |value| {
+            value
+                .as_array()
+                .map(|tools| Some(tools.is_empty()))
+                .ok_or_else(|| "tools".to_owned())
+        })
+    }
+
+    /// Set `stop_when.max_steps`, preserving other `stop_when` members.
+    pub fn with_max_steps(mut self, limit: u64) -> Self {
+        self.set_limit("stop_when", "max_steps", limit);
+        self
+    }
+
+    /// Set `generation.max_output_tokens`, preserving other generation settings.
+    pub fn with_max_output_tokens(mut self, limit: u64) -> Self {
+        self.set_limit("generation", "max_output_tokens", limit);
+        self
+    }
+
+    fn set_limit(&mut self, parent: &str, member: &str, limit: u64) {
+        let raw = self
+            .runner_params
+            .entry(parent)
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !raw.is_object() {
+            *raw = Value::Object(Map::new());
+        }
+        raw.as_object_mut()
+            .expect("limit parent is an object")
+            .insert(member.into(), Value::from(limit));
+    }
+
+    /// Offer no tools, including plan tools and host built-ins.
+    pub fn with_no_tools(mut self) -> Self {
+        self.runner_params
+            .insert("tools".into(), Value::Array(vec![]));
+        self
+    }
+
     /// Replace the raw `runner_params["structured_output"]` value with this
     /// request. The member stays in `runner_params`, as it arrives on the wire.
     pub fn with_structured_output(
@@ -1215,5 +1283,141 @@ mod prompt_tests {
                 "{prompt:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod run_parameter_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn run_parameter_vectors_preserve_bytes_and_name_refusals() {
+        let file = crate::vectors::load("run-parameters.json");
+        let request: SendRequest = crate::vectors::round_trip("run parameters", &file["send"]);
+        assert_eq!(request.max_steps(), Ok(Some(2)));
+        assert_eq!(request.max_output_tokens(), Ok(Some(16)));
+        assert_eq!(request.no_tools(), Ok(Some(true)));
+        assert_eq!(
+            serde_json::to_string(&request.runner_params).unwrap(),
+            file["runner_params_bytes"].as_str().unwrap()
+        );
+        for case in file["refuse"].as_array().unwrap() {
+            let request: SendRequest =
+                crate::vectors::round_trip("malformed run parameter", &case["params"]);
+            let field = if request.runner_params.contains_key("stop_when") {
+                request.max_steps().unwrap_err()
+            } else if request.runner_params.contains_key("generation") {
+                request.max_output_tokens().unwrap_err()
+            } else {
+                request.no_tools().unwrap_err()
+            };
+            assert_eq!(case["error"]["code"], crate::errors::INVALID_PARAMS);
+            assert_eq!(field, case["error"]["detail"]["field"].as_str().unwrap());
+        }
+    }
+
+    #[test]
+    fn run_parameter_groups_are_independent_and_require_send() {
+        let file = crate::vectors::load("run-parameters-describe.json");
+        let groups = [
+            crate::capabilities::MAX_STEPS,
+            crate::capabilities::MAX_OUTPUT_TOKENS,
+            crate::capabilities::NO_TOOLS,
+        ];
+        for group in groups {
+            let mut description = file.clone();
+            description["capabilities"] = json!([group]);
+            assert!(crate::describe::check_describe(&description).is_ok());
+            description["majors"][0]["ops"] = json!(["role.describe", "session.baseline"]);
+            assert!(crate::describe::check_describe(&description).is_err());
+        }
+        assert!(crate::describe::check_describe(&file).is_ok());
+    }
+
+    #[test]
+    fn run_parameters_round_trip_byte_for_byte() {
+        let bytes = br#"{"generation":{"max_output_tokens":16,"temperature":0.25},"stop_when":{"max_steps":2,"other":"kept"},"tools":[],"vendor":{"x":true}}"#;
+        let raw: Map<String, Value> = serde_json::from_slice(bytes).unwrap();
+        let request = SendRequest::new("hello", "limits").with_runner_params(raw);
+        let wire = serde_json::to_vec(&request).unwrap();
+        let decoded: SendRequest = serde_json::from_slice(&wire).unwrap();
+        assert_eq!(decoded.max_steps(), Ok(Some(2)));
+        assert_eq!(decoded.max_output_tokens(), Ok(Some(16)));
+        assert_eq!(decoded.no_tools(), Ok(Some(true)));
+        assert_eq!(serde_json::to_vec(&decoded.runner_params).unwrap(), bytes);
+        assert_eq!(serde_json::to_vec(&decoded).unwrap(), wire);
+    }
+
+    #[test]
+    fn run_parameter_builders_preserve_siblings_and_replace_single_values() {
+        let request = SendRequest::new("hello", "limits").with_runner_params(
+            json!({"stop_when":{"other":true},"generation":{"temperature":0.5},"tools":["native"]})
+                .as_object().unwrap().clone(),
+        ).with_max_steps(2).with_max_output_tokens(16).with_no_tools();
+        assert_eq!(
+            request.runner_params,
+            json!({
+                "stop_when":{"other":true,"max_steps":2},
+                "generation":{"temperature":0.5,"max_output_tokens":16},"tools":[]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+        );
+        assert_eq!(request.max_steps(), Ok(Some(2)));
+        assert_eq!(request.max_output_tokens(), Ok(Some(16)));
+        assert_eq!(request.no_tools(), Ok(Some(true)));
+    }
+
+    #[test]
+    fn run_parameter_accessors_name_malformed_values_without_changing_them() {
+        for (parent, member) in [
+            ("stop_when", "max_steps"),
+            ("generation", "max_output_tokens"),
+        ] {
+            for value in [
+                json!(0),
+                json!(-1),
+                json!(1.5),
+                json!(null),
+                json!("2"),
+                json!(true),
+                json!(18446744073709551616.0),
+            ] {
+                let raw = json!({parent: {member: value}});
+                let request: SendRequest = serde_json::from_value(
+                    json!({"prompt":"hi", "send_id":"bad", parent: raw[parent]}),
+                )
+                .unwrap();
+                let result = if parent == "stop_when" {
+                    request.max_steps()
+                } else {
+                    request.max_output_tokens()
+                };
+                assert_eq!(result, Err(format!("{parent}.{member}")));
+                assert_eq!(request.runner_params[parent], raw[parent]);
+            }
+            let request = SendRequest::new("hi", "bad")
+                .with_runner_params(json!({parent: null}).as_object().unwrap().clone());
+            let result = if parent == "stop_when" {
+                request.max_steps()
+            } else {
+                request.max_output_tokens()
+            };
+            assert_eq!(result, Err(parent.into()));
+        }
+        let absent = SendRequest::new("hi", "absent");
+        assert_eq!(absent.max_steps(), Ok(None));
+        assert_eq!(absent.max_output_tokens(), Ok(None));
+        assert_eq!(absent.no_tools(), Ok(None));
+        for value in [json!(null), json!({}), json!(false), json!("none")] {
+            let request = SendRequest::new("hi", "bad")
+                .with_runner_params(json!({"tools":value}).as_object().unwrap().clone());
+            assert_eq!(request.no_tools(), Err("tools".into()));
+        }
+        let request = SendRequest::new("hi", "specific")
+            .with_runner_params(json!({"tools":["native"]}).as_object().unwrap().clone());
+        assert_eq!(request.no_tools(), Ok(Some(false)));
     }
 }

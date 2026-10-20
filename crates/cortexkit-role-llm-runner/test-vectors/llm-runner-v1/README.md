@@ -210,3 +210,12 @@ one that started a run (`turn`, its `ref` and `run_id` the same run), and
 refusal and an answer without the group. Checked by the
 `send_status::tests` and `describe::tags_and_tool_calls_tests` modules of
 the wire crate.
+
+# Declared run parameters
+
+`run-parameters.json` carries all three role-meaning members in their existing
+wire positions, pins the complete `runner_params` bytes (including unrelated
+siblings), and names the malformed-value refusals for each member plus the
+later-plan-tools refusal. `run-parameters-describe.json` declares all three
+independent groups; `run_parameter_groups_are_independent_and_require_send`
+also checks each group alone and without its required `session.send` op.

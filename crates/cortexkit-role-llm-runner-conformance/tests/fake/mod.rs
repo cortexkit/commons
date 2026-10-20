@@ -275,6 +275,16 @@ pub struct Defects {
     /// step, ref}` without `run_id`, on a re-send and on `send.status`, so
     /// the answer never says which run the steer joined.
     pub delivered_steer_without_run_id: bool,
+    /// The model-response limit is ignored.
+    pub max_steps_ignored: bool,
+    /// The max_steps terminal is written without its pending calls' results.
+    pub max_steps_unsealed: bool,
+    /// The requested output maximum is not passed to the scripted model.
+    pub max_output_tokens_ignored: bool,
+    /// Empty tools leaves the plan's tools offered to the model.
+    pub no_tools_ignored: bool,
+    /// A later tools member on a plan session is silently ignored.
+    pub late_plan_tools_ignored: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -443,6 +453,9 @@ struct SendRec {
 
 #[derive(Clone, Debug)]
 struct RunRec {
+    max_steps: Option<u64>,
+    max_output_tokens: Option<u64>,
+    no_tools: bool,
     run_id: String,
     state: String,
     final_ordinal: Option<u64>,
@@ -1047,6 +1060,9 @@ impl Module {
                 );
                 if kind == "send" {
                     sess.runs.push(RunRec {
+                        max_steps: record["max_steps"].as_u64(),
+                        max_output_tokens: record["max_output_tokens"].as_u64(),
+                        no_tools: record["no_tools"] == true,
                         run_id,
                         state: "active".into(),
                         final_ordinal: None,
@@ -1188,7 +1204,7 @@ impl Module {
                     }
                     sess.push(
                         json!({"role":"tool", "tool_call_id":blocked["tool_call_id"],
-                        "content":{"executed":false,"error":{"code":"budget_exhausted"}}}),
+                        "content":{"executed":false,"error":{"code":record["state"]}}}),
                         &run_id,
                         Vec::new(),
                     );
@@ -1323,7 +1339,7 @@ impl Module {
                 .unwrap()
                 .get(session)
                 .and_then(|script| script.turns.get(turn_index).cloned());
-            let Some(turn) = turn else {
+            let Some(mut turn) = turn else {
                 return self.commit(
                     session,
                     json!({ "kind": "terminal", "run_id": run_id, "state": "error" }),
@@ -1337,14 +1353,26 @@ impl Module {
             let frozen = sess
                 .run(run_id)
                 .and_then(|run| run.structured_output.clone());
+            let run = sess.run(run_id).unwrap();
+            let output_cap = run
+                .max_output_tokens
+                .filter(|_| !self.world.defects.max_output_tokens_ignored)
+                .map(|cap| cap.min(32));
             if received {
+                let tools = if run.no_tools && !self.world.defects.no_tools_ignored {
+                    &[][..]
+                } else {
+                    &sess.tools[..]
+                };
+                let mut observation = observe_request(tools, frozen.as_ref());
+                observation.max_output_tokens = output_cap;
                 self.world
                     .model_requests
                     .lock()
                     .unwrap()
                     .entry(session.into())
                     .or_default()
-                    .push(observe_request(&sess.tools, frozen.as_ref()));
+                    .push(observation);
             }
             if !model_started
                 && self.world.defects.cancel_starts_next_step
@@ -1373,6 +1401,28 @@ impl Module {
             }
             if self.world.held_models.lock().unwrap().contains_key(session) {
                 return Ok(());
+            }
+            // The output-cap fixture is text-only. Its fake provider uses
+            // whitespace-delimited tokens and one allowance across all parts,
+            // reporting the number returned rather than merely clamping usage.
+            if let Some(cap) = output_cap {
+                if turn
+                    .parts
+                    .iter()
+                    .all(|part| matches!(part, ScriptedPart::Text(_) | ScriptedPart::Reasoning(_)))
+                {
+                    let mut remaining = cap as usize;
+                    for part in &mut turn.parts {
+                        if let ScriptedPart::Text(text) | ScriptedPart::Reasoning(text) = part {
+                            let tokens: Vec<_> = text.split_whitespace().take(remaining).collect();
+                            remaining -= tokens.len();
+                            *text = tokens.join(" ");
+                        }
+                    }
+                    if let Some(usage) = &mut turn.usage {
+                        usage.output_tokens = cap - remaining as u64;
+                    }
+                }
             }
             let ordinal = sess.messages.len();
             let mut parts = Vec::new();
@@ -1425,6 +1475,22 @@ impl Module {
                 json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls,
                         "input_spent": input_spent, "usage": usage }),
             )?;
+            if run
+                .max_steps
+                .is_some_and(|limit| run.usage.steps + 1 >= limit)
+                && !self.world.defects.max_steps_ignored
+            {
+                let blocked = if self.world.defects.max_steps_unsealed {
+                    vec![]
+                } else {
+                    calls.clone()
+                };
+                return self.commit(
+                    session,
+                    json!({"kind":"terminal", "run_id":run_id,
+                        "state":"max_steps", "blocked":blocked}),
+                );
+            }
             if let Some(limit) = sess.input_cap {
                 let cause = match input_spent {
                     None => Some("usage_unreported"),
@@ -2087,6 +2153,18 @@ impl Module {
         let delivery = request.delivery().as_str().to_owned();
         let old = self.sessions.lock().unwrap().get(session).cloned();
         let mut existing = old.clone().filter(|s| s.expired_at.is_none());
+        let max_steps = match request.max_steps() {
+            Ok(limit) => limit,
+            Err(field) => return Ok(invalid(&field)),
+        };
+        let max_output_tokens = match request.max_output_tokens() {
+            Ok(limit) => limit,
+            Err(field) => return Ok(invalid(&field)),
+        };
+        let no_tools = match request.no_tools() {
+            Ok(value) => value,
+            Err(field) => return Ok(invalid(&field)),
+        };
         let budget = match request.budget() {
             Ok(budget) => budget,
             Err(field) => return Ok(invalid(&field)),
@@ -2216,9 +2294,29 @@ impl Module {
                 drop(sessions);
                 return Ok(self.send_reply(session, &send));
             }
+            if sess.plan_digest.is_some()
+                && request.runner_params.contains_key("tools")
+                && !self.world.defects.late_plan_tools_ignored
+            {
+                return Ok(invalid("tools"));
+            }
             if let Some(run) = sess.runs.iter().find(|run| run.state == "active") {
                 if delivery != groups::STEER || !self.world.serves(groups::STEER) {
                     return Ok(refuse(errors::TRANSIENT, None));
+                }
+                for (differs, field) in [
+                    (
+                        max_steps.is_some_and(|limit| Some(limit) != run.max_steps),
+                        "stop_when.max_steps",
+                    ),
+                    (
+                        max_output_tokens.is_some_and(|limit| Some(limit) != run.max_output_tokens),
+                        "generation.max_output_tokens",
+                    ),
+                ] {
+                    if differs {
+                        return Ok(invalid(field));
+                    }
                 }
                 // A steer accepted during a run waits for a step boundary.
                 // Unlike a send to an idle session, accepting it must not
@@ -2310,6 +2408,8 @@ impl Module {
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "retention":request.retention, "title":request.runner_params.get("title"),
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
+                    "max_steps":max_steps, "max_output_tokens":max_output_tokens,
+                    "no_tools":no_tools == Some(true),
                     "structured_output": frozen }),
         )?;
         self.drive(session, &run_id)?;
@@ -3209,6 +3309,8 @@ pub struct FakeSubject {
     pub pause_for: Option<Duration>,
     /// Whether the scripted route supports a turn-scoped system message.
     pub turn_system: bool,
+    /// This adapter cannot create fetch-plan sessions.
+    pub without_plans: bool,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -3261,6 +3363,7 @@ impl FakeSubject {
             defects,
             step_recovery: StepRecovery::Resume,
             capabilities: served(),
+            without_plans: false,
             seal_compaction_setup_crash: false,
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
@@ -3466,7 +3569,7 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn send_fields(&self, session: &str, first: bool) -> Map<String, Value> {
         let mut fields = Map::new();
-        if first {
+        if first && !self.without_plans {
             fields.insert("plan".into(), json!({ "tools": [SCRIPTED_TOOL] }));
             fields.insert("model".into(), json!("fake-model"));
             if self.has_compaction_script(session) {
@@ -3524,6 +3627,9 @@ impl LlmRunnerSubject for FakeSubject {
         first: bool,
         members: &Map<String, Value>,
     ) -> Option<Map<String, Value>> {
+        if self.without_plans {
+            return None;
+        }
         let mut fields = self.send_fields(session, first);
         if let Some(plan) = fields.get_mut("plan").and_then(Value::as_object_mut) {
             plan.extend(members.clone());

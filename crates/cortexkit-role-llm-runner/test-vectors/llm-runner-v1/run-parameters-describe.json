@@ -1,0 +1,10 @@
+{
+  "majors": [{
+    "version": "llm-runner/v1",
+    "ops": ["role.describe", "session.baseline", "session.send"],
+    "stability": "alpha"
+  }],
+  "implementation_version": "1.0.0",
+  "capabilities": ["max_steps", "max_output_tokens", "no_tools"],
+  "session_capabilities_from": "baseline"
+}

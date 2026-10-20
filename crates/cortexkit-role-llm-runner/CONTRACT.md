@@ -130,6 +130,9 @@ shipping runner with this document.
 | `retention` | `session.send` with `retention` | §9.1 |
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
+| `max_steps` | `session.send` with `stop_when.max_steps` | §9.3.1 |
+| `max_output_tokens` | `session.send` with `generation.max_output_tokens` | §9.3.1 |
+| `no_tools` | `session.send` with `tools: []` | §9.3.1 |
 | `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
 | `adopt` | `session.adopt` | §9.5 |
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
@@ -142,7 +145,8 @@ shipping runner with this document.
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
   `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage`,
-  `delivery_order` and `send_status` are each declared on their own: a runner may serve any of them without the others,
+  `delivery_order`, `send_status`, `max_steps`, `max_output_tokens` and
+  `no_tools` are each declared on their own: a runner may serve any of them without the others,
   and without `run_ops` or `transcript_reads`. `tags` adds fields to
   `session.read`, so it requires that op (and `session.resolve`), not all of
   `transcript_reads`.
@@ -893,7 +897,8 @@ run's token usage whichever runner served it.
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. Except for the scoped closed `budget`
   rules on an `input_token_cap` runner (§9.3), the strict
-  `structured_output` member (§9.4) and the strict `delivery_order` members
+  `structured_output` member (§9.4), the declared run-limit members (§9.3.1)
+  and the strict `delivery_order` members
   on a `delivery_order` runner (§9.7), the request is lenient: a
   runner's own send parameters ride beside the role's members
   (`SendRequest::runner_params`).
@@ -1129,6 +1134,52 @@ joined, and `session.retract` does not withdraw it.
   runner-specific values of the three older budget members verbatim; only
   their member names are pinned here. Non-advertising runners retain their
   existing budget behavior unchanged.
+
+### 9.3.1 `max_steps`, `max_output_tokens`, `no_tools`: declared run parameters
+
+- [pinned] These are three independent describe groups. A runner declares
+  exactly the ones it honours. A caller MUST send `stop_when.max_steps`,
+  `generation.max_output_tokens` or `tools: []` only to a runner declaring
+  `max_steps`, `max_output_tokens` or `no_tools`, respectively.
+  `check_describe` checks each group for `session.send`; none adds discovery
+  metadata. Receiving an undeclared member keeps §9's existing rule: the
+  runner honours it or refuses `invalid_params` naming the field, never
+  silently ignores it.
+- [pinned] The wire positions do not change. The Rust `SendRequest` keeps
+  the complete raw members in `runner_params["stop_when"]["max_steps"]`,
+  `runner_params["generation"]["max_output_tokens"]` and
+  `runner_params["tools"]`, exactly as received. There are no separate typed
+  fields. `SendRequest::max_steps()`, `max_output_tokens()` and `no_tools()`
+  inspect without changing those values and report the offending field path
+  on malformed input. `with_max_steps`, `with_max_output_tokens` and
+  `with_no_tools` write those same positions; the limit builders preserve
+  sibling members. Decoding alone preserves even malformed legacy values.
+- [pinned] `stop_when.max_steps` is a positive u64 integer. One step is one
+  model response. Reaching the limit ends the run in terminal state
+  `max_steps`; §6's hard-stop rule seals every pending, undispatched call
+  with its never-executed result in the same durable commit. On a runner
+  declaring `max_steps`, a value that is not a representable positive u64
+  integer (including zero, null, negatives, non-integers and overflow) is refused `invalid_params` naming
+  `stop_when.max_steps`; a non-object `stop_when` names `stop_when`.
+- [pinned] `generation.max_output_tokens` is a positive u64 integer, frozen
+  at admission, that caps each model response. The effective cap is the
+  minimum of the request and the model's own output maximum: never above
+  the request, and never refused because the model's maximum is lower.
+  On a runner declaring `max_output_tokens`, a value that is not a
+  representable positive u64 integer (including zero, null, negatives,
+  non-integers and overflow) is
+  refused `invalid_params` naming `generation.max_output_tokens`; a
+  non-object `generation` names `generation`.
+- [pinned] `tools: []` means the model is offered no tools at all, including
+  plan tools and host built-ins. Only the empty list has role meaning in
+  `no_tools`; a non-empty list stays runner-specific. A non-list is refused
+  `invalid_params` naming `tools` on a runner declaring the group. A runner
+  that freezes tools at admission (a session with a fetch plan) refuses
+  `tools` on any later send with `invalid_params` naming `tools`, rather
+  than ignoring it, even when the value is unchanged.
+- [pinned] A joining steer whose limits differ from its run's is refused
+  `invalid_params`, naming the first differing field, under §9's existing
+  frozen-settings rule.
 
 ### 9.4 `structured_output`: schema-shaped run output
 
@@ -2226,6 +2277,10 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_usage_counts_reported_steps` | `run_usage`, `queue`, `run_ops`; after a two-step scripted run whose provider reports input, cache-read, cache-write and output counts but no reasoning, `run.result` carries `usage` with `steps: 2`, the scripted totals, `by_model` summing to them, and `reasoning_tokens` absent rather than `0`; `run.status`, where the major lists it, carries the same `usage`; reported as a named skip without `run_usage` |
+| `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
+| `max_output_tokens_caps_response` | `max_output_tokens`, `run_usage`, `queue`, `transcript_reads`, `run_ops`; the actual dispatched output maximum and the single response's reported usage are positive and never above the requested cap, including a request above the model's own maximum |
+| `no_tools_offered_to_model` | `no_tools`, `queue`, `transcript_reads`; an unsuppressed control offers tools and `tools: []` offers none, observed at the scripted model |
+| `no_tools_later_plan_send_refused` | `no_tools`, `queue`, `transcript_reads`; a fetch-plan session refuses any later `tools` member naming `tools`, writing nothing; reported inapplicable by name when the adapter cannot create a plan session |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
 
 The `context_ceiling` refusal and run state (§6, §12.1) have no live case:

@@ -144,6 +144,10 @@ where
                 .await
                 .map(|()| Ending::Passed),
             "send_status_unknown_send_refused" => passed(crate::follow::unknown_send(self).await),
+            "max_steps_seals_pending_calls"
+            | "max_output_tokens_caps_response"
+            | "no_tools_offered_to_model"
+            | "no_tools_later_plan_send_refused" => crate::run_parameters::run(self, name).await,
             name if name.starts_with("delivery_order_") => {
                 crate::delivery_order::run(self, name).await
             }

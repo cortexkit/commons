@@ -112,6 +112,14 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/run-cancel.json"),
     ),
     (
+        "run-parameters-describe.json",
+        include_str!("../test-vectors/llm-runner-v1/run-parameters-describe.json"),
+    ),
+    (
+        "run-parameters.json",
+        include_str!("../test-vectors/llm-runner-v1/run-parameters.json"),
+    ),
+    (
         "run-result.json",
         include_str!("../test-vectors/llm-runner-v1/run-result.json"),
     ),

@@ -64,6 +64,14 @@ const STRUCTURED_RESTART: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("max_steps_seals_pending_calls", &[Capability::MaxSteps, Queue, TranscriptReads, RunOps],
+        "a tool-calling model ends at the response limit in max_steps, with every pending call sealed before the terminal is observable and none dispatched"),
+    case("max_output_tokens_caps_response", &[Capability::MaxOutputTokens, Capability::RunUsage, Queue, TranscriptReads, RunOps],
+        "the dispatched per-response output maximum and the single response's reported output usage never exceed the requested cap"),
+    case("no_tools_offered_to_model", &[Capability::NoTools, Queue, TranscriptReads],
+        "tools [] offers no tools to the model, including the tools the adapter normally supplies"),
+    case("no_tools_later_plan_send_refused", &[Capability::NoTools, Queue, TranscriptReads],
+        "when the adapter can create a fetch-plan session, every later tools member is refused invalid_params naming tools without writes"),
     case("read_stable_across_host_metadata_change", &[Queue, TranscriptReads, Capability::HostMetadataChange],
         "a re-read after the host changes the session's metadata, under the same lineage, answers the same entries byte for byte"),
     case("tags_on_every_read_entry", TAGS,

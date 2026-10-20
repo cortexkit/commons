@@ -33,6 +33,9 @@ const LEFT_LINEAGE_CASE: &str = "tags_resolve_left_lineage_refused";
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::InputTokenCap,
+    Capability::MaxSteps,
+    Capability::MaxOutputTokens,
+    Capability::NoTools,
     Capability::StructuredOutput,
     Capability::Adopt,
     Capability::Tags,
@@ -157,6 +160,11 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.extend([
+        Capability::MaxSteps,
+        Capability::MaxOutputTokens,
+        Capability::NoTools,
+    ]);
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -444,6 +452,9 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::Streaming,
                     Capability::Retention,
                     Capability::InputTokenCap,
+                    Capability::MaxSteps,
+                    Capability::MaxOutputTokens,
+                    Capability::NoTools,
                     Capability::StructuredOutput,
                     Capability::Adopt,
                     Capability::RunToolCalls,
@@ -797,6 +808,9 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunOps,
                     Capability::Retention,
                     Capability::InputTokenCap,
+                    Capability::MaxSteps,
+                    Capability::MaxOutputTokens,
+                    Capability::NoTools,
                     Capability::StructuredOutput,
                     Capability::Adopt,
                     Capability::RunToolCalls,
@@ -1034,6 +1048,11 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.extend([
+        Capability::MaxSteps,
+        Capability::MaxOutputTokens,
+        Capability::NoTools,
+    ]);
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
@@ -1053,6 +1072,11 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.extend([
+        Capability::MaxSteps,
+        Capability::MaxOutputTokens,
+        Capability::NoTools,
+    ]);
     subject.advertise_status = false;
     let report = run(&subject).await;
     assert!(
@@ -2204,4 +2228,176 @@ async fn a_template_send_carrying_an_empty_prompt_accepted_fails_by_name() {
         &[("delivery_order_template_renders_as_system", "not refused")],
     )
     .await;
+}
+
+const RUN_PARAMETER_CASES: &[&str] = &[
+    "max_steps_seals_pending_calls",
+    "max_output_tokens_caps_response",
+    "no_tools_offered_to_model",
+    "no_tools_later_plan_send_refused",
+];
+
+fn run_parameters(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.extend([
+        Capability::MaxSteps,
+        Capability::MaxOutputTokens,
+        Capability::NoTools,
+        Capability::RunUsage,
+    ]);
+    subject
+}
+
+#[tokio::test]
+async fn declared_run_parameters_pass_all_four_cases() {
+    let report = run(&run_parameters(Defects::default())).await;
+    for name in RUN_PARAMETER_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn undeclared_run_parameters_skip_each_case_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for (name, missing) in [
+        (RUN_PARAMETER_CASES[0], Capability::MaxSteps),
+        (RUN_PARAMETER_CASES[1], Capability::MaxOutputTokens),
+        (RUN_PARAMETER_CASES[2], Capability::NoTools),
+        (RUN_PARAMETER_CASES[3], Capability::NoTools),
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing: names }) if names.contains(&missing)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+        assert!(report.render().contains(&format!("SKIP {name}")));
+    }
+}
+
+async fn run_parameter_break(defects: Defects, expected: &str, message: &str) {
+    let report = run(&run_parameters(defects)).await;
+    let reason = failed(&report, expected);
+    assert!(reason.contains(message), "{expected}: {reason}");
+    assert_none_failed_but(&report, &[expected]);
+    for name in RUN_PARAMETER_CASES {
+        if *name != expected {
+            assert_passed(&report, name);
+        }
+    }
+    println!("NON-VACUITY BREAK {expected}: {reason}; other run-parameter cases passed");
+}
+
+#[tokio::test]
+async fn ignoring_max_steps_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            max_steps_ignored: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[0],
+        "expected max_steps",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn unsealed_max_steps_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            max_steps_unsealed: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[0],
+        "never-executed result",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_max_output_tokens_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            max_output_tokens_ignored: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[1],
+        "response exceeds cap",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_no_tools_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            no_tools_ignored: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[2],
+        "suppression=true",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_later_plan_tools_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            late_plan_tools_ignored: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[3],
+        "late plan tools",
+    )
+    .await;
+}
+
+async fn run_parameter_case(name: &str) {
+    let report = run(&run_parameters(Defects::default())).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{name}: {:?}",
+        report.outcome(name)
+    );
+}
+
+#[tokio::test]
+async fn run_parameter_case_max_steps_seals_pending_calls() {
+    run_parameter_case(RUN_PARAMETER_CASES[0]).await;
+}
+
+#[tokio::test]
+async fn run_parameter_case_max_output_tokens_caps_response() {
+    run_parameter_case(RUN_PARAMETER_CASES[1]).await;
+}
+
+#[tokio::test]
+async fn run_parameter_case_no_tools_offered_to_model() {
+    run_parameter_case(RUN_PARAMETER_CASES[2]).await;
+}
+
+#[tokio::test]
+async fn run_parameter_case_no_tools_later_plan_send_refused() {
+    run_parameter_case(RUN_PARAMETER_CASES[3]).await;
+}
+
+#[tokio::test]
+async fn no_tools_without_plan_session_support_skips_later_send_case_by_name() {
+    let mut subject = declaring(Capability::NoTools, Defects::default());
+    subject.without_plans = true;
+    let report = run(&subject).await;
+    let name = RUN_PARAMETER_CASES[3];
+    assert!(
+        matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("cannot create a fetch-plan session")),
+        "{name}: {:?}",
+        report.outcome(name)
+    );
+    assert!(report.render().contains(name));
 }
