@@ -2699,6 +2699,56 @@ async fn run_tool_calls_new_locations_pass() {
 }
 
 #[tokio::test]
+async fn run_tool_calls_embedded_layout_passes() {
+    let report = run(&declaring(
+        Capability::RunToolCalls,
+        Defects {
+            run_tool_calls_embedded_results: true,
+            ..Defects::default()
+        },
+    ))
+    .await;
+    for name in cases_of(TOOL_CALL_PREFIXES) {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn run_tool_calls_missing_request_arguments_after_release_fails_by_name() {
+    let report = run(&declaring(
+        Capability::RunToolCalls,
+        Defects {
+            run_tool_calls_omit_finished_arguments: true,
+            ..Defects::default()
+        },
+    ))
+    .await;
+    let reason = failed(&report, "run_tool_calls_result_ordinal_tracks_storage");
+    assert!(
+        reason.contains("run.tool_calls names ordinal")
+            && reason.contains("but that message does not hold them"),
+        "{reason}"
+    );
+}
+
+#[tokio::test]
+async fn run_tool_calls_open_message_without_arguments_fails_by_name() {
+    only_these_fail(
+        Capability::RunToolCalls,
+        TOOL_CALL_PREFIXES,
+        Defects {
+            run_tool_calls_open_message_without_arguments: true,
+            ..Defects::default()
+        },
+        &[(
+            "run_tool_calls_result_ordinal_tracks_storage",
+            "but that message does not hold them",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn swapped_tool_call_positions_fail_by_name() {
     only_these_fail(
         Capability::RunToolCalls,

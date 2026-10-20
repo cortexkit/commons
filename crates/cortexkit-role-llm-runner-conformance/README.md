@@ -349,11 +349,19 @@ keeps the call (shape (b)), and when the seal dropped no tagged part.
 
 ## Run tool calls
 
-The three `run_tool_calls_*` cases run only with `Capability::RunToolCalls`.
+The five `run_tool_calls_*` cases run only with `Capability::RunToolCalls`.
 They follow `next` one call a page and check dispatch order, names, ids,
 exact `args`, outcomes, the dispatch module, stored result sizes and the
 carrying ordinal; `unknown_run`, a misspelled cursor and `limit: 0`; and, with
 held tool calls, `indeterminate` until the result is stored.
+
+`run_tool_calls_result_ordinal_tracks_storage` requires an open call to have
+position 0 and no `result_ordinal`. Its requesting-message ordinal may be
+unreadable until release because an embedded call/result message is not yet
+finished. Any already-readable message at that ordinal must carry the arguments.
+After release, the requesting message must exist and carry the arguments, and
+`result_ordinal >= ordinal` must locate the stored result; equal ordinals are
+valid for embedded layouts.
 
 ## Run usage
 

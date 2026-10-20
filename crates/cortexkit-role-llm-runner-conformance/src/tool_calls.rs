@@ -302,7 +302,15 @@ where
                 "open call must have position 0 and no result_ordinal: {call:?}"
             ));
         }
-        carried(&read_all(&session.route).await?.1, call, &held.arguments)?;
+        let (_, messages) = read_all(&session.route).await?;
+        // A message embedding both the call and its result is not finished
+        // until the tool returns, so its ordinal need not be readable yet.
+        if messages
+            .iter()
+            .any(|message| message.ordinal == call.ordinal)
+        {
+            carried(&messages, call, &held.arguments)?;
+        }
     }
     case.subject
         .release_tool_call(&held.arguments)
@@ -320,6 +328,7 @@ where
                             format!("finished call needs result_ordinal >= ordinal: {call:?}")
                         })?;
                     let (_, messages) = read_all(&session.route).await?;
+                    carried(&messages, call, &held.arguments)?;
                     if !messages.iter().any(|message| {
                         message.ordinal == ordinal
                             && message

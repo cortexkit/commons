@@ -302,6 +302,14 @@ pub struct Defects {
     pub run_tool_calls_positions_swapped: bool,
     /// An open call falsely claims a stored result location.
     pub run_tool_calls_open_result_ordinal: bool,
+    /// Embed results in the requesting message; keep it unreadable until every
+    /// tool returns so reads never expose a message that will change.
+    pub run_tool_calls_embedded_results: bool,
+    /// A finished requesting message loses the arguments its listed call names.
+    pub run_tool_calls_omit_finished_arguments: bool,
+    /// Serve open requesting messages without arguments, then restore them
+    /// after the tool returns, changing content that readers already saw.
+    pub run_tool_calls_open_message_without_arguments: bool,
     pub directives: DirectiveDefect,
     /// The model-response limit is ignored.
     pub max_steps_ignored: bool,
@@ -1221,6 +1229,31 @@ impl Module {
                     .unwrap_or_default();
                 if let Some(call) = sess.calls.get_mut(&key) {
                     call.result = true;
+                }
+                if self.world.defects.run_tool_calls_embedded_results
+                    || self.world.defects.run_tool_calls_omit_finished_arguments
+                {
+                    let arguments = &sess.calls[&key].arguments;
+                    let message = sess
+                        .messages
+                        .iter_mut()
+                        .find(|message| message.calls.contains(&key))
+                        .unwrap();
+                    let part = message.body["parts"]
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|part| part["type"] == "tool_call" && part["arguments"] == *arguments)
+                        .unwrap();
+                    if self.world.defects.run_tool_calls_embedded_results {
+                        part["result"] = record["content"].clone();
+                    }
+                    if self.world.defects.run_tool_calls_omit_finished_arguments {
+                        part.as_object_mut().unwrap().remove("arguments");
+                    }
+                }
+                if self.world.defects.run_tool_calls_embedded_results {
+                    return;
                 }
                 let mut body =
                     json!({ "role": "tool", "call_key": key, "content": record["content"] });
@@ -2686,13 +2719,20 @@ impl Module {
             .unwrap_or(DEFAULT_MAX_BYTES)
             .min(MAXIMUM_MAX_BYTES) as usize;
         let size = |m: &Msg| m.body.to_string().len();
-        let all = &sess.messages;
+        let all: Vec<_> = sess
+            .messages
+            .iter()
+            .filter(|message| {
+                !self.world.defects.run_tool_calls_embedded_results
+                    || message.calls.iter().all(|key| sess.calls[key].result)
+            })
+            .collect();
         let (start, end) = match mode {
             ReadMode::Tail if !self.world.defects.tail_returns_oldest => {
                 let mut start = all.len();
                 let mut bytes = 0;
                 while start > 0 && all.len() - start < limit {
-                    let next = size(&all[start - 1]);
+                    let next = size(all[start - 1]);
                     if start < all.len() && bytes + next > cap {
                         break;
                     }
@@ -2716,7 +2756,7 @@ impl Module {
                 let mut end = start;
                 let mut bytes = 0;
                 while end < all.len() && end - start < limit {
-                    let next = size(&all[end]);
+                    let next = size(all[end]);
                     if end > start && bytes + next > cap {
                         break;
                     }
@@ -2773,6 +2813,24 @@ impl Module {
             })
             .collect();
         let mut body = m.body.clone();
+        if self
+            .world
+            .defects
+            .run_tool_calls_open_message_without_arguments
+        {
+            for part in body["parts"].as_array_mut().into_iter().flatten() {
+                if part["type"] == "tool_call"
+                    && m.calls.iter().any(|key| {
+                        let call = &sess.calls[key];
+                        !call.result
+                            && part["id"] == call.tool_call_id
+                            && part["arguments"] == call.arguments
+                    })
+                {
+                    part.as_object_mut().unwrap().remove("arguments");
+                }
+            }
+        }
         if self.world.defects.read_serves_live_host_metadata && sess.host_meta > 0 {
             body["host_title"] = json!(format!("renamed {}", sess.host_meta));
         }
@@ -3203,17 +3261,32 @@ impl Module {
                     listed = listed.with_dispatched_to(TOOL_MODULE);
                 }
                 if call.result {
-                    let stored = sess.messages.iter().find(|m| {
-                        m.body["role"] == "tool"
-                            && (m.body["call_key"] == json!(key)
-                                || (m.body.get("call_key").is_none()
-                                    && m.run_id == call.run_id
-                                    && m.body["tool_call_id"] == json!(call.tool_call_id)))
-                    });
-                    if let Some(stored) = stored {
+                    let stored = if self.world.defects.run_tool_calls_embedded_results {
+                        message.body["parts"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .find(|part| {
+                                part["type"] == "tool_call" && part["id"] == call.tool_call_id
+                            })
+                            .and_then(|part| part.get("result"))
+                            .map(|result| (message.ordinal, result.to_string().len()))
+                    } else {
+                        sess.messages
+                            .iter()
+                            .find(|m| {
+                                m.body["role"] == "tool"
+                                    && (m.body["call_key"] == json!(key)
+                                        || (m.body.get("call_key").is_none()
+                                            && m.run_id == call.run_id
+                                            && m.body["tool_call_id"] == json!(call.tool_call_id)))
+                            })
+                            .map(|stored| (stored.ordinal, stored.body.to_string().len()))
+                    };
+                    if let Some((ordinal, bytes)) = stored {
                         listed = listed
-                            .with_result_bytes(stored.body.to_string().len() as u64)
-                            .with_result_ordinal(stored.ordinal);
+                            .with_result_bytes(bytes as u64)
+                            .with_result_ordinal(ordinal);
                     }
                 }
                 calls.push(listed);

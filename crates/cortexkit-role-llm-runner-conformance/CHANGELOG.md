@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.7
+
+- Accept an unreadable requesting-message ordinal while a tool call is open in `run_tool_calls_result_ordinal_tracks_storage`: embedded call/result messages are not finished until the tool returns. If the message is already readable, it must still carry the call's arguments; open calls still require position 0 and no `result_ordinal`.
+- After release, require the requesting message to exist and carry the arguments, as well as checking that `result_ordinal` locates the stored result. Self-tests cover an embedded layout with equal call and result ordinals, a faulty runner that loses the finished requesting message's arguments, and an early-readable placeholder that gains the arguments only after release.
+
 ## 0.8.6
 
 - Require llm-runner 0.3.8. Add `delivery_order_declared_modes_respected`, gated on the live describe answer advertising `delivery_order_modes`. It tries every non-empty ordered list of distinct modes: lists containing only undeclared modes must be refused `delivery_unsupported` with the original `detail.delivery` and no transcript writes; lists containing a listed mode must be accepted.

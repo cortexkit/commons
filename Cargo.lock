@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "async-trait",
  "cortexkit-role-compaction-provider",
