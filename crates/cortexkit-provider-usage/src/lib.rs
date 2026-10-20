@@ -436,6 +436,20 @@ pub struct Pool {
     /// everywhere else.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub resets_at: Option<String>,
+    /// When unused credit in this pool stops being spendable, as RFC 3339, if
+    /// the provider states one.
+    ///
+    /// **Expiry is not a reset.** At `resets_at` a pool refills; at `expires_at`
+    /// whatever is left is lost and nothing comes back in its place. A grant
+    /// that lapses at the end of a billing cycle may be followed by a new grant,
+    /// but that is a separate pool, not this one refilling. Kept apart from
+    /// `resets_at` so a consumer never schedules spending around a refill that
+    /// will not happen, and can spend expiring credit first.
+    ///
+    /// **Absent means not stated, never "does not expire".** A producer sets it
+    /// only from a value the provider sent.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub expires_at: Option<String>,
 }
 
 /// Account labels and subscription information supplied by a provider or vault.
@@ -1428,6 +1442,7 @@ mod tests {
             basis: PoolBasis::Reported,
             spendable: Some(true),
             resets_at: None,
+            expires_at: None,
         };
         let mut entry = ProviderUsage::healthy("deepseek", None, "api", Usage::default());
         entry.spend = Some(vec![pool.clone()]);
@@ -1460,6 +1475,7 @@ mod tests {
             basis: PoolBasis::Unstated,
             spendable: None,
             resets_at: Some("2026-10-01T00:00:00Z".to_string()),
+            expires_at: None,
         };
         let json = serde_json::to_string(&pool).unwrap();
         assert!(
@@ -1476,6 +1492,48 @@ mod tests {
         assert!(!json.contains("resetsAt"), "{json}");
     }
 
+    /// A stated expiry round-trips under its own wire name, separate from
+    /// `resetsAt`, and an absent one is not rendered at all.
+    #[test]
+    fn a_pool_expiry_round_trips_apart_from_reset_and_is_omitted_when_absent() {
+        let pool = Pool {
+            id: "grant_1".to_string(),
+            label: "API credit (Max 20x)".to_string(),
+            funding: PoolFunding::Subscription,
+            remaining: Some(Amount {
+                minor: 19663,
+                exponent: 2,
+                unit: "USD".to_string(),
+            }),
+            total: Some(Amount {
+                minor: 20000,
+                exponent: 2,
+                unit: "USD".to_string(),
+            }),
+            basis: PoolBasis::Reported,
+            spendable: None,
+            resets_at: None,
+            expires_at: Some("2026-11-06T00:00:00Z".to_string()),
+        };
+        let json = serde_json::to_string(&pool).unwrap();
+        assert!(
+            json.contains(r#""expiresAt":"2026-11-06T00:00:00Z""#),
+            "{json}"
+        );
+        assert!(
+            !json.contains("resetsAt"),
+            "an expiry was rendered as a reset: {json}"
+        );
+        assert_eq!(serde_json::from_str::<Pool>(&json).unwrap(), pool);
+
+        let unstated = Pool {
+            expires_at: None,
+            ..pool
+        };
+        let json = serde_json::to_string(&unstated).unwrap();
+        assert!(!json.contains("expiresAt"), "{json}");
+    }
+
     /// A pool written before `resetsAt` existed still decodes, to `None`.
     ///
     /// The direction that bites: a producer on an older crate, or a stored
@@ -1489,6 +1547,7 @@ mod tests {
                        "remaining": { "minor": 2402, "exponent": 2, "unit": "credit" } }"#;
         let pool: Pool = serde_json::from_str(json).unwrap();
         assert_eq!(pool.resets_at, None);
+        assert_eq!(pool.expires_at, None);
     }
 
     /// An unrecognised funding kind must not take the entry down with it.
