@@ -714,6 +714,9 @@ pub struct SendReply {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    /// The id of a queued submission, on a `pending` reply. Opaque: a caller
+    /// never derives a run id from it. Once the send is delivered, `run_id`
+    /// names the run that carried it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submission_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -726,7 +729,12 @@ pub struct SendReply {
     /// same `send_id` gets the same facts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<Baseline>,
-    /// Steer delivery receipt, when applicable.
+    /// Steer delivery receipt, when applicable. For a queued send once
+    /// delivered: `step` with the stored row as `ref` when it went into a
+    /// running run, `turn` with the run as `ref` when it started one, and
+    /// `unknown` when delivery cannot be confirmed, each with `run_id` naming
+    /// that run when known. These three are durable: a restart never turns
+    /// them back into `pending` or absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered: Option<Delivered>,
 }

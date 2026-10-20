@@ -136,12 +136,13 @@ shipping runner with this document.
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
+| `send_status` | `send.status` | §9.8 |
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
-  `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage` and
-  `delivery_order` are each declared on their own: a runner may serve any of them without the others,
+  `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage`,
+  `delivery_order` and `send_status` are each declared on their own: a runner may serve any of them without the others,
   and without `run_ops` or `transcript_reads`. `tags` adds fields to
   `session.read`, so it requires that op (and `session.resolve`), not all of
   `transcript_reads`.
@@ -174,6 +175,11 @@ shipping runner with this document.
   `queue` (a reminder starting a run, a template send going out as an empty
   prompt). Beside a list they fail closed, because every runner without the
   group, older ones included, refuses the whole send naming `delivery`.
+- [pinned] A caller MUST NOT send `send.status` unless the runner
+  advertises `send_status` (§9.8). Against any other runner it follows a
+  send by re-sending the full body under the same `send_id` (§9).
+  `check_describe` checks the group for `send.status`; it adds no discovery
+  metadata.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
   `check_describe` refuses by name a `run_cancel` member without the
@@ -934,6 +940,33 @@ run's token usage whichever runner served it.
   unchanged, `ref` included. Absent to `pending` is not a move on a
   `confirm` runner, where absent already means `pending`; a `guaranteed`
   runner never answers `pending` at all.
+- [pinned] Following a queued send. A send answered `pending` with a
+  `submission_id` (a `queue` send behind a running run, or a
+  `delivery_order` list waiting for a boundary, §9.7) is followed by
+  re-sending the same `send_id`, or by `send.status` on a runner that
+  declares `send_status` (§9.8). Once it is delivered, the answer says how
+  and into which run (`SendReply::delivered`, `SendReply::run_id`):
+  - delivered as a steer into a running run: `delivered: {as: "step", ref}`,
+    `ref` the stored row id of the delivered message, and `run_id` the run
+    it joined;
+  - delivered by starting a run on an idle session: `delivered: {as:
+    "turn", ref}`, `ref` the run id, and `run_id` that same run;
+  - handed to a run but not confirmed delivered: `delivered: {as:
+    "unknown"}`, with `run_id` the run it was handed to when the runner
+    knows it, absent otherwise.
+  A queued send delivered with a `tool_result` or `turn_system` mode
+  (§9.7) rode a step of a running run and is answered as a steer.
+- [pinned] These three answers are durable. They are §9's "final" rule
+  made explicit for a queued send: the runner answers them from its durable
+  record of the send, so once one is given, a runner restart never turns it
+  back into `pending` or absent, and every later answer to the same
+  `send_id` carries the same `delivered` and `run_id`. `unknown` stays
+  `unknown` even if the delivery is later proven.
+- [pinned] A caller MUST NOT derive a run id from a `submission_id`.
+  `submission_id` is opaque, it names a submission and never a run, and
+  `run.status` on an id that names no run answers `{state: "unknown"}`
+  (§6.1), which a caller would misread as a run of unknown state. The run
+  that carried a delivered send is the answer's `run_id`.
 
 ### 9.1 `retention`: whole-session transcript lifetime
 
@@ -1430,9 +1463,18 @@ runner answers with the exact stored content.
   (a tool call, a reasoning block, a structured result) it is the runner's
   own stored encoding of the part, the same bytes on every resolve. `range`
   echoes the request's.
-- [pinned] A malformed tag is refused `invalid_params {field: "tag"}`; a
-  well-formed tag the session never assigned is refused `unknown_tag`,
-  terminal, since tags are never reused (§12.1). A range whose `start` is
+- [pinned] `session.resolve` answers about the session's current lineage.
+  A tag whose part is in the current lineage resolves normally, with that
+  part's current `ordinal` and `mid`. That includes a part carried across a
+  lineage change that kept its tag: it answers where the part now sits in
+  the new lineage, never where it sat in the old one.
+- [pinned] A malformed tag is refused `invalid_params {field: "tag"}`. A
+  well-formed tag that no part of the session's current lineage carries is
+  refused `unknown_tag`, terminal (§12.1): a tag the session never
+  assigned, and a tag assigned only under a lineage the session has left (a
+  fork, a §14 shape-(a) drop, a retention expiry, §9.1), since tags are
+  never reused and a left lineage never returns. Resolve never answers a
+  left lineage's content. A range whose `start` is
   after its `end`, or whose `end` is past the content, is refused
   `invalid_params {field: "range"}`; an empty range within the content
   answers `""`.
@@ -1537,7 +1579,12 @@ say who may send and which texts are system text.
   "expired"}`. A send whose time has passed when it arrives is dropped at
   its first boundary.
 - [pinned] Until it is delivered, a queued send answers `pending` with its
-  `submission_id`, as a queued send does today (§9).
+  `submission_id`, as a queued send does today (§9). Once delivered, a
+  re-send of its `send_id` (or `send.status`, §9.8) answers how and into
+  which run, durably, as §9 says for following a queued send: `step` with
+  `run_id` the run it joined, or `turn` with `run_id` the run it started.
+  One handed to a run but not confirmed delivered answers `unknown`, with
+  `run_id` that run when known, just as durably.
 
 **What is written.**
 
@@ -1609,6 +1656,38 @@ say who may send and which texts are system text.
   string `queue` or `steer`, which stand for lists holding `idle_start`) is
   refused `invalid_params {field: "delivery"}`. `interrupt` stays the
   owner's.
+
+### 9.8 `send_status`: `send.status`
+
+A caller that follows a queued send (§9) re-sends its full body under the
+same `send_id`. A runner that declares `send_status` also answers the same
+question from the `send_id` alone, so a caller polling many sends does not
+re-send their bodies.
+
+- [pinned] The request is `{send_id}` (`send_status::SendStatusRequest`),
+  strict: an unknown field is refused `invalid_params` naming it, because a
+  misspelled `send_id` would otherwise ask about another send. It names no
+  session (§1), and carries no part of the send's body.
+- [pinned] The answer is exactly what a re-send of that `send_id`, with the
+  body it was accepted with, would answer at that moment: a `SendReply`
+  (`send_status::SendStatusReply`), with §9's `state`, `run_id`,
+  `submission_id` and `delivered` rules, and the same durability: a
+  queued send's final `step`, `turn` or `unknown` answer survives a runner
+  restart unchanged. The runner answers from its durable record of the
+  send.
+- [pinned] The `send_id` is looked up as a re-send's is: the caller's
+  `send_id` namespace (§9, and per sender on a `delivery_order` runner,
+  §9.7). A `send_id` the session has no record of for the caller is
+  refused `unknown_send`, terminal (§12.1); nothing is written.
+- [pinned] `send.status` writes nothing and dispatches nothing: it never
+  admits, delivers, re-queues or retries a send, and it is not activity
+  for retention (§9.1).
+- [pinned] A caller sends `send.status` only to a runner that declares
+  `send_status` (§3). Against any other runner it falls back to re-sending
+  the full body under the same `send_id`, which answers the same way.
+- [pinned] Vectors: `send-status.json` (requests, refused requests,
+  replies, and the `unknown_send` refusal) and `send-status-describe.json`
+  in `test-vectors/llm-runner-v1/`.
 
 ## 10. `session.baseline` and the admission reply
 
@@ -1832,7 +1911,8 @@ treats it as a terminal refusal of that one request.
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
-| `unknown_tag` | `session.resolve` names a well-formed tag the session never assigned (§9.6) | — | no |
+| `unknown_tag` | `session.resolve` names a well-formed tag that no part of the session's current lineage carries: one it never assigned, or one assigned only under a lineage it has left (§9.6) | — | no |
+| `unknown_send` | `send.status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
@@ -2133,9 +2213,13 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
 | `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
 | `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
+| `tags_resolve_left_lineage_refused` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, and `StepRecorded`; reads the `crash_at_StepRecorded` scenario: after a seal that drops the never-sent call or its step and moves the session to a new lineage (§14, shape (a)), every tag number below the new lineage's highest that no part it reads carries, the dropped part's among them, is refused `unknown_tag`, and the cut run's prompt resolves with its ordinal and `mid` in the new lineage; inapplicable when the runner resumes the run or keeps the call (shape (b)), or when the seal dropped no tagged part; reported as a named skip without `tags` |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_members_without_list_refused`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` |
 | `delivery_order_list_refused_without_group` | `queue`, `transcript_reads`; not applicable when `delivery_order` is declared: a list in `delivery` is refused `invalid_params` naming `delivery` and writes nothing |
 | `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
+| `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, and a held tool call; on its own state root, the harness restart hook and no kill: a `[steer]` list sent while a run waits on a held call answers `pending` with a `submission_id`, is delivered once as a steer when the call is released, and a re-send of its `send_id` answers `delivered: {as: "step", ref}` with `run_id` the run it joined, before the restart and unchanged after it; reported as a named skip without `delivery_order` |
+| `send_status_answers_as_a_resend_after_restart` | `send_status` and the above; `send.status` of the same send answers what a re-send answers, `step` with the joined run's `run_id`, before the restart and after it, never `pending`; the live `role.describe` must declare `send_status` before any `send.status` is sent; reported as a named skip without `send_status` |
+| `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads`; `send.status` of a settled send answers what its re-send answers, one of a `send_id` the session has no record of is refused `unknown_send`, and one carrying an unknown field is refused `invalid_params` naming it |
 | `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
 | `delivery_order_template_renders_as_system`, `delivery_order_bad_slot_refused` | the above; the rendered text goes out as `turn_system` where the adapter says its scripted route supports it, and as the same text at user authority otherwise; an out-of-range slot, and a template send carrying an empty `prompt`, are refused naming `template` and write nothing |
 | `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |

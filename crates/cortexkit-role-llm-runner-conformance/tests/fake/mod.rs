@@ -263,6 +263,18 @@ pub struct Defects {
     /// reported any, at the top and in every `by_model` entry, instead of
     /// leaving the total absent.
     pub usage_absent_reasoning_as_zero: bool,
+    /// After a restart, `send.status` answers a queued send that was
+    /// delivered before it `pending` again, as a status kept only in memory
+    /// would; a re-send still answers from the durable record.
+    pub send_status_pending_after_restart: bool,
+    /// `session.resolve` still answers a tag whose part a recovery dropped
+    /// when it moved the session to a new lineage, with the dropped part's
+    /// old content.
+    pub resolve_left_lineage_tags: bool,
+    /// A queued send delivered as a steer is answered `delivered: {as:
+    /// step, ref}` without `run_id`, on a re-send and on `send.status`, so
+    /// the answer never says which run the steer joined.
+    pub delivered_steer_without_run_id: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -404,6 +416,18 @@ struct Queued {
     request: Value,
     /// `pending`, `delivered`, `superseded` or `expired`.
     state: String,
+    /// Once delivered: how, and into which run.
+    delivery: Option<QueuedDelivery>,
+}
+
+/// How a queued `delivery_order` send was delivered, as its re-send answers
+/// it: `step` with the stored row for a send that went into a running run,
+/// `turn` with the run for one that started a run.
+#[derive(Clone, Debug)]
+struct QueuedDelivery {
+    r#as: &'static str,
+    r#ref: String,
+    run_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -477,6 +501,10 @@ struct Sess {
     events: Vec<String>,
     /// The highest tag number assigned.
     last_tag: u64,
+    /// Messages, as they were written, that a recovery dropped or rewrote
+    /// when it moved the session to a new lineage. Never read or resolved,
+    /// except when `Defects::resolve_left_lineage_tags` is set.
+    left: Vec<Msg>,
     /// The non-owner senders the session's admitted plan names.
     senders: Vec<order::PlanSender>,
     /// Accepted `delivery_order` sends, keyed by sender and `send_id`, and
@@ -591,6 +619,9 @@ pub struct Module {
     kill_hook: Mutex<Option<String>>,
     hook_fired: AtomicBool,
     sessions: Mutex<BTreeMap<String, Sess>>,
+    /// The module was opened over a log an earlier incarnation wrote: it is
+    /// a restart.
+    replayed: AtomicBool,
 }
 
 impl Module {
@@ -707,8 +738,12 @@ impl Module {
             kill_hook: Mutex::new(None),
             hook_fired: AtomicBool::new(false),
             sessions: Mutex::new(BTreeMap::new()),
+            replayed: AtomicBool::new(false),
         });
         if let Ok(text) = std::fs::read_to_string(&module.log) {
+            module
+                .replayed
+                .store(!text.trim().is_empty(), Ordering::SeqCst);
             for line in text.lines() {
                 let record: Value = serde_json::from_str(line)
                     .map_err(|e| HarnessError::new(format!("corrupt log: {e}")))?;
@@ -900,12 +935,21 @@ impl Module {
                         system: record["system"] == json!(true),
                         request: record["request"].clone(),
                         state: "pending".into(),
+                        delivery: None,
                     },
                 );
             }
             "order_end" => {
                 if let Some(queued) = sess.ordered.get_mut(&text("id")) {
                     queued.state = text("state");
+                    // A send delivered by starting a run records that run.
+                    if let Some(run_id) = record["run_id"].as_str() {
+                        queued.delivery = Some(QueuedDelivery {
+                            r#as: delivered_as::TURN,
+                            r#ref: run_id.to_owned(),
+                            run_id: run_id.to_owned(),
+                        });
+                    }
                 }
             }
             "order_delivered" => {
@@ -921,7 +965,16 @@ impl Module {
                 };
                 let body = json!({ "role": role, "text": queued.text });
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
-                sess.messages[ordinal as usize].delivered_as = Some(record["delivered_as"].clone());
+                let message = &mut sess.messages[ordinal as usize];
+                message.delivered_as = Some(record["delivered_as"].clone());
+                let row = message.mid.clone();
+                if let Some(queued) = sess.ordered.get_mut(&id) {
+                    queued.delivery = Some(QueuedDelivery {
+                        r#as: delivered_as::STEP,
+                        r#ref: row,
+                        run_id: text("run_id"),
+                    });
+                }
             }
             "ceiling_wait" => {
                 sess.ceiling_wait = Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
@@ -1065,6 +1118,13 @@ impl Module {
                     sess.lineage = format!("{}-r", sess.lineage);
                 }
                 sess.calls.retain(|_, call| call.run_id != run_id);
+                let dropped: Vec<Msg> = sess
+                    .messages
+                    .iter()
+                    .filter(|m| m.run_id == run_id && !m.calls.is_empty())
+                    .cloned()
+                    .collect();
+                sess.left.extend(dropped);
                 if record["keep_text"] == json!(true) {
                     for message in sess
                         .messages
@@ -1544,7 +1604,7 @@ impl Module {
             let run_id = format!("run-{}", sess.runs.len() + 1);
             self.commit(
                 session,
-                json!({ "kind": "order_end", "id": id, "state": "delivered" }),
+                json!({ "kind": "order_end", "id": id, "state": "delivered", "run_id": run_id }),
             )?;
             self.commit(
                 session,
@@ -1617,6 +1677,9 @@ impl Module {
             }
             ops::RUN_TOOL_CALLS if self.world.serves(groups::RUN_TOOL_CALLS) => {
                 Ok(self.tool_calls(session, &params))
+            }
+            ops::SEND_STATUS if self.world.serves(groups::SEND_STATUS) => {
+                Ok(self.send_status(stamp, session, &params))
             }
             ops::SESSION_READ | ops::SESSION_HEAD => {
                 self.world.transcript_calls.fetch_add(1, Ordering::SeqCst);
@@ -2287,7 +2350,7 @@ impl Module {
                     Some(json!({ "field": order::FIELD })),
                 ));
             }
-            return Ok(ordered_reply(queued));
+            return Ok(ordered_reply(&self.world.defects, &sess, queued));
         }
         let (text, system) = match &wanted.template {
             None => (request.prompt_text().to_owned(), false),
@@ -2333,8 +2396,12 @@ impl Module {
                     "request": params }),
         )?;
         self.deliver_idle(session)?;
-        let queued = self.sessions.lock().unwrap()[session].ordered[&id].clone();
-        Ok(ordered_reply(&queued))
+        let sess = self.sessions.lock().unwrap()[session].clone();
+        Ok(ordered_reply(
+            &self.world.defects,
+            &sess,
+            &sess.ordered[&id],
+        ))
     }
 
     /// Start or end a context-ceiling hold on `session`. Ending it without a
@@ -2698,6 +2765,36 @@ impl Module {
         }
     }
 
+    /// `send.status`: the answer a re-send of the caller's `send_id` would
+    /// get, read from the session's records, writing nothing.
+    fn send_status(&self, stamp: &RouteStamp, session: &str, params: &Value) -> Reply {
+        if let Some(field) = unknown_field(params, &["send_id"]) {
+            return invalid(&field);
+        }
+        let request: cortexkit_role_llm_runner::send_status::SendStatusRequest =
+            match serde_json::from_value(params.clone()) {
+                Ok(request) => request,
+                Err(_) => return invalid("send_id"),
+            };
+        let Some(sess) = self.sessions.lock().unwrap().get(session).cloned() else {
+            return refuse(errors::UNKNOWN_SEND, None);
+        };
+        let id = format!("{} {}", stamp.principal, request.send_id);
+        if let Some(queued) = sess.ordered.get(&id) {
+            if self.world.defects.send_status_pending_after_restart
+                && self.replayed.load(Ordering::SeqCst)
+                && queued.state == "delivered"
+            {
+                return respond(SendReply::new("pending").with_submission_id(&queued.send_id));
+            }
+            return ordered_reply(&self.world.defects, &sess, queued);
+        }
+        match sess.sends.get(&request.send_id) {
+            Some(send) => self.send_reply(session, send),
+            None => refuse(errors::UNKNOWN_SEND, None),
+        }
+    }
+
     fn resolve(&self, session: &str, params: &Value) -> Reply {
         if let Some(field) = unknown_field(params, &["tag", "range"]) {
             return invalid(&field);
@@ -2714,7 +2811,15 @@ impl Module {
         };
         let sessions = self.sessions.lock().unwrap();
         let found = sessions.get(session).and_then(|sess| {
-            sess.messages.iter().find_map(|m| {
+            // Only the current lineage's parts resolve; with
+            // `Defects::resolve_left_lineage_tags` set, resolve also searches
+            // parts a recovery dropped with the lineage it left.
+            let left: &[Msg] = if self.world.defects.resolve_left_lineage_tags {
+                &sess.left
+            } else {
+                &[]
+            };
+            sess.messages.iter().chain(left).find_map(|m| {
                 m.tags
                     .iter()
                     .find(|(_, tag)| *tag == Some(number))
@@ -2985,12 +3090,29 @@ fn strip_tags_value(value: &Value) -> Value {
 }
 
 /// The answer to a `delivery_order` send, or its re-send: `pending` while
-/// queued, then its terminal state.
-fn ordered_reply(queued: &Queued) -> Reply {
-    match queued.state.as_str() {
-        "pending" => respond(SendReply::new("pending").with_submission_id(&queued.send_id)),
-        "delivered" => respond(SendReply::new("finished")),
-        other => respond(SendReply::new(other)),
+/// queued; once delivered, the state of the run that carried it, that run,
+/// and how it went in; otherwise its terminal state. With
+/// `Defects::delivered_steer_without_run_id` set, a steer's answer leaves
+/// the run out.
+fn ordered_reply(defects: &Defects, sess: &Sess, queued: &Queued) -> Reply {
+    match (queued.state.as_str(), &queued.delivery) {
+        ("pending", _) => respond(SendReply::new("pending").with_submission_id(&queued.send_id)),
+        ("delivered", Some(delivery)) => {
+            let reply = match sess.run(&delivery.run_id) {
+                Some(run) if run.state == "active" => SendReply::new("active"),
+                Some(run) => SendReply::new("finished").with_reason(&run.state),
+                None => SendReply::new("finished"),
+            };
+            let reply =
+                if defects.delivered_steer_without_run_id && delivery.r#as == delivered_as::STEP {
+                    reply
+                } else {
+                    reply.with_run_id(&delivery.run_id)
+                };
+            respond(reply.with_delivered(Delivered::new(delivery.r#as).with_ref(&delivery.r#ref)))
+        }
+        ("delivered", None) => respond(SendReply::new("finished")),
+        (other, _) => respond(SendReply::new(other)),
     }
 }
 

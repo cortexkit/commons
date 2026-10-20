@@ -107,6 +107,19 @@ where
                     crate::structured_output::restart(subject, work_dir, &declared, &mint)
                         .await
                         .map(|()| Ending::Passed)
+                } else if spec.name == crate::follow::RESEND_CASE
+                    || spec.name == crate::follow::STATUS_CASE
+                {
+                    crate::follow::restart(
+                        subject,
+                        &mut driver,
+                        work_dir,
+                        &declared,
+                        &mint,
+                        spec.name,
+                    )
+                    .await
+                    .map(|()| Ending::Passed)
                 } else if spec.name == "crash_at_RetentionTombstoned" {
                     retention::crash(subject, &mut driver, work_dir, &declared, &mint).await
                 } else if let Some(point) = crash::point_of(spec.name) {
@@ -118,6 +131,9 @@ where
                     }
                     match &crashes[point] {
                         Err(error) => Err(format!("the {point} crash scenario failed: {error}")),
+                        Ok(observed) if spec.name == crash::LEFT_LINEAGE_TAG_CASE => {
+                            crash::check_left_lineage(observed)
+                        }
                         Ok(observed) => crash::check(spec.name, point, observed, &declared)
                             .map(|()| Ending::Passed),
                     }

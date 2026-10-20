@@ -756,4 +756,13 @@ mod tags_and_tool_calls_tests {
             crate::ops::RUN_TOOL_CALLS,
         );
     }
+
+    #[test]
+    fn send_status_describe_group_requires_its_op() {
+        group_describe(
+            "send-status-describe.json",
+            capabilities::SEND_STATUS,
+            crate::ops::SEND_STATUS,
+        );
+    }
 }

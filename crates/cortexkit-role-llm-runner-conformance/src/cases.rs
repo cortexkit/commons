@@ -143,6 +143,7 @@ where
             name if name.starts_with("run_usage_") => crate::run_usage::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
+            "send_status_unknown_send_refused" => passed(crate::follow::unknown_send(self).await),
             name if name.starts_with("delivery_order_") => {
                 crate::delivery_order::run(self, name).await
             }

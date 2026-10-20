@@ -66,6 +66,9 @@ pub enum Capability {
     /// `session.send` with `delivery_order`, plan-named senders and plan
     /// templates.
     DeliveryOrder,
+    /// `send.status`: what a re-send of a `send_id` would answer, without
+    /// its body.
+    SendStatus,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -113,6 +116,7 @@ impl Capability {
         Self::RunToolCalls,
         Self::RunUsage,
         Self::DeliveryOrder,
+        Self::SendStatus,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -155,6 +159,7 @@ impl Capability {
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::RunUsage => groups::RUN_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
+            Self::SendStatus => groups::SEND_STATUS,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange

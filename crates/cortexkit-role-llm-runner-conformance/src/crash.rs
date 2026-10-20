@@ -17,27 +17,38 @@ use std::{collections::BTreeSet, path::Path};
 
 use cortexkit_role_harness::{CrashDriver, KillPoint, Trigger};
 use cortexkit_role_llm_runner::{
+    capabilities as groups,
     errors::{self, tool_result_reasons},
     ops, points,
     read::{HeadMeta, ReadMessage, ReadRequest},
     run::{RunResult, RunState},
     send::SendReply,
+    tags::{self, ResolveReply, ResolveRequest},
 };
 
 use crate::{
-    cases::entries_for,
+    cases::{entries_for, Ending},
     drive::{
         call, check_unique, decode, expect_code, expect_ok, head, holding, read_all, read_refusal,
         result_marker, run_result, send_params, wait_run_end, Mint, MAX_POLLS,
     },
-    route::RunnerRoute,
+    route::{Reply, RunnerRoute},
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn},
+    tags::{entry_holding, require_declared},
 };
 
 /// The run-ops case that has no scenario of its own: it reads `run.result`
 /// of the run the `DispatchIntent` kill cut, because a run can cut each
 /// point only once.
 const INTERRUPTED_CASE: &str = "run_result_interrupted_not_cancelled";
+
+/// The tags case that has no scenario of its own: it resolves tags in the
+/// session the `StepRecorded` kill cut, after a seal that left its lineage.
+pub const LEFT_LINEAGE_TAG_CASE: &str = "tags_resolve_left_lineage_refused";
+
+/// The most tag numbers [`LEFT_LINEAGE_TAG_CASE`] resolves, so a runner
+/// whose numbers are sparse is not sent thousands of requests.
+const MAX_UNCARRIED_TAGS: usize = 64;
 
 /// What one crash scenario observed.
 pub struct CrashObservation {
@@ -77,12 +88,20 @@ pub struct CrashObservation {
     /// when a read naming the old lineage was refused `lineage_changed`, or
     /// what was answered instead. Absent when the lineage did not change.
     old_lineage_read: Option<Result<(), String>>,
+    /// At `StepRecorded`, with `tags` declared, after a seal that moved B to
+    /// a new lineage and an owner follow-up on it: `Ok` with the tags no
+    /// part of the new lineage carries, each refused `unknown_tag`, or what
+    /// was answered instead. Absent when the scenario took no such branch.
+    left_lineage_tags: Option<Result<Vec<String>, String>>,
 }
 
 /// The kill point a case's scenario cuts at, if it is a crash case.
 pub fn point_of(case: &str) -> Option<&'static str> {
     if case == INTERRUPTED_CASE {
         return Some(points::DISPATCH_INTENT);
+    }
+    if case == LEFT_LINEAGE_TAG_CASE {
+        return Some(points::STEP_RECORDED);
     }
     let name = case.strip_prefix("crash_at_")?;
     points::ALL.iter().copied().find(|point| *point == name)
@@ -319,6 +338,15 @@ where
     } else {
         None
     };
+    let left_lineage_tags = match (&sealed_follow_up, &old_lineage_read) {
+        (Some(Ok(follow_up)), Some(_)) if declared.contains(&Capability::Tags) => {
+            Some(resolve_left_lineage(&route_b, follow_up, &prompt).await)
+        }
+        (Some(Err(error)), Some(_)) if declared.contains(&Capability::Tags) => Some(Err(format!(
+            "the owner follow-up on the new lineage failed, so its tags could not be read: {error}"
+        ))),
+        _ => None,
+    };
     Ok(CrashObservation {
         before_a,
         after_a,
@@ -337,7 +365,96 @@ where
         lineage_after_b: head_b_lineage,
         before_b,
         old_lineage_read,
+        left_lineage_tags,
     })
+}
+
+/// In the lineage a seal moved session B to, resolve every tag number below
+/// its highest that no part read from it carries: each must be refused
+/// `unknown_tag`. The tag of the part the seal dropped is among them, since
+/// it was assigned before the drop and the follow-up's tags after it. Then
+/// resolve a tag of the cut run's prompt, which the seal kept: it answers
+/// where the prompt now sits in the new lineage.
+async fn resolve_left_lineage<R: RunnerRoute>(
+    route: &R,
+    messages: &[ReadMessage],
+    prompt: &str,
+) -> Result<Vec<String>, String> {
+    require_declared(route, groups::TAGS, ops::SESSION_RESOLVE).await?;
+    let carried: BTreeSet<u64> = messages
+        .iter()
+        .flat_map(|m| &m.tags)
+        .filter_map(|row| row.tag.as_deref().and_then(tags::parse_tag))
+        .collect();
+    let highest = carried.iter().max().copied().unwrap_or(0);
+    let uncarried: Vec<String> = (1..highest)
+        .filter(|number| !carried.contains(number))
+        .take(MAX_UNCARRIED_TAGS)
+        .map(|number| tags::format_tag(number).expect("positive"))
+        .collect();
+    for tag in &uncarried {
+        let what = format!("session.resolve of {tag}, which no part of the new lineage carries");
+        let request = serde_json::to_value(ResolveRequest::new(tag)).expect("serializes");
+        match call(route, ops::SESSION_RESOLVE, request).await? {
+            Reply::Response(body) => {
+                return Err(format!(
+                    "{what} answered {body}: a tag assigned only under a lineage the session \
+                     left is refused unknown_tag, never answered with that lineage's content"
+                ))
+            }
+            Reply::Error(error) => expect_code(&what, &error, errors::UNKNOWN_TAG)?,
+        }
+    }
+    let entry = entry_holding(messages, prompt)?;
+    let tag = entry
+        .tags
+        .iter()
+        .find_map(|row| row.tag.clone())
+        .ok_or_else(|| {
+            format!(
+                "the cut run's prompt at ordinal {} carries no tag in the new lineage",
+                entry.ordinal
+            )
+        })?;
+    let what = format!("session.resolve of the cut run's prompt tag {tag}");
+    let reply: ResolveReply = decode(
+        &what,
+        expect_ok(
+            &what,
+            call(
+                route,
+                ops::SESSION_RESOLVE,
+                serde_json::to_value(ResolveRequest::new(&tag)).expect("serializes"),
+            )
+            .await?,
+        )?,
+    )?;
+    if reply.ordinal != entry.ordinal || reply.mid != entry.mid {
+        return Err(format!(
+            "{what} answered ordinal {} and mid {}, but the new lineage reads the prompt at \
+             ordinal {} with mid {}: resolve answers where a part sits in the current lineage",
+            reply.ordinal, reply.mid, entry.ordinal, entry.mid
+        ));
+    }
+    Ok(uncarried)
+}
+
+/// [`LEFT_LINEAGE_TAG_CASE`], against the `StepRecorded` scenario.
+pub fn check_left_lineage(observed: &CrashObservation) -> Result<Ending, String> {
+    match &observed.left_lineage_tags {
+        Some(Ok(refused)) if refused.is_empty() => Ok(Ending::Inapplicable(
+            "the seal moved the session to a new lineage but dropped no tagged part: every tag \
+             below the new lineage's highest is carried, so none is left to refuse"
+                .into(),
+        )),
+        Some(Ok(_)) => Ok(Ending::Passed),
+        Some(Err(reason)) => Err(reason.clone()),
+        None => Ok(Ending::Inapplicable(
+            "the StepRecorded recovery resumed the run or kept the never-sent call on the same \
+             lineage (shape (b)), so the session left no lineage whose tags could be asked for"
+                .into(),
+        )),
+    }
 }
 
 /// Check `case` against the scenario observed at `point`.

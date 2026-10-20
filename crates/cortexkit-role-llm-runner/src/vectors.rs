@@ -140,6 +140,14 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/run_status.usage_unreported_step.json"),
     ),
     (
+        "send-status-describe.json",
+        include_str!("../test-vectors/llm-runner-v1/send-status-describe.json"),
+    ),
+    (
+        "send-status.json",
+        include_str!("../test-vectors/llm-runner-v1/send-status.json"),
+    ),
+    (
         "send.json",
         include_str!("../test-vectors/llm-runner-v1/send.json"),
     ),

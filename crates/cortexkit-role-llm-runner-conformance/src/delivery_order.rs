@@ -161,7 +161,11 @@ fn holding<'m>(messages: &'m [ReadMessage], marker: &str) -> Vec<&'m ReadMessage
 }
 
 /// `marker` was delivered exactly once, in `mode`.
-fn delivered_once(messages: &[ReadMessage], marker: &str, mode: &str) -> Result<(), String> {
+pub(crate) fn delivered_once(
+    messages: &[ReadMessage],
+    marker: &str,
+    mode: &str,
+) -> Result<(), String> {
     match holding(messages, marker).as_slice() {
         [entry] => match &entry.delivered_as {
             Some(delivered) if delivered.mode == mode => Ok(()),

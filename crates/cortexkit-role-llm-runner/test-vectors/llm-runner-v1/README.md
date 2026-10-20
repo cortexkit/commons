@@ -194,3 +194,19 @@ model and two on another with a variant; and three reported steps on one
 model, as in `usage_plain`, with `reasoning_tokens` reported on two of them. Each `usage` round-trips byte for byte, its
 `by_model` sums to its totals, and an absent total decodes as `None`.
 Checked by the `usage::tests` module of the wire crate.
+
+# Send status
+
+`send-status.json` pins `send.status` (contract §9.8): a request, requests
+refused by field (a misspelled `send_id`, a named session, the send's body
+beside its `send_id`, no `send_id`); replies, each the `SendReply` a re-send
+of the same `send_id` would get: `pending` with a `submission_id` and no
+run, a queued send delivered as a steer (`step` with its row and the run it
+joined, while that run runs and after it ended and the runner restarted),
+one that started a run (`turn`, its `ref` and `run_id` the same run), and
+`unknown` with and without the run it was handed to; and the terminal
+`unknown_send` refusal of a `send_id` the session has no record of.
+`send-status-describe.json` pins the group's discovery, its missing-op
+refusal and an answer without the group. Checked by the
+`send_status::tests` and `describe::tags_and_tool_calls_tests` modules of
+the wire crate.

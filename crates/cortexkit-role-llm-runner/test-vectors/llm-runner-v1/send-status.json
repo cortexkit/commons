@@ -1,0 +1,115 @@
+{
+  "requests": [
+    {
+      "name": "the status of one send",
+      "request": {
+        "send_id": "reminder-7"
+      }
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "a misspelled send_id",
+      "request": {
+        "sendid": "reminder-7"
+      },
+      "field": "sendid"
+    },
+    {
+      "name": "naming its session",
+      "request": {
+        "send_id": "reminder-7",
+        "session": "s"
+      },
+      "field": "session"
+    },
+    {
+      "name": "carrying the send's body",
+      "request": {
+        "send_id": "reminder-7",
+        "prompt": "check the build"
+      },
+      "field": "prompt"
+    },
+    {
+      "name": "no send_id",
+      "request": {},
+      "field": "send_id"
+    }
+  ],
+  "replies": [
+    {
+      "name": "queued behind a running run, not yet delivered",
+      "reply": {
+        "state": "pending",
+        "submission_id": "sub-3"
+      }
+    },
+    {
+      "name": "delivered as a steer into the run it joined, still running",
+      "reply": {
+        "state": "active",
+        "run_id": "run-7",
+        "delivered": {
+          "as": "step",
+          "ref": "row-41"
+        }
+      }
+    },
+    {
+      "name": "delivered as a steer, after the run it joined ended and the runner restarted",
+      "reply": {
+        "state": "finished",
+        "run_id": "run-7",
+        "reason": "completed",
+        "delivered": {
+          "as": "step",
+          "ref": "row-41"
+        }
+      }
+    },
+    {
+      "name": "delivered by starting a run on an idle session",
+      "reply": {
+        "state": "active",
+        "run_id": "run-8",
+        "delivered": {
+          "as": "turn",
+          "ref": "run-8"
+        }
+      }
+    },
+    {
+      "name": "handed to a run, delivery not confirmed",
+      "reply": {
+        "state": "finished",
+        "run_id": "run-9",
+        "reason": "interrupted",
+        "delivered": {
+          "as": "unknown"
+        }
+      }
+    },
+    {
+      "name": "delivery not confirmed, and the run it was handed to not known",
+      "reply": {
+        "state": "finished",
+        "delivered": {
+          "as": "unknown"
+        }
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "a send_id the session has no record of",
+      "request": {
+        "send_id": "never-sent"
+      },
+      "refusal": {
+        "code": "unknown_send"
+      },
+      "retryable": false
+    }
+  ]
+}

@@ -23,23 +23,40 @@ fn failed(report: &SuiteReport, case: &str) -> String {
     }
 }
 
+/// The case that resolves tags only after a `StepRecorded` seal that drops
+/// the never-sent call onto a new lineage. The fake resumes by default, and
+/// `StepRecovery::SealDropCall` (which keeps the step's text) drops no
+/// tagged part, so with either the case is inapplicable by name; the tests
+/// that use `StepRecovery::SealDropStep` check it passes and fails.
+const LEFT_LINEAGE_CASE: &str = "tags_resolve_left_lineage_refused";
+
+/// Optional groups the fake leaves undeclared unless a test declares them.
+const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::InputTokenCap,
+    Capability::StructuredOutput,
+    Capability::Adopt,
+    Capability::Tags,
+    Capability::RunToolCalls,
+    Capability::RunUsage,
+    Capability::DeliveryOrder,
+    Capability::SendStatus,
+];
+
 fn assert_passed(report: &SuiteReport, case: &str) {
-    for group in [
-        Capability::InputTokenCap,
-        Capability::StructuredOutput,
-        Capability::Adopt,
-        Capability::Tags,
-        Capability::RunToolCalls,
-        Capability::RunUsage,
-        Capability::DeliveryOrder,
-    ] {
-        if report.outcome(case)
-            == Some(&CaseOutcome::Skipped {
-                missing: vec![group],
-            })
-        {
+    // A case skipped only for optional groups the subject leaves undeclared.
+    if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
+        if !missing.is_empty() && missing.iter().all(|group| OPTIONAL_GROUPS.contains(group)) {
             return;
         }
+    }
+    if case == LEFT_LINEAGE_CASE
+        && matches!(
+            report.outcome(case),
+            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("no lineage")
+                || reason.contains("dropped no tagged part")
+        )
+    {
+        return;
     }
     // Legacy fake configurations intentionally do not declare retention.
     // Assert the named skip, never count it as a passed retention case.
@@ -139,6 +156,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
+    subject.capabilities.insert(Capability::SendStatus);
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -431,6 +449,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::RunToolCalls,
                     Capability::RunUsage,
                     Capability::DeliveryOrder,
+                    Capability::SendStatus,
                     Capability::HoldToolCalls
                 ]
             );
@@ -782,7 +801,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::Adopt,
                     Capability::RunToolCalls,
                     Capability::RunUsage,
-                    Capability::DeliveryOrder
+                    Capability::DeliveryOrder,
+                    Capability::SendStatus
                 ],
                 "{}",
                 report.render()
@@ -1013,6 +1033,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
+    subject.capabilities.insert(Capability::SendStatus);
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
@@ -1031,6 +1052,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
+    subject.capabilities.insert(Capability::SendStatus);
     subject.advertise_status = false;
     let report = run(&subject).await;
     assert!(
@@ -1696,6 +1718,171 @@ const TAG_PREFIXES: &[&str] = &["tags_"];
 const TOOL_CALL_PREFIXES: &[&str] = &["run_tool_calls_"];
 const ORDER_PREFIXES: &[&str] = &["delivery_order_"];
 const USAGE_PREFIXES: &[&str] = &["run_usage_"];
+const SEND_STATUS_PREFIXES: &[&str] = &["send_status_"];
+
+/// The steer-receipt case that follows a delivered steer by re-sending it.
+const RESEND_CASE: &str = "delivery_order_steer_receipt_durable_across_restart";
+/// The same steer followed through `send.status`.
+const STATUS_CASE: &str = "send_status_answers_as_a_resend_after_restart";
+const UNKNOWN_SEND_CASE: &str = "send_status_unknown_send_refused";
+
+/// A fake declaring `delivery_order` and `send_status`.
+fn following(defects: Defects) -> FakeSubject {
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.capabilities.insert(Capability::SendStatus);
+    subject
+}
+
+/// No case but those in `failing` failed. Unlike [`assert_others_passed`],
+/// a case the subject's groups make inapplicable is allowed.
+fn assert_none_failed_but(report: &SuiteReport, failing: &[&str]) {
+    for spec in CASES {
+        if !failing.contains(&spec.name) {
+            assert!(
+                !matches!(report.outcome(spec.name), Some(CaseOutcome::Failed { .. })),
+                "{}: {:?}",
+                spec.name,
+                report.outcome(spec.name)
+            );
+        }
+    }
+}
+#[tokio::test]
+async fn a_runner_answering_delivered_steers_durably_passes_the_follow_cases() {
+    let report = run(&following(Defects::default())).await;
+    for name in [RESEND_CASE, STATUS_CASE, UNKNOWN_SEND_CASE] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+/// `send.status` that answers `pending` after a restart for a steer
+/// delivered before it: only the status case fails, by name; a re-send,
+/// answered from the durable record, still passes.
+#[tokio::test]
+async fn send_status_answering_pending_after_a_restart_fails_only_the_status_case() {
+    let report = run(&following(Defects {
+        send_status_pending_after_restart: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, STATUS_CASE);
+    assert!(reason.contains("after the restart"), "{reason}");
+    assert!(reason.contains("never pending again"), "{reason}");
+    assert_none_failed_but(&report, &[STATUS_CASE]);
+    assert_passed(&report, RESEND_CASE);
+    assert_passed(&report, UNKNOWN_SEND_CASE);
+}
+
+/// A delivered steer answered without the run it joined: the re-send case
+/// and the `send.status` case both fail by name, each naming the joined
+/// run, and nothing else fails.
+#[tokio::test]
+async fn a_delivered_steer_answered_without_its_run_fails_both_follow_cases() {
+    let report = run(&following(Defects {
+        delivered_steer_without_run_id: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in [RESEND_CASE, STATUS_CASE] {
+        let reason = failed(&report, name);
+        // The case's session runs its opening turn as run-1 and the held
+        // turn the steer joins as run-2.
+        assert!(
+            reason.contains("answered run_id None, not run-2, the run the steer joined"),
+            "{name}: {reason}"
+        );
+    }
+    assert_none_failed_but(&report, &[RESEND_CASE, STATUS_CASE]);
+    assert_passed(&report, UNKNOWN_SEND_CASE);
+}
+
+#[tokio::test]
+async fn without_send_status_its_cases_skip_by_name_and_the_resend_case_still_runs() {
+    let report = run(&declaring(Capability::DeliveryOrder, Defects::default())).await;
+    for name in cases_of(SEND_STATUS_PREFIXES) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::SendStatus]
+            }),
+            "{name}"
+        );
+    }
+    assert_eq!(report.outcome(RESEND_CASE), Some(&CaseOutcome::Passed));
+}
+
+/// The tags case reads the `StepRecorded` scenario: a seal that drops the
+/// step moves the session to a new lineage and leaves the step's tag
+/// carried by no part, which resolve must refuse.
+#[tokio::test]
+async fn a_dropped_step_tag_is_refused_and_resolving_it_with_old_content_fails_by_name() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.step_recovery = StepRecovery::SealDropStep;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome(LEFT_LINEAGE_CASE),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_passed(&report, "crash_at_StepRecorded");
+
+    let mut subject = FakeSubject::new(Defects {
+        resolve_left_lineage_tags: true,
+        ..Defects::default()
+    });
+    subject.step_recovery = StepRecovery::SealDropStep;
+    let report = run(&subject).await;
+    let reason = failed(&report, LEFT_LINEAGE_CASE);
+    assert!(
+        reason.contains("no part of the new lineage carries"),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("never answered with that lineage's content"),
+        "{reason}"
+    );
+    assert_passed(&report, "crash_at_StepRecorded");
+    assert_passed(&report, "tags_resolve_unknown_tag_refused");
+}
+
+/// Without a seal that leaves a lineage, or with one that drops no tagged
+/// part, the left-lineage case has nothing to ask and says so by name.
+#[tokio::test]
+async fn without_a_dropped_tagged_part_the_left_lineage_case_is_inapplicable() {
+    for (recovery, because) in [
+        (StepRecovery::Resume, "no lineage"),
+        (StepRecovery::SealInterrupted, "no lineage"),
+        (StepRecovery::SealDropCall, "dropped no tagged part"),
+    ] {
+        let mut subject = FakeSubject::new(Defects::default());
+        subject.step_recovery = recovery;
+        let report = run(&subject).await;
+        match report.outcome(LEFT_LINEAGE_CASE) {
+            Some(CaseOutcome::Inapplicable { reason }) => {
+                assert!(reason.contains(because), "{recovery:?}: {reason}")
+            }
+            other => panic!("{recovery:?}: {other:?}"),
+        }
+    }
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.step_recovery = StepRecovery::SealDropStep;
+    subject.capabilities.remove(&Capability::Compaction);
+    subject.capabilities.remove(&Capability::Tags);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome(LEFT_LINEAGE_CASE),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::Tags]
+        })
+    );
+}
 
 #[tokio::test]
 async fn a_runner_reporting_usage_passes_and_an_absent_reasoning_total_as_zero_fails_by_name() {
@@ -1956,6 +2143,7 @@ async fn without_the_new_groups_their_cases_skip_by_name() {
         (Capability::RunToolCalls, TOOL_CALL_PREFIXES),
         (Capability::RunUsage, USAGE_PREFIXES),
         (Capability::DeliveryOrder, ORDER_PREFIXES),
+        (Capability::SendStatus, SEND_STATUS_PREFIXES),
     ] {
         // The one case that asks a runner without the group runs here.
         for name in cases_of(prefixes)

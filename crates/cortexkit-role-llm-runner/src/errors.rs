@@ -86,10 +86,18 @@ pub enum ReplyTooLargeSubject {
 /// `run.result` or `run.tool_calls` names a run the session does not have.
 pub const UNKNOWN_RUN: &str = "unknown_run";
 
-/// A `session.resolve` names a well-formed tag the session never assigned.
-/// Terminal: tags are never reused, so the same request meets the same
-/// refusal. A malformed tag is `invalid_params` naming `tag` instead.
+/// A `session.resolve` names a well-formed tag that no part of the session's
+/// current lineage carries: one the session never assigned, or one assigned
+/// only under a lineage the session has since left. Terminal: tags are never
+/// reused and a left lineage never returns, so the same request meets the
+/// same refusal. A malformed tag is `invalid_params` naming `tag` instead.
 pub const UNKNOWN_TAG: &str = "unknown_tag";
+
+/// A `send.status` names a `send_id` the session has no record of for the
+/// caller. Terminal: `send.status` writes nothing, so repeating the same
+/// request cannot create the record and meets the same refusal. A malformed
+/// request is `invalid_params` instead.
+pub const UNKNOWN_SEND: &str = "unknown_send";
 
 /// The session's context is at or over its ceiling, so the runner will not
 /// send the request. It refuses a `session.send` that would start or join a
@@ -307,6 +315,7 @@ pub const CODES: &[&str] = &[
     REPLY_TOO_LARGE,
     UNKNOWN_RUN,
     UNKNOWN_TAG,
+    UNKNOWN_SEND,
     CONTEXT_CEILING,
     EXPIRED,
     SEND_ID_REUSE,
@@ -692,6 +701,12 @@ mod tag_code_tests {
     fn unknown_tag_is_named_and_terminal() {
         assert!(CODES.contains(&UNKNOWN_TAG));
         assert!(!is_retryable(UNKNOWN_TAG));
+    }
+
+    #[test]
+    fn unknown_send_is_named_and_terminal() {
+        assert!(CODES.contains(&UNKNOWN_SEND));
+        assert!(!is_retryable(UNKNOWN_SEND));
     }
 }
 

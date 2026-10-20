@@ -1,0 +1,59 @@
+{
+  "accept": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.send",
+          "send.status"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "queue",
+      "send_status"
+    ],
+    "session_capabilities_from": "baseline"
+  },
+  "refuse": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.send"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "queue",
+      "send_status"
+    ],
+    "session_capabilities_from": "baseline"
+  },
+  "without": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.send"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "queue"
+    ],
+    "session_capabilities_from": "baseline"
+  }
+}

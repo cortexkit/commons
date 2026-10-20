@@ -31,6 +31,7 @@ pub mod read;
 pub mod retract;
 pub mod run;
 pub mod send;
+pub mod send_status;
 pub mod serializer_profile;
 pub mod session_ref;
 pub mod structured_output;
@@ -100,6 +101,9 @@ pub mod ops {
     /// Every tool call a run made, in order, without message bodies. In
     /// `run_tool_calls`.
     pub const RUN_TOOL_CALLS: &str = "run.tool_calls";
+    /// What a re-send of a `send_id` would answer, from the runner's durable
+    /// record of the send, without its body. In `send_status`.
+    pub const SEND_STATUS: &str = "send.status";
 }
 
 /// Ops every `llm-runner/v1` module must list in `role.describe`. A consumer
@@ -182,6 +186,9 @@ pub mod capabilities {
     /// modes, plan-named senders and plan templates for system-authority
     /// text.
     pub const DELIVERY_ORDER: &str = "delivery_order";
+    /// `send.status`: what a re-send of a `send_id` would answer, read
+    /// without re-sending the send's body.
+    pub const SEND_STATUS: &str = "send_status";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -211,6 +218,7 @@ pub mod capabilities {
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
+        (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (
             SESSION_CHANGE,
@@ -322,6 +330,7 @@ mod tests {
             ops::SESSION_ADOPT,
             ops::SESSION_RESOLVE,
             ops::RUN_TOOL_CALLS,
+            ops::SEND_STATUS,
         ];
         for (group, group_ops) in capabilities::GROUPS {
             assert!(!group_ops.is_empty(), "{group} names no op");

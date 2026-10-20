@@ -122,6 +122,10 @@ from `session.baseline` has no admission reply to compare.
 | `undeclared_delivery_refused` | `queue`, `transcript_reads`, and `steer` or `interrupt` left undeclared |
 | `crash_at_Admitted`, `crash_at_SendRecorded`, `crash_at_StepRecorded`, `crash_at_ToolResultRecorded`, `crash_at_Terminal` | `queue`, `transcript_reads`, the kill point |
 | `crash_at_DispatchIntent` | `queue`, `transcript_reads`, `dispatch_attribution`, the kill point |
+| `tags_resolve_left_lineage_refused` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, kill point `StepRecorded`; inapplicable unless the seal drops a tagged part onto a new lineage |
+| `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; restarts its own runner |
+| `send_status_answers_as_a_resend_after_restart` | `send_status` and the above |
+| `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads` |
 | `retention_honoured`, `retention_no_content_served`, `retention_equal_noop`, `retention_shorten_continues_lineage`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
 | `retention_run_status_expired` | same; not applicable if `run.status` is not advertised |
 | `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
@@ -310,7 +314,7 @@ the identities the runner reports with each other.
 
 ## Tags
 
-The seven `tags_*` cases run only when the subject declares
+The eight `tags_*` cases run only when the subject declares
 `Capability::Tags` (the `tags` group); otherwise each is reported as skipped,
 by name, and the suite sends no `session.resolve`. They require `queue` and
 `transcript_reads`, and read the live `role.describe` before resolving. They
@@ -322,6 +326,17 @@ Unicode scalar values) and its `unknown_tag`, `tag` and `range` refusals, and
 that a model-written `§N§` is stored and dispatched as written. The rendered
 case needs the defaulted `send_fields_with_plan(session, first, members)`
 hook, which adds members (here `render_tags`) to the first send's plan.
+
+`tags_resolve_left_lineage_refused` also requires `dispatch_attribution`
+and the `StepRecorded` kill point: it reads the `crash_at_StepRecorded`
+scenario. After a seal that drops the never-sent call or its step and moves
+the session to a new lineage (shape (a)), the kill came before any read of
+the cut step, so the case cannot name the dropped part's tag; it resolves
+every tag number below the new lineage's highest that no part read from it
+carries (at most 64), which must each be refused `unknown_tag`, and resolves
+the cut run's prompt, which must answer its ordinal and `mid` in the new
+lineage. It is inapplicable, by name, when the runner resumes the run or
+keeps the call (shape (b)), and when the seal dropped no tagged part.
 
 ## Run tool calls
 
@@ -345,7 +360,7 @@ the ended run's `run.status` must carry the same `usage`.
 
 ## Delivery order
 
-The eight `delivery_order_*` cases run only with `Capability::DeliveryOrder`.
+The nine `delivery_order_*` cases run only with `Capability::DeliveryOrder`.
 They need `send_fields_with_plan` (to name `senders` in the plan) and
 `plan_sender()`, the route identity and module id of a sender the plan
 names. `turn_system_supported()` says whether the scripted route takes a
@@ -359,6 +374,31 @@ grant, and that an out-of-range slot refuses the send. The list rides in
 `delivery` as an array. `delivery_order_list_refused_without_group` runs only
 when the subject does not declare the group: such a runner must refuse a
 list naming `delivery`.
+
+## Following a queued send
+
+`delivery_order_steer_receipt_durable_across_restart` needs
+`Capability::DeliveryOrder`, `queue`, `transcript_reads` and held tool
+calls. On a state root of its own it sends a `[steer]` list while a run waits
+on a held call, which must answer `pending` with a `submission_id`; releases
+the call, so the steer is delivered once into that run; and re-sends the
+`send_id`, which must answer `delivered: {as: "step", ref}` with `run_id`
+the run it joined. It then stops the runner, reopens the same root with the
+harness restart hook (`Harness::restart`, no kill point), and re-sends again:
+the answer must carry the same `delivered` and `run_id`.
+
+The two `send_status_*` cases run only with `Capability::SendStatus` (the
+`send_status` group), and read the live `role.describe` before sending
+`send.status`. `send_status_answers_as_a_resend_after_restart` follows the
+same steer through `send.status`: before the restart it must answer exactly
+what a re-send answers, and after it `step` with the joined run's `run_id`,
+never `pending`, and exactly what a re-send then answers.
+`send_status_unknown_send_refused` needs `queue` and `transcript_reads`: the
+status of a settled send must equal its re-send's answer, an unrecorded
+`send_id` must be refused `unknown_send`, and an unknown field must be
+refused `invalid_params` naming it. The restart cases restart the runner on
+their own root without a kill, so they do not count toward the real-kill
+rule.
 
 ## Context ceiling and read stability
 

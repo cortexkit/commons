@@ -25,6 +25,10 @@
       "retryable": false
     },
     {
+      "code": "unknown_send",
+      "retryable": false
+    },
+    {
       "code": "context_ceiling",
       "retryable": false
     },
