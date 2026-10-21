@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.1
+
+- Fix: a superseded writer could leave a removal in the journal that no
+  current writer decided. A superseded writer is an older process still
+  running after a newer one took a higher lease epoch and made a fenced write.
+  `SqliteStore::remove` appended the record before checking anything about the
+  fence, and its erase was not fenced at all, so such a writer journaled the
+  record and every later open replayed it.
+- `SqliteStore::remove` is now a fenced write, like
+  `SqliteStore::with_conn_fenced`, and both run the same check. Inside the
+  IMMEDIATE transaction it already took, and before appending the record, it
+  reads the database's fence epoch. When that is above the store's lease epoch
+  it refuses with `StoreError::Fenced`, and nothing is appended or erased.
+  Otherwise it stamps the store's epoch as the fence epoch, creating the
+  `cortexkit_fence` table if it is absent, so a newer writer's removal also
+  fences older writers. The transaction holds SQLite's write lock from the
+  check through the append to the erase's commit, so no other process can stamp
+  a higher epoch in between: a record reaches the journal only when its erase
+  will pass the fence.
+- Behaviour change: a database whose module removes data now carries a
+  `cortexkit_fence` row, even if it never called `with_conn_fenced`. The
+  journal format and replay at open are unchanged.
+
 ## 0.4.0
 
 - Add a removals journal, so an older copy of `store.db` (a backup restore, a

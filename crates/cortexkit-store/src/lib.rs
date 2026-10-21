@@ -567,40 +567,8 @@ mod sqlite_backend {
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| StoreError::Backend(e.to_string()))?;
 
-            tx.execute_batch(
-                "CREATE TABLE IF NOT EXISTS cortexkit_fence (\
-                     id INTEGER PRIMARY KEY CHECK (id = 0), \
-                     epoch INTEGER NOT NULL)",
-            )
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-
-            // COALESCE over the (at most one) fence row yields 0 when unclaimed, so
-            // no OptionalExtension import is needed.
-            let db_epoch: u64 = tx
-                .query_row(
-                    "SELECT COALESCE((SELECT epoch FROM cortexkit_fence WHERE id = 0), 0)",
-                    [],
-                    |r| r.get::<_, i64>(0).map(|v| v as u64),
-                )
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-
-            if db_epoch > self.epoch {
-                // A newer writer owns the database; reject without applying `f`. The
-                // transaction rolls back on drop.
-                return Err(StoreError::Fenced {
-                    holder_epoch: self.epoch,
-                    db_epoch,
-                });
-            }
-            if self.epoch > db_epoch {
-                // Claim the database for this writer's epoch, fencing older writers.
-                tx.execute(
-                    "INSERT INTO cortexkit_fence (id, epoch) VALUES (0, ?1) \
-                     ON CONFLICT(id) DO UPDATE SET epoch = excluded.epoch",
-                    rusqlite::params![self.epoch as i64],
-                )
-                .map_err(|e| StoreError::Backend(e.to_string()))?;
-            }
+            // On a refusal the transaction rolls back on drop, without applying `f`.
+            claim_fence(&tx, self.epoch)?;
 
             let out = f(&tx).map_err(|e| StoreError::Backend(e.to_string()))?;
             tx.commit()
@@ -896,6 +864,52 @@ mod sqlite_backend {
                 ))),
                 other => StoreError::Lease(other),
             })
+    }
+
+    /// The epoch fence check of every fenced write ([`SqliteStore::with_conn_fenced`]
+    /// and [`SqliteStore::remove`]), run inside the write's own IMMEDIATE
+    /// transaction `tx` by a store holding lease epoch `epoch`.
+    ///
+    /// Creates the fence table if it is absent and reads the database's fence
+    /// epoch. When that is above `epoch`, a newer writer owns the database: the
+    /// write is refused with [`StoreError::Fenced`] and nothing is written (the
+    /// caller drops `tx`, which rolls back). Otherwise, when `epoch` is higher,
+    /// it is stamped as the database's fence epoch, which fences every older
+    /// writer once `tx` commits. The IMMEDIATE transaction holds SQLite's write
+    /// lock from this check to the commit, so no other process can stamp a
+    /// higher epoch in between.
+    fn claim_fence(tx: &Transaction<'_>, epoch: u64) -> Result<(), StoreError> {
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS cortexkit_fence (\
+                 id INTEGER PRIMARY KEY CHECK (id = 0), \
+                 epoch INTEGER NOT NULL)",
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        // COALESCE over the (at most one) fence row yields 0 when unclaimed.
+        let db_epoch: u64 = tx
+            .query_row(
+                "SELECT COALESCE((SELECT epoch FROM cortexkit_fence WHERE id = 0), 0)",
+                [],
+                |r| r.get::<_, i64>(0).map(|v| v as u64),
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        if db_epoch > epoch {
+            return Err(StoreError::Fenced {
+                holder_epoch: epoch,
+                db_epoch,
+            });
+        }
+        if epoch > db_epoch {
+            tx.execute(
+                "INSERT INTO cortexkit_fence (id, epoch) VALUES (0, ?1) \
+                 ON CONFLICT(id) DO UPDATE SET epoch = excluded.epoch",
+                rusqlite::params![epoch as i64],
+            )
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// The epoch stamped by the last fenced write, or 0 when the database has

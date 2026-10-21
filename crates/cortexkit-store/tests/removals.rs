@@ -263,6 +263,92 @@ fn the_erase_runs_only_after_its_record_is_in_the_journal() {
         .unwrap();
 }
 
+/// Stamp the database's fence epoch through a raw connection, as a newer
+/// writer's fenced write would.
+fn stamp_fence(db: &Path, epoch: u64) {
+    let conn = Connection::open(db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS cortexkit_fence (
+             id INTEGER PRIMARY KEY CHECK (id = 0), epoch INTEGER NOT NULL)",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO cortexkit_fence (id, epoch) VALUES (0, ?1)
+         ON CONFLICT(id) DO UPDATE SET epoch = excluded.epoch",
+        [epoch as i64],
+    )
+    .unwrap();
+}
+
+/// The database's fence epoch, read through a raw connection.
+fn stored_fence(db: &Path) -> u64 {
+    let conn = Connection::open(db).unwrap();
+    conn.query_row(
+        "SELECT epoch FROM cortexkit_fence WHERE id = 0",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap() as u64
+}
+
+/// A superseded writer: a newer writer has stamped a fence epoch above this
+/// store's lease epoch. Its removal is refused with `Fenced` BEFORE anything
+/// reaches the journal, so the journal's bytes are unchanged and the next open
+/// has nothing to replay: no removal that no current writer decided.
+#[test]
+fn a_superseded_writer_is_refused_before_its_record_reaches_the_journal() {
+    let db = TestDb::new();
+    seeded(&db);
+    let journal_before;
+    {
+        let store = db.open().unwrap();
+        let epoch = store.epoch();
+        stamp_fence(&db.path(), epoch + 1);
+        journal_before = std::fs::read(db.journal()).unwrap();
+
+        match store.remove("item", ["a"], erase_items) {
+            Err(StoreError::Fenced {
+                holder_epoch,
+                db_epoch,
+            }) => assert_eq!((holder_epoch, db_epoch), (epoch, epoch + 1)),
+            other => panic!("expected Fenced, got {other:?}"),
+        }
+        assert_eq!(
+            std::fs::read(db.journal()).unwrap(),
+            journal_before,
+            "a refused removal changed the journal"
+        );
+        assert_eq!(items(&store), ["a", "b", "c", "d"]);
+        assert_eq!(store.applied_removal_seq().unwrap(), 0);
+    }
+
+    let store = db.open().unwrap();
+    assert_eq!(std::fs::read(db.journal()).unwrap(), journal_before);
+    assert_eq!(
+        store.applied_removal_seq().unwrap(),
+        0,
+        "a record was replayed"
+    );
+    assert_eq!(items(&store), ["a", "b", "c", "d"]);
+}
+
+/// The fence refuses only a store whose epoch is BELOW the database's: one
+/// holding exactly the stamped epoch still removes, and its record is applied.
+#[test]
+fn a_writer_at_the_fence_epoch_still_removes() {
+    let db = TestDb::new();
+    seeded(&db);
+    let store = db.open().unwrap();
+    let epoch = store.epoch();
+    stamp_fence(&db.path(), epoch);
+
+    assert_eq!(remove(&store, &["a"]).seq, 1);
+    assert_eq!(items(&store), ["b", "c", "d"]);
+    assert_eq!(store.applied_removal_seq().unwrap(), 1);
+    assert_eq!(lines(&db.journal_text()).len(), 2, "header and record 1");
+    assert_eq!(stored_fence(&db.path()), epoch);
+}
+
 /// A crash while a record was being appended leaves a torn final line. Its
 /// erase never ran, so the open drops it (truncating the file) and serves, and
 /// the next record takes its seq.

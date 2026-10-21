@@ -261,16 +261,31 @@ impl SqliteStore {
     /// Remove data with evidence that survives an older copy of the database:
     /// journal a record of `kind` and `ids`, then run `erase` to delete them.
     ///
-    /// 1. The record is appended to the journal and the file is synced.
-    /// 2. `erase(&tx, &record)` runs in an immediate transaction that also sets
-    ///    `applied_removal_seq` to `record.seq`, and that transaction commits.
+    /// The three steps run while one IMMEDIATE transaction on the database
+    /// stays open (the journal append itself is a file write, outside SQLite):
+    /// 1. The fence check of a fenced write (as in
+    ///    [`SqliteStore::with_conn_fenced`]): when the database's fence epoch is
+    ///    above this store's lease epoch, a newer writer owns the database and
+    ///    the removal is refused with [`StoreError::Fenced`], with nothing
+    ///    appended or erased. Otherwise this store's epoch is stamped as the
+    ///    database's fence epoch (creating the `cortexkit_fence` table if it is
+    ///    absent), so a removal fences older writers like any fenced write.
+    /// 2. The record is appended to the journal and the file is synced.
+    /// 3. `erase(&tx, &record)` runs, `applied_removal_seq` is set to
+    ///    `record.seq`, and the transaction commits.
+    ///
+    /// The transaction holds SQLite's write lock from step 1 to the commit, so
+    /// no other process can stamp a higher fence epoch between the check and
+    /// the erase. A record therefore reaches the journal only when its erase
+    /// will pass the fence: a superseded writer can't leave a record behind for
+    /// the next open to replay, a removal no current writer decided.
     ///
     /// `erase` should delete exactly what the module's
     /// [`RemovalsHandler::replay`] would for the same record; usually it calls
     /// the handler. Returns the record on success.
     ///
-    /// If step 1 fails, nothing was erased. If step 2 fails (or `erase` returns
-    /// an error), the record is already durable: the removal has been decided,
+    /// If step 1 or 2 fails, nothing was erased. If step 3 fails (or `erase`
+    /// returns an error), the record is already durable: the removal has been decided,
     /// and the next open replays it. In either case this store refuses further
     /// removals until it is reopened, so a record whose erase did not commit
     /// can't be skipped by a later one.
@@ -300,11 +315,16 @@ impl SqliteStore {
             )));
         }
 
-        // Taken before the append only so the check below and the erase see the
+        // Taken before the append so the checks below and the erase see the
         // same database state; no erase runs until the record is durable.
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(backend)?;
+        // Step 1: the fence check, BEFORE the append. A superseded writer is
+        // refused here, so it never journals a record whose erase it could not
+        // commit. The transaction's write lock keeps the outcome valid until
+        // the commit.
+        claim_fence(&tx, self.epoch)?;
         let applied = read_applied_seq(&tx).map_err(backend)?;
         if applied + 1 != journal.next_seq {
             return Err(StoreError::Backend(format!(
@@ -320,7 +340,7 @@ impl SqliteStore {
             at_ms: now_ms(),
         };
 
-        // Step 1: the record is synced to the journal BEFORE its erase runs.
+        // Step 2: the record is synced to the journal BEFORE its erase runs.
         // This order is what makes an open's handling of a torn final line safe:
         // the open drops that line without replaying it, which is right only
         // because no erase can have run for a record that never finished
@@ -334,7 +354,7 @@ impl SqliteStore {
         }
         journal.next_seq += 1;
 
-        // Step 2: erase and record the applied sequence in one transaction.
+        // Step 3: erase and record the applied sequence in one transaction.
         let erased = erase(&tx, &record)
             .and_then(|()| set_applied_seq(&tx, record.seq))
             .and_then(|()| tx.commit());
@@ -916,5 +936,118 @@ mod format_tests {
         assert!(parse_header(br#"{"format":2,"owner":{}}"#)
             .unwrap_err()
             .contains("format 2"));
+    }
+}
+
+#[cfg(test)]
+mod fence_tests {
+    use super::*;
+
+    /// A store directory removed when the test ends.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "cortexkit-store-removals-fence-{}-{}-{}",
+                std::process::id(),
+                now_ms(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    struct Items;
+
+    impl RemovalsHandler for Items {
+        fn replay(&self, tx: &Transaction<'_>, record: &RemovalRecord) -> rusqlite::Result<()> {
+            erase(tx, record)
+        }
+    }
+
+    fn erase(tx: &Transaction<'_>, record: &RemovalRecord) -> rusqlite::Result<()> {
+        for id in &record.ids {
+            tx.execute("DELETE FROM items WHERE id = ?1", [id])?;
+        }
+        Ok(())
+    }
+
+    /// A removal is a fenced write: it stamps its store's epoch, after which a
+    /// lingering writer holding a lower epoch is refused by both `remove` and
+    /// `with_conn_fenced`: the refused removal leaves the journal unchanged,
+    /// and neither refused write changes the database's rows.
+    #[test]
+    fn a_removal_stamps_its_epoch_and_fences_older_writers() {
+        let dir = TempDir::new();
+        let db = dir.0.join("store.db");
+        let descriptor = StorageDescriptor {
+            module_id: "removals-fence".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: db.to_string_lossy().into_owned(),
+            },
+        };
+        let open = || open_sqlite_with_removals(&descriptor, SqliteOpenOptions::default(), &Items);
+        {
+            // The first open takes epoch 1, so the next one has an older epoch
+            // below it to fence.
+            let store = open().unwrap();
+            store
+                .with_conn(|conn| {
+                    conn.execute_batch(
+                        "CREATE TABLE items (id TEXT PRIMARY KEY);
+                         INSERT INTO items VALUES ('a'), ('b');",
+                    )
+                })
+                .unwrap();
+        }
+        let store = open().unwrap();
+        let epoch = store.epoch();
+        assert!(epoch >= 2, "epoch {epoch}");
+        let raw = Connection::open(&db).unwrap();
+        assert_eq!(read_fence_epoch(&raw).unwrap(), 0, "nothing fenced yet");
+
+        store.remove("item", ["a"], erase).unwrap();
+        assert_eq!(read_fence_epoch(&raw).unwrap(), epoch, "remove stamped");
+
+        // A writer still holding an older epoch of the same store, with the
+        // same journal and the same next record, as a draining process would.
+        let journal = journal_file(&db.to_string_lossy());
+        let mut stale = SqliteStore::for_test(Connection::open(&db).unwrap(), epoch - 1);
+        stale.removals = Some(Mutex::new(JournalWriter {
+            path: journal.clone(),
+            next_seq: 2,
+            poisoned: None,
+        }));
+        let journal_before = std::fs::read(&journal).unwrap();
+        let expect_fenced = |result: Result<(), StoreError>, what: &str| match result {
+            Err(StoreError::Fenced {
+                holder_epoch,
+                db_epoch,
+            }) => assert_eq!((holder_epoch, db_epoch), (epoch - 1, epoch), "{what}"),
+            other => panic!("{what}: expected Fenced, got {other:?}"),
+        };
+        expect_fenced(stale.remove("item", ["b"], erase).map(|_| ()), "remove");
+        expect_fenced(
+            stale.with_conn_fenced(|tx| tx.execute("DELETE FROM items", []).map(|_| ())),
+            "with_conn_fenced",
+        );
+        assert_eq!(std::fs::read(&journal).unwrap(), journal_before);
+        let left: i64 = raw
+            .query_row("SELECT count(*) FROM items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(left, 1, "only the newer writer's removal applied");
+        assert_eq!(read_fence_epoch(&raw).unwrap(), epoch);
     }
 }
