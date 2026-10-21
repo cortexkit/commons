@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.10
+
+- Add chunked returned files, so a runner can return up to 10 MiB of files when
+  one `return_result` record would be too large. A caller opts in with
+  `RunRequest.return_chunked` (`with_return_chunked`, omitted when false), and
+  only for a runner advertising `RETURN_CHUNKED_CAPABILITY`
+  (`"exec-remote-return/v2"`). The cap then defaults to
+  `RETURN_CHUNKED_MAX_BYTES_CAP` (10,485,760 bytes); larger requests are refused
+  as `invalid_params`. `RETURN_MAX_BYTES_CAP` and `return_result` are unchanged
+  for requests without the flag.
+- Add `StreamRecord::ReturnChunk` (`return_chunk`): up to
+  `RETURN_CHUNK_MAX_BYTES` (524,288) bytes of one file, grouped by path and
+  contiguous from offset 0.
+- Add `StreamRecord::ReturnManifest` (`return_manifest`), sent once before
+  `terminal`, with one `ReturnManifestEntry` per requested path: returned (size
+  and SHA-256) or failed (cause and optional size), exposed as
+  `ReturnManifestOutcome`. Decoding refuses an entry with both or neither of
+  `sha256` and `cause`, or `sha256` without `size`.
+- Add `ReturnPathsFailureCause::ReadError` (`read_error`) and `Expired`
+  (`expired`). After the runner's retention window, a replay sends the manifest
+  at its original seq with returned entries turned into `expired`, and no
+  chunks; a chunked caller must accept the seq gap this leaves before the
+  manifest.
+- Add `ReturnAssembler`, a pure checker shared by callers and producers'
+  tests. It checks chunk order, contiguity, size and the cap, then the
+  manifest's paths, sizes, digests and total, and returns `VerifiedReturn`
+  values or a `ReturnStreamError`. A chunk error names the path index and
+  the chunk's offset, a manifest error names the path index, and
+  `TotalMismatch` concerns no single path.
+- `sha2` becomes a normal dependency (it was a dev-dependency).
+- Add 21 vectors under `test-vectors/exec-remote-v1/return-chunked/`. Existing
+  vectors are unchanged.
 ## 0.2.9
 
 - Add optional `TerminalRecord.hosted` placement and billed virtual-CPU

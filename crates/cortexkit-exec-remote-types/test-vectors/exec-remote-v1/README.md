@@ -196,3 +196,54 @@ retain and round-trip `seq` when present. A present non-`u64` seq (including nul
 is a decode error. Other unknown fields are ignored. Known tags with malformed or
 missing required fields still fail, and string enums still reject non-string
 wire shapes.
+
+## Chunked returned files
+
+`return-chunked/` holds 21 crate-local cases for `RunRequest.return_chunked`,
+in the same `.jcs`/`.sha256` format. Each case is an object with:
+
+- `return_paths` and `cap_bytes`: the requested paths and the effective cap,
+  the arguments to `ReturnAssembler::new`.
+- `records`: the stream records in order, ending with `terminal`. Every record
+  round-trips byte for byte through `StreamRecord`.
+- `expect`: the assembler's result. Either `{files: [...]}`, one entry per
+  requested path with its `path_index` and `path`, plus `size`, `sha256` and the
+  base64 `data` the caller writes for a returned file, or `cause` and optional
+  `size` for a failed one. Or `{error: {code, path_index, offset?}}`, where
+  `code` is `ReturnStreamError::code()` for the first error the stream raises;
+  `offset` is present for errors raised by a chunk.
+
+All records use `job_id` `0192a64a-1234-7000-8000-000000000001`. Chunks are
+smaller than the 524,288-byte maximum except in `refuse-chunk-too-large`.
+
+Accepted streams:
+
+- `two-files-one-empty`: two returned files; the zero-byte one has no chunks.
+- `three-chunks-short-last`: one file in chunks of 4, 4 and 2 bytes.
+- `failed-missing`, `failed-not-regular`, `failed-escape`, `failed-over-cap`:
+  one returned file and one failed path per cause. The over-cap entry carries
+  its size and has no chunks.
+- `read-error-after-chunks`: a path ends `read_error` after two chunks, whose
+  bytes are discarded, followed by a returned path.
+- `replay-retained` and `replay-expired`: the same job replayed while its bytes
+  are kept and after they expired. Both show `started` at seq 1 and `output` at
+  seq 2. The retained replay has chunks at seqs 3-5 and the manifest at 6. The
+  expired replay has no chunks, so its seq jumps from 2 to the manifest at 6;
+  the returned entry becomes `expired` with its original size, the `missing`
+  entry keeps its cause, and `total_bytes` is 0.
+- `unknown-cause-discards-chunks`: chunks followed by a failed entry with the
+  unrecognised cause `future_cause`, discarded without an error.
+
+Refusals, each by its error code:
+
+- `refuse-offset-gap` and `refuse-offset-overlap`: `non_contiguous`.
+- `refuse-interleaved-paths`: `path_out_of_order`.
+- `refuse-chunk-too-large`: `chunk_too_large` (524,289 zero bytes).
+- `refuse-empty-chunk`: `empty_chunk`.
+- `refuse-path-index-out-of-range`: `path_index_out_of_range`.
+- `refuse-digest-mismatch`: `digest_mismatch`.
+- `refuse-size-mismatch`: `size_mismatch`.
+- `refuse-path-not-echoed`: `path_not_echoed` (`./dist/app.bin` for
+  `dist/app.bin`).
+- `refuse-chunks-before-over-cap`: `chunks_for_failed_path`.
+- `refuse-total-over-cap`: `over_cap`, raised by the chunk that passes the cap.

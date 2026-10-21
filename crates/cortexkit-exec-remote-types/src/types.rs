@@ -126,12 +126,25 @@ pub struct RunRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<Platform>,
     /// Paths relative to `cwd` to return with the stream. An empty list disables
-    /// returned-file collection and its `return_result` record.
+    /// returned-file collection and its `return_result` record (or, with
+    /// `return_chunked`, its `return_chunk` and `return_manifest` records).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub return_paths: Vec<String>,
-    /// Total returned-file byte cap. `None` selects [`RETURN_MAX_BYTES_CAP`].
+    /// Total returned-file byte cap. `None` selects [`RETURN_MAX_BYTES_CAP`], or
+    /// [`RETURN_CHUNKED_MAX_BYTES_CAP`] when `return_chunked` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_max_bytes: Option<u64>,
+    /// Return the requested files as `return_chunk` records followed by one
+    /// `return_manifest`, instead of one `return_result`. Set it only for a
+    /// runner that advertises [`RETURN_CHUNKED_CAPABILITY`]. It has no effect
+    /// when `return_paths` is empty. Omitted on the wire when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub return_chunked: bool,
+}
+
+// serde's `skip_serializing_if` needs a function taking a reference.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl RunRequest {
@@ -156,6 +169,7 @@ impl RunRequest {
             platform: None,
             return_paths: Vec::new(),
             return_max_bytes: None,
+            return_chunked: false,
         }
     }
 
@@ -222,8 +236,9 @@ impl RunRequest {
         &self.return_paths
     }
 
-    /// Set the total returned-file byte cap. Values above
-    /// [`RETURN_MAX_BYTES_CAP`] must be rejected by the runner.
+    /// Set the total returned-file byte cap. Without `return_chunked`, the
+    /// runner must reject values above [`RETURN_MAX_BYTES_CAP`]; with it, values
+    /// above [`RETURN_CHUNKED_MAX_BYTES_CAP`].
     pub fn with_return_max_bytes(mut self, return_max_bytes: u64) -> Self {
         self.return_max_bytes = Some(return_max_bytes);
         self
@@ -232,6 +247,18 @@ impl RunRequest {
     /// Read the explicit total byte cap, or `None` for the default cap.
     pub fn return_max_bytes(&self) -> Option<u64> {
         self.return_max_bytes
+    }
+
+    /// Ask for chunked returned files. Only send `true` to a runner that
+    /// advertises [`RETURN_CHUNKED_CAPABILITY`].
+    pub fn with_return_chunked(mut self, return_chunked: bool) -> Self {
+        self.return_chunked = return_chunked;
+        self
+    }
+
+    /// Whether returned files are requested as chunks plus a manifest.
+    pub fn return_chunked(&self) -> bool {
+        self.return_chunked
     }
 }
 
@@ -707,8 +734,17 @@ impl IgnoredWrites {
 /// a producer obligation, not a decoder limit: longer received details are kept
 /// intact, without truncation or rejection.
 pub const REFUSAL_DETAIL_MAX_BYTES: usize = 1024;
-/// Maximum requested returned-file bytes, also used when `return_max_bytes` is absent.
+/// Maximum requested returned-file bytes, also used when `return_max_bytes` is
+/// absent. Applies to requests without `return_chunked`.
 pub const RETURN_MAX_BYTES_CAP: u64 = 262_144;
+/// Capability a runner advertises when it supports `RunRequest.return_chunked`.
+pub const RETURN_CHUNKED_CAPABILITY: &str = "exec-remote-return/v2";
+/// Maximum requested returned-file bytes with `return_chunked`, also used when
+/// `return_max_bytes` is absent from such a request.
+pub const RETURN_CHUNKED_MAX_BYTES_CAP: u64 = 10_485_760;
+/// Maximum decoded bytes in one `return_chunk` record. Every chunk carries at
+/// least one byte.
+pub const RETURN_CHUNK_MAX_BYTES: usize = 524_288;
 
 /// Host or pool that ran a hosted job and its optional billing measurement.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1018,15 +1054,33 @@ impl ReturnedFile {
 }
 
 /// Why requested files could not be returned. Unknown strings remain readable.
+///
+/// In chunked mode (`RunRequest.return_chunked`) each cause describes one path
+/// in a [`ReturnManifestEntry`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 #[serde(from = "String", into = "String")]
 pub enum ReturnPathsFailureCause {
+    /// The file would take the total past the cap. In chunked mode this is
+    /// decided before any of the file's bytes are sent.
     OverCap,
+    /// No such path.
     Missing,
+    /// The path, or a symlink it resolves through, leads outside the job root.
     Escape,
+    /// The path is not a regular file.
     NotRegular,
+    /// The `return_result` record would exceed the runner's record size limit.
+    /// Does not occur in chunked mode.
     FrameLimit,
+    /// Chunked mode only: reading failed, or the file's bytes changed while it
+    /// was read. Chunks may already have been sent for the path; the caller
+    /// discards them. It is the only known cause that may follow chunks; a
+    /// cause this version does not recognise may also follow them.
+    ReadError,
+    /// Chunked mode only: a replay after the runner stopped keeping the job's
+    /// returned bytes. The entry keeps the file's original size.
+    Expired,
     /// A cause this version does not recognise.
     Unknown(String),
 }
@@ -1039,6 +1093,8 @@ impl From<String> for ReturnPathsFailureCause {
             "escape" => Self::Escape,
             "not_regular" => Self::NotRegular,
             "frame_limit" => Self::FrameLimit,
+            "read_error" => Self::ReadError,
+            "expired" => Self::Expired,
             _ => Self::Unknown(cause),
         }
     }
@@ -1052,6 +1108,8 @@ impl From<ReturnPathsFailureCause> for String {
             ReturnPathsFailureCause::Escape => "escape".into(),
             ReturnPathsFailureCause::NotRegular => "not_regular".into(),
             ReturnPathsFailureCause::FrameLimit => "frame_limit".into(),
+            ReturnPathsFailureCause::ReadError => "read_error".into(),
+            ReturnPathsFailureCause::Expired => "expired".into(),
             ReturnPathsFailureCause::Unknown(cause) => cause,
         }
     }
@@ -1176,6 +1234,295 @@ impl ReturnResult {
     /// Read the collection failure when collection did not succeed.
     pub fn return_paths_failed(&self) -> Option<&ReturnPathsFailed> {
         self.return_paths_failed.as_ref()
+    }
+}
+
+/// A piece of one returned file, sent when the request set `return_chunked`.
+///
+/// Chunks come grouped by path in ascending `path_index`: a path's chunks are
+/// never interleaved with another path's, and the stream never returns to an
+/// earlier path. Each path's chunks are contiguous from offset 0. A zero-byte
+/// file has no chunks. The bytes are not verified until the
+/// [`ReturnManifest`] arrives; [`crate::ReturnAssembler`] applies these rules.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnChunk {
+    pub job_id: Uuid,
+    /// Replay sequence number for this stream record.
+    pub seq: u64,
+    /// Position of the file in the request's `return_paths`, from 0.
+    pub path_index: u32,
+    /// Byte offset of `data` within the file.
+    pub offset: u64,
+    /// 1 to [`RETURN_CHUNK_MAX_BYTES`] file bytes, encoded as standard padded
+    /// base64 on the wire.
+    pub data: BytePayload,
+}
+
+impl ReturnChunk {
+    /// A chunk of the file at `path_index`, starting at `offset`.
+    pub fn new(job_id: Uuid, seq: u64, path_index: u32, offset: u64, data: BytePayload) -> Self {
+        Self {
+            job_id,
+            seq,
+            path_index,
+            offset,
+            data,
+        }
+    }
+
+    /// Read the job identifier.
+    pub fn job_id(&self) -> Uuid {
+        self.job_id
+    }
+
+    /// Read the replay sequence number.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Read the index into the request's `return_paths`.
+    pub fn path_index(&self) -> u32 {
+        self.path_index
+    }
+
+    /// Read the byte offset within the file.
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Read the decoded chunk bytes.
+    pub fn data(&self) -> &[u8] {
+        &self.data.0
+    }
+}
+
+/// What happened to one requested path in a [`ReturnManifest`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReturnManifestOutcome {
+    /// The file was returned. Its received chunk bytes must total `size` and
+    /// hash to `sha256` before the caller places the file.
+    Returned {
+        /// File size in bytes.
+        size: u64,
+        /// Lowercase hexadecimal SHA-256 of the file's bytes.
+        sha256: String,
+    },
+    /// The file was not returned; any chunks received for it are discarded.
+    Failed {
+        cause: ReturnPathsFailureCause,
+        /// The file's size when the runner knew it, for example for an
+        /// over-cap or expired file.
+        size: Option<u64>,
+    },
+}
+
+/// One requested path's entry in a [`ReturnManifest`].
+///
+/// On the wire a returned entry is `{path, size, sha256}` and a failed entry is
+/// `{path, cause, size?}`. Decoding refuses an entry with both `sha256` and
+/// `cause`, with neither, or with `sha256` but no `size`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnManifestEntry {
+    /// The requested path, echoed exactly as the caller sent it.
+    pub path: String,
+    pub outcome: ReturnManifestOutcome,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ReturnManifestEntryWire {
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cause: Option<ReturnPathsFailureCause>,
+}
+
+impl Serialize for ReturnManifestEntry {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let wire = match &self.outcome {
+            ReturnManifestOutcome::Returned { size, sha256 } => ReturnManifestEntryWire {
+                path: self.path.clone(),
+                size: Some(*size),
+                sha256: Some(sha256.clone()),
+                cause: None,
+            },
+            ReturnManifestOutcome::Failed { cause, size } => ReturnManifestEntryWire {
+                path: self.path.clone(),
+                size: *size,
+                sha256: None,
+                cause: Some(cause.clone()),
+            },
+        };
+        wire.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReturnManifestEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = ReturnManifestEntryWire::deserialize(deserializer)?;
+        let outcome = match (wire.sha256, wire.cause) {
+            (Some(sha256), None) => {
+                let Some(size) = wire.size else {
+                    return Err(serde::de::Error::custom(
+                        "a returned return_manifest entry must contain size with sha256",
+                    ));
+                };
+                ReturnManifestOutcome::Returned { size, sha256 }
+            }
+            (None, Some(cause)) => ReturnManifestOutcome::Failed {
+                cause,
+                size: wire.size,
+            },
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "a return_manifest entry must contain exactly one of sha256 or cause",
+                ))
+            }
+        };
+        Ok(Self {
+            path: wire.path,
+            outcome,
+        })
+    }
+}
+
+impl ReturnManifestEntry {
+    /// A returned file with its size and lowercase hexadecimal SHA-256.
+    pub fn returned(path: impl Into<String>, size: u64, sha256: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            outcome: ReturnManifestOutcome::Returned {
+                size,
+                sha256: sha256.into(),
+            },
+        }
+    }
+
+    /// A path that was not returned, with its size unknown.
+    pub fn failed(path: impl Into<String>, cause: ReturnPathsFailureCause) -> Self {
+        Self {
+            path: path.into(),
+            outcome: ReturnManifestOutcome::Failed { cause, size: None },
+        }
+    }
+
+    /// Set the file size: the returned size, or the known size of a failed
+    /// file such as an over-cap or expired one.
+    pub fn with_size(mut self, new_size: u64) -> Self {
+        match &mut self.outcome {
+            ReturnManifestOutcome::Returned { size, .. } => *size = new_size,
+            ReturnManifestOutcome::Failed { size, .. } => *size = Some(new_size),
+        }
+        self
+    }
+
+    /// Read the requested path as echoed by the runner.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Read whether the path was returned or failed.
+    pub fn outcome(&self) -> &ReturnManifestOutcome {
+        &self.outcome
+    }
+
+    /// Read the file size: always present for a returned file, and present for
+    /// a failed one only when the runner knew it.
+    pub fn size(&self) -> Option<u64> {
+        match &self.outcome {
+            ReturnManifestOutcome::Returned { size, .. } => Some(*size),
+            ReturnManifestOutcome::Failed { size, .. } => *size,
+        }
+    }
+
+    /// Read the digest of a returned file, or `None` for a failed one.
+    pub fn sha256(&self) -> Option<&str> {
+        match &self.outcome {
+            ReturnManifestOutcome::Returned { sha256, .. } => Some(sha256),
+            ReturnManifestOutcome::Failed { .. } => None,
+        }
+    }
+
+    /// Read the failure cause, or `None` for a returned file.
+    pub fn cause(&self) -> Option<&ReturnPathsFailureCause> {
+        match &self.outcome {
+            ReturnManifestOutcome::Returned { .. } => None,
+            ReturnManifestOutcome::Failed { cause, .. } => Some(cause),
+        }
+    }
+}
+
+/// The outcome of every requested path, sent once after the job's
+/// `return_chunk` records and immediately before the terminal record when the
+/// request set `return_chunked` with non-empty `return_paths`.
+///
+/// After the runner stops keeping the job's returned bytes, a replay sends no
+/// chunks and this manifest at its original `seq`, with every returned entry
+/// turned into a failed `expired` entry. A caller that set `return_chunked`
+/// must then accept a gap in `seq` in exactly one place: between the last
+/// record before the missing chunks and this manifest. Every other gap keeps
+/// its usual meaning, and the resume cursor advances to this record's `seq`
+/// as for any other record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnManifest {
+    pub job_id: Uuid,
+    /// Replay sequence number for this stream record.
+    pub seq: u64,
+    /// One entry per requested path, in request order.
+    pub files: Vec<ReturnManifestEntry>,
+    /// Sum of the returned entries' sizes.
+    pub total_bytes: u64,
+    /// The effective total byte cap.
+    pub cap_bytes: u64,
+}
+
+impl ReturnManifest {
+    /// A manifest with one entry per requested path, in request order.
+    pub fn new(
+        job_id: Uuid,
+        seq: u64,
+        files: Vec<ReturnManifestEntry>,
+        total_bytes: u64,
+        cap_bytes: u64,
+    ) -> Self {
+        Self {
+            job_id,
+            seq,
+            files,
+            total_bytes,
+            cap_bytes,
+        }
+    }
+
+    /// Read the job identifier.
+    pub fn job_id(&self) -> Uuid {
+        self.job_id
+    }
+
+    /// Read the replay sequence number.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Read the per-path entries, in request order.
+    pub fn files(&self) -> &[ReturnManifestEntry] {
+        &self.files
+    }
+
+    /// Read the sum of the returned entries' sizes.
+    pub fn total_bytes(&self) -> u64 {
+        self.total_bytes
+    }
+
+    /// Read the effective total byte cap.
+    pub fn cap_bytes(&self) -> u64 {
+        self.cap_bytes
     }
 }
 
@@ -1696,6 +2043,12 @@ pub enum StreamRecord {
     Output(Output),
     /// Returned-file collection requested by the caller, immediately before terminal.
     ReturnResult(ReturnResult),
+    /// A piece of a returned file, sent only when the request set
+    /// `return_chunked`. Nonterminal.
+    ReturnChunk(ReturnChunk),
+    /// The per-path outcome of chunked returned files, immediately before
+    /// terminal. Nonterminal.
+    ReturnManifest(ReturnManifest),
     Terminal(TerminalRecord),
     /// An unrecognised record. Skip it and keep reading, counting its sequence
     /// number toward the resume cursor when present. Never treat it as terminal.
@@ -1719,6 +2072,8 @@ enum KnownStreamRecord {
     Started(Started),
     Output(Output),
     ReturnResult(ReturnResult),
+    ReturnChunk(ReturnChunk),
+    ReturnManifest(ReturnManifest),
     Terminal(TerminalRecord),
 }
 
@@ -1756,6 +2111,8 @@ impl Serialize for StreamRecord {
             Self::Started(started) => KnownStreamRecord::Started(started.clone()),
             Self::Output(output) => KnownStreamRecord::Output(output.clone()),
             Self::ReturnResult(result) => KnownStreamRecord::ReturnResult(result.clone()),
+            Self::ReturnChunk(chunk) => KnownStreamRecord::ReturnChunk(chunk.clone()),
+            Self::ReturnManifest(manifest) => KnownStreamRecord::ReturnManifest(manifest.clone()),
             Self::Terminal(terminal) => KnownStreamRecord::Terminal(terminal.clone()),
             Self::Unknown { kind, seq } => {
                 use serde::ser::SerializeMap;
@@ -1778,7 +2135,13 @@ impl<'de> Deserialize<'de> for StreamRecord {
             StreamRecordInput::Tag(StreamRecordTag { kind, seq }) => {
                 if matches!(
                     kind.as_str(),
-                    "accepted" | "started" | "output" | "return_result" | "terminal"
+                    "accepted"
+                        | "started"
+                        | "output"
+                        | "return_result"
+                        | "return_chunk"
+                        | "return_manifest"
+                        | "terminal"
                 ) {
                     return Err(serde::de::Error::custom(format!(
                         "malformed fields for known stream record tag {kind}"
@@ -1792,6 +2155,8 @@ impl<'de> Deserialize<'de> for StreamRecord {
             KnownStreamRecord::Started(started) => Self::Started(started),
             KnownStreamRecord::Output(output) => Self::Output(output),
             KnownStreamRecord::ReturnResult(result) => Self::ReturnResult(result),
+            KnownStreamRecord::ReturnChunk(chunk) => Self::ReturnChunk(chunk),
+            KnownStreamRecord::ReturnManifest(manifest) => Self::ReturnManifest(manifest),
             KnownStreamRecord::Terminal(terminal) => Self::Terminal(terminal),
         })
     }

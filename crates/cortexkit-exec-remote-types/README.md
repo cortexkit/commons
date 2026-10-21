@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.9**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.10**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -18,7 +18,8 @@ sibling path-dependency consumers.
 | `workspace.drop` | `DropRequest` | `DropReply` |
 
 `StreamRecord` is internally tagged by `type`: known records are `accepted`,
-`started`, `output`, `return_result`, or `terminal`, with fields inline beside the discriminator.
+`started`, `output`, `return_result`, `return_chunk`, `return_manifest`, or
+`terminal`, with fields inline beside the discriminator.
 `Started` is emitted once after acceptance when the job takes runner capacity,
 before its first output or terminal; a job refused before start never has one.
 The runner's command timeout runs from this moment, not from acceptance. A
@@ -75,10 +76,32 @@ requested platform's wire name is reported in `refusal_detail`.
 
 `RunRequest::with_return_paths` requests files relative to `cwd`; the empty list
 is omitted and disables `return_result`. The optional `return_max_bytes` cap
-defaults to `RETURN_MAX_BYTES_CAP` (262,144 bytes), and a larger request must be
-rejected as `invalid_params` naming that field. The types crate has no runner-side
-request validator. See [`CONTRACT.md`](CONTRACT.md) for the capability check
-required before sending paths, the stream ordering, and the outcome rules.
+defaults to `RETURN_MAX_BYTES_CAP` (262,144 bytes). Without `return_chunked`, a
+larger request must be rejected as `invalid_params` naming that field. The types
+crate has no runner-side request validator. See [`CONTRACT.md`](CONTRACT.md) for
+the capability check required before sending paths, the stream ordering, and
+the outcome rules.
+
+#### Chunked returned files
+
+For more than 262,144 bytes, a caller sets `RunRequest::with_return_chunked(true)`,
+but only for a runner that advertises `RETURN_CHUNKED_CAPABILITY`
+(`"exec-remote-return/v2"`). The cap then defaults to, and may not exceed,
+`RETURN_CHUNKED_MAX_BYTES_CAP` (10 MiB). Instead of one `return_result`, the
+runner sends the files' bytes as `ReturnChunk` records of at most
+`RETURN_CHUNK_MAX_BYTES` (524,288) bytes each, grouped by path and contiguous,
+followed by one `ReturnManifest` immediately before `terminal`. The manifest
+has one `ReturnManifestEntry` per requested path: returned with its size and
+SHA-256, or failed with a `ReturnPathsFailureCause` (now including `read_error`
+and `expired`).
+
+`ReturnAssembler` is a pure checker for this stream. Feed it each chunk with
+`accept_chunk`, which returns the bytes to write, then the manifest with
+`finish`, which returns a `VerifiedReturn` per path. Place a file only when
+`finish` reports it returned; on a `ReturnStreamError`, discard every received
+byte. A replay after the runner's retention window carries no chunks, so its
+`seq` jumps from the record before the chunks to the manifest; a chunked caller
+must accept that one gap. See [`CONTRACT.md`](CONTRACT.md) for the full rules.
 
 ### Recovery and request refusals
 
@@ -260,6 +283,12 @@ bytes, and round-trip every case through typed values to the same independent
 RFC 8785 canonical bytes. The nested-unknown-fields input re-encodes to the
 separately pinned `all` case, dropping only unknown fields. The vectors and tests
 are included in the package.
+
+`test-vectors/exec-remote-v1/return-chunked/` holds 21 more crate-local cases
+for chunked returned files, in the same `.jcs`/`.sha256` format. Each is a
+record sequence with the requested paths, the cap, and the result
+`ReturnAssembler` must reach: ten accepted streams and eleven refusals, each
+checked by its own test. The vector README lists them.
 
 ## Verification
 

@@ -2,7 +2,7 @@
 # Transport framing and runner-only transfer control stay with the executor.
 [package]
 name = "cortexkit-exec-remote-types"
-version = "0.2.9"
+version = "0.2.10"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -15,9 +15,9 @@ include = ["Cargo.toml", "README.md", "CONTRACT.md", "CHANGELOG.md", "src/**", "
 [dependencies]
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 uuid = { version = "1", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 serde_json = "1"
 serde_json_canonicalizer = "0.3"
-sha2 = "0.10"

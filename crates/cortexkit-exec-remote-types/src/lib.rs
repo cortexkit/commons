@@ -20,6 +20,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod assembler;
 pub mod types;
 
+pub use assembler::*;
 pub use types::*;
