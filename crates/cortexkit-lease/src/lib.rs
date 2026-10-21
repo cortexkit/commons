@@ -298,6 +298,40 @@ pub trait LeaseHandle: Send + Sync + std::fmt::Debug {
 
     /// The namespaced identity this lease was acquired for.
     fn key(&self) -> &LeaseKey;
+
+    /// Raise this held EXCLUSIVE lease's epoch to at least `at_least`,
+    /// persisting the new value before returning it. An epoch is never lowered:
+    /// when the current epoch is already `at_least` or higher, nothing is
+    /// written and the current epoch is returned. On success [`Self::epoch`]
+    /// reports the returned value, and the next exclusive acquisition of the same
+    /// key starts above it.
+    ///
+    /// For a writer whose fence token is behind a token already stamped in the
+    /// data it guards, for example a database restored onto a machine that lacks
+    /// the lease state the database was written under. Raising only ever fences
+    /// MORE writers, and the caller already holds the exclusive lease, so no
+    /// other live writer can be holding the raised value.
+    ///
+    /// Shared handles refuse: they are not writers, and their epoch is for
+    /// observability only.
+    ///
+    /// The default implementation returns [`LeaseError::Io`] with
+    /// [`io::ErrorKind::Unsupported`]. It cannot do nothing and report success,
+    /// because a caller that needs the raise would then keep a fence token that
+    /// every fenced write rejects; an implementor that can persist its epoch
+    /// should override it.
+    fn raise_epoch(&self, at_least: u64) -> Result<u64, LeaseError> {
+        Err(LeaseError::Io(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "lease for module '{}' (backend {}, scope '{}') cannot raise its epoch to {at_least}: \
+                 this lease implementation does not support raising",
+                self.key().module_id,
+                self.key().backend,
+                self.key().scope_key
+            ),
+        )))
+    }
 }
 
 #[derive(Debug)]
@@ -374,19 +408,41 @@ impl FileLeaseStore {
 /// for its lifetime.
 #[derive(Debug)]
 struct FileLeaseHandle {
-    epoch: u64,
+    /// Behind a mutex because [`LeaseHandle::raise_epoch`] takes `&self` (the
+    /// handle may be shared through an `Arc`); holding it across the file
+    /// write keeps the in-memory and persisted values in step.
+    epoch: std::sync::Mutex<u64>,
     /// Holds the OS advisory lock until dropped.
     file: File,
     key: LeaseKey,
+    /// Whether the OS lock is exclusive. Only an exclusive holder may write the
+    /// persisted epoch.
+    exclusive: bool,
 }
 
 impl LeaseHandle for FileLeaseHandle {
     fn epoch(&self) -> u64 {
-        self.epoch
+        *self.epoch.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     fn key(&self) -> &LeaseKey {
         &self.key
+    }
+
+    fn raise_epoch(&self, at_least: u64) -> Result<u64, LeaseError> {
+        if !self.exclusive {
+            return Err(LeaseError::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "a shared lease cannot raise the writer epoch",
+            )));
+        }
+        let mut epoch = self.epoch.lock().unwrap_or_else(|p| p.into_inner());
+        if *epoch >= at_least {
+            return Ok(*epoch);
+        }
+        write_epoch(&self.file, at_least).map_err(LeaseError::Io)?;
+        *epoch = at_least;
+        Ok(at_least)
     }
 }
 
@@ -430,9 +486,10 @@ impl LeaseStore for FileLeaseStore {
         })?;
 
         Ok(Box::new(FileLeaseHandle {
-            epoch,
+            epoch: std::sync::Mutex::new(epoch),
             file,
             key: key.clone(),
+            exclusive: true,
         }))
     }
 
@@ -470,9 +527,10 @@ impl LeaseStore for FileLeaseStore {
         })?;
 
         Ok(Box::new(FileLeaseHandle {
-            epoch,
+            epoch: std::sync::Mutex::new(epoch),
             file,
             key: key.clone(),
+            exclusive: false,
         }))
     }
 }
@@ -511,6 +569,22 @@ fn bump_epoch(file: &mut File) -> std::io::Result<u64> {
     file.write_all(next.to_string().as_bytes())?;
     file.flush()?;
     Ok(next)
+}
+
+/// Persist `epoch` as the file's whole contents and sync it to disk. Called
+/// only by an exclusive holder, through the handle that holds the OS lock (on
+/// Windows the byte-range lock refuses writes through any other handle).
+///
+/// The new digits are written over the old ones before the file is cut to the
+/// new length and synced, rather than truncating first, so the write never
+/// starts by emptying the file (an empty file reads as epoch 0). A crash during
+/// the write or before the sync can still leave partial contents.
+fn write_epoch(mut file: &File, epoch: u64) -> io::Result<()> {
+    let text = epoch.to_string();
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(text.as_bytes())?;
+    file.set_len(text.len() as u64)?;
+    file.sync_all()
 }
 
 /// FNV-1a 64-bit, hex: a dependency-free deterministic filename hash.
@@ -914,6 +988,81 @@ mod tests {
         assert_eq!(g2.epoch(), 2);
         drop(g2);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Raising goes through a shared `Arc` handle, is visible at once through
+    /// `epoch()`, never lowers the epoch, and is persisted: the next exclusive
+    /// acquisition continues above the raised value. The persisted value is
+    /// observed by re-acquiring, not by reading the file, which Windows refuses
+    /// while another handle holds the lock.
+    #[test]
+    fn raise_epoch_persists_and_never_lowers() {
+        let (store, dir) = tmp_store();
+        let k = key("raise");
+
+        let lease: std::sync::Arc<dyn LeaseHandle> =
+            std::sync::Arc::from(store.acquire(&k).expect("acquire"));
+        assert_eq!(lease.epoch(), 1);
+        let shared = std::sync::Arc::clone(&lease);
+        assert_eq!(shared.raise_epoch(7).expect("raise"), 7);
+        assert_eq!(lease.epoch(), 7, "every clone of the handle sees the raise");
+        assert_eq!(
+            lease
+                .raise_epoch(3)
+                .expect("a lower target is not an error"),
+            7,
+            "an epoch is never lowered"
+        );
+        assert_eq!(lease.epoch(), 7);
+        drop((lease, shared));
+
+        let next = FileLeaseStore::new(&dir).acquire(&k).expect("re-acquire");
+        assert_eq!(next.epoch(), 8, "the raised epoch was persisted");
+        drop(next);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A shared holder is not a writer, so it may not move the writer epoch.
+    #[test]
+    fn a_shared_lease_cannot_raise_the_epoch() {
+        let (store, dir) = tmp_store();
+        let k = key("raise-shared");
+
+        let shared = store.acquire_shared(&k).expect("shared");
+        match shared.raise_epoch(9) {
+            Err(LeaseError::Io(error)) => {
+                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied)
+            }
+            other => panic!("a shared raise must be refused, got {other:?}"),
+        }
+        assert_eq!(shared.epoch(), 0);
+        drop(shared);
+
+        let writer = store.acquire(&k).expect("writer");
+        assert_eq!(writer.epoch(), 1, "the refused raise persisted nothing");
+        drop(writer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An implementor that does not override `raise_epoch` reports it as
+    /// unsupported instead of claiming a raise it did not make.
+    #[test]
+    fn the_default_raise_epoch_is_unsupported() {
+        #[derive(Debug)]
+        struct FixedLease(LeaseKey);
+        impl LeaseHandle for FixedLease {
+            fn epoch(&self) -> u64 {
+                1
+            }
+            fn key(&self) -> &LeaseKey {
+                &self.0
+            }
+        }
+
+        match FixedLease(key("fixed")).raise_epoch(5) {
+            Err(LeaseError::Io(error)) => assert_eq!(error.kind(), io::ErrorKind::Unsupported),
+            other => panic!("expected an unsupported error, got {other:?}"),
+        }
     }
 
     #[cfg(unix)]

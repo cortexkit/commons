@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-lease = "0.1.3"
+cortexkit-lease = "0.1.4"
 ```
 
 Start with `LeaseKey` and `LeaseStore`; see the [crate source](src/lib.rs) for acquisition and fencing semantics, owner-only file/directory helpers (`protect_file`, `create_private_dir`), and durable file replacement (`durable_replace`).

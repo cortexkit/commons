@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.3
+
+- A `store.db` that arrives without its `*.lease` files (a backup restored onto
+  another machine, a copy placed by hand, lease files deleted) now opens and
+  takes fenced writes at once. Previously a fresh lease started at epoch 1
+  while the database still carried the old fence epoch N, so every
+  `with_conn_fenced` write was refused with `StoreError::Fenced` until N
+  restarts had passed.
+- `open_sqlite`, `open_sqlite_with` and `StoreLease::open_scratch` read the
+  database's fence epoch beside the owner check, before WAL is enabled. When it
+  is at or above the lease's epoch, the lease's persisted epoch is raised to
+  one above it (through `LeaseHandle::raise_epoch`, written and synced under
+  the held exclusive lock) and the store uses it. Epochs are never lowered, so
+  an older writer is still fenced out. For `open_scratch` the raise applies to
+  the shared lease, so `StoreLease::epoch` then reports the raised value.
+- If a raise is needed and the lease implementation cannot raise, the open is
+  refused with `StoreError::Lease` (an `Unsupported` I/O error naming the
+  database and both epochs) instead of serving a store whose fenced writes
+  would all fail.
+- A database that has never taken a fenced write is not changed: the check
+  only reads, and the fence table is still created by the first fenced write.
+- Requires `cortexkit-lease` 0.1.4. A patch release: no public API changed.
+
 ## 0.3.2
 
 - `open_sqlite` now takes the single-writer lease before it opens the
