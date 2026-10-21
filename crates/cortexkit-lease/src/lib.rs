@@ -29,8 +29,8 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
-    path::PathBuf,
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
 };
 
 use fs2::FileExt;
@@ -149,6 +149,103 @@ pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+/// Flushes a completed temporary file, atomically replaces `dest`, then makes
+/// the replacement durable where the local filesystem supports that barrier.
+/// The temporary file must be in the same directory as `dest`; otherwise this
+/// returns [`io::ErrorKind::InvalidInput`] before changing either path.
+///
+/// On Unix, the file is synced before rename and the containing directory is
+/// synced afterward. On Windows, the file is flushed and `MoveFileExW` is
+/// called with write-through enabled. On local filesystems that honor these
+/// operations, a successful return requests durability across power loss. The
+/// rename is atomic to concurrent observers, so a process crash does not expose
+/// a partially copied destination; if the process crashes before this function
+/// returns, the caller cannot know whether the old or new name is durable. This
+/// is not a guarantee for remote filesystems, devices that ignore flushes, or
+/// filesystems that do not provide the documented barriers.
+pub fn durable_replace(temp: &Path, dest: &Path) -> io::Result<()> {
+    let parent = require_same_parent_directory(temp, dest)?;
+
+    #[cfg(unix)]
+    {
+        File::open(temp)?.sync_all()?;
+        std::fs::rename(temp, dest)?;
+        sync_dir(&parent)
+    }
+    #[cfg(windows)]
+    {
+        let _ = parent;
+        windows::durable_replace(temp, dest)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (temp, dest, parent);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "durable replacement is supported only on Unix and Windows",
+        ))
+    }
+}
+
+/// Flushes directory metadata after creating a name without replacing an
+/// existing one.
+///
+/// On Unix this calls `fsync` on the directory. An `EINVAL` response is treated
+/// as an unsupported filesystem operation, so `Ok(())` in that case does not
+/// promise power-loss durability. On Windows this opens the directory for write
+/// access and calls `FlushFileBuffers`; NTFS supports this operation, but other
+/// filesystems may refuse it and their errors are returned. A successful
+/// barrier on a local filesystem that honors it requests persistence across
+/// power loss; it is not needed to preserve metadata across a process-only
+/// crash and does not guarantee behavior for remote filesystems or devices that
+/// ignore flushes.
+pub fn sync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        match File::open(dir)?.sync_all() {
+            // EINVAL means this filesystem refuses fsync on directories; unlike
+            // other errors it is documented as an unsupported barrier.
+            Err(error)
+                if error.kind() == io::ErrorKind::InvalidInput
+                    && error.raw_os_error().is_some() =>
+            {
+                Ok(())
+            }
+            result => result,
+        }
+    }
+    #[cfg(windows)]
+    {
+        windows::sync_dir(dir)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = dir;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "directory syncing is supported only on Unix and Windows",
+        ))
+    }
+}
+
+fn require_same_parent_directory(temp: &Path, dest: &Path) -> io::Result<PathBuf> {
+    fn parent_or_current(path: &Path) -> &Path {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+    }
+
+    let temp_parent = std::fs::canonicalize(parent_or_current(temp))?;
+    let dest_parent = std::fs::canonicalize(parent_or_current(dest))?;
+    if temp_parent != dest_parent {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "temporary file and destination must be in the same directory",
+        ));
+    }
+    Ok(dest_parent)
+}
+
 /// Identifies the thing being single-writer-guarded, namespaced so distinct
 /// modules cannot collide on a shared lease root.
 ///
@@ -201,6 +298,40 @@ pub trait LeaseHandle: Send + Sync + std::fmt::Debug {
 
     /// The namespaced identity this lease was acquired for.
     fn key(&self) -> &LeaseKey;
+
+    /// Raise this held EXCLUSIVE lease's epoch to at least `at_least`,
+    /// persisting the new value before returning it. An epoch is never lowered:
+    /// when the current epoch is already `at_least` or higher, nothing is
+    /// written and the current epoch is returned. On success [`Self::epoch`]
+    /// reports the returned value, and the next exclusive acquisition of the same
+    /// key starts above it.
+    ///
+    /// For a writer whose fence token is behind a token already stamped in the
+    /// data it guards, for example a database restored onto a machine that lacks
+    /// the lease state the database was written under. Raising only ever fences
+    /// MORE writers, and the caller already holds the exclusive lease, so no
+    /// other live writer can be holding the raised value.
+    ///
+    /// Shared handles refuse: they are not writers, and their epoch is for
+    /// observability only.
+    ///
+    /// The default implementation returns [`LeaseError::Io`] with
+    /// [`io::ErrorKind::Unsupported`]. It cannot do nothing and report success,
+    /// because a caller that needs the raise would then keep a fence token that
+    /// every fenced write rejects; an implementor that can persist its epoch
+    /// should override it.
+    fn raise_epoch(&self, at_least: u64) -> Result<u64, LeaseError> {
+        Err(LeaseError::Io(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "lease for module '{}' (backend {}, scope '{}') cannot raise its epoch to {at_least}: \
+                 this lease implementation does not support raising",
+                self.key().module_id,
+                self.key().backend,
+                self.key().scope_key
+            ),
+        )))
+    }
 }
 
 #[derive(Debug)]
@@ -277,19 +408,41 @@ impl FileLeaseStore {
 /// for its lifetime.
 #[derive(Debug)]
 struct FileLeaseHandle {
-    epoch: u64,
+    /// Behind a mutex because [`LeaseHandle::raise_epoch`] takes `&self` (the
+    /// handle may be shared through an `Arc`); holding it across the file
+    /// write keeps the in-memory and persisted values in step.
+    epoch: std::sync::Mutex<u64>,
     /// Holds the OS advisory lock until dropped.
     file: File,
     key: LeaseKey,
+    /// Whether the OS lock is exclusive. Only an exclusive holder may write the
+    /// persisted epoch.
+    exclusive: bool,
 }
 
 impl LeaseHandle for FileLeaseHandle {
     fn epoch(&self) -> u64 {
-        self.epoch
+        *self.epoch.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     fn key(&self) -> &LeaseKey {
         &self.key
+    }
+
+    fn raise_epoch(&self, at_least: u64) -> Result<u64, LeaseError> {
+        if !self.exclusive {
+            return Err(LeaseError::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "a shared lease cannot raise the writer epoch",
+            )));
+        }
+        let mut epoch = self.epoch.lock().unwrap_or_else(|p| p.into_inner());
+        if *epoch >= at_least {
+            return Ok(*epoch);
+        }
+        write_epoch(&self.file, at_least).map_err(LeaseError::Io)?;
+        *epoch = at_least;
+        Ok(at_least)
     }
 }
 
@@ -333,9 +486,10 @@ impl LeaseStore for FileLeaseStore {
         })?;
 
         Ok(Box::new(FileLeaseHandle {
-            epoch,
+            epoch: std::sync::Mutex::new(epoch),
             file,
             key: key.clone(),
+            exclusive: true,
         }))
     }
 
@@ -373,9 +527,10 @@ impl LeaseStore for FileLeaseStore {
         })?;
 
         Ok(Box::new(FileLeaseHandle {
-            epoch,
+            epoch: std::sync::Mutex::new(epoch),
             file,
             key: key.clone(),
+            exclusive: false,
         }))
     }
 }
@@ -416,6 +571,22 @@ fn bump_epoch(file: &mut File) -> std::io::Result<u64> {
     Ok(next)
 }
 
+/// Persist `epoch` as the file's whole contents and sync it to disk. Called
+/// only by an exclusive holder, through the handle that holds the OS lock (on
+/// Windows the byte-range lock refuses writes through any other handle).
+///
+/// The new digits are written over the old ones before the file is cut to the
+/// new length and synced, rather than truncating first, so the write never
+/// starts by emptying the file (an empty file reads as epoch 0). A crash during
+/// the write or before the sync can still leave partial contents.
+fn write_epoch(mut file: &File, epoch: u64) -> io::Result<()> {
+    let text = epoch.to_string();
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(text.as_bytes())?;
+    file.set_len(text.len() as u64)?;
+    file.sync_all()
+}
+
 /// FNV-1a 64-bit, hex: a dependency-free deterministic filename hash.
 fn fnv1a_hex(s: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -434,11 +605,17 @@ mod tests {
         LeaseKey::new("test-module", "sqlite", scope)
     }
 
+    /// A fresh directory per call. A counter makes it unique: tests run in
+    /// parallel in one process, and two calls in the same clock tick would
+    /// otherwise share a directory that one test deletes while another still
+    /// uses it. On Windows that deleted directory stays pending deletion, so
+    /// the other test's next open fails with "path not found".
     fn tmp_store() -> (FileLeaseStore, PathBuf) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "cortexkit-lease-{}-{}",
             std::process::id(),
-            fnv1a_hex(&format!("{:?}", std::time::Instant::now()))
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         (FileLeaseStore::new(&dir), dir)
     }
@@ -810,6 +987,139 @@ mod tests {
         let g2 = store2.acquire(&k).expect("re-acquire");
         assert_eq!(g2.epoch(), 2);
         drop(g2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Raising goes through a shared `Arc` handle, is visible at once through
+    /// `epoch()`, never lowers the epoch, and is persisted: the next exclusive
+    /// acquisition continues above the raised value. The persisted value is
+    /// observed by re-acquiring, not by reading the file, which Windows refuses
+    /// while another handle holds the lock.
+    #[test]
+    fn raise_epoch_persists_and_never_lowers() {
+        let (store, dir) = tmp_store();
+        let k = key("raise");
+
+        let lease: std::sync::Arc<dyn LeaseHandle> =
+            std::sync::Arc::from(store.acquire(&k).expect("acquire"));
+        assert_eq!(lease.epoch(), 1);
+        let shared = std::sync::Arc::clone(&lease);
+        assert_eq!(shared.raise_epoch(7).expect("raise"), 7);
+        assert_eq!(lease.epoch(), 7, "every clone of the handle sees the raise");
+        assert_eq!(
+            lease
+                .raise_epoch(3)
+                .expect("a lower target is not an error"),
+            7,
+            "an epoch is never lowered"
+        );
+        assert_eq!(lease.epoch(), 7);
+        drop((lease, shared));
+
+        let next = FileLeaseStore::new(&dir).acquire(&k).expect("re-acquire");
+        assert_eq!(next.epoch(), 8, "the raised epoch was persisted");
+        drop(next);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A shared holder is not a writer, so it may not move the writer epoch.
+    #[test]
+    fn a_shared_lease_cannot_raise_the_epoch() {
+        let (store, dir) = tmp_store();
+        let k = key("raise-shared");
+
+        let shared = store.acquire_shared(&k).expect("shared");
+        match shared.raise_epoch(9) {
+            Err(LeaseError::Io(error)) => {
+                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied)
+            }
+            other => panic!("a shared raise must be refused, got {other:?}"),
+        }
+        assert_eq!(shared.epoch(), 0);
+        drop(shared);
+
+        let writer = store.acquire(&k).expect("writer");
+        assert_eq!(writer.epoch(), 1, "the refused raise persisted nothing");
+        drop(writer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An implementor that does not override `raise_epoch` reports it as
+    /// unsupported instead of claiming a raise it did not make.
+    #[test]
+    fn the_default_raise_epoch_is_unsupported() {
+        #[derive(Debug)]
+        struct FixedLease(LeaseKey);
+        impl LeaseHandle for FixedLease {
+            fn epoch(&self) -> u64 {
+                1
+            }
+            fn key(&self) -> &LeaseKey {
+                &self.0
+            }
+        }
+
+        match FixedLease(key("fixed")).raise_epoch(5) {
+            Err(LeaseError::Io(error)) => assert_eq!(error.kind(), io::ErrorKind::Unsupported),
+            other => panic!("expected an unsupported error, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn durable_replace_replaces_contents_and_removes_temp_file() {
+        let (_, dir) = tmp_store();
+        std::fs::create_dir_all(&dir).expect("create directory");
+        let temp = dir.join("state.tmp");
+        let dest = dir.join("state");
+        std::fs::write(&temp, b"new contents").expect("write temporary file");
+        std::fs::write(&dest, b"old contents").expect("write existing file");
+
+        durable_replace(&temp, &dest).expect("replace durably");
+
+        assert_eq!(
+            std::fs::read(&dest).expect("read destination"),
+            b"new contents"
+        );
+        assert!(!temp.exists(), "the temporary name must be removed");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn durable_replace_refuses_different_directories() {
+        let (_, dir) = tmp_store();
+        let temp_dir = dir.join("temp");
+        let dest_dir = dir.join("destination");
+        std::fs::create_dir_all(&temp_dir).expect("create temporary directory");
+        std::fs::create_dir_all(&dest_dir).expect("create destination directory");
+        let temp = temp_dir.join("state.tmp");
+        let dest = dest_dir.join("state");
+        std::fs::write(&temp, b"new contents").expect("write temporary file");
+        std::fs::write(&dest, b"old contents").expect("write existing file");
+
+        let error = durable_replace(&temp, &dest).expect_err("different directories must fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            std::fs::read(&temp).expect("read temporary file"),
+            b"new contents"
+        );
+        assert_eq!(
+            std::fs::read(&dest).expect("read destination"),
+            b"old contents"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_dir_succeeds_on_a_real_directory() {
+        let (_, dir) = tmp_store();
+        std::fs::create_dir_all(&dir).expect("create directory");
+
+        sync_dir(&dir).expect("sync directory");
+
         let _ = std::fs::remove_dir_all(dir);
     }
 }

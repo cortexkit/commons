@@ -1,5 +1,5 @@
 use super::test_support::{assert_broad_inherited, assert_owner_only, grant_everyone, read_acl};
-use crate::{create_private_dir, protect_file};
+use crate::{create_private_dir, durable_replace, protect_file, sync_dir};
 use std::{
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
@@ -180,4 +180,56 @@ fn protect_file_refuses_file_symlinks_when_the_host_allows_them() {
         before,
         "the symlink target's DACL must be untouched"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn durable_replace_replaces_contents_and_removes_temp_file() {
+    let root = TempDir::new();
+    let temp = root.0.join("state.tmp");
+    let dest = root.0.join("state");
+    std::fs::write(&temp, b"new contents").expect("write temporary file");
+    std::fs::write(&dest, b"old contents").expect("write existing file");
+
+    durable_replace(&temp, &dest).expect("replace durably");
+
+    assert_eq!(
+        std::fs::read(&dest).expect("read destination"),
+        b"new contents"
+    );
+    assert!(!temp.exists(), "the temporary name must be removed");
+}
+
+#[cfg(windows)]
+#[test]
+fn durable_replace_refuses_different_directories() {
+    let root = TempDir::new();
+    let temp_dir = root.0.join("temp");
+    let dest_dir = root.0.join("destination");
+    std::fs::create_dir(&temp_dir).expect("create temporary directory");
+    std::fs::create_dir(&dest_dir).expect("create destination directory");
+    let temp = temp_dir.join("state.tmp");
+    let dest = dest_dir.join("state");
+    std::fs::write(&temp, b"new contents").expect("write temporary file");
+    std::fs::write(&dest, b"old contents").expect("write existing file");
+
+    let error = durable_replace(&temp, &dest).expect_err("different directories must fail");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        std::fs::read(&temp).expect("read temporary file"),
+        b"new contents"
+    );
+    assert_eq!(
+        std::fs::read(&dest).expect("read destination"),
+        b"old contents"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn sync_dir_succeeds_on_a_real_directory() {
+    let root = TempDir::new();
+
+    sync_dir(&root.0).expect("sync directory");
 }

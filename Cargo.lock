@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-lease"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "fs2",
  "windows-sys 0.61.2",
@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-store"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "cortexkit-lease",
  "cortexkit-store-types",

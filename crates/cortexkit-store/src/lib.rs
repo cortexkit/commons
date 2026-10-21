@@ -72,7 +72,8 @@ impl MigrationOutcome {
 
 #[derive(Debug)]
 pub enum StoreError {
-    /// A live writer already holds this module's store.
+    /// Acquiring or raising the store's lease failed, for example because a live
+    /// writer already holds it.
     Lease(LeaseError),
     /// The descriptor asked for a backend this build was not compiled with.
     UnsupportedBackend(String),
@@ -309,6 +310,11 @@ mod sqlite_backend {
     impl SqliteStore {
         /// The fence epoch of the held lease (strictly greater than any superseded
         /// writer's). A distributed backend would carry this on every write.
+        ///
+        /// Also strictly greater than the fence epoch the database carried when
+        /// it was opened: an open that finds a database stamped at or above the
+        /// lease's epoch (one restored or copied without its lease files) raises
+        /// the lease first. See [`open_sqlite`].
         pub fn epoch(&self) -> u64 {
             self.epoch
         }
@@ -502,6 +508,14 @@ mod sqlite_backend {
     /// shared lease directory at several distinct databases (which would falsely
     /// make them contend) or split one database across lease directories (which
     /// would break single-writer).
+    ///
+    /// When the database's stored fence epoch is at or above the lease's epoch,
+    /// as for a `store.db` restored or copied without its `*.lease` files, the
+    /// lease's persisted epoch is raised to one above it before the store is
+    /// returned, so fenced writes succeed and later opens continue above it.
+    /// An epoch is never lowered. If the lease cannot be raised, the open is
+    /// refused with [`StoreError::Lease`]. A database that has never taken a
+    /// fenced write is not written to by this check.
     pub fn open_sqlite(descriptor: &StorageDescriptor) -> Result<SqliteStore, StoreError> {
         open_sqlite_with(descriptor, SqliteOpenOptions::default())
     }
@@ -538,9 +552,11 @@ mod sqlite_backend {
         let lease = FileLeaseStore::new(&parent)
             .acquire(&lease_key(descriptor))
             .map_err(StoreError::Lease)?;
-        let epoch = lease.epoch();
 
         let conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
+        // Recover the lease epoch before enabling WAL, so a refused open leaves
+        // a rollback-journal database in its own journal mode.
+        let epoch = raise_lease_past_fence(&conn, &path, lease.as_ref())?;
         // Durability + concurrency pragmas: WAL for concurrent readers, a busy
         // timeout so a transient lock waits rather than erroring, foreign keys on.
         conn.pragma_update(None, "journal_mode", "WAL")
@@ -594,6 +610,71 @@ mod sqlite_backend {
             epoch,
             _lease: lease,
         })
+    }
+
+    /// The epoch a store opened over `conn` writes with: the lease's epoch,
+    /// raised first to one above the database's stored fence epoch when the
+    /// database already carries an epoch at or above the lease's.
+    ///
+    /// On one machine the lease epoch only grows, so it is always above any
+    /// epoch it stamped into the database. A database that arrives WITHOUT its
+    /// lease files (a backup restored onto a new machine, a copy placed by hand,
+    /// a deleted lease file) meets a fresh lease starting at 1 while the
+    /// database still carries the old fence epoch; without the raise, every
+    /// fenced write would be refused until that many restarts had passed.
+    ///
+    /// Refuses the open with [`StoreError::Lease`] when a raise is needed and the
+    /// lease cannot do it, rather than serving a store whose fenced writes would
+    /// all fail. A database with no fence table reads as epoch 0 and is not
+    /// written to.
+    fn raise_lease_past_fence(
+        conn: &Connection,
+        path: &str,
+        lease: &dyn LeaseHandle,
+    ) -> Result<u64, StoreError> {
+        let fence = read_fence_epoch(conn).map_err(|e| StoreError::Backend(e.to_string()))?;
+        let epoch = lease.epoch();
+        if fence < epoch {
+            return Ok(epoch);
+        }
+        // Raising is safe. The caller holds the EXCLUSIVE lease, so no other
+        // live writer holds any epoch of this lease, and the raised value is
+        // persisted before the store serves, so the next holder starts above it.
+        // Fencing still does its job: a lingering older writer on this machine
+        // carries an epoch at or below the stored fence epoch, which is below the
+        // raised one, so its fenced writes stay refused once this store stamps
+        // the database. A raised epoch can only fence more writers, never fewer.
+        lease
+            .raise_epoch(fence.saturating_add(1))
+            .map_err(|error| match error {
+                LeaseError::Io(io) => StoreError::Lease(LeaseError::Io(std::io::Error::new(
+                    io.kind(),
+                    format!(
+                        "database {path:?} carries fence epoch {fence}, at or above this \
+                         lease's epoch {epoch}, and the lease could not be raised past it: {io}"
+                    ),
+                ))),
+                other => StoreError::Lease(other),
+            })
+    }
+
+    /// The epoch stamped by the last fenced write, or 0 when the database has
+    /// never taken one. Reads only: the fence table is not created here.
+    fn read_fence_epoch(conn: &Connection) -> rusqlite::Result<u64> {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema
+             WHERE type = 'table' AND name = 'cortexkit_fence')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Ok(0);
+        }
+        conn.query_row(
+            "SELECT COALESCE((SELECT epoch FROM cortexkit_fence WHERE id = 0), 0)",
+            [],
+            |row| row.get::<_, i64>(0).map(|v| v as u64),
+        )
     }
 
     /// Apply un-applied migrations for one `namespace` in ascending version order,
@@ -678,6 +759,239 @@ mod sqlite_backend {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0)
+    }
+
+    /// Restored databases must take fenced writes immediately without their old
+    /// lease files. Observe persisted epochs through the lease API: Windows
+    /// blocks reads through another handle while an exclusive lease holds the
+    /// byte-range lock.
+    #[cfg(test)]
+    mod fence_raise_tests {
+        use super::*;
+
+        const KV: &[Migration] = &[Migration {
+            version: 1,
+            statements: "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+        }];
+
+        /// A fresh, unique directory, removed when the guard drops.
+        struct TempDir(PathBuf);
+
+        impl TempDir {
+            fn new(label: &str) -> Self {
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static NEXT: AtomicU64 = AtomicU64::new(0);
+                let dir = std::env::temp_dir().join(format!(
+                    "cortexkit-store-fence-{label}-{}-{}-{}",
+                    std::process::id(),
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                std::fs::create_dir_all(&dir).unwrap();
+                Self(dir)
+            }
+
+            fn db(&self, name: &str) -> PathBuf {
+                self.0.join(name)
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn descriptor(db: &Path) -> StorageDescriptor {
+            StorageDescriptor {
+                module_id: "fence-module".into(),
+                storage_namespace: "main".into(),
+                isolation: Isolation::Module,
+                backend: StorageBackend::Sqlite {
+                    path: db.to_string_lossy().into_owned(),
+                },
+            }
+        }
+
+        fn fenced_put(store: &SqliteStore, key: &str) -> Result<(), StoreError> {
+            store.with_conn_fenced(|tx| {
+                tx.execute(
+                    "INSERT INTO kv (k, v) VALUES (?1, 'v') \
+                     ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+                    [key],
+                )
+                .map(|_| ())
+            })
+        }
+
+        /// The fence epoch stored in a closed database file.
+        fn stored_fence(db: &Path) -> u64 {
+            read_fence_epoch(&Connection::open(db).unwrap()).unwrap()
+        }
+
+        fn lease_files(dir: &Path) -> Vec<PathBuf> {
+            std::fs::read_dir(dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "lease"))
+                .collect()
+        }
+
+        /// A shared acquire observes the persisted epoch without bumping it or
+        /// opening the database, so a second recovery cannot mask a lost raise.
+        fn assert_persisted_epoch(db: &Path, expected: u64) {
+            let lease = FileLeaseStore::new(db.parent().unwrap())
+                .acquire_shared(&lease_key(&descriptor(db)))
+                .unwrap();
+            assert_eq!(
+                lease.epoch(),
+                expected,
+                "the open persisted its raised epoch"
+            );
+        }
+
+        /// Write a store the normal way, opening it `opens` times with a fenced
+        /// write each time, so its stored fence epoch ends at `opens`.
+        fn store_fenced_at(dir: &TempDir, opens: u64) -> PathBuf {
+            let db = dir.db("store.db");
+            for open in 1..=opens {
+                let store = open_sqlite(&descriptor(&db)).unwrap();
+                assert_eq!(store.epoch(), open);
+                store.migrate("kv", KV).unwrap();
+                fenced_put(&store, "old").unwrap();
+            }
+            assert_eq!(stored_fence(&db), opens);
+            db
+        }
+
+        /// Copy only the database file into a fresh directory with no lease
+        /// files, as a backup restored onto another machine arrives.
+        fn copy_without_leases(from: &Path, to: &TempDir, name: &str) -> PathBuf {
+            let copy = to.db(name);
+            std::fs::copy(from, &copy).unwrap();
+            assert!(lease_files(&to.0).is_empty());
+            copy
+        }
+
+        /// A copy carrying fence epoch 3 opens at 4 and the next open is at 5.
+        /// The first write precedes epoch assertions so skipping the raise fails
+        /// with `Fenced { holder_epoch: 1, db_epoch: 3 }`.
+        #[test]
+        fn a_store_copied_without_its_lease_files_opens_and_writes() {
+            let old = TempDir::new("old-machine");
+            let original = store_fenced_at(&old, 3);
+            let new = TempDir::new("new-machine");
+            let copy = copy_without_leases(&original, &new, "store.db");
+
+            let store = open_sqlite(&descriptor(&copy)).unwrap();
+            fenced_put(&store, "new").expect("a fenced write on the copy was refused");
+            assert_eq!(store.epoch(), 4, "one above the copy's fence epoch");
+            drop(store);
+            assert_eq!(stored_fence(&copy), 4);
+            assert_persisted_epoch(&copy, 4);
+
+            let reopened = open_sqlite(&descriptor(&copy)).unwrap();
+            assert_eq!(reopened.epoch(), 5);
+            fenced_put(&reopened, "again").unwrap();
+        }
+
+        /// Raising does not weaken the fence: once the raised store has written,
+        /// writers holding the old machine's epoch or the fresh lease's initial
+        /// epoch are still refused.
+        #[test]
+        fn after_a_raise_an_older_writer_is_still_fenced() {
+            let old = TempDir::new("old-writer");
+            let original = store_fenced_at(&old, 3);
+            let new = TempDir::new("raised");
+            let copy = copy_without_leases(&original, &new, "store.db");
+
+            let store = open_sqlite(&descriptor(&copy)).unwrap();
+            assert_eq!(store.epoch(), 4);
+            fenced_put(&store, "new").unwrap();
+
+            for stale_epoch in [3, 1] {
+                let stale = SqliteStore::for_test(Connection::open(&copy).unwrap(), stale_epoch);
+                match fenced_put(&stale, "new") {
+                    Err(StoreError::Fenced {
+                        holder_epoch,
+                        db_epoch,
+                    }) => assert_eq!((holder_epoch, db_epoch), (stale_epoch, 4)),
+                    other => {
+                        panic!("a writer at epoch {stale_epoch} must be fenced, got {other:?}")
+                    }
+                }
+            }
+        }
+
+        /// Losing the lease files on the same machine also recovers immediately
+        /// and persists the raised epoch before the next open.
+        #[test]
+        fn a_store_whose_lease_files_were_deleted_reopens_and_writes() {
+            let dir = TempDir::new("lost-lease");
+            let db = store_fenced_at(&dir, 3);
+            let leases = lease_files(&dir.0);
+            assert!(!leases.is_empty());
+            for lease in leases {
+                std::fs::remove_file(lease).unwrap();
+            }
+
+            let store = open_sqlite_with(&descriptor(&db), SqliteOpenOptions::default()).unwrap();
+            fenced_put(&store, "after-loss")
+                .expect("a fenced write after losing the lease was refused");
+            assert_eq!(store.epoch(), 4);
+            drop(store);
+            assert_eq!(stored_fence(&db), 4);
+            assert_persisted_epoch(&db, 4);
+
+            let reopened = open_sqlite(&descriptor(&db)).unwrap();
+            assert_eq!(reopened.epoch(), 5);
+            fenced_put(&reopened, "again").unwrap();
+        }
+
+        /// Refuse an unsupported raise rather than returning an epoch that
+        /// would make every fenced write fail. A fresh database needs no raise.
+        #[test]
+        fn a_lease_that_cannot_raise_refuses_recovery() {
+            #[derive(Debug)]
+            struct FixedLease(LeaseKey);
+            impl LeaseHandle for FixedLease {
+                fn epoch(&self) -> u64 {
+                    1
+                }
+                fn key(&self) -> &LeaseKey {
+                    &self.0
+                }
+            }
+            let lease = FixedLease(LeaseKey::new("fence-module", "sqlite", "main"));
+            let conn = Connection::open_in_memory().unwrap();
+            assert_eq!(
+                raise_lease_past_fence(&conn, ":memory:", &lease).unwrap(),
+                1
+            );
+            let has_fence: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'cortexkit_fence')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!has_fence, "the open must not create a fence table");
+            conn.execute_batch(
+                "CREATE TABLE cortexkit_fence (id INTEGER PRIMARY KEY, epoch INTEGER NOT NULL);
+                 INSERT INTO cortexkit_fence VALUES (0, 1);",
+            )
+            .unwrap();
+            match raise_lease_past_fence(&conn, ":memory:", &lease) {
+                Err(StoreError::Lease(LeaseError::Io(error))) => {
+                    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+                    assert!(error.to_string().contains("fence epoch 1"));
+                }
+                other => panic!("expected an unsupported lease error, got {other:?}"),
+            }
+        }
     }
 }
 
