@@ -125,6 +125,13 @@ pub struct RunRequest {
     /// platform it actually uses in [`Accepted::platform`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<Platform>,
+    /// Paths relative to `cwd` to return with the stream. An empty list disables
+    /// returned-file collection and its `return_result` record.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub return_paths: Vec<String>,
+    /// Total returned-file byte cap. `None` selects [`RETURN_MAX_BYTES_CAP`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_max_bytes: Option<u64>,
 }
 
 impl RunRequest {
@@ -147,6 +154,8 @@ impl RunRequest {
             siblings: Vec::new(),
             network: None,
             platform: None,
+            return_paths: Vec::new(),
+            return_max_bytes: None,
         }
     }
 
@@ -200,6 +209,29 @@ impl RunRequest {
     /// Requested execution platform, or `None` for the default Linux platform.
     pub fn platform(&self) -> Option<&Platform> {
         self.platform.as_ref()
+    }
+
+    /// Request files relative to `cwd` in a `return_result` stream record.
+    pub fn with_return_paths(mut self, return_paths: Vec<String>) -> Self {
+        self.return_paths = return_paths;
+        self
+    }
+
+    /// Return the requested cwd-relative paths; an empty slice disables file collection.
+    pub fn return_paths(&self) -> &[String] {
+        &self.return_paths
+    }
+
+    /// Set the total returned-file byte cap. Values above
+    /// [`RETURN_MAX_BYTES_CAP`] must be rejected by the runner.
+    pub fn with_return_max_bytes(mut self, return_max_bytes: u64) -> Self {
+        self.return_max_bytes = Some(return_max_bytes);
+        self
+    }
+
+    /// Read the explicit total byte cap, or `None` for the default cap.
+    pub fn return_max_bytes(&self) -> Option<u64> {
+        self.return_max_bytes
     }
 }
 
@@ -675,6 +707,45 @@ impl IgnoredWrites {
 /// a producer obligation, not a decoder limit: longer received details are kept
 /// intact, without truncation or rejection.
 pub const REFUSAL_DETAIL_MAX_BYTES: usize = 1024;
+/// Maximum requested returned-file bytes, also used when `return_max_bytes` is absent.
+pub const RETURN_MAX_BYTES_CAP: u64 = 262_144;
+
+/// Host or pool that ran a hosted job and its optional billing measurement.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HostedUsage {
+    /// Host or pool identifier, such as `ovh-1` or `boat:<sandbox_id>`.
+    pub placement: String,
+    /// Billed virtual-CPU milliseconds, absent while billing is pending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billed_vcpu_ms: Option<u64>,
+}
+
+impl HostedUsage {
+    /// Hosted placement with billing still pending.
+    pub fn new(placement: impl Into<String>) -> Self {
+        Self {
+            placement: placement.into(),
+            billed_vcpu_ms: None,
+        }
+    }
+
+    /// Set the final billed virtual-CPU duration.
+    pub fn with_billed_vcpu_ms(mut self, billed_vcpu_ms: u64) -> Self {
+        self.billed_vcpu_ms = Some(billed_vcpu_ms);
+        self
+    }
+
+    /// Read the host or pool placement.
+    pub fn placement(&self) -> &str {
+        &self.placement
+    }
+
+    /// Read billed virtual-CPU milliseconds, if billing has completed.
+    pub fn billed_vcpu_ms(&self) -> Option<u64> {
+        self.billed_vcpu_ms
+    }
+}
 
 /// The last record on an `exec.run` or `exec.attach` reply stream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -725,6 +796,9 @@ pub struct TerminalRecord {
     /// for the recommended sample cap and build-directory exclusions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignored_writes: Option<IgnoredWrites>,
+    /// Hosted placement and billing. Build-server jobs do not report this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosted: Option<HostedUsage>,
 }
 
 impl TerminalRecord {
@@ -754,6 +828,7 @@ impl TerminalRecord {
             git_state_changed: None,
             untracked_files: None,
             ignored_writes: None,
+            hosted: None,
         }
     }
 
@@ -830,6 +905,17 @@ impl TerminalRecord {
         self.ignored_writes = Some(ignored_writes);
         self
     }
+
+    /// Report hosted placement and billing, if available.
+    pub fn with_hosted(mut self, hosted: HostedUsage) -> Self {
+        self.hosted = Some(hosted);
+        self
+    }
+
+    /// Read hosted placement and billing, when reported.
+    pub fn hosted(&self) -> Option<&HostedUsage> {
+        self.hosted.as_ref()
+    }
 }
 
 /// The output file descriptor a chunk came from.
@@ -890,6 +976,206 @@ impl Output {
     pub fn with_truncated_before_seq(mut self, truncated_before_seq: u64) -> Self {
         self.truncated_before_seq = Some(truncated_before_seq);
         self
+    }
+}
+
+/// A file returned from the job's cwd, with decoded bytes and their SHA-256.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnedFile {
+    /// Path relative to the request's `cwd`.
+    pub path: String,
+    /// Lowercase hexadecimal SHA-256 of `data`.
+    pub sha256: String,
+    /// File bytes, encoded as standard padded base64 on the wire.
+    pub data: BytePayload,
+}
+
+impl ReturnedFile {
+    /// Create a returned file from its cwd-relative path, digest, and bytes.
+    pub fn new(path: impl Into<String>, sha256: impl Into<String>, data: BytePayload) -> Self {
+        Self {
+            path: path.into(),
+            sha256: sha256.into(),
+            data,
+        }
+    }
+
+    /// Read the cwd-relative path.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Read the file digest.
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    /// Read the decoded file bytes.
+    pub fn data(&self) -> &[u8] {
+        &self.data.0
+    }
+}
+
+/// Why requested files could not be returned. Unknown strings remain readable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum ReturnPathsFailureCause {
+    OverCap,
+    Missing,
+    Escape,
+    NotRegular,
+    FrameLimit,
+    /// A cause this version does not recognise.
+    Unknown(String),
+}
+
+impl From<String> for ReturnPathsFailureCause {
+    fn from(cause: String) -> Self {
+        match cause.as_str() {
+            "over_cap" => Self::OverCap,
+            "missing" => Self::Missing,
+            "escape" => Self::Escape,
+            "not_regular" => Self::NotRegular,
+            "frame_limit" => Self::FrameLimit,
+            _ => Self::Unknown(cause),
+        }
+    }
+}
+
+impl From<ReturnPathsFailureCause> for String {
+    fn from(cause: ReturnPathsFailureCause) -> Self {
+        match cause {
+            ReturnPathsFailureCause::OverCap => "over_cap".into(),
+            ReturnPathsFailureCause::Missing => "missing".into(),
+            ReturnPathsFailureCause::Escape => "escape".into(),
+            ReturnPathsFailureCause::NotRegular => "not_regular".into(),
+            ReturnPathsFailureCause::FrameLimit => "frame_limit".into(),
+            ReturnPathsFailureCause::Unknown(cause) => cause,
+        }
+    }
+}
+
+/// A failed attempt to collect the requested cwd-relative files.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnPathsFailed {
+    pub measured_bytes: u64,
+    pub cap_bytes: u64,
+    pub cause: ReturnPathsFailureCause,
+}
+
+impl ReturnPathsFailed {
+    /// Describe a collection failure with its measured byte total, cap, and cause.
+    pub fn new(measured_bytes: u64, cap_bytes: u64, cause: ReturnPathsFailureCause) -> Self {
+        Self {
+            measured_bytes,
+            cap_bytes,
+            cause,
+        }
+    }
+
+    /// Read the measured byte total.
+    pub fn measured_bytes(&self) -> u64 {
+        self.measured_bytes
+    }
+
+    /// Read the effective total cap.
+    pub fn cap_bytes(&self) -> u64 {
+        self.cap_bytes
+    }
+
+    /// Read the open-ended collection failure cause.
+    pub fn cause(&self) -> &ReturnPathsFailureCause {
+        &self.cause
+    }
+}
+
+/// Result of collecting requested files, emitted before the terminal record.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnResult {
+    pub job_id: Uuid,
+    pub seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returned_files: Option<Vec<ReturnedFile>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_paths_failed: Option<ReturnPathsFailed>,
+}
+
+#[derive(Deserialize)]
+struct ReturnResultInput {
+    job_id: Uuid,
+    seq: u64,
+    #[serde(default)]
+    returned_files: Option<Vec<ReturnedFile>>,
+    #[serde(default)]
+    return_paths_failed: Option<ReturnPathsFailed>,
+}
+
+impl<'de> Deserialize<'de> for ReturnResult {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = ReturnResultInput::deserialize(deserializer)?;
+        match (input.returned_files, input.return_paths_failed) {
+            (Some(returned_files), None) => Ok(Self {
+                job_id: input.job_id,
+                seq: input.seq,
+                returned_files: Some(returned_files),
+                return_paths_failed: None,
+            }),
+            (None, Some(return_paths_failed)) => Ok(Self {
+                job_id: input.job_id,
+                seq: input.seq,
+                returned_files: None,
+                return_paths_failed: Some(return_paths_failed),
+            }),
+            _ => Err(serde::de::Error::custom(
+                "return_result must contain exactly one of returned_files or return_paths_failed",
+            )),
+        }
+    }
+}
+
+impl ReturnResult {
+    /// A successful file collection, including an empty result list.
+    pub fn with_files(job_id: Uuid, seq: u64, returned_files: Vec<ReturnedFile>) -> Self {
+        Self {
+            job_id,
+            seq,
+            returned_files: Some(returned_files),
+            return_paths_failed: None,
+        }
+    }
+
+    /// A failed file collection that leaves the command's exit outcome unchanged.
+    pub fn failed(job_id: Uuid, seq: u64, failure: ReturnPathsFailed) -> Self {
+        Self {
+            job_id,
+            seq,
+            returned_files: None,
+            return_paths_failed: Some(failure),
+        }
+    }
+
+    /// Read the job identifier.
+    pub fn job_id(&self) -> Uuid {
+        self.job_id
+    }
+
+    /// Read the replay sequence number.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Read returned files when collection succeeded.
+    pub fn returned_files(&self) -> Option<&[ReturnedFile]> {
+        self.returned_files.as_deref()
+    }
+
+    /// Read the collection failure when collection did not succeed.
+    pub fn return_paths_failed(&self) -> Option<&ReturnPathsFailed> {
+        self.return_paths_failed.as_ref()
     }
 }
 
@@ -1408,6 +1694,8 @@ pub enum StreamRecord {
     /// terminal record.
     Started(Started),
     Output(Output),
+    /// Returned-file collection requested by the caller, immediately before terminal.
+    ReturnResult(ReturnResult),
     Terminal(TerminalRecord),
     /// An unrecognised record. Skip it and keep reading, counting its sequence
     /// number toward the resume cursor when present. Never treat it as terminal.
@@ -1430,6 +1718,7 @@ enum KnownStreamRecord {
     Accepted(Accepted),
     Started(Started),
     Output(Output),
+    ReturnResult(ReturnResult),
     Terminal(TerminalRecord),
 }
 
@@ -1466,6 +1755,7 @@ impl Serialize for StreamRecord {
             Self::Accepted(accepted) => KnownStreamRecord::Accepted(accepted.clone()),
             Self::Started(started) => KnownStreamRecord::Started(started.clone()),
             Self::Output(output) => KnownStreamRecord::Output(output.clone()),
+            Self::ReturnResult(result) => KnownStreamRecord::ReturnResult(result.clone()),
             Self::Terminal(terminal) => KnownStreamRecord::Terminal(terminal.clone()),
             Self::Unknown { kind, seq } => {
                 use serde::ser::SerializeMap;
@@ -1488,7 +1778,7 @@ impl<'de> Deserialize<'de> for StreamRecord {
             StreamRecordInput::Tag(StreamRecordTag { kind, seq }) => {
                 if matches!(
                     kind.as_str(),
-                    "accepted" | "started" | "output" | "terminal"
+                    "accepted" | "started" | "output" | "return_result" | "terminal"
                 ) {
                     return Err(serde::de::Error::custom(format!(
                         "malformed fields for known stream record tag {kind}"
@@ -1501,6 +1791,7 @@ impl<'de> Deserialize<'de> for StreamRecord {
             KnownStreamRecord::Accepted(accepted) => Self::Accepted(accepted),
             KnownStreamRecord::Started(started) => Self::Started(started),
             KnownStreamRecord::Output(output) => Self::Output(output),
+            KnownStreamRecord::ReturnResult(result) => Self::ReturnResult(result),
             KnownStreamRecord::Terminal(terminal) => Self::Terminal(terminal),
         })
     }

@@ -2,7 +2,7 @@
 
 The `replies/` and `outcomes/` `.jcs`/`.sha256` pairs are the executor's own
 golden cases for what a caller receives, copied byte for byte so both sides
-pin the same bytes. The twenty-nine `crate-local-*` cases documented below were
+pin the same bytes. The thirty-six `crate-local-*` cases documented below were
 written in this crate rather than copied from the executor's vectors, to pin
 caller-side cases the executor's set does not cover. The following encoding and shape rules
 cover the caller corpus; executor-to-runner frames are not included.
@@ -54,9 +54,9 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These twenty-six outcome cases (52 files: one `.jcs`/`.sha256` pair each) and
+These thirty-three outcome cases (66 files: one `.jcs`/`.sha256` pair each) and
 three reply cases (six files) extend the caller corpus described above. The
-resulting corpus contains 46 outcome cases and 17 reply cases:
+resulting corpus contains 53 outcome cases and 17 reply cases:
 
 - `outcomes/crate-local-network-outbound`: a request with `network: "outbound"`
   and an `accepted` record acknowledging `network: "outbound"`. The runner must
@@ -78,6 +78,15 @@ resulting corpus contains 46 outcome cases and 17 reply cases:
   `refusal_detail`.
 - `outcomes/crate-local-unknown-platform`: an unrecognised platform retained on
   the request and refused before start with its wire name in `refusal_detail`.
+- `outcomes/crate-local-return-result-files`: two requested cwd-relative files
+  with standard padded base64 data and their SHA-256 digests, returned directly
+  before the terminal record.
+- `outcomes/crate-local-return-result-over-cap`, `-missing`, `-escape`,
+  `-not-regular`, and `-frame-limit`: each known collection failure cause. The
+  terminal exit remains successful because file collection does not change the
+  command outcome.
+- `outcomes/crate-local-return-result-unknown-cause`: an unrecognized cause
+  retained as `ReturnPathsFailureCause::Unknown`.
 
 Absent network fields preserve the existing `outcomes/exit` bytes. Tests also
 decode the outbound request and accepted record with shapes mirroring 0.2.4 and

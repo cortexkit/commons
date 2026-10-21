@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.8**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.9**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -18,7 +18,7 @@ sibling path-dependency consumers.
 | `workspace.drop` | `DropRequest` | `DropReply` |
 
 `StreamRecord` is internally tagged by `type`: known records are `accepted`,
-`started`, `output`, or `terminal`, with fields inline beside the discriminator.
+`started`, `output`, `return_result`, or `terminal`, with fields inline beside the discriminator.
 `Started` is emitted once after acceptance when the job takes runner capacity,
 before its first output or terminal; a job refused before start never has one.
 The runner's command timeout runs from this moment, not from acceptance. A
@@ -27,6 +27,11 @@ but must not start a timeout of its own from `Started`. Older runners may omit
 it, so callers keep their existing behavior when it is absent. It is progress,
 never a terminal record. Its `seq` counts toward the attach resume cursor;
 `queue_wait_ms` is measured by the runner and `started_at_ms` is for display only.
+
+`return_result` carries returned files requested through `RunRequest.return_paths`
+or a file-collection failure. It appears immediately before `terminal` and only
+when the request supplied a non-empty path list. See [`CONTRACT.md`](CONTRACT.md)
+for the cap, capability requirement, and outcome rules.
 
 `Output` retains its `seq`, `stream`, raw `BytePayload(Vec<u8>)`, and optional
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
@@ -65,6 +70,15 @@ must cancel the job and must not trust its result unless `Accepted.platform`
 exactly matches the request. Unknown or unavailable platforms are refused before
 start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`); the
 requested platform's wire name is reported in `refusal_detail`.
+
+### Returned files
+
+`RunRequest::with_return_paths` requests files relative to `cwd`; the empty list
+is omitted and disables `return_result`. The optional `return_max_bytes` cap
+defaults to `RETURN_MAX_BYTES_CAP` (262,144 bytes), and a larger request must be
+rejected as `invalid_params` naming that field. The types crate has no runner-side
+request validator. See [`CONTRACT.md`](CONTRACT.md) for the capability check
+required before sending paths, the stream ordering, and the outcome rules.
 
 ### Recovery and request refusals
 
@@ -117,6 +131,10 @@ fields, even with equal before/after Git values, an empty untracked list with
 not these types, enforces caps and exclusions. Consumers must not assume that
 remote commits, staged changes, or generated files are present locally.
 
+Hosted execution may additionally report `TerminalRecord.hosted` with its
+placement and billed virtual-CPU milliseconds. Billing is absent while pending;
+build-server jobs omit this field.
+
 Public named structs and enums are `#[non_exhaustive]`. Construct structs with
 `new`, then use `with_*` setters for optional fields, or deserialize them. Fields
 remain public for inspection and mutation. `Uuid` is re-exported from uuid major
@@ -138,6 +156,7 @@ tags into a catch-all with a stated grading:**
 | `Killed` | `Unknown(String)` | The command was killed for a reason this version does not recognise. |
 | `Ran` | `Unknown(String)` | Never treat as `Ran::None`: the command may have run. Grade like `outcome_unknown` for re-run decisions; never re-run it locally. |
 | `OutputStream` | `Unknown(String)` | Deliver the chunk's bytes and seq; only the stream label is unknown. |
+| `ReturnPathsFailureCause` | `Unknown(String)` | Preserve an unrecognized cause; the returned-file failure remains readable. |
 | `PrepareOutcome` | `Unknown { kind: String }` | Never treat the workspace as prepared or run against it on that basis. |
 | `RebuildResult` | `Unknown(String)` | Informational only. |
 
@@ -182,7 +201,7 @@ same bytes:
   and status, including absent workspaces, cold generations and an unreachable
   server.
 
-Twenty-nine **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
+Thirty-six **crate-local additions** were written in this crate, rather than copied byte for byte from the executor's own test vectors described above. They cover the cases below:
 
 - `outcomes/crate-local-network-outbound`: an outbound request and acknowledged
   grant; 0.2.4-shaped request and accepted decoders ignore the additive fields.
@@ -203,6 +222,13 @@ Twenty-nine **crate-local additions** were written in this crate, rather than co
   without claiming a before-start guarantee.
 - `outcomes/crate-local-unknown-stream-record`: `future_record` with seq 7,
   skipped while advancing the resume cursor, followed by a known terminal.
+- `outcomes/crate-local-return-result-files`: a successful `return_result` with
+  two base64 files immediately before terminal.
+- `outcomes/crate-local-return-result-over-cap`, `-missing`, `-escape`,
+  `-not-regular`, and `-frame-limit`: each known file-collection failure cause,
+  while the command's terminal outcome remains successful.
+- `outcomes/crate-local-return-result-unknown-cause`: an open-ended failure cause
+  retained as `Unknown`.
 - `outcomes/crate-local-unknown-killed`: a killed command with the unknown
   `future_kill` reason.
 - `outcomes/crate-local-unknown-ran`: the `future_location` execution location,
@@ -227,7 +253,7 @@ Twenty-nine **crate-local additions** were written in this crate, rather than co
   rejection, and runner authentication refusals, with human-only detail codes
   where reported. An older reader retains their reason strings as `Unknown`.
 
-Totals: **46 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
+Totals: **53 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.9
+
+- Add optional `TerminalRecord.hosted` placement and billed virtual-CPU
+  milliseconds for hosted jobs; pending billing and build-server jobs omit it.
+- Add `RunRequest.return_paths` and `return_max_bytes`, plus the 262,144-byte
+  `RETURN_MAX_BYTES_CAP`. Runners must refuse an excessive cap as `invalid_params`
+  naming `return_max_bytes`; non-empty paths gate the new result record.
+- Add `StreamRecord::ReturnResult` and returned-file/failure types. Returned bytes
+  decode from base64, failure causes remain open-ended, and exactly one result
+  payload is required. A collection failure does not change the terminal outcome.
+- Add vectors for two returned files and each known and unknown failure cause;
+  older stream decoders keep `return_result` as an unknown sequenced record.
+
 ## 0.2.8
 
 - Add `RefusalReason::LostToRestart` (`"lost_to_restart"`) for an admission that

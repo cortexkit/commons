@@ -53,6 +53,13 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-lost-to-restart",
     "crate-local-request-rejected",
     "crate-local-runner-authentication-failed",
+    "crate-local-return-result-files",
+    "crate-local-return-result-over-cap",
+    "crate-local-return-result-missing",
+    "crate-local-return-result-escape",
+    "crate-local-return-result-not-regular",
+    "crate-local-return-result-frame-limit",
+    "crate-local-return-result-unknown-cause",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -250,9 +257,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 26);
+    assert_eq!(LOCAL_OUTCOMES.len(), 33);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 63);
+    assert_eq!(cases().len(), 70);
 }
 
 #[test]
@@ -725,6 +732,181 @@ fn unknown_stream_record_retains_sequence_and_round_trips() {
 }
 
 #[test]
+fn return_result_with_two_files_matches_vector_and_precedes_terminal() {
+    let case: OutcomeCase =
+        serde_json::from_value(value("outcomes", "crate-local-return-result-files")).unwrap();
+    assert_eq!(
+        case.request.return_paths,
+        ["dist/hello.txt", "dist/world.txt"]
+    );
+    let [StreamRecord::Accepted(_), StreamRecord::ReturnResult(result), StreamRecord::Terminal(_)] =
+        case.stream.as_slice()
+    else {
+        panic!("expected acceptance, returned files, and terminal in order")
+    };
+    let files = result.returned_files().expect("successful file collection");
+    assert_eq!(result.seq(), 7);
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].path(), "dist/hello.txt");
+    assert_eq!(
+        files[0].sha256(),
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+    assert_eq!(files[0].data(), b"hello");
+    assert_eq!(files[1].path(), "dist/world.txt");
+    assert_eq!(
+        files[1].sha256(),
+        "486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7"
+    );
+    assert_eq!(files[1].data(), b"world");
+    let raw = value("outcomes", "crate-local-return-result-files")["stream"][1].clone();
+    assert_eq!(
+        serde_json::to_value(StreamRecord::ReturnResult((*result).clone())).unwrap(),
+        raw
+    );
+}
+
+#[test]
+fn return_result_failure_causes_are_open_and_match_vectors() {
+    for (name, expected_cause) in [
+        (
+            "crate-local-return-result-over-cap",
+            ReturnPathsFailureCause::OverCap,
+        ),
+        (
+            "crate-local-return-result-missing",
+            ReturnPathsFailureCause::Missing,
+        ),
+        (
+            "crate-local-return-result-escape",
+            ReturnPathsFailureCause::Escape,
+        ),
+        (
+            "crate-local-return-result-not-regular",
+            ReturnPathsFailureCause::NotRegular,
+        ),
+        (
+            "crate-local-return-result-frame-limit",
+            ReturnPathsFailureCause::FrameLimit,
+        ),
+        (
+            "crate-local-return-result-unknown-cause",
+            ReturnPathsFailureCause::Unknown("future_cause".into()),
+        ),
+    ] {
+        let raw = value("outcomes", name)["stream"][1].clone();
+        let StreamRecord::ReturnResult(result) =
+            serde_json::from_value::<StreamRecord>(raw.clone()).unwrap()
+        else {
+            panic!("expected return_result in {name}")
+        };
+        let failure = result
+            .return_paths_failed()
+            .expect("failed file collection");
+        assert_eq!(failure.cause(), &expected_cause, "{name}");
+        assert!(result.returned_files().is_none(), "{name}");
+        let case: OutcomeCase = serde_json::from_value(value("outcomes", name)).unwrap();
+        assert!(
+            matches!(
+                case.stream.last(),
+                Some(StreamRecord::Terminal(TerminalRecord {
+                    outcome: Outcome::Exit { code: 0 },
+                    ..
+                }))
+            ),
+            "a collection failure must not change the exit outcome in {name}"
+        );
+        assert_eq!(
+            serde_json::to_value(StreamRecord::ReturnResult(result)).unwrap(),
+            raw,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn return_result_requires_exactly_one_payload() {
+    let both = json!({
+        "type": "return_result", "job_id": job_id(), "seq": 7,
+        "returned_files": [],
+        "return_paths_failed": {"measured_bytes": 0, "cap_bytes": 262144, "cause": "missing"}
+    });
+    let neither = json!({"type": "return_result", "job_id": job_id(), "seq": 7});
+    for malformed in [both, neither] {
+        assert!(
+            serde_json::from_value::<StreamRecord>(malformed.clone()).is_err(),
+            "{malformed}"
+        );
+    }
+}
+
+#[test]
+fn return_result_rejects_invalid_base64_by_name() {
+    let malformed = json!({
+        "type": "return_result", "job_id": job_id(), "seq": 7,
+        "returned_files": [{"path": "file.bin", "sha256": "hash", "data": "not base64!"}]
+    });
+    assert!(
+        serde_json::from_value::<StreamRecord>(malformed.clone()).is_err(),
+        "{malformed}"
+    );
+}
+
+#[test]
+fn return_result_is_unknown_with_sequence_to_a_023_decoder() {
+    let raw = value("outcomes", "crate-local-return-result-files")["stream"][1].clone();
+    assert_eq!(
+        decode_stream_record_023(raw),
+        StreamRecord023::Unknown {
+            kind: "return_result".into(),
+            seq: Some(7),
+        }
+    );
+}
+
+#[test]
+fn return_request_fields_are_optional_omitted_and_capped() {
+    assert_eq!(RETURN_MAX_BYTES_CAP, 262_144);
+    let legacy = RunRequest::new("/workspace", "/repo", "/workspace", "true");
+    assert!(legacy.return_paths().is_empty());
+    assert_eq!(legacy.return_max_bytes(), None);
+    assert!(serde_json::to_value(&legacy)
+        .unwrap()
+        .get("return_paths")
+        .is_none());
+    let requested = legacy
+        .with_return_paths(vec!["dist/a.txt".into(), "dist/b.txt".into()])
+        .with_return_max_bytes(16_384);
+    assert_eq!(requested.return_paths(), ["dist/a.txt", "dist/b.txt"]);
+    assert_eq!(requested.return_max_bytes(), Some(16_384));
+    assert_eq!(
+        serde_json::to_value(requested).unwrap(),
+        json!({
+            "workspace_key": "/workspace", "repository_root": "/repo", "cwd": "/workspace",
+            "command": "true", "env": {}, "siblings": [],
+            "return_paths": ["dist/a.txt", "dist/b.txt"], "return_max_bytes": 16384
+        })
+    );
+}
+
+#[test]
+fn hosted_usage_is_optional_and_billing_can_be_pending() {
+    let pending = HostedUsage::new("boat:sandbox-17");
+    assert_eq!(pending.placement(), "boat:sandbox-17");
+    assert_eq!(pending.billed_vcpu_ms(), None);
+    assert_eq!(
+        serde_json::to_value(&pending).unwrap(),
+        json!({"placement": "boat:sandbox-17"})
+    );
+    let terminal = TerminalRecord::new(job_id(), Outcome::Exit { code: 0 }, 125, 25, 29)
+        .with_hosted(pending.with_billed_vcpu_ms(12_500));
+    assert_eq!(
+        serde_json::to_value(&terminal).unwrap()["hosted"],
+        json!({"placement": "boat:sandbox-17", "billed_vcpu_ms": 12500})
+    );
+}
+
+#[test]
 fn started_record_round_trips_its_golden_vector() {
     let raw = value("outcomes", "crate-local-started")["stream"][1].clone();
     let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
@@ -902,6 +1084,8 @@ fn known_stream_record_tags_with_malformed_fields_do_not_become_unknown() {
         json!({"type": "output", "seq": "7", "stream": "stdout", "bytes": "4g=="}),
         json!({"type": "output", "seq": 7, "stream": 1, "bytes": "4g=="}),
         json!({"type": "output", "seq": 7, "stream": "stdout", "bytes": "not base64!"}),
+        json!({"type": "return_result"}),
+        json!({"type": "return_result", "job_id": job_id(), "seq": 7, "returned_files": [{"path": "x", "sha256": "h", "data": "not base64!"}]}),
         json!({"type": "terminal"}),
         json!({"type": 1}),
         json!({"seq": 7}),
@@ -1738,6 +1922,22 @@ fn network_fields_are_ignored_by_0_2_4_decoders() {
     assert_eq!(
         round_trip::<Accepted024>(&serde_json::to_vec(&accepted).unwrap()),
         serde_json_canonicalizer::to_vec(&old_accepted).unwrap()
+    );
+}
+
+#[test]
+fn return_path_fields_are_ignored_by_an_older_request_decoder() {
+    let mut extended = value("outcomes", "crate-local-return-result-files")["request"].clone();
+    extended["return_max_bytes"] = json!(16_384);
+    let mut older_shape = extended.clone();
+    older_shape.as_object_mut().unwrap().remove("return_paths");
+    older_shape
+        .as_object_mut()
+        .unwrap()
+        .remove("return_max_bytes");
+    assert_eq!(
+        round_trip::<RunRequest024>(&serde_json::to_vec(&extended).unwrap()),
+        serde_json_canonicalizer::to_vec(&older_shape).unwrap()
     );
 }
 
