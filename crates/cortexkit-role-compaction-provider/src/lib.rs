@@ -121,6 +121,7 @@ pub(crate) mod vectors {
         "async.json",
         "errors.json",
         "role-describe.json",
+        "route-identity.json",
         "setup.json",
         "setup-descent.json",
     ];

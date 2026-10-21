@@ -1,0 +1,76 @@
+{
+  "identity_cases": [
+    {
+      "name": "shared project route uses Setup identity for conversation calls",
+      "incoming_route": {
+        "principal": {"value": "daemon:runner-module", "daemon_attested": true},
+        "bind": {"harness": "runner", "session": "", "project_root": "/work/project"}
+      },
+      "setup": {"harness": "broca", "session": "conversation-1"},
+      "expected": {
+        "setup": "accept",
+        "conversation_calls": ["session.read", "session.head", "session.resolve", "session.send", "reminder"],
+        "reverse_bind": {"harness": "broca", "session": "conversation-1", "project_root": "/work/project"}
+      }
+    },
+    {
+      "name": "single-session route may use a generic harness",
+      "incoming_route": {
+        "principal": {"value": "daemon:runner-module", "daemon_attested": true},
+        "bind": {"harness": "runner", "session": "conversation-2", "project_root": "/work/project"}
+      },
+      "setup": {"harness": "broca", "session": "conversation-2"},
+      "expected": {
+        "setup": "accept",
+        "reverse_bind": {"harness": "broca", "session": "conversation-2", "project_root": "/work/project"}
+      }
+    },
+    {
+      "name": "different single-session route may be refused by name",
+      "incoming_route": {
+        "principal": {"value": "daemon:runner-module", "daemon_attested": true},
+        "bind": {"harness": "runner", "session": "another-session", "project_root": "/work/project"}
+      },
+      "setup": {"harness": "broca", "session": "conversation-3"},
+      "expected": {"setup": "refuse", "code": "setup_identity_mismatch"}
+    },
+    {
+      "name": "child run gets a new session under the Setup harness and project root",
+      "incoming_route": {
+        "principal": {"value": "daemon:runner-module", "daemon_attested": true},
+        "bind": {"harness": "runner", "session": "", "project_root": "/work/project"}
+      },
+      "setup": {"harness": "broca", "session": "conversation-4"},
+      "child_session": "summarizer-1",
+      "expected": {
+        "child_bind": {"harness": "broca", "session": "summarizer-1", "project_root": "/work/project"},
+        "forbidden_child_bind_session": "conversation-4"
+      }
+    },
+    {
+      "name": "caller-chosen harness does not authenticate an unattested route",
+      "incoming_route": {
+        "principal": {"value": "caller-chosen:runner", "daemon_attested": false},
+        "bind": {"harness": "runner", "session": "", "project_root": "/work/project"}
+      },
+      "setup": {"harness": "broca", "session": "conversation-5"},
+      "expected": {"runner_authenticated": false}
+    }
+  ],
+  "provider_faults": [
+    {
+      "name": "reusing the shared route's empty session cannot read the conversation",
+      "incoming_route": {"harness": "runner", "session": "", "project_root": "/work/project"},
+      "setup": {"harness": "broca", "session": "conversation-6"},
+      "expected_reverse_bind": {"harness": "broca", "session": "conversation-6", "project_root": "/work/project"},
+      "faulty_reverse_bind": {"harness": "runner", "session": "", "project_root": "/work/project"}
+    },
+    {
+      "name": "a constant harness misses the Setup conversation identity",
+      "incoming_route": {"harness": "runner", "session": "conversation-7", "project_root": "/work/project"},
+      "setup": {"harness": "broca", "session": "conversation-7"},
+      "expected_reverse_bind": {"harness": "broca", "session": "conversation-7", "project_root": "/work/project"},
+      "faulty_reverse_bind": {"harness": "runner", "session": "conversation-7", "project_root": "/work/project"}
+    }
+  ]
+}

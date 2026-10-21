@@ -229,6 +229,8 @@ pub const CASES: &[CaseSpec] = &[
     case("compaction_setup_durable_once",
         &[Compaction, ModelView, Queue, TranscriptReads, RunOps, KillAt(points::FOLD_RECORDED)],
         "Setup is durable before the first model call and never re-invoked after its recorded answer survives a crash"),
+    case("compaction_setup_route_session_matches_setup", &[Compaction, Queue],
+        "a route bound to one session uses the same session Setup reports; a shared project route with an empty session and generic harness is accepted"),
     case("model_view_half_open_ranges_and_travel", COMPACTED,
         "Setup [0,0) insertions precede message zero and travel with it over count/byte caps, are not repeated on the next page, and the held model request carries that canonical view"),
     case("compaction_unavailable_distinct_from_refuse", &[Compaction, Queue, TranscriptReads, RunOps],
@@ -512,7 +514,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
-    "compaction cases check Setup only (its durability, its refusals and the model view it inserts); the runner half of compaction-provider 0.3.0 §3 (advance notices, views applied at step boundaries, rides, the ceiling, native markers) has no live case yet, and a later conformance release adds them",
+    "compaction cases check Setup durability, refusals and model-view insertion, plus whether a single-session provider route's session agrees with Setup; adapters must observe the actual route bind separately from Setup, and shared project routes with an empty bind session are valid. Advance notices, view application, rides, the ceiling and native markers still have no live case",
     "structured-output cases cannot see a runner's commits, so 'in the same commit as the run's end' is checked as: once the run reads terminal, every skipped sibling already has exactly one never-executed result; schema subsets (schema_outside_subset, mode_not_enforceable) are runner-specific and are checked against the vectors only",
     "structured_output_frozen_across_restart cuts ToolResultRecorded with a crash driver of its own, on its own state root, because the suite's driver cuts each point once and the shared crash scenario owns that cut; its kill is not in the run's kill ledger and does not count toward the real-kill rule",
     "run_attribution_per_message uses transcript_reads and a held tool call to observe a non-terminal run, cancelling it over run.cancel only when run_cancel is declared; the native fixture hook supplies unknown-origin records independently of read replies, or explicitly declares only that rule inapplicable via CannotHoldUnattributable (NotSupported fails)",

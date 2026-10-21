@@ -35,6 +35,11 @@
       "retryable": true
     },
     {
+      "code": "setup_identity_mismatch",
+      "named": false,
+      "retryable": false
+    },
+    {
       "code": "acme_own_code",
       "named": false,
       "retryable": false
@@ -72,6 +77,11 @@
     {
       "code": "history_unreadable",
       "retryable": true,
+      "ends_run_after_setup": true
+    },
+    {
+      "code": "setup_identity_mismatch",
+      "retryable": false,
       "ends_run_after_setup": true
     },
     {

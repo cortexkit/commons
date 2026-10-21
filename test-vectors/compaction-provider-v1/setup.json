@@ -138,6 +138,16 @@
         "reason": "x"
       },
       "retryable": false
+    },
+    {
+      "name": "setup identity mismatch on a session-bound route",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000001",
+        "code": "setup_identity_mismatch",
+        "reason": "the route is bound to another session"
+      },
+      "retryable": false
     }
   ],
   "tolerated": [

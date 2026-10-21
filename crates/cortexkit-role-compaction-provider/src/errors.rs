@@ -10,11 +10,12 @@
 //! - codes the runner answers or writes, quoted from `llm-runner/v1` so
 //!   both sides spell them the same ([`runner_codes`]).
 //!
-//! Every named code has a fixed retryability ([`KnownCode::retryable`]:
+//! Every code in `KnownCode` has a fixed retryability ([`KnownCode::retryable`]:
 //! `true` means the runner may retry without the user acting) and a fixed
 //! answer to whether it may end a run after Setup
-//! ([`KnownCode::ends_run_after_setup`]): the four `refuse` codes and
-//! `compaction_unavailable` may, the ERROR codes never.
+//! ([`KnownCode::ends_run_after_setup`]): the four typed `refuse` codes and
+//! `compaction_unavailable` may, the ERROR codes never. A named wire code not
+//! in `KnownCode` follows `RefuseCode::Unknown` when it refuses Setup.
 //!
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request, never retried.
@@ -141,7 +142,7 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
     detail?.get("field")?.as_str()
 }
 
-/// The `code` of a Setup `refuse` answer: one of the role's four codes, each
+/// The `code` of a Setup `refuse` answer: one of the four named codes, each
 /// with a fixed retryability. A code this crate does not know still decodes,
 /// as [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
 /// answer undecodable; an unfamiliar code is never retryable. A provider's own, finer reason
@@ -167,7 +168,8 @@ impl RefuseCode {
         }
     }
 
-    /// Maps a `refuse` code string to its variant; a code this crate does not list becomes [`Self::Unknown`].
+    /// Maps a `refuse` code string to one of the four named variants; a wire
+    /// code this crate does not list becomes [`Self::Unknown`].
     pub fn from_code(code: &str) -> Self {
         match code {
             refuse_codes::WINDOW_TOO_SMALL => Self::WindowTooSmall,
@@ -178,9 +180,16 @@ impl RefuseCode {
         }
     }
 
+    /// Whether this value is the named `setup_identity_mismatch` wire code.
+    /// In 0.3.x it remains `Unknown`, so adding the code does not add a public
+    /// enum variant.
+    pub fn is_setup_identity_mismatch(&self) -> bool {
+        self.as_str() == refuse_codes::SETUP_IDENTITY_MISMATCH
+    }
+
     /// Whether the refusal is retryable. Retryability is fixed by the code:
-    /// `true` means the runner may retry without the user acting. An
-    /// unknown code is never retried.
+    /// `true` means the runner may retry without the user acting. An unknown
+    /// code, including `setup_identity_mismatch`, is never retried.
     pub fn retryable(&self) -> bool {
         refuse_codes::retryable(self.as_str())
     }
@@ -199,7 +208,11 @@ impl<'de> Deserialize<'de> for RefuseCode {
     }
 }
 
-/// The spellings of the four [`RefuseCode`]s.
+/// The spellings of the four typed [`RefuseCode`]s, plus `setup_identity_mismatch`,
+/// a named wire code that decodes as [`RefuseCode::Unknown`] in 0.3.x. On that
+/// Setup refusal, the runner ends the current run as `error`, never retries it,
+/// and tries Setup again only on the next send. The next breaking release will
+/// add a typed variant and mark both public enums `#[non_exhaustive]`.
 pub mod refuse_codes {
     /// The model's window cannot hold the smallest view the provider can
     /// build. The user has to switch to a larger model. Not retryable.
@@ -214,11 +227,20 @@ pub mod refuse_codes {
     /// inherited prefix it does not hold. Retryable.
     pub const HISTORY_UNREADABLE: &str = "history_unreadable";
 
+    /// A route bound to a non-empty session different from Setup's session is
+    /// a named Setup refusal.
+    /// In 0.3.x it decodes as `RefuseCode::Unknown`, so a runner ends the
+    /// current run as `error`, does not retry, and calls Setup again on the
+    /// next send. The next breaking release will add a typed variant and mark
+    /// both public enums `#[non_exhaustive]`.
+    pub const SETUP_IDENTITY_MISMATCH: &str = "setup_identity_mismatch";
+
     pub const ALL: &[&str] = &[
         WINDOW_TOO_SMALL,
         PROVIDER_BUSY,
         MISCONFIGURED,
         HISTORY_UNREADABLE,
+        SETUP_IDENTITY_MISMATCH,
     ];
 
     /// Whether this `refuse` code may be retried without the user acting. Only
@@ -291,6 +313,7 @@ mod tests {
                             .map(|(_, value)| value.split_whitespace().next().unwrap().to_owned())
                     })
             })
+            .filter(|code| code.as_str() != refuse_codes::SETUP_IDENTITY_MISMATCH)
             .collect()
     }
 
@@ -377,26 +400,58 @@ mod tests {
     }
 
     #[test]
-    fn every_refuse_code_has_its_fixed_retryability() {
+    fn every_typed_refuse_code_has_its_fixed_retryability() {
         let expected = [
             (RefuseCode::WindowTooSmall, false),
             (RefuseCode::ProviderBusy, true),
             (RefuseCode::Misconfigured, false),
             (RefuseCode::HistoryUnreadable, true),
         ];
-        assert_eq!(expected.len(), refuse_codes::ALL.len());
+        assert_eq!(expected.len(), refuse_codes::ALL.len() - 1);
         for (code, retryable) in expected {
             assert_eq!(code.retryable(), retryable, "{}", code.as_str());
             assert_eq!(RefuseCode::from_code(code.as_str()), code);
             let known = KnownCode::from_code(code.as_str()).unwrap();
             assert_eq!(known.retryable(), retryable, "{}", code.as_str());
         }
-        // A code not listed in `KnownCode` still decodes, is kept as
-        // received, and is never retried.
+        // A code not listed in `KnownCode` still decodes, is kept as received,
+        // and is never retried.
         let unknown: RefuseCode = serde_json::from_value(Value::from("acme:quota")).unwrap();
         assert_eq!(unknown, RefuseCode::Unknown("acme:quota".into()));
         assert!(!unknown.retryable());
         assert_eq!(serde_json::to_value(&unknown).unwrap(), "acme:quota");
+    }
+
+    #[test]
+    fn setup_identity_mismatch_uses_unknown_refusal_path() {
+        let code = RefuseCode::from_code(refuse_codes::SETUP_IDENTITY_MISMATCH);
+        assert_eq!(
+            code,
+            RefuseCode::Unknown(refuse_codes::SETUP_IDENTITY_MISMATCH.into())
+        );
+        assert!(code.is_setup_identity_mismatch());
+        assert!(!code.retryable());
+        assert_eq!(KnownCode::from_code(code.as_str()), None);
+        assert!(include_str!("../CONTRACT.md").contains("| `setup_identity_mismatch` |"));
+
+        let answer: crate::setup::SetupAnswer = serde_json::from_value(serde_json::json!({
+            "answer": "refuse",
+            "request_id": "request-1",
+            "code": refuse_codes::SETUP_IDENTITY_MISMATCH,
+            "reason": "the route is bound to another session"
+        }))
+        .unwrap();
+        assert_eq!(answer.retryable(), Some(false));
+        match answer {
+            crate::setup::SetupAnswer::Refuse { code, .. } => {
+                assert_eq!(
+                    code,
+                    RefuseCode::Unknown(refuse_codes::SETUP_IDENTITY_MISMATCH.into())
+                );
+                assert!(code.is_setup_identity_mismatch());
+            }
+            crate::setup::SetupAnswer::Ready { .. } => panic!("decoded a refusal as ready"),
+        }
     }
 
     /// Reads the retryability table from CONTRACT.md. Each row is one named
@@ -429,33 +484,44 @@ mod tests {
             .collect()
     }
 
-    /// Checks that three copies of one table agree: `KnownCode`'s
-    /// `retryable` and `ends_run_after_setup`, the retryability table in
-    /// CONTRACT.md, and the `retryability` cases in `errors.json`. It also
-    /// pins that `compaction_unavailable` is never retryable and may end a
-    /// run after Setup.
     #[test]
     fn retryability_table_matches_contract_and_vectors() {
         let table = contract_retryability();
-        assert_eq!(table.len(), KnownCode::ALL.len(), "§13.3 rows: {table:?}");
         let file = vectors::load("errors.json");
         let rows = vectors::cases(&file, "retryability");
-        assert_eq!(rows.len(), KnownCode::ALL.len());
+        assert_eq!(rows.len(), table.len());
+        let mut typed_count = 0;
         for ((code, retryable, ends_run), row) in table.iter().zip(rows) {
-            let known = KnownCode::from_code(code).unwrap_or_else(|| panic!("{code}"));
             assert_eq!(row["code"], code.as_str());
-            assert_eq!(known.retryable(), *retryable, "{code}: retryable");
             assert_eq!(row["retryable"], *retryable, "{code}: vector retryable");
+            assert_eq!(
+                row["ends_run_after_setup"], *ends_run,
+                "{code}: vector ends run"
+            );
+
+            if code == refuse_codes::SETUP_IDENTITY_MISMATCH {
+                let refusal = RefuseCode::from_code(code);
+                assert!(refusal.is_setup_identity_mismatch());
+                assert!(!refusal.retryable());
+                assert!(ends_run, "{code}: Unknown refusal ends the run after Setup");
+                assert!(KnownCode::from_code(code).is_none());
+                continue;
+            }
+
+            typed_count += 1;
+            let known = KnownCode::from_code(code).unwrap_or_else(|| panic!("{code}"));
+            assert_eq!(known.retryable(), *retryable, "{code}: retryable");
             assert_eq!(
                 known.ends_run_after_setup(),
                 *ends_run,
                 "{code}: ends a run"
             );
-            assert_eq!(
-                row["ends_run_after_setup"], *ends_run,
-                "{code}: vector ends_run_after_setup"
-            );
         }
+        assert_eq!(
+            typed_count,
+            KnownCode::ALL.len(),
+            "§13.3 typed rows: {table:?}"
+        );
         let unavailable = KnownCode::CompactionUnavailable;
         assert!(!unavailable.retryable());
         assert!(unavailable.ends_run_after_setup());

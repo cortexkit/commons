@@ -66,7 +66,7 @@ use subc_protocol::ErrorBody;
 
 mod compaction;
 mod user_commands;
-pub use compaction::CompactionDefect;
+pub use compaction::{CompactionDefect, CompactionRouteMode};
 
 pub const TOOL_MODULE: &str = "fake.tools";
 /// The module id (and route principal) of the sender the delivery-order
@@ -349,6 +349,7 @@ struct World {
     cancel_step_boundary: bool,
     defects: Defects,
     step_recovery: StepRecovery,
+    compaction_route_mode: compaction::CompactionRouteMode,
     queue_receipt_pending_then_unknown: bool,
     steer_receipt_confirm: bool,
     omit_first_steer_receipt: bool,
@@ -3600,6 +3601,7 @@ pub struct FakeSubject {
     pub cancel_step_boundary: bool,
     pub defects: Defects,
     pub step_recovery: StepRecovery,
+    pub compaction_route_mode: compaction::CompactionRouteMode,
     pub capabilities: BTreeSet<Capability>,
     pub delivery_order_modes: Option<Vec<String>>,
     pub seal_compaction_setup_crash: bool,
@@ -3678,6 +3680,7 @@ impl FakeSubject {
             cancel_step_boundary: true,
             defects,
             step_recovery: StepRecovery::Resume,
+            compaction_route_mode: compaction::CompactionRouteMode::SingleSession,
             capabilities: served(),
             delivery_order_modes: None,
             without_plans: false,
@@ -3739,6 +3742,7 @@ impl FakeSubject {
                     compaction: Mutex::new(compaction::Providers::new(
                         self.seal_compaction_setup_crash,
                     )),
+                    compaction_route_mode: self.compaction_route_mode,
                     invocations: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),

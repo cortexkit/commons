@@ -61,16 +61,20 @@ vocabulary section and identifies the governing contract sections.
   `install_compaction_setup(session, CompactionSetup)`, included in the
   session plan when installed. The runner adapter must convert replacement
   text to the runner's schema and preserve ids, versions and ranges.
-  `compaction_observation` captures actual Setup calls and canonical inputs
-  at the scripted model boundary outside the runner's process and state root;
-  it must not reconstruct inputs from the configured answer or `session.read`
-  responses. Hold every model answer until `release_compaction_model`.
-  `durable_compaction_setup` must read the initial answer from persistent
-  runner storage while a model call is held, never from an in-memory cache,
-  the configured provider answer or a `session.read` model page. The
-  compaction cases check Setup only: the runner half of compaction-provider
-  0.3.0 §3 (advance notices, views, rides, the ceiling, native markers) has
-  no live case yet.
+   `compaction_observation` captures the Setup body's `harness` and `session`,
+   the actual route bind's `harness`, `session` and `project_root`, and
+   canonical model inputs, all outside the runner's process and state root.
+   Route identity must be observed at provider ingress, not reconstructed
+   from Setup or `session.read` responses. A single-session route's bind
+   session must equal Setup's session; a shared project route with an empty
+   session and a generic harness is valid. The named case
+   `compaction_setup_route_session_matches_setup` checks both forms. Hold
+   every model answer until `release_compaction_model`.
+   `durable_compaction_setup` must read the initial answer from persistent
+   runner storage while a model call is held, never from an in-memory cache,
+   the configured provider answer or a `session.read` model page. The runner
+   half of compaction-provider 0.3.3 §3 (advance notices, views, rides, the
+   ceiling, native markers) still has no live case.
 - Retention time can be controlled separately. A subject opts in by declaring
   `Capability::RetentionClock` and implementing
   `LlmRunnerSubject::advance_retention_clock`; the adapter must advance the

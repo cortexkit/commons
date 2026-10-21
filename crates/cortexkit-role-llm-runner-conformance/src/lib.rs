@@ -92,7 +92,10 @@ mod tags;
 mod tool_calls;
 mod user_commands;
 
-pub use compaction::{CompactionCall, CompactionMessage, CompactionObservation, CompactionSetup};
+pub use compaction::{
+    CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
+    CompactionSetup, CompactionSetupIdentity,
+};
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;
 pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES, NARROWINGS};

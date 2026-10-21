@@ -54,13 +54,36 @@ contacts after Setup are the ride request and the ceiling pause (§8).
   op, by name, before routing anything to it.
 - [pinned] Compaction routes are module-level and unscoped. Setup names the
   opaque session handle; `view.get` and `compaction.ride` name the session
-  reference. Neither is an authorization credential.
-- [pinned] Setup carries a required string `harness`, next to `session`: the
-  harness named in the session's key, which identifies the caller (for
-  example `broca`). This differs from the route's bind harness, the harness a
-  connection declares when it opens the route; a runner always declares
-  `runner`. A Setup without `harness` does not decode; it is never
+  reference. Neither is an authorization credential. The daemon-attested
+  principal on the route identifies the runner; the caller-chosen `harness`
+  string is not attested and never identifies or authorizes a runner.
+- [pinned] Setup carries required strings `harness` and `session`, the
+  session's caller-chosen identity as reported by the runner. Setup does not
+  carry `project_root`; the provider takes it from the route that delivered
+  Setup. A Setup without `harness` or `session` does not decode; neither is
   defaulted.
+- [pinned] A runner reports its session's own `harness` and `session` in
+  Setup, and opens the provider route with that session's `project_root`.
+  A route bound to a single session carries that same session. A route shared
+  at project scope may instead have an empty bind session and a generic bind
+  harness such as `runner`.
+- [pinned] At Setup, the provider records the authoritative reverse-call
+  identity: Setup's `harness` and `session`, together with the incoming
+  route's `project_root`.
+- [pinned] Calls about the conversation—`session.read`, `session.head`,
+  `session.resolve`, sends into it, and reminders—open the provider's own
+  route to the runner with exactly that identity. They never use a constant or
+  the Setup route's harness or session. A reverse `session.read` can find
+  messages and lineage only under the identity carried by its route.
+- [pinned] A child run the provider creates is a separate session owned by
+  that provider. Its route binds the Setup route's `project_root`, Setup's
+  `harness`, and the child's own new session. It never binds the conversation's
+  session.
+- [pinned] If the incoming route has a non-empty bind session and that value
+  differs from Setup's session, the provider may refuse Setup with
+  `setup_identity_mismatch` (§4, §10, §13.3). It does not compare harnesses;
+  the harness is caller-chosen and unattested. The provider recognizes a
+  runner only by the daemon-attested principal on the route.
 - [pinned] A provider keys a runner conversation, and every piece of
   per-session state it keeps for one, on `(project_root, session,
   harness)`: the project root it serves the request for, the session
@@ -163,6 +186,22 @@ the session and freezes that plan for use.
   verbatim. `newest` is `{ordinal, mid}` when a message is already written;
   `lineage_id` is absent when no lineage exists. `now` is milliseconds since
   the Unix epoch.
+- [pinned] Before accepting Setup, the provider checks whether the incoming
+  route is bound to a single session. If its bind session is non-empty and
+  differs from Setup's session, the provider may refuse with the named,
+  non-retryable code `setup_identity_mismatch` (§10, §13.3). It does not
+  compare Setup's harness with the route's bind harness: routes shared across
+  sessions may carry a generic harness. For reverse calls, it combines
+  Setup's `harness` and `session` with the incoming route's `project_root`.
+- [pinned] For calls about the conversation—`session.read`, `session.head`,
+  `session.resolve`, sends into it, and reminders—the provider opens its own
+  route to the runner using exactly the identity above. It never uses a
+  constant or the Setup route's bind harness or session. A reverse
+  `session.read` can find messages and lineage only under the identity its
+  route carries.
+- [pinned] A child run the provider creates is a separate session owned by
+  that provider. Its route binds the Setup route's `project_root`, Setup's
+  `harness`, and the child's own new session, never the conversation's session.
 - [pinned] Optional `descends_from: {lineage_id, through_ordinal}`
   (`lineage::DescendsFrom`) declares that the session's first lineage
   continues another lineage of the same conversation, through the inclusive
@@ -674,18 +713,24 @@ provider.
   In llm-runner run errors, this answer's role `code` maps to `provider_code`
   and its optional finer `provider_code` maps to `provider_detail_code`,
   diagnostics only, never replacing the role code or deciding retryability.
-- [pinned] `code` is one of the four codes below (`RefuseCode`). Each has a
-  fixed retryability, which tells the session's owner whether retrying
-  without the user acting makes sense (the provider was only busy) or the
-  user must act (switch model, fix configuration). The answer carries no
-  retryability of its own: a `retryable` member is ignored on decode and
-  never decides retry.
+- [pinned] `code` is one of the four typed codes below (`RefuseCode`). Each
+  has a fixed retryability, so an owner knows whether retrying without acting
+  can help: a busy provider or unreadable history may clear, while a window or
+  configuration refusal needs correction. The table also lists the named wire
+  code `setup_identity_mismatch`, which is not a typed variant in 0.3.x.
+  The answer carries no retryability of its own: a `retryable` member is ignored
+  on decode and never decides retry.
 - [pinned] `provider_code` is an optional open string: the provider's own,
   finer reason, for logs and display. It never replaces `code` and never
   decides retry.
 - [pinned] A `code` the runner does not know decodes rather than failing
   the answer (`RefuseCode::Unknown`). It still ends the run, is recorded as
   received, and is not retryable.
+- [pinned] `setup_identity_mismatch` is a named wire refusal, but in 0.3.x it
+  decodes as `RefuseCode::Unknown`. The runner therefore ends the current run
+  as `error` after Setup and does not retry the refusal; the next send calls
+  Setup again. The next breaking release will make it a typed variant and
+  mark both public enums `#[non_exhaustive]`.
 - [pinned] `reason` is user-facing text.
 
 | Code | When | Retryable |
@@ -694,6 +739,7 @@ provider.
 | `provider_busy` | the provider is busy with the session's history and cannot answer Setup now | yes |
 | `misconfigured` | the configuration for this preset and params cannot be used | no |
 | `history_unreadable` | required history is missing, such as a declared inherited prefix the provider does not hold | yes |
+| `setup_identity_mismatch` | the incoming route is bound to one non-empty session that differs from Setup's session; in 0.3.x decoded as `Unknown`, ending the current run as `error` | no |
 
 ## 11. The model view
 
@@ -742,12 +788,12 @@ detail?}` (`ErrorBody`). They are open strings: a party that meets one it
 does not know treats it as a terminal refusal of that one request, and
 never retries it.
 
-`KnownCode` enumerates the codes in §10 and §13 for classification, with
-each one's fixed retryability (§13.3); it does not close the wire
-vocabulary. `ErrorBody.code` remains a string; a `refuse` answer's `code`
-decodes to `RefuseCode`, which keeps an unknown code as received (§10).
-`detail` is arbitrary JSON, omitted when absent; `message` is a required
-string.
+`KnownCode` classifies the typed codes this role recognizes from §10 and §13,
+with their fixed retryability (§13.3); it does not close the wire vocabulary.
+A named wire refusal not represented there follows `RefuseCode::Unknown` (§10).
+`ErrorBody.code` remains a string; an unrecognized Setup `refuse` code decodes
+to `RefuseCode::Unknown`. `detail` is arbitrary JSON, omitted when absent;
+`message` is a required string.
 
 ### 13.1 Provider refusals (`errors`)
 
@@ -773,12 +819,13 @@ string.
 The ceiling refusal is `llm-runner/v1`'s `context_ceiling` (§8); that role
 defines its retryability.
 
-### 13.3 Retryability and whether a code ends a run (`KnownCode`)
+### 13.3 Retryability and whether a code ends a run after Setup
 
-[pinned] Every code this role names has a fixed retryability and a fixed
-answer to whether it may end a run after Setup (`KnownCode::retryable`,
-`KnownCode::ends_run_after_setup`). No party chooses either per message. A
-code not in this table is not retryable.
+`KnownCode` classifies the typed codes this role recognizes from §10 and §13.
+This table also pins open wire codes that do not yet have a typed variant.
+`setup_identity_mismatch` follows §10's `RefuseCode::Unknown` path in 0.3.x:
+it is not retryable and ends the current run after Setup. No party chooses
+retryability or terminal behavior per message.
 
 | Code | Retryable | Ends a run after Setup |
 |---|---|---|
@@ -788,6 +835,7 @@ code not in this table is not retryable.
 | `provider_busy` | yes | yes |
 | `misconfigured` | no | yes |
 | `history_unreadable` | yes | yes |
+| `setup_identity_mismatch` | no | yes |
 | `compaction_unavailable` | no | yes |
 
 ## 14. Decoding

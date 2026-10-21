@@ -4,7 +4,8 @@
 use super::*;
 use cortexkit_role_llm_runner::read::{EntrySource, ModelEntry, ModelPage};
 use cortexkit_role_llm_runner_conformance::{
-    CompactionCall, CompactionMessage, CompactionObservation, CompactionSetup,
+    CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
+    CompactionSetup, CompactionSetupIdentity,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,6 +19,14 @@ pub enum CompactionDefect {
     InsertionAfterMessage,
     UnavailableAsRefusal,
     FinerCodeReplacesRoleCode,
+    BindWrongSession,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CompactionRouteMode {
+    #[default]
+    SingleSession,
+    SharedProject,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -211,6 +220,15 @@ impl Module {
             session,
             json!({"kind":"compaction_request","request_id":id}),
         )?;
+        let route_session = match self.world.compaction_route_mode {
+            CompactionRouteMode::SingleSession
+                if self.world.defects.compaction == CompactionDefect::BindWrongSession =>
+            {
+                format!("wrong-{session}")
+            }
+            CompactionRouteMode::SingleSession => session.to_owned(),
+            CompactionRouteMode::SharedProject => String::new(),
+        };
         self.world
             .compaction
             .lock()
@@ -221,6 +239,15 @@ impl Module {
             .calls
             .push(CompactionCall {
                 request_id: id.clone(),
+                setup_identity: CompactionSetupIdentity {
+                    harness: "broca".into(),
+                    session: session.to_owned(),
+                },
+                route_identity: CompactionRouteIdentity {
+                    harness: "runner".into(),
+                    session: route_session,
+                    project_root: "/fake/project".into(),
+                },
             });
         match setup {
             CompactionSetup::Unavailable => {

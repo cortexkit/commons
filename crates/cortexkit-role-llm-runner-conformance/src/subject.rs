@@ -692,11 +692,16 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("scripted compaction is not implemented"))
     }
 
-    /// Return the Setup calls observed at the scripted provider and canonical
-    /// inputs captured from requests received by the scripted model. Keep
-    /// both observations outside the runner process and its persistent state
-    /// directory so a runner crash cannot erase them. Do not reconstruct
-    /// observations from configured answers or `session.read` responses.
+    /// Return Setup calls observed at the scripted provider and canonical
+    /// inputs captured at the scripted model. For each Setup call, capture
+    /// `harness` and `session` from the body and the actual `harness`,
+    /// `session` and `project_root` from the route that received it; route
+    /// metadata must not be reconstructed from the body. A shared project
+    /// route may have a generic harness and an empty session. Keep both
+    /// observations outside the runner process and persistent state directory,
+    /// and do not reconstruct them from configured answers or `session.read`
+    /// responses. `CompactionCall` pairs the body and route identities so the
+    /// case can distinguish a single-session bind from a shared route.
     async fn compaction_observation(
         &self,
         _session: &str,

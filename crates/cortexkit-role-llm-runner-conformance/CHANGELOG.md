@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.9
+
+- Require `cortexkit-role-compaction-provider` 0.3.3. Add
+  `compaction_setup_route_session_matches_setup`, which rejects a runner's
+  single-session provider route when its bind session differs from Setup's
+  session, while accepting shared project routes with an empty bind session
+  and generic `runner` harness. The scripted provider observation now carries
+  the Setup body identity and the actual incoming route bind identity
+  separately. A faulty reference runner binding another session fails the
+  case by name.
+
 ## 0.8.8
 
 - Require llm-runner 0.3.9. Add live-route user-command checks for history and

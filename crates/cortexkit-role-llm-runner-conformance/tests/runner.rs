@@ -9,7 +9,8 @@ use cortexkit_role_llm_runner_conformance::{
     SuiteVerdict, CASES,
 };
 use fake::{
-    CompactionDefect, Defects, DirectiveDefect, FakeSubject, RetentionDefect, StepRecovery,
+    CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject, RetentionDefect,
+    StepRecovery,
 };
 use std::time::{Duration, Instant};
 
@@ -1170,6 +1171,7 @@ async fn retention_requires_a_real_tombstone_process_kill() {
 
 const COMPACTION_CASES: &[&str] = &[
     "compaction_setup_durable_once",
+    "compaction_setup_route_session_matches_setup",
     "model_view_half_open_ranges_and_travel",
     "compaction_unavailable_distinct_from_refuse",
 ];
@@ -1197,6 +1199,23 @@ async fn compaction_good_fake_passes_all_named_cases() {
     for name in COMPACTION_CASES {
         assert_passed(&report, name);
     }
+}
+
+#[tokio::test]
+async fn compaction_setup_route_session_mismatch_fails_only_named_case() {
+    compaction_break(
+        CompactionDefect::BindWrongSession,
+        "compaction_setup_route_session_matches_setup",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn compaction_shared_project_route_with_runner_harness_passes_identity_case() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.compaction_route_mode = CompactionRouteMode::SharedProject;
+    let report = run(&subject).await;
+    assert_passed(&report, "compaction_setup_route_session_matches_setup");
 }
 
 #[tokio::test]
@@ -1304,7 +1323,9 @@ async fn compaction_model_view_missing_is_not_applicable_independently() {
     subject.capabilities.remove(&Capability::ModelView);
     let report = run(&subject).await;
     for name in COMPACTION_CASES {
-        if *name == "compaction_unavailable_distinct_from_refuse" {
+        if *name == "compaction_unavailable_distinct_from_refuse"
+            || *name == "compaction_setup_route_session_matches_setup"
+        {
             assert_passed(&report, name);
         } else {
             assert_eq!(

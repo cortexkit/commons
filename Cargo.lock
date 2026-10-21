@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-compaction-provider"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.8.8"
+version = "0.8.9"
 dependencies = [
  "async-trait",
  "cortexkit-role-compaction-provider",

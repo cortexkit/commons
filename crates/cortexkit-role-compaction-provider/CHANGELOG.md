@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.3
+
+- Pin the runner/provider route identity contract: Setup reports the session's
+  caller-chosen `harness` and session; the Setup route supplies `project_root`.
+  Providers use that composite identity for conversation calls and use a new
+  child session with the Setup harness and route root for provider-owned child
+  runs. Shared project routes may carry a generic harness and empty session;
+  only a non-empty route session that differs from the Setup-reported session
+  may be refused. Runner authorization uses the daemon-attested principal, not
+  the harness.
+- Name `setup_identity_mismatch` as a Setup refusal wire code without adding
+  public enum variants. In 0.3.x `RefuseCode` decodes it as `Unknown`, which is
+  terminal and non-retryable; `RefuseCode::is_setup_identity_mismatch()`
+   identifies it. The next breaking release will add a typed variant and mark
+  `RefuseCode` and `KnownCode` `#[non_exhaustive]`.
+- Add route-identity vectors for shared and single-session routes, provider
+  reverse calls, child sessions, principal attestation, and named faults that
+  reuse an empty session or constant harness. There is no provider
+  conformance kit to execute transport calls, so the vectors pin expected
+  identities; the wire tests validate their relationships.
+
 ## 0.3.2
 
 - Pin a limit on provider-constraint deferral in §7: at the next step starting

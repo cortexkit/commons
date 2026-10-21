@@ -720,3 +720,86 @@ fn lost_runner_state_continues_under_a_new_lineage_and_resyncs() {
     assert_eq!(outcome, DescentOutcome::Resync);
     assert_eq!(case["outcome"], "resync");
 }
+
+#[test]
+fn provider_route_identity_vectors_keep_conversation_and_child_scopes_distinct() {
+    let file = vectors::load("route-identity.json");
+    for case in vectors::cases(&file, "identity_cases") {
+        let route = &case["incoming_route"]["bind"];
+        let setup = &case["setup"];
+        let expected = &case["expected"];
+        let setup_session = setup["session"].as_str().unwrap();
+        let route_session = route["session"].as_str().unwrap();
+
+        if expected["setup"] == "refuse" {
+            assert!(!route_session.is_empty(), "{}", name(case));
+            assert_ne!(route_session, setup_session, "{}", name(case));
+            assert_eq!(
+                expected["code"],
+                "setup_identity_mismatch",
+                "{}",
+                name(case)
+            );
+        }
+
+        if let Some(reverse_bind) = expected.get("reverse_bind") {
+            assert_eq!(reverse_bind["harness"], setup["harness"], "{}", name(case));
+            assert_eq!(reverse_bind["session"], setup["session"], "{}", name(case));
+            assert_eq!(
+                reverse_bind["project_root"],
+                route["project_root"],
+                "{}",
+                name(case)
+            );
+            assert!(
+                route_session.is_empty() || route_session == setup_session,
+                "{}",
+                name(case)
+            );
+        }
+
+        if let Some(child_bind) = expected.get("child_bind") {
+            assert_eq!(child_bind["harness"], setup["harness"], "{}", name(case));
+            assert_eq!(
+                child_bind["session"],
+                case["child_session"],
+                "{}",
+                name(case)
+            );
+            assert_eq!(
+                child_bind["project_root"],
+                route["project_root"],
+                "{}",
+                name(case)
+            );
+            assert_ne!(child_bind["session"], setup["session"], "{}", name(case));
+            assert_eq!(expected["forbidden_child_bind_session"], setup["session"]);
+        }
+
+        if expected.get("runner_authenticated") == Some(&Value::Bool(false)) {
+            assert_eq!(
+                case["incoming_route"]["principal"]["daemon_attested"],
+                false
+            );
+            assert_ne!(
+                case["incoming_route"]["principal"]["value"],
+                route["harness"]
+            );
+        }
+    }
+    for fault in vectors::cases(&file, "provider_faults") {
+        let route = &fault["incoming_route"];
+        let setup = &fault["setup"];
+        let expected = &fault["expected_reverse_bind"];
+        let faulty = &fault["faulty_reverse_bind"];
+        assert_eq!(expected["harness"], setup["harness"], "{}", name(fault));
+        assert_eq!(expected["session"], setup["session"], "{}", name(fault));
+        assert_eq!(
+            expected["project_root"],
+            route["project_root"],
+            "{}",
+            name(fault)
+        );
+        assert_ne!(faulty, expected, "{}", name(fault));
+    }
+}

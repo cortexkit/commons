@@ -1,5 +1,7 @@
 //! `compaction.setup`: called once per session, before its first model
-//! call.
+//! call. The provider takes `project_root` from the incoming route; together
+//! with Setup's `harness` and `session`, it uses these values as the identity
+//! for later reverse calls.
 //!
 //! Setup returns the initial CompactionMessage, which the runner renders
 //! until it applies the session's first view (a provider with no head
@@ -24,14 +26,15 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct SetupRequest {
-    /// The runner's opaque name for the session.
+    /// The runner's opaque name for the session. If the incoming route binds
+    /// a non-empty session that differs, the provider may refuse Setup with
+    /// `setup_identity_mismatch`; a shared route has an empty bind session.
+    /// `project_root` is not carried here and comes only from the route's bind
+    /// identity.
     pub session: String,
-    /// The harness named in the session's key, which identifies the caller
-    /// (for example `broca`). This differs from the route's bind harness,
-    /// the harness a connection declares when it opens the route; a runner
-    /// always declares `runner`. Required: a request without it does
-    /// not decode. A provider keys a runner conversation on
-    /// `(project_root, session, harness)`.
+    /// The caller-chosen harness in the session identity. The daemon does not
+    /// attest this string, and a shared project route may carry a different
+    /// bind harness. Required; a request without it does not decode.
     pub harness: String,
     /// This request's id; the answer names it.
     pub request_id: String,

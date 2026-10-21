@@ -53,11 +53,39 @@ pub enum CompactionSetup {
     },
 }
 
-/// A Setup call captured when the scripted provider receives it. The runner
-/// adapter must not fabricate calls from the configured answer.
+/// The session identity carried in the Setup request body. `project_root` is
+/// not a Setup field; the provider route carries it separately.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompactionSetupIdentity {
+    /// The caller-chosen harness from the Setup body.
+    pub harness: String,
+    /// The runner's session handle from the Setup body.
+    pub session: String,
+}
+
+/// The actual bind identity of the runner-to-provider route that delivered
+/// Setup. Its harness may be generic and its session may be empty on a shared
+/// project route; adapters observe these fields at provider ingress.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompactionRouteIdentity {
+    /// The bind harness on the route that delivered Setup.
+    pub harness: String,
+    /// The bind session, empty for a shared project route.
+    pub session: String,
+    /// The project root on the incoming route, not carried in Setup.
+    pub project_root: String,
+}
+
+/// A Setup call captured by the scripted provider. The adapter records the
+/// request body and actual incoming route independently; it never fabricates
+/// either identity from the configured Setup answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompactionCall {
     pub request_id: String,
+    /// The `harness` and `session` that arrived in the Setup request body.
+    pub setup_identity: CompactionSetupIdentity,
+    /// The runner-to-provider route's actual bind identity.
+    pub route_identity: CompactionRouteIdentity,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -256,8 +284,44 @@ where
     match name {
         "model_view_half_open_ranges_and_travel" => ranges(case).await,
         "compaction_unavailable_distinct_from_refuse" => refusals(case).await,
+        "compaction_setup_route_session_matches_setup" => route_session_matches_setup(case).await,
         _ => Err(format!("unknown compaction case {name}")),
     }
+}
+
+async fn route_session_matches_setup<S>(case: &Case<'_, S>) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut session = install(
+        case,
+        "route-identity",
+        CompactionSetup::Ready(initial("route-identity")),
+        Script {
+            turns: vec![text("route-identity-answer")],
+        },
+    )
+    .await?;
+    send(case, &mut session, "route-identity-prompt").await?;
+    release_model(case.subject, &session.name).await?;
+
+    let observation = observation(case.subject, &session.name).await?;
+    if observation.calls.len() != 1 {
+        return Err(format!(
+            "expected one observed Setup call, got {}",
+            observation.calls.len()
+        ));
+    }
+    let call = &observation.calls[0];
+    let setup_session = &call.setup_identity.session;
+    let route_session = &call.route_identity.session;
+    if !route_session.is_empty() && route_session != setup_session {
+        return Err(format!(
+            "single-session provider route binds session {route_session:?}, but Setup reports {setup_session:?}"
+        ));
+    }
+    Ok(())
 }
 
 async fn ranges<S>(case: &Case<'_, S>) -> Result<(), String>
