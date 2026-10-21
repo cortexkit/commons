@@ -144,8 +144,10 @@ pub mod classes {
 }
 
 /// An error class. Decodes open: a value other than [`classes`] is kept in
-/// [`ErrorClass::Other`].
+/// [`ErrorClass::Other`]. Non-exhaustive, so a match needs a wildcard arm
+/// and adding a variant later is not a breaking change.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ErrorClass {
     Transient,
     Permanent,

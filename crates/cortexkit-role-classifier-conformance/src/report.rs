@@ -15,7 +15,7 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 pub const CHECKS: &[CheckSpec] = &[
     check(
         "describe_complete",
-        "role.describe decodes, passes check_describe, names classifier/v1, and lists exactly the served models, each with the catalog's context_tokens, image limit (null for none), a price exactly when the catalog prices it, and its egress host",
+        "role.describe decodes, passes check_describe, names classifier/v1, and lists exactly the served models, each with the catalog's context_tokens (absent when the catalog states none), image limit (null for none), a price exactly when the catalog prices it, and its egress host",
     ),
     check(
         "concurrent_call_refused_batch_in_progress",

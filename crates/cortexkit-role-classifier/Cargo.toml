@@ -4,10 +4,8 @@
 # validators, and CONTRACT.md, which says what is pinned. Pure serde plus
 # small checks; no transport, no runtime.
 #
-# A DRAFT for design review: not published until the role's owner
-# and its consumers have reviewed CONTRACT.md. The conformance suite lives in
-# the sibling `-conformance` crate, so a runner's production build never
-# pulls in the suite.
+# The conformance suite lives in the sibling `-conformance` crate, so a
+# runner's production build never pulls in the suite.
 [package]
 name = "cortexkit-role-classifier"
 version = "0.1.0"
@@ -16,7 +14,14 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Wire contract of the CortexKit classifier/v1 role: role.describe, classify.run, question and answer shapes, batch identity and error codes."
-publish = false
+publish = true
+# Ship the shared vector files with the crate so the optional `vectors` module
+# works for consumers who install this package without a repository checkout.
+include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
+
+[features]
+# Compiles the shared vectors into the public `vectors` module.
+test-vectors = []
 
 [dependencies]
 indexmap = { version = "2", features = ["serde"] }
@@ -27,3 +32,11 @@ sha2 = "0.10"
 
 [dev-dependencies]
 subc-protocol = "0.32"
+
+[[test]]
+name = "vectors"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

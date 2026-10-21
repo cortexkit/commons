@@ -2,7 +2,7 @@
   "about": "One choice question, per provider. provider_request and provider_response are the provider's own shapes (CONTRACT.md cites the documentation); request and reply are the classify.run request and reply that wrap them. The clef request is Cloudflare's documented example cut to its choice question; the TypeSafe answer and usage are TypeSafe's documented examples. The clef answer and usage numbers are illustrative, in the documented shape. The runner in these vectors serves both models unpriced, so the replies carry no cost_usd.",
   "vectors": [
     {
-      "provider": "cloudflare/clef",
+      "provider": "cloudflare-workers-ai/@cf/cloudflare/clef",
       "provider_request": {
         "model": "clef",
         "state": "Checkout has been failing for every customer for the last hour.",
@@ -39,7 +39,7 @@
       },
       "request": {
         "batch_id": "vec-choice-clef",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "team": {
             "type": "choice",
@@ -59,7 +59,7 @@
       },
       "reply": {
         "batch_id": "vec-choice-clef",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "items": [
           {
             "index": 0,
@@ -88,7 +88,7 @@
       }
     },
     {
-      "provider": "typesafe/jev-latest",
+      "provider": "typesafe/jev-1.13.0",
       "provider_request": {
         "model": "jev-latest",
         "state": "I was charged twice for my last invoice.",
@@ -125,7 +125,7 @@
       },
       "request": {
         "batch_id": "vec-choice-typesafe",
-        "model": "typesafe/jev-latest",
+        "model": "typesafe/jev-1.13.0",
         "questions": {
           "team": {
             "type": "choice",
@@ -145,7 +145,7 @@
       },
       "reply": {
         "batch_id": "vec-choice-typesafe",
-        "model": "typesafe/jev-latest",
+        "model": "typesafe/jev-1.13.0",
         "items": [
           {
             "index": 0,

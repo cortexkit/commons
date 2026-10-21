@@ -18,7 +18,9 @@
 //! - [`provider`]: the provider-side request and response;
 //! - [`identity`]: the batch body identity that decides replay versus
 //!   `batch_id_reuse`;
-//! - [`errors`]: admission refusal codes, per-item error codes and classes.
+//! - [`errors`]: admission refusal codes, per-item error codes and classes;
+//! - `vectors` (with the `test-vectors` feature): the role's vector files,
+//!   compiled in, so a module's tests can use the same bytes.
 //!
 //! Maps whose key order is part of what a provider documents (questions,
 //! choice options, probabilities) are [`IndexMap`]s, so a decoded and
@@ -37,6 +39,8 @@ pub mod provider;
 pub mod question;
 pub mod reply;
 pub mod request;
+#[cfg(any(test, feature = "test-vectors"))]
+pub mod vectors;
 
 pub use indexmap::IndexMap;
 

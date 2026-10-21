@@ -46,8 +46,9 @@ pub struct ServedModel {
     pub priced: bool,
     /// The catalog's image limit per item; `None` when it takes no images.
     pub images_max: Option<u64>,
-    /// The catalog's context, in tokens.
-    pub context_tokens: u64,
+    /// The catalog's context, in tokens; `None` when the catalog states no
+    /// exact figure, in which case `role.describe` must leave it absent.
+    pub context_tokens: Option<u64>,
     /// The host the module sends item text to for this model.
     pub egress_host: String,
 }

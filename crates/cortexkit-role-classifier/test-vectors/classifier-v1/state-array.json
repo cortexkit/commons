@@ -2,7 +2,7 @@
   "about": "An item whose state is an array, forwarded to the provider verbatim. The answer and usage numbers are illustrative, in the documented shape. The runner in this vector serves the model unpriced, so the reply carries no cost_usd.",
   "vectors": [
     {
-      "provider": "typesafe/jev-latest",
+      "provider": "typesafe/jev-1.13.0",
       "provider_request": {
         "model": "jev-latest",
         "state": [
@@ -43,7 +43,7 @@
       },
       "request": {
         "batch_id": "vec-state-array",
-        "model": "typesafe/jev-latest",
+        "model": "typesafe/jev-1.13.0",
         "questions": {
           "team": {
             "type": "choice",
@@ -67,7 +67,7 @@
       },
       "reply": {
         "batch_id": "vec-state-array",
-        "model": "typesafe/jev-latest",
+        "model": "typesafe/jev-1.13.0",
         "items": [
           {
             "index": 0,

@@ -6,7 +6,7 @@
   },
   "request": {
     "batch_id": "vec-replay-retry",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "questions": {
       "urgent": {
         "type": "noul",
@@ -34,7 +34,7 @@
   },
   "first_reply": {
     "batch_id": "vec-replay-retry",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "items": [
       {
         "index": 0,
@@ -92,7 +92,7 @@
   "first_provider_calls": 2,
   "retry_request": {
     "batch_id": "vec-replay-retry",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "questions": {
       "urgent": {
         "type": "noul",
@@ -120,7 +120,7 @@
   },
   "retry_reply": {
     "batch_id": "vec-replay-retry",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "items": [
       {
         "index": 0,

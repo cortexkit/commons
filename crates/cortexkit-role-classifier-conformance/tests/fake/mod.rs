@@ -53,7 +53,6 @@ const EGRESS: &str = "stand-in.invalid";
 const MAX_ITEMS: u64 = 20;
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const PRICED_CONTEXT: u64 = 8192;
-const TEXT_CONTEXT: u64 = 4096;
 
 /// Deliberate contract breaks: each field makes the fake violate one rule a
 /// check must catch.
@@ -244,14 +243,16 @@ impl FakeModule {
         }
         vec![
             priced,
-            ModelEntry::new(TEXT_ONLY, 8, MAX_ITEMS, TEXT_CONTEXT, EGRESS),
+            // The text-only model's catalog row states no exact context, so
+            // its entry leaves `context_tokens` absent.
+            ModelEntry::new(TEXT_ONLY, 8, MAX_ITEMS, None, EGRESS),
         ]
     }
 
     fn describe(&self) -> RoleDescribe {
         let mut models = self.catalog();
         if self.defects.describe_wrong_context_tokens {
-            models[0].context_tokens = 1;
+            models[0].context_tokens = Some(1);
         }
         if self.defects.describe_omits_model {
             models.truncate(1);
@@ -750,14 +751,14 @@ impl ClassifierSubject for FakeSubject {
                 model: PRICED.into(),
                 priced: self.module.priced,
                 images_max: Some(2),
-                context_tokens: PRICED_CONTEXT,
+                context_tokens: Some(PRICED_CONTEXT),
                 egress_host: EGRESS.into(),
             },
             ServedModel {
                 model: TEXT_ONLY.into(),
                 priced: false,
                 images_max: None,
-                context_tokens: TEXT_CONTEXT,
+                context_tokens: None,
                 egress_host: EGRESS.into(),
             },
         ]

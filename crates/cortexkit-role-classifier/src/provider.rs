@@ -18,11 +18,14 @@ use crate::{
     reply::{Answer, Usage},
 };
 
-/// Catalog ids of the starting providers' models.
+/// Catalog ids of the starting providers' models: models.dev's provider key,
+/// then `/`, then models.dev's model id. The first `/` splits the two, so `@`
+/// and any further `/` belong to the model id. Each pins a model version,
+/// never a moving alias.
 pub mod catalog_ids {
-    pub const CLEF: &str = "cloudflare/clef";
-    pub const CLEF_FLASH: &str = "cloudflare/clef-flash";
-    pub const JEV_LATEST: &str = "typesafe/jev-latest";
+    pub const CLEF: &str = "cloudflare-workers-ai/@cf/cloudflare/clef";
+    pub const CLEF_FLASH: &str = "cloudflare-workers-ai/@cf/cloudflare/clef-flash";
+    pub const JEV_1_13_0: &str = "typesafe/jev-1.13.0";
 }
 
 /// The `model` value each provider expects in its request body.

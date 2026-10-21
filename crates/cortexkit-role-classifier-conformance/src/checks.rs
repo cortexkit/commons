@@ -408,9 +408,12 @@ where
             let entry = describe.model(&model.model).expect("listed above");
             let name = &model.model;
             if entry.context_tokens != model.context_tokens {
+                let show =
+                    |tokens: Option<u64>| tokens.map_or("absent".to_owned(), |n| n.to_string());
                 return Err(format!(
                     "{name}: context_tokens {}, the catalog says {}",
-                    entry.context_tokens, model.context_tokens
+                    show(entry.context_tokens),
+                    show(model.context_tokens)
                 ));
             }
             if entry.images.map(|images| images.max) != model.images_max {

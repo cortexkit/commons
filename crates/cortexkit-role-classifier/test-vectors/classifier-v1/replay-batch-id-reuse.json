@@ -2,7 +2,7 @@
   "about": "The same batch_id with a different body: item 1's state differs. The second call is refused batch_id_reuse with detail.field naming the first differing field, items[1]; it writes nothing and calls no provider. The answer and usage numbers are illustrative; the runner serves the model unpriced.",
   "request": {
     "batch_id": "vec-replay-reuse",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "questions": {
       "urgent": {
         "type": "noul",
@@ -20,7 +20,7 @@
   },
   "reply": {
     "batch_id": "vec-replay-reuse",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "items": [
       {
         "index": 0,
@@ -56,7 +56,7 @@
   },
   "reuse_request": {
     "batch_id": "vec-replay-reuse",
-    "model": "cloudflare/clef",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
     "questions": {
       "urgent": {
         "type": "noul",

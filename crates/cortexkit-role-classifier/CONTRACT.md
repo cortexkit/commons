@@ -1,9 +1,8 @@
-# `classifier/v1`: role contract (draft)
+# `classifier/v1`: role contract
 
-Stability: **alpha, draft**. Nothing ships against it until the role's owner
-and its consumers approve it. This document is the role definition; the Rust types
-in this crate are its wire shapes, `tests/vectors/` holds its vectors, and
-the sibling `cortexkit-role-classifier-conformance` crate holds its suite
+Stability: **alpha**. This document is the role definition; the Rust types
+in this crate are its wire shapes, `test-vectors/classifier-v1/` holds its
+vectors, and the sibling `cortexkit-role-classifier-conformance` crate holds its suite
 (§11).
 
 It is written from the role owner's draft and the owner's rulings on the
@@ -35,10 +34,15 @@ specified; §12 lists none left to interpretation.
 - [pinned] A caller picks the module by **model id**, through the catalog
   row's serving module, not by capability alone.
 - [pinned] Starting providers: Cloudflare Workers AI `@cf/cloudflare/clef`
-  (catalog ids `cloudflare/clef`, `cloudflare/clef-flash`) and TypeSafe
-  `jev-latest` (`typesafe/jev-latest`, `POST
+  (catalog ids `cloudflare-workers-ai/@cf/cloudflare/clef`,
+  `cloudflare-workers-ai/@cf/cloudflare/clef-flash`) and TypeSafe
+  `jev-latest` (catalog id `typesafe/jev-1.13.0`, `POST
   https://api.typesafe.ai/v1/systemone`). Each provider call takes one
   item's `state` with every question of the batch.
+- [pinned] A catalog id is `<provider>/<model>`: models.dev's own provider
+  key, then models.dev's model id. The first `/` splits provider from
+  model, so `@` and any further `/` belong to the model part. A catalog id
+  pins a model version, never a moving alias.
 
 ## 2. `role.describe`
 
@@ -51,7 +55,7 @@ specified; §12 lists none left to interpretation.
     models: [ {
       model,                      // catalog id
       max_questions, max_items,   // per model: the tighter of catalog and module limits
-      context_tokens,             // from the catalog; the provider truncates state beyond it
+      context_tokens?,            // from the catalog; absent when it states no exact figure
       images: { max: n } | null,  // null = no image support; always stated
       price?: { input_per_mtok_usd?, output_per_mtok_usd? },  // absent if unpriced
       egress_host                 // the provider host item text is sent to
@@ -67,6 +71,12 @@ specified; §12 lists none left to interpretation.
 - [pinned] `images` is always present: `null` states that the model takes no
   images. A price direction the catalog does not price is absent, never
   zero.
+- [pinned] `context_tokens` is the catalog's exact context figure, and the
+  provider truncates `state` beyond it. It is absent when the catalog states
+  no exact figure, under the same rule as `price`: absent is not zero, and
+  the module never guesses one (a provider that says only "64k" gets
+  neither 64,000 nor 65,536). A stated `context_tokens` is never zero
+  (`check_describe`).
 
 ## 3. `classify.run` request
 
@@ -88,12 +98,12 @@ specified; §12 lists none left to interpretation.
 - [pinned] `images` is accepted only where the model's catalog row allows
   it, up to its `images.max` (clef: at most 4). TypeSafe takes text only.
 - [pinned] Truncation: the provider truncates a `state` longer than the
-  model's `context_tokens` without saying so. Neither provider reports
-  truncation, so the reply carries no truncation flag: a guessed flag would
-  read as a measurement. A caller keeps `state` under `context_tokens`; the
-  per-item `usage.input_tokens`, when the provider reports it, is how the
-  caller sees an item ran near the limit. The module does not refuse a
-  `state` by a byte heuristic.
+  model's context without saying so. Neither provider reports truncation,
+  so the reply carries no truncation flag: a guessed flag would read as a
+  measurement. A caller keeps `state` under `context_tokens` where the model
+  states one; the per-item `usage.input_tokens`, when the provider reports
+  it, is how the caller sees an item ran near the limit. The module does not
+  refuse a `state` by a byte heuristic.
 
 ## 4. Questions
 
@@ -263,7 +273,7 @@ with the providers' own field names (`question` module):
   narrower path applies, the refusal uses it, even where the problem keeps
   the whole request from decoding: a malformed image names
   `items[i].images[j]`, and an object missing `batch_id` names `batch_id`
-  (`parse_request`, `tests/vectors/field-paths.json`).
+  (`parse_request`, `test-vectors/classifier-v1/field-paths.json`).
 - [pinned] `detail.limit` is the bound broken, where there is one.
 
 ### 6.8 Model pinned
@@ -413,13 +423,18 @@ compatible" (`provider` module).
   https://api.typesafe.ai/v1/systemone`
   (<https://www.jevtypesafeai.com/how-to-use>).
 
-`tests/vectors/provider-examples.json` holds the providers' examples
-verbatim.
+`test-vectors/classifier-v1/provider-examples.json` holds the providers'
+examples verbatim.
 
 ## 11. Vectors and conformance
 
-- `tests/vectors/` holds the role's vectors; each is decoded into this
-  crate's types and re-encoded byte for byte by `tests/vectors.rs`:
+- `test-vectors/classifier-v1/` holds the role's vectors, pinned by its
+  `SHA256SUMS` file. They ship in this crate's package, and the
+  `test-vectors` feature compiles them into the `vectors` module
+  (`vectors::FILES`, plus a constant per file), so a module's tests can
+  read the same bytes. Each is decoded into this crate's types and
+  re-encoded byte for byte by `tests/vectors.rs`, which needs
+  `--features test-vectors`:
   - `provider-examples.json`: the providers' documented examples;
   - `question-noul.json`, `question-choice.json`, `question-score.json`:
     per question type, per provider, the provider request and response and
@@ -434,8 +449,8 @@ verbatim.
   - `replay-retry.json`: a retry returning the stored answers with the same
     `cost_usd`;
   - `replay-batch-id-reuse.json`: a reuse refused naming the field;
-  - `role-describe.json`: two models, one with images and one with
-    `images: null`.
+  - `role-describe.json`: three models, one with images, one with
+    `images: null`, and one with no `context_tokens`.
 - The conformance suite (`cortexkit-role-classifier-conformance`) drives a
   live module against a call-counting stand-in provider; its `README.md`
   lists the checks.

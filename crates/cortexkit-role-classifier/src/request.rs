@@ -341,14 +341,20 @@ mod tests {
     };
 
     fn model() -> ModelEntry {
-        ModelEntry::new("cloudflare/clef", 2, 3, 8192, "api.cloudflare.com")
-            .with_images(ImageSupport::new(4))
+        ModelEntry::new(
+            "cloudflare-workers-ai/@cf/cloudflare/clef",
+            2,
+            3,
+            8192,
+            "api.cloudflare.com",
+        )
+        .with_images(ImageSupport::new(4))
     }
 
     fn request(items: Vec<Item>) -> ClassifyRequest {
         ClassifyRequest::new(
             "b-1",
-            "cloudflare/clef",
+            "cloudflare-workers-ai/@cf/cloudflare/clef",
             [("urgent".to_owned(), Question::noul("Is it urgent?"))].into(),
             items,
         )
@@ -405,7 +411,7 @@ mod tests {
         let refusal = check_request(&request(vec![item]), &model()).unwrap_err();
         assert_eq!(refusal.field(), Some("items[0].images"));
         assert_eq!(refusal.detail.limit, Some(4));
-        let text_only = ModelEntry::new("typesafe/jev-latest", 2, 3, 8192, "api.typesafe.ai");
+        let text_only = ModelEntry::new("typesafe/jev-1.13.0", 2, 3, 8192, "api.typesafe.ai");
         let item = Item::new("s").with_images(vec![image]);
         let refusal = check_request(&request(vec![item]), &text_only).unwrap_err();
         assert_eq!(refusal.field(), Some("items[0].images"));

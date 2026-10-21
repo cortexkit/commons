@@ -5,7 +5,7 @@
       "name": "invalid_params",
       "request": {
         "batch_id": "vec-refuse-invalid",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -34,7 +34,7 @@
       "name": "batch_id_reuse",
       "request": {
         "batch_id": "vec-refuse-reuse",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -113,7 +113,7 @@
       "name": "cost_exceeded",
       "request": {
         "batch_id": "vec-refuse-cost",
-        "model": "typesafe/jev-latest",
+        "model": "typesafe/jev-1.13.0",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -141,7 +141,7 @@
       "name": "account_walled",
       "request": {
         "batch_id": "vec-refuse-walled",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -167,7 +167,7 @@
       "name": "batch_in_progress",
       "request": {
         "batch_id": "vec-refuse-busy",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -193,7 +193,7 @@
       "name": "auth_failed",
       "request": {
         "batch_id": "vec-refuse-auth",
-        "model": "typesafe/jev-latest",
+        "model": "typesafe/jev-1.13.0",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -222,7 +222,7 @@
       "name": "model_unavailable",
       "request": {
         "batch_id": "vec-refuse-model-unavailable",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -240,10 +240,10 @@
       },
       "refusal": {
         "code": "model_unavailable",
-        "message": "the provider does not serve cloudflare/clef",
+        "message": "the provider does not serve cloudflare-workers-ai/@cf/cloudflare/clef",
         "detail": {
           "class": "permanent",
-          "model": "cloudflare/clef"
+          "model": "cloudflare-workers-ai/@cf/cloudflare/clef"
         }
       }
     }

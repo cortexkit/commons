@@ -68,8 +68,11 @@ pub struct ModelEntry {
     /// module's limits, so never above `limits.max_items`.
     pub max_items: u64,
     /// The model's context, in tokens, from the catalog. The provider
-    /// truncates `state` beyond it without saying so.
-    pub context_tokens: u64,
+    /// truncates `state` beyond it without saying so. Absent when the catalog
+    /// states no exact figure (a provider that says only "64k" gets no
+    /// guessed number); absent is not zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
     /// The model's image support; `null` when it takes no images. Always
     /// encoded, never omitted, so "no images" is stated rather than implied.
     pub images: Option<ImageSupport>,
@@ -81,18 +84,20 @@ pub struct ModelEntry {
 }
 
 impl ModelEntry {
+    /// `context_tokens` takes a number, or `None` when the catalog states
+    /// no exact figure.
     pub fn new(
         model: impl Into<String>,
         max_questions: u64,
         max_items: u64,
-        context_tokens: u64,
+        context_tokens: impl Into<Option<u64>>,
         egress_host: impl Into<String>,
     ) -> Self {
         Self {
             model: model.into(),
             max_questions,
             max_items,
-            context_tokens,
+            context_tokens: context_tokens.into(),
             images: None,
             price: None,
             egress_host: egress_host.into(),
@@ -166,8 +171,8 @@ pub enum DescribeProblem {
     NoModels,
     /// A model is listed twice.
     DuplicateModel(String),
-    /// A model states a zero limit or context, names no egress host, or
-    /// allows more items than the module does. Names the model and member.
+    /// A model states a zero limit or a zero context, names no egress host,
+    /// or allows more items than the module does. Names the model and member.
     BadModel { model: String, member: &'static str },
     /// A module limit is zero.
     BadLimits(&'static str),
@@ -219,7 +224,9 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
         if entry.max_items == 0 || entry.max_items > describe.limits.max_items {
             return bad("max_items");
         }
-        if entry.context_tokens == 0 {
+        // An absent context is allowed (the catalog states no exact
+        // figure); a stated zero is not.
+        if entry.context_tokens == Some(0) {
             return bad("context_tokens");
         }
         if entry.images.is_some_and(|images| images.max == 0) {
@@ -240,9 +247,15 @@ mod tests {
         RoleDescribe::new(
             Limits::new(100, 1 << 20),
             vec![
-                ModelEntry::new("cloudflare/clef", 64, 100, 8192, "api.cloudflare.com")
-                    .with_images(ImageSupport::new(4)),
-                ModelEntry::new("typesafe/jev-latest", 32, 50, 8192, "api.typesafe.ai"),
+                ModelEntry::new(
+                    "cloudflare-workers-ai/@cf/cloudflare/clef",
+                    64,
+                    100,
+                    8192,
+                    "api.cloudflare.com",
+                )
+                .with_images(ImageSupport::new(4)),
+                ModelEntry::new("typesafe/jev-1.13.0", 32, 50, 8192, "api.typesafe.ai"),
             ],
         )
     }
@@ -260,18 +273,29 @@ mod tests {
     }
 
     #[test]
+    fn an_absent_context_is_omitted_and_passes() {
+        let mut answer = describe();
+        answer.models[1].context_tokens = None;
+        assert_eq!(check_describe(&answer), Ok(()));
+        let text = serde_json::to_string(&answer.models[1]).unwrap();
+        assert!(!text.contains("context_tokens"), "{text}");
+        let decoded: ModelEntry = serde_json::from_str(&text).unwrap();
+        assert_eq!(decoded.context_tokens, None);
+    }
+
+    #[test]
     fn a_model_allowing_more_items_than_the_module_is_refused() {
         let mut answer = describe();
         answer.models[1].max_items = 101;
         assert_eq!(
             check_describe(&answer),
             Err(DescribeProblem::BadModel {
-                model: "typesafe/jev-latest".into(),
+                model: "typesafe/jev-1.13.0".into(),
                 member: "max_items"
             })
         );
         let mut answer = describe();
-        answer.models[0].context_tokens = 0;
+        answer.models[0].context_tokens = Some(0);
         assert!(matches!(
             check_describe(&answer),
             Err(DescribeProblem::BadModel {

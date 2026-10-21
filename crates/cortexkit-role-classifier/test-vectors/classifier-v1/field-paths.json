@@ -5,7 +5,7 @@
       "name": "unknown_question_type",
       "request": {
         "batch_id": "vec-field-unknown-type",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",
@@ -35,7 +35,7 @@
       "name": "narrower_path",
       "request": {
         "batch_id": "vec-field-narrower",
-        "model": "cloudflare/clef",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
         "questions": {
           "urgent": {
             "type": "noul",

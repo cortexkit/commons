@@ -1,9 +1,10 @@
-//! The role's vectors under `tests/vectors/`. Every file is decoded into
-//! the crate's types and re-encoded, and the encoding must equal the file
-//! byte for byte: a member a type drops, renames, reorders or reformats
-//! (a number included) shows up here. Each file then has its semantic
-//! checks: a provider shape that does not match the role-level shape it is
-//! wrapped in, or a refusal the crate's constructors would word
+//! The role's vectors under `test-vectors/classifier-v1/`, read through the
+//! crate's `vectors` module (the `test-vectors` feature). Every file is
+//! decoded into the crate's types and re-encoded, and the encoding must equal
+//! the file byte for byte: a member a type drops, renames, reorders or
+//! reformats (a number included) shows up here. Each file then has its
+//! semantic checks: a provider shape that does not match the role-level shape
+//! it is wrapped in, or a refusal the crate's constructors would word
 //! differently, fails too.
 
 use cortexkit_role_classifier::{
@@ -14,13 +15,14 @@ use cortexkit_role_classifier::{
     question::{check_question, QuestionType},
     reply::{check_reply, sum_usage, Answer, ClassifyReply, Usage},
     request::{check_request, ClassifyRequest},
-    IndexMap,
+    vectors, IndexMap,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Number;
 
-/// Every vector file. A test checks this list against the directory, so a
-/// new file cannot land without a test reading it.
+/// Every vector file this test reads. A test checks this list against
+/// `vectors::FILES`, which `tests/vectors_feature.rs` checks against the
+/// directory, so a new file cannot land without a test reading it.
 const FILES: &[&str] = &[
     "admission-refusals.json",
     "field-paths.json",
@@ -36,17 +38,12 @@ const FILES: &[&str] = &[
     "state-object.json",
 ];
 
-fn dir() -> String {
-    format!("{}/tests/vectors", env!("CARGO_MANIFEST_DIR"))
-}
-
 /// Decode `name` as `T` and check that its pretty encoding, with a final
 /// newline, is the file's exact bytes.
 fn exact<T: DeserializeOwned + Serialize>(name: &str) -> T {
     assert!(FILES.contains(&name), "{name} is not listed in FILES");
-    let path = format!("{}/{name}", dir());
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let decoded: T = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let text = vectors::file(name).unwrap_or_else(|| panic!("{name} is not in vectors::FILES"));
+    let decoded: T = serde_json::from_str(text).unwrap_or_else(|e| panic!("{name}: {e}"));
     let encoded = serde_json::to_string_pretty(&decoded).unwrap() + "\n";
     if encoded != text {
         let line = encoded
@@ -152,9 +149,11 @@ fn num(value: f64) -> Number {
 
 #[test]
 fn every_vector_file_on_disk_is_listed() {
-    let mut on_disk: Vec<String> = std::fs::read_dir(dir())
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+    // `vectors::FILES` matches the directory exactly; `tests/vectors_feature.rs`
+    // checks that.
+    let mut on_disk: Vec<String> = vectors::FILES
+        .iter()
+        .map(|(name, _)| name.to_string())
         .filter(|name| name.ends_with(".json"))
         .collect();
     on_disk.sort();
@@ -163,20 +162,27 @@ fn every_vector_file_on_disk_is_listed() {
     assert_eq!(on_disk, listed);
 }
 
+/// The file round-trips byte for byte (`exact`) and passes `check_describe`,
+/// including the entry whose catalog states no exact context: its
+/// `context_tokens` decodes as absent and stays absent when re-encoded.
 #[test]
-fn role_describe_lists_two_models_one_without_images() {
+fn role_describe_lists_three_models_one_without_images_one_without_context() {
     let describe = describe();
     assert_eq!(check_describe(&describe), Ok(()));
-    assert_eq!(describe.models.len(), 2);
+    assert_eq!(describe.models.len(), 3);
     let clef = describe.model(provider::catalog_ids::CLEF).unwrap();
     assert_eq!(clef.images.map(|images| images.max), Some(4));
     assert_eq!(clef.egress_host, provider::hosts::CLOUDFLARE);
-    let jev = describe.model(provider::catalog_ids::JEV_LATEST).unwrap();
+    assert_eq!(clef.context_tokens, Some(8192));
+    let jev = describe.model(provider::catalog_ids::JEV_1_13_0).unwrap();
     assert_eq!(jev.images, None);
     assert_eq!(jev.egress_host, provider::hosts::TYPESAFE);
-    assert!(jev.context_tokens > 0);
-    let text = std::fs::read_to_string(format!("{}/role-describe.json", dir())).unwrap();
+    assert_eq!(jev.context_tokens, Some(4096));
+    let flash = describe.model(provider::catalog_ids::CLEF_FLASH).unwrap();
+    assert_eq!(flash.context_tokens, None);
+    let text = vectors::ROLE_DESCRIBE_JSON;
     assert!(text.contains("\"images\": null"));
+    assert_eq!(text.matches("\"context_tokens\"").count(), 2);
 }
 
 #[test]
@@ -225,7 +231,7 @@ fn check_wrapping(file: &str, expected_type: Option<QuestionType>) {
         assert_eq!(vector.request.model, vector.provider, "{name}");
         let provider_model = match vector.provider.as_str() {
             provider::catalog_ids::CLEF => provider::models::CLEF,
-            provider::catalog_ids::JEV_LATEST => provider::models::JEV_LATEST,
+            provider::catalog_ids::JEV_1_13_0 => provider::models::JEV_LATEST,
             other => panic!("{name}: unknown provider {other}"),
         };
         assert_eq!(vector.provider_request.model, provider_model, "{name}");
@@ -265,7 +271,7 @@ fn check_wrapping(file: &str, expected_type: Option<QuestionType>) {
             providers,
             [
                 provider::catalog_ids::CLEF,
-                provider::catalog_ids::JEV_LATEST
+                provider::catalog_ids::JEV_1_13_0
             ],
             "{file}: one vector per provider"
         );

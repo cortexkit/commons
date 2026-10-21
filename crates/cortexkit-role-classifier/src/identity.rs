@@ -95,7 +95,7 @@ mod tests {
     fn request(states: Vec<serde_json::Value>) -> ClassifyRequest {
         ClassifyRequest::new(
             "b",
-            "cloudflare/clef",
+            "cloudflare-workers-ai/@cf/cloudflare/clef",
             [("q".to_owned(), Question::noul("i"))].into(),
             states.into_iter().map(Item::new).collect(),
         )
@@ -153,7 +153,7 @@ mod tests {
             Some("questions".into())
         );
         let mut other_model = request(vec![json!("a"), json!("b")]);
-        other_model.model = "typesafe/jev-latest".into();
+        other_model.model = "typesafe/jev-1.13.0".into();
         assert_eq!(
             recorded.first_difference(&BatchIdentity::of(&other_model).unwrap()),
             Some("model".into())
