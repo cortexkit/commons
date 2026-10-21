@@ -1,5 +1,113 @@
 # Changelog
 
+## 0.4.0
+
+- In-process hosts clean the model's text at their save seam (the hook where
+  the host stores a finished reply), by the frozen plan of the run that wrote
+  it. The Claude Code gateway cleans on every exposure instead.
+- Command cutoffs and expiry follow the same forwarded/never-forwarded distinction as
+  crashes: `outcome_unknown` versus `failed`, retained and replayed unchanged.
+
+
+- `session.read` and `session.resolve` accept strict `media: "inline" |
+  "descriptors"` (inline by default). Descriptor reads replace byte-backed
+  media and large text, arguments and reasoning payloads in place without
+  losing tool pairing or signatures. `ResolveReply.content` is now JSON: the
+  inline string is unchanged, while descriptors can be structured content.
+  The shared `read::descriptors` primitives provide strict refs, UTF-8 heads,
+  and a deterministic 3-MiB per-message budget with a largest-first fallback
+  for smaller payloads. Only an over-budget non-payload envelope can still
+  refuse `reply_too_large` in descriptors mode.
+- `ReadMessage.digest` and `part_digests` carry full-inline content identities
+  in descriptors mode, optional in inline mode and independent of tag rows.
+  Compaction's existing JCS content-digest implementation moved here and is
+  re-exported from the provider crate; payload SHA-256 remains a separate hash.
+  New `read-descriptors.json` vectors cover the Anthropic content layouts,
+  nested media, paired calls/results, a UTF-8 head crossing, and frame fallback.
+
+Breaking. Tag numbers are no longer a stored, never-reused ledger: a number is
+only the name a part shows the model, computed from the transcript, and
+everything durable is keyed by the host's own identity (message id, part key,
+content digest). CONTRACT.md §9.6 is rewritten around that.
+
+- **Which parts count** (§9.6). A part gets a number if and only if it is
+  rendered with one: user text (a steer stored as a user message included),
+  a tool result's text (error text included), the model's text, and an
+  image-only tool result, which renders a label `§N§ [image]`. Images and
+  files in user messages, reasoning, tool calls, the history head, compaction
+  markers, `turn_system` messages and empty text never count. One predicate,
+  `tags::counts` over the new `tags::PartKind`, drives both counting and
+  rendering. Earlier revisions let a runner tag reasoning and tool calls.
+- **Numbers.** `checkpoint + position` in the order the runner renders the
+  history from the cut, never storage order (`tags::number_parts`, with
+  `tags::RenderedPart`). The cut is keyed on the field (`tail_start_id`, else
+  the message holding the compaction part), and the anchor falls back from
+  in-effect markers carrying a checkpoint for the session to the Setup
+  checkpoint at its cut (`tags::anchor`, `tags::Marker`,
+  `tags::MarkerCheckpoint`, `tags::SetupCheckpoint`). Gaps exist only behind
+  the tail; a dropped part keeps its number as `[dropped §N§]`
+  (`tags::dropped_placeholder`).
+- **Lineage.** Renumbering a part a read exposed starts a new lineage, and a
+  renumbering detected mid-step takes effect at the next step boundary, never
+  before that step's tool calls run. That is why `session.resolve` keeps its
+  shape with no anchor: it answers the current lineage, and a number no part
+  of it shows is `unknown_tag`. Numbers may repeat across lineages.
+- **Scope.** Numbering and rendering apply only to sessions whose plan sets
+  `render_tags: true`; elsewhere rows carry keys and no numbers. Earlier
+  revisions numbered every session of a `tags` runner.
+- **Cleaning the model's own tag notation.** The shared functions port the tag
+  cleaning in standalone Magic Context, the plugin that manages context inside
+  OpenCode and Pi (`tag-content-primitives.ts`, `text-complete.ts`).
+  `tags::clean_model_text`, `tags::strip_leading_tag_notation` and
+  `tags::render_counted_text` apply on every exposure of text a tag-rendering
+  run wrote (`tags::exposed_model_text`,
+  `tags::TextWriter`). Untagged runs' text and a structured-output run's final
+  text are never cleaned; nor are signed thinking, encrypted reasoning or
+  tool-call arguments. In 0.3, rendering left a model's text as written when
+  its text part carried provider state (a Gemini thought signature or
+  ChatGPT's `phase`). Cleaning now applies on every provider. Earlier revisions
+  stored and answered model-written `§N§` byte for byte.
+- Descriptor fallback sizing serializes the whole message once, adjusts its
+  encoded size by each replacement's exact compact-JSON size difference, then
+  checks the final full encoding. A mixed-size vector pins largest-first
+  selection and a tie at the cut, alongside the equal-size vector.
+- **Freeze and switching.** The rules are frozen per run under
+  `runner-tags/v2` (`tags::RULES_FEATURE`). A runner moving from a stored
+  ledger switches at its next run or user turn, keeps every stored number,
+  takes the ledger's high-water as its starting checkpoint and stays on the
+  same lineage; a detected restore starts a new lineage.
+- **New describe group `tag_checkpoint`** (requires `compaction`; refused as
+  `tag_checkpoint_without_compaction` otherwise): the runner honours a
+  compaction provider's Setup checkpoint `{tag_checkpoint, cut}`.
+- **New terminal refusals** in `errors::CODES`: `fork_unsupported`
+  (`errors::ForkUnsupportedDetail {parent?}`) on `session.send` and
+  `session.adopt` for a session the runner knows was forked from a managed
+  session, and `template_part_gone` (`errors::TemplatePartGoneDetail {slot}`).
+- **Template slots** (§9.7). The `tag` slot type is replaced by `part_tag`,
+  whose value is `{mid, part}` (`delivery_order::PartRef`), never a number;
+  the runner renders the number the carrying request shows. A part not shown
+  refuses the send `template_part_gone` at admission, or ends a queued send in
+  the new terminal send state `template_part_gone` (`send::states`,
+  `SendReply::slot`). `delivery_order::render` now takes a `shown` lookup
+  instead of an `assigned` predicate. **`template_digest` changes** for every
+  template with a tag slot: the slot is spelled differently, and a template
+  still declaring `tag` no longer decodes, so senders regenerate their
+  catalogs.
+- **Person-started turns are runs** (§9.5): on an `adopt` session every turn
+  the host starts has a `run_id`, appears on `session.subscribe`, and answers
+  `run.status` and `run.result`. It carries no `send_id`.
+- Every public enum this release adds or extends is `#[non_exhaustive]`
+  (`tags::PartKind`, `tags::Anchor`, `tags::TextWriter`, and the extended
+  `send::SendState`, `delivery_order::Slot` and
+  `delivery_order::TemplateProblem`): a later variant is additive, and a
+  `match` on one outside this crate needs a `_` arm.
+- Removed: `tags::next_after`, `tags::RenderKind` and `tags::render_text`
+  (replaced by `tags::render_part`).
+- Vectors: new `tag-cleaning.json` (generated by running standalone's own
+  functions, with its test cases and this crate's own), `tag-numbering.json`
+  and `tag-checkpoint-describe.json`; `tags.json`, `delivery-order.json` and
+  `errors.json` follow the new rules; `SHA256SUMS` regenerated.
+
 ## 0.3.10
 
 - Persist user-command invocation records and the terminal `outcome_unknown`

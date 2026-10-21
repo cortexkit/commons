@@ -14,6 +14,10 @@ pub const DIR: &str = "llm-runner-v1";
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "read-descriptors.json",
+        include_str!("../test-vectors/llm-runner-v1/read-descriptors.json"),
+    ),
+    (
         "user-commands.json",
         include_str!("../test-vectors/llm-runner-v1/user-commands.json"),
     ),
@@ -266,6 +270,18 @@ pub const FILES: &[(&str, &str)] = &[
     (
         "subscribe.json",
         include_str!("../test-vectors/llm-runner-v1/subscribe.json"),
+    ),
+    (
+        "tag-checkpoint-describe.json",
+        include_str!("../test-vectors/llm-runner-v1/tag-checkpoint-describe.json"),
+    ),
+    (
+        "tag-cleaning.json",
+        include_str!("../test-vectors/llm-runner-v1/tag-cleaning.json"),
+    ),
+    (
+        "tag-numbering.json",
+        include_str!("../test-vectors/llm-runner-v1/tag-numbering.json"),
     ),
     (
         "tags-describe.json",

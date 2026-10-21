@@ -10,7 +10,7 @@
     "commons_revision": "synthetic-commons-revision",
     "wire_majors": {"compaction-provider": "v1", "step-transform-provider": "v1"},
     "package_versions": {"compaction-provider": "0.2.0", "step-transform-provider": "0.2.0"},
-    "epochs": {"codec": 1, "raw_provenance": 1, "render": 1, "tagger": 1, "memory": 1, "compartment": 1},
+    "epochs": {"codec": 1, "raw_provenance": 1, "render": 1, "tagger": 2, "memory": 1, "compartment": 1},
     "exact_endpoint": "native_top_level_inclusive",
     "partial_message_cut": false,
     "caps": {"ingress_envelope_bytes": 3145728, "hook_envelope_bytes": 3145728, "single_message_bytes": 1048576, "view_page_bytes": 1024},

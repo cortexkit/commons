@@ -23,6 +23,7 @@
 pub mod adopt;
 pub mod baseline;
 pub mod compaction;
+pub mod content_digest;
 pub mod delivery_order;
 pub mod describe;
 pub mod directives;
@@ -162,6 +163,16 @@ pub mod capabilities {
     /// refusal and run state and the `context_ceiling_wait` status. A runner
     /// that hosts no sessions of its own declares none of it.
     pub const COMPACTION: &str = "compaction";
+    /// Honouring a compaction provider's Setup checkpoint
+    /// (`tags::SetupCheckpoint`, `{tag_checkpoint, cut}`): the runner
+    /// anchors the checkpoint at its cut message when no in-effect marker
+    /// carries a checkpoint for the session, and numbers from the session
+    /// start with it, on a new lineage, once that message is gone. A
+    /// provider refuses Setup for a session it moved from standalone Magic
+    /// Context on a runner without it. Requires [`COMPACTION`]: an answer
+    /// declaring it without `compaction` is malformed. Adds no op of its
+    /// own.
+    pub const TAG_CHECKPOINT: &str = "tag_checkpoint";
     /// Mid-session changes from the session's owner: `session.refresh`,
     /// `session.refresh_policy` and `session.flush_prefix`. A runner without
     /// it gets no mid-session changes; its owner applies them at the next
@@ -190,8 +201,9 @@ pub mod capabilities {
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
     pub const ADOPT: &str = "adopt";
-    /// Runner-owned tags: a durable `§N§` per message part on
-    /// `session.read` entries, resolved by `session.resolve`.
+    /// Runner-rendered tags: the `§N§` each counted part shows, computed
+    /// from the transcript, on `session.read` entries and resolved in the
+    /// current lineage by `session.resolve`.
     pub const TAGS: &str = "tags";
     /// `run.tool_calls`: a run's tool calls as a paged list, read without
     /// decoding message bodies.
@@ -249,6 +261,7 @@ pub mod capabilities {
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
         (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
+        (TAG_CHECKPOINT, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (
             SESSION_CHANGE,
             &[

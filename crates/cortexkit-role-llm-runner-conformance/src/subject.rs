@@ -46,6 +46,9 @@ pub enum Capability {
     /// The `compaction` group: scripted Setup, step answers, refusals,
     /// deadlines, request fences and durable replay.
     Compaction,
+    /// The `tag_checkpoint` group: the runner honours a compaction
+    /// provider's Setup checkpoint `{tag_checkpoint, cut}`.
+    TagCheckpoint,
     /// The `session_change` group. Conformance cases do not require it.
     SessionChange,
     /// Whole-session retention with limits from `role.describe.retention`.
@@ -96,6 +99,11 @@ pub enum Capability {
     /// [`LlmRunnerSubject::await_tool_call`] and
     /// [`LlmRunnerSubject::release_tool_call`].
     HoldToolCalls,
+    /// The runner adapter records the texts each model request carried, as
+    /// the model received them, in
+    /// [`ModelRequestObservation::rendered`]. See
+    /// [`LlmRunnerSubject::model_requests`].
+    RenderedModelInput,
     /// The harness can kill the runner at this point of
     /// `cortexkit_role_llm_runner::points`. Never listed by
     /// [`LlmRunnerSubject::capabilities`]: the conformance driver derives it from
@@ -119,6 +127,7 @@ impl Capability {
         Self::Queue,
         Self::Interrupt,
         Self::Compaction,
+        Self::TagCheckpoint,
         Self::SessionChange,
         Self::Retention,
         Self::InputTokenCap,
@@ -146,6 +155,7 @@ impl Capability {
                 Self::HoldContextCeiling => "hold_context_ceiling".to_owned(),
                 Self::HostMetadataChange => "host_metadata_change".to_owned(),
                 Self::RetentionClock => "advance_retention_clock".to_owned(),
+                Self::RenderedModelInput => "rendered_model_input".to_owned(),
                 Self::KillAt(point) => format!("kill_at:{point}"),
                 _ => unreachable!("every other capability is a group"),
             },
@@ -169,6 +179,7 @@ impl Capability {
             Self::Queue => groups::QUEUE,
             Self::Interrupt => groups::INTERRUPT,
             Self::Compaction => groups::COMPACTION,
+            Self::TagCheckpoint => groups::TAG_CHECKPOINT,
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
@@ -188,6 +199,7 @@ impl Capability {
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
             | Self::RetentionClock
+            | Self::RenderedModelInput
             | Self::KillAt(_) => return None,
         })
     }
@@ -266,6 +278,11 @@ pub struct ModelRequestObservation {
     /// The input schema of the `submit_result` tool, if the request offered
     /// it.
     pub submit_result_schema: Option<Value>,
+    /// Every text the request carried (each text part, each tool result's
+    /// text, each label), in request order, exactly as the model received
+    /// it, a rendered tag prefix included. Recorded when the adapter
+    /// declares [`Capability::RenderedModelInput`]; empty otherwise.
+    pub rendered: Vec<String>,
 }
 
 impl ModelRequestObservation {
@@ -288,6 +305,11 @@ impl ModelRequestObservation {
 
     pub fn with_submit_result_schema(mut self, schema: Value) -> Self {
         self.submit_result_schema = Some(schema);
+        self
+    }
+
+    pub fn with_rendered(mut self, rendered: Vec<String>) -> Self {
+        self.rendered = rendered;
         self
     }
 }
@@ -513,7 +535,8 @@ pub trait LlmRunnerSubject: Harness {
     /// Every model request the scripted model received for `session`, in
     /// order, across kills and restarts. Keep the record outside the runner
     /// and its state root. Required with [`Capability::StructuredOutput`],
-    /// [`Capability::NoTools`] and [`Capability::MaxOutputTokens`].
+    /// [`Capability::NoTools`], [`Capability::MaxOutputTokens`] and
+    /// [`Capability::RenderedModelInput`].
     async fn model_requests(
         &self,
         _session: &str,
@@ -615,6 +638,148 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "host metadata changes are not implemented",
         ))
+    }
+
+    /// A scripted tool result that the adapter's tool provider answers as a
+    /// tool result holding only an image (no text), with `marker` somewhere
+    /// in the result's bytes as `session.read` returns them (an image's
+    /// name, say), so a case can find its entry. `None` when the provider
+    /// cannot answer one; the tags case counting an image-only result then
+    /// checks the rest of its rules and names the one it could not.
+    fn image_tool_result(&self, _marker: &str) -> Option<Value> {
+        None
+    }
+
+    /// An image result in the host's actual schema, with exactly `bytes` as
+    /// decoded image bytes. `nested` requests a tool_result containing the
+    /// image; otherwise the result is an image block. Unsupported adapters
+    /// name the media-fixture cases inapplicable.
+    fn media_tool_result(&self, _bytes: &[u8], _nested: bool, _scenario: &str) -> Option<Value> {
+        None
+    }
+
+    /// A tool result containing `texts` as separate text payloads, preserving
+    /// their order. Used to test descriptor selection when individually
+    /// inline-sized text payloads together exceed the per-message budget.
+    fn multipart_tool_result(&self, _texts: &[String]) -> Option<Value> {
+        None
+    }
+
+    /// Top-level parts of a read message in message order, keyed exactly as
+    /// tags and replace_part address them. Override for a host's schema;
+    /// these defaults cover content-block and parts-array schemas.
+    fn read_parts(&self, message: &Value) -> Vec<(String, Value)> {
+        if let Some(parts) = message
+            .get("parts")
+            .or_else(|| message.get("content"))
+            .and_then(Value::as_array)
+        {
+            parts
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    (
+                        p.get("id")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| i.to_string()),
+                        p.clone(),
+                    )
+                })
+                .collect()
+        } else {
+            vec![("0".into(), message.clone())]
+        }
+    }
+
+    /// Make session `fork` a fork or clone of the managed session `parent`
+    /// the way the host makes one (OpenCode's fork copies the parent's
+    /// parts, marker checkpoint included), so that the runner can know it
+    /// was forked. `fork`'s script is installed and its route open, and no
+    /// role request has reached it. Return an error when the adapter cannot
+    /// create a fork the runner can detect: the fork case is then
+    /// inapplicable, since a runner refuses only forks it can know about.
+    async fn fork_session(
+        &self,
+        _handle: &Self::Handle,
+        _parent: &str,
+        _fork: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("forks are not implemented"))
+    }
+
+    /// Compact `session` the way its host compacts natively (OpenCode's own
+    /// compaction), so that the runner writes its checkpoint key on the
+    /// marker. Return an error when the host cannot: the lost-key tags case
+    /// is then inapplicable.
+    async fn compact_in_host(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("host compaction is not implemented"))
+    }
+
+    /// Drop the checkpoint key from `session`'s newest compaction marker the
+    /// way the host loses it (OpenCode's part-update route drops unknown
+    /// keys), leaving the marker in effect. Return an error when the adapter
+    /// cannot: the lost-key tags case is then inapplicable.
+    async fn drop_marker_key(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "dropping a marker key is not implemented",
+        ))
+    }
+
+    /// The text of the model reply holding `marker`, as the host's own store
+    /// keeps it, read outside the runner (an in-process host's save seam has
+    /// run on it); `None` when the store holds no such reply. Return an
+    /// error when the adapter cannot read the host's store: the save-seam
+    /// tags case is then inapplicable.
+    async fn host_stored_text(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _marker: &str,
+    ) -> Result<Option<String>, HarnessError> {
+        Err(HarnessError::new(
+            "reading the host's store is not implemented",
+        ))
+    }
+
+    /// Whether the runner's host runs standalone Magic Context in-process,
+    /// so a runner that has never served a session hands it to standalone on
+    /// `standalone_session_not_migrated` instead of failing the run. The
+    /// refusal case checks that code only when this is `false`.
+    fn standalone_in_process(&self) -> bool {
+        false
+    }
+
+    /// Make the next run call Setup again, as a provider reconnect would,
+    /// without changing the history or whether the runner has already served it.
+    /// Without this hook the case cannot check that a later
+    /// `standalone_session_not_migrated` fails rather than handing off.
+    async fn require_setup_again(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("repeating Setup is not implemented"))
+    }
+
+    /// End an invocation at the host's session cutoff, just before or just
+    /// after forwarding. The adapter holds the invocation at that boundary;
+    /// it must not synthesize the runner's answer or status.
+    async fn cut_off_user_command(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _after_forward: bool,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("cutting off commands is not implemented"))
     }
 
     /// The module id the runner records as `dispatched_to` for a call to

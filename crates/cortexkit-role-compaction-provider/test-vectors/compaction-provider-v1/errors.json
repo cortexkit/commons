@@ -35,8 +35,18 @@
       "retryable": true
     },
     {
+      "code": "standalone_session_not_migrated",
+      "named": true,
+      "retryable": false
+    },
+    {
+      "code": "tag_checkpoint_unsupported",
+      "named": true,
+      "retryable": false
+    },
+    {
       "code": "setup_identity_mismatch",
-      "named": false,
+      "named": true,
       "retryable": false
     },
     {
@@ -77,6 +87,16 @@
     {
       "code": "history_unreadable",
       "retryable": true,
+      "ends_run_after_setup": true
+    },
+    {
+      "code": "standalone_session_not_migrated",
+      "retryable": false,
+      "ends_run_after_setup": true
+    },
+    {
+      "code": "tag_checkpoint_unsupported",
+      "retryable": false,
       "ends_run_after_setup": true
     },
     {

@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.9.0
+
+Breaking. Requires llm-runner 0.4.0 and compaction-provider 0.4.0, whose tag
+numbers are computed from the transcript and are no longer a never-reused
+ledger. The tags cases are rewritten for that, and three are renamed because
+their old names state the rule that no longer holds.
+
+- Renamed and rewritten: `tags_never_reused_across_runs` is now
+  `tags_numbers_stable_within_a_lineage` (numbers consecutive and kept within
+  a lineage, changed only with a lineage change);
+  `tags_model_written_tags_stored_verbatim` is now
+  `tags_model_written_tags_cleaned_on_exposure` (cleaned on every exposure for
+  tag-rendering runs, byte for byte for untagged runs, raw for a
+  structured-output run's final text where `structured_output` is declared);
+  `tags_resolve_left_lineage_refused` is now
+  `tags_resolve_answers_the_current_lineage` (every number the new lineage
+  shows resolves there; numbers may repeat across lineages);
+  `tags_exist_whether_or_not_rendered` is now
+  `tags_only_on_tag_rendering_sessions`, and
+  `tags_resolve_returns_stored_content` is now
+  `tags_resolve_returns_exposed_content`.
+- Every tags case opens its sessions with `render_tags: true` through
+  `send_fields_with_plan`, since numbering applies only to such sessions. The
+  crash scenario's session B does so on a tags runner.
+- New cases: `tags_numbered_in_rendered_order`,
+  `tags_renumbering_waits_for_the_step_boundary`,
+  `tags_count_only_parts_rendered_with_a_number`,
+  `tags_setup_checkpoint_anchors_at_its_cut`,
+  `tags_fork_of_a_managed_session_refused` (inapplicable unless the adapter
+  can create a fork the runner can detect),
+  `delivery_order_template_part_gone_refused` and `adopt_host_turn_is_a_run`
+  (inapplicable unless the adapter can start a host turn).
+- `compaction_setup_route_session_matches_setup` also checks that a Setup
+  refused `setup_identity_mismatch` ends the run `error` with that code (now a
+  typed compaction-provider code), with no model request.
+- `CompactionSetup` is now `#[non_exhaustive]`: an adapter's `match` on it
+  needs a `_` arm.
+- Subject API: `Capability::TagCheckpoint` and
+  `Capability::RenderedModelInput`; `ModelRequestObservation::rendered` with
+  `with_rendered`; defaulted hooks `image_tool_result(marker)` and
+  `fork_session(handle, parent, fork)`; `CompactionSetup::ReadyWithCheckpoint`.
+  `structured_output_frozen_across_restart` ignores `rendered` when comparing
+  requests.
+- The reference fake numbers, cleans and renders through the role crate's
+  shared functions, renders a steer stored during a held call after the
+  call's result, and moves to a new lineage at the next step boundary when
+  that renumbers an exposed part. Each new or rewritten case has a defect
+  that fails it by name in the suite's own tests.
+- Add descriptor-read cases for decoded media hashes, nested
+  media, frame-sized arguments, UTF-8 heads, inline compatibility, full-inline
+  message/part identities, pairing preservation, strict digest keys, and stable
+  per-message fallback across page caps. Adapter media fixtures gate these
+  cases; each supported rule has a named defect-fake check.
+
+- Check lost marker-key fallback, in-process save seams,
+  standalone refusal handoff only before first service, and command cutoffs
+  on each side of forwarding. Adapter-only situations are named inapplicable
+  when unsupported; defect fakes exercise the corresponding failures by name.
+- The frame-budget case also checks mixed-size fallback selection: largest
+  payload first, with the earlier of two tied parts selected at the cut.
+  A smallest-first defect fake fails this case by name.
+- Preserve the 0.8.11 route-before-prepare fix for the crash-cut command case;
+  adapters may derive session references from the runner bound by the route.
+
 ## 0.8.11
 
 - The crash-cut user-command case (`user_commands_outcome_unknown`) now calls

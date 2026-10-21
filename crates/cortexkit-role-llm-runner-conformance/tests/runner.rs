@@ -26,12 +26,10 @@ fn failed(report: &SuiteReport, case: &str) -> String {
     }
 }
 
-/// The case that resolves tags only after a `StepRecorded` seal that drops
-/// the never-sent call onto a new lineage. The fake resumes by default, and
-/// `StepRecovery::SealDropCall` (which keeps the step's text) drops no
-/// tagged part, so with either the case is inapplicable by name; the tests
-/// that use `StepRecovery::SealDropStep` check it passes and fails.
-const LEFT_LINEAGE_CASE: &str = "tags_resolve_left_lineage_refused";
+/// The case that resolves tags only after a `StepRecorded` seal that moves
+/// the session onto a new lineage. The fake resumes by default, so the case
+/// is inapplicable by name; the tests that seal check it passes and fails.
+const LEFT_LINEAGE_CASE: &str = "tags_resolve_answers_the_current_lineage";
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
@@ -53,6 +51,11 @@ const OPTIONAL_GROUPS: &[Capability] = &[
 ];
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("media_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("byte-backed image"))
+    {
+        return;
+    }
     // A case skipped only for optional groups the subject leaves undeclared.
     if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
         if !missing.is_empty() && missing.iter().all(|group| OPTIONAL_GROUPS.contains(group)) {
@@ -110,7 +113,20 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         && matches!(
             report.outcome(case),
             Some(CaseOutcome::Inapplicable { reason }) if reason.contains("no lineage")
-                || reason.contains("dropped no tagged part")
+        )
+    {
+        return;
+    }
+    // The fake leaves structured_output undeclared unless a test declares
+    // it, so the cleaning case names the structured-output rule unchecked.
+    if [
+        "tags_model_written_tags_cleaned_on_exposure",
+        "tags_host_store_cleaned_at_the_save_seam",
+    ]
+    .contains(&case)
+        && matches!(
+            report.outcome(case),
+            Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("structured_output")
         )
     {
         return;
@@ -205,6 +221,7 @@ const TIMED_RETENTION_CASES: &[&str] = &[
 async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.claim_process_kill = true;
+    subject.descriptor_fixtures = true;
     subject.enable_retention();
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
@@ -1210,6 +1227,27 @@ async fn compaction_setup_route_session_mismatch_fails_only_named_case() {
     .await;
 }
 
+/// A runner that records a `setup_identity_mismatch` refusal under another
+/// code fails the route-session case, by name and with that reason.
+#[tokio::test]
+async fn compaction_identity_mismatch_under_another_code_fails_only_the_route_session_case() {
+    compaction_break(
+        CompactionDefect::IdentityMismatchUnderAnotherCode,
+        "compaction_setup_route_session_matches_setup",
+    )
+    .await;
+    let report = run(&FakeSubject::new(Defects {
+        compaction: CompactionDefect::IdentityMismatchUnderAnotherCode,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "compaction_setup_route_session_matches_setup");
+    assert!(
+        reason.contains("a Setup refused setup_identity_mismatch"),
+        "{reason}"
+    );
+}
+
 #[tokio::test]
 async fn compaction_shared_project_route_with_runner_harness_passes_identity_case() {
     let mut subject = FakeSubject::new(Defects::default());
@@ -2009,20 +2047,22 @@ async fn without_send_status_its_cases_skip_by_name_and_the_resend_case_still_ru
 }
 
 /// The tags case reads the `StepRecorded` scenario: a seal that drops the
-/// step moves the session to a new lineage and leaves the step's tag
-/// carried by no part, which resolve must refuse.
+/// step moves the session to a new lineage, whose numbers may repeat the
+/// dropped part's; resolve answers the part the new lineage shows.
 #[tokio::test]
-async fn a_dropped_step_tag_is_refused_and_resolving_it_with_old_content_fails_by_name() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.step_recovery = StepRecovery::SealDropStep;
-    let report = run(&subject).await;
-    assert_eq!(
-        report.outcome(LEFT_LINEAGE_CASE),
-        Some(&CaseOutcome::Passed),
-        "{}",
-        report.render()
-    );
-    assert_passed(&report, "crash_at_StepRecorded");
+async fn a_dropped_step_resolves_in_the_new_lineage_and_resolving_old_content_fails_by_name() {
+    for recovery in [StepRecovery::SealDropStep, StepRecovery::SealDropCall] {
+        let mut subject = FakeSubject::new(Defects::default());
+        subject.step_recovery = recovery;
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome(LEFT_LINEAGE_CASE),
+            Some(&CaseOutcome::Passed),
+            "{recovery:?}: {}",
+            report.render()
+        );
+        assert_passed(&report, "crash_at_StepRecorded");
+    }
 
     let mut subject = FakeSubject::new(Defects {
         resolve_left_lineage_tags: true,
@@ -2032,32 +2072,24 @@ async fn a_dropped_step_tag_is_refused_and_resolving_it_with_old_content_fails_b
     let report = run(&subject).await;
     let reason = failed(&report, LEFT_LINEAGE_CASE);
     assert!(
-        reason.contains("no part of the new lineage carries"),
-        "{reason}"
-    );
-    assert!(
-        reason.contains("never answered with that lineage's content"),
+        reason.contains("never the one the session left"),
         "{reason}"
     );
     assert_passed(&report, "crash_at_StepRecorded");
     assert_passed(&report, "tags_resolve_unknown_tag_refused");
 }
 
-/// Without a seal that leaves a lineage, or with one that drops no tagged
-/// part, the left-lineage case has nothing to ask and says so by name.
+/// Without a seal that leaves a lineage, the left-lineage case has nothing
+/// to ask and says so by name; without `tags` it is skipped.
 #[tokio::test]
-async fn without_a_dropped_tagged_part_the_left_lineage_case_is_inapplicable() {
-    for (recovery, because) in [
-        (StepRecovery::Resume, "no lineage"),
-        (StepRecovery::SealInterrupted, "no lineage"),
-        (StepRecovery::SealDropCall, "dropped no tagged part"),
-    ] {
+async fn without_a_new_lineage_the_left_lineage_case_is_inapplicable() {
+    for recovery in [StepRecovery::Resume, StepRecovery::SealInterrupted] {
         let mut subject = FakeSubject::new(Defects::default());
         subject.step_recovery = recovery;
         let report = run(&subject).await;
         match report.outcome(LEFT_LINEAGE_CASE) {
             Some(CaseOutcome::Inapplicable { reason }) => {
-                assert!(reason.contains(because), "{recovery:?}: {reason}")
+                assert!(reason.contains("no lineage"), "{recovery:?}: {reason}")
             }
             other => panic!("{recovery:?}: {other:?}"),
         }
@@ -2065,6 +2097,7 @@ async fn without_a_dropped_tagged_part_the_left_lineage_case_is_inapplicable() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.step_recovery = StepRecovery::SealDropStep;
     subject.capabilities.remove(&Capability::Compaction);
+    subject.capabilities.remove(&Capability::TagCheckpoint);
     subject.capabilities.remove(&Capability::Tags);
     let report = run(&subject).await;
     assert_eq!(
@@ -2111,32 +2144,182 @@ async fn run_status_carries_the_same_usage_as_run_result() {
 #[tokio::test]
 async fn a_tagging_runner_passes_the_tags_cases() {
     only_these_fail(Capability::Tags, TAG_PREFIXES, Defects::default(), &[]).await;
+    let report = run(&declaring(Capability::Tags, Defects::default())).await;
+    for name in [
+        "tags_numbered_in_rendered_order",
+        "tags_renumbering_waits_for_the_step_boundary",
+        "tags_count_only_parts_rendered_with_a_number",
+        "tags_setup_checkpoint_anchors_at_its_cut",
+        "tags_fork_of_a_managed_session_refused",
+        "tags_model_written_tags_cleaned_on_exposure",
+    ] {
+        assert!(
+            matches!(
+                report.outcome(name),
+                Some(CaseOutcome::Passed | CaseOutcome::PassedWithInapplicableRule { .. })
+            ),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
 }
 
+/// Each defect fails its named rule. Restarting numbering every run also
+/// breaks the lost-key case, whose setup spans runs; other tag cases pass.
 #[tokio::test]
-async fn a_runner_reusing_tag_numbers_fails_the_reuse_case() {
-    only_these_fail(
-        Capability::Tags,
-        TAG_PREFIXES,
+async fn each_tags_defect_fails_its_case_by_name() {
+    let cases: &[(Defects, &str, &str)] = &[
+        (
+            Defects {
+                tags_restart_each_run: true,
+                ..Defects::default()
+            },
+            "tags_numbers_stable_within_a_lineage",
+            "used twice",
+        ),
+        (
+            Defects {
+                tags_exposed_raw: true,
+                ..Defects::default()
+            },
+            "tags_model_written_tags_cleaned_on_exposure",
+            "cleaned on every exposure",
+        ),
+        (
+            Defects {
+                tags_numbered_in_storage_order: true,
+                ..Defects::default()
+            },
+            "tags_numbered_in_rendered_order",
+            "never in storage order",
+        ),
+        (
+            Defects {
+                tags_renumber_mid_step: true,
+                ..Defects::default()
+            },
+            "tags_renumbering_waits_for_the_step_boundary",
+            "still held",
+        ),
+        (
+            Defects {
+                tags_renumber_without_new_lineage: true,
+                ..Defects::default()
+            },
+            "tags_renumbering_waits_for_the_step_boundary",
+            "starts a new lineage",
+        ),
+        (
+            Defects {
+                tags_count_reasoning: true,
+                ..Defects::default()
+            },
+            "tags_count_only_parts_rendered_with_a_number",
+            "only its text counts",
+        ),
+        (
+            Defects {
+                tags_numbered_without_render_tags: true,
+                ..Defects::default()
+            },
+            "tags_only_on_tag_rendering_sessions",
+            "numbering applies only to sessions whose plan renders tags",
+        ),
+        (
+            Defects {
+                tags_setup_checkpoint_ignored: true,
+                ..Defects::default()
+            },
+            "tags_setup_checkpoint_anchors_at_its_cut",
+            "numbering starts after the checkpoint",
+        ),
+        (
+            Defects {
+                fork_accepted: true,
+                ..Defects::default()
+            },
+            "tags_fork_of_a_managed_session_refused",
+            "not refused",
+        ),
+        (
+            Defects {
+                tags_count_only_rendered_parts: true,
+                ..Defects::default()
+            },
+            "tags_lost_marker_key_keeps_numbers",
+            "fallback counts every part",
+        ),
+        (
+            Defects {
+                host_seam_not_cleaning: true,
+                ..Defects::default()
+            },
+            "tags_host_store_cleaned_at_the_save_seam",
+            "save seam",
+        ),
+    ];
+    for (defects, case, text) in cases {
+        let mut expected = vec![(*case, *text)];
+        if defects.tags_restart_each_run {
+            expected.push(("tags_lost_marker_key_keeps_numbers", "used twice"));
+        }
+        only_these_fail(Capability::Tags, TAG_PREFIXES, *defects, &expected).await;
+    }
+}
+
+/// With `structured_output` declared, the cleaning case also checks that a
+/// structured-output run's final text stays raw.
+#[tokio::test]
+async fn a_structured_output_runner_keeps_its_final_text_raw() {
+    let mut subject = declaring(Capability::StructuredOutput, Defects::default());
+    subject.capabilities.insert(Capability::Tags);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("tags_model_written_tags_cleaned_on_exposure"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+}
+
+/// A host turn that creates no run fails the adopt host-turn case by name.
+#[tokio::test]
+async fn host_turns_are_runs_and_one_without_a_run_fails_by_name() {
+    let report = run(&declaring(Capability::Adopt, Defects::default())).await;
+    assert_passed(&report, "adopt_host_turn_is_a_run");
+    let report = run(&declaring(
+        Capability::Adopt,
         Defects {
-            tags_reused_across_runs: true,
+            host_turns_without_run: true,
             ..Defects::default()
         },
-        &[("tags_never_reused_across_runs", "used twice")],
+    ))
+    .await;
+    let reason = failed(&report, "adopt_host_turn_is_a_run");
+    assert!(
+        reason.contains("a turn the host starts is a run"),
+        "{reason}"
+    );
+}
+
+/// A gone part in a template's `part_tag` slot is refused by name.
+#[tokio::test]
+async fn a_template_naming_a_gone_part_is_refused_and_accepting_it_fails_by_name() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects::default(),
+        &[],
     )
     .await;
-}
-
-#[tokio::test]
-async fn a_runner_rewriting_model_written_tags_fails_the_verbatim_case() {
     only_these_fail(
-        Capability::Tags,
-        TAG_PREFIXES,
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
         Defects {
-            tags_rewrite_model_text: true,
+            order_template_part_gone_accepted: true,
             ..Defects::default()
         },
-        &[("tags_model_written_tags_stored_verbatim", "as written")],
+        &[("delivery_order_template_part_gone_refused", "not refused")],
     )
     .await;
 }
@@ -2883,4 +3066,95 @@ async fn user_command_crash_faults_fail_by_name() {
             "user_commands_outcome_unknown",
         );
     }
+}
+
+#[tokio::test]
+async fn standalone_refusal_hands_off_only_before_service() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.standalone_in_process = true;
+    assert_passed(
+        &run(&subject).await,
+        "compaction_standalone_refusal_lifecycle",
+    );
+    for defect in [
+        CompactionDefect::StandaloneNoHandoff,
+        CompactionDefect::StandaloneLateHandoff,
+    ] {
+        let mut subject = FakeSubject::new(Defects {
+            compaction: defect,
+            ..Defects::default()
+        });
+        subject.standalone_in_process = true;
+        let report = run(&subject).await;
+        let reason = failed(&report, "compaction_standalone_refusal_lifecycle");
+        assert!(reason.contains("standalone"), "{reason}");
+    }
+}
+
+#[tokio::test]
+async fn user_command_cutoff_defect_fails_after_forward_by_name() {
+    let report = run(&command_subject(Some("cutoff_failed"))).await;
+    let reason = failed(&report, "user_commands_cutoff_after_forward");
+    assert!(reason.contains("outcome_unknown"), "{reason}");
+    assert_passed(&report, "user_commands_cutoff_before_forward");
+}
+
+#[tokio::test]
+async fn descriptor_defects_fail_their_cases_by_name() {
+    for (defect, case) in [
+        ("base64", "media_descriptors_image_bytes"),
+        ("nested_base64", "media_descriptors_nested_media"),
+        ("head_boundary", "media_descriptors_utf8_head"),
+        ("pairing", "media_descriptors_pairing"),
+        ("hash_descriptor", "media_descriptors_full_content_digests"),
+        ("part_key", "media_descriptors_part_keys"),
+        (
+            "model_view_descriptors",
+            "media_descriptors_model_view_refused",
+        ),
+        ("page_position", "media_descriptors_stable_across_pages"),
+        ("smallest_first", "media_descriptors_frame_budget"),
+    ] {
+        let mut subject = FakeSubject::new(Defects {
+            media: Some(defect),
+            ..Defects::default()
+        });
+        subject.descriptor_fixtures = true;
+        subject.descriptor_case = Some(case);
+        let report = run(&subject).await;
+        let reason = failed(&report, case);
+        if defect == "smallest_first" {
+            assert!(
+                reason.contains("largest-first") && reason.contains("[0, 2, 4]"),
+                "{reason}"
+            );
+        }
+        eprintln!("{defect}: {case} failed: {reason}");
+        assert_passed(&report, "tags_numbers_stable_within_a_lineage");
+    }
+}
+
+#[tokio::test]
+async fn mixed_size_fallback_frame_budget_case() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.descriptor_fixtures = true;
+    subject.descriptor_case = Some("media_descriptors_frame_budget");
+    let report = run(&subject).await;
+    assert_passed(&report, "media_descriptors_frame_budget");
+}
+
+/// These two controls use the production tag primitives through the fake's
+/// live route, not a second implementation of either rule.
+#[tokio::test]
+async fn shared_tag_rules_control_keeps_structured_output_raw() {
+    let mut subject = declaring(Capability::StructuredOutput, Defects::default());
+    subject.capabilities.insert(Capability::Tags);
+    let report = run(&subject).await;
+    assert_passed(&report, "tags_model_written_tags_cleaned_on_exposure");
+}
+
+#[tokio::test]
+async fn shared_tag_rules_control_numbers_in_rendered_order() {
+    let report = run(&declaring(Capability::Tags, Defects::default())).await;
+    assert_passed(&report, "tags_numbered_in_rendered_order");
 }

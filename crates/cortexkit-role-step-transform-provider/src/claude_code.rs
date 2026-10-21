@@ -16,6 +16,14 @@ use serde::{Deserialize, Serialize};
 use crate::hook::DEFAULT_HOOK_CAP_BYTES;
 
 pub const CAPABILITY: &str = "claude-code-step/v1";
+/// The `tagger` epoch of a provider whose tags follow llm-runner 0.4.0's
+/// computed rules (`runner-tags/v2`: a number is computed from the
+/// transcript, never stored per part). Epoch 1 named the earlier rules,
+/// under which tags were recorded once and never reused. A provider
+/// advertises this epoch, or a later one, once it tags by the computed
+/// rules; the epoch is advertised data and admission does not refuse an
+/// older one.
+pub const COMPUTED_TAGGER_EPOCH: u64 = 2;
 pub const PRINCIPAL: &str = "reserved:thalamus";
 /// The 3 MiB ceiling for encoded Claude Code request/reply envelopes. Reuse
 /// the host hook ceiling so hooks, statuses and view replies share one bound;

@@ -40,6 +40,9 @@ pub mod problem_names {
     /// The answer declares `compaction` without `tags`, which a compaction
     /// provider addresses every view edit by.
     pub const COMPACTION_WITHOUT_TAGS: &str = "compaction_without_tags";
+    /// The answer declares `tag_checkpoint` without `compaction`, whose
+    /// Setup answer carries the checkpoint.
+    pub const TAG_CHECKPOINT_WITHOUT_COMPACTION: &str = "tag_checkpoint_without_compaction";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -361,6 +364,13 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.declares(capabilities::COMPACTION) && !describe.declares(capabilities::TAGS) {
         problems.push(DescribeProblem::Undecodable(
             problem_names::COMPACTION_WITHOUT_TAGS.into(),
+        ));
+    }
+    if describe.declares(capabilities::TAG_CHECKPOINT)
+        && !describe.declares(capabilities::COMPACTION)
+    {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into(),
         ));
     }
     if let Some(modes) = &describe.delivery_order_modes {
@@ -917,6 +927,33 @@ mod tags_and_tool_calls_tests {
             "tags-describe.json",
             capabilities::TAGS,
             crate::ops::SESSION_RESOLVE,
+        );
+    }
+
+    /// `tag_checkpoint` is discovered like any group, lists the ops of the
+    /// `compaction` group it rides on, and is malformed without it.
+    #[test]
+    fn tag_checkpoint_describe_group_rides_on_compaction() {
+        let file = vectors::load("tag-checkpoint-describe.json");
+        let group = capabilities::TAG_CHECKPOINT;
+        let answer: RoleDescribe = vectors::round_trip(group, &file["accept"]);
+        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
+        assert!(answer.declares(group));
+        // Without `session.resolve` every group listing it is incomplete,
+        // this one among them.
+        let problems = check_describe(&file["refuse"]).unwrap_err();
+        assert!(problems.contains(&DescribeProblem::GroupIncomplete {
+            capability: group,
+            op: crate::ops::SESSION_RESOLVE,
+        }));
+        let without = check_describe(&file["without"]).unwrap();
+        assert!(!without.declares(group));
+        assert_eq!(without.missing(&[group]), vec![group]);
+        assert_eq!(
+            check_describe(&file["without_compaction"]),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into()
+            )])
         );
     }
 

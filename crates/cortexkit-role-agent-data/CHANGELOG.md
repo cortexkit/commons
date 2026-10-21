@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Dev-dependency on cortexkit-role-llm-runner 0.4.0 (was 0.3.0), for the
+  `session_ref` vector test. Nothing changes for callers: no public type or
+  signature names an llm-runner type, and the wire is unchanged.
+
 ## 0.2.1
 
 - Dev-dependency on cortexkit-role-llm-runner 0.3.0 (was 0.2.1), for the `session_ref` vector test. Nothing changes for callers: the published API and the wire are unchanged.

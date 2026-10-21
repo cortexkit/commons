@@ -1,13 +1,12 @@
-# `llm-runner/v1` — role contract (draft)
+# `llm-runner/v1` — role contract
 
-Stability: **alpha, draft**. Approved by the role's owner with the
-decisions recorded under "Open questions", every one of which is now
-settled; nothing here ships until the design room signs off. This document is the role definition; the
+Stability: **alpha**. The role owner's decisions are recorded under
+"Open questions". This document is the role definition; the
 Rust types in this crate are its wire shapes, this crate's
 `test-vectors/llm-runner-v1/` holds its vectors (they ship in its package, and
 the `test-vectors` feature exposes them as the public `vectors` module, with
-a `SHA256SUMS` pinning every file), and a separate `-conformance` crate will
-hold its suite (§15). Paths to vector files below are relative to this
+a `SHA256SUMS` pinning every file), and a separate `-conformance` crate
+holds its suite (§15). Paths to vector files below are relative to this
 crate.
 
 Derives from the CK extensibility design r7.3, §3.2–§3.5, §5, §6, §9.3, §10,
@@ -18,7 +17,7 @@ Every item is marked:
 
 - **[pinned]**: the design states it. A runner must do it, and a consumer may
   rely on it.
-- **[open: Qn]**: the design is silent or ambiguous, and this draft writes one
+- **[open: Qn]**: the design is silent or ambiguous, and this document records one
   option down so the types and vectors have something to pin. Question `Qn`
   under "Open questions" lists the options.
 - **[open]** (no question number): not yet defined, because it depends on a
@@ -135,6 +134,7 @@ shipping runner with this document.
 | `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
 | `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
 | `compaction` | `session.read`, `session.resolve` (it requires `tags`), and the runner half of compaction-provider 0.3.0 §3 | §11.1 |
+| `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `retract` | `session.retract` | §9.2 |
@@ -220,6 +220,11 @@ shipping runner with this document.
   (`compaction_without_tags`), because a compaction provider addresses every
   view edit by part key and tag. The group lists `tags`' ops,
   `session.read` and `session.resolve`.
+- [pinned] `tag_checkpoint` requires `compaction`: an answer declaring it
+  without `compaction` is malformed, and `check_describe` refuses it by
+  name (`tag_checkpoint_without_compaction`), because the checkpoint rides
+  the compaction provider's Setup answer. It lists `compaction`'s ops and
+  adds none (§9.6).
 - [pinned] A compaction provider requires `compaction` of any runner it
   serves. A session starter never pairs a plan's `compaction_item` with a
   runner that lacks it, and the runner refuses such a plan at admission
@@ -240,7 +245,7 @@ shipping runner with this document.
 ### 4.1 The request
 
 `{from_ordinal?, after_mid?, lineage_id?, limit?, max_bytes?,
-include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
+include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 
 - [pinned] **Tail.** With no cursor, the newest page. This is a contract, not
   a default a runner may change; the suite checks it on a session longer than
@@ -263,6 +268,12 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   are stated in `role.describe` (§2).
 - [pinned] `include_originals: true` adds `originals` to each message a hook
   changed (§4.2).
+- [pinned] `media` is `"inline"` (the default) or `"descriptors"`. Unknown
+  values are refused `invalid_params {field: "media"}`. Inline preserves the
+  existing payload bytes, whole-message paging and `reply_too_large` behavior.
+  Descriptors are offered only on raw transcript reads and `session.resolve`.
+  `view: "model"` with `media: "descriptors"` is refused before read work with
+  `invalid_params {field: "media"}`; model-view descriptors are not offered.
 - [pinned] The request is strict: an unknown field is refused
   `invalid_params` naming it, because a missing cursor changes the question
   (a misspelled `from_ordinal` would otherwise get the newest page).
@@ -281,7 +292,7 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   on its page, over the cap, with `next_from_ordinal` set if more follow. It
   is never truncated: the complete encoded reply is served whole when it fits
   the transport frame limit of 4,194,304 bytes, including the 21-byte header.
-  Otherwise the runner refuses `reply_too_large`, naming the message by its
+  Otherwise, in inline mode, the runner refuses `reply_too_large`, naming the message by its
   session and ordinal (§12).
 - [pinned] A page is an ordinal range and nothing more. It is not aligned to
   turns, runs or tool-call boundaries: a tool call and its result may arrive
@@ -315,7 +326,8 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
   entry) are outside the transcript: they never appear in `session.read`
   and are never rendered to the model on top of the view.
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
-  originals?, tool_calls?, tags?, role?, written_at?, delivered_as?}`. Every
+  originals?, tool_calls?, tags?, role?, written_at?, delivered_as?, digest?,
+  part_digests?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
@@ -331,6 +343,53 @@ include_originals?, view?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 - [pinned] The message body (`message`) is in the runner's own schema,
   opaque to the role and decoded as JSON. A neutral message schema is not in
   v1 (see "Not in v1").
+
+#### Descriptor payloads and identity
+
+- [pinned] In descriptors mode every byte-backed image, file, PDF or audio
+  payload becomes `{type: "media_ref", part?, kind, mime, byte_size, sha256,
+  width?, height?}`. Size and SHA-256 are over decoded bytes, never base64.
+  Dimensions are present only when read from an image header. URL-only media
+  stays inline; a text-sourced document is text, not byte-backed media.
+- [pinned] `PART_INLINE_MAX = 262_144` UTF-8 bytes. Every other payload over
+  that threshold is a ref: `text_ref` adds `char_count` (Unicode scalar values)
+  and `head` (the first 4,096 UTF-8 bytes, cut back to a character boundary);
+  `args_ref` adds the tool `name`; `reasoning_ref` describes thinking or
+  reasoning data. Each has `part?`, `byte_size` and lowercase `sha256`.
+  Text SHA-256 covers exposed text, cleaned where the writing run requires
+  it; arguments cover their bytes as written. These payload hashes differ
+  from the JSON content identities below.
+- [pinned] Refs replace only payloads, in place. A top-level ref carries the
+  replaced part's key. A nested ref has no `part`: its containing top-level
+  part remains the unit for tags, `replace_part` and content digests. Large
+  text includes a tool result's string content and an OpenCode tool output.
+  A described call keeps its id and name beside its `args_ref`; a result keeps
+  its call id or `tool_use_id`, `is_error` and every other non-payload field;
+  reasoning retains its kind, signatures and provider metadata.
+- [pinned] `DESCRIPTOR_MESSAGE_MAX = 3_145_728` bytes bounds one complete
+  encoded `ReadMessage`, leaving 1 MiB of the daemon frame for the page
+  envelope and transport header. If describing all media and all payloads
+  over the threshold still exceeds it, describe additional payloads largest
+  first, ties broken by earlier part order, until it fits. Selection depends
+  only on that message's own content and these constants, never `max_bytes`,
+  page position or neighboring messages: repeated reads on one lineage return
+  identical bytes. The runner selects fewer messages to keep the complete
+  page inside the frame. `max_bytes` is still soft for one message: an
+  over-cap message is served alone. The only descriptors-mode
+  `reply_too_large` is non-payload structure exceeding the fixed budget; its
+  detail names `ordinal`. `read::descriptors::describe` supplies the shared
+  largest-first policy; schema adapters identify payload locations.
+- [pinned] In descriptors mode every `ReadMessage` MUST carry `digest` and
+  `part_digests: [{part, digest}]`, every top-level part in message order,
+  nested media excluded. Both fields are optional in inline mode and are
+  independent of the tags group. Digests use `content_digest::content_digest`:
+  lowercase SHA-256 over RFC 8785 (JCS) of the full message or full part exactly
+  as inline mode serves it. This is the same function used for compaction
+  notices' `through_digest` and `descends_from`, re-exported by the provider
+  crate; it never hashes descriptors. Digest rows with keys not matching the
+  actual parts, missing rows, duplicate keys or wrong order are decode errors
+  in the kit. Ref shapes decode strictly. A compaction provider uses these
+  served identities and ref hashes as given, never rehashing a descriptor.
 - [pinned] Ordinals and `mid`s are never reused or renumbered within a
   lineage, across any crash.
 - [pinned] With `include_originals`, a hooked message carries `originals:
@@ -814,6 +873,11 @@ run's token usage whichever runner served it.
   `reason: context_ceiling_wait` and `deadline_ms` when the wait starts.
 
 ## 8. `model_view`
+
+- [pinned] Model-view descriptors are not offered. A request combining
+  `view: "model"` with `media: "descriptors"` is refused before read work as
+  `invalid_params {field: "media"}`. The existing indivisible group rule and
+  `reply_too_large` for an over-frame group are unchanged.
 
 - [pinned] Raw is the default view. The model view is the canonical message
   list after hooks and compaction. The bytes a model provider was sent are not
@@ -1458,7 +1522,17 @@ without a prompt.
   records a plan (§10.1), so `session.baseline` answers the owner afterwards
   as it would after that admission. It starts no run and writes no message.
   It does not interrupt, wait for or refuse a run already in progress: the
-  person may be mid-turn in their app, and that run goes on as before.
+  person may be mid-turn in their app, and that run continues, observable
+  as every run is (below).
+- [pinned] Person-started turns are runs. On a session the runner serves
+  through `adopt`, every turn the host starts, a turn the person starts in
+  their own app included, is a run: it has a `run_id`, it appears on
+  `session.subscribe` like any run (§7), and it answers `run.status`
+  (§6.1) and `run.result` (§6), its `directives` (§9.9) included, wherever
+  the runner declares those groups. `directives` follow §9.9 unchanged: a
+  run whose admission named no directive reports none, so a host turn
+  reports one only where the host admits its turns with the names. It carries no `send_id`, and that is
+  how the owner tells it from its own runs: there is no origin field.
 - [pinned] Drift: the runner computes the identity of the request's plan,
   the same identity admission uses for `plan_drift` (§10.1), and compares
   it with the identity of the plan it applied when the host started the
@@ -1507,132 +1581,297 @@ without a prompt.
   (§12.1) concerns a scoped send into a session recorded without a scope,
   and is unchanged.
 
-### 9.6 `tags`: runner-owned part tags
+### 9.6 `tags`: runner-rendered part numbers
 
-The runner owns the transcript, so it owns short, stable addresses for its
-parts: tags. A consumer (a context manager, a model referring to an earlier
-message, a tool using part of an earlier output) names a part by its tag, and the
-runner answers with the exact stored content.
+The runner renders the transcript, so it shows the model short names for
+its parts: tags, `§N§`. A consumer (a context manager, a model referring to
+an earlier message, a tool using part of an earlier output) names a part by
+the number it was shown, and the runner answers with that part. A tag
+number is only a name the model can see, computed from the transcript.
+Everything durable is keyed by the host's own identity: a message id, the
+part's key and its content digest, never a number.
 
-**Assignment.**
+**Scope.**
 
-- [pinned] A runner that declares `tags` gives every part it exposes a
-  stable key (`part`), and a tag to every part it tags. It tags at least
-  every part that carries text: user text, a tool result's text and the
-  model's text. It may tag others (a tool call, a reasoning block); a part
-  with nothing to address by text (an image, say) may stay untagged. A tag is
-  `§N§` (`tags::SIGIL`), `N` a positive decimal integer without a leading
-  zero that fits a `u64` (`tags::parse_tag`, `tags::format_tag`). That one
-  spelling is the tag: no other spelling names it.
-- [pinned] Tags are per session, durable and never reused: not across a
-  fork, a reset or a restart. A fork continues numbering after its parent's
-  highest tag (`tags::next_after`), and numbers are assigned in increasing
-  order.
-- [pinned] A part is tagged at write time: before the runner stores it, or,
-  for a part its host stored itself (in-process hosts store the model's
-  text before any hook sees it), at the runner's first ingest of that part.
-  Both readings conform. Either way the tag is recorded durably in the
-  runner's ledger, keyed by (message, part), and every later read and
-  resolve answers it byte-identical.
-- [pinned] Once a part is exposed, its key never changes, tagged or not;
-  once assigned, its tag and its stored content never change. A compaction
-  provider addresses part-level view edits by that key.
+- [pinned] Numbering and rendering apply only to a session whose frozen
+  plan renders tags (`render_tags: true`, below). On a session whose plan
+  does not, every `session.read` part row carries its key and no number,
+  `session.resolve` refuses every well-formed tag `unknown_tag`, and the
+  model's text is exposed as written.
+- [pinned] Cleaning (below) is per message: each piece of the model's text
+  is cleaned according to the frozen plan of the run that wrote it,
+  whatever the current run renders. A session that later stops rendering
+  tags still has its earlier replies cleaned, and text written by a run
+  that rendered no tags is never cleaned on any exposure.
+
+**Which parts count.**
+
+- [pinned] A part counts if and only if the runner renders it with a
+  visible number. One predicate drives both counting and rendering, so the
+  two cannot drift apart: a runner maps each part it renders onto
+  `tags::PartKind` and asks `tags::counts`.
+  - Counted: user text, a tool result's text (error text included), the
+    model's own text, and a tool result holding only images, which renders
+    a short text label carrying its number (`tags::image_label`, `§N§
+    [image]`) where the provider accepts text beside the image (on
+    Anthropic's API, a text block before the image inside the
+    `tool_result`), so a context manager can reach a screenshot.
+  - A steer the runner stores as a user message counts, as a reminder or a
+    delivered notice stored that way does. A `turn_system` message (§9.7)
+    does not.
+  - Never counted: images and files in a user message, reasoning and
+    thinking blocks, tool calls (the call's result carries the number), the
+    history head, compaction-marker messages, and a text part whose
+    exposed text is empty.
+- [pinned] The same parts count on every provider, including those whose
+  text parts carry provider state (a Gemini thought signature, ChatGPT's
+  `phase`): the model must be able to predict its own next number. Seeing
+  `§100§` and `§101§`, its next text part is `§102§`.
+
+**Numbers.**
+
+- [pinned] A part's number is the checkpoint plus its position
+  (`tags::number_parts`). The checkpoint counts the counted parts before
+  the cut, the first retained message. Positions run in the order the
+  runner renders the history from the cut, never in storage order: a steer
+  stored while a tool call ran but rendered after that call's result is
+  numbered after the result. The computation is deterministic, so no
+  per-part ledger is stored.
+- [pinned] The cut is keyed on the field, not on who wrote the marker
+  (`tags::Marker::cut`): a marker's `tail_start_id` when present, otherwise
+  the message holding its compaction part. That covers standalone Magic
+  Context's markers and native markers that omit `tail_start_id` when they
+  retain nothing. A marker not in effect is never an anchor.
+- [pinned] The anchor falls back in this order (`tags::anchor`): the newest
+  in-effect marker carrying a checkpoint for this session, then earlier
+  in-effect markers carrying one, then the Setup checkpoint at its own cut
+  message (`tag_checkpoint`, below). Only when that message no longer
+  exists, after a revert past it, does the runner number from the session
+  start with the Setup checkpoint's number, on a new lineage. With no
+  anchor at all, it numbers from the session start at zero.
+- [pinned] A fallback renumbers nothing. When the anchor falls back past a
+  newer in-effect marker that lost its key, to an older keyed marker, to the
+  Setup checkpoint or to the session start, numbering counts every counted
+  part from that anchor's cut, the parts the newer markers summarized
+  included, by kind exactly as they were counted when rendered, in the
+  order they rendered while the anchor's marker was the newest (on OpenCode,
+  storage order with marker pairs skipped): the runner feeds
+  `tags::number_parts` those parts, not only the ones it renders now. A
+  compaction message and its summary never count, wherever they sit and
+  with or without the key; a dropped part keeps its placeholder number and
+  still counts. So the numbers equal the ones computed with every key
+  present, the numbers the model saw, and the lineage does not change,
+  apart from the Setup cut gone rule above. `tag-numbering.json` pins three
+  shapes: the newest key lost with an older keyed marker; every key lost,
+  falling back to the Setup checkpoint or to the session start; and a newer
+  cut inside the older marker's retained tail.
+- [pinned] A runner writes the checkpoint on its own compaction markers,
+  in the same write as the marker and never sent to the model:
+  `{tag_checkpoint, session}` (`tags::MarkerCheckpoint`), naming the
+  session it was written for. On OpenCode it is one extra key on the
+  compaction part, `"cortexkit"`; never the summary's metadata, which
+  OpenCode forwards to the provider. A marker that lost its key is no
+  anchor, never a checkpoint of zero.
+- [pinned] Gaps exist only behind the tail: a checkpoint may count parts no
+  longer rendered, or numbers an earlier tagger handed out. A part a
+  compaction provider dropped keeps its number, rendered as its
+  placeholder `[dropped §N§]` (`tags::dropped_placeholder`), so it is
+  still counted.
+- [pinned] A runner never walks the whole session to number it. It keeps
+  the tail's numbers and the next number in memory, and what it holds
+  always equals a fresh computation from the anchor: a revert or a reorder
+  recomputes from the cut, never just keeps counting upward. Resolving a
+  number inside summarized history finds the marker interval that holds it
+  and walks only that interval.
+
+**Lineage.**
+
+- [pinned] Any renumbering of a part a read has already exposed starts a
+  new lineage (§4.2): a revert, a recomputed reorder, the move of a session
+  from standalone Magic Context (whose every visible number changes once),
+  a detected restore, and the fallback to the session start above. A switch
+  from a stored ledger (below) renumbers nothing and keeps the lineage.
+  Within one lineage a number names one part, and a re-read answers the
+  same numbers. Numbers may repeat across lineages; a number reused after a
+  revert is fine. Undo, revert and rewind stay within the session as
+  lineage changes.
+- [pinned] A renumbering the runner detects during a step takes effect at
+  the next step boundary, never before that step's tool calls have run.
+  So between a model reply and its tool calls, the current lineage is the
+  one the model saw. That is what lets a context manager resolve a number
+  in a tool call against the session's current numbering, locally and
+  without naming the numbering it means: `session.resolve` carries no
+  anchor for this reason. A runner that could change lineage within a turn
+  would need that anchor back, and this contract does not give it one.
+
+**`tag_checkpoint`: the Setup checkpoint.**
+
+- [pinned] A runner that declares `tag_checkpoint` (it requires
+  `compaction`, §3) honours a Setup checkpoint `{tag_checkpoint, cut}`
+  (`tags::SetupCheckpoint`) on its compaction provider's Setup answer
+  (compaction-provider §4): it anchors the number at the `cut` message,
+  used only when no in-effect marker carries a checkpoint for this
+  session, so the numbers are the same with or without the marker's key.
+  If the cut message is gone (a revert past it), the runner numbers from
+  the session start with that number, on a new lineage. The checkpoint is
+  permanent for the session, needs no report back, and survives a lost
+  marker key and runner restarts.
+- [pinned] A compaction provider refuses Setup for a session it moved from
+  standalone Magic Context, on a runner without `tag_checkpoint`, with the
+  terminal `tag_checkpoint_unsupported` (compaction-provider §10).
+- [pinned] For a session with standalone state and no completed move, the
+  provider refuses Setup `standalone_session_not_migrated`. Where standalone
+  runs in-process, a runner that has never served the session hands it to
+  standalone in the same step; one that has served it, and every runner on
+  a host without standalone, fails the run by name and never forwards the
+  unmanaged history (compaction-provider §4).
+
+**Forks.**
+
+- [pinned] A session the runner knows was forked or cloned from a managed
+  session (one whose plan names a compaction provider) is never enrolled.
+  The runner refuses `session.send` and `session.adopt` for it with the
+  terminal `fork_unsupported {parent?}` (§12.1,
+  `errors::ForkUnsupportedDetail`), writing nothing, with a message such as
+  "Forks aren't supported for Magic Context sessions; use undo instead".
+  An in-process host refuses the person's own turn the same way.
+- [pinned] A runner refuses only forks it can know about. On OpenCode a
+  fork is known by a copied marker checkpoint naming another session,
+  which is the `{parent}` (`tags::anchor` answers it); a fork of a session
+  that never compacted carries nothing of the runner's and is an ordinary
+  session.
+
+**Switching from a stored ledger.**
+
+- [pinned] One rule for every runner that numbered parts from a stored
+  ledger before (`runner-tags/v1`, or a gateway's own ledger): it switches
+  at a session's next run, or, on a runner whose sessions advance by user
+  turns, its next user turn. Parts already written or admitted keep their
+  stored numbers, so no exposed part is renumbered and the lineage stays
+  the same. The first run (or user turn) under these rules records the
+  ledger's high-water as its starting checkpoint, on that run's frozen
+  configuration, anchored at that run's first part; numbers are computed
+  from there, by these rules, on the same lineage. A compaction cut before
+  that anchor covers only parts numbered by the ledger; a cut after it
+  counts from the anchor.
+- [pinned] A detected restore of such a runner's store is not a switch: it
+  starts a new lineage, numbered from the restored high-water.
 
 **What the model writes.**
 
-- [pinned] A runner stores what the model wrote byte for byte. A `§N§` the
-  model writes is never a tag, wherever it appears, and is never rewritten
-  in storage: `session.read` and `session.resolve` answer it as written.
-- [pinned] In a signed thinking block, in encrypted reasoning, or in a tool
-  call's arguments, a model-written `§N§` stays as written in every
-  rendering too: editing it would break the signature or change what the
-  tool was asked. A tool call's arguments are dispatched exactly as the
-  model wrote them.
-- [pinned] Correcting a model-written `§N§` in the model's text (so the
-  model does not later read its own invention as a tag) is allowed only in
-  the rendering, and only where two conditions hold. First, the provider's
-  text part carries no provider state (an Anthropic text block, say). Where
-  a text part carries provider state (a thought signature, ChatGPT's
-  `phase`, encrypted reasoning beside it), the assistant's tags are
-  metadata only and a stray `§N§` is rendered as written. Second, the
-  corrected rendering is fixed at the runner's first render of that message
-  and never changes afterwards, so every later request carries the same
-  bytes. This is the runner's provider duty: it applies the rule per
-  provider and model, and a consumer never sees the difference in a read.
+- [pinned] The model's own tag notation is cleaned by a port of the tag
+  cleaning in standalone Magic Context, the plugin that manages context inside
+  OpenCode and Pi (`tags::clean_model_text`, from its
+  `tag-content-primitives.ts` and `text-complete.ts`): remove a leading run
+  of `§N§`; remove every complete `§N§` anywhere; remove malformed `§N">§…`
+  shapes; remove a `§N` closed with an improvised character, but never a
+  `§` followed by digits, then `.` and a digit (a section reference such as
+  `§5.1` or `§12.3`, at any digit count); remove any stray `§`, then trim.
+  Bare digits are never removed. The function is idempotent. Standalone's
+  own rule backtracks one digit before a decimal (`§12.3` cleans to `2.3`
+  there). This port instead preserves the whole section number, so the two
+  differ for a `§` followed by two or more digits and a decimal.
+- [pinned] Cleaning runs on every exposure (`tags::exposed_model_text`):
+  `session.read`, `session.resolve`, the final text of `run.result`, every
+  render, and the summarizer's feed. Every reader and the model see the same
+  text produced by the shared cleaning function. Storage may keep the raw
+  text.
+- [pinned] An in-process host MUST also clean at its own save seam
+  (OpenCode's `experimental.text.complete`, Pi's `message_end`), because its
+  own UI and other plugins read the host store outside the runner. It
+  cleans only a reply whose writing run rendered tags, judged by that
+  message's own record of its run's frozen plan, never by the session's
+  current setting, and never a structured-output reply. Exposure stays
+  authoritative: a seam that does not fire (an aborted reply, a hook error
+  the host swallows) leaves raw text only in the host's own copy, never in
+  anything the runner exposes, and cleaning text that is already clean
+  changes nothing. This does not apply to the Claude Code gateway, which is
+  not an in-process host and has no save seam: Claude Code's own file keeps
+  the raw text, and the gateway cleans on every exposure.
+- [pinned] Never cleaned, at any seam: signed thinking, encrypted
+  reasoning, a tool call's arguments (dispatched exactly as the model wrote
+  them), and the final text of a structured-output run (§9.4), which
+  `run.result` answers from the runner's own record of the raw text.
+- [pinned] The cleaning applies on every provider: no provider-state
+  exception remains.
+
+**Freeze.**
+
+- [pinned] The numbering and cleaning rules are frozen per run under one
+  named feature, `runner-tags/v2` (`tags::RULES_FEATURE`), recorded with
+  the rest of the run's frozen configuration. A run keeps the rules it was
+  frozen under for its whole life.
 
 **Reads.**
 
 - [pinned] On a runner that declares `tags`, every `session.read` entry
   carries `tags: [{part, tag?}]` (`tags::PartTag`), one row per part the
   runner exposes, in the message's part order, beside the message as
-  `tool_calls` are: `tag` is present on a tagged part and absent on an
-  untagged one, so a reader learns every part's key, tagged or not, from
-  the rows alone. `part` is the runner's own key for the part within its
-  message schema (an index or a part id), opaque to consumers: the key its
-  ledger records the tag under and the one `session.resolve` answers with.
-  Decoding stays lenient: a reader of a runner without `tags` finds no
-  `tags`. Where a message came from (its attestation) is not in this
-  revision.
-- [pinned] No digest rides on an entry: a reader computes one from the
-  bytes it reads.
+  `tool_calls` are: `tag` is the number the part shows in the current
+  lineage, present on a counted part of a tag-rendering session and absent
+  otherwise, so a reader learns every part's key from the rows alone.
+  `part` is the runner's own key for the part within its message (an index
+  or a part id), opaque to consumers: the host identity a consumer keys
+  its durable state by, and the one `session.resolve` answers with. Once a
+  part is exposed its key never changes. Decoding stays lenient: a reader
+  of a runner without `tags` finds no `tags`. Where a message came from
+  (its attestation) is not in this revision.
+- [pinned] Content digests ride separately from tags (§4.2): required in
+  descriptors mode and optional in inline mode.
 
 **Resolve.**
 
-- [pinned] `session.resolve {tag, range?}` (`tags::ResolveRequest`) is
+- [pinned] `session.resolve {tag, range?, media?}` (`tags::ResolveRequest`) is
   strict: an unknown field is refused `invalid_params` naming it, and the
   request names no session (§1). `range` is `{start, end}`
   (`tags::CharRange`), a half-open range of the part's content counted in
   Unicode scalar values: not bytes, and not UTF-16 code units, so a range
   names the same text in every language.
 - [pinned] The answer is `{tag, ordinal, mid, part, content, range?}`
-  (`tags::ResolveReply`), decoded leniently: `content` is the
-  part's exact stored content, or the requested range of it
-  (`tags::slice`). For a text part that is its text; for any other part
-  (a tool call, a reasoning block, a structured result) it is the runner's
-  own stored encoding of the part, the same bytes on every resolve. `range`
-  echoes the request's.
-- [pinned] `session.resolve` answers about the session's current lineage.
-  A tag whose part is in the current lineage resolves normally, with that
-  part's current `ordinal` and `mid`. That includes a part carried across a
-  lineage change that kept its tag: it answers where the part now sits in
-  the new lineage, never where it sat in the old one.
+  (`tags::ResolveReply`), decoded leniently: `content` is the part's
+  exposed content, or the requested range of it (`tags::slice`): a text
+  part's text, cleaned when it is the model's text a tag-rendering run
+  wrote; an image-only tool result in the runner's own stored encoding of
+  it. `range` echoes the request's. `media` defaults to `"inline"` and accepts
+  only `"inline"` and `"descriptors"`, refusing other values with
+  `invalid_params {field: "media"}`. Inline keeps the existing string content
+  and frame refusal behavior. Descriptors uses the same in-place ref shapes,
+  threshold and fixed budget as §4.2; `content`
+  may then be a JSON ref or a structured part with refs. Character ranges are
+  validated and applied to exposed text before describing that text.
+- [pinned] `session.resolve` answers about the session's current lineage:
+  the part that shows the number now, with its current `ordinal` and
+  `mid`.
 - [pinned] A malformed tag is refused `invalid_params {field: "tag"}`. A
-  well-formed tag that no part of the session's current lineage carries is
-  refused `unknown_tag`, terminal (§12.1): a tag the session never
-  assigned, and a tag assigned only under a lineage the session has left (a
-  fork, a §14 shape-(a) drop, a retention expiry, §9.1), since tags are
-  never reused and a left lineage never returns. Resolve never answers a
-  left lineage's content. A range whose `start` is
-  after its `end`, or whose `end` is past the content, is refused
-  `invalid_params {field: "range"}`; an empty range within the content
-  answers `""`.
+  well-formed tag that no part of the current lineage carries is refused
+  `unknown_tag`, terminal (§12.1). Resolve never answers a left lineage's
+  content. A range whose `start` is after its `end`, or whose `end` is past
+  the content, is refused `invalid_params {field: "range"}`; an empty range
+  within the content answers `""`.
 - [pinned] Resolve writes nothing.
 
-**Visibility.**
+**Rendering.**
 
-- [pinned] With `render_tags: true`, the runner renders a tagged part's tag
-  as an exact prefix: the tag, one space (U+0020), then the part's text
-  (`tags::render_text`, `tags::RENDER_SEPARATOR`). It does so for user
-  text, for a tool result's first text block, and for the model's text only
-  where the provider's text part carries no provider state and the
-  rendering is fixed at the first render (above); assistant text that
-  carries provider state renders as stored, its tag metadata only. A part
-  with no text (an image, a tool call, a reasoning or thinking block), an
-  empty text part and an untagged part carry no prefix. A compaction
-  provider builds the same bytes for a drop placeholder; `tags.json` pins
+- [pinned] With `render_tags: true`, the runner renders a counted text
+  part as its number, one space (U+0020), then the part's text with any
+  leading tag notation stripped (`tags::render_counted_text`,
+  `tags::RENDER_SEPARATOR`): only `§`-shaped notation, never bare digits,
+  in up to eight rounds (`tags::strip_leading_tag_notation`). Rendering
+  what it rendered gives the same bytes again. An image-only tool result
+  renders its label; a part that does not count renders as exposed, with
+  no number (`tags::render_part`). A compaction provider builds the same
+  bytes for its placeholders. `tags.json` and `tag-cleaning.json` pin
   rendered parts.
-
 - [pinned] Whether tags are rendered to the model is the session's fetch
   plan's `render_tags` member (`tags::PLAN_RENDER_TAGS`), composed by core
   in the same plan object `SendRequest::plan` carries (§10.1): `true`
-  renders each part's tag; absent, `null` or `false` renders none. A plan
-  carrying a non-boolean, or `render_tags: true` to a runner without `tags`,
-  is refused at admission `invalid_params {field: "plan.render_tags"}`,
-  writing nothing (`tags::check_plan`, `SendRequest::check_render_tags`).
-- [pinned] Tags exist either way: a runner that declares `tags` assigns,
-  records, reads and resolves them whether or not the plan renders them.
-  `render_tags` is part of the plan, so it is frozen with it, and a later
-  plan that differs in it is `plan_drift` like any other difference.
+  numbers, renders and cleans by these rules; absent, `null` or `false`
+  does none of it. A plan carrying a non-boolean, or `render_tags: true` to
+  a runner without `tags`, is refused at admission `invalid_params {field:
+  "plan.render_tags"}`, writing nothing (`tags::check_plan`,
+  `SendRequest::check_render_tags`). `render_tags` is part of the plan, so
+  it is frozen with it, and a later plan that differs in it is
+  `plan_drift` like any other difference.
 
 ### 9.7 `delivery_order`: ordered delivery modes, plan senders and templates
 
@@ -1776,7 +2015,22 @@ say who may send and which texts are system text.
   (`delivery_order::TemplateProblem`): the sender's plan entry declares no
   template with that id, its digest differs, a slot is missing or
   undeclared, or a value is not a value of its slot (the wrong type, out of
-  range, an unassigned tag, an unlisted enum value).
+  range, a `part_tag` value that is not `{mid, part}`, an unlisted enum
+  value).
+- [pinned] A `part_tag` slot carries a part's host identity `{mid, part}`
+  (`delivery_order::PartRef`), never a number, and the runner renders the
+  number the request carrying the send shows for that part (§9.6). Core
+  passes the slot through without validating it. A part the request does
+  not show ends the send terminally with `template_part_gone {slot}`
+  naming the slot (`errors::TEMPLATE_PART_GONE`,
+  `TemplateProblem::PartGone`): refused at admission, writing nothing, when
+  the part is already gone, and, for a queued send whose part goes before
+  it is delivered, the terminal send state `template_part_gone`
+  (`send::states::TEMPLATE_PART_GONE`), never delivered, which a re-send of
+  its `send_id` (or `send.status`) answers with `slot`, as an expired send
+  answers `expired`. The sender recomposes on its next pass. Once a
+  template send is delivered, its rendered text is stored and resent byte
+  for byte.
 - [pinned] `tool_result`, `steer` and `idle_start` deliver at user
   authority. `turn_system` is possible only for a rendered template, and
   only where the provider supports a turn-scoped system message and the
@@ -1798,9 +2052,13 @@ say who may send and which texts are system text.
   digest is lowercase hex SHA-256 over its RFC 8785 (JCS) bytes
   (`delivery_order::template_digest`). Slots are typed
   (`delivery_order::Slot`), and none takes free text: `integer {min, max}`
-  (inclusive), `percentage` (an integer from 0 to 100), `tag` (a tag this
-  session assigned, §9.6) and `enum {values}` (one of the listed values).
-  Integers render in decimal; a tag and an enum value render as themselves.
+  (inclusive), `percentage` (an integer from 0 to 100), `part_tag` (a part
+  of this session, `{mid, part}`, above) and `enum {values}` (one of the
+  listed values). Integers render in decimal, a `part_tag` as the number
+  the carrying request shows (`§N§`), and an enum value as itself. The
+  `part_tag` slot replaced llm-runner 0.3's `tag` slot, which took a
+  number: a template declaring `tag` no longer decodes, and a template with
+  a `part_tag` slot has a different digest than it had with `tag`.
 
 **Senders.**
 
@@ -1969,8 +2227,12 @@ re-send their bodies.
   `(owner, invocation_id)`. The runner durably records the invocation before
   forwarding and sends `user_command.invoke` once on the session's route to the
   declaring provider. A retry returns the stored answer, never dispatching
-  again. If the runner crashes, a forward times out or the connection is lost
-  before the provider's reply is stored, whether the command ran is unknowable.
+  again. Any invocation forwarded to the module whose reply was not stored
+  ends in terminal `outcome_unknown`, whatever ended it: a crash, a forward
+  timeout, connection loss, session cutoff or expiry. Whether the command ran
+  is unknowable. An invocation never forwarded ends `failed`, including a
+  cutoff or expiry before forwarding. After forwarding the runner records
+  `outcome_unknown` rather than issuing another refusal.
   The runner stores terminal `outcome_unknown` as the answer and status instead
   of forwarding again; every retry and status read replays that outcome. Its
   text tells the person the command may have run.
@@ -2042,8 +2304,8 @@ re-send their bodies.
   that set a policy are `session.refresh` and `session.refresh_policy`, in
   the `session_change` group (§10.2).
 - [pinned] A baseline item is identified by `provider`, and by `item` for a
-  provider with more than one plan item. The `item` values follow the
-  fetch-plan section of this crate, still to be written.
+  provider with more than one plan item. The `item` value identifies which of
+  that provider's plan items the baseline records (§10.1).
 
 - [pinned] An absent optional item (`AbsentItem`) is `{provider, kind,
   reason, provider_code?}`. `kind` is an open string; `system_text` is the
@@ -2217,7 +2479,9 @@ treats it as a terminal refusal of that one request.
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
-| `unknown_tag` | `session.resolve` names a well-formed tag that no part of the session's current lineage carries: one it never assigned, or one assigned only under a lineage it has left (§9.6) | — | no |
+| `unknown_tag` | `session.resolve` names a well-formed tag that no part of the session's current lineage carries: one no part shows in this lineage, including one that named a part only under a lineage it has left (§9.6) | — | no |
+| `fork_unsupported` | a `session.send` or `session.adopt` for a session the runner knows was forked or cloned from a managed session, one whose plan names a compaction provider (§9.6) | `{parent?}`: the session it was forked from, when known (`errors::ForkUnsupportedDetail`) | no |
+| `template_part_gone` | a template send whose `part_tag` slot names a part the request that would carry it does not show (§9.7); a queued send meeting it later ends in the send state of the same name instead | `{slot}` (`errors::TemplatePartGoneDetail`) | no |
 | `unknown_send` | `send.status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
@@ -2530,8 +2794,22 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `adopt_binds_owner_without_a_run`, `adopt_exact_repeat_replays_reply`, `adopt_send_id_reuse_names_plan`, `adopt_plan_drift_refused`, `adopt_other_owner_refused`, `adopt_same_owner_readopts` | `adopt`, `transcript_reads`; the adapter's host-start hook and host plans; the live `role.describe` must declare `adopt` before any `session.adopt` is sent; reported as a named skip without `adopt` |
 | `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
 | `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
-| `tags_on_every_read_entry`, `tags_never_reused_across_runs`, `tags_exist_whether_or_not_rendered`, `tags_resolve_returns_stored_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_stored_verbatim` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields for the rendered half; the live `role.describe` must declare `tags` before any `session.resolve` is sent; reported as a named skip without `tags` |
-| `tags_resolve_left_lineage_refused` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, and `StepRecorded`; reads the `crash_at_StepRecorded` scenario: after a seal that drops the never-sent call or its step and moves the session to a new lineage (§14, shape (a)), every tag number below the new lineage's highest that no part it reads carries, the dropped part's among them, is refused `unknown_tag`, and the cut run's prompt resolves with its ordinal and `mid` in the new lineage; inapplicable when the runner resumes the run or keeps the call (shape (b)), or when the seal dropped no tagged part; reported as a named skip without `tags` |
+| `adopt_host_turn_is_a_run` | `adopt`, `transcript_reads`, `run_ops`, and the adapter's host-start hook; the person's own turn has a `run_id` on `session.head`, `run.result` answers it, and `run.status` and `session.subscribe` show it where declared; the owner's next send is a run of its own; inapplicable when the adapter cannot start a host turn |
+| `tags_on_every_read_entry`, `tags_numbers_stable_within_a_lineage`, `tags_only_on_tag_rendering_sessions`, `tags_resolve_returns_exposed_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_cleaned_on_exposure`, `tags_count_only_parts_rendered_with_a_number` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields carrying `render_tags: true` (§9.6: numbering applies only to tag-rendering sessions), and without it for the untagged halves; the live `role.describe` must declare `tags` before any `session.resolve` is sent; the structured-output half of the cleaning case where `structured_output` is declared, and the image-only half of the counting case where the adapter's tool provider answers an image-only result, each named as unchecked otherwise; reported as a named skip without `tags` |
+| `tags_numbered_in_rendered_order` | `tags`, `queue`, `transcript_reads`, `steer`, held tool calls, and the adapter's record of each model request's rendered texts; a steer sent while a call is held: the last request's texts carry exactly the numbers `session.read` reports, increasing in the order the model saw them; inapplicable when the runner rendered the steer where it stored it |
+| `tags_renumbering_waits_for_the_step_boundary` | `tags`, `queue`, `transcript_reads`, `steer`, held tool calls; while the call is held, a steer changes neither the lineage nor a number read before it; the call runs once; afterwards a part a read exposed carries another number only on a new lineage |
+| `tags_setup_checkpoint_anchors_at_its_cut` | `tags`, `tag_checkpoint`, `compaction`, `queue`, `transcript_reads`; a Setup checkpoint of 500 cut at the session's first message numbers the prompt 501 and the answer 502 |
+| `tags_lost_marker_key_keeps_numbers` | `tags` and adapter hooks to compact in the host and drop a key; fallback preserves every exposed number and lineage |
+| `tags_host_store_cleaned_at_the_save_seam` | `tags` and a host-store read hook; tagged replies are clean there, untagged replies and structured-output replies remain raw |
+| `compaction_standalone_refusal_lifecycle` | `compaction`; handoff only before first service on in-process hosts, otherwise a named failure; the late rule requires an adapter Setup-repeat hook |
+| `user_commands_cutoff_after_forward`, `user_commands_cutoff_before_forward` | `user_commands` and a cutoff adapter; `outcome_unknown` after forwarding, `failed` before, retained and replayed without another forward |
+| `media_descriptors_image_bytes`, `media_descriptors_nested_media` | `transcript_reads` and byte-backed adapter fixtures; top-level and nested media hashes cover decoded bytes |
+| `media_descriptors_frame_budget`, `media_descriptors_utf8_head` | fixture-backed over-frame arguments are served as refs; a text head ends before a crossing UTF-8 character |
+| `media_descriptors_inline_unchanged`, `media_descriptors_full_content_digests`, `media_descriptors_pairing`, `media_descriptors_part_keys` | inline compatibility, full-inline identities, pairing preservation and strict digest-row keys |
+| `media_descriptors_stable_across_pages` | multipart fixture; fixed-budget fallback is independent of page position and byte cap |
+| `media_descriptors_model_view_refused` | `model_view`; descriptors are refused before read work, naming `media` |
+| `tags_fork_of_a_managed_session_refused` | `tags`, `compaction`, `queue`, `transcript_reads`, and the adapter's fork hook; a send into, and an adoption of, a fork of a managed session is refused `fork_unsupported`, writing nothing; inapplicable when the adapter cannot create a fork the runner can detect, since a runner refuses only forks it can know about |
+| `tags_resolve_answers_the_current_lineage` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, and `StepRecorded`; reads the `crash_at_StepRecorded` scenario: after a seal that moves the session to a new lineage (§14, shape (a)), every number the new lineage shows (up to 64) resolves to the part showing it there, never to a part of the lineage left, a number above its highest is refused `unknown_tag`, and the cut run's prompt carries a number; inapplicable when the runner resumes the run or keeps the call on its lineage (shape (b)); reported as a named skip without `tags` |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` or `steer` |
 | `delivery_order_members_without_list_refused` | `delivery_order`, `queue`, `transcript_reads`; list members beside a string or absent `delivery` are refused naming the member and write nothing |
 | `delivery_order_list_refused_without_group` | `queue`, `transcript_reads`; not applicable when `delivery_order` is declared: a list in `delivery` is refused `invalid_params` naming `delivery` and writes nothing |
@@ -2545,6 +2823,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
 | `delivery_order_template_renders_as_system` | `delivery_order`, `queue`, `transcript_reads`; needs `steer` for user-authority fallback or a route that supports `turn_system`, and is inapplicable when neither is available; the template send carrying empty `prompt` is refused naming `template` |
 | `delivery_order_bad_slot_refused` | `delivery_order`, `queue`, `transcript_reads`; an out-of-range slot is refused naming `template` and writes nothing |
+| `delivery_order_template_part_gone_refused` | `delivery_order`, `queue`, `transcript_reads`, `tags`; on a tag-rendering session, a template send whose `part_tag` slot names a part the session does not show is refused `template_part_gone` naming the slot and writes nothing; one naming a shown part is accepted |
 | `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |
 | `run_tool_calls_positions_identify_siblings` | `run_tool_calls`, `queue`, `transcript_reads`; two sibling calls have positions 0 and 1 at their requesting message's ordinal, independent of intervening text/reasoning parts |
 | `run_tool_calls_result_ordinal_tracks_storage` | `run_tool_calls`, `queue`, `transcript_reads`, held tool call; no result ordinal while open, and a finished call's `result_ordinal >= ordinal` locates the stored result |

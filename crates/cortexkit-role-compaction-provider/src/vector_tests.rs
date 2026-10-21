@@ -1,4 +1,4 @@
-//! Tests over `test-vectors/compaction-provider-v1/async.json`. Its digests
+//! Tests over this crate's `test-vectors/compaction-provider-v1/async.json`. Its digests
 //! were computed by a separate implementation, so these tests compare this
 //! crate against a second one rather than against itself.
 

@@ -41,9 +41,21 @@ pub struct CompactionMessage {
 /// What the scripted provider answers the runner's Setup call with. The
 /// runner adapter translates it to compaction-provider/v1 without changing
 /// its kind or fields.
+///
+/// Non-exhaustive: a later answer kind is additive, so an adapter's `match`
+/// keeps a `_` arm (answering an unknown kind as a failed Setup, say).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompactionSetup {
     Ready(CompactionMessage),
+    /// Answer `ready` with `initial` and a Setup checkpoint
+    /// `{tag_checkpoint, cut}` whose `cut` is the message the Setup request
+    /// names as `newest` (the session's first message, its prompt), as a
+    /// provider does for a session it moved from standalone Magic Context.
+    ReadyWithCheckpoint {
+        initial: CompactionMessage,
+        tag_checkpoint: u64,
+    },
     /// Fail the actual provider call without an answer, not a REFUSE answer.
     Unavailable,
     Refuse {
@@ -90,6 +102,9 @@ pub struct CompactionCall {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompactionObservation {
+    /// Actual handoffs to the host's standalone implementation, observed
+    /// outside the runner, not inferred from a completed run.
+    pub standalone_handoffs: usize,
     /// Every Setup call the scripted provider received, in order.
     pub calls: Vec<CompactionCall>,
     /// Canonical messages captured from requests received by the scripted
@@ -321,6 +336,52 @@ where
             "single-session provider route binds session {route_session:?}, but Setup reports {setup_session:?}"
         ));
     }
+    // A provider that finds the route bound to another session refuses Setup
+    // `setup_identity_mismatch`: the run ends `error` under that code, with
+    // no model request. The run's error is read from `run.result`, so this
+    // half needs `run_ops`.
+    if !case.declared.contains(&Capability::RunOps) {
+        return Ok(());
+    }
+    let reason = "the route is bound to another session";
+    let mut refused = install(
+        case,
+        "route-identity-refused",
+        CompactionSetup::Refuse {
+            code: RefuseCode::SetupIdentityMismatch,
+            reason: reason.into(),
+            provider_code: None,
+        },
+        Script {
+            turns: vec![text("route-identity-refused-answer")],
+        },
+    )
+    .await?;
+    let reply = send(case, &mut refused, "route-identity-refused-prompt").await?;
+    let ended = result(case, &refused, &reply).await?;
+    if ended.run_state() != RunState::Error {
+        return Err(format!(
+            "a Setup refused setup_identity_mismatch ended {:?}, not error",
+            ended.state
+        ));
+    }
+    let error = ended
+        .error
+        .ok_or("a Setup refused setup_identity_mismatch has no run error")?;
+    refusal_error(
+        &error,
+        RefuseCode::SetupIdentityMismatch.as_str(),
+        reason,
+        None,
+    )
+    .map_err(|e| format!("a Setup refused setup_identity_mismatch: {e}"))?;
+    if !self::observation(case.subject, &refused.name)
+        .await?
+        .model_inputs
+        .is_empty()
+    {
+        return Err("a Setup refused setup_identity_mismatch sent a model request".into());
+    }
     Ok(())
 }
 
@@ -426,7 +487,25 @@ where
             reason: "unknown preserved".into(),
             provider_code: None,
         },
-    ] {
+        // A host with no standalone Magic Context fails the run by name; a
+        // host running it in-process may hand the session to it instead.
+        CompactionSetup::Refuse {
+            code: RefuseCode::StandaloneSessionNotMigrated,
+            reason: "run doctor to move this session".into(),
+            provider_code: None,
+        },
+    ]
+    .into_iter()
+    .filter(|setup| {
+        !(case.subject.standalone_in_process()
+            && matches!(
+                setup,
+                CompactionSetup::Refuse {
+                    code: RefuseCode::StandaloneSessionNotMigrated,
+                    ..
+                }
+            ))
+    }) {
         let mut session = install(
             case,
             "refusals",
@@ -457,7 +536,9 @@ where
                 reason,
                 provider_code,
             } => refusal_error(&error, code.as_str(), reason, provider_code.as_deref())?,
-            CompactionSetup::Ready(_) => unreachable!(),
+            CompactionSetup::Ready(_) | CompactionSetup::ReadyWithCheckpoint { .. } => {
+                unreachable!()
+            }
         }
         let obs = observation(case.subject, &session.name).await?;
         if !obs.model_inputs.is_empty() {
@@ -802,4 +883,86 @@ where
         return Err("Setup was re-run after its durable answer".into());
     }
     Ok(())
+}
+
+/// A standalone refusal is a handoff only before the runner ever serves the
+/// session and only on a host with standalone in-process.
+pub async fn standalone_refusal<S>(case: &Case<'_, S>) -> Result<crate::cases::Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    use crate::cases::Ending;
+    let refusal = CompactionSetup::Refuse {
+        code: RefuseCode::StandaloneSessionNotMigrated,
+        reason: "move required".into(),
+        provider_code: None,
+    };
+    let mut first = install(
+        case,
+        "standalone-first",
+        refusal.clone(),
+        Script {
+            turns: vec![text("standalone answer")],
+        },
+    )
+    .await?;
+    let reply = send(case, &mut first, "first prompt").await?;
+    let ended = result(case, &first, &reply).await?;
+    let obs = observation(case.subject, &first.name).await?;
+    if case.subject.standalone_in_process() {
+        if obs.standalone_handoffs != 1
+            || ended.run_state() != RunState::Completed
+            || !obs.model_inputs.is_empty()
+        {
+            return Err("first standalone refusal must hand off in the same step, not fail or forward unmanaged history through the runner".into());
+        }
+    } else if ended.run_state() != RunState::Error
+        || ended
+            .error
+            .as_ref()
+            .is_none_or(|e| e.provider_code != "standalone_session_not_migrated")
+        || !obs.model_inputs.is_empty()
+        || obs.standalone_handoffs != 0
+    {
+        return Err("a host without standalone must fail standalone_session_not_migrated, never forward unmanaged history".into());
+    }
+    let mut served = install(
+        case,
+        "standalone-served",
+        CompactionSetup::Ready(initial("served-head")),
+        Script {
+            turns: vec![text("managed answer"), text("must not reach model")],
+        },
+    )
+    .await?;
+    send(case, &mut served, "managed prompt").await?;
+    release_model(case.subject, &served.name).await?;
+    if let Err(e) = case
+        .subject
+        .require_setup_again(case.handle.inner(), &served.name)
+        .await
+    {
+        return Ok(Ending::PassedWithInapplicableRule(format!(
+            "late refusal: the adapter cannot require Setup again: {e}"
+        )));
+    }
+    case.subject
+        .install_compaction_setup(&served.name, refusal)
+        .await
+        .map_err(|e| e.to_string())?;
+    let reply = send(case, &mut served, "late refusal").await?;
+    let ended = result(case, &served, &reply).await?;
+    let obs = observation(case.subject, &served.name).await?;
+    if ended.run_state() != RunState::Error
+        || ended
+            .error
+            .as_ref()
+            .is_none_or(|e| e.provider_code != "standalone_session_not_migrated")
+        || obs.standalone_handoffs != 0
+        || obs.model_inputs.len() != 1
+    {
+        return Err("a runner that has served the session must fail the later standalone_session_not_migrated by name, never hand it back".into());
+    }
+    Ok(Ending::Passed)
 }

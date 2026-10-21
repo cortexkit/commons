@@ -65,6 +65,8 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 mod compaction;
+mod media;
+mod tags;
 mod user_commands;
 pub use compaction::{CompactionDefect, CompactionRouteMode};
 
@@ -129,6 +131,7 @@ const MAXIMUM_MAX_BYTES: u64 = 1024 * 1024;
 const DEFAULT_LIMIT: u64 = 100;
 const MAXIMUM_LIMIT: u64 = 1000;
 const READ_FIELDS: &[&str] = &[
+    "media",
     "from_ordinal",
     "after_mid",
     "lineage_id",
@@ -142,6 +145,7 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub media: Option<&'static str>,
     pub user_command: Option<&'static str>,
     pub compaction: CompactionDefect,
     /// Continue to a new model step after a boundary cancellation.
@@ -239,12 +243,43 @@ pub struct Defects {
     /// `session.adopt` from a caller other than the recorded owner takes the
     /// session over instead of being refused `scope_owner_mismatch`.
     pub adopt_takes_over_owner: bool,
-    /// Tag numbering starts again at each run, so a later run reuses the
-    /// numbers an earlier one assigned.
-    pub tags_reused_across_runs: bool,
-    /// Model-written `§N§` sequences are stripped from stored text parts and
-    /// from tool-call arguments.
-    pub tags_rewrite_model_text: bool,
+    /// Tag numbering starts again at each run, so a later run's parts show
+    /// numbers an earlier run's parts show in the same lineage.
+    pub tags_restart_each_run: bool,
+    /// The model's text is exposed as written even on a session whose plan
+    /// renders tags, instead of cleaned of its own tag notation.
+    pub tags_exposed_raw: bool,
+    /// Parts are numbered in storage order instead of the order they are
+    /// rendered in.
+    pub tags_numbered_in_storage_order: bool,
+    /// A steer that arrives while a step's tool call is still running moves
+    /// the session to a new lineage at once, before the call has run.
+    pub tags_renumber_mid_step: bool,
+    /// A renumbering of exposed parts keeps the lineage.
+    pub tags_renumber_without_new_lineage: bool,
+    /// Reasoning parts are counted and numbered like the model's text.
+    pub tags_count_reasoning: bool,
+    /// A session whose plan renders no tags is numbered all the same.
+    pub tags_numbered_without_render_tags: bool,
+    /// The compaction provider's Setup checkpoint is ignored: numbering
+    /// starts at the session start.
+    pub tags_setup_checkpoint_ignored: bool,
+    /// A send into, or an adoption of, a fork of a managed session is
+    /// served instead of refused `fork_unsupported`.
+    pub fork_accepted: bool,
+    /// A turn the host starts creates no run: nothing answers it on
+    /// `run.result`, `run.status` or the stream.
+    pub host_turns_without_run: bool,
+    /// A template send whose `part_tag` slot names a part the session does
+    /// not show is accepted, the slot rendered as written.
+    pub order_template_part_gone_accepted: bool,
+    /// After a marker lost its key, numbering from the older marker counts
+    /// only the parts rendered now, skipping those the newer marker
+    /// summarized.
+    pub tags_count_only_rendered_parts: bool,
+    /// The host's save seam leaves a tag-rendering run's reply raw in the
+    /// host's own store.
+    pub host_seam_not_cleaning: bool,
     /// `run.tool_calls` lists a run's calls in reverse dispatch order.
     pub run_tool_calls_reversed: bool,
     /// A `delivery_order` list without `idle_start` starts a run on an idle
@@ -339,6 +374,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    standalone_in_process: bool,
     user_commands: Mutex<user_commands::Commands>,
     retention_defect: RetentionDefect,
     retention_delete_ms: u64,
@@ -400,6 +436,12 @@ impl World {
         self.groups.iter().any(|served| served == group)
     }
 
+    /// Whether the fake numbers from a compaction provider's Setup
+    /// checkpoint: it declares `tag_checkpoint` and the defect is off.
+    fn honours_checkpoint(&self) -> bool {
+        self.serves(groups::TAG_CHECKPOINT) && !self.defects.tags_setup_checkpoint_ignored
+    }
+
     fn declares_mode(&self, mode: Mode) -> bool {
         let mut describe = RoleDescribe::default().with_capabilities(self.groups.clone());
         if !self.defects.order_modes_ignored {
@@ -449,11 +491,21 @@ struct Msg {
     ordinal: u64,
     mid: String,
     body: Value,
+    /// The writing run's frozen cleaning mode, independent of later plans.
+    writer: cortexkit_role_llm_runner::tags::TextWriter,
+    /// The host's own copy, written at its save seam rather than on read.
+    host_body: Value,
     run_id: String,
     /// The keys of the calls an assistant message carries, in order.
     calls: Vec<String>,
-    /// One row per part: its key and its tag number, if tagged.
-    tags: Vec<(String, Option<u64>)>,
+    /// For a message a recovery dropped: the numbers its parts showed in
+    /// the lineage it was dropped from.
+    left_numbers: Vec<(String, u64)>,
+    /// For a host compaction marker: the message it cuts at.
+    marker_cut: Option<String>,
+    /// The checkpoint key the runner wrote on that marker, until the host
+    /// drops it.
+    marker_key: Option<u64>,
     /// For an entry written by a delivered `delivery_order` send: the mode
     /// it went out in, as the entry's `delivered_as`.
     delivered_as: Option<Value>,
@@ -547,6 +599,8 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    ever_served: bool,
+    standalone_handed_off: bool,
     compaction: compaction::State,
     retention: Option<u64>,
     input_cap: Option<u64>,
@@ -573,8 +627,16 @@ struct Sess {
     user_commands: BTreeMap<String, UserCommandRec>,
     /// The kind of every record, in order: the durable control events.
     events: Vec<String>,
-    /// The highest tag number assigned.
-    last_tag: u64,
+    /// The session's name, which a marker's checkpoint key names.
+    name: String,
+    /// Whether the session's frozen plan renders tags.
+    render_tags: bool,
+    /// The numbering in effect for the current lineage, by message id and
+    /// part key (see `tags`).
+    numbering: BTreeMap<tags::Key, u64>,
+    /// The managed session this one was forked from, when the host forked
+    /// it.
+    forked_from: Option<String>,
     /// Messages, as they were written, that a recovery dropped or rewrote
     /// when it moved the session to a new lineage. Never read or resolved,
     /// except when `Defects::resolve_left_lineage_tags` is set.
@@ -603,32 +665,27 @@ impl Sess {
 
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.messages.len() as u64;
-        // Text-bearing parts are tagged; a tool call keeps a key but no tag.
-        let parts: Vec<bool> = match body["parts"].as_array() {
-            Some(parts) => parts
-                .iter()
-                .map(|part| part["type"] != "tool_call")
-                .collect(),
-            None => vec![true],
+        let writer = if self
+            .run(run_id)
+            .is_some_and(|run| run.structured_output.is_some())
+        {
+            cortexkit_role_llm_runner::tags::TextWriter::StructuredOutputFinal
+        } else if self.render_tags {
+            cortexkit_role_llm_runner::tags::TextWriter::TagRenderingRun
+        } else {
+            cortexkit_role_llm_runner::tags::TextWriter::UntaggedRun
         };
-        let tags = parts
-            .into_iter()
-            .enumerate()
-            .map(|(index, tagged)| {
-                let tag = tagged.then(|| {
-                    self.last_tag += 1;
-                    self.last_tag
-                });
-                (index.to_string(), tag)
-            })
-            .collect();
         self.messages.push(Msg {
             ordinal,
             mid: format!("{}.m{ordinal}", self.lineage),
+            host_body: body.clone(),
             body,
+            writer,
             run_id: run_id.to_owned(),
             calls,
-            tags,
+            left_numbers: Vec::new(),
+            marker_cut: None,
+            marker_key: None,
             delivered_as: None,
         });
         ordinal
@@ -1027,9 +1084,24 @@ impl Module {
                     plan_digest: record["plan_digest"].as_str().map(str::to_owned),
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
+                    render_tags: record["render_tags"] == json!(true),
+                    name: session.clone(),
                     ..Sess::default()
                 },
             );
+        }
+        if kind == "fork" {
+            // The host copied the parent's history into the fork, as
+            // OpenCode's fork copies every part.
+            if let Some(parent) = sessions.get(&text("parent")).cloned() {
+                sessions.insert(
+                    session.clone(),
+                    Sess {
+                        forked_from: Some(text("parent")),
+                        ..parent
+                    },
+                );
+            }
         }
         let Some(sess) = sessions.get_mut(&session) else {
             return;
@@ -1044,6 +1116,42 @@ impl Module {
         }
         match kind.as_str() {
             "host_meta" => sess.host_meta += 1,
+            "host_compact" => {
+                // The host compacts natively, keeping the last exchange: its
+                // marker cuts at the newest user message, and the runner
+                // writes its checkpoint key on the marker in the same write.
+                let cut = sess
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.body["role"] == "user" && m.marker_cut.is_none())
+                    .map(|m| m.mid.clone())
+                    .unwrap_or_default();
+                let key = tags::checkpoint_before(sess, &cut);
+                let ordinal = sess.push(
+                    json!({ "role": "user", "compaction": { "tail_start_id": cut } }),
+                    "",
+                    Vec::new(),
+                );
+                let marker = &mut sess.messages[ordinal as usize];
+                marker.marker_cut = Some(cut);
+                marker.marker_key = Some(key);
+                sess.push(
+                    json!({ "role": "assistant", "summary": "the history before the cut" }),
+                    "",
+                    Vec::new(),
+                );
+            }
+            "drop_marker_key" => {
+                if let Some(marker) = sess
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.marker_cut.is_some())
+                {
+                    marker.marker_key = None;
+                }
+            }
             "ordered" => {
                 let id = text("id");
                 sess.queue.push(id.clone());
@@ -1111,6 +1219,8 @@ impl Module {
                     (record["request"].clone(), record["reply"].clone()),
                 );
             }
+            "standalone_handoff" => sess.standalone_handed_off = true,
+            "require_setup" => sess.compaction = compaction::State::default(),
             "user_command_reservation" => {
                 sess.user_commands.insert(
                     text("invocation"),
@@ -1166,8 +1276,17 @@ impl Module {
                     sess.title = Some(title.into());
                 }
                 let run_id = text("run_id");
-                if kind == "send" && self.world.defects.tags_reused_across_runs {
-                    sess.last_tag = 0;
+                if kind == "steer"
+                    && self.world.defects.tags_renumber_mid_step
+                    && sess.render_tags
+                    && sess
+                        .calls
+                        .values()
+                        .any(|call| call.run_id == run_id && !call.result)
+                {
+                    // Renumbers at once, while the step's call is running.
+                    sess.lineage = format!("{}-t", sess.lineage);
+                    sess.numbering.clear();
                 }
                 let ordinal = sess.push(
                     json!({ "role": "user", "text": text("prompt") }),
@@ -1189,7 +1308,7 @@ impl Module {
                         resend_count: 0,
                     },
                 );
-                if kind == "send" {
+                if kind == "send" && record["no_run"] != json!(true) {
                     sess.runs.push(RunRec {
                         directives: serde_json::from_value(record["directives"].clone())
                             .unwrap_or_default(),
@@ -1216,6 +1335,9 @@ impl Module {
                 }
             }
             "step" => {
+                if !sess.standalone_handed_off {
+                    sess.ever_served = true;
+                }
                 if let Some(spent) = record["input_spent"]
                     .as_u64()
                     .filter(|_| !sess.input_unreported)
@@ -1254,11 +1376,15 @@ impl Module {
                         },
                     );
                 }
+                // The model request this step answers was made at a step
+                // boundary: a renumbering detected since takes effect now.
+                tags::settle(sess, &self.world.defects, self.world.honours_checkpoint());
                 sess.push(
                     json!({ "role": "assistant", "parts": record["parts"] }),
                     &run_id,
                     keys,
                 );
+                tags::save_in_host(sess.messages.last_mut().unwrap(), &self.world.defects);
             }
             "drop_step" => {
                 let run_id = text("run_id");
@@ -1268,11 +1394,20 @@ impl Module {
                     sess.lineage = format!("{}-r", sess.lineage);
                 }
                 sess.calls.retain(|_, call| call.run_id != run_id);
+                let shown = tags::current(sess);
                 let dropped: Vec<Msg> = sess
                     .messages
                     .iter()
                     .filter(|m| m.run_id == run_id && !m.calls.is_empty())
                     .cloned()
+                    .map(|mut m| {
+                        m.left_numbers = shown
+                            .iter()
+                            .filter(|((mid, _), _)| mid == &m.mid)
+                            .map(|((_, part), n)| (part.clone(), *n))
+                            .collect();
+                        m
+                    })
                     .collect();
                 sess.left.extend(dropped);
                 if record["keep_text"] == json!(true) {
@@ -1290,6 +1425,8 @@ impl Module {
                     sess.messages
                         .retain(|m| m.run_id != run_id || m.calls.is_empty());
                 }
+                // The new lineage numbers afresh.
+                sess.numbering.clear();
             }
             "intent" => {
                 if let Some(call) = sess.calls.get_mut(&text("call_key")) {
@@ -1398,6 +1535,7 @@ impl Module {
                     .find(|m| m.run_id == run_id && m.body["role"] == "assistant")
                     .map(|m| m.ordinal);
                 sess.ceiling_wait = None;
+                tags::settle(sess, &self.world.defects, self.world.honours_checkpoint());
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
                     run.reason = record["reason"].as_str().map(str::to_owned);
@@ -1413,6 +1551,7 @@ impl Module {
             }
             _ => {}
         }
+        tags::note_write(sess, &self.world.defects, self.world.honours_checkpoint());
     }
 
     /// Continue run `run_id` of `session`: dispatch the calls of its last
@@ -1525,7 +1664,12 @@ impl Module {
                 } else {
                     &sess.tools[..]
                 };
-                let mut observation = observe_request(tools, frozen.as_ref());
+                let mut observation =
+                    observe_request(tools, frozen.as_ref()).with_rendered(tags::rendered_texts(
+                        &sess,
+                        &self.world.defects,
+                        self.world.honours_checkpoint(),
+                    ));
                 observation.max_output_tokens = output_cap;
                 self.world
                     .model_requests
@@ -1591,18 +1735,11 @@ impl Module {
             let mut tools = Vec::new();
             for (index, part) in turn.parts.iter().enumerate() {
                 match part {
-                    ScriptedPart::Text(text) => {
-                        parts.push(json!({ "type": "text", "text": self.model_text(text) }))
-                    }
+                    ScriptedPart::Text(text) => parts.push(json!({ "type": "text", "text": text })),
                     ScriptedPart::Reasoning(text) => {
                         parts.push(json!({ "type": "reasoning", "text": text }))
                     }
                     ScriptedPart::ToolCall(call) => {
-                        let mut call = call.clone();
-                        if self.world.defects.tags_rewrite_model_text {
-                            call.arguments = strip_tags_value(&call.arguments);
-                        }
-                        let call = &call;
                         let key = if self.world.defects.call_key_from_model_id {
                             format!("key-{}", call.tool_call_id)
                         } else {
@@ -1717,16 +1854,6 @@ impl Module {
                 }
                 return self.commit(session, record);
             }
-        }
-    }
-
-    /// The model's text as stored: byte for byte, unless the defect strips
-    /// model-written tags.
-    fn model_text(&self, text: &str) -> String {
-        if self.world.defects.tags_rewrite_model_text {
-            strip_tags(text)
-        } else {
-            text.to_owned()
         }
     }
 
@@ -2025,6 +2152,9 @@ impl Module {
     /// session runs under. It records the owner and the reply, and writes no
     /// message and starts no run.
     fn adopt(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = self.refuse_fork(session) {
+            return Ok(reply);
+        }
         if let Some(field) = unknown_field(&params, &["send_id", PLAN_FIELD]) {
             return Ok(invalid(&field));
         }
@@ -2093,7 +2223,8 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "start", "owner": "", "lineage": format!("lin-{session}"),
-                    "tools": tools, "plan_digest": plan_digest(plan) }),
+                    "tools": tools, "plan_digest": plan_digest(plan),
+                    "render_tags": plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS) }),
         )?;
         let Some(prompt) = prompt else {
             return Ok(());
@@ -2102,7 +2233,8 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "send", "send_id": format!("host-{session}"), "prompt": prompt,
-                    "delivery": groups::QUEUE, "run_id": run_id, "admitted": false }),
+                    "delivery": groups::QUEUE, "run_id": run_id, "admitted": false,
+                    "no_run": self.world.defects.host_turns_without_run }),
         )?;
         self.drive(session, run_id)
     }
@@ -2212,7 +2344,11 @@ impl Module {
                 reply = reply.with_delivered(Delivered::new(r#as));
             }
         }
-        if send.delivery == groups::STEER {
+        // The tags cases' own steers into held turns (on sessions rendering
+        // tags) stay out of the held-steer receipt fixtures below, which
+        // count and break only the guaranteed-steer case's steers. They are
+        // answered without a receipt, which a guaranteed runner may do.
+        if send.delivery == groups::STEER && !sessions[session].render_tags {
             let held_turn = send.steered_into_running
                 && run.state == "active"
                 && sessions[session]
@@ -2287,7 +2423,27 @@ impl Module {
         respond(reply)
     }
 
+    /// A fork of a managed session is never enrolled: its sends and its
+    /// adoption are refused `fork_unsupported`, naming the parent.
+    fn refuse_fork(&self, session: &str) -> Option<Reply> {
+        let parent = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session)
+            .and_then(|sess| sess.forked_from.clone())?;
+        (!self.world.defects.fork_accepted).then(|| {
+            refuse(
+                errors::FORK_UNSUPPORTED,
+                Some(json!(errors::ForkUnsupportedDetail::new(Some(parent)))),
+            )
+        })
+    }
+
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = self.refuse_fork(session) {
+            return Ok(reply);
+        }
         if let Some(reply) = self.command_collision(session) {
             return Ok(reply);
         }
@@ -2539,7 +2695,9 @@ impl Module {
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
                             "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
                 )?;
-                if self.world.defects.held_steer_ends_run {
+                if self.world.defects.held_steer_ends_run
+                    && !self.sessions.lock().unwrap()[session].render_tags
+                {
                     self.world
                         .held_steer_break_answers
                         .fetch_add(1, Ordering::SeqCst);
@@ -2580,6 +2738,7 @@ impl Module {
                 json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
                         "tools": tools,
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
+                        "render_tags": request.plan.as_ref().and_then(|plan| plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS)),
                         "plan_digest": request.plan.as_ref().map(plan_digest) }),
             )?;
         }
@@ -2693,13 +2852,27 @@ impl Module {
                     .find(|sender| sender.module == caller)
                     .map(|sender| sender.templates.clone())
                     .unwrap_or_default();
-                let assigned = |n: u64| (1..=sess.last_tag).contains(&n);
-                match order::render(&templates, template, assigned) {
+                let numbers = tags::current(&sess);
+                let shown = |part: &order::PartRef| {
+                    numbers.get(&(part.mid.clone(), part.part.clone())).copied()
+                };
+                match order::render(&templates, template, shown) {
                     Ok(text) => (text, true),
-                    Err(_) if self.world.defects.order_template_slots_unchecked => {
+                    Err(order::TemplateProblem::PartGone(_))
+                        if self.world.defects.order_template_part_gone_accepted =>
+                    {
                         (unchecked_render(&templates, template), true)
                     }
-                    Err(_) => return Ok(invalid(order::TEMPLATE_FIELD)),
+                    Err(problem)
+                        if self.world.defects.order_template_slots_unchecked
+                            && !matches!(problem, order::TemplateProblem::PartGone(_)) =>
+                    {
+                        (unchecked_render(&templates, template), true)
+                    }
+                    Err(problem) => {
+                        let (code, detail) = problem.refusal();
+                        return Ok(refuse(code, Some(detail)));
+                    }
                 }
             }
         };
@@ -2766,10 +2939,14 @@ impl Module {
         }
         let request: ReadRequest = match serde_json::from_value(params.clone()) {
             Ok(request) => request,
+            Err(e) if e.to_string().contains("media") => return invalid("media"),
             Err(_) => return invalid("view"),
         };
         let mode = match request.mode() {
             Ok(mode) => mode,
+            Err("media") if self.world.defects.media == Some("model_view_descriptors") => {
+                ReadMode::Tail
+            }
             Err(field) => return invalid(field),
         };
         if request.view == Some(ReadView::Model) && !self.world.serves(groups::MODEL_VIEW) {
@@ -2857,7 +3034,7 @@ impl Module {
         if end < all.len() {
             page = page.with_next_from_ordinal(all[end].ordinal);
         }
-        respond(page)
+        media::page(page, request.media, cap, &self.world.defects)
     }
 
     fn read_message(&self, sess: &Sess, m: &Msg) -> ReadMessage {
@@ -2896,6 +3073,17 @@ impl Module {
             })
             .collect();
         let mut body = m.body.clone();
+        for part in body
+            .get_mut("parts")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            if part["type"] == "text" {
+                let text = part["text"].as_str().unwrap_or_default().to_owned();
+                part["text"] = json!(tags::exposed(sess, m, &text, &self.world.defects));
+            }
+        }
         if self
             .world
             .defects
@@ -2922,18 +3110,8 @@ impl Module {
             message = message.with_role(role);
         }
         if self.world.serves(groups::TAGS) {
-            message = message.with_tags(
-                m.tags
-                    .iter()
-                    .map(|(part, tag)| match tag {
-                        Some(n) => cortexkit_role_llm_runner::tags::PartTag::tagged(
-                            part,
-                            cortexkit_role_llm_runner::tags::format_tag(*n).unwrap(),
-                        ),
-                        None => cortexkit_role_llm_runner::tags::PartTag::untagged(part),
-                    })
-                    .collect(),
-            );
+            let numbers = tags::current(sess);
+            message = message.with_tags(tags::rows(sess, m, &self.world.defects, &numbers));
         }
         if let Some(delivered) = &m.delivered_as {
             message = message.with_delivered_as(serde_json::from_value(delivered.clone()).unwrap());
@@ -3045,11 +3223,17 @@ impl Module {
         );
         if run.state == "completed" {
             let ordinal = run.final_ordinal.unwrap_or_default();
-            let mid = sessions[session].messages[ordinal as usize].mid.clone();
+            let sess = &sessions[session];
+            let message = &sess.messages[ordinal as usize];
             result = result.with_final_message(FinalMessage {
                 ordinal,
-                mid,
-                text: run.final_text.clone().unwrap_or_default(),
+                mid: message.mid.clone(),
+                text: tags::exposed(
+                    sess,
+                    message,
+                    &run.final_text.clone().unwrap_or_default(),
+                    &self.world.defects,
+                ),
             });
         }
         if let Some(reason) = &run.reason {
@@ -3149,11 +3333,14 @@ impl Module {
     }
 
     /// The content of part `part` of `message`, as stored.
-    fn part_content(message: &Msg, part: &str) -> String {
+    fn part_content(sess: &Sess, message: &Msg, part: &str, defects: &Defects) -> String {
         match message.body["parts"].as_array() {
             Some(parts) => {
                 let part = &parts[part.parse::<usize>().unwrap_or_default()];
                 match part["text"].as_str() {
+                    Some(text) if part["type"] == "text" => {
+                        tags::exposed(sess, message, text, defects)
+                    }
                     Some(text) if part["type"] != "tool_call" => text.to_owned(),
                     _ => part.to_string(),
                 }
@@ -3230,13 +3417,14 @@ impl Module {
     }
 
     fn resolve(&self, session: &str, params: &Value) -> Reply {
-        if let Some(field) = unknown_field(params, &["tag", "range"]) {
+        if let Some(field) = unknown_field(params, &["tag", "range", "media"]) {
             return invalid(&field);
         }
         let request: cortexkit_role_llm_runner::tags::ResolveRequest =
             match serde_json::from_value(params.clone()) {
                 Ok(request) => request,
                 Err(error) if error.to_string().contains("tag") => return invalid("tag"),
+                Err(error) if error.to_string().contains("media") => return invalid("media"),
                 Err(_) => return invalid("range"),
             };
         let number = match request.number() {
@@ -3248,22 +3436,26 @@ impl Module {
             // Only the current lineage's parts resolve; with
             // `Defects::resolve_left_lineage_tags` set, resolve also searches
             // parts a recovery dropped with the lineage it left.
-            let left: &[Msg] = if self.world.defects.resolve_left_lineage_tags {
-                &sess.left
-            } else {
-                &[]
-            };
-            sess.messages.iter().chain(left).find_map(|m| {
-                m.tags
-                    .iter()
-                    .find(|(_, tag)| *tag == Some(number))
-                    .map(|(part, _)| (m, part.clone()))
-            })
+            let left = self
+                .world
+                .defects
+                .resolve_left_lineage_tags
+                .then(|| {
+                    sess.left.iter().find_map(|m| {
+                        m.left_numbers
+                            .iter()
+                            .find(|(_, n)| *n == number)
+                            .map(|(part, _)| (m, part.clone()))
+                    })
+                })
+                .flatten();
+            left.or_else(|| tags::find(sess, number))
+                .map(|found| (sess, found))
         });
-        let Some((message, part)) = found else {
+        let Some((sess, (message, part))) = found else {
             return refuse(errors::UNKNOWN_TAG, None);
         };
-        let content = Self::part_content(message, &part);
+        let content = Self::part_content(sess, message, &part, &self.world.defects);
         let sliced = match cortexkit_role_llm_runner::tags::slice(&content, request.range.as_ref())
         {
             Ok(sliced) => sliced,
@@ -3278,6 +3470,47 @@ impl Module {
         );
         if let Some(range) = request.range {
             reply = reply.with_range(range);
+        }
+        if request.media == Some(cortexkit_role_llm_runner::read::MediaMode::Descriptors) {
+            let is_text = message.body.get("text").is_some()
+                || message.body["parts"]
+                    .as_array()
+                    .and_then(|p| reply.part.parse::<usize>().ok().and_then(|i| p.get(i)))
+                    .is_some_and(|p| p["type"] == "text");
+            if !is_text {
+                if let Ok(value) = serde_json::from_str::<Value>(&content) {
+                    reply.content = match cortexkit_role_llm_runner::read::descriptors::describe(
+                        &value,
+                        &media::payloads(&value),
+                        cortexkit_role_llm_runner::read::descriptors::DESCRIPTOR_MESSAGE_MAX - 2048,
+                    ) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            return refuse(
+                                errors::REPLY_TOO_LARGE,
+                                Some(json!({"ordinal":message.ordinal})),
+                            )
+                        }
+                    };
+                }
+            } else if let Some(text) = reply
+                .content
+                .as_str()
+                .filter(|s| s.len() > cortexkit_role_llm_runner::read::descriptors::PART_INLINE_MAX)
+            {
+                reply.content = serde_json::to_value(
+                    cortexkit_role_llm_runner::read::descriptors::Reference::text(
+                        Some(reply.part.clone()),
+                        text,
+                    ),
+                )
+                .unwrap();
+            }
+        } else if serde_json::to_vec(&reply).unwrap().len() + 21 > 4_194_304 {
+            return refuse(
+                errors::REPLY_TOO_LARGE,
+                Some(json!({"ordinal":message.ordinal})),
+            );
         }
         respond(reply)
     }
@@ -3521,39 +3754,6 @@ fn validate(schema: &Value, value: &Value, path: &str, errors: &mut Vec<String>)
 }
 
 /// The opaque position after the `seq`-th durable event.
-/// `text` without any `§N§` sequence.
-fn strip_tags(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(start) = rest.find('§') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + '§'.len_utf8()..];
-        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
-        if digits > 0 && after[digits..].starts_with('§') {
-            rest = &after[digits + '§'.len_utf8()..];
-        } else {
-            out.push('§');
-            rest = after;
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-fn strip_tags_value(value: &Value) -> Value {
-    match value {
-        Value::String(text) => Value::String(strip_tags(text)),
-        Value::Array(values) => Value::Array(values.iter().map(strip_tags_value).collect()),
-        Value::Object(members) => Value::Object(
-            members
-                .iter()
-                .map(|(k, v)| (k.clone(), strip_tags_value(v)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
 /// The answer to a `delivery_order` send, or its re-send: `pending` while
 /// queued; once delivered, the state of the run that carried it, that run,
 /// and how it went in; otherwise its terminal state. With
@@ -3663,6 +3863,9 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub descriptor_case: Option<&'static str>,
+    pub descriptor_fixtures: bool,
+    pub standalone_in_process: bool,
     /// The first `late_seal_reads` `run.result` reads of an ended run answer
     /// `active`, as if the runner reported the end late.
     pub late_seal_reads: usize,
@@ -3724,6 +3927,8 @@ pub fn served() -> BTreeSet<Capability> {
         Capability::HoldToolCalls,
         Capability::HoldContextCeiling,
         Capability::HostMetadataChange,
+        Capability::TagCheckpoint,
+        Capability::RenderedModelInput,
     ]
     .into()
 }
@@ -3745,6 +3950,9 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            descriptor_case: None,
+            descriptor_fixtures: false,
+            standalone_in_process: false,
             late_seal_reads: 0,
             retention_defect: RetentionDefect::None,
             retention_delete_ms: RETENTION_DELETE_MS,
@@ -3779,6 +3987,7 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    standalone_in_process: self.standalone_in_process,
                     retention_defect: if RETENTION_DEFECTS_ENABLED {
                         self.retention_defect
                     } else {
@@ -3932,6 +4141,55 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    fn multipart_tool_result(&self, texts: &[String]) -> Option<Value> {
+        self.descriptor_fixtures.then(|| json!({"type":"tool_result","tool_use_id":"fallback-call","content":texts.iter().map(|s| json!({"type":"text","text":s})).collect::<Vec<_>>()}))
+    }
+    fn read_parts(&self, message: &Value) -> Vec<(String, Value)> {
+        media::parts(message)
+    }
+
+    fn media_tool_result(&self, bytes: &[u8], nested: bool, scenario: &str) -> Option<Value> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        if !self.descriptor_fixtures || self.descriptor_case.is_some_and(|case| case != scenario) {
+            return None;
+        }
+        let image = json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":STANDARD.encode(bytes)}});
+        Some(if nested {
+            json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,"content":[image]})
+        } else {
+            image
+        })
+    }
+    async fn cut_off_user_command(
+        &self,
+        _handle: &FakeHandle,
+        session: &str,
+        after: bool,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .user_commands
+            .lock()
+            .unwrap()
+            .sessions
+            .get_mut(session)
+            .unwrap()
+            .cutoff = Some(after);
+        Ok(())
+    }
+    fn standalone_in_process(&self) -> bool {
+        self.standalone_in_process
+    }
+
+    async fn require_setup_again(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({"kind":"require_setup"}))
+            .map_err(|Killed| HarnessError::new("killed"))
+    }
     async fn prepare_user_commands(
         &self,
         session: &str,
@@ -4091,6 +4349,56 @@ impl LlmRunnerSubject for FakeSubject {
             .ok_or_else(|| HarnessError::new("no module is running"))?;
         module
             .end_ceiling_wait(session, view_arrived)
+            .map_err(|Killed| HarnessError::new("the module was killed"))
+    }
+
+    async fn compact_in_host(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({ "kind": "host_compact" }))
+            .map_err(|Killed| HarnessError::new("the module was killed"))
+    }
+
+    async fn drop_marker_key(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({ "kind": "drop_marker_key" }))
+            .map_err(|Killed| HarnessError::new("the module was killed"))
+    }
+
+    async fn host_stored_text(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        marker: &str,
+    ) -> Result<Option<String>, HarnessError> {
+        let sessions = handle.0.sessions.lock().unwrap();
+        Ok(sessions
+            .get(session)
+            .and_then(|sess| tags::host_stored(sess, marker, &self.defects)))
+    }
+
+    fn image_tool_result(&self, marker: &str) -> Option<Value> {
+        Some(tags::image_result(marker))
+    }
+
+    async fn fork_session(
+        &self,
+        handle: &FakeHandle,
+        parent: &str,
+        fork: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(fork, json!({ "kind": "fork", "parent": parent }))
             .map_err(|Killed| HarnessError::new("the module was killed"))
     }
 

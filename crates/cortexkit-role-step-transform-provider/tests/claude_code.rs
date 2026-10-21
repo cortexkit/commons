@@ -1,7 +1,7 @@
 use cortexkit_role_step_transform_provider::{
     claude_code::{
         is_valid_capability_identifier, ClaudeCodeCapabilities, ClaudeCodeLane, CAPABILITY,
-        PRINCIPAL,
+        COMPUTED_TAGGER_EPOCH, PRINCIPAL,
     },
     describe::RoleDescribe,
     hook::HookCall,
@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 fn vectors() -> Value {
     serde_json::from_str(include_str!(
-        "../../../test-vectors/step-transform-provider-v1/claude-code.json"
+        "../test-vectors/step-transform-provider-v1/claude-code.json"
     ))
     .unwrap()
 }
@@ -242,7 +242,7 @@ fn capability_identifier_grammar_matches_daemon() {
 
 fn native_vectors() -> Value {
     serde_json::from_str(include_str!(
-        "../../../test-vectors/step-transform-provider-v1/claude-code-native-ingress.json"
+        "../test-vectors/step-transform-provider-v1/claude-code-native-ingress.json"
     ))
     .unwrap()
 }
@@ -311,6 +311,16 @@ fn assert_epoch_required(epoch: &str) {
     let refusal = ClaudeCodeLane::admit(PRINCIPAL, "connection1", Some(selected)).unwrap_err();
     assert_eq!(refusal.field, "claude_code");
     assert_eq!(refusal.code(), "invalid_params");
+}
+
+/// The fixture advertises the computed tagger, and an older tagger epoch is
+/// still admitted: the epoch is advertised data, not an admission gate.
+#[test]
+fn the_fixture_advertises_the_computed_tagger_epoch() {
+    assert_eq!(bundle().epochs.get("tagger"), Some(&COMPUTED_TAGGER_EPOCH));
+    let mut older = bundle();
+    older.epochs.insert("tagger".into(), 1);
+    assert_eq!(older.validate(), Ok(()));
 }
 
 #[test]

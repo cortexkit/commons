@@ -80,6 +80,7 @@ mod drive;
 mod follow;
 mod input_token_cap;
 mod interrupt_reason;
+mod media;
 mod report;
 mod retention;
 mod route;

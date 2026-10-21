@@ -1,0 +1,902 @@
+{
+  "counts": [
+    {
+      "kind": "user_text",
+      "counts": true
+    },
+    {
+      "kind": "tool_result_text",
+      "counts": true
+    },
+    {
+      "kind": "tool_result_image_only",
+      "counts": true
+    },
+    {
+      "kind": "assistant_text",
+      "counts": true
+    },
+    {
+      "kind": "empty_text",
+      "counts": false
+    },
+    {
+      "kind": "turn_system",
+      "counts": false
+    },
+    {
+      "kind": "user_attachment",
+      "counts": false
+    },
+    {
+      "kind": "reasoning",
+      "counts": false
+    },
+    {
+      "kind": "tool_call",
+      "counts": false
+    },
+    {
+      "kind": "history_head",
+      "counts": false
+    },
+    {
+      "kind": "compaction_marker",
+      "counts": false
+    }
+  ],
+  "numbering": [
+    {
+      "name": "storage order differs from rendered order: a steer stored while a call ran renders after its result",
+      "checkpoint": 0,
+      "parts": [
+        {
+          "kind": "assistant_text",
+          "rendered_at": 0
+        },
+        {
+          "kind": "tool_call",
+          "rendered_at": 1
+        },
+        {
+          "kind": "user_text",
+          "rendered_at": 3
+        },
+        {
+          "kind": "tool_result_text",
+          "rendered_at": 2
+        }
+      ],
+      "numbers": [
+        1,
+        null,
+        3,
+        2
+      ]
+    },
+    {
+      "name": "numbered from a marker checkpoint: the first counted part after the cut is checkpoint + 1",
+      "checkpoint": 40,
+      "parts": [
+        {
+          "kind": "user_text",
+          "rendered_at": 0
+        },
+        {
+          "kind": "reasoning",
+          "rendered_at": 1
+        },
+        {
+          "kind": "assistant_text",
+          "rendered_at": 2
+        }
+      ],
+      "numbers": [
+        41,
+        null,
+        42
+      ]
+    },
+    {
+      "name": "numbered from a setup checkpoint at its cut",
+      "checkpoint": 340,
+      "parts": [
+        {
+          "kind": "user_text",
+          "rendered_at": 0
+        },
+        {
+          "kind": "tool_call",
+          "rendered_at": 1
+        },
+        {
+          "kind": "tool_result_text",
+          "rendered_at": 2
+        },
+        {
+          "kind": "assistant_text",
+          "rendered_at": 3
+        }
+      ],
+      "numbers": [
+        341,
+        null,
+        342,
+        343
+      ]
+    },
+    {
+      "name": "gaps only behind the tail: a checkpoint above the parts before the cut, and a dropped part keeps its number",
+      "checkpoint": 100,
+      "parts": [
+        {
+          "kind": "user_text",
+          "rendered_at": 0
+        },
+        {
+          "kind": "tool_result_image_only",
+          "rendered_at": 1
+        },
+        {
+          "kind": "user_attachment",
+          "rendered_at": 2
+        },
+        {
+          "kind": "empty_text",
+          "rendered_at": 3
+        },
+        {
+          "kind": "turn_system",
+          "rendered_at": 4
+        },
+        {
+          "kind": "assistant_text",
+          "rendered_at": 5
+        }
+      ],
+      "numbers": [
+        101,
+        102,
+        null,
+        null,
+        null,
+        103
+      ]
+    },
+    {
+      "name": "the history head and a marker are not counted",
+      "checkpoint": 7,
+      "parts": [
+        {
+          "kind": "history_head",
+          "rendered_at": 0
+        },
+        {
+          "kind": "compaction_marker",
+          "rendered_at": 1
+        },
+        {
+          "kind": "user_text",
+          "rendered_at": 2
+        }
+      ],
+      "numbers": [
+        null,
+        null,
+        8
+      ]
+    }
+  ],
+  "anchors": [
+    {
+      "name": "a cut with no tail_start_id is the message holding the compaction part",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m5",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 12,
+            "session": "s"
+          }
+        }
+      ],
+      "existing": [
+        "m5"
+      ],
+      "anchor": {
+        "anchor": "marker",
+        "checkpoint": 12,
+        "cut": "m5"
+      }
+    },
+    {
+      "name": "tail_start_id is the cut when present",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m9",
+          "tail_start_id": "m7",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 30,
+            "session": "s"
+          }
+        }
+      ],
+      "existing": [
+        "m7",
+        "m9"
+      ],
+      "anchor": {
+        "anchor": "marker",
+        "checkpoint": 30,
+        "cut": "m7"
+      }
+    },
+    {
+      "name": "a marker not in effect is never an anchor",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m9",
+          "in_effect": false,
+          "checkpoint": {
+            "tag_checkpoint": 30,
+            "session": "s"
+          }
+        },
+        {
+          "message": "m4",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 12,
+            "session": "s"
+          }
+        }
+      ],
+      "existing": [
+        "m4",
+        "m9"
+      ],
+      "anchor": {
+        "anchor": "marker",
+        "checkpoint": 12,
+        "cut": "m4"
+      }
+    },
+    {
+      "name": "a marker that lost its key is no anchor, never zero: the earlier marker anchors",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m9",
+          "tail_start_id": "m8",
+          "in_effect": true
+        },
+        {
+          "message": "m4",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 12,
+            "session": "s"
+          }
+        }
+      ],
+      "existing": [
+        "m4",
+        "m8",
+        "m9"
+      ],
+      "anchor": {
+        "anchor": "marker",
+        "checkpoint": 12,
+        "cut": "m4"
+      }
+    },
+    {
+      "name": "a setup checkpoint at its cut, under a standalone marker that carries no key",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m6",
+          "tail_start_id": "m5",
+          "in_effect": true
+        }
+      ],
+      "setup": {
+        "tag_checkpoint": 340,
+        "cut": "m5"
+      },
+      "existing": [
+        "m5",
+        "m6"
+      ],
+      "anchor": {
+        "anchor": "setup",
+        "checkpoint": 340,
+        "cut": "m5"
+      }
+    },
+    {
+      "name": "an in-effect marker checkpoint wins over the setup checkpoint",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m20",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 352,
+            "session": "s"
+          }
+        }
+      ],
+      "setup": {
+        "tag_checkpoint": 340,
+        "cut": "m5"
+      },
+      "existing": [
+        "m5",
+        "m20"
+      ],
+      "anchor": {
+        "anchor": "marker",
+        "checkpoint": 352,
+        "cut": "m20"
+      }
+    },
+    {
+      "name": "the setup cut is gone after a revert: the session start, numbered from N, on a new lineage",
+      "session": "s",
+      "markers": [],
+      "setup": {
+        "tag_checkpoint": 340,
+        "cut": "m5"
+      },
+      "existing": [
+        "m0",
+        "m1"
+      ],
+      "anchor": {
+        "anchor": "session_start",
+        "checkpoint": 340,
+        "new_lineage": true
+      }
+    },
+    {
+      "name": "nothing anchors: the session start at zero",
+      "session": "s",
+      "markers": [],
+      "existing": [
+        "m0"
+      ],
+      "anchor": {
+        "anchor": "session_start",
+        "checkpoint": 0,
+        "new_lineage": false
+      }
+    },
+    {
+      "name": "a key naming another session marks a fork, and names its parent",
+      "session": "s",
+      "markers": [
+        {
+          "message": "m5",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 12,
+            "session": "ses_parent"
+          }
+        }
+      ],
+      "existing": [
+        "m5"
+      ],
+      "fork_parent": "ses_parent"
+    }
+  ],
+  "lost_keys": [
+    {
+      "name": "the newest marker lost its key: the older keyed marker anchors, counting the parts the newer one summarized",
+      "session": "s",
+      "messages": [
+        {
+          "id": "m0",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m1",
+          "parts": [
+            "assistant_text",
+            "reasoning",
+            "tool_call"
+          ]
+        },
+        {
+          "id": "m2",
+          "parts": [
+            "tool_result_text"
+          ]
+        },
+        {
+          "id": "m3",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m4",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "c1",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s1",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m5",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m6",
+          "parts": [
+            "assistant_text",
+            "tool_call"
+          ]
+        },
+        {
+          "id": "m7",
+          "parts": [
+            "tool_result_image_only"
+          ]
+        },
+        {
+          "id": "c2",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s2",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m8",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m9",
+          "parts": [
+            "assistant_text"
+          ]
+        }
+      ],
+      "markers_with_keys": [
+        {
+          "message": "c2",
+          "tail_start_id": "m6",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 6,
+            "session": "s"
+          }
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m3",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 3,
+            "session": "s"
+          }
+        }
+      ],
+      "markers": [
+        {
+          "message": "c2",
+          "tail_start_id": "m6",
+          "in_effect": true
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m3",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 3,
+            "session": "s"
+          }
+        }
+      ],
+      "numbers": {
+        "m6:0": 7,
+        "m7:0": 8,
+        "m8:0": 9,
+        "m9:0": 10
+      }
+    },
+    {
+      "name": "every key lost: the Setup checkpoint at its cut anchors",
+      "session": "s",
+      "messages": [
+        {
+          "id": "m0",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m1",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m2",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m3",
+          "parts": [
+            "assistant_text",
+            "tool_call"
+          ]
+        },
+        {
+          "id": "m4",
+          "parts": [
+            "tool_result_text"
+          ]
+        },
+        {
+          "id": "c1",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s1",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m5",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m6",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m7",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "c2",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s2",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m8",
+          "parts": [
+            "assistant_text"
+          ]
+        }
+      ],
+      "markers_with_keys": [
+        {
+          "message": "c2",
+          "tail_start_id": "m7",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 345,
+            "session": "s"
+          }
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m4",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 342,
+            "session": "s"
+          }
+        }
+      ],
+      "markers": [
+        {
+          "message": "c2",
+          "tail_start_id": "m7",
+          "in_effect": true
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m4",
+          "in_effect": true
+        }
+      ],
+      "numbers": {
+        "m7:0": 346,
+        "m8:0": 347
+      },
+      "setup": {
+        "tag_checkpoint": 340,
+        "cut": "m2"
+      }
+    },
+    {
+      "name": "every key lost and no Setup checkpoint: the session start anchors at zero",
+      "session": "s",
+      "messages": [
+        {
+          "id": "m0",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m1",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m2",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m3",
+          "parts": [
+            "assistant_text",
+            "tool_call"
+          ]
+        },
+        {
+          "id": "m4",
+          "parts": [
+            "tool_result_text"
+          ]
+        },
+        {
+          "id": "c1",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s1",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m5",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m6",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m7",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "c2",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s2",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m8",
+          "parts": [
+            "assistant_text"
+          ]
+        }
+      ],
+      "markers_with_keys": [
+        {
+          "message": "c2",
+          "tail_start_id": "m7",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 7,
+            "session": "s"
+          }
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m4",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 4,
+            "session": "s"
+          }
+        }
+      ],
+      "markers": [
+        {
+          "message": "c2",
+          "tail_start_id": "m7",
+          "in_effect": true
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m4",
+          "in_effect": true
+        }
+      ],
+      "numbers": {
+        "m7:0": 8,
+        "m8:0": 9
+      }
+    },
+    {
+      "name": "a newer cut inside the older marker's retained tail: the older marker pair inside it never counts",
+      "session": "s",
+      "messages": [
+        {
+          "id": "m0",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m1",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m2",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "m3",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m4",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "c1",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s1",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m5",
+          "parts": [
+            "assistant_text"
+          ]
+        },
+        {
+          "id": "m6",
+          "parts": [
+            "user_text"
+          ]
+        },
+        {
+          "id": "c2",
+          "parts": [
+            "compaction_marker"
+          ]
+        },
+        {
+          "id": "s2",
+          "parts": [
+            "history_head"
+          ]
+        },
+        {
+          "id": "m7",
+          "parts": [
+            "assistant_text"
+          ]
+        }
+      ],
+      "markers_with_keys": [
+        {
+          "message": "c2",
+          "tail_start_id": "m3",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 3,
+            "session": "s"
+          }
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m2",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 2,
+            "session": "s"
+          }
+        }
+      ],
+      "markers": [
+        {
+          "message": "c2",
+          "tail_start_id": "m3",
+          "in_effect": true
+        },
+        {
+          "message": "c1",
+          "tail_start_id": "m2",
+          "in_effect": true,
+          "checkpoint": {
+            "tag_checkpoint": 2,
+            "session": "s"
+          }
+        }
+      ],
+      "numbers": {
+        "m3:0": 4,
+        "m4:0": 5,
+        "m5:0": 6,
+        "m6:0": 7,
+        "m7:0": 8
+      }
+    }
+  ]
+}

@@ -1,9 +1,10 @@
-# `step-transform-provider/v1` — role contract (draft)
+# `step-transform-provider/v1` — role contract
 
-Stability: **alpha, draft**, unpublished. This document is the role
+Stability: **alpha**. This document is the role
 definition; the Rust types in this crate are its wire shapes,
-`test-vectors/step-transform-provider-v1/` at the repository root holds its
-vectors, and a separate `-conformance` crate will hold its suite (§12).
+`test-vectors/step-transform-provider-v1/` inside this crate holds its
+vectors. Conformance requirements are described in §12; this crate does not
+contain a provider conformance runner.
 
 `llm-runner/v1` states what the runner owes at each hook call site;
 this document states the provider's side.
@@ -762,6 +763,11 @@ change to ordinary runner admission or observation.
   `compartment`, even when tagging is inactive. Missing any component refuses
   `invalid_params` naming `claude_code`; a `render` epoch is not a substitute
   for component pins. Actual supported values must match provider discovery.
+  The `tagger` epoch names the tagging rules: 1 for tags recorded once and
+  never reused (llm-runner before 0.4.0), and 2
+  (`claude_code::COMPUTED_TAGGER_EPOCH`) for tags computed from the
+  transcript (llm-runner 0.4.0's `runner-tags/v2`, its §9.6). A provider
+  that tags by the computed rules advertises 2 or later.
   No codec epoch is implied by this contract or by synthetic vectors.
   Profile/provider generations are separate data fields, not session-id edits.
   `bootstrap_complete` advertises support for the typed completion receipt in

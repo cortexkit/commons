@@ -1,5 +1,14 @@
 # cortexkit-role-llm-runner-conformance
 
+Descriptor-read adapters supply `media_tool_result` (actual decoded image
+bytes, with a nested tool-result layout when requested), `multipart_tool_result`
+for the fixed-budget fallback, and `read_parts` for their host's stable part
+keys. The kit validates message/part digest rows against the inline content,
+never descriptor JSON; unsupported image fixtures are named inapplicable.
+Compaction providers must read with `media: "descriptors"` and trust served
+content digests. This runner kit exercises Setup, not a provider's reverse-read
+implementation.
+
 The conformance suite for the `llm-runner/v1` role
 (`crates/cortexkit-role-llm-runner/CONTRACT.md`). A runner adds it as a
 dev-dependency and runs it in its own CI against its real module over its
@@ -68,7 +77,9 @@ vocabulary section and identifies the governing contract sections.
    from Setup or `session.read` responses. A single-session route's bind
    session must equal Setup's session; a shared project route with an empty
    session and a generic harness is valid. The named case
-   `compaction_setup_route_session_matches_setup` checks both forms. Hold
+   `compaction_setup_route_session_matches_setup` checks both forms, and
+   that a Setup refused `setup_identity_mismatch` ends the run `error` under
+   that code. Hold
    every model answer until `release_compaction_model`.
    `durable_compaction_setup` must read the initial answer from persistent
    runner storage while a model call is held, never from an in-memory cache,
@@ -128,13 +139,19 @@ from `session.baseline` has no admission reply to compare.
 | `undeclared_delivery_refused` | `queue`, `transcript_reads`, and `steer` or `interrupt` left undeclared |
 | `crash_at_Admitted`, `crash_at_SendRecorded`, `crash_at_StepRecorded`, `crash_at_ToolResultRecorded`, `crash_at_Terminal` | `queue`, `transcript_reads`, the kill point |
 | `crash_at_DispatchIntent` | `queue`, `transcript_reads`, `dispatch_attribution`, the kill point |
-| `tags_resolve_left_lineage_refused` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, kill point `StepRecorded`; inapplicable unless the seal drops a tagged part onto a new lineage |
+| `tags_resolve_answers_the_current_lineage` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, kill point `StepRecorded`; inapplicable unless the seal moves the session onto a new lineage |
+| `tags_numbered_in_rendered_order` | `tags`, `queue`, `transcript_reads`, `steer`, `hold_tool_calls`, `rendered_model_input`; inapplicable when the runner renders a steer where it stores it |
+| `tags_renumbering_waits_for_the_step_boundary` | `tags`, `queue`, `transcript_reads`, `steer`, `hold_tool_calls` |
+| `tags_setup_checkpoint_anchors_at_its_cut` | `tags`, `tag_checkpoint`, `compaction`, `queue`, `transcript_reads` |
+| `tags_fork_of_a_managed_session_refused` | `tags`, `compaction`, `queue`, `transcript_reads`; inapplicable unless the adapter can create a fork the runner can detect (`fork_session`) |
+| `adopt_host_turn_is_a_run` | `adopt`, `transcript_reads`, `run_ops`; inapplicable unless the adapter can start a host turn |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer` |
 | `delivery_order_members_without_list_refused` | `delivery_order`, `queue`, `transcript_reads` |
 | `delivery_order_first_possible_mode` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls` |
 | `delivery_order_declared_modes_respected` | `delivery_order`, `queue`, `transcript_reads`; inapplicable without live `delivery_order_modes`; all lists containing only undeclared modes are refused with `detail.delivery` and no writes, and lists with a listed mode are accepted |
 | `delivery_order_template_renders_as_system` | `delivery_order`, `queue`, `transcript_reads`; needs `steer` for fallback or a route that supports `turn_system`; inapplicable if neither is available |
 | `delivery_order_bad_slot_refused` | `delivery_order`, `queue`, `transcript_reads` |
+| `delivery_order_template_part_gone_refused` | `delivery_order`, `queue`, `transcript_reads`, `tags` |
 | `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; retracts a pending `[tool_result]` send, then releases the held call and confirms the send was never delivered |
 | `delivery_order_undeclared_mode_refused` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; runs when `steer` is not declared, refuses a `[steer]`-only list as `delivery_unsupported` with the sent list in `detail.delivery`, and proves `[steer, idle_start]` waits for and starts an idle turn |
 | `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, `hold_tool_calls`; restarts its own runner |
@@ -304,12 +321,16 @@ separate state root. The suite's count of real kills does not include it.
 
 ## Adoption
 
-The eight `adopt_*` cases run only when the subject declares
+The nine `adopt_*` cases run only when the subject declares
 `Capability::Adopt` (the `adopt` group); otherwise the report names each one
 as skipped, never as passed, and the suite sends no `session.adopt`. Each
 case also reads the live `role.describe` and sends nothing unless it declares
 `adopt`. They require `transcript_reads`; `adopt_during_active_run` also
-requires held tool calls, and `adopt_then_owner_sends` also requires `queue`.
+requires held tool calls, `adopt_then_owner_sends` also requires `queue`, and
+`adopt_host_turn_is_a_run` also requires `run_ops`: the person's own turn,
+started through `start_host_session`, must be a run with a `run_id` that
+`run.result` answers (and `run.status` and `session.subscribe` show, where
+declared). It is inapplicable when the adapter cannot start a host turn.
 
 An adapter for such a runner implements two defaulted hooks:
 
@@ -328,29 +349,56 @@ the identities the runner reports with each other.
 
 ## Tags
 
-The eight `tags_*` cases run only when the subject declares
+The thirteen `tags_*` cases run only when the subject declares
 `Capability::Tags` (the `tags` group); otherwise each is reported as skipped,
 by name, and the suite sends no `session.resolve`. They require `queue` and
-`transcript_reads`, and read the live `role.describe` before resolving. They
-check part rows (a stable key per exposed part, at least one tagged part per
-entry, each tag a well-formed `§N§` used once), that a later run never reuses
-or lowers numbers, that tags exist whether or not the plan renders them,
-`session.resolve`'s exact stored content (with a character range counted in
-Unicode scalar values) and its `unknown_tag`, `tag` and `range` refusals, and
-that a model-written `§N§` is stored and dispatched as written. The rendered
-case needs the defaulted `send_fields_with_plan(session, first, members)`
-hook, which adds members (here `render_tags`) to the first send's plan.
+`transcript_reads`, and read the live `role.describe` before resolving.
+Numbering applies only to sessions whose plan renders tags (llm-runner 0.4.0
+§9.6), so the cases open their sessions through the defaulted
+`send_fields_with_plan(session, first, members)` hook with `render_tags:
+true`; an adapter without it fails them by name.
 
-`tags_resolve_left_lineage_refused` also requires `dispatch_attribution`
-and the `StepRecorded` kill point: it reads the `crash_at_StepRecorded`
-scenario. After a seal that drops the never-sent call or its step and moves
-the session to a new lineage (shape (a)), the kill came before any read of
-the cut step, so the case cannot name the dropped part's tag; it resolves
-every tag number below the new lineage's highest that no part read from it
-carries (at most 64), which must each be refused `unknown_tag`, and resolves
-the cut run's prompt, which must answer its ordinal and `mid` in the new
-lineage. It is inapplicable, by name, when the runner resumes the run or
-keeps the call (shape (b)), and when the seal dropped no tagged part.
+They check part rows (a stable key per exposed part, each number a
+well-formed `§N§` used once in its lineage, the numbers consecutive), that a
+later run on the same lineage keeps every earlier number, that a session
+whose plan leaves `render_tags` absent numbers nothing, `session.resolve`'s
+exposed content (with a character range counted in Unicode scalar values)
+and its `unknown_tag`, `tag` and `range` refusals, and that the model's own
+tag notation is cleaned on every exposure of a tag-rendering run, exposed
+byte for byte for an untagged run, and left raw in a structured-output run's
+final text (where `structured_output` is declared; the case names that rule
+as unchecked otherwise), while tool-call arguments reach the tool as written.
+`tags_count_only_parts_rendered_with_a_number` checks that reasoning and a
+tool call carry no number; with the defaulted `image_tool_result(marker)`
+hook it also checks that an image-only tool result carries one.
+
+Two cases steer into a held tool call, the one renumbering every runner
+shares (a steer stored before the call's result and rendered after it).
+`tags_numbered_in_rendered_order` needs `Capability::RenderedModelInput`: the
+adapter records, in `ModelRequestObservation::rendered`, every text each
+model request carried as the model received it, and the case checks that the
+last request's numbers are the ones `session.read` reports, increasing in
+rendered order. `tags_renumbering_waits_for_the_step_boundary` checks that
+nothing a read showed changes while the call is still held, and that a
+renumbered part afterwards comes with a new lineage.
+
+`tags_setup_checkpoint_anchors_at_its_cut` needs `Capability::TagCheckpoint`
+and `compaction`: its scripted provider answers Setup with
+`CompactionSetup::ReadyWithCheckpoint`, a checkpoint cut at the Setup
+request's `newest` message. `tags_fork_of_a_managed_session_refused` needs the
+defaulted `fork_session(handle, parent, fork)` hook, which makes a fork the
+runner can detect; without one the case is inapplicable, by name, since a
+runner refuses only forks it can know about.
+
+`tags_resolve_answers_the_current_lineage` also requires
+`dispatch_attribution` and the `StepRecorded` kill point: it reads the
+`crash_at_StepRecorded` scenario, whose session B renders tags on a tags
+runner. After a seal that moves the session to a new lineage (shape (a)),
+every number the new lineage shows (up to 64) must resolve to the part
+showing it there, never to a dropped part, a number above its highest must
+be refused `unknown_tag`, and the cut run's prompt must carry a number. It
+is inapplicable, by name, when the runner resumes the run or keeps the call
+(shape (b)).
 
 ## Run tool calls
 
@@ -382,7 +430,7 @@ the ended run's `run.status` must carry the same `usage`.
 
 ## Delivery order
 
-The nine `delivery_order_*` cases run only with `Capability::DeliveryOrder`.
+The `delivery_order_*` cases run only with `Capability::DeliveryOrder`.
 They need `send_fields_with_plan` (to name `senders` in the plan) and
 `plan_sender()`, the route identity and module id of a sender the plan
 names. `turn_system_supported()` says whether the scripted route takes a
@@ -392,7 +440,9 @@ list without `idle_start` never starts a run, that the first possible mode
 wins (with a held tool call for `tool_result`), dedupe, expiry, the refusal
 by name of `template`, `dedupe_key` and `expires_at_ms` sent without a list in
 `delivery`, plan-named senders and the `idle_start`
-grant, and that an out-of-range slot refuses the send. The list rides in
+grant, that an out-of-range slot refuses the send, and, on a session
+rendering tags (which needs `tags`), that a `part_tag` slot naming a part
+the session does not show is refused `template_part_gone`. The list rides in
 `delivery` as an array. `delivery_order_list_refused_without_group` runs only
 when the subject does not declare the group: such a runner must refuse a
 list naming `delivery`.

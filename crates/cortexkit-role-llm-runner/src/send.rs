@@ -787,6 +787,11 @@ pub mod states {
     /// Terminal: it is never delivered. A re-send of its `send_id` answers
     /// this state.
     pub const EXPIRED: &str = "expired";
+    /// A `delivery_order` template send whose `part_tag` slot names a part
+    /// the request that would carry it does not show. Terminal: it is never
+    /// delivered. A re-send of its `send_id` answers this state, with `slot`
+    /// naming the slot (`crate::errors::TEMPLATE_PART_GONE`).
+    pub const TEMPLATE_PART_GONE: &str = "template_part_gone";
 }
 
 /// A send state, classified without rejecting a runner's additional states.
@@ -799,6 +804,7 @@ pub enum SendState {
     Paused,
     Superseded,
     Expired,
+    TemplatePartGone,
     Unknown(String),
 }
 impl SendState {
@@ -810,6 +816,7 @@ impl SendState {
             states::PAUSED => Self::Paused,
             states::SUPERSEDED => Self::Superseded,
             states::EXPIRED => Self::Expired,
+            states::TEMPLATE_PART_GONE => Self::TemplatePartGone,
             other => Self::Unknown(other.into()),
         }
     }
@@ -856,6 +863,10 @@ pub struct SendReply {
     /// absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered: Option<Delivered>,
+    /// On a `template_part_gone` reply: the template slot whose part the
+    /// carrying request did not show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
 }
 
 impl SendReply {
@@ -868,6 +879,7 @@ impl SendReply {
             pause_reason: None,
             baseline: None,
             delivered: None,
+            slot: None,
         }
     }
 
@@ -902,6 +914,11 @@ impl SendReply {
 
     pub fn with_delivered(mut self, delivered: Delivered) -> Self {
         self.delivered = Some(delivered);
+        self
+    }
+
+    pub fn with_slot(mut self, slot: impl Into<String>) -> Self {
+        self.slot = Some(slot.into());
         self
     }
 }

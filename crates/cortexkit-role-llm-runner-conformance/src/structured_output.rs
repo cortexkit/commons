@@ -773,7 +773,13 @@ where
             "the run after the restart did not submit {answer}: {output:?}"
         ));
     }
-    let seen = requests(subject, &name).await?;
+    // The frozen request is its tools and schemas; the history it carries
+    // grows from one request to the next, so `rendered` is not compared.
+    let seen: Vec<ModelRequestObservation> = requests(subject, &name)
+        .await?
+        .into_iter()
+        .map(|request| request.with_rendered(Vec::new()))
+        .collect();
     match seen.as_slice() {
         [first, .., last] if first == last => offers_submit(first),
         [first, .., last] => Err(format!(

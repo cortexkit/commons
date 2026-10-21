@@ -12,6 +12,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+pub use cortexkit_role_llm_runner::tags::SetupCheckpoint;
+
 use crate::{
     ceiling::CeilingPolicy,
     errors::RefuseCode,
@@ -152,6 +154,15 @@ pub enum SetupAnswer {
         /// provider but still never sends over the window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ceiling: Option<CeilingPolicy>,
+        /// For a session the provider moved from standalone Magic Context:
+        /// the tag checkpoint `{tag_checkpoint, cut}`, `cut` the message the
+        /// standalone marker cuts at. The provider sends it on every `ready`
+        /// Setup answer for that session, unchanged, and the runner anchors its
+        /// numbering at `cut` when no in-effect marker carries a checkpoint
+        /// (`llm-runner/v1` §9.6, its `tag_checkpoint` group). Absent for a
+        /// session that was never moved.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checkpoint: Option<SetupCheckpoint>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own
@@ -171,6 +182,14 @@ impl SetupAnswer {
     pub fn request_id(&self) -> &str {
         match self {
             Self::Ready { request_id, .. } | Self::Refuse { request_id, .. } => request_id,
+        }
+    }
+
+    /// The Setup checkpoint a `ready` answer carries, if any.
+    pub fn checkpoint(&self) -> Option<&SetupCheckpoint> {
+        match self {
+            Self::Ready { checkpoint, .. } => checkpoint.as_ref(),
+            Self::Refuse { .. } => None,
         }
     }
 
@@ -248,6 +267,31 @@ mod tests {
         for case in vectors::cases(&file, "undecodable") {
             vectors::refused::<SetupAnswer>(case["name"].as_str().unwrap(), &case["answer"]);
         }
+    }
+
+    /// A moved session's Setup answer carries its checkpoint, which round
+    /// trips as the runner role's own type; an answer without one decodes
+    /// as before.
+    #[test]
+    fn a_moved_session_carries_its_setup_checkpoint() {
+        let file = vectors::load("setup.json");
+        let moved = vectors::cases(&file, "answers")
+            .iter()
+            .find(|case| case["answer"].get("checkpoint").is_some())
+            .expect("a vector for a moved session");
+        let answer: SetupAnswer = vectors::round_trip("moved", &moved["answer"]);
+        assert_eq!(
+            answer.checkpoint(),
+            Some(&SetupCheckpoint::new(340, "msg_boundary"))
+        );
+        let plain = vectors::cases(&file, "answers")
+            .iter()
+            .find(|case| {
+                case["answer"]["answer"] == "ready" && case["answer"].get("checkpoint").is_none()
+            })
+            .unwrap();
+        let answer: SetupAnswer = serde_json::from_value(plain["answer"].clone()).unwrap();
+        assert_eq!(answer.checkpoint(), None);
     }
 
     #[test]

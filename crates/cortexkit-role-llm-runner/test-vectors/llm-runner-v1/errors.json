@@ -29,6 +29,8 @@
       "code": "unknown_tag",
       "retryable": false
     },
+    {"code": "fork_unsupported", "retryable": false, "detail": {"parent": "ses_parent"}},
+    {"code": "template_part_gone", "retryable": false, "detail": {"slot": "part"}},
     {
       "code": "unknown_send",
       "retryable": false

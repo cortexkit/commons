@@ -109,11 +109,61 @@ pub enum ReplyTooLargeSubject {
 pub const UNKNOWN_RUN: &str = "unknown_run";
 
 /// A `session.resolve` names a well-formed tag that no part of the session's
-/// current lineage carries: one the session never assigned, or one assigned
-/// only under a lineage the session has since left. Terminal: tags are never
-/// reused and a left lineage never returns, so the same request meets the
-/// same refusal. A malformed tag is `invalid_params` naming `tag` instead.
+/// current lineage carries: one no part has shown in this lineage, or one
+/// that named a part only under a lineage the session has since left.
+/// Numbers may repeat across lineages, but resolve answers only the current
+/// one, so within it the same request meets the same refusal: terminal. A
+/// malformed tag is `invalid_params` naming `tag` instead.
 pub const UNKNOWN_TAG: &str = "unknown_tag";
+
+/// A `session.send` or `session.adopt` for a session the runner knows was
+/// forked or cloned from a managed session (one whose plan names a
+/// compaction provider). Such a session is never enrolled; the person uses
+/// undo instead. `detail` is [`ForkUnsupportedDetail`]. Terminal, writing
+/// nothing. A runner refuses only forks it can know about: a fork that
+/// carries nothing of the runner's (say, of a session that never compacted)
+/// is an ordinary session.
+pub const FORK_UNSUPPORTED: &str = "fork_unsupported";
+
+/// The detail of a `fork_unsupported` refusal: the session it was forked
+/// from, when the runner knows it.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ForkUnsupportedDetail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+impl ForkUnsupportedDetail {
+    pub fn new(parent: Option<String>) -> Self {
+        Self { parent }
+    }
+}
+
+/// A template send names, in a `part_tag` slot, a part the request that
+/// would carry it does not show (a compaction dropped it from the view, or
+/// a revert removed it). The send has no text, so it is never delivered.
+/// `detail` is [`TemplatePartGoneDetail`]. Terminal: the sender recomposes
+/// with a part it can see. A runner refuses a send at admission with it
+/// when the part is already gone; a queued send whose part goes before it
+/// is delivered ends in the terminal send state of the same name
+/// (`crate::send::states::TEMPLATE_PART_GONE`), as an expired one ends
+/// `expired`.
+pub const TEMPLATE_PART_GONE: &str = "template_part_gone";
+
+/// The detail of a `template_part_gone` refusal: the template slot whose
+/// part is gone.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct TemplatePartGoneDetail {
+    pub slot: String,
+}
+
+impl TemplatePartGoneDetail {
+    pub fn new(slot: impl Into<String>) -> Self {
+        Self { slot: slot.into() }
+    }
+}
 
 /// A `send.status` names a `send_id` the session has no record of for the
 /// caller. Terminal: `send.status` writes nothing, so repeating the same
@@ -342,6 +392,8 @@ pub const CODES: &[&str] = &[
     REPLY_TOO_LARGE,
     UNKNOWN_RUN,
     UNKNOWN_TAG,
+    FORK_UNSUPPORTED,
+    TEMPLATE_PART_GONE,
     UNKNOWN_SEND,
     CONTEXT_CEILING,
     EXPIRED,
@@ -734,6 +786,32 @@ mod tag_code_tests {
     fn unknown_send_is_named_and_terminal() {
         assert!(CODES.contains(&UNKNOWN_SEND));
         assert!(!is_retryable(UNKNOWN_SEND));
+    }
+
+    #[test]
+    fn fork_and_gone_part_refusals_are_named_terminal_and_carry_their_detail() {
+        for code in [FORK_UNSUPPORTED, TEMPLATE_PART_GONE] {
+            assert!(CODES.contains(&code), "{code}");
+            assert!(!is_retryable(code), "{code}");
+        }
+        let file = crate::vectors::load("errors.json");
+        let detail = |code: &str| {
+            crate::vectors::cases(&file, "codes")
+                .iter()
+                .find(|case| case["code"] == code)
+                .and_then(|case| case.get("detail").cloned())
+                .unwrap_or_else(|| panic!("{code} has no detail vector"))
+        };
+        let fork: ForkUnsupportedDetail =
+            crate::vectors::round_trip(FORK_UNSUPPORTED, &detail(FORK_UNSUPPORTED));
+        assert_eq!(fork, ForkUnsupportedDetail::new(Some("ses_parent".into())));
+        assert_eq!(
+            serde_json::to_value(ForkUnsupportedDetail::new(None)).unwrap(),
+            serde_json::json!({})
+        );
+        let gone: TemplatePartGoneDetail =
+            crate::vectors::round_trip(TEMPLATE_PART_GONE, &detail(TEMPLATE_PART_GONE));
+        assert_eq!(gone, TemplatePartGoneDetail::new("part"));
     }
 }
 

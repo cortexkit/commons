@@ -13,9 +13,11 @@
 //! Every code in `KnownCode` has a fixed retryability ([`KnownCode::retryable`]:
 //! `true` means the runner may retry without the user acting) and a fixed
 //! answer to whether it may end a run after Setup
-//! ([`KnownCode::ends_run_after_setup`]): the four typed `refuse` codes and
+//! ([`KnownCode::ends_run_after_setup`]): the typed `refuse` codes and
 //! `compaction_unavailable` may, the ERROR codes never. A named wire code not
 //! in `KnownCode` follows `RefuseCode::Unknown` when it refuses Setup.
+//! Both enums are `#[non_exhaustive]`: a later code is additive, so a
+//! `match` outside this crate keeps a `_` arm.
 //!
 //! Codes are open strings: a party that meets one it does not know treats
 //! it as a terminal refusal of that one request, never retried.
@@ -55,8 +57,12 @@ macro_rules! known_codes {
     ($($variant:ident => $code:path),+ $(,)?) => {
         /// Named ERROR codes, refusal-answer codes and runner provider codes.
         /// This classification enum is not the open wire type of `code`.
+        ///
+        /// Non-exhaustive: a later code is additive, so a `match` outside
+        /// this crate keeps a `_` arm.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
         #[serde(rename_all = "snake_case")]
+        #[non_exhaustive]
         pub enum KnownCode { $($variant),+ }
 
         impl KnownCode {
@@ -79,19 +85,29 @@ impl KnownCode {
             Self::InvalidParams
             | Self::WindowTooSmall
             | Self::Misconfigured
+            | Self::StandaloneSessionNotMigrated
+            | Self::TagCheckpointUnsupported
+            | Self::SetupIdentityMismatch
             | Self::CompactionUnavailable => false,
         }
     }
 
-    /// Whether a run may end `error` with this code after Setup: the four
+    /// Whether a run may end `error` with this code after Setup: the typed
     /// `refuse` codes, and `compaction_unavailable` when Setup failed or
     /// timed out with no answer. ERROR codes never end a run themselves.
+    /// `standalone_session_not_migrated` ends the run except in its one
+    /// hand-off: on a host running standalone Magic Context in-process, a
+    /// runner that has never served the session hands it to standalone in
+    /// the same step instead (CONTRACT.md §4).
     pub fn ends_run_after_setup(self) -> bool {
         match self {
             Self::WindowTooSmall
             | Self::ProviderBusy
             | Self::Misconfigured
             | Self::HistoryUnreadable
+            | Self::TagCheckpointUnsupported
+            | Self::SetupIdentityMismatch
+            | Self::StandaloneSessionNotMigrated
             | Self::CompactionUnavailable => true,
             Self::InvalidParams | Self::Transient => false,
         }
@@ -113,6 +129,9 @@ known_codes! {
     ProviderBusy => refuse_codes::PROVIDER_BUSY,
     Misconfigured => refuse_codes::MISCONFIGURED,
     HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
+    StandaloneSessionNotMigrated => refuse_codes::STANDALONE_SESSION_NOT_MIGRATED,
+    TagCheckpointUnsupported => refuse_codes::TAG_CHECKPOINT_UNSUPPORTED,
+    SetupIdentityMismatch => refuse_codes::SETUP_IDENTITY_MISMATCH,
     CompactionUnavailable => runner_codes::COMPACTION_UNAVAILABLE,
 }
 
@@ -142,17 +161,32 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
     detail?.get("field")?.as_str()
 }
 
-/// The `code` of a Setup `refuse` answer: one of the four named codes, each
+/// The `code` of a Setup `refuse` answer: one of the seven typed codes, each
 /// with a fixed retryability. A code this crate does not know still decodes,
 /// as [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
 /// answer undecodable; an unfamiliar code is never retryable. A provider's own, finer reason
 /// goes in the answer's separate `provider_code`, never in `code`.
+///
+/// Non-exhaustive: a later code is additive, so a `match` outside this crate
+/// keeps a `_` arm.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum RefuseCode {
     WindowTooSmall,
     ProviderBusy,
     Misconfigured,
     HistoryUnreadable,
+    /// The session has standalone Magic Context state and was never moved
+    /// to the provider. A runner that has never served the session, on a
+    /// host running standalone in-process, hands it to standalone; any other
+    /// runner fails the run by name.
+    StandaloneSessionNotMigrated,
+    /// The session was moved from standalone Magic Context and needs its
+    /// Setup checkpoint honoured, which the runner does not declare.
+    TagCheckpointUnsupported,
+    /// The incoming route is bound to a non-empty session other than
+    /// Setup's session. Not retryable; it ends the current run.
+    SetupIdentityMismatch,
     /// A code this role does not name, kept as received.
     Unknown(String),
 }
@@ -164,11 +198,14 @@ impl RefuseCode {
             Self::ProviderBusy => refuse_codes::PROVIDER_BUSY,
             Self::Misconfigured => refuse_codes::MISCONFIGURED,
             Self::HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
+            Self::StandaloneSessionNotMigrated => refuse_codes::STANDALONE_SESSION_NOT_MIGRATED,
+            Self::TagCheckpointUnsupported => refuse_codes::TAG_CHECKPOINT_UNSUPPORTED,
+            Self::SetupIdentityMismatch => refuse_codes::SETUP_IDENTITY_MISMATCH,
             Self::Unknown(code) => code,
         }
     }
 
-    /// Maps a `refuse` code string to one of the four named variants; a wire
+    /// Maps a `refuse` code string to one of the typed variants; a wire
     /// code this crate does not list becomes [`Self::Unknown`].
     pub fn from_code(code: &str) -> Self {
         match code {
@@ -176,20 +213,23 @@ impl RefuseCode {
             refuse_codes::PROVIDER_BUSY => Self::ProviderBusy,
             refuse_codes::MISCONFIGURED => Self::Misconfigured,
             refuse_codes::HISTORY_UNREADABLE => Self::HistoryUnreadable,
+            refuse_codes::STANDALONE_SESSION_NOT_MIGRATED => Self::StandaloneSessionNotMigrated,
+            refuse_codes::TAG_CHECKPOINT_UNSUPPORTED => Self::TagCheckpointUnsupported,
+            refuse_codes::SETUP_IDENTITY_MISMATCH => Self::SetupIdentityMismatch,
             other => Self::Unknown(other.to_owned()),
         }
     }
 
-    /// Whether this value is the named `setup_identity_mismatch` wire code.
-    /// In 0.3.x it remains `Unknown`, so adding the code does not add a public
-    /// enum variant.
+    /// Whether this value is the `setup_identity_mismatch` refusal: its
+    /// typed variant, or the same spelling kept as [`Self::Unknown`] by a
+    /// value built by hand.
     pub fn is_setup_identity_mismatch(&self) -> bool {
         self.as_str() == refuse_codes::SETUP_IDENTITY_MISMATCH
     }
 
     /// Whether the refusal is retryable. Retryability is fixed by the code:
     /// `true` means the runner may retry without the user acting. An unknown
-    /// code, including `setup_identity_mismatch`, is never retried.
+    /// code is never retried.
     pub fn retryable(&self) -> bool {
         refuse_codes::retryable(self.as_str())
     }
@@ -208,11 +248,9 @@ impl<'de> Deserialize<'de> for RefuseCode {
     }
 }
 
-/// The spellings of the four typed [`RefuseCode`]s, plus `setup_identity_mismatch`,
-/// a named wire code that decodes as [`RefuseCode::Unknown`] in 0.3.x. On that
-/// Setup refusal, the runner ends the current run as `error`, never retries it,
-/// and tries Setup again only on the next send. The next breaking release will
-/// add a typed variant and mark both public enums `#[non_exhaustive]`.
+/// The spellings of the seven typed [`RefuseCode`]s. On any of them the
+/// runner ends the current run as `error` after Setup, but for the one
+/// hand-off of `standalone_session_not_migrated` (CONTRACT.md §4).
 pub mod refuse_codes {
     /// The model's window cannot hold the smallest view the provider can
     /// build. The user has to switch to a larger model. Not retryable.
@@ -226,13 +264,23 @@ pub mod refuse_codes {
     /// The provider needed history it could not read, such as a declared
     /// inherited prefix it does not hold. Retryable.
     pub const HISTORY_UNREADABLE: &str = "history_unreadable";
+    /// The session has standalone Magic Context state and no completed move
+    /// to this provider. Terminal: not retryable. On a host running
+    /// standalone in-process, a runner that has never served the session
+    /// hands it to standalone in the same step and sends no rides for it;
+    /// once a runner has served a session it never hands it back, and this
+    /// refusal fails the run by name. A host without standalone (a
+    /// module-launched private host, the Claude Code gateway) fails the run,
+    /// or the request, by name and never forwards unmanaged history.
+    pub const STANDALONE_SESSION_NOT_MIGRATED: &str = "standalone_session_not_migrated";
+    /// The session was moved from standalone Magic Context, so its numbering
+    /// needs the Setup checkpoint, and the runner does not declare
+    /// `llm-runner/v1`'s `tag_checkpoint` group. Terminal: not retryable.
+    pub const TAG_CHECKPOINT_UNSUPPORTED: &str = "tag_checkpoint_unsupported";
 
-    /// A route bound to a non-empty session different from Setup's session is
-    /// a named Setup refusal.
-    /// In 0.3.x it decodes as `RefuseCode::Unknown`, so a runner ends the
-    /// current run as `error`, does not retry, and calls Setup again on the
-    /// next send. The next breaking release will add a typed variant and mark
-    /// both public enums `#[non_exhaustive]`.
+    /// A route bound to a non-empty session different from Setup's session.
+    /// Not retryable: the runner ends the current run as `error` and calls
+    /// Setup again only on the next send.
     pub const SETUP_IDENTITY_MISMATCH: &str = "setup_identity_mismatch";
 
     pub const ALL: &[&str] = &[
@@ -240,6 +288,8 @@ pub mod refuse_codes {
         PROVIDER_BUSY,
         MISCONFIGURED,
         HISTORY_UNREADABLE,
+        STANDALONE_SESSION_NOT_MIGRATED,
+        TAG_CHECKPOINT_UNSUPPORTED,
         SETUP_IDENTITY_MISMATCH,
     ];
 
@@ -313,7 +363,6 @@ mod tests {
                             .map(|(_, value)| value.split_whitespace().next().unwrap().to_owned())
                     })
             })
-            .filter(|code| code.as_str() != refuse_codes::SETUP_IDENTITY_MISMATCH)
             .collect()
     }
 
@@ -406,8 +455,11 @@ mod tests {
             (RefuseCode::ProviderBusy, true),
             (RefuseCode::Misconfigured, false),
             (RefuseCode::HistoryUnreadable, true),
+            (RefuseCode::StandaloneSessionNotMigrated, false),
+            (RefuseCode::TagCheckpointUnsupported, false),
+            (RefuseCode::SetupIdentityMismatch, false),
         ];
-        assert_eq!(expected.len(), refuse_codes::ALL.len() - 1);
+        assert_eq!(expected.len(), refuse_codes::ALL.len());
         for (code, retryable) in expected {
             assert_eq!(code.retryable(), retryable, "{}", code.as_str());
             assert_eq!(RefuseCode::from_code(code.as_str()), code);
@@ -422,16 +474,19 @@ mod tests {
         assert_eq!(serde_json::to_value(&unknown).unwrap(), "acme:quota");
     }
 
+    /// `setup_identity_mismatch` is a typed refusal: it decodes to its own
+    /// variant, is never retried, ends the run after Setup, and round-trips
+    /// as the same spelling.
     #[test]
-    fn setup_identity_mismatch_uses_unknown_refusal_path() {
+    fn setup_identity_mismatch_is_a_typed_refusal() {
         let code = RefuseCode::from_code(refuse_codes::SETUP_IDENTITY_MISMATCH);
-        assert_eq!(
-            code,
-            RefuseCode::Unknown(refuse_codes::SETUP_IDENTITY_MISMATCH.into())
-        );
+        assert_eq!(code, RefuseCode::SetupIdentityMismatch);
         assert!(code.is_setup_identity_mismatch());
         assert!(!code.retryable());
-        assert_eq!(KnownCode::from_code(code.as_str()), None);
+        let known = KnownCode::from_code(code.as_str()).unwrap();
+        assert_eq!(known, KnownCode::SetupIdentityMismatch);
+        assert!(!known.retryable());
+        assert!(known.ends_run_after_setup());
         assert!(include_str!("../CONTRACT.md").contains("| `setup_identity_mismatch` |"));
 
         let answer: crate::setup::SetupAnswer = serde_json::from_value(serde_json::json!({
@@ -442,16 +497,16 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(answer.retryable(), Some(false));
-        match answer {
+        match &answer {
             crate::setup::SetupAnswer::Refuse { code, .. } => {
-                assert_eq!(
-                    code,
-                    RefuseCode::Unknown(refuse_codes::SETUP_IDENTITY_MISMATCH.into())
-                );
-                assert!(code.is_setup_identity_mismatch());
+                assert_eq!(code, &RefuseCode::SetupIdentityMismatch);
             }
             crate::setup::SetupAnswer::Ready { .. } => panic!("decoded a refusal as ready"),
         }
+        assert_eq!(
+            serde_json::to_value(&answer).unwrap()["code"],
+            refuse_codes::SETUP_IDENTITY_MISMATCH
+        );
     }
 
     /// Reads the retryability table from CONTRACT.md. Each row is one named
@@ -499,15 +554,6 @@ mod tests {
                 "{code}: vector ends run"
             );
 
-            if code == refuse_codes::SETUP_IDENTITY_MISMATCH {
-                let refusal = RefuseCode::from_code(code);
-                assert!(refusal.is_setup_identity_mismatch());
-                assert!(!refusal.retryable());
-                assert!(ends_run, "{code}: Unknown refusal ends the run after Setup");
-                assert!(KnownCode::from_code(code).is_none());
-                continue;
-            }
-
             typed_count += 1;
             let known = KnownCode::from_code(code).unwrap_or_else(|| panic!("{code}"));
             assert_eq!(known.retryable(), *retryable, "{code}: retryable");
@@ -525,6 +571,11 @@ mod tests {
         let unavailable = KnownCode::CompactionUnavailable;
         assert!(!unavailable.retryable());
         assert!(unavailable.ends_run_after_setup());
+        // A session that was never moved ends the run but for the hand-off
+        // to an in-process standalone; a moved session on a runner that
+        // cannot honour its checkpoint ends the run.
+        assert!(KnownCode::StandaloneSessionNotMigrated.ends_run_after_setup());
+        assert!(KnownCode::TagCheckpointUnsupported.ends_run_after_setup());
     }
 
     #[test]

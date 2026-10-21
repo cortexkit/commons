@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 
 fn vectors() -> Value {
     serde_json::from_str(include_str!(
-        "../../../test-vectors/step-transform-provider-v1/host-runner-lane.json"
+        "../test-vectors/step-transform-provider-v1/host-runner-lane.json"
     ))
     .unwrap()
 }

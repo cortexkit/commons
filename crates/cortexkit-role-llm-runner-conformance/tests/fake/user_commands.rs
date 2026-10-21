@@ -15,6 +15,7 @@ pub(super) struct Commands {
 }
 
 pub(super) struct CommandSession {
+    pub cutoff: Option<bool>,
     fixture: UserCommandFixture,
     pub observation: UserCommandObservation,
 }
@@ -49,6 +50,7 @@ impl FakeSubject {
         self.world().user_commands.lock().unwrap().sessions.insert(
             session.into(),
             CommandSession {
+                cutoff: None,
                 fixture: fixture.clone(),
                 observation: UserCommandObservation {
                     host_commands: menu,
@@ -185,6 +187,7 @@ impl Module {
                 .map(Reply::Response)
                 .unwrap_or_else(|| refuse(errors::UNKNOWN_INVOCATION, None)));
         }
+        let cutoff = config.cutoff;
         drop(commands);
         drop(sessions);
 
@@ -198,7 +201,8 @@ impl Module {
                 "input":input,
             }),
         )?;
-        self.world
+        if cutoff != Some(false) {
+            self.world
             .user_commands
             .lock()
             .unwrap()
@@ -208,6 +212,25 @@ impl Module {
             .observation
             .provider_calls
             .push(json!({"name":"user_command.invoke", "arguments":{"command":command,"input":input}, "call_key":call_key}));
+        }
+        if let Some(after) = cutoff {
+            if after {
+                self.commit(session, json!({"kind":"user_command_forwarded"}))?;
+            }
+            let state = if after && self.world.defects.user_command != Some("cutoff_failed") {
+                "outcome_unknown"
+            } else {
+                "failed"
+            };
+            let text = if after {
+                "The command may have run before the session ended."
+            } else {
+                "The session ended before forwarding."
+            };
+            let answer = json!({"call_key":call_key,"reply":{"state":state,"text":text}});
+            self.commit(session, json!({"kind":"user_command_result","invocation":invocation,"answer":answer,"status":{"state":state,"text":text,"progress":[]}}))?;
+            return Ok(Reply::Response(answer));
+        }
         let (reply, mut status) = if command == "ctx-wrapup" {
             (
                 json!({"state":"accepted","text":"command-private-reply"}),

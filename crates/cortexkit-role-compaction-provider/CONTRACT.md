@@ -1,9 +1,10 @@
-# `compaction-provider/v1` — role contract (draft)
+# `compaction-provider/v1` — role contract
 
-Stability: **alpha, draft**, unpublished. This document is the role
+Stability: **alpha**. This document is the role
 definition; the Rust types in this crate are its wire
-shapes, `test-vectors/compaction-provider-v1/` at the repository root holds
-its vectors, and a separate `-conformance` crate will hold its suite (§16).
+shapes, `test-vectors/compaction-provider-v1/` inside this crate holds
+its vectors. Conformance requirements are described in §16; this crate does
+not contain a provider conformance runner.
 
 `llm-runner/v1` states what the runner owes on the same interface; this
 document states the provider's side, and the runner's side where the two
@@ -161,6 +162,12 @@ the session and freezes that plan for use.
   `provider` is a module id, `preset` a string, and `params` an opaque
   object.
 - [pinned] New messages are read with `llm-runner/v1`'s `session.read`.
+- [pinned] A compaction provider MUST request `media: "descriptors"` on
+  `session.read` and `session.resolve`. It uses the runner's message `digest`,
+  `part_digests`, refs' `sha256` and notices' `through_digest` as given, and
+  never recomputes a content digest from a descriptors-mode read. Nested media
+  refs have no independent part key: edits and tag indexes address the
+  containing top-level part.
   This role defines no delta op.
 
 ## 4. `compaction.setup`
@@ -225,8 +232,8 @@ the session and freezes that plan for use.
   is not a declaration of support. Later forks within the session are
   announced on advance notices instead (§5).
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, ceiling?}` or `{answer: "refuse", request_id, code, reason,
-  provider_code?}` (§10).
+  initial, ceiling?, checkpoint?}` or `{answer: "refuse", request_id, code,
+  reason, provider_code?}` (§10).
   - `initial` is a CompactionMessage (`message::CompactionMessage`,
     `{compaction_id, version, range: {from, to}, replacement}`): the
     provider's finished messages, in the runner's message schema, standing
@@ -240,8 +247,35 @@ the session and freezes that plan for use.
     (§7). A view replaces it entirely and is never a delta over it.
   - `ceiling` (`ceiling::CeilingPolicy`) says when the runner pauses for a
     view and, failing one, refuses the run (§8). It is omitted when absent.
+  - `checkpoint` (`setup::SetupCheckpoint`, `llm-runner/v1`'s
+    `tags::SetupCheckpoint`) is `{tag_checkpoint, cut}`: for a session the
+    provider moved from standalone Magic Context, the highest tag number
+    standalone ever allocated for it, and `cut` the message the standalone
+    marker cuts at. The provider MUST send it on every Setup answer for a
+    moved session, permanently and unchanged; it is absent for a session
+    that was never moved. The runner anchors its numbering at `cut` only
+    when no in-effect marker carries a checkpoint for the session, so the
+    numbers are the same with or without the marker's key, and numbers from
+    the session start with it, on a new lineage, once `cut` is gone
+    (`llm-runner/v1` §9.6). It needs no report back.
+  - A provider sends `checkpoint` only to a runner that declares
+    `llm-runner/v1`'s `tag_checkpoint` group. For a moved session on a
+    runner without it, the provider refuses Setup with the terminal
+    `tag_checkpoint_unsupported` (§10). For a session with standalone state
+    and no completed move, it refuses with the terminal
+    `standalone_session_not_migrated`, and what the runner does depends on
+    its host:
+    - On a host where standalone Magic Context runs in-process, the runner
+      honours the refusal only before it has ever served that session: it
+      hands the session to standalone in the same step, manages nothing of
+      it and sends no rides for it. Once it has served a session it never
+      hands it back, and a later refusal with this code fails the run
+      `error` by name.
+    - On a host with no standalone (a module-launched private host, the
+      Claude Code gateway), the runner fails the run by name (the gateway
+      fails the request), and never forwards the unmanaged history.
   - A `refuse` ends the run `error` with the refusal's role `code`, and the
-    next send runs Setup again (§10).
+    next send runs Setup again (§10), except as the codes above say.
 - [pinned] Setup freezes nothing else. The stability ranks of the provider's
   own messages and the `call_when` conditions that earlier drafts froze are
   gone: they described the per-step call, and a view's cache behaviour is the
@@ -341,9 +375,11 @@ provider.
   the value's frame.
 - [pinned] Content digest (`digest::content_digest`): lowercase
   hexadecimal SHA-256 over the RFC 8785 (JCS) encoding of a message, or a
-  message part, as `session.read` returns it. `through_digest` is the content
-  digest of the message at `through_ordinal`. The provider computes part
-  digests itself, over the parts the runner's tags address.
+  message part exactly as inline `session.read` would return it, using the
+  shared function re-exported from llm-runner. `through_digest` is the content
+  digest of the message at `through_ordinal`. In descriptors mode the runner
+  supplies every message and part digest; the provider uses those values
+  directly, never hashes a descriptor as content.
 
 ### 5.1 Fork descent
 
@@ -386,9 +422,9 @@ provider.
   resync triggers listed next. A hidden refusal or discard shows up as
   `applied_view_version` never naming that view. A hidden marker outcome is
   taken as `unknown`.
-- [pinned] The provider computes the content digest of every message it
+- [pinned] The provider records the runner-served content digest of every message it
   reads. **Resync** is required when any of these happens:
-  - `through_digest` differs from the digest the provider computes for
+  - `through_digest` differs from the runner-served digest the provider records for
     `through_ordinal` once it has read that far;
   - a re-read returns different bytes for an ordinal or a tag it already
     holds;
@@ -425,13 +461,16 @@ provider.
   does not send it for lost state. Having lost its view, it renders Setup's
   initial CompactionMessage and omits `applied_view_version` until a newer
   view applies (§7).
-- [pinned] Tag numbers after the loss follow three rules. Within a session
-  the runner MUST NOT give a tag number to a different part than the one it
-  had before. New tag assignments go above the floor: every tag number the
-  session may have used before the loss, as for a fork in `llm-runner/v1`
-  (`tags::next_after`). A runner whose restored state cannot tell it the
-  highest number it handed out jumps past any number it could have used. A
-  part whose restored state still records its tag MAY keep that number.
+- [pinned] Nothing durable is keyed by a tag number. A tag number is only
+  the name a part shows the model in one lineage, computed from the
+  transcript (`llm-runner/v1` §9.6); the provider keys every durable record
+  (summaries, memories, queued drops, its part index) by the host's own
+  identity: message id, part key and content digest.
+- [pinned] Any renumbering of a part a read has exposed is a new lineage.
+  Within one lineage a number names one part; across lineages numbers may
+  repeat and name other parts. A runner that recomputes its numbering after
+  the loss (from another anchor, say) therefore does so on the new lineage
+  above, and a provider re-reads it rather than carrying numbers over.
 - [pinned] A provider never relies on tag numbers across lineages. It
   re-anchors by message id, part key and content digest.
 - [pinned] A provider that sees a new lineage without descent drops its
@@ -713,12 +752,12 @@ provider.
   In llm-runner run errors, this answer's role `code` maps to `provider_code`
   and its optional finer `provider_code` maps to `provider_detail_code`,
   diagnostics only, never replacing the role code or deciding retryability.
-- [pinned] `code` is one of the four typed codes below (`RefuseCode`). Each
+- [pinned] `code` is one of the seven typed codes below (`RefuseCode`). Each
   has a fixed retryability, so an owner knows whether retrying without acting
   can help: a busy provider or unreadable history may clear, while a window or
-  configuration refusal needs correction. The table also lists the named wire
-  code `setup_identity_mismatch`, which is not a typed variant in 0.3.x.
-  The answer carries no retryability of its own: a `retryable` member is ignored
+  configuration refusal needs correction. `RefuseCode` and `KnownCode` are
+  `#[non_exhaustive]`, so a later code is additive and a `match` outside the
+  crate keeps a `_` arm. The answer carries no retryability of its own: a `retryable` member is ignored
   on decode and never decides retry.
 - [pinned] `provider_code` is an optional open string: the provider's own,
   finer reason, for logs and display. It never replaces `code` and never
@@ -726,11 +765,11 @@ provider.
 - [pinned] A `code` the runner does not know decodes rather than failing
   the answer (`RefuseCode::Unknown`). It still ends the run, is recorded as
   received, and is not retryable.
-- [pinned] `setup_identity_mismatch` is a named wire refusal, but in 0.3.x it
-  decodes as `RefuseCode::Unknown`. The runner therefore ends the current run
-  as `error` after Setup and does not retry the refusal; the next send calls
-  Setup again. The next breaking release will make it a typed variant and
-  mark both public enums `#[non_exhaustive]`.
+- [pinned] `setup_identity_mismatch` is a typed refusal
+  (`RefuseCode::SetupIdentityMismatch`, `KnownCode::SetupIdentityMismatch`).
+  The runner ends the current run as `error` after Setup and does not retry
+  the refusal; the next send calls Setup again. Before 0.4.0 it decoded as
+  `RefuseCode::Unknown`, which the runner treated the same way.
 - [pinned] `reason` is user-facing text.
 
 | Code | When | Retryable |
@@ -739,7 +778,9 @@ provider.
 | `provider_busy` | the provider is busy with the session's history and cannot answer Setup now | yes |
 | `misconfigured` | the configuration for this preset and params cannot be used | no |
 | `history_unreadable` | required history is missing, such as a declared inherited prefix the provider does not hold | yes |
-| `setup_identity_mismatch` | the incoming route is bound to one non-empty session that differs from Setup's session; in 0.3.x decoded as `Unknown`, ending the current run as `error` | no |
+| `standalone_session_not_migrated` | the session has standalone Magic Context state and no completed move to the provider; a runner that has never served it, on a host running standalone in-process, hands it to standalone and sends no rides; any other runner fails the run by name (§4) | no |
+| `tag_checkpoint_unsupported` | the session was moved from standalone Magic Context and the runner does not declare `llm-runner/v1`'s `tag_checkpoint` group (§4) | no |
+| `setup_identity_mismatch` | the incoming route is bound to one non-empty session that differs from Setup's session; ends the current run as `error` | no |
 
 ## 11. The model view
 
@@ -821,11 +862,9 @@ defines its retryability.
 
 ### 13.3 Retryability and whether a code ends a run after Setup
 
-`KnownCode` classifies the typed codes this role recognizes from §10 and §13.
-This table also pins open wire codes that do not yet have a typed variant.
-`setup_identity_mismatch` follows §10's `RefuseCode::Unknown` path in 0.3.x:
-it is not retryable and ends the current run after Setup. No party chooses
-retryability or terminal behavior per message.
+`KnownCode` classifies the typed codes this role recognizes from §10 and §13;
+every row of this table is one of them. No party chooses retryability or
+terminal behavior per message.
 
 | Code | Retryable | Ends a run after Setup |
 |---|---|---|
@@ -835,6 +874,8 @@ retryability or terminal behavior per message.
 | `provider_busy` | yes | yes |
 | `misconfigured` | no | yes |
 | `history_unreadable` | yes | yes |
+| `standalone_session_not_migrated` | no | yes |
+| `tag_checkpoint_unsupported` | no | yes |
 | `setup_identity_mismatch` | no | yes |
 | `compaction_unavailable` | no | yes |
 

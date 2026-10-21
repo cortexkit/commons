@@ -1,0 +1,405 @@
+{
+  "clean": [
+    {
+      "name": "a dangling tag closed with $",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§103012$ Fixed it",
+      "cleaned": "Fixed it"
+    },
+    {
+      "name": "a dangling tag with a non-ASCII closer",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§11865ҩ done",
+      "cleaned": "done"
+    },
+    {
+      "name": "a dangling tag mid-text with a non-ASCII closer",
+      "source": "tag-content-primitives.test.ts",
+      "text": "mid §11865ҩ text",
+      "cleaned": "mid  text"
+    },
+    {
+      "name": "a dangling tag with no closer keeps the text after the space",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§42 files changed",
+      "cleaned": "files changed"
+    },
+    {
+      "name": "a dangling tag never eats the letter after it",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§42important",
+      "cleaned": "important"
+    },
+    {
+      "name": "a complete leading tag",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§42§ hi",
+      "cleaned": "hi"
+    },
+    {
+      "name": "bare digits are never touched",
+      "source": "tag-content-primitives.test.ts",
+      "text": "99 files, 2024 roadmap",
+      "cleaned": "99 files, 2024 roadmap"
+    },
+    {
+      "name": "two leading tags",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§2030§ §2030§ Run",
+      "cleaned": "Run"
+    },
+    {
+      "name": "a complete pair mid-text goes whole",
+      "source": "tag-content-primitives.test.ts",
+      "text": "Looking at §40827§ the result is X",
+      "cleaned": "Looking at  the result is X"
+    },
+    {
+      "name": "a pair after bare digits goes, the digits stay",
+      "source": "tag-content-primitives.test.ts",
+      "text": "2030  §42§ Hello",
+      "cleaned": "2030   Hello"
+    },
+    {
+      "name": "a malformed hybrid mid-text",
+      "source": "tag-content-primitives.test.ts",
+      "text": "Hello §40827\">Oracle confirmed",
+      "cleaned": "Hello Oracle confirmed"
+    },
+    {
+      "name": "digit residue without a sigil stays",
+      "source": "tag-content-primitives.test.ts",
+      "text": "2030  2030  2030° Run clippy",
+      "cleaned": "2030  2030  2030° Run clippy"
+    },
+    {
+      "name": "short leading numbers stay",
+      "source": "tag-content-primitives.test.ts",
+      "text": "99  Actually executing now. Running fmt:",
+      "cleaned": "99  Actually executing now. Running fmt:"
+    },
+    {
+      "name": "a malformed prefix with a trailing space trims to empty",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§15298\">§15298§ ",
+      "cleaned": ""
+    },
+    {
+      "name": "a tag alone trims to empty",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§42§ ",
+      "cleaned": ""
+    },
+    {
+      "name": "whitespace alone trims to empty",
+      "source": "tag-content-primitives.test.ts",
+      "text": "   ",
+      "cleaned": ""
+    },
+    {
+      "name": "a leading tag",
+      "source": "text-complete.test.ts",
+      "text": "§42§ Hello world",
+      "cleaned": "Hello world"
+    },
+    {
+      "name": "consecutive different leading tags",
+      "source": "text-complete.test.ts",
+      "text": "§55§ §56§ Response text",
+      "cleaned": "Response text"
+    },
+    {
+      "name": "the same leading tag twice",
+      "source": "text-complete.test.ts",
+      "text": "§56§ §56§ Bailan Kimi 2.5 done",
+      "cleaned": "Bailan Kimi 2.5 done"
+    },
+    {
+      "name": "a large tag number",
+      "source": "text-complete.test.ts",
+      "text": "§999§ Large tag content",
+      "cleaned": "Large tag content"
+    },
+    {
+      "name": "a leading tag without a space",
+      "source": "text-complete.test.ts",
+      "text": "§42§Response without space",
+      "cleaned": "Response without space"
+    },
+    {
+      "name": "a stray sigil",
+      "source": "text-complete.test.ts",
+      "text": "See § marker for details",
+      "cleaned": "See  marker for details"
+    },
+    {
+      "name": "a leading tag and a mid-text pair",
+      "source": "text-complete.test.ts",
+      "text": "§42§ The pattern §40827§ appeared.",
+      "cleaned": "The pattern  appeared."
+    },
+    {
+      "name": "several mid-text pairs",
+      "source": "text-complete.test.ts",
+      "text": "First §100§, then §200§, finally §300§.",
+      "cleaned": "First , then , finally ."
+    },
+    {
+      "name": "a section reference keeps its number and loses its sigil",
+      "source": "text-complete.test.ts",
+      "text": "As described in §5.1 of the plan",
+      "cleaned": "As described in 5.1 of the plan"
+    },
+    {
+      "name": "plain text is unchanged",
+      "source": "text-complete.test.ts",
+      "text": "No tag here, just normal text",
+      "cleaned": "No tag here, just normal text"
+    },
+    {
+      "name": "empty text stays empty",
+      "source": "text-complete.test.ts",
+      "text": "",
+      "cleaned": ""
+    },
+    {
+      "name": "a section reference beside a tag: the reference's number is kept",
+      "source": "commons",
+      "text": "see §5.1 and §12§",
+      "cleaned": "see 5.1 and"
+    },
+    {
+      "name": "a decimal after two digits is a section reference, never a dangling tag",
+      "source": "commons",
+      "text": "see §12.3 now",
+      "cleaned": "see 12.3 now",
+      "standalone_before_fix": "see 2.3 now"
+    },
+    {
+      "name": "a decimal after three digits is a section reference, never a dangling tag",
+      "source": "commons",
+      "text": "see §123.4 now",
+      "cleaned": "see 123.4 now",
+      "standalone_before_fix": "see 3.4 now"
+    },
+    {
+      "name": "a leading byte-order mark is whitespace to JavaScript",
+      "source": "commons",
+      "text": "﻿§3§ hi",
+      "cleaned": "hi"
+    },
+    {
+      "name": "a next-line character is not whitespace to JavaScript",
+      "source": "commons",
+      "text": "hi",
+      "cleaned": "hi"
+    },
+    {
+      "name": "a malformed prefix without its closing digits",
+      "source": "commons",
+      "text": "§15298\">§ hello",
+      "cleaned": "hello"
+    },
+    {
+      "name": "tags inside JSON",
+      "source": "commons",
+      "text": "{\"ref\":\"§12§\",\"note\":\"see §5.1\"}",
+      "cleaned": "{\"ref\":\"\",\"note\":\"see 5.1\"}"
+    }
+  ],
+  "strip_leading": [
+    {
+      "name": "a dangling leading tag closed with $",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§103012$ Fixed it",
+      "stripped": "Fixed it"
+    },
+    {
+      "name": "a complete leading tag is never cut into a dangling one",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§42§ hi",
+      "stripped": "hi"
+    },
+    {
+      "name": "a complete leading tag",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§42§ Hello",
+      "stripped": "Hello"
+    },
+    {
+      "name": "a malformed hybrid prefix",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§15298\">§15298§ hello",
+      "stripped": "hello"
+    },
+    {
+      "name": "digit residue stays",
+      "source": "tag-content-primitives.test.ts",
+      "text": "2030  2030  2030° Run clippy",
+      "stripped": "2030  2030  2030° Run clippy"
+    },
+    {
+      "name": "leading numbers stay",
+      "source": "tag-content-primitives.test.ts",
+      "text": "99 files are located in folder zzz",
+      "stripped": "99 files are located in folder zzz"
+    },
+    {
+      "name": "a list of numbers stays",
+      "source": "tag-content-primitives.test.ts",
+      "text": "6 8 9 tasks from todo list completed",
+      "stripped": "6 8 9 tasks from todo list completed"
+    },
+    {
+      "name": "a numbered list stays",
+      "source": "tag-content-primitives.test.ts",
+      "text": "1. do this now, 2. do that next",
+      "stripped": "1. do this now, 2. do that next"
+    },
+    {
+      "name": "a year stays",
+      "source": "tag-content-primitives.test.ts",
+      "text": "2024 roadmap",
+      "stripped": "2024 roadmap"
+    },
+    {
+      "name": "a tag after bare digits is not leading",
+      "source": "tag-content-primitives.test.ts",
+      "text": "2030  §42§ Hello",
+      "stripped": "2030  §42§ Hello"
+    },
+    {
+      "name": "a leading tag splits from its body",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§3§ hello",
+      "stripped": "hello"
+    },
+    {
+      "name": "a malformed leading tag splits from its body",
+      "source": "tag-content-primitives.test.ts",
+      "text": "§9\">§9§ body",
+      "stripped": "body"
+    },
+    {
+      "name": "mixed leading shapes over several rounds",
+      "source": "commons",
+      "text": "§7$ §8\">§ §9§ body",
+      "stripped": ">§ §9§ body"
+    },
+    {
+      "name": "a section reference at the start is eaten as standalone does",
+      "source": "commons",
+      "text": "§5 of the contract",
+      "stripped": "of the contract"
+    },
+    {
+      "name": "a decimal section reference at the start stays",
+      "source": "commons",
+      "text": "§5.1 of the contract",
+      "stripped": "§5.1 of the contract"
+    },
+    {
+      "name": "a two-digit decimal section reference at the start stays",
+      "source": "commons",
+      "text": "§12.3 of the contract",
+      "stripped": "§12.3 of the contract",
+      "standalone_before_fix": "2.3 of the contract"
+    },
+    {
+      "name": "a three-digit decimal section reference at the start stays",
+      "source": "commons",
+      "text": "§123.4 of the contract",
+      "stripped": "§123.4 of the contract",
+      "standalone_before_fix": "3.4 of the contract"
+    },
+    {
+      "name": "a mid-text pair stays",
+      "source": "commons",
+      "text": "see §4§ below",
+      "stripped": "see §4§ below"
+    }
+  ],
+  "render": [
+    {
+      "name": "digit residue gets the prefix and keeps its digits",
+      "source": "tag-content-primitives.test.ts",
+      "number": 7,
+      "text": "2030  2030  2030° Run clippy",
+      "rendered": "§7§ 2030  2030  2030° Run clippy"
+    },
+    {
+      "name": "an old prefix is replaced",
+      "source": "tag-content-primitives.test.ts",
+      "number": 9,
+      "text": "§3§ Hello",
+      "rendered": "§9§ Hello"
+    },
+    {
+      "name": "a malformed prefix is stripped first",
+      "source": "tag-content-primitives.test.ts",
+      "number": 11,
+      "text": "§15298\">§15298§ hello",
+      "rendered": "§11§ hello"
+    },
+    {
+      "name": "leading numbers are kept",
+      "source": "tag-content-primitives.test.ts",
+      "number": 5,
+      "text": "99 files are located",
+      "rendered": "§5§ 99 files are located"
+    },
+    {
+      "name": "the model's correct self-tag round-trips byte for byte",
+      "source": "tag-content-primitives.test.ts",
+      "number": 12,
+      "text": "Reading both files in parallel.\n\nThe next step follows.",
+      "rendered": "§12§ Reading both files in parallel.\n\nThe next step follows."
+    },
+    {
+      "name": "user text quoting a tag at its start",
+      "source": "commons",
+      "number": 14,
+      "text": "§1§ quoted",
+      "rendered": "§14§ quoted"
+    },
+    {
+      "name": "a tag mid-text is left in user text",
+      "source": "commons",
+      "number": 3,
+      "text": "see §1§ above",
+      "rendered": "§3§ see §1§ above"
+    }
+  ],
+  "exposure": [
+    {
+      "name": "a tag-rendering run's text is cleaned",
+      "writer": "tag_rendering_run",
+      "text": "as §2§ says",
+      "exposed": "as  says"
+    },
+    {
+      "name": "a tag-rendering run's leading self-tag is cleaned",
+      "writer": "tag_rendering_run",
+      "text": "§12§ Reading both files",
+      "exposed": "Reading both files"
+    },
+    {
+      "name": "an untagged run's text is exposed byte for byte",
+      "writer": "untagged_run",
+      "text": "as §2§ says",
+      "exposed": "as §2§ says"
+    },
+    {
+      "name": "tags inside a structured-output run's JSON stay raw",
+      "writer": "structured_output_final",
+      "text": "{\"ref\":\"§12§\",\"note\":\"see §5.1\"}",
+      "exposed": "{\"ref\":\"§12§\",\"note\":\"see §5.1\"}"
+    },
+    {
+      "name": "the same JSON written as a tag-rendering run's text is cleaned",
+      "writer": "tag_rendering_run",
+      "text": "{\"ref\":\"§12§\",\"note\":\"see §5.1\"}",
+      "exposed": "{\"ref\":\"\",\"note\":\"see 5.1\"}"
+    }
+  ]
+}

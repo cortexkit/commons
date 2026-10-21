@@ -1,25 +1,44 @@
-//! The `tags` group: runner-owned part tags and `session.resolve`.
+//! The `tags` group: runner-rendered part numbers and `session.resolve`.
 //!
-//! A runner that declares `tags` ([`crate::capabilities::TAGS`]) gives every
-//! message part a tag `§N§`, `N` a positive integer, per session. A tag is
-//! assigned when the part is stored, or at the runner's first ingest of a
-//! part its host stored itself, and is recorded in the runner's ledger keyed
-//! by (message, part). It is durable and never reused: not across a fork, a
-//! reset or a restart, and a fork continues numbering after its parent's
-//! highest tag ([`next_after`]). Once assigned, a part's key, its tag and
-//! its stored content never change.
+//! A runner that declares `tags` ([`crate::capabilities::TAGS`]) shows the
+//! model a number `§N§` on every part it renders with one, and reports each
+//! number on `session.read` entries ([`crate::read::ReadMessage::tags`]). A
+//! tag number is only a name the model can see, computed from the
+//! transcript ([`numbering`]): the checkpoint before the cut plus the part's
+//! position among the counted parts, in rendered order. It is never stored
+//! per part and never keys anything durable; durable state is keyed by the
+//! host's own identity (message id, part key, content digest). Any
+//! renumbering of a part a read has exposed starts a new lineage, so within
+//! one lineage a number names one part.
 //!
-//! `session.read` entries carry each message's part tags
-//! ([`crate::read::ReadMessage::tags`]); `session.resolve` answers a tag with
-//! the part's exact stored content.
+//! The model's own text is cleaned of tag notation on every exposure
+//! ([`clean`]), for text written by a run whose frozen plan renders tags.
+//! `session.resolve` answers a number in the session's current lineage.
 //!
 //! Whether tags are rendered to the model is the session's fetch plan's
-//! `render_tags` member ([`plan_render_tags`]); the numbers exist either way.
+//! `render_tags` member ([`plan_render_tags`]); numbering, rendering and
+//! cleaning apply only where it is `true`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::capabilities;
+
+pub mod clean;
+pub mod numbering;
+
+pub use clean::{clean_model_text, strip_leading_tag_notation};
+pub use numbering::{
+    anchor, counts, number_parts, Anchor, Marker, MarkerCheckpoint, PartKind, RenderedPart,
+    SetupCheckpoint,
+};
+
+/// The name under which a run freezes these numbering and cleaning rules
+/// with the rest of its configuration. A run frozen under it numbers by
+/// [`numbering`] and cleans by [`clean`] for its whole life; a session's
+/// earlier runs keep the rules they were frozen under. It succeeds the
+/// stored-ledger rules some runners recorded as `runner-tags/v1`.
+pub const RULES_FEATURE: &str = "runner-tags/v2";
 
 /// The character that opens and closes a tag.
 pub const SIGIL: char = '§';
@@ -44,17 +63,9 @@ pub fn parse_tag(tag: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
-/// The first number a session assigns after `highest`, the highest tag
-/// number it (or, for a fork, its parent) ever assigned; `None` when it has
-/// assigned none. Numbers are never reused, so a fork, a reset and a restart
-/// all continue from here.
-pub fn next_after(highest: Option<u64>) -> u64 {
-    highest.map_or(1, |n| n.saturating_add(1))
-}
-
 /// One part of a `session.read` entry: one row per part the runner exposes,
 /// in the message's part order, beside the message as `tool_calls` are.
-/// Every exposed part has a row, tagged or not, so a reader learns every
+/// Every exposed part has a row, numbered or not, so a reader learns every
 /// part key from the rows alone.
 ///
 /// Non-exhaustive so a later optional member is additive: build one with
@@ -63,13 +74,13 @@ pub fn next_after(highest: Option<u64>) -> u64 {
 #[non_exhaustive]
 pub struct PartTag {
     /// The runner's own key for the part within its message (an index, or a
-    /// part id), opaque to consumers: the key its ledger records the tag
-    /// under, `session.resolve` answers with, and a compaction provider
-    /// addresses part-level view edits by. Stable: never changes once the
-    /// part is exposed.
+    /// part id), opaque to consumers: the host identity `session.resolve`
+    /// answers with and a compaction provider addresses part-level view
+    /// edits by. Stable: never changes once the part is exposed.
     pub part: String,
-    /// The part's tag, `§N§`. Absent for a part the runner does not tag (an
-    /// image, say).
+    /// The number the part shows in the current lineage, `§N§`. Absent for a
+    /// part that does not count ([`counts`]): an image or file in a user
+    /// message, reasoning, a tool call, the history head, a marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
 }
@@ -93,39 +104,80 @@ impl PartTag {
 /// What separates a rendered tag from the text after it: one space.
 pub const RENDER_SEPARATOR: &str = " ";
 
-/// The kind of a part, as far as tag rendering cares.
+/// The text a counted text part renders as: its number, one space, then its
+/// text with any leading tag notation stripped
+/// ([`strip_leading_tag_notation`], never bare digits). The model's own text
+/// is passed as exposed, so already cleaned when a tag-rendering run wrote
+/// it.
+///
+/// Rendering what it rendered gives the same bytes again,
+/// `render_counted_text(n, &render_counted_text(m, t)) ==
+/// render_counted_text(n, t)`, for every text that does not begin with
+/// whitespace (cleaned model text never does). A runner renders from the
+/// exposed text each time, never from an earlier rendering.
+pub fn render_counted_text(number: u64, text: &str) -> String {
+    format!(
+        "{SIGIL}{number}{SIGIL}{RENDER_SEPARATOR}{}",
+        strip_leading_tag_notation(text)
+    )
+}
+
+/// What follows the number in an image-only tool result's label.
+pub const IMAGE_LABEL_TEXT: &str = "[image]";
+
+/// The short text label an image-only tool result renders, carrying its
+/// number: `§N§ [image]`. The runner places it where the provider accepts
+/// text beside the image (on Anthropic's API, a text block before the image
+/// inside the `tool_result`).
+pub fn image_label(number: u64) -> String {
+    format!("{SIGIL}{number}{SIGIL}{RENDER_SEPARATOR}{IMAGE_LABEL_TEXT}")
+}
+
+/// The whole rendered text of a counted part a compaction provider dropped:
+/// `[dropped §N§]`, no prefix before it. The part keeps its number.
+pub fn dropped_placeholder(number: u64) -> String {
+    format!("[dropped {SIGIL}{number}{SIGIL}]")
+}
+
+/// The text a runner renders for a part of `kind` numbered `number`, when
+/// the run renders tags: [`render_counted_text`] for counted text,
+/// [`image_label`] for an image-only tool result (its `text` is unused), and
+/// `text` unchanged for a part that does not count or has no number.
+pub fn render_part(kind: PartKind, number: Option<u64>, text: &str) -> String {
+    match (kind, number) {
+        (PartKind::ToolResultImageOnly, Some(number)) => image_label(number),
+        (kind, Some(number)) if counts(kind) => render_counted_text(number, text),
+        _ => text.to_owned(),
+    }
+}
+
+/// Who wrote a piece of the model's text, which decides how it is exposed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum RenderKind {
-    /// Text the person, the owner or a sender wrote.
-    UserText,
-    /// A tool result's text: its first text block.
-    ToolResultText,
-    /// The model's text, on a provider whose text part carries no provider
-    /// state (an Anthropic text block, say).
-    AssistantText,
-    /// The model's text, on a provider whose text part carries provider
-    /// state (a thought signature, ChatGPT's `phase`, encrypted reasoning).
-    AssistantTextWithProviderState,
-    /// Anything without text to carry a prefix: an image, a tool call, a
-    /// reasoning or thinking block.
-    NoText,
+pub enum TextWriter {
+    /// A run whose frozen plan renders tags. Cleaned on every exposure.
+    TagRenderingRun,
+    /// A run whose frozen plan renders no tags. Exposed byte for byte,
+    /// whatever later runs of the session render.
+    UntaggedRun,
+    /// The final text of a structured-output run, under any plan. Never
+    /// cleaned: a tag-like string inside the output is the output.
+    StructuredOutputFinal,
 }
 
-/// The exact text a runner renders for a part when the session's plan has
-/// `render_tags: true`: the tag, one space, then the part's text, for user
-/// text, a tool result's first text block, and assistant text where the
-/// provider's text part carries no provider state. Every other part, an
-/// untagged part, and a part whose text is empty render unchanged. A
-/// compaction provider builds the same bytes for a drop placeholder.
-pub fn render_text(kind: RenderKind, tag: Option<&str>, text: &str) -> String {
-    match (kind, tag) {
-        (
-            RenderKind::UserText | RenderKind::ToolResultText | RenderKind::AssistantText,
-            Some(tag),
-        ) if !text.is_empty() => format!("{tag}{RENDER_SEPARATOR}{text}"),
-        _ => text.to_owned(),
+/// The model's text as every exposure shows it (`session.read`,
+/// `session.resolve`, `run.result`'s final text, a render, the summarizer's
+/// feed): [`clean_model_text`] for text a tag-rendering run wrote, and the
+/// stored text otherwise. Applies to the model's text parts only: signed
+/// thinking, encrypted reasoning and tool-call arguments are never cleaned.
+/// Storage may keep the raw text.
+pub fn exposed_model_text(writer: TextWriter, text: &str) -> std::borrow::Cow<'_, str> {
+    match writer {
+        TextWriter::TagRenderingRun => std::borrow::Cow::Owned(clean_model_text(text)),
+        TextWriter::UntaggedRun | TextWriter::StructuredOutputFinal => {
+            std::borrow::Cow::Borrowed(text)
+        }
     }
 }
 
@@ -155,7 +207,7 @@ impl CharRange {
     }
 }
 
-/// The `session.resolve` request: `{tag, range?}`.
+/// The `session.resolve` request: `{tag, range?, media?}`.
 ///
 /// Strict: an unknown field is refused `invalid_params` naming it. It names
 /// no session: the session is the one the route is bound to.
@@ -166,6 +218,12 @@ impl CharRange {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ResolveRequest {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::read::descriptors::deserialize_media"
+    )]
+    pub media: Option<crate::read::MediaMode>,
     /// The tag to resolve, `§N§`.
     pub tag: String,
     /// Only this character range of the part's content. Absent means the
@@ -178,6 +236,7 @@ impl ResolveRequest {
     pub fn new(tag: impl Into<String>) -> Self {
         Self {
             tag: tag.into(),
+            media: None,
             range: None,
         }
     }
@@ -187,9 +246,15 @@ impl ResolveRequest {
         self
     }
 
+    pub fn with_media(mut self, media: crate::read::MediaMode) -> Self {
+        self.media = Some(media);
+        self
+    }
+
     /// The tag's number, or [`TAG_FIELD`] for the `invalid_params` refusal
-    /// of a malformed tag. A well-formed tag the session never assigned is
-    /// refused `unknown_tag` instead, which only the runner can tell.
+    /// of a malformed tag. A well-formed tag no part of the current lineage
+    /// carries is refused `unknown_tag` instead, which only the runner can
+    /// tell.
     pub fn number(&self) -> Result<u64, &'static str> {
         parse_tag(&self.tag).ok_or(TAG_FIELD)
     }
@@ -228,10 +293,15 @@ pub struct ResolveReply {
     pub mid: String,
     /// The part's key, as the message's `session.read` entry names it.
     pub part: String,
-    /// The part's exact stored content, or the requested range of it. A text
-    /// part's text; any other part in the runner's own stored encoding of
-    /// it. The same bytes on every resolve.
-    pub content: String,
+    /// The part's exposed content, or the requested range of it: a text
+    /// part's text, cleaned when it is the model's text and a tag-rendering
+    /// run wrote it ([`exposed_model_text`]); an image-only tool result in
+    /// the runner's own stored encoding of it. The same bytes on every
+    /// resolve within a lineage for the same media mode. Inline is a string;
+    /// descriptors mode may instead carry a ref or a structured part with
+    /// payload refs, preserving its call pairing fields.
+    #[serde(deserialize_with = "crate::read::descriptors::deserialize_content")]
+    pub content: serde_json::Value,
     /// The requested range, echoed; absent for the whole content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<CharRange>,
@@ -250,7 +320,7 @@ impl ResolveReply {
             ordinal,
             mid: mid.into(),
             part: part.into(),
-            content: content.into(),
+            content: serde_json::Value::String(content.into()),
             range: None,
         }
     }
@@ -262,7 +332,9 @@ impl ResolveReply {
 }
 
 /// The fetch-plan member that turns tag rendering on: `render_tags: true`
-/// renders each part's tag to the model. Absent (or `null`) means off.
+/// numbers, renders and cleans by [`RULES_FEATURE`]. Absent (or `null`)
+/// means off: no part carries a number and the model's text is exposed as
+/// written.
 pub const PLAN_RENDER_TAGS: &str = "render_tags";
 
 /// The `field` of an `invalid_params` refusal of the plan's `render_tags`.
@@ -320,30 +392,34 @@ mod tests {
             assert_eq!(ResolveRequest::new(tag).number(), Err(TAG_FIELD), "{tag}");
         }
         assert_eq!(format_tag(0), None);
-        let fork = &file["fork"];
-        assert_eq!(
-            format_tag(next_after(fork["parent_highest"].as_u64())),
-            fork["first_new"].as_str().map(str::to_owned)
-        );
-        assert_eq!(next_after(None), 1);
     }
 
+    /// Within one lineage the numbers run consecutively over the counted
+    /// parts, each used once; a part that does not count has a row and no
+    /// number.
     #[test]
-    fn read_entries_carry_part_tags() {
+    fn read_entries_carry_consecutive_numbers_on_counted_parts() {
         let file = vectors::load("tags.json");
-        let mut seen = std::collections::BTreeSet::new();
+        let mut numbers = Vec::new();
+        let mut untagged = 0;
         for case in vectors::cases(&file, "read_entries") {
             let name = case["name"].as_str().unwrap();
             let entry: ReadMessage = vectors::round_trip(name, &case["entry"]);
             let mut parts = std::collections::BTreeSet::new();
             for row in &entry.tags {
                 assert!(parts.insert(row.part.clone()), "{name}: part twice");
-                if let Some(tag) = &row.tag {
-                    assert!(parse_tag(tag).is_some(), "{name}: {tag}");
-                    assert!(seen.insert(tag.clone()), "{name}: {tag} reused");
+                match &row.tag {
+                    Some(tag) => numbers.push(parse_tag(tag).expect(name)),
+                    None => untagged += 1,
                 }
             }
         }
+        let expected: Vec<u64> = (1..=numbers.len() as u64).collect();
+        assert_eq!(numbers, expected, "numbers run consecutively");
+        assert!(
+            untagged >= 4,
+            "reasoning, a tool call, an image and turn_system"
+        );
         // A runner without the group sends no tags, and a consumer still
         // decodes the entry.
         let plain: ReadMessage =
@@ -353,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_answers_stored_content_or_refuses_by_name() {
+    fn resolve_answers_the_current_lineage_or_refuses_by_name() {
         let file = vectors::load("tags.json");
         for case in vectors::cases(&file, "resolve_requests") {
             vectors::round_trip::<ResolveRequest>(case["name"].as_str().unwrap(), &case["request"]);
@@ -365,7 +441,7 @@ mod tests {
                 serde_json::from_value::<ResolveRequest>(case["request"].clone()).expect_err(name);
             assert!(error.to_string().contains(field), "{name}: {error}");
         }
-        let parts = vectors::cases(&file, "ledger");
+        let parts = vectors::cases(&file, "lineage");
         let mut kinds = std::collections::BTreeSet::new();
         for case in vectors::cases(&file, "resolve_cases") {
             let name = case["name"].as_str().unwrap();
@@ -433,21 +509,27 @@ mod tests {
     }
 
     #[test]
-    fn rendered_parts_carry_the_exact_prefix() {
+    fn rendered_parts_follow_the_counting_predicate() {
         let file = vectors::load("tags.json");
         let mut kinds = std::collections::BTreeSet::new();
         for case in vectors::cases(&file, "rendered_parts") {
             let name = case["name"].as_str().unwrap();
-            let kind: RenderKind = serde_json::from_value(case["kind"].clone()).unwrap();
-            let rendered = render_text(kind, case["tag"].as_str(), case["text"].as_str().unwrap());
+            let kind: PartKind = serde_json::from_value(case["kind"].clone()).unwrap();
+            let number = case["number"].as_u64();
+            assert_eq!(number.is_some(), counts(kind), "{name}");
+            let rendered = render_part(kind, number, case["text"].as_str().unwrap());
             assert_eq!(rendered, case["rendered"].as_str().unwrap(), "{name}");
             kinds.insert(format!("{kind:?}"));
         }
-        assert_eq!(kinds.len(), 5, "every render kind has a vector");
-        assert_eq!(
-            render_text(RenderKind::UserText, Some("§3§"), "hi"),
-            "§3§ hi"
-        );
+        assert_eq!(kinds.len(), 11, "every part kind has a vector");
+        for case in vectors::cases(&file, "dropped") {
+            let number = case["number"].as_u64().unwrap();
+            assert_eq!(
+                dropped_placeholder(number),
+                case["rendered"].as_str().unwrap()
+            );
+        }
+        assert_eq!(image_label(3), "§3§ [image]");
     }
 
     #[test]
@@ -491,6 +573,257 @@ mod tests {
                     assert_eq!(refusal["detail"]["field"], field, "{name}");
                 }
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
+            }
+        }
+    }
+}
+
+/// Cleaning and rendering vectors from the tag cleaning in standalone Magic
+/// Context, the plugin that manages context inside OpenCode and Pi
+/// (`tag-content-primitives.ts`, `text-complete.ts`). They preserve section
+/// references: `§` followed by digits, then `.` and a digit, is never a dangling
+/// tag. The source pattern backtracks one digit and cleans `§12.3` to `2.3`;
+/// the vectors record that output separately from the corrected result.
+#[cfg(test)]
+mod cleaning_tests {
+    use super::*;
+    use crate::vectors;
+
+    fn cases(section: &str) -> Vec<serde_json::Value> {
+        vectors::cases(&vectors::load("tag-cleaning.json"), section).to_vec()
+    }
+
+    /// Whether `text` contains a sigil followed by two or more digits, then
+    /// a decimal point and a digit.
+    fn multi_digit_decimal(text: &str) -> bool {
+        text.split(SIGIL).skip(1).any(|after| {
+            let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+            let mut rest = after[digits..].chars();
+            digits >= 2
+                && rest.next() == Some('.')
+                && rest.next().is_some_and(|c| c.is_ascii_digit())
+        })
+    }
+
+    /// Rows with a recorded source-pattern difference contain the multi-digit
+    /// section references affected by regex backtracking.
+    fn standalone_differs_only_on_multi_digit_decimals(cases: &[serde_json::Value]) {
+        for case in cases {
+            if case.get("standalone_before_fix").is_some() {
+                let name = case["name"].as_str().unwrap();
+                assert!(
+                    multi_digit_decimal(case["text"].as_str().unwrap()),
+                    "{name}: standalone differs on a text the decimal fix does not change"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn model_text_is_cleaned_by_the_shared_rules() {
+        let cases = cases("clean");
+        assert!(cases.iter().any(|case| case["source"] == "commons"));
+        standalone_differs_only_on_multi_digit_decimals(&cases);
+        for case in &cases {
+            let name = case["name"].as_str().unwrap();
+            let cleaned = clean_model_text(case["text"].as_str().unwrap());
+            assert_eq!(cleaned, case["cleaned"].as_str().unwrap(), "{name}");
+            assert_eq!(clean_model_text(&cleaned), cleaned, "{name}: idempotent");
+            assert!(!cleaned.contains(SIGIL), "{name}: no sigil survives");
+        }
+    }
+
+    #[test]
+    fn leading_tag_notation_is_stripped_and_bare_digits_kept() {
+        let cases = cases("strip_leading");
+        standalone_differs_only_on_multi_digit_decimals(&cases);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let stripped = strip_leading_tag_notation(case["text"].as_str().unwrap());
+            assert_eq!(stripped, case["stripped"].as_str().unwrap(), "{name}");
+            assert_eq!(
+                strip_leading_tag_notation(stripped),
+                stripped,
+                "{name}: idempotent"
+            );
+        }
+    }
+
+    #[test]
+    fn counted_text_renders_its_number_and_rendering_again_changes_nothing() {
+        for case in cases("render") {
+            let name = case["name"].as_str().unwrap();
+            let number = case["number"].as_u64().unwrap();
+            let text = case["text"].as_str().unwrap();
+            let rendered = render_counted_text(number, text);
+            assert_eq!(rendered, case["rendered"].as_str().unwrap(), "{name}");
+            assert_eq!(render_counted_text(number, &rendered), rendered, "{name}");
+            assert_eq!(
+                render_counted_text(number + 1, &rendered),
+                render_counted_text(number + 1, text),
+                "{name}: a new number replaces the old one"
+            );
+        }
+        // The model's correct self-tag survives cleaning and rendering byte
+        // for byte, as standalone's round-trip test pins.
+        let reply = "§12§ Reading both files in parallel.\n\nThe next step follows.";
+        assert_eq!(render_counted_text(12, &clean_model_text(reply)), reply);
+    }
+
+    #[test]
+    fn structured_output_final_text_is_never_cleaned() {
+        let mut writers = std::collections::BTreeSet::new();
+        for case in cases("exposure") {
+            let name = case["name"].as_str().unwrap();
+            let writer: TextWriter = serde_json::from_value(case["writer"].clone()).unwrap();
+            let text = case["text"].as_str().unwrap();
+            assert_eq!(
+                exposed_model_text(writer, text),
+                case["exposed"].as_str().unwrap(),
+                "{name}"
+            );
+            writers.insert(format!("{writer:?}"));
+        }
+        assert_eq!(writers.len(), 3, "every writer has a vector");
+    }
+}
+
+/// Counting, numbering and anchoring against `tag-numbering.json`.
+#[cfg(test)]
+mod numbering_tests {
+    use super::*;
+    use crate::vectors;
+
+    #[test]
+    fn one_predicate_decides_what_counts() {
+        let file = vectors::load("tag-numbering.json");
+        for case in vectors::cases(&file, "counts") {
+            let kind: PartKind = serde_json::from_value(case["kind"].clone()).unwrap();
+            assert_eq!(counts(kind), case["counts"].as_bool().unwrap(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn numbers_follow_rendered_order_from_the_checkpoint() {
+        let file = vectors::load("tag-numbering.json");
+        let mut reordered = false;
+        for case in vectors::cases(&file, "numbering") {
+            let name = case["name"].as_str().unwrap();
+            let parts: Vec<RenderedPart> = serde_json::from_value(case["parts"].clone()).unwrap();
+            let expected: Vec<Option<u64>> =
+                serde_json::from_value(case["numbers"].clone()).unwrap();
+            assert_eq!(
+                number_parts(case["checkpoint"].as_u64().unwrap(), &parts),
+                expected,
+                "{name}"
+            );
+            reordered |= parts
+                .windows(2)
+                .any(|w| w[0].rendered_at > w[1].rendered_at);
+        }
+        assert!(reordered, "no vector stores parts out of rendered order");
+    }
+
+    /// Number a session from the anchor `markers` and `setup` give: every
+    /// part from the anchor's cut, in storage order (as OpenCode renders,
+    /// marker pairs never counting), fed to [`number_parts`]. Answers the
+    /// numbers by `message:part` and the anchor.
+    fn number_from_anchor(
+        case: &serde_json::Value,
+        markers: &serde_json::Value,
+    ) -> (std::collections::BTreeMap<String, u64>, Anchor) {
+        let name = case["name"].as_str().unwrap();
+        let markers: Vec<Marker> = serde_json::from_value(markers.clone()).unwrap();
+        let setup: Option<SetupCheckpoint> = case
+            .get("setup")
+            .map(|setup| serde_json::from_value(setup.clone()).unwrap());
+        let messages = case["messages"].as_array().unwrap();
+        let ids: Vec<&str> = messages.iter().map(|m| m["id"].as_str().unwrap()).collect();
+        let found = anchor("s", &markers, setup.as_ref(), |id| ids.contains(&id)).expect(name);
+        let (checkpoint, from) = match &found {
+            Anchor::Marker { checkpoint, cut } | Anchor::Setup { checkpoint, cut } => (
+                *checkpoint,
+                ids.iter().position(|id| id == cut).expect(name),
+            ),
+            Anchor::SessionStart { checkpoint, .. } => (*checkpoint, 0),
+        };
+        let mut keys = Vec::new();
+        let mut parts = Vec::new();
+        for (at, message) in messages.iter().enumerate().skip(from) {
+            for (index, kind) in message["parts"].as_array().unwrap().iter().enumerate() {
+                keys.push(format!("{}:{index}", ids[at]));
+                parts.push(RenderedPart::new(
+                    serde_json::from_value(kind.clone()).unwrap(),
+                    at as u64,
+                ));
+            }
+        }
+        let numbers = keys
+            .into_iter()
+            .zip(number_parts(checkpoint, &parts))
+            .filter_map(|(key, number)| Some((key, number?)))
+            .collect();
+        (numbers, found)
+    }
+
+    /// A lost key renumbers nothing: falling back to an older keyed marker,
+    /// the Setup checkpoint or the session start, and counting every part
+    /// from that cut, gives the numbers computed with every key present.
+    #[test]
+    fn a_lost_marker_key_falls_back_without_renumbering() {
+        let file = vectors::load("tag-numbering.json");
+        let cases = vectors::cases(&file, "lost_keys");
+        assert_eq!(cases.len(), 4);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let expected: std::collections::BTreeMap<String, u64> =
+                serde_json::from_value(case["numbers"].clone()).unwrap();
+            let (with_keys, newest) = number_from_anchor(case, &case["markers_with_keys"]);
+            let (without, fallback) = number_from_anchor(case, &case["markers"]);
+            assert_ne!(newest, fallback, "{name}: no fallback happened");
+            for (key, number) in &expected {
+                assert_eq!(
+                    with_keys.get(key),
+                    Some(number),
+                    "{name}: {key} with every key"
+                );
+                assert_eq!(
+                    without.get(key),
+                    Some(number),
+                    "{name}: {key} after the key was lost"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_anchor_falls_back_from_markers_to_the_setup_checkpoint() {
+        let file = vectors::load("tag-numbering.json");
+        for case in vectors::cases(&file, "anchors") {
+            let name = case["name"].as_str().unwrap();
+            let markers: Vec<Marker> = serde_json::from_value(case["markers"].clone()).unwrap();
+            let setup: Option<SetupCheckpoint> = case
+                .get("setup")
+                .map(|setup| vectors::round_trip(name, setup));
+            let existing: Vec<&str> = case["existing"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap())
+                .collect();
+            let outcome = anchor(
+                case["session"].as_str().unwrap(),
+                &markers,
+                setup.as_ref(),
+                |id| existing.contains(&id),
+            );
+            match (outcome, case.get("fork_parent")) {
+                (Err(parent), Some(expected)) => assert_eq!(parent, expected.as_str().unwrap()),
+                (Ok(found), None) => {
+                    let expected: Anchor = vectors::round_trip(name, &case["anchor"]);
+                    assert_eq!(found, expected, "{name}");
+                }
+                (outcome, expected) => panic!("{name}: {outcome:?} against {expected:?}"),
             }
         }
     }

@@ -89,6 +89,13 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("media_") => crate::media::run(self, name).await,
+            "user_commands_cutoff_after_forward" | "user_commands_cutoff_before_forward" => {
+                crate::user_commands::cutoff(self, name.ends_with("after_forward")).await
+            }
+            "compaction_standalone_refusal_lifecycle" => {
+                crate::compaction::standalone_refusal(self).await
+            }
             name if name.starts_with("user_commands_") => crate::user_commands::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
@@ -137,12 +144,8 @@ where
             }
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
-            name if name.starts_with("adopt_") => {
-                crate::adopt::run(self, name).await.map(|()| Ending::Passed)
-            }
-            name if name.starts_with("tags_") => {
-                crate::tags::run(self, name).await.map(|()| Ending::Passed)
-            }
+            name if name.starts_with("adopt_") => crate::adopt::run(self, name).await,
+            name if name.starts_with("tags_") => crate::tags::run(self, name).await,
             name if name.starts_with("run_tool_calls_") => crate::tool_calls::run(self, name)
                 .await
                 .map(|()| Ending::Passed),

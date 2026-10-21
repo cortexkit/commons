@@ -12,7 +12,7 @@ use cortexkit_role_llm_runner::{
 use serde_json::{json, Value};
 
 use crate::{
-    cases::Case,
+    cases::{Case, Ending},
     drive::{call, decode, expect_code, expect_error, expect_ok, read_all, wait_run_end, Mint},
     route::RunnerRoute,
     subject::{
@@ -271,6 +271,102 @@ where
         }
     }
     Ok(())
+}
+
+/// Cut off a reserved command on either side of the actual provider forward.
+pub async fn cutoff<S>(case: &Case<'_, S>, after_forward: bool) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut session = case
+        .open(
+            "command-cutoff",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![ScriptedPart::Text("answer".into())])],
+            },
+        )
+        .await?;
+    let fixture = UserCommandFixture {
+        collision: false,
+        interactive: true,
+        host_replies_outside_history: true,
+    };
+    let (session_ref, fields) = case
+        .subject
+        .prepare_user_commands(&session.name, &fixture)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut admission = Value::Object(fields);
+    let send_id = case.mint.next("admit");
+    admission["prompt"] = json!("ordinary prompt");
+    admission["send_id"] = json!(send_id);
+    let send: SendReply = decode(
+        "admission",
+        expect_ok(
+            "admission",
+            call(&session.route, ops::SESSION_SEND, admission).await?,
+        )?,
+    )?;
+    session.first = Some((send_id, "ordinary prompt".into()));
+    wait_run_end(case.subject, &session.route, case.declared, None, &send).await?;
+    if let Err(e) = case
+        .subject
+        .cut_off_user_command(case.handle.inner(), &session.name, after_forward)
+        .await
+    {
+        return Ok(Ending::Inapplicable(format!(
+            "the adapter cannot cut off a command: {e}"
+        )));
+    }
+    let request = json!({"session_ref":session_ref,"command":"ctx-status","input":"cutoff","invocation_id":case.mint.next("cutoff")});
+    let first = expect_ok(
+        "cutoff invocation",
+        call(&session.route, ops::SESSION_USER_COMMAND, request.clone()).await?,
+    )?;
+    let answer: UserCommandAnswer = decode("cutoff invocation", first.clone())?;
+    let expected = if after_forward {
+        "outcome_unknown"
+    } else {
+        "failed"
+    };
+    if answer.reply.state != expected {
+        return Err(format!(
+            "cutoff after_forward={after_forward} must end {expected}, got {:?}",
+            answer.reply
+        ));
+    }
+    let repeat = expect_ok(
+        "cutoff retry",
+        call(&session.route, ops::SESSION_USER_COMMAND, request).await?,
+    )?;
+    let status: UserCommandStatus = decode(
+        "cutoff status",
+        expect_ok(
+            "cutoff status",
+            call(
+                &session.route,
+                ops::SESSION_USER_COMMAND_STATUS,
+                json!({"session_ref":session_ref,"call_key":answer.call_key}),
+            )
+            .await?,
+        )?,
+    )?;
+    if repeat != first || status.state != expected || status.text != answer.reply.text {
+        return Err("cutoff reply/status was not retained and replayed".into());
+    }
+    let observed = case
+        .subject
+        .user_command_observation(&session.name)
+        .await
+        .map_err(|e| e.to_string())?;
+    if observed.provider_calls.len() != usize::from(after_forward) {
+        return Err(format!(
+            "cutoff forwarded {} times",
+            observed.provider_calls.len()
+        ));
+    }
+    Ok(Ending::Passed)
 }
 
 /// Kill after the provider has received a user command but before its reply is

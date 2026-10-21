@@ -5,11 +5,9 @@
 # and checks every reply against the role crate's wire types. A runner adds
 # this crate as a dev-dependency; it is a separate crate so a runner's
 # production build never compiles the suite.
-#
-# Not published while the role crate itself is a draft.
 [package]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.8.11"
+version = "0.9.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,10 +16,11 @@ description = "Conformance runner for the CortexKit llm-runner/v1 role: drives a
 publish = true
 
 [dependencies]
+base64 = "0.22"
 async-trait = "0.1"
 cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
-cortexkit-role-compaction-provider = { version = "0.3.3", path = "../cortexkit-role-compaction-provider" }
-cortexkit-role-llm-runner = { version = "0.3.10", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-compaction-provider = { version = "0.4.0", path = "../cortexkit-role-compaction-provider" }
+cortexkit-role-llm-runner = { version = "0.4.0", path = "../cortexkit-role-llm-runner" }
 futures-util = { version = "0.3", default-features = false }
 serde = "1"
 serde_json = "1"

@@ -110,6 +110,7 @@ where
         "delivery_order_unnamed_sender_refused" => passed(unnamed_sender(case).await),
         "delivery_order_template_renders_as_system" => passed(template_renders(case).await),
         "delivery_order_bad_slot_refused" => passed(bad_slot(case).await),
+        "delivery_order_template_part_gone_refused" => passed(part_gone(case).await),
         other => Err(format!("unknown delivery_order case {other}")),
     }
 }
@@ -1164,6 +1165,113 @@ where
         modes::STEER
     };
     delivered_once(&messages, "Context is 82% full.", mode)
+}
+
+/// On a session whose plan renders tags, a template send whose `part_tag`
+/// slot names a part the session does not show is refused
+/// `template_part_gone` naming the slot, writing nothing; one naming a part
+/// it shows is accepted.
+async fn part_gone<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut session = case
+        .open(
+            "order-part-gone",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![
+                    case.mint.text("part-gone-answer").0,
+                ])],
+            },
+        )
+        .await?;
+    require_declared(&session.route, groups::DELIVERY_ORDER, "delivery_order").await?;
+    let identity = sender(case)?;
+    let mut slots = std::collections::BTreeMap::new();
+    slots.insert("part".to_owned(), Slot::PartTag);
+    let template = Template::new("drop_hint", "Consider dropping {part}.", slots);
+    let entry = PlanSender::new(&identity.module).with_templates(vec![template.clone()]);
+    let mut members = Map::new();
+    members.insert("senders".into(), json!([entry]));
+    members.insert(
+        cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS.into(),
+        json!(true),
+    );
+    let fields = case
+        .subject
+        .send_fields_with_plan(&session.name, true, &members)
+        .ok_or(
+            "the subject builds no plan carrying senders and render_tags, which this case requires",
+        )?;
+    let opening = case.mint.next("part-gone-opening");
+    send_and_wait(case, &mut session, Some(&fields), &opening, &Map::new()).await?;
+    let named = case
+        .subject
+        .session_route(case.handle.inner(), &session.name, &identity.stamp)
+        .await
+        .map_err(|e| format!("opening {} as the plan sender: {e}", session.name))?;
+    let (_, messages) = read_all(&session.route).await?;
+    let shown = messages
+        .iter()
+        .find_map(|m| {
+            m.tags
+                .iter()
+                .find(|row| row.tag.is_some())
+                .map(|row| json!({ "mid": m.mid, "part": row.part }))
+        })
+        .ok_or("the session shows no numbered part to name in a part_tag slot")?;
+    let template_send = |part: Value| {
+        let mut slots = Map::new();
+        slots.insert("part".into(), part);
+        DeliveryOrder::new(vec![Mode::TurnSystem, Mode::Steer]).with_template(TemplateUse::new(
+            "drop_hint",
+            template_digest(&template),
+            slots,
+        ))
+    };
+    let before = snapshot(&session.route).await?;
+    let gone = json!({ "mid": case.mint.next("no-such-message"), "part": "0" });
+    let what = "a template send whose part_tag slot names a part the session does not show";
+    let error = expect_error(
+        what,
+        ordered(
+            case,
+            &session,
+            &named,
+            "",
+            &case.mint.next("send"),
+            &template_send(gone),
+        )
+        .await?,
+    )?;
+    expect_code(what, &error, errors::TEMPLATE_PART_GONE)?;
+    let detail: errors::TemplatePartGoneDetail =
+        serde_json::from_value(error.detail.clone().unwrap_or(Value::Null))
+            .map_err(|e| format!("{what}: the refusal's detail does not name the slot: {e}"))?;
+    if detail.slot != "part" {
+        return Err(format!(
+            "{what}: the refusal names slot {:?}, not part",
+            detail.slot
+        ));
+    }
+    if !same(&before, &snapshot(&session.route).await?) {
+        return Err(format!("{what} was refused but changed the transcript"));
+    }
+    let what = "a template send whose part_tag slot names a part the session shows";
+    expect_ok(
+        what,
+        ordered(
+            case,
+            &session,
+            &named,
+            "",
+            &case.mint.next("send"),
+            &template_send(shown),
+        )
+        .await?,
+    )?;
+    Ok(())
 }
 
 async fn bad_slot<S>(case: &Case<'_, S>) -> Check

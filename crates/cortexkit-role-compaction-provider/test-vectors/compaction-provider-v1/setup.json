@@ -109,6 +109,45 @@
       }
     },
     {
+      "name": "a session moved from standalone Magic Context carries its tag checkpoint",
+      "answer": {
+        "answer": "ready",
+        "request_id": "cr-000001",
+        "initial": {
+          "compaction_id": "mc:ses_01J9Z:head-1",
+          "version": 1,
+          "range": {
+            "from": 0,
+            "to": 0
+          },
+          "replacement": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "<m0: project docs and memories>"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "<m1: session history>"
+                }
+              ]
+            }
+          ]
+        },
+        "checkpoint": {
+          "tag_checkpoint": 340,
+          "cut": "msg_boundary"
+        }
+      }
+    },
+    {
       "name": "setup refused",
       "answer": {
         "answer": "refuse",
@@ -146,6 +185,26 @@
         "request_id": "cr-000001",
         "code": "setup_identity_mismatch",
         "reason": "the route is bound to another session"
+      },
+      "retryable": false
+    },
+    {
+      "name": "a session with standalone state and no completed move",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000001",
+        "code": "standalone_session_not_migrated",
+        "reason": "see the doctor command"
+      },
+      "retryable": false
+    },
+    {
+      "name": "a moved session on a runner without tag_checkpoint",
+      "answer": {
+        "answer": "refuse",
+        "request_id": "cr-000001",
+        "code": "tag_checkpoint_unsupported",
+        "reason": "see the doctor command"
       },
       "retryable": false
     }

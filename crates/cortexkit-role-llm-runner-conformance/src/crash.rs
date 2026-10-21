@@ -25,6 +25,7 @@ use cortexkit_role_llm_runner::{
     send::SendReply,
     tags::{self, ResolveReply, ResolveRequest},
 };
+use serde_json::Value;
 
 use crate::{
     cases::{entries_for, Ending},
@@ -44,11 +45,11 @@ const INTERRUPTED_CASE: &str = "run_result_interrupted_not_cancelled";
 
 /// The tags case that has no scenario of its own: it resolves tags in the
 /// session the `StepRecorded` kill cut, after a seal that left its lineage.
-pub const LEFT_LINEAGE_TAG_CASE: &str = "tags_resolve_left_lineage_refused";
+pub const LEFT_LINEAGE_TAG_CASE: &str = "tags_resolve_answers_the_current_lineage";
 
-/// The most tag numbers [`LEFT_LINEAGE_TAG_CASE`] resolves, so a runner
-/// whose numbers are sparse is not sent thousands of requests.
-const MAX_UNCARRIED_TAGS: usize = 64;
+/// The most tag numbers [`LEFT_LINEAGE_TAG_CASE`] resolves, so a long
+/// session is not sent thousands of requests.
+const MAX_RESOLVED_TAGS: usize = 64;
 
 /// What one crash scenario observed.
 pub struct CrashObservation {
@@ -190,7 +191,7 @@ where
     let mut earlier_run = None;
     let mut before_b = Vec::new();
     if earlier_b {
-        let params = send_params(
+        let mut params = send_params(
             subject,
             &name_b,
             true,
@@ -198,6 +199,16 @@ where
             &mint.next("send"),
             None,
         );
+        // On a tags runner B renders tags, so the left-lineage case has
+        // numbers to resolve: numbering applies only to such sessions.
+        if declared.contains(&Capability::Tags) {
+            if let Ok(fields) = crate::tags::rendering_fields(subject, &name_b) {
+                let mut rendering = Value::Object(fields);
+                rendering["prompt"] = params["prompt"].clone();
+                rendering["send_id"] = params["send_id"].clone();
+                params = rendering;
+            }
+        }
         let reply: SendReply = decode(
             "session.send",
             expect_ok(
@@ -369,82 +380,90 @@ where
     })
 }
 
-/// In the lineage a seal moved session B to, resolve every tag number below
-/// its highest that no part read from it carries: each must be refused
-/// `unknown_tag`. The tag of the part the seal dropped is among them, since
-/// it was assigned before the drop and the follow-up's tags after it. Then
-/// resolve a tag of the cut run's prompt, which the seal kept: it answers
-/// where the prompt now sits in the new lineage.
+/// In the lineage a seal moved session B to, resolve the numbers its parts
+/// carry (at most [`MAX_RESOLVED_TAGS`] of them): each answers the part of the
+/// new lineage that shows it, never a part of the lineage the session left,
+/// though numbers may repeat across lineages. A number above the new
+/// lineage's highest is refused `unknown_tag`, and the cut run's prompt
+/// resolves where it now sits. Answers the numbers resolved.
 async fn resolve_left_lineage<R: RunnerRoute>(
     route: &R,
     messages: &[ReadMessage],
     prompt: &str,
 ) -> Result<Vec<String>, String> {
     require_declared(route, groups::TAGS, ops::SESSION_RESOLVE).await?;
-    let carried: BTreeSet<u64> = messages
+    let carried: Vec<(String, &ReadMessage, String)> = messages
         .iter()
-        .flat_map(|m| &m.tags)
-        .filter_map(|row| row.tag.as_deref().and_then(tags::parse_tag))
+        .flat_map(|m| {
+            m.tags
+                .iter()
+                .filter_map(move |row| Some((row.tag.clone()?, m, row.part.clone())))
+        })
+        .take(MAX_RESOLVED_TAGS)
         .collect();
-    let highest = carried.iter().max().copied().unwrap_or(0);
-    let uncarried: Vec<String> = (1..highest)
-        .filter(|number| !carried.contains(number))
-        .take(MAX_UNCARRIED_TAGS)
-        .map(|number| tags::format_tag(number).expect("positive"))
-        .collect();
-    for tag in &uncarried {
-        let what = format!("session.resolve of {tag}, which no part of the new lineage carries");
-        let request = serde_json::to_value(ResolveRequest::new(tag)).expect("serializes");
-        match call(route, ops::SESSION_RESOLVE, request).await? {
-            Reply::Response(body) => {
-                return Err(format!(
-                    "{what} answered {body}: a tag assigned only under a lineage the session \
-                     left is refused unknown_tag, never answered with that lineage's content"
-                ))
-            }
-            Reply::Error(error) => expect_code(&what, &error, errors::UNKNOWN_TAG)?,
+    let mut resolved = Vec::new();
+    for (tag, entry, part) in &carried {
+        let what = format!("session.resolve of {tag}, which the new lineage shows");
+        let reply: ResolveReply = decode(
+            &what,
+            expect_ok(
+                &what,
+                call(
+                    route,
+                    ops::SESSION_RESOLVE,
+                    serde_json::to_value(ResolveRequest::new(tag)).expect("serializes"),
+                )
+                .await?,
+            )?,
+        )?;
+        if reply.ordinal != entry.ordinal || reply.mid != entry.mid || &reply.part != part {
+            return Err(format!(
+                "{what} answered ordinal {} mid {} part {}, but the new lineage reads it on \
+                 ordinal {} mid {} part {part}: resolve answers the current lineage, never the \
+                 one the session left",
+                reply.ordinal, reply.mid, reply.part, entry.ordinal, entry.mid
+            ));
         }
+        resolved.push(tag.clone());
+    }
+    let highest = carried
+        .iter()
+        .filter_map(|(tag, _, _)| tags::parse_tag(tag))
+        .max()
+        .unwrap_or(0);
+    let above = tags::format_tag(highest + 1).expect("positive");
+    let what = format!("session.resolve of {above}, above every number the new lineage shows");
+    match call(
+        route,
+        ops::SESSION_RESOLVE,
+        serde_json::to_value(ResolveRequest::new(&above)).expect("serializes"),
+    )
+    .await?
+    {
+        Reply::Response(body) => {
+            return Err(format!(
+                "{what} answered {body}: a number no part of the current lineage carries is \
+                 refused unknown_tag, never answered with a left lineage's content"
+            ))
+        }
+        Reply::Error(error) => expect_code(&what, &error, errors::UNKNOWN_TAG)?,
     }
     let entry = entry_holding(messages, prompt)?;
-    let tag = entry
-        .tags
-        .iter()
-        .find_map(|row| row.tag.clone())
-        .ok_or_else(|| {
-            format!(
-                "the cut run's prompt at ordinal {} carries no tag in the new lineage",
-                entry.ordinal
-            )
-        })?;
-    let what = format!("session.resolve of the cut run's prompt tag {tag}");
-    let reply: ResolveReply = decode(
-        &what,
-        expect_ok(
-            &what,
-            call(
-                route,
-                ops::SESSION_RESOLVE,
-                serde_json::to_value(ResolveRequest::new(&tag)).expect("serializes"),
-            )
-            .await?,
-        )?,
-    )?;
-    if reply.ordinal != entry.ordinal || reply.mid != entry.mid {
+    if !entry.tags.iter().any(|row| row.tag.is_some()) {
         return Err(format!(
-            "{what} answered ordinal {} and mid {}, but the new lineage reads the prompt at \
-             ordinal {} with mid {}: resolve answers where a part sits in the current lineage",
-            reply.ordinal, reply.mid, entry.ordinal, entry.mid
+            "the cut run's prompt at ordinal {} carries no number in the new lineage",
+            entry.ordinal
         ));
     }
-    Ok(uncarried)
+    Ok(resolved)
 }
 
 /// [`LEFT_LINEAGE_TAG_CASE`], against the `StepRecorded` scenario.
 pub fn check_left_lineage(observed: &CrashObservation) -> Result<Ending, String> {
     match &observed.left_lineage_tags {
-        Some(Ok(refused)) if refused.is_empty() => Ok(Ending::Inapplicable(
-            "the seal moved the session to a new lineage but dropped no tagged part: every tag \
-             below the new lineage's highest is carried, so none is left to refuse"
+        Some(Ok(resolved)) if resolved.is_empty() => Ok(Ending::Inapplicable(
+            "the seal moved the session to a new lineage that shows no number, so there is \
+             nothing to resolve"
                 .into(),
         )),
         Some(Ok(_)) => Ok(Ending::Passed),

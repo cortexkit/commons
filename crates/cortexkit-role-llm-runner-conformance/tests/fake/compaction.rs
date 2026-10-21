@@ -2,6 +2,7 @@
 //! observations outside Module's persistent log, so Module's restart cannot
 //! reconstruct or erase those observations.
 use super::*;
+use cortexkit_role_compaction_provider::errors::RefuseCode;
 use cortexkit_role_llm_runner::read::{EntrySource, ModelEntry, ModelPage};
 use cortexkit_role_llm_runner_conformance::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
@@ -20,6 +21,11 @@ pub enum CompactionDefect {
     UnavailableAsRefusal,
     FinerCodeReplacesRoleCode,
     BindWrongSession,
+    /// A Setup refused `setup_identity_mismatch` is recorded under another
+    /// code (`misconfigured`).
+    IdentityMismatchUnderAnotherCode,
+    StandaloneLateHandoff,
+    StandaloneNoHandoff,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,6 +44,9 @@ pub(super) struct State {
     setup_issued: bool,
     request_count: usize,
     sealed_setup_crash: bool,
+    /// The Setup checkpoint `(tag_checkpoint, cut)` the provider answered,
+    /// if any.
+    pub checkpoint: Option<(u64, String)>,
 }
 
 #[derive(Default)]
@@ -56,6 +65,7 @@ impl Providers {
 }
 
 struct Provider {
+    handoffs: usize,
     setup: CompactionSetup,
     calls: Vec<CompactionCall>,
     models: Vec<ModelCall>,
@@ -95,6 +105,12 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
             let m = decode_message(&record["message"]);
             state.setup = Some(m.clone());
             state.fold = Some(m);
+            if let (Some(n), Some(cut)) = (
+                record["checkpoint"]["tag_checkpoint"].as_u64(),
+                record["checkpoint"]["cut"].as_str(),
+            ) {
+                state.checkpoint = Some((n, cut.to_owned()));
+            }
         }
         "compaction_fold" => {
             state.view = Some(decode_message(&record["message"]));
@@ -264,7 +280,33 @@ impl Module {
                 code,
                 reason,
                 provider_code,
-            } => self.compaction_error(session, run_id, code.as_str(), &reason, provider_code),
+            } => {
+                if code == RefuseCode::StandaloneSessionNotMigrated
+                    && self.world.standalone_in_process
+                    && (!sess.ever_served
+                        || self.world.defects.compaction == CompactionDefect::StandaloneLateHandoff)
+                    && self.world.defects.compaction != CompactionDefect::StandaloneNoHandoff
+                {
+                    self.world
+                        .compaction
+                        .lock()
+                        .unwrap()
+                        .sessions
+                        .get_mut(session)
+                        .unwrap()
+                        .handoffs += 1;
+                    return self.commit(session, json!({"kind":"standalone_handoff"}));
+                }
+                let code = if code == RefuseCode::SetupIdentityMismatch
+                    && self.world.defects.compaction
+                        == CompactionDefect::IdentityMismatchUnderAnotherCode
+                {
+                    RefuseCode::Misconfigured
+                } else {
+                    code
+                };
+                self.compaction_error(session, run_id, code.as_str(), &reason, provider_code)
+            }
             CompactionSetup::Ready(m) => {
                 self.commit(
                     session,
@@ -275,6 +317,36 @@ impl Module {
                     json!({"kind":"compaction_fold","message":encode(&m)}),
                 )
             }
+            CompactionSetup::ReadyWithCheckpoint {
+                initial: m,
+                tag_checkpoint,
+            } => {
+                // The cut is the newest message when Setup is called: the
+                // session's first, its prompt.
+                let cut = sess
+                    .messages
+                    .last()
+                    .map(|m| m.mid.clone())
+                    .unwrap_or_default();
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_message","setup":true,"message":encode(&m),
+                           "checkpoint":{"tag_checkpoint":tag_checkpoint,"cut":cut}}),
+                )?;
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_fold","message":encode(&m)}),
+                )
+            }
+            // An answer kind this fake does not know fails Setup, as a
+            // runner treats an answer it cannot decode.
+            _ => self.compaction_error(
+                session,
+                run_id,
+                "compaction_unavailable",
+                "Setup answer of an unknown kind",
+                None,
+            ),
         }
     }
 
@@ -287,6 +359,9 @@ impl Module {
         run_id: &str,
         step: usize,
     ) -> Result<bool, Killed> {
+        if self.sessions.lock().unwrap()[session].standalone_handed_off {
+            return Ok(true);
+        }
         if !self
             .world
             .compaction
@@ -306,6 +381,9 @@ impl Module {
         }
         if state.setup.is_none() {
             self.issue_setup(session, run_id)?;
+        }
+        if self.sessions.lock().unwrap()[session].standalone_handed_off {
+            return Ok(true);
         }
         if self.sessions.lock().unwrap()[session]
             .run(run_id)
@@ -422,6 +500,7 @@ impl FakeSubject {
             providers.sessions.insert(
                 session.into(),
                 Provider {
+                    handoffs: 0,
                     setup,
                     calls: Vec::new(),
                     models: Vec::new(),
@@ -434,6 +513,7 @@ impl FakeSubject {
         let providers = world.compaction.lock().unwrap();
         let p = &providers.sessions[session];
         CompactionObservation {
+            standalone_handoffs: p.handoffs,
             calls: p.calls.clone(),
             model_inputs: p.models.iter().map(|m| m.entries.clone()).collect(),
         }

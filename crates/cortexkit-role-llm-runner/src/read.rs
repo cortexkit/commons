@@ -28,10 +28,14 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
+pub mod descriptors;
+pub use descriptors::MediaMode;
+
 /// The `field` an `invalid_params` refusal names when a read combines
 /// `after_mid` with `from_ordinal`, or names `after_mid` without
 /// `lineage_id`.
 pub mod fields {
+    pub const MEDIA: &str = "media";
     pub const FROM_ORDINAL: &str = "from_ordinal";
     pub const LINEAGE_ID: &str = "lineage_id";
     pub const VIEW: &str = "view";
@@ -72,6 +76,13 @@ where
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ReadRequest {
+    /// Payload representation; absent means `inline`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "descriptors::deserialize_media"
+    )]
+    pub media: Option<MediaMode>,
     /// Read forward from this ordinal. Excludes `after_mid`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_ordinal: Option<u64>,
@@ -112,6 +123,10 @@ pub enum ReadMode<'a> {
 }
 
 impl ReadRequest {
+    pub fn with_media(mut self, media: MediaMode) -> Self {
+        self.media = Some(media);
+        self
+    }
     /// The newest page.
     pub fn tail() -> Self {
         Self::default()
@@ -165,6 +180,9 @@ impl ReadRequest {
     /// `from_ordinal` when it is combined with `after_mid`, `lineage_id`
     /// when `after_mid` comes without it.
     pub fn mode(&self) -> Result<ReadMode<'_>, &'static str> {
+        if self.view == Some(ReadView::Model) && self.media == Some(MediaMode::Descriptors) {
+            return Err(fields::MEDIA);
+        }
         if self.after_mid.is_some() && self.view == Some(ReadView::Model) {
             return Err(fields::VIEW);
         }
@@ -308,6 +326,7 @@ pub struct ModelEntry {
     /// Which transcript message, or which replaced range, this entry is.
     pub source: EntrySource,
     /// The message itself, in the runner's own schema.
+    #[serde(deserialize_with = "descriptors::deserialize_content")]
     pub message: Value,
 }
 
@@ -553,6 +572,18 @@ impl ModelPage {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ReadMessage {
+    /// Content identity over the full inline message. Required in descriptors
+    /// mode, optional in inline mode; never computed over the refs.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "descriptors::deserialize_digest"
+    )]
+    pub digest: Option<String>,
+    /// Every top-level part in message order, nested media excluded. Required
+    /// in descriptors mode, optional in inline mode, independent of tags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_digests: Option<Vec<descriptors::PartDigest>>,
     /// The message's position in the transcript. Never reused or
     /// renumbered within a lineage.
     pub ordinal: u64,
@@ -561,6 +592,7 @@ pub struct ReadMessage {
     pub mid: String,
     /// The message itself, carrying its final values: what later steps
     /// render and what executed. Its schema is the runner's.
+    #[serde(deserialize_with = "descriptors::deserialize_content")]
     pub message: Value,
     /// Which run produced the message. Present on a runner that declares
     /// `run_ops`.
@@ -575,9 +607,9 @@ pub struct ReadMessage {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
     /// One row per part the runner exposes, in part order: the part's
-    /// stable key, and its `§N§` tag when the part is tagged. Neither
-    /// changes once assigned. Present on a runner that declares `tags`. No
-    /// digest rides here: a reader computes one from the bytes it reads.
+    /// stable key, and its `§N§` tag in the current lineage when tagged.
+    /// Present on a runner that declares `tags`. Digests ride separately in
+    /// `part_digests`, including on runners without tags.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<crate::tags::PartTag>,
     /// The message's role (`role::USER`, `role::ASSISTANT`, `role::TOOL`,
@@ -615,6 +647,8 @@ impl ReadMessage {
     pub fn new(ordinal: u64, mid: impl Into<String>, message: Value) -> Self {
         Self {
             ordinal,
+            digest: None,
+            part_digests: None,
             mid: mid.into(),
             message,
             run: None,

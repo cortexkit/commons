@@ -371,8 +371,14 @@ pub enum Slot {
     Integer { min: i64, max: i64 },
     /// An integer from 0 to 100.
     Percentage,
-    /// A tag (`§N§`) the session assigned.
-    Tag,
+    /// A part of the session, named by its host identity `{mid, part}`
+    /// (`delivery_order::PartRef`), never by a number. The runner renders
+    /// the number the request carrying the send shows for that part
+    /// (`§N§`); a part that request does not show ends the send
+    /// `template_part_gone`. Spelled `part_tag`: a template that declared a
+    /// `tag` slot before llm-runner 0.4.0 no longer decodes, and its digest
+    /// changes with the new spelling.
+    PartTag,
     /// Exactly one of the strings in `values`.
     Enum { values: Vec<String> },
 }
@@ -554,9 +560,34 @@ pub fn admit(
     Ok(())
 }
 
+/// The value of a `part_tag` slot: the part's host identity, the `mid` of
+/// its message and its `part` key as `session.read` names them. Strict: an
+/// unknown member, or a value that is not this object (a number, a `§N§`
+/// string, free text), is not a value of the slot.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct PartRef {
+    pub mid: String,
+    pub part: String,
+}
+
+impl PartRef {
+    pub fn new(mid: impl Into<String>, part: impl Into<String>) -> Self {
+        Self {
+            mid: mid.into(),
+            part: part.into(),
+        }
+    }
+}
+
 /// Why a send's template cannot render. The send has no text, so it is
-/// refused at admission `invalid_params {field: "template"}`, writing
-/// nothing; it never falls through.
+/// never delivered and never falls through. Every problem but
+/// [`TemplateProblem::PartGone`] is refused at admission `invalid_params
+/// {field: "template"}`, writing nothing. `PartGone` is refused
+/// `template_part_gone {slot}` at admission, and ends a queued send in the
+/// terminal send state `template_part_gone` when its part goes before the
+/// send is delivered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TemplateProblem {
@@ -568,21 +599,45 @@ pub enum TemplateProblem {
     MissingSlot(String),
     /// A value for a slot the template does not declare.
     UnknownSlot(String),
-    /// A value outside its slot's type or range, an unassigned tag, or an
-    /// enum value the plan does not list.
+    /// A value outside its slot's type or range, a `part_tag` value that is
+    /// not `{mid, part}`, or an enum value the plan does not list.
     InvalidSlot(String),
+    /// A `part_tag` slot names a part the carrying request does not show.
+    PartGone(String),
+}
+
+impl TemplateProblem {
+    /// The refusal of a send whose template has this problem: the code and
+    /// its detail.
+    pub fn refusal(&self) -> (&'static str, Value) {
+        match self {
+            Self::PartGone(slot) => (
+                errors::TEMPLATE_PART_GONE,
+                serde_json::json!({ "slot": slot }),
+            ),
+            _ => (
+                errors::INVALID_PARAMS,
+                serde_json::json!({ "field": TEMPLATE_FIELD }),
+            ),
+        }
+    }
 }
 
 /// Render `use_` from the templates the plan declares for its sender: the
-/// send's one text, used for whichever mode carries it. `assigned` says
-/// whether the session assigned a tag number. The runner renders and
-/// validates every slot itself; the sender's word is never enough. A value
-/// outside its slot's type, range or listed values is not a value of that
-/// slot, so it is as unrenderable as a missing one.
+/// send's one text, used for whichever mode carries it. `shown` answers the
+/// number the request carrying the send shows for a part, or `None` when
+/// that request does not show it. The runner renders and validates every
+/// slot itself; the sender's word is never enough. A value outside its
+/// slot's type, range or listed values is not a value of that slot, so it
+/// is as unrenderable as a missing one.
+///
+/// At admission the runner renders against the request it would make now;
+/// at delivery, against the request that carries the send, whose text is
+/// then stored and resent byte for byte.
 pub fn render(
     templates: &[Template],
     use_: &TemplateUse,
-    assigned: impl Fn(u64) -> bool,
+    shown: impl Fn(&PartRef) -> Option<u64>,
 ) -> Result<String, TemplateProblem> {
     let template = templates
         .iter()
@@ -617,13 +672,10 @@ pub fn render(
                 let n = value.as_u64().filter(|n| *n <= 100).ok_or_else(invalid)?;
                 n.to_string()
             }
-            Slot::Tag => {
-                let tag = value.as_str().ok_or_else(invalid)?;
-                let n = crate::tags::parse_tag(tag).ok_or_else(invalid)?;
-                if !assigned(n) {
-                    return Err(invalid());
-                }
-                tag.to_owned()
+            Slot::PartTag => {
+                let part: PartRef = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
+                let n = shown(&part).ok_or_else(|| TemplateProblem::PartGone(name.clone()))?;
+                crate::tags::format_tag(n).ok_or_else(invalid)?
             }
             Slot::Enum { values } => {
                 let chosen = value.as_str().ok_or_else(invalid)?;
@@ -870,6 +922,7 @@ mod tests {
             "unknown_slot" => TemplateProblem::UnknownSlot(slot()),
             "digest_mismatch" => TemplateProblem::DigestMismatch,
             "unknown_template" => TemplateProblem::UnknownTemplate,
+            "part_gone" => TemplateProblem::PartGone(slot()),
             other => panic!("unknown problem {other}"),
         }
     }
@@ -879,9 +932,21 @@ mod tests {
         let file = file();
         let templates = &file["templates"];
         let sender: PlanSender = vectors::round_trip("template sender", &templates["sender"]);
-        let assigned: Vec<u64> =
-            serde_json::from_value(templates["assigned_tags"].clone()).unwrap();
-        let has = |n: u64| assigned.contains(&n);
+        let shown_parts: Vec<(PartRef, u64)> = vectors::cases(templates, "shown_parts")
+            .iter()
+            .map(|row| {
+                (
+                    PartRef::new(row["mid"].as_str().unwrap(), row["part"].as_str().unwrap()),
+                    row["number"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        let has = |part: &PartRef| {
+            shown_parts
+                .iter()
+                .find(|(shown, _)| shown == part)
+                .map(|(_, number)| *number)
+        };
         for case in vectors::cases(templates, "uses") {
             let name = case["name"].as_str().unwrap();
             let use_: TemplateUse = vectors::round_trip(name, &case["use"]);
@@ -902,9 +967,14 @@ mod tests {
                 render(&sender.templates, &use_, has)
             });
             if let Some(refusal) = case.get("refusal") {
-                assert!(matches!(rendered, Some(Err(_))), "{name}");
-                assert_eq!(refusal["code"], crate::errors::INVALID_PARAMS, "{name}");
-                assert_eq!(refusal["detail"]["field"], TEMPLATE_FIELD, "{name}");
+                let Some(Err(problem)) = rendered else {
+                    panic!("{name}: rendered {rendered:?}");
+                };
+                let (code, detail) = problem.refusal();
+                assert_eq!(refusal["code"], code, "{name}");
+                assert_eq!(refusal["detail"], detail, "{name}");
+                assert!(crate::errors::CODES.contains(&code), "{name}");
+                assert!(!crate::errors::is_retryable(code), "{name}");
                 continue;
             }
             let rendered = rendered.map(Result::unwrap);
@@ -1008,6 +1078,27 @@ mod tests {
             .collect();
         assert!(states.contains(&SendState::Superseded));
         assert!(states.contains(&SendState::Expired));
+        assert!(states.contains(&SendState::TemplatePartGone));
+        let gone = vectors::cases(&file, "replies")
+            .iter()
+            .find(|case| case["reply"]["state"] == crate::send::states::TEMPLATE_PART_GONE)
+            .map(|case| serde_json::from_value::<SendReply>(case["reply"].clone()).unwrap())
+            .unwrap();
+        assert_eq!(gone.slot.as_deref(), Some("part"));
+    }
+
+    /// A `part_tag` slot changes the template's bytes, so its digest, and an
+    /// old `tag` slot no longer decodes: a sender holding a pre-0.4.0
+    /// template is refused loudly rather than rendering a stale number.
+    #[test]
+    fn a_part_tag_slot_replaces_the_tag_slot() {
+        let slot: Slot = serde_json::from_value(serde_json::json!({"type": "part_tag"})).unwrap();
+        assert_eq!(slot, Slot::PartTag);
+        assert!(serde_json::from_value::<Slot>(serde_json::json!({"type": "tag"})).is_err());
+        assert!(serde_json::from_value::<PartRef>(
+            serde_json::json!({"mid": "m", "part": "0", "tag": "§1§"})
+        )
+        .is_err());
     }
 
     #[test]

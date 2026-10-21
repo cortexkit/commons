@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.4.0
+
+- Move the complete `compaction-provider-v1` vector set
+  from the workspace root into this crate. It now ships in the package,
+  exposed through `vectors` with `test-vectors`, including a SHA256SUMS check
+  run in CI. Old pinned commits retain their old workspace path;
+  new consumers use the versioned crate's compiled-in vectors.
+
+- Providers read using `media: "descriptors"`,
+  recording the runner-served message and part content digests rather than
+  hashing descriptor JSON. The existing `digest::content_digest` API is now
+  a re-export of llm-runner's shared implementation; its bytes do not change.
+
+
+Breaking. Requires llm-runner 0.4.0, whose tag numbers are computed from the
+transcript; this crate's public API names llm-runner types (`EntrySource`,
+and now `SetupCheckpoint`), so it moves with it in a minor bump.
+
+- Setup's `ready` answer gains an optional `checkpoint`
+  (`setup::SetupCheckpoint`, llm-runner's `tags::SetupCheckpoint`,
+  `{tag_checkpoint, cut}`; `SetupAnswer::checkpoint`). A provider MUST send it,
+  unchanged, on every Setup answer for a session whose history and context
+  state it imported from standalone Magic Context, the plugin that manages
+  context inside OpenCode and Pi, and only to a runner declaring llm-runner's
+  `tag_checkpoint` group.
+- Two new typed, terminal Setup refusal codes, `RefuseCode` and `KnownCode`
+  variants: `standalone_session_not_migrated` (a session with standalone state
+  and no completed move) and `tag_checkpoint_unsupported` (a moved session on
+  a runner without `tag_checkpoint`; ends the run). For
+  `standalone_session_not_migrated` the runner's duty depends on its host:
+  where standalone Magic Context runs in-process, a runner that has never
+  served the session hands it to standalone in the same step and sends no
+  rides, while one that has served it fails the run by name; a host with no
+  standalone (a module-launched private host, the Claude Code gateway) fails
+  the run, or the request, by name and never forwards unmanaged history.
+- `setup_identity_mismatch` is now typed, as 0.3.x promised:
+  `RefuseCode::SetupIdentityMismatch` and `KnownCode::SetupIdentityMismatch`,
+  not retryable and ending the run after Setup, the same behaviour it had
+  while it decoded as `RefuseCode::Unknown`. Its wire spelling is unchanged.
+- `RefuseCode` and `KnownCode` are now `#[non_exhaustive]`: a later code is
+  additive, and a `match` on either outside this crate needs a `_` arm.
+- §5.3: the tag-number floor rules are replaced. Nothing durable is keyed by
+  a tag number, and renumbering a part a read exposed is a new lineage. The
+  rule that a runner which lost its state continues on a fresh lineage
+  without `descends_from` is unchanged.
+- Vectors: `setup.json` and `errors.json` gain the checkpoint and the two
+  codes; `errors.json` lists `setup_identity_mismatch` as a named code.
+
 ## 0.3.3
 
 - Pin the runner/provider route identity contract: Setup reports the session's

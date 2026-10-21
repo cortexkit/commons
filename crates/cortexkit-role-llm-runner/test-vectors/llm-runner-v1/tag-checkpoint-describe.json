@@ -1,0 +1,83 @@
+{
+  "accept": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.read",
+          "session.resolve"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "tags",
+      "compaction",
+      "tag_checkpoint"
+    ],
+    "session_capabilities_from": "baseline"
+  },
+  "refuse": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.read"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "tags",
+      "compaction",
+      "tag_checkpoint"
+    ],
+    "session_capabilities_from": "baseline"
+  },
+  "without": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.read",
+          "session.resolve"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "tags",
+      "compaction"
+    ],
+    "session_capabilities_from": "baseline"
+  },
+  "without_compaction": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": [
+          "role.describe",
+          "session.baseline",
+          "session.read",
+          "session.resolve"
+        ],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "1.0.0",
+    "capabilities": [
+      "tags",
+      "tag_checkpoint"
+    ],
+    "session_capabilities_from": "baseline"
+  }
+}

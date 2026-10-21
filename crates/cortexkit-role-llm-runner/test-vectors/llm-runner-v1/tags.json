@@ -31,10 +31,6 @@
       "§18446744073709551616§"
     ]
   },
-  "fork": {
-    "parent_highest": 7,
-    "first_new": "§8§"
-  },
   "read_entries": [
     {
       "name": "the person's prompt, typed in the harness",
@@ -56,7 +52,7 @@
       }
     },
     {
-      "name": "the model's answer: one tag per part",
+      "name": "the model's answer: its text counts; reasoning and the tool call do not",
       "entry": {
         "ordinal": 1,
         "mid": "m1",
@@ -102,12 +98,10 @@
             "tag": "§2§"
           },
           {
-            "part": "1",
-            "tag": "§3§"
+            "part": "1"
           },
           {
-            "part": "2",
-            "tag": "§4§"
+            "part": "2"
           }
         ],
         "role": "assistant",
@@ -132,7 +126,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§5§"
+            "tag": "§3§"
           }
         ],
         "role": "tool",
@@ -151,7 +145,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§6§"
+            "tag": "§4§"
           }
         ],
         "role": "user",
@@ -170,7 +164,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§7§"
+            "tag": "§5§"
           }
         ],
         "role": "user",
@@ -189,7 +183,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§8§"
+            "tag": "§6§"
           }
         ],
         "role": "user",
@@ -208,7 +202,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§9§"
+            "tag": "§7§"
           }
         ],
         "role": "user",
@@ -227,7 +221,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§10§"
+            "tag": "§8§"
           }
         ],
         "role": "user",
@@ -235,7 +229,7 @@
       }
     },
     {
-      "name": "a model-written tag stays in the stored text as written",
+      "name": "the model's own tag notation is cleaned from its exposed text (a tag-rendering run)",
       "entry": {
         "ordinal": 8,
         "mid": "m8",
@@ -244,7 +238,7 @@
           "parts": [
             {
               "type": "text",
-              "text": "as §2§ says"
+              "text": "as  says"
             }
           ]
         },
@@ -256,7 +250,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§11§"
+            "tag": "§9§"
           }
         ],
         "role": "assistant",
@@ -264,7 +258,7 @@
       }
     },
     {
-      "name": "an image part has a row and a stable key, but no tag",
+      "name": "an image in a user message has a row and a stable key, but no number",
       "entry": {
         "ordinal": 9,
         "mid": "m9",
@@ -285,7 +279,7 @@
         "tags": [
           {
             "part": "0",
-            "tag": "§12§"
+            "tag": "§10§"
           },
           {
             "part": "1"
@@ -294,36 +288,58 @@
         "role": "user",
         "written_at": 1790000009000
       }
-    }
-  ],
-  "ledger": [
-    {
-      "tag": "§1§",
-      "ordinal": 0,
-      "mid": "m0",
-      "part": "0",
-      "content": "fix the build"
     },
     {
-      "tag": "§2§",
-      "ordinal": 1,
-      "mid": "m1",
-      "part": "0",
-      "content": "Looking at héllo wörld"
+      "name": "an image-only tool result counts, and renders as a label carrying its number",
+      "entry": {
+        "ordinal": 10,
+        "mid": "m10",
+        "message": {
+          "role": "tool",
+          "call_key": "k-2",
+          "content": [
+            {
+              "type": "image",
+              "media_type": "image/png",
+              "data_ref": "blob-2"
+            }
+          ]
+        },
+        "run": {
+          "run_id": "run-2",
+          "episode": "ep-2",
+          "final": false
+        },
+        "tags": [
+          {
+            "part": "0",
+            "tag": "§11§"
+          }
+        ],
+        "role": "tool",
+        "written_at": 1790000010000
+      }
     },
     {
-      "tag": "§4§",
-      "ordinal": 1,
-      "mid": "m1",
-      "part": "2",
-      "content": "{\"name\":\"read\",\"arguments\":{\"path\":\"a.rs\",\"quote\":\"§1§\"}}"
-    },
-    {
-      "tag": "§11§",
-      "ordinal": 8,
-      "mid": "m8",
-      "part": "0",
-      "content": "as §2§ says"
+      "name": "a turn_system message does not count",
+      "entry": {
+        "ordinal": 11,
+        "mid": "m11",
+        "message": {
+          "role": "system",
+          "text": "Context is 82% full."
+        },
+        "tags": [
+          {
+            "part": "0"
+          }
+        ],
+        "role": "system",
+        "written_at": 1790000011000,
+        "delivered_as": {
+          "mode": "turn_system"
+        }
+      }
     }
   ],
   "resolve_requests": [
@@ -464,33 +480,20 @@
       }
     },
     {
-      "name": "a tool-call part in the runner's stored encoding, its arguments untouched",
+      "name": "the model's text resolves as exposed, cleaned of its own tag notation",
       "request": {
-        "tag": "§4§"
+        "tag": "§9§"
       },
       "reply": {
-        "tag": "§4§",
-        "ordinal": 1,
-        "mid": "m1",
-        "part": "2",
-        "content": "{\"name\":\"read\",\"arguments\":{\"path\":\"a.rs\",\"quote\":\"§1§\"}}"
-      }
-    },
-    {
-      "name": "a model-written tag resolved as stored",
-      "request": {
-        "tag": "§11§"
-      },
-      "reply": {
-        "tag": "§11§",
+        "tag": "§9§",
         "ordinal": 8,
         "mid": "m8",
         "part": "0",
-        "content": "as §2§ says"
+        "content": "as  says"
       }
     },
     {
-      "name": "a tag the session never assigned",
+      "name": "a number no part of the current lineage carries",
       "request": {
         "tag": "§999§"
       },
@@ -638,67 +641,132 @@
   ],
   "rendered_parts": [
     {
-      "name": "user text: the tag, one space, the text",
+      "name": "user text: the number, one space, the text",
       "kind": "user_text",
-      "tag": "§1§",
+      "number": 1,
       "text": "fix the build",
       "rendered": "§1§ fix the build"
     },
     {
-      "name": "a tool result's first text block",
+      "name": "a tool result's text",
       "kind": "tool_result_text",
-      "tag": "§5§",
+      "number": 3,
       "text": "fn main() {}",
-      "rendered": "§5§ fn main() {}"
+      "rendered": "§3§ fn main() {}"
     },
     {
-      "name": "assistant text where the text part carries no provider state",
+      "name": "a tool result's error text counts like any other",
+      "kind": "tool_result_text",
+      "number": 4,
+      "text": "error: a.rs not found",
+      "rendered": "§4§ error: a.rs not found"
+    },
+    {
+      "name": "the model's text, on every provider",
       "kind": "assistant_text",
-      "tag": "§2§",
+      "number": 2,
       "text": "Looking at héllo wörld",
       "rendered": "§2§ Looking at héllo wörld"
     },
     {
-      "name": "assistant text carrying provider state: metadata only",
-      "kind": "assistant_text_with_provider_state",
-      "tag": "§11§",
-      "text": "as §2§ says",
-      "rendered": "as §2§ says"
+      "name": "an image-only tool result renders a label carrying its number",
+      "kind": "tool_result_image_only",
+      "number": 11,
+      "text": "",
+      "rendered": "§11§ [image]"
     },
     {
-      "name": "a tool call has no text and carries none",
-      "kind": "no_text",
-      "tag": "§4§",
+      "name": "user text quoting a tag at its start: the leading notation is stripped",
+      "kind": "user_text",
+      "number": 14,
+      "text": "§1§ quoted",
+      "rendered": "§14§ quoted"
+    },
+    {
+      "name": "leading digits are content and stay",
+      "kind": "user_text",
+      "number": 15,
+      "text": "99 files",
+      "rendered": "§15§ 99 files"
+    },
+    {
+      "name": "reasoning carries no number",
+      "kind": "reasoning",
+      "number": null,
+      "text": "check a.rs",
+      "rendered": "check a.rs"
+    },
+    {
+      "name": "a tool call carries none",
+      "kind": "tool_call",
+      "number": null,
       "text": "",
       "rendered": ""
     },
     {
-      "name": "an image carries none",
-      "kind": "no_text",
-      "tag": null,
+      "name": "a turn_system message carries none",
+      "kind": "turn_system",
+      "number": null,
+      "text": "Context is 82% full.",
+      "rendered": "Context is 82% full."
+    },
+    {
+      "name": "an image in a user message carries none",
+      "kind": "user_attachment",
+      "number": null,
       "text": "",
       "rendered": ""
     },
     {
       "name": "an empty text part carries none",
-      "kind": "user_text",
-      "tag": "§13§",
+      "kind": "empty_text",
+      "number": null,
       "text": "",
       "rendered": ""
     },
     {
-      "name": "an untagged text part renders unchanged",
-      "kind": "user_text",
-      "tag": null,
-      "text": "hello",
-      "rendered": "hello"
+      "name": "the history head carries none",
+      "kind": "history_head",
+      "number": null,
+      "text": "Earlier: the build was fixed.",
+      "rendered": "Earlier: the build was fixed."
     },
     {
-      "name": "text that already starts with a sigil gets the prefix all the same",
-      "kind": "user_text",
-      "tag": "§14§",
-      "text": "§1§ quoted",
-      "rendered": "§14§ §1§ quoted"
+      "name": "a compaction marker carries none",
+      "kind": "compaction_marker",
+      "number": null,
+      "text": "",
+      "rendered": ""
+    }
+  ],
+  "lineage": [
+    {
+      "tag": "§1§",
+      "ordinal": 0,
+      "mid": "m0",
+      "part": "0",
+      "content": "fix the build"
+    },
+    {
+      "tag": "§2§",
+      "ordinal": 1,
+      "mid": "m1",
+      "part": "0",
+      "content": "Looking at héllo wörld"
+    },
+    {
+      "tag": "§9§",
+      "ordinal": 8,
+      "mid": "m8",
+      "part": "0",
+      "content": "as  says"
+    }
+  ],
+  "dropped": [
+    {
+      "name": "a dropped part keeps its number behind its placeholder",
+      "number": 4,
+      "rendered": "[dropped §4§]"
     }
   ]
 }

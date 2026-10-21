@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate test-vectors/compaction-provider-v1/async.json.
+"""Generate crates/cortexkit-role-compaction-provider/test-vectors/compaction-provider-v1/async.json.
 
 Run: python3 generate_async.py async.json  (then refresh ASYNC_SHA256SUMS).
 

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 fn host_vectors() -> Value {
     serde_json::from_str(include_str!(
-        "../../../test-vectors/step-transform-provider-v1/host-runner.json"
+        "../test-vectors/step-transform-provider-v1/host-runner.json"
     ))
     .unwrap()
 }
@@ -77,7 +77,7 @@ fn hook_subject_pairing_is_validated() {
 #[test]
 fn legacy_hook_bytes_unchanged() {
     let legacy: Value = serde_json::from_str(include_str!(
-        "../../../test-vectors/step-transform-provider-v1/hook-requests.json"
+        "../test-vectors/step-transform-provider-v1/hook-requests.json"
     ))
     .unwrap();
     for case in legacy["requests"].as_array().unwrap() {

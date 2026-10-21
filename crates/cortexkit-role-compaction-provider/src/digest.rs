@@ -2,23 +2,10 @@
 //! digest of a message or part, the length-prefixed framing every digest in
 //! this role uses, and canonical decimal parsing for header values.
 
+#[cfg(test)]
+pub(crate) use cortexkit_role_llm_runner::content_digest::sha256_hex;
+pub use cortexkit_role_llm_runner::content_digest::{content_digest, is_sha256_hex};
 use sha2::{Digest, Sha256};
-
-/// Lowercase hexadecimal SHA-256 of `bytes`.
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// Whether `value` is a lowercase hexadecimal SHA-256 digest.
-pub fn is_sha256_hex(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
 
 /// Append one field of a canonical digest input: its length in bytes as an
 /// 8-byte unsigned big-endian integer, then the bytes. Length-prefixing makes
@@ -35,17 +22,6 @@ pub(crate) fn finish(hasher: Sha256) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-/// The digest of one message (or one message part) as the provider computes
-/// it from what `session.read` returned: lowercase hexadecimal SHA-256 over
-/// the value's RFC 8785 (JCS) encoding. JCS fixes member order and number
-/// form, so the digest does not depend on how either side's JSON library
-/// orders or spells the value. `through_digest` in an advance notice is this
-/// digest of the message at `through_ordinal`.
-pub fn content_digest(value: &serde_json::Value) -> String {
-    let canonical = serde_jcs::to_vec(value).expect("a JSON value always has a JCS encoding");
-    sha256_hex(&canonical)
 }
 
 /// Parse a canonical decimal `u64`: ASCII digits only, no sign, and no

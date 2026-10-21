@@ -15,19 +15,20 @@ use cortexkit_role_llm_runner::{
     errors::{self, PlanDriftDetail},
     ops,
     read::{HeadMeta, ReadMessage},
-    run::{states as run_states, RunState},
+    run::{states as run_states, RunState, RunStatus},
     send::SendReply,
+    subscribe::{SubscribeFrom, SubscribeRequest},
 };
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::{
-    cases::{Case, Session},
+    cases::{Case, Ending, Session},
     drive::{
         call, decode, expect_code, expect_error, expect_field, expect_ok, head, holding, read_all,
-        send_params, wait_run_end, MAX_POLLS,
+        run_result, send_params, wait_run_end, MAX_POLLS,
     },
-    route::{Reply, RunnerRoute},
-    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
+    route::{Reply, RunnerRoute, SubscribeOutcome},
+    subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
 
 type Check = Result<(), String>;
@@ -238,12 +239,15 @@ where
         .map_err(|e| format!("opening {session} as a stranger: {e}"))
 }
 
-pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Check
+pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
-    match name {
+    if name == "adopt_host_turn_is_a_run" {
+        return host_turn_is_a_run(case).await;
+    }
+    let check = match name {
         "adopt_binds_owner_without_a_run" => binds_owner(case).await,
         "adopt_exact_repeat_replays_reply" => exact_repeat(case).await,
         "adopt_send_id_reuse_names_plan" => send_id_reuse(case).await,
@@ -253,7 +257,140 @@ where
         "adopt_same_owner_readopts" => same_owner_readopts(case).await,
         "adopt_then_owner_sends" => then_owner_sends(case).await,
         other => Err(format!("unknown adopt case {other}")),
+    };
+    check.map(|()| Ending::Passed)
+}
+
+/// A turn the person starts in their own app is a run like any other: it
+/// has a `run_id` on `session.head`, `run.result` answers it, and
+/// `run.status` and `session.subscribe` show it where declared. It carries
+/// no `send_id`, which is how the owner tells its own runs from it.
+/// Inapplicable when the adapter cannot start a host turn.
+async fn host_turn_is_a_run<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (first, answer) = case.mint.text("host-turn-answer");
+    let (second, _) = case.mint.text("host-turn-owner-answer");
+    let prompt = case.mint.next("host-turn-prompt");
+    let session = case
+        .open(
+            "adopt-host-turn",
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![first]),
+                    ScriptedTurn::new(vec![second]),
+                ],
+            },
+        )
+        .await?;
+    require_declared(&session.route).await?;
+    let plan = host_plan(case, &session.name, false)?;
+    if let Err(error) = case
+        .subject
+        .start_host_session(case.handle.inner(), &session.name, &plan, Some(&prompt))
+        .await
+    {
+        return Ok(Ending::Inapplicable(format!(
+            "the adapter cannot start a host turn: {error}"
+        )));
     }
+    let head = idle(case, &session.route).await?;
+    let last = head.last_run_state.ok_or(
+        "the person's turn left no run on session.head: a turn the host starts is a run, with \
+         a run_id",
+    )?;
+    let what = format!("run.result of the person's run {}", last.run_id);
+    let result = run_result(&session.route, &last.run_id)
+        .await
+        .map_err(|e| format!("{what}: {e}"))?;
+    let text = result.final_message.as_ref().map(|m| m.text.clone());
+    if !result.run_state().is_terminal() || !text.as_deref().is_some_and(|t| t.contains(&answer)) {
+        return Err(format!(
+            "{what} answered state {} with final text {text:?}, not the person's finished turn",
+            result.state
+        ));
+    }
+    if case.declared.contains(&Capability::RunStatus) {
+        let status: RunStatus = decode(
+            "run.status",
+            expect_ok(
+                "run.status of the person's run",
+                call(
+                    &session.route,
+                    ops::RUN_STATUS,
+                    json!({ "run_id": last.run_id }),
+                )
+                .await?,
+            )?,
+        )?;
+        if status.state != result.state || status.directives != result.directives {
+            return Err(format!(
+                "run.status of the person's run answered {status:?}, which disagrees with \
+                 run.result {result:?}"
+            ));
+        }
+    }
+    if case.declared.contains(&Capability::Streaming) {
+        let params =
+            serde_json::to_value(SubscribeRequest::new(SubscribeFrom::Start)).expect("serializes");
+        match session
+            .route
+            .subscribe(params)
+            .await
+            .map_err(|e| format!("session.subscribe: the route failed: {}", e.message))?
+        {
+            SubscribeOutcome::Refused(error) => {
+                return Err(format!(
+                    "session.subscribe of the person's session was refused {}",
+                    error.code
+                ))
+            }
+            SubscribeOutcome::Events(events) if events.is_empty() => {
+                return Err(
+                    "session.subscribe from the start shows nothing of the person's run".into(),
+                )
+            }
+            SubscribeOutcome::Events(_) => {}
+        }
+    }
+    adopt(&session.route, &case.mint.next("adopt"), &plan).await?;
+    let owner_prompt = case.mint.next("host-turn-owner-prompt");
+    let reply: SendReply = decode(
+        "the owner's session.send after adoption",
+        expect_ok(
+            "the owner's session.send after adoption",
+            call(
+                &session.route,
+                ops::SESSION_SEND,
+                send_params(
+                    case.subject,
+                    &session.name,
+                    false,
+                    &owner_prompt,
+                    &case.mint.next("send"),
+                    None,
+                ),
+            )
+            .await?,
+        )?,
+    )?;
+    let end = wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&last.run_id),
+        &reply,
+    )
+    .await?;
+    if end.run_id == last.run_id {
+        return Err(format!(
+            "the owner's send ran as {}, the person's run: each turn is a run of its own",
+            end.run_id
+        ));
+    }
+    Ok(Ending::Passed)
 }
 
 async fn binds_owner<S>(case: &Case<'_, S>) -> Check

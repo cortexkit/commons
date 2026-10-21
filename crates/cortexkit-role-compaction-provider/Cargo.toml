@@ -5,13 +5,10 @@
 # states every rule as pinned. Pure serde plus small checks; no transport, no
 # runtime.
 #
-# Not yet published to crates.io: consumers depend on it by git commit until
-# its first release. The conformance runner will live in a sibling
-# `-conformance` crate, so a provider's production build never pulls in the
-# suite.
+# These production wire types do not depend on a conformance harness or suite.
 [package]
 name = "cortexkit-role-compaction-provider"
-version = "0.3.3"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,10 +16,17 @@ authors.workspace = true
 description = "Wire contract of the CortexKit compaction-provider/v1 role: Setup, advance notices, views and view.get, compaction.ride and the ceiling policy."
 publish = true
 
+[features]
+test-vectors = []
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]
+
 [dependencies]
 # The runner role's crate, for the names and types both sides of the
 # interface share, so they cannot drift apart.
-cortexkit-role-llm-runner = { version = "0.3.0", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.4.0", path = "../cortexkit-role-llm-runner" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
