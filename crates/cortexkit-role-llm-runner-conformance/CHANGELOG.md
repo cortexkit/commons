@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.11
+
+- The crash-cut user-command case (`user_commands_outcome_unknown`) now calls
+  `prepare_user_commands` after spawning the runner and opening the session's
+  route, as every other user-command case does. Before, it called the hook
+  before the runner existed, so an adapter that computes the session reference
+  from the runner instance the route bound failed the case before it reached
+  the runner. `prepare_user_commands` documents this order, and the reference
+  fake now refuses a call made before the session's route is open.
+
 ## 0.8.10
 
 - Require llm-runner 0.3.10. Add a crash-cut user-command case proving that a

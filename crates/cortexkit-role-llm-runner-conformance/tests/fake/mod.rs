@@ -3972,6 +3972,12 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
         stamp: &RouteStamp,
     ) -> Result<FakeRoute, HarnessError> {
+        self.world()
+            .user_commands
+            .lock()
+            .unwrap()
+            .routed
+            .insert(session.to_owned());
         Ok(FakeRoute {
             module: handle.0.clone(),
             session: session.to_owned(),

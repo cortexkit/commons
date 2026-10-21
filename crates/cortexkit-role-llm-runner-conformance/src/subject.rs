@@ -423,7 +423,11 @@ pub trait LlmRunnerSubject: Harness {
     /// declaring `ctx-status`. Return the session reference and admission fields
     /// for those providers.
     /// Set up the host's command-reply interface before session admission;
-    /// this setup is not a protocol operation.
+    /// this setup is not a protocol operation. Every case calls this with the
+    /// session's route already open (after the runner is spawned and
+    /// [`LlmRunnerSubject::session_route`] has returned), so an adapter may
+    /// compute the session reference from the runner instance that route
+    /// bound.
     async fn prepare_user_commands(
         &self,
         _session: &str,

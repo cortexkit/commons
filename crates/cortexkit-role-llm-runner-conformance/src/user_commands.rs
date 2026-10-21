@@ -307,15 +307,8 @@ where
         interactive: true,
         host_replies_outside_history: true,
     };
-    let (session_ref, fields) = subject
-        .prepare_user_commands(&name, &fixture)
-        .await
-        .map_err(|error| error.to_string())?;
     let owner = subject.owner_stamp();
     let invocation_id = mint.next("user-command-invocation");
-    let mut invocation = Value::Object(fields);
-    invocation["prompt"] = json!("ordinary prompt");
-    invocation["send_id"] = json!(mint.next("user-command-send"));
 
     let handle = driver
         .spawn(&root)
@@ -325,6 +318,17 @@ where
         .session_route(handle.inner(), &name, &owner)
         .await
         .map_err(|error| format!("opening the route of {name}: {error}"))?;
+    // Prepared once the session's route is open, as in every other
+    // user-command case: an adapter may compute the session reference from
+    // the runner instance the route bound, which does not exist before the
+    // spawn.
+    let (session_ref, fields) = subject
+        .prepare_user_commands(&name, &fixture)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut invocation = Value::Object(fields);
+    invocation["prompt"] = json!("ordinary prompt");
+    invocation["send_id"] = json!(mint.next("user-command-send"));
     let admission: SendReply = decode(
         "command-session admission",
         expect_ok(

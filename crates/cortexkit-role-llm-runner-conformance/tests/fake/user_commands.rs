@@ -7,6 +7,11 @@ use cortexkit_role_llm_runner_conformance::{UserCommandFixture, UserCommandObser
 #[derive(Default)]
 pub(super) struct Commands {
     pub sessions: BTreeMap<String, CommandSession>,
+    /// Sessions a route has been opened for. Preparing commands for any other
+    /// session is refused, the way an adapter that derives the session
+    /// reference from the bound runner instance would fail, so a case that
+    /// prepares before opening the route fails against this fake too.
+    pub routed: BTreeSet<String>,
 }
 
 pub(super) struct CommandSession {
@@ -20,6 +25,19 @@ impl FakeSubject {
         session: &str,
         fixture: &UserCommandFixture,
     ) -> Result<(String, Map<String, Value>), HarnessError> {
+        if !self
+            .world()
+            .user_commands
+            .lock()
+            .unwrap()
+            .routed
+            .contains(session)
+        {
+            return Err(HarnessError::new(format!(
+                "prepare_user_commands for {session} was called before the session's route \
+                 was opened"
+            )));
+        }
         let menu = if fixture.interactive
             && (fixture.host_replies_outside_history
                 || self.defects.user_command == Some("unsafe_host"))
