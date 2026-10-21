@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.12.7
+
+- `check` now reports every catalogue row whose anchor fails, not just the
+  first. Before, it stopped at the first row whose `old` text matched nothing,
+  matched more than once, or named a missing file, so every later broken row
+  stayed hidden until that one was fixed. A branch could then pass its own
+  look at the output while one of its rows was still broken. Each failing row
+  prints the same line as before, such as `ckdev-mutate: some-row
+  (mutations.toml:12): ANCHOR_MISSING src/lib.rs: replaced 0 occurrences`, in
+  catalogue order, followed by one count line such as `ckdev-mutate check: 2
+  rows failed`. The exit code is still 2. A catalogue that cannot be read at
+  all (a TOML parse error, an unknown key, a duplicate id) still stops at once
+  with its single error, and a clean catalogue's output is unchanged. Anchors
+  are now checked before any `prebuild` command runs, so a broken row is
+  reported without waiting for a build.
+
 ## 0.12.6
 
 - Fix a timed-out or interrupted test run leaving its tests running. The runner

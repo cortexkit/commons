@@ -452,3 +452,105 @@ fn prove_appends_to_the_default_directory_and_reports_the_destination() {
         serde_json::from_slice(&fs::read(f.root().join("out.json")).unwrap()).unwrap();
     assert_eq!(report[0]["source"]["file"], "mutations.d/proof.toml");
 }
+
+fn anchored_row(id: &str, file: &str, old: &str) -> String {
+    format!(
+        r#"[[control]]
+id = "{id}"
+guards = "the guard rejects invalid input"
+file = "{file}"
+old = "{old}"
+new = "changed"
+test_file = "guard.txt"
+runner = "cargo"
+package = "unused"
+expect_red = []
+unreachable = "the edited function has no production caller"
+"#
+    )
+}
+
+fn stderr(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+#[test]
+fn check_reports_every_broken_row_in_file_order() {
+    let f = Fixture::new();
+    f.write("target.txt", "twice twice once\n");
+    let first = anchored_row("matches-twice", "target.txt", "twice");
+    let clean = anchored_row("matches-once", "target.txt", "once");
+    let clean_line = first.lines().count() + 2;
+    let last_line = clean_line + clean.lines().count();
+    f.write(
+        "mutations.toml",
+        &format!(
+            "{first}{clean}{}",
+            anchored_row("matches-nothing", "target.txt", "absent")
+        ),
+    );
+    let out = f.cli(&["check"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out),
+        format!(
+            "ckdev-mutate: matches-twice (mutations.toml:2): ANCHOR_MISSING target.txt: replaced 2 occurrences\n\
+             ckdev-mutate: matches-nothing (mutations.toml:{last_line}): ANCHOR_MISSING target.txt: replaced 0 occurrences\n\
+             ckdev-mutate check: 2 rows failed\n"
+        )
+    );
+    // The library check refuses the same catalogue and names both rows.
+    let message = check(
+        f.root(),
+        &f.load("mutations.toml").unwrap(),
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert_eq!(message.lines().count(), 2, "{message}");
+    assert!(message.contains("matches-twice"), "{message}");
+    assert!(message.contains("matches-nothing"), "{message}");
+}
+
+#[test]
+fn check_reports_a_single_broken_row_with_its_usual_line() {
+    let f = Fixture::new();
+    f.write(
+        "mutations.toml",
+        &format!(
+            "{}{}",
+            anchored_row("missing-file", "deleted.txt", "guard"),
+            row("clean")
+        ),
+    );
+    let out = f.cli(&["check"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    let text = stderr(&out);
+    let mut lines = text.lines();
+    let first = lines.next().unwrap();
+    assert!(
+        first.starts_with(
+            "ckdev-mutate: missing-file (mutations.toml:2): ANCHOR_MISSING deleted.txt: "
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        lines.next(),
+        Some("ckdev-mutate check: 1 row failed"),
+        "{text}"
+    );
+    assert_eq!(lines.next(), None, "{text}");
+}
+
+#[test]
+fn check_passes_a_clean_catalogue() {
+    let f = Fixture::new();
+    f.write("mutations.toml", &format!("{}{}", row("one"), row("two")));
+    let out = f.cli(&["check"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Catalogue anchors checked; verified 0 rows; 2 rows not verified"),
+        "{stdout}"
+    );
+}

@@ -5333,14 +5333,32 @@ fn check_command_listing(root: &Path, c: &Control, stop: &AtomicBool) -> Result<
     Ok(())
 }
 
+/// Every row whose edits no longer apply to the tree, in catalogue order, each
+/// as `"<row label>: <reason>"`. An anchor that matches nothing, matches more
+/// than once, or names a missing file is a failure of that row alone, so all
+/// rows are examined: stopping at the first would hide every later broken row.
+pub fn anchor_failures(root: &Path, catalogue: &Catalogue) -> Result<Vec<String>> {
+    let mut failures = Vec::new();
+    for c in &catalogue.control {
+        if let Err(e) = replaced_scoped(root, &c.edits()?, c.scope.as_ref()) {
+            failures.push(format!("{}: {e}", c.label()));
+        }
+    }
+    Ok(failures)
+}
+
 pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<CheckReport> {
     validate(root, catalogue)?;
+    // Anchors are checked before the prebuild so a broken row is reported
+    // without waiting for a build; the error lists every broken row, one per line.
+    let failures = anchor_failures(root, catalogue)?;
+    if !failures.is_empty() {
+        return Err(failures.join("\n"));
+    }
     let rows: Vec<_> = catalogue.control.iter().collect();
     let mut session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
     let mut report = CheckReport::default();
     for c in &catalogue.control {
-        replaced_scoped(root, &c.edits()?, c.scope.as_ref())
-            .map_err(|e| format!("{}: {e}", c.label()))?;
         let reason = if !c.matches_platform() {
             Some("platform does not match this host")
         } else if c.unreachable.is_some() {

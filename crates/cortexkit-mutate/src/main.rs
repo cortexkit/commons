@@ -669,7 +669,21 @@ fn run() -> Result<bool> {
     let stop = signal_flag()?;
     match cli.command {
         Action::Check { strict } => {
-            let report = check(&root, &load(&catalogue_path)?, &stop)?;
+            let catalogue = load(&catalogue_path)?;
+            validate(&root, &catalogue)?;
+            let failures = anchor_failures(&root, &catalogue)?;
+            if !failures.is_empty() {
+                // `main` prefixes the first line with "ckdev-mutate: "; every
+                // other failing row gets the same prefix, so each row's line
+                // reads exactly as it did when check stopped at the first one.
+                return Err(format!(
+                    "{}\nckdev-mutate check: {} {} failed",
+                    failures.join("\nckdev-mutate: "),
+                    failures.len(),
+                    if failures.len() == 1 { "row" } else { "rows" }
+                ));
+            }
+            let report = check(&root, &catalogue, &stop)?;
             for (id, reason) in &report.not_verified {
                 println!("{id}: test names not verified: {reason}");
             }
