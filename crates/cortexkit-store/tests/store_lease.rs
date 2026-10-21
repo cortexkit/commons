@@ -345,26 +345,37 @@ fn open_scratch_prepares_a_replacement_under_the_held_lease() {
     assert_eq!(value(&live), 2);
 }
 
+/// Links to the live database that a scratch open must also refuse: a
+/// symlink and a hard link. Only Unix detects hard links (by inode), so
+/// elsewhere there is nothing to add.
+#[cfg(unix)]
+fn links_to_live(db: &TestDb) -> Vec<PathBuf> {
+    let symlink = db.root.join("alias.db");
+    std::os::unix::fs::symlink(db.path(), &symlink).unwrap();
+    let hard_link = db.root.join("hard.db");
+    std::fs::hard_link(db.path(), &hard_link).unwrap();
+    vec![symlink, hard_link]
+}
+
+#[cfg(not(unix))]
+fn links_to_live(_db: &TestDb) -> Vec<PathBuf> {
+    Vec::new()
+}
+
 #[test]
 fn open_scratch_refuses_the_live_database_and_non_file_paths() {
     let db = TestDb::new();
     drop(open_sqlite(&db.descriptor).unwrap());
     let lease = acquire_store_lease(&db.descriptor).unwrap();
     let options = SqliteOpenOptions::default();
-    let mut refused: Vec<PathBuf> = vec![
+    let refused: Vec<PathBuf> = [
         db.path(),
         PathBuf::from(":memory:"),
         PathBuf::from(format!("file:{}", db.path().display())),
-    ];
-    #[cfg(unix)]
-    {
-        let symlink = db.root.join("alias.db");
-        std::os::unix::fs::symlink(db.path(), &symlink).unwrap();
-        refused.push(symlink);
-        let hard_link = db.root.join("hard.db");
-        std::fs::hard_link(db.path(), &hard_link).unwrap();
-        refused.push(hard_link);
-    }
+    ]
+    .into_iter()
+    .chain(links_to_live(&db))
+    .collect();
     let live_before = std::fs::read(db.path()).unwrap();
     for path in refused {
         match lease.open_scratch(&path, options) {
