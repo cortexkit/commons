@@ -38,6 +38,21 @@ pub const CAPABILITY_NOT_ADMITTED: &str = "capability_not_admitted";
 /// A call to a tool the provider does not serve at all.
 pub const UNKNOWN_TOOL: &str = "unknown_tool";
 
+/// The provider does not declare the command. Detail: `{command}`.
+pub const UNKNOWN_USER_COMMAND: &str = "unknown_user_command";
+
+/// Only session routes with neither a run ID nor a flow ID may invoke commands.
+pub const USER_COMMAND_NOT_ADMITTED: &str = "user_command_not_admitted";
+
+/// An `unknown_user_command` refusal naming the requested command.
+pub fn unknown_user_command(command: &str) -> ErrorBody {
+    ErrorBody::new(
+        UNKNOWN_USER_COMMAND,
+        format!("no user command named {command}"),
+    )
+    .with_detail(json!({"command": command}))
+}
+
 /// A call to a tool in a call mode the tool does not serve: `serves_call_mode`
 /// returned false for the route's bind mode, including an `Unknown` mode.
 /// Detail: `{tool, mode}`, with the mode's wire spelling. Terminal; never

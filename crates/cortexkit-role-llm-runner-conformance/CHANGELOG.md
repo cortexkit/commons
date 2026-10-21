@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.8
+
+- Require llm-runner 0.3.9. Add live-route user-command checks for history and
+  model-input isolation, once-only forwarding, no-person sessions, collisions,
+  ordered progress, owner-only relay and unsafe host menus. Adapters install
+  scripted providers and observe provider/model/host boundaries independently.
+- Add faithful and deliberately faulty runner self-tests, failing by case name.
+
 ## 0.8.7
 
 - Accept an unreadable requesting-message ordinal while a tool call is open in `run_tool_calls_result_ordinal_tracks_storage`: embedded call/result messages are not finished until the tool returns. If the message is already readable, it must still carry the call's arguments; open calls still require position 0 and no `result_ordinal`.

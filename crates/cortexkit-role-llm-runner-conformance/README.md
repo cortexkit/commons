@@ -432,3 +432,22 @@ call's never-executed result in the message right after it once the run has
 ended `interrupted`; the owner's follow-up must leave that transcript as it
 was and write no message carrying the call. A failure names the shape it
 was closest to.
+
+## User commands
+
+Declare the independent `UserCommands` capability for runners serving the
+`user_commands` group. `prepare_user_commands` installs the two scripted
+commands described by the trait, returns the session reference and admission
+fields, configures interactivity, optionally adds a second provider declaring the same
+command name, and sets up the host's reply interface before admission. `user_command_observation` records actual provider
+invocations, complete model requests and host-menu registrations outside runner
+state. Neither hook may synthesize management replies.
+
+The named cases cover transcript/model-input isolation through a follow-up
+turn, once-only forwarding with verbatim input, `interactive: false`, admission
+provider collisions for the same command name, ordered late progress,
+owner-only access and a host that cannot keep user-command replies out of
+conversation history. A menu is not required: even with no safe menu,
+user-command requests must still reach the provider. The asynchronous fixture must settle within 30 seconds;
+the protocol's normal one-hour pull limit is a contract rule, not a one-hour
+self-test. Each case has a deliberately faulty fake that fails it by name.

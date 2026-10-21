@@ -26,6 +26,7 @@ pub mod late_results;
 pub mod points;
 pub mod result;
 pub mod scope;
+pub mod user_command;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
 pub mod withdraw;
@@ -85,6 +86,8 @@ pub mod ops {
     pub const ROLE_DESCRIBE: &str = "role.describe";
     /// The catalog-and-text fetch. Required.
     pub const TOOL_CATALOG: &str = "tool.catalog";
+    /// Invoke a frozen command on behalf of the person driving a session.
+    pub const USER_COMMAND_INVOKE: &str = "user_command.invoke";
     /// Withdraw a call the provider holds. Required of a provider that can
     /// hold a call past its own reply; absent otherwise.
     pub const TOOL_WITHDRAW: &str = "tool.withdraw";

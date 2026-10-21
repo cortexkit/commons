@@ -38,4 +38,6 @@ pub use route::{
     single_terminal, Exchange, ObservedFrame, RouteFailure, TerminalProblem, ToolRoute,
 };
 pub use runner::{run_suite, SetupError};
-pub use subject::{CallModeProbe, CallSpec, Capability, ScopedPrincipals, ToolProviderSubject};
+pub use subject::{
+    CallModeProbe, CallSpec, Capability, ScopedPrincipals, ToolProviderSubject, UserCommandScope,
+};

@@ -242,3 +242,8 @@ historical reason and a runner-specific reason, decoded on result/status/head.
 `run-tool-calls.json` now carries `position` and finished-call `result_ordinal`:
 message-array results at the next ordinal and embedded results at the same
 ordinal, including repeated model ids across sibling positions.
+
+`user-commands.json` covers the independent owner relay, frozen provider-qualified
+commands, open reply/status states, the optional plan `interactive` boolean and
+safe host menu naming. The absent-command baseline reuses `baseline.json` and
+pins its unchanged JCS bytes. Command output is never transcript or model input.

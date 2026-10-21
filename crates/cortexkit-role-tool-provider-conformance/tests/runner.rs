@@ -581,3 +581,30 @@ async fn a_used_work_dir_is_refused() {
         .unwrap_err();
     assert!(matches!(error, SetupError::WorkDirNotEmpty(_)));
 }
+
+#[tokio::test]
+async fn user_command_faults_fail_their_named_cases() {
+    for (defect, case) in [
+        ("catalog", "user_commands_catalog"),
+        ("reply", "user_commands_reply"),
+        ("repeat", "user_commands_repeat"),
+        ("repeat_bytes", "user_commands_repeat"),
+        ("codemode", "user_commands_codemode_refused"),
+        ("flow", "user_commands_flow_refused"),
+        ("accepted", "user_commands_accepted_late"),
+    ] {
+        let report = run(&FakeSubject::new(Defects {
+            user_command: Some(defect),
+            ..Defects::default()
+        }))
+        .await;
+        failed(&report, case);
+    }
+}
+
+#[tokio::test]
+async fn user_command_codemode_scope_is_refused() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert_passed(&report, "user_commands_codemode_refused");
+    assert_passed(&report, "user_commands_flow_refused");
+}

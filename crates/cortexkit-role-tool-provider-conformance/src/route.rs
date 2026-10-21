@@ -59,6 +59,18 @@ impl RouteFailure {
 pub trait ToolRoute: Send + Sync {
     async fn request(&self, body: Value) -> Result<Exchange, RouteFailure>;
 
+    /// Send once and retain the exact RESPONSE body bytes before JSON decoding.
+    /// Required for command-repeat checks: re-encoding a decoded value would
+    /// hide changes in whitespace or member order. Do not include frame headers.
+    async fn request_with_response_bytes(
+        &self,
+        _body: Value,
+    ) -> Result<(Exchange, Vec<u8>), RouteFailure> {
+        Err(RouteFailure::new(
+            "raw response-body observation is not implemented",
+        ))
+    }
+
     /// Send the request, then a `CANCEL` for it while the module is still
     /// working on it (after the first frame back, or after a short delay if
     /// none comes), and collect the frames as [`ToolRoute::request`] does.

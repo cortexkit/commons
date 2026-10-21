@@ -123,6 +123,7 @@ pub enum SystemTextDefect {
 /// runner case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub user_command: Option<&'static str>,
     /// A cancelled call gets a second terminal frame after its error.
     pub double_terminal_on_cancel: bool,
     /// A key never held is refused instead of answered `unknown_call`.
@@ -201,6 +202,7 @@ pub struct Module {
     late: Mutex<Vec<(u64, LateEntry)>>,
     acked: Mutex<BTreeSet<String>>,
     system_text_fetches: AtomicU64,
+    command_replies: Mutex<BTreeMap<Key, Value>>,
 }
 
 impl Module {
@@ -224,6 +226,7 @@ impl Module {
             late: Mutex::new(Vec::new()),
             acked: Mutex::new(BTreeSet::new()),
             system_text_fetches: AtomicU64::new(0),
+            command_replies: Mutex::new(BTreeMap::new()),
         });
         module.replay()?;
         let pending: Vec<Key> = module
@@ -410,6 +413,7 @@ impl Module {
                         &ops::TOOL_WITHDRAW,
                         &ops::LATE_RESULTS,
                         &ops::LATE_RESULTS_ACK,
+                        &ops::USER_COMMAND_INVOKE,
                     ])
                     .map(|op| (*op).to_owned())
                     .collect(),
@@ -528,7 +532,11 @@ impl Module {
             "catalog_digest": "",
             "capabilities": { "late_results": true },
             "tools": tools,
+            "user_commands": [{"name": "ctx-status", "description": "Show status"}],
         });
+        if self.defects.user_command == Some("catalog") {
+            answer["user_commands"][0]["name"] = json!("Bad-Name");
+        }
         if request.system_text.is_some()
             && !matches!(
                 self.defects.system_text,
@@ -878,11 +886,46 @@ pub struct FakeRoute {
     stamp: RouteStamp,
     mode: CallMode,
     consumer_capabilities: Option<Vec<String>>,
+    user_scope: Option<cortexkit_role_tool_provider_conformance::UserCommandScope>,
 }
 
 #[async_trait]
 impl ToolRoute for FakeRoute {
+    async fn request_with_response_bytes(
+        &self,
+        body: Value,
+    ) -> Result<(Exchange, Vec<u8>), RouteFailure> {
+        let key = (
+            self.stamp.principal.clone(),
+            body["call_key"].as_str().unwrap().to_owned(),
+        );
+        let repeated = self
+            .module
+            .command_replies
+            .lock()
+            .unwrap()
+            .contains_key(&key);
+        let exchange = self.request(body).await?;
+        let response = exchange
+            .frames
+            .iter()
+            .find_map(|frame| match frame {
+                ObservedFrame::Response(value) => Some(value),
+                _ => None,
+            })
+            .ok_or_else(|| RouteFailure::new("no response body"))?;
+        let mut bytes = serde_json::to_vec(response).unwrap();
+        if repeated && self.module.defects.user_command == Some("repeat_bytes") {
+            bytes.push(b' ');
+        }
+        Ok((exchange, bytes))
+    }
     async fn request(&self, body: Value) -> Result<Exchange, RouteFailure> {
+        if body["name"] == ops::USER_COMMAND_INVOKE {
+            return Ok(Exchange {
+                frames: self.user_command(body),
+            });
+        }
         Ok(Exchange {
             frames: self.module.handle(
                 &self.stamp,
@@ -994,6 +1037,7 @@ impl Harness for FakeSubject {
             stamp: stamp.clone(),
             mode: CallMode::Classic,
             consumer_capabilities: None,
+            user_scope: None,
         })
     }
 
@@ -1026,6 +1070,18 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl ToolProviderSubject for FakeSubject {
+    async fn user_command_route(
+        &self,
+        handle: &FakeHandle,
+        scope: cortexkit_role_tool_provider_conformance::UserCommandScope,
+    ) -> Result<FakeRoute, HarnessError> {
+        let identities = self.scoped_principals().unwrap();
+        let mut route = self
+            .route(handle, &identities.stamp(&identities.scope.owner))
+            .await?;
+        route.user_scope = Some(scope);
+        Ok(route)
+    }
     fn capabilities(&self) -> BTreeSet<Capability> {
         self.capabilities.clone()
     }
@@ -1081,6 +1137,7 @@ impl ToolProviderSubject for FakeSubject {
             stamp: stamp.clone(),
             mode: mode.clone(),
             consumer_capabilities: None,
+            user_scope: None,
         })
     }
 
@@ -1095,6 +1152,7 @@ impl ToolProviderSubject for FakeSubject {
             stamp: stamp.clone(),
             mode: CallMode::Classic,
             consumer_capabilities: Some(consumer_capabilities.to_vec()),
+            user_scope: None,
         })
     }
 
@@ -1134,5 +1192,77 @@ impl ToolProviderSubject for FakeSubject {
 
     async fn settle(&self) {
         tokio::task::yield_now().await;
+    }
+}
+
+impl FakeRoute {
+    fn user_command(&self, body: Value) -> Vec<ObservedFrame> {
+        use cortexkit_role_tool_provider::user_command::{admitted, check_invoke};
+        use cortexkit_role_tool_provider_conformance::UserCommandScope;
+        let scope = self.user_scope.map(|kind| {
+            let mut value = json!({"owner": {"kind": "reserved", "module_id": "owner"}, "ref": "scope-1", "scope_epoch": 1, "kind": "head", "owner_authorized": false, "attributes": {}});
+            if kind == UserCommandScope::Codemode { value["attributes"]["run_id"] = json!("run-1"); }
+            if kind == UserCommandScope::Flow { value["attributes"]["flow_id"] = json!("flow-1"); }
+            serde_json::from_value(value).unwrap()
+        });
+        let bypass = matches!(
+            (self.module.defects.user_command, self.user_scope),
+            (Some("codemode"), Some(UserCommandScope::Codemode))
+                | (Some("flow"), Some(UserCommandScope::Flow))
+        );
+        if !admitted(scope.as_ref()) && !bypass {
+            return error(ErrorBody::new(
+                errors::USER_COMMAND_NOT_ADMITTED,
+                "not a person-driven session route",
+            ));
+        }
+        let request: ToolCallRequest = serde_json::from_value(body).unwrap();
+        if let Err(refusal) = check_invoke(&request) {
+            return error(refusal);
+        }
+        if request.arguments["command"] != "ctx-status" {
+            return error(errors::unknown_user_command(
+                request.arguments["command"].as_str().unwrap(),
+            ));
+        }
+        let key = (self.stamp.principal.clone(), request.call_key.unwrap());
+        let mut replies = self.module.command_replies.lock().unwrap();
+        if let Some(reply) = replies.get(&key) {
+            let mut reply = reply.clone();
+            if self.module.defects.user_command == Some("repeat")
+                && key.1.contains("user_commands_repeat")
+            {
+                reply["text"] = json!("changed reply");
+            }
+            return vec![ObservedFrame::Response(reply)];
+        }
+        let mut reply = json!({"state": "accepted", "text": "working"});
+        if self.module.defects.user_command == Some("reply")
+            && key.1.contains("user_commands_reply")
+        {
+            reply["text"] = json!(false);
+        }
+        let mut late = self.module.late.lock().unwrap();
+        for (kind, text) in [("progress", "working"), ("result", "finished")] {
+            let mut entry = LateEntry::new(
+                kind,
+                "reserved:owner",
+                "scope-1",
+                1,
+                &self.stamp.principal,
+                &key.1,
+                format!("{}-{kind}", key.1),
+                1,
+            );
+            if kind == "progress" {
+                entry = entry.with_text(text);
+            } else {
+                entry = entry.with_result(json!({"state": if self.module.defects.user_command == Some("accepted") && key.1.contains("user_commands_accepted_late") { "accepted" } else { "done" }, "text": text}));
+            }
+            let seq = late.len() as u64 + 1;
+            late.push((seq, entry));
+        }
+        replies.insert(key, reply.clone());
+        vec![ObservedFrame::Response(reply)]
     }
 }

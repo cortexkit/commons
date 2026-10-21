@@ -1,0 +1,223 @@
+{
+  "_about": "User-command group and owner relay. Baseline absence reuses the existing baseline fixture byte for byte under JCS. No view timing mark is defined.",
+  "unknown_user_command": {
+    "code": "unknown_user_command",
+    "detail": {"command": "ctx-missing"}
+  },
+  "baselines": [
+    {
+      "name": "absent",
+      "baseline": {
+        "items": [
+          {
+            "provider": "prefrontal-core",
+            "item": "system_text",
+            "item_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+            "preflight_digest": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          {
+            "provider": "aft",
+            "item": "tools",
+            "item_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+            "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          {
+            "provider": "magic-context",
+            "item": "system_text",
+            "item_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+            "preflight_digest": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "tool_names": [
+          "bash",
+          "browser_use",
+          "ctx_reduce",
+          "edit",
+          "read"
+        ],
+        "accepted_generation": 0,
+        "applied_generation": 0,
+        "rungs": {
+          "tools": [
+            "on_prefix_rebuild",
+            "on_system_rebuild",
+            "on_history_rebuild",
+            "immediately"
+          ],
+          "system_text": [
+            "on_prefix_rebuild",
+            "on_system_rebuild",
+            "on_history_rebuild",
+            "immediately"
+          ]
+        },
+        "session_capabilities": {
+          "mid_session_appends": true,
+          "ordered_hook_phases": true
+        }
+      },
+      "encoded_jcs": "{\"accepted_generation\":0,\"applied_generation\":0,\"composition_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"items\":[{\"item\":\"system_text\",\"item_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"preflight_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"provider\":\"prefrontal-core\"},{\"item\":\"tools\",\"item_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"preflight_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"provider\":\"aft\"},{\"item\":\"system_text\",\"item_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"preflight_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"provider\":\"magic-context\"}],\"rungs\":{\"system_text\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"],\"tools\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"]},\"session_capabilities\":{\"mid_session_appends\":true,\"ordered_hook_phases\":true},\"tool_names\":[\"bash\",\"browser_use\",\"ctx_reduce\",\"edit\",\"read\"]}"
+    },
+    {
+      "name": "present",
+      "baseline": {
+        "items": [
+          {
+            "provider": "prefrontal-core",
+            "item": "system_text",
+            "item_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+            "preflight_digest": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          {
+            "provider": "aft",
+            "item": "tools",
+            "item_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+            "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          {
+            "provider": "magic-context",
+            "item": "system_text",
+            "item_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+            "preflight_digest": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "composition_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "tool_names": [
+          "bash",
+          "browser_use",
+          "ctx_reduce",
+          "edit",
+          "read"
+        ],
+        "accepted_generation": 0,
+        "applied_generation": 0,
+        "rungs": {
+          "tools": [
+            "on_prefix_rebuild",
+            "on_system_rebuild",
+            "on_history_rebuild",
+            "immediately"
+          ],
+          "system_text": [
+            "on_prefix_rebuild",
+            "on_system_rebuild",
+            "on_history_rebuild",
+            "immediately"
+          ]
+        },
+        "session_capabilities": {
+          "mid_session_appends": true,
+          "ordered_hook_phases": true
+        },
+        "user_commands": [
+          {
+            "provider": "magic-context",
+            "name": "ctx-wrapup",
+            "description": "Summarize older history now",
+            "argument_hint": "[messages to keep]"
+          }
+        ]
+      },
+      "encoded_jcs": "{\"accepted_generation\":0,\"applied_generation\":0,\"composition_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"items\":[{\"item\":\"system_text\",\"item_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"preflight_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"provider\":\"prefrontal-core\"},{\"item\":\"tools\",\"item_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"preflight_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"provider\":\"aft\"},{\"item\":\"system_text\",\"item_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"preflight_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"provider\":\"magic-context\"}],\"rungs\":{\"system_text\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"],\"tools\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"]},\"session_capabilities\":{\"mid_session_appends\":true,\"ordered_hook_phases\":true},\"tool_names\":[\"bash\",\"browser_use\",\"ctx_reduce\",\"edit\",\"read\"],\"user_commands\":[{\"argument_hint\":\"[messages to keep]\",\"description\":\"Summarize older history now\",\"name\":\"ctx-wrapup\",\"provider\":\"magic-context\"}]}"
+    }
+  ],
+  "plans": [
+    {
+      "plan": {},
+      "interactive": true
+    },
+    {
+      "plan": {
+        "interactive": true
+      },
+      "interactive": true
+    },
+    {
+      "plan": {
+        "interactive": false
+      },
+      "interactive": false
+    }
+  ],
+  "bad_plans": [
+    {
+      "interactive": 0
+    },
+    {
+      "interactive": "false"
+    },
+    {
+      "interactive": null
+    }
+  ],
+  "request": {
+    "session_ref": "0123456789abcdef0123456789abcdef",
+    "command": "ctx-wrapup",
+    "input": " 20\n ",
+    "invocation_id": "host-invocation-1"
+  },
+  "answer": {
+    "call_key": "runner/invocation-1",
+    "reply": {
+      "state": "accepted",
+      "text": "Working",
+      "job": "job-1"
+    }
+  },
+  "status_request": {
+    "session_ref": "0123456789abcdef0123456789abcdef",
+    "call_key": "runner/invocation-1"
+  },
+  "statuses": [
+    {
+      "state": "accepted",
+      "text": "Working",
+      "progress": [],
+      "job": "job-1"
+    },
+    {
+      "state": "done",
+      "text": "Finished",
+      "progress": [
+        "First",
+        "Second"
+      ],
+      "job": "job-1"
+    },
+    {
+      "state": "future",
+      "text": "Show unknown state",
+      "progress": []
+    }
+  ],
+  "collision": {
+    "name": "ctx-wrapup",
+    "providers": [
+      "magic-context",
+      "other-provider"
+    ]
+  },
+  "host_names": [
+    {
+      "safe": false,
+      "registered": false,
+      "result": null
+    },
+    {
+      "safe": false,
+      "registered": true,
+      "result": null
+    },
+    {
+      "safe": true,
+      "registered": false,
+      "result": "ctx-wrapup"
+    },
+    {
+      "safe": true,
+      "registered": true,
+      "result": "magic-context-ctx-wrapup"
+    }
+  ]
+}

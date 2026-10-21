@@ -149,6 +149,7 @@ shipping runner with this document.
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 | `send_status` | `send.status` | §9.8 |
+| `user_commands` | `session.user_command`, `session.user_command_status` | §9.10 |
 | `turn_directives` | `session.send` with `directives`; its answer on `run.result` and `run.status` where served | §9.9 |
 | `interrupt_reason` | `run.result` with durable `reason`; the same on `run.status` and `last_run_state` where served | §6.5 |
 
@@ -1935,6 +1936,54 @@ re-send their bodies.
   outcomes and the wire send/result. The parts vector joins two text parts
   with a tool part between them, excluding the tool part, under §6.
 
+### 9.10 `user_commands`: person-only commands
+
+- [pinned] Declaring `user_commands` promises the owner relay and isolation
+  from history, not a host menu. Commands frozen from each provider's
+  `tool.catalog.user_commands` appear in `session.baseline.user_commands`
+  as `{provider, name, description, argument_hint?}`. The member is omitted
+  when empty, preserving existing baseline bytes. Commands are never offered
+  to a model, as tools or otherwise.
+- [pinned] Replies, progress and final results never enter the transcript,
+  `session.read`, or any model request. This rule is fixed, not chosen by a
+  provider. A runner lists commands in its host's menu only when the host can
+  show replies outside the transcript. A host that records command output as
+  history gets no menu entries; the owner relay remains available.
+- [pinned] The menu shows `/name`, description and hint. A name matching a
+  built-in host command or any command already registered when the runner
+  lists its commands is qualified as `<module>-<name>`. Baselines and relay
+  requests use the frozen name, independent of this host alias.
+- [pinned] The optional top-level plan member `interactive` is a boolean;
+  absent means a person may drive the session. `interactive: false` lists
+  no commands and refuses every invocation with `no_person`. Admission
+  refuses duplicate command names from different plan providers with
+  `user_command_collision {name, providers}`.
+- [pinned] `session.user_command {session_ref, command, input,
+  invocation_id}` is owner-only, like `session.baseline`; every other caller
+  is refused `scope_owner_mismatch`. It returns `{call_key, reply}`, where
+  `reply` is the provider's first `UserCommandReply`. Input is forwarded
+  verbatim (at most 4,096 bytes). The runner mints the key from the host's id
+  for that invocation when available; otherwise its host shim mints an id
+  once and reuses it on every retry. For the owner relay the identity is
+  `(owner, invocation_id)`. It sends `user_command.invoke` once on the
+  session's route to the declaring provider. A retry returns the stored
+  answer, never dispatching again.
+- [pinned] `session.user_command_status {session_ref, call_key}` is also
+  owner-only. It returns `{state, text, progress: [text], job?}`: the latest
+  state, the first reply's or terminal result's text, and progress in order
+  (the last 20, at most 64 KiB total). State is decoded open. Invocation state
+  is retained until the session ends or 24 h after its terminal result,
+  whichever comes first. There is no notice path: notices are the model's
+  channel.
+- [pinned] While accepted, the runner pulls provider `late_results` every
+  2–10 s until the result, session end, or one hour. After an hour it tells
+  the person no result arrived in that time. The owner polls status at the
+  same 2–10 s rhythm while open. Progress is non-terminal; a result carries
+  a `done` or `failed` `UserCommandReply`.
+- [pinned] An unfrozen name is refused `unknown_user_command {command}`; a status key
+  not held is refused `unknown_invocation`. A runner without the group
+  refuses these ops with `user_commands_unsupported`.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -2165,12 +2214,17 @@ treats it as a terminal refusal of that one request.
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract` or `session.adopt` (§9.5) | the accepted identity | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract`, `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
 | `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
+| `user_command_collision` | plan providers share a command name | `name`, `providers` (every declaring provider) | no |
+| `unknown_user_command` | the session did not freeze this command | `command` | no |
+| `unknown_invocation` | status key is not held by the session | — | no |
+| `no_person` | the session plan has `interactive: false` | — | no |
+| `user_commands_unsupported` | runner does not declare `user_commands` | — | no |
 | `plan_drift` | a later send's plan differs from the frozen one; a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode, or on `session.adopt` when no plan was applied) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |

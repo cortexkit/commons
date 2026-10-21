@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0
+
+- Breaking: exhaustive matches on `late_results::EntryKind` need a wildcard arm.
+
+- Add person-only catalog commands, the reserved `user_command.invoke` op,
+  bounded open-state replies, scope admission and named refusals. Catalog and
+  late-entry builders remain source-compatible; absent members retain all old
+  bytes and digests. Command declarations are covered by the catalog digest.
+- Add non-terminal late `progress` text and command result shapes, plus shared
+  command wire, bounds, digest and admission vectors.
+- Mark `EntryKind` non-exhaustive so future entry kinds are additive.
+
 ## 0.9.3
 
 - Ship all shared `tool-provider/v1` vectors inside the crate package, expose

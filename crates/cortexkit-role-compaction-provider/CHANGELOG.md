@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+- Pin a limit on provider-constraint deferral in §7: at the next step starting
+  from a user message, apply the view with required companion edits or refuse
+  `view_refused:<version>:provider_constraint`, never keep deferring. Contract
+  text only: no view member, wire byte, digest or vector changes.
+
 ## 0.3.1
 
 - `RideRequest` gains optional `overflow` (`ride::Overflow {reported_limit_tokens}`, both non-exhaustive, built with `Overflow::new`, `with_reported_limit_tokens` and `RideRequest::with_overflow`). Present on a `ceiling` ride, it says the ride follows a model provider error stating that the request exceeded the context window; `reported_limit_tokens` is the limit that error stated, set only when the runner parsed one; `overflow: {}` is valid. Absent means the ceiling came from the runner's own count, never "no overflow happened". On any other cause a provider ignores it: `RideRequest::check` does not fail on it, and `RideRequest::ceiling_overflow` returns it for a `ceiling` ride only. Both members are omitted when absent, never encoded as `null`.

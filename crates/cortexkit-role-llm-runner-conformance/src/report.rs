@@ -65,6 +65,13 @@ const STRUCTURED_RESTART: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_history_isolation", requires: &[Capability::UserCommands, Capability::Queue, Capability::RunOps, Capability::TranscriptReads], checks: "replies, progress and results never enter reads or actual model inputs" },
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_forward_once", requires: &[Capability::UserCommands, Capability::Queue, Capability::RunOps], checks: "retry of an invocation returns the stored reply and reaches the provider once" },
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_no_person", requires: &[Capability::UserCommands, Capability::Queue, Capability::RunOps], checks: "interactive false lists no commands and refuses no_person" },
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_collision", requires: &[Capability::UserCommands, Capability::Queue], checks: "duplicate names at admission refuse user_command_collision with declaring providers" },
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_progress_order", requires: &[Capability::UserCommands, Capability::Queue, Capability::RunOps], checks: "status keeps progress in arrival order and exposes the terminal result" },
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_unsafe_host_menu", requires: &[Capability::UserCommands, Capability::Queue, Capability::RunOps], checks: "no host menu entries where replies cannot stay outside history; relay remains usable" },
+    CaseSpec { requires_any: &[], requires_undeclared_any: &[], name: "user_commands_owner_only", requires: &[Capability::UserCommands, Capability::Queue, Capability::RunOps], checks: "both relay ops refuse a non-owner" },
     case("interrupt_reason_shutdown_durable", &[Capability::InterruptReason, Queue, TranscriptReads, RunOps, HoldToolCalls],
         "an orderly handle stop during a held run records interrupted reason runner_shutdown, preserved on restart across result, status and last_run_state"),
     case("run_tool_calls_positions_identify_siblings", TOOL_CALLS,

@@ -177,6 +177,28 @@ where
         capabilities.insert(Capability::ContentV1);
     }
 
+    capabilities.remove(&Capability::UserCommands);
+    if let Ok(handle) = &main {
+        let case = Case {
+            subject,
+            driver: &driver,
+            handle,
+            work_dir,
+            capabilities: &capabilities,
+        };
+        let listed = match case.plain_route().await {
+            Ok(route) => case
+                .catalog(&route)
+                .await
+                .map(|answer| !answer.user_commands.is_empty())
+                .unwrap_or(true),
+            Err(_) => true,
+        };
+        if listed {
+            capabilities.insert(Capability::UserCommands);
+        }
+    }
+
     let mut cases = Vec::with_capacity(CASES.len());
     for spec in CASES {
         let missing: Vec<Capability> = spec
@@ -288,6 +310,9 @@ where
 {
     async fn run(&self, name: &str, mint: &mut KeyMint) -> CaseResult {
         match name {
+            name if name.starts_with("user_commands_") => {
+                self.user_commands(name, mint.next(name)).await
+            }
             "role_describe_shape" => self.role_describe_shape().await,
             "role_describe_cacheable" => self.role_describe_cacheable().await,
             "catalog_schemas_flat" => self.catalog_schemas_flat().await,
@@ -588,6 +613,13 @@ where
                 ops::TOOL_WITHDRAW
             ));
         }
+        if self.capabilities.contains(&Capability::UserCommands)
+            && !describe.serves(ops::USER_COMMAND_INVOKE)
+        {
+            return Err(
+                "catalog lists commands but role.describe omits user_command.invoke".into(),
+            );
+        }
         if self.capabilities.contains(&Capability::LateResults) {
             for op in [ops::LATE_RESULTS, ops::LATE_RESULTS_ACK] {
                 if !describe.serves(op) {
@@ -805,6 +837,9 @@ where
         let digest = self.catalog_with(&route, true).await?;
         if !digest.tools.is_empty() {
             return Err("a digest_only answer lists tools".to_owned());
+        }
+        if !digest.user_commands.is_empty() {
+            return Err("a digest_only answer lists user commands".into());
         }
         if digest.generation != full.generation {
             return Err(format!(
@@ -1726,4 +1761,157 @@ fn vector_strings(vectors: &str, set: &str, member: &str) -> Vec<String> {
         .iter()
         .map(|case| case[member].as_str().expect("vector member").to_owned())
         .collect()
+}
+
+impl<S> Case<'_, S>
+where
+    S: ToolProviderSubject,
+    S::Route: ToolRoute,
+{
+    async fn user_commands(&self, name: &str, key: String) -> CaseResult {
+        let catalog = self.catalog(&self.plain_route().await?).await?;
+        if name == "user_commands_catalog" {
+            return cortexkit_role_tool_provider::user_command::check_catalog(&catalog)
+                .map_err(|e| e.message);
+        }
+        if catalog.user_commands.is_empty() {
+            return Err("catalog no longer lists commands".into());
+        }
+        for (index, command) in catalog.user_commands.iter().enumerate() {
+            self.user_command_case(name, format!("{key}/{index}"), &catalog, command)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn user_command_case(
+        &self,
+        name: &str,
+        key: String,
+        catalog: &CatalogAnswer,
+        command: &cortexkit_role_tool_provider::user_command::UserCommand,
+    ) -> CaseResult {
+        use crate::subject::UserCommandScope;
+        use cortexkit_role_tool_provider::user_command::UserCommandReply;
+        let scope = match name {
+            "user_commands_codemode_refused" => UserCommandScope::Codemode,
+            "user_commands_flow_refused" => UserCommandScope::Flow,
+            _ => UserCommandScope::Session,
+        };
+        let route = self
+            .subject
+            .user_command_route(self.handle.inner(), scope)
+            .await
+            .map_err(|e| e.to_string())?;
+        let body = json!({"name": ops::USER_COMMAND_INVOKE, "arguments": {"command": command.name, "input": self.subject.user_command_input(&command.name)}, "call_key": key});
+        let (exchange, first_bytes) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                if name == "user_commands_repeat" {
+                    route
+                        .request_with_response_bytes(body.clone())
+                        .await
+                        .map(|(exchange, bytes)| (exchange, Some(bytes)))
+                        .map_err(|error| error.message)
+                } else {
+                    request(&route, body.clone())
+                        .await
+                        .map(|exchange| (exchange, None))
+                }
+            })
+            .await
+            .map_err(|_| "user command exceeded five seconds")??;
+        if scope != UserCommandScope::Session {
+            return expect_code(
+                &expect_error("user_command.invoke", exchange)?,
+                errors::USER_COMMAND_NOT_ADMITTED,
+            );
+        }
+        let first = expect_response("user_command.invoke", exchange)?;
+        let reply: UserCommandReply =
+            serde_json::from_value(first.clone()).map_err(|e| format!("command reply: {e}"))?;
+        reply.check().map_err(|e| e.message)?;
+        if !["done", "failed", "accepted"].contains(&reply.state.as_str()) {
+            return Err(format!(
+                "provider emitted unknown reply state {}",
+                reply.state
+            ));
+        }
+        if name == "user_commands_repeat" {
+            let (exchange, repeated_bytes) = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                route.request_with_response_bytes(body),
+            )
+            .await
+            .map_err(|_| "repeated user command exceeded five seconds")?
+            .map_err(|error| error.message)?;
+            let repeated = expect_response("repeated user_command.invoke", exchange)?;
+            let bytes = first_bytes.ok_or("missing first reply bytes")?;
+            let raw: Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+            let repeated_raw: Value =
+                serde_json::from_slice(&repeated_bytes).map_err(|error| error.to_string())?;
+            if raw != first || repeated_raw != repeated {
+                return Err("raw response bytes do not match decoded responses".into());
+            }
+            if bytes != repeated_bytes || first != repeated {
+                return Err("repeat changed the stored user-command reply".into());
+            }
+        }
+        if name != "user_commands_accepted_late" || reply.state != "accepted" {
+            return Ok(());
+        }
+        if catalog.capabilities.get("late_results") != Some(&json!(true)) {
+            return Err("accepted without late_results".into());
+        }
+        let mut since = None;
+        let mut terminal = false;
+        for _ in 0..15 {
+            let args = match &since {
+                Some(cursor) => json!({"since": cursor}),
+                None => json!({}),
+            };
+            let late: LateResultsReply = serde_json::from_value(expect_response(
+                "late_results",
+                request(&route, op_body(ops::LATE_RESULTS, args)).await?,
+            )?)
+            .map_err(|e| e.to_string())?;
+            for entry in late.entries.iter().filter(|entry| entry.call_key == key) {
+                if terminal {
+                    return Err("entry after terminal user-command result".into());
+                }
+                match entry.kind.as_str() {
+                    "progress" => {
+                        if entry.text.is_none() {
+                            return Err("invalid progress text".into());
+                        }
+                    }
+                    "result" => {
+                        let result: UserCommandReply = serde_json::from_value(
+                            entry.result.clone().ok_or("missing command result")?,
+                        )
+                        .map_err(|e| e.to_string())?;
+                        result.check().map_err(|e| e.message)?;
+                        if !["done", "failed"].contains(&result.state.as_str()) {
+                            return Err("non-terminal user-command result".into());
+                        }
+                        terminal = true;
+                    }
+                    _ => {
+                        return Err("accepted user command produced a non-command late entry".into())
+                    }
+                }
+            }
+            since = Some(late.cursor);
+            if terminal && !late.more {
+                return Ok(());
+            }
+            if late.more {
+                continue;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        Err(
+            "accepted user command did not produce a terminal result within the fixture deadline"
+                .into(),
+        )
+    }
 }

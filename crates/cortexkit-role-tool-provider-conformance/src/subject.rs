@@ -10,8 +10,12 @@ use serde_json::Value;
 /// A capability a conformance case requires of the provider or its harness.
 /// A case whose requirement the subject does not declare is reported as
 /// skipped with the missing names, never as passed.
+/// Additional capabilities may be added; consumers keep a wildcard match arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum Capability {
+    /// The suite infers this capability from the live catalog, not the adapter.
+    UserCommands,
     /// The harness can open routes under a scope stamp, as distinct
     /// principals (a carrier, a second carrier and the scope's owner), and
     /// under a second scope of the same owner. See
@@ -64,6 +68,7 @@ impl Capability {
     /// The `requires` tag the report prints.
     pub fn name(self) -> &'static str {
         match self {
+            Self::UserCommands => "user_commands",
             Self::ScopeStamp => "scope_stamp",
             Self::CallKey => "call_key",
             Self::SchemaPin => "schema_pin",
@@ -123,6 +128,14 @@ fn stamp_under(principal: &str, scope: &ScopeIdentity) -> RouteStamp {
 /// A tool call as `(tool name, arguments)`.
 pub type CallSpec = (String, Value);
 
+/// The route's user-command scope, independent of its call-mode declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserCommandScope {
+    Session,
+    Codemode,
+    Flow,
+}
+
 /// A prompt, successful tool call and a known mode its catalog entry does
 /// not list. The suite chooses a served mode from that same entry.
 #[derive(Clone, Debug, PartialEq)]
@@ -136,6 +149,21 @@ pub struct CallModeProbe {
 /// the harness's real route; nothing here answers on the module's behalf.
 #[async_trait]
 pub trait ToolProviderSubject: Harness {
+    /// Open a real session scope; codemode adds `run_id`, flow adds `flow_id`.
+    /// The adapter must stamp these fields on the bind, not in the call body.
+    async fn user_command_route(
+        &self,
+        _handle: &Self::Handle,
+        _scope: UserCommandScope,
+    ) -> Result<Self::Route, HarnessError> {
+        Err(HarnessError::new("no user-command scope adapter supplied"))
+    }
+
+    /// A safe input for the listed command. Returning an empty input is valid;
+    /// a usage reply still exercises the first-reply and repeat rules.
+    fn user_command_input(&self, _command: &str) -> String {
+        String::new()
+    }
     /// The capabilities this provider and harness declare. Cases requiring
     /// anything missing are skipped, with the reason.
     fn capabilities(&self) -> BTreeSet<Capability>;

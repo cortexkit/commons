@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0
+
+- Breaking: exhaustive matches on `subject::Capability` need a wildcard arm.
+
+- Require tool-provider 0.10.0. Infer command cases from the live catalog and
+  exercise shape, reply deadline, stored-repeat identity, codemode/flow scope
+  refusals and accepted late results through real routes. Add a scope adapter
+  hook because the shared harness's identity stamp does not carry run/flow ids.
+- Add deliberately faulty provider self-tests for each named case.
+- Mark `Capability` non-exhaustive so future capabilities are additive.
+
 ## 0.9.3
 
 - Use `cortexkit-role-tool-provider` 0.9.3 and read call-key and schema-pin

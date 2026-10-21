@@ -36,6 +36,12 @@ const CRASH: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    CaseSpec { name: "user_commands_catalog", requires: &[], checks: "command declarations are valid, unique, and separate from reserved tools" },
+    CaseSpec { name: "user_commands_reply", requires: &[Capability::UserCommands], checks: "a listed command replies within five seconds with bounded person-only text" },
+    CaseSpec { name: "user_commands_repeat", requires: &[Capability::UserCommands], checks: "the same call key returns the identical stored reply" },
+    CaseSpec { name: "user_commands_codemode_refused", requires: &[Capability::UserCommands], checks: "a session scope with run_id refuses user_command_not_admitted" },
+    CaseSpec { name: "user_commands_flow_refused", requires: &[Capability::UserCommands], checks: "a session scope with flow_id refuses user_command_not_admitted" },
+    CaseSpec { name: "user_commands_accepted_late", requires: &[Capability::UserCommands], checks: "accepted requires late_results, ordered progress and a terminal UserCommandReply result" },
     CaseSpec {
         name: "role_describe_shape",
         requires: &[],

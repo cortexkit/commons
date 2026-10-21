@@ -564,6 +564,10 @@ provider.
     a model that binds signed reasoning to its prefix requires.
   A runner that can do neither refuses the view with
   `view_refused:<version>:provider_constraint`.
+- [pinned] A deferral lasts no later than the next step that starts from a
+  user message: at that step the runner applies the view (with companion
+  edits if the model provider requires them) or refuses it with
+  `view_refused:<version>:provider_constraint`; it never keeps deferring.
 - [pinned] The runner also refuses a view, reporting
   `view_refused:<version>:<reason>` on its next notice and keeping its
   current view, when applying it would separate a tool call from its result

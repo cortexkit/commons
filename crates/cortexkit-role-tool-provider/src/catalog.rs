@@ -238,9 +238,17 @@ pub struct CatalogAnswer {
     /// each declared with the value `true`.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub capabilities: Map<String, Value>,
+    /// Commands for the person, never tools offered to a model.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_commands: Vec<crate::user_command::UserCommand>,
 }
 
 impl CatalogAnswer {
+    /// Add user commands to the catalog without adding them to the model-tool list.
+    pub fn with_user_commands(mut self, commands: Vec<crate::user_command::UserCommand>) -> Self {
+        self.user_commands = commands;
+        self
+    }
     /// An answer with its required digests and no optional content.
     pub fn new(generation: impl Into<String>, catalog_digest: impl Into<String>) -> Self {
         Self {

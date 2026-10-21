@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("user_commands_") => crate::user_commands::run(self, name)
+                .await
+                .map(|()| Ending::Passed),
             "role_describe_shape" => passed(self.role_describe_shape().await),
             "role_describe_cacheable" => passed(self.role_describe_cacheable().await),
             "role_describe_groups_complete" => passed(self.role_describe_groups_complete().await),

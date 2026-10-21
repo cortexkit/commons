@@ -65,6 +65,7 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 mod compaction;
+mod user_commands;
 pub use compaction::CompactionDefect;
 
 pub const TOOL_MODULE: &str = "fake.tools";
@@ -141,6 +142,7 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub user_command: Option<&'static str>,
     pub compaction: CompactionDefect,
     /// Continue to a new model step after a boundary cancellation.
     pub cancel_starts_next_step: bool,
@@ -337,6 +339,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    user_commands: Mutex<user_commands::Commands>,
     retention_defect: RetentionDefect,
     retention_delete_ms: u64,
     epoch: tokio::time::Instant,
@@ -1443,6 +1446,7 @@ impl Module {
                 .filter(|_| !self.world.defects.max_output_tokens_ignored)
                 .map(|cap| cap.min(32));
             if received {
+                self.capture_command_model_input(session, &sess);
                 let tools = if run.no_tools && !self.world.defects.no_tools_ignored {
                     &[][..]
                 } else {
@@ -1860,6 +1864,9 @@ impl Module {
             }
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
+            ops::SESSION_USER_COMMAND | ops::SESSION_USER_COMMAND_STATUS => {
+                Ok(self.user_command(stamp, session, method, params))
+            }
             ops::SESSION_SEND => self.send(stamp, session, params),
             ops::SESSION_ADOPT => {
                 self.world.adopt_calls.fetch_add(1, Ordering::SeqCst);
@@ -2075,7 +2082,7 @@ impl Module {
                 errors::SCOPE_OWNER_MISMATCH,
                 Some(json!({ "accepted": sess.owner })),
             ),
-            Some(_) => respond(BaselineReply::ready(baseline())),
+            Some(_) => respond(BaselineReply::ready(self.command_baseline(session))),
         }
     }
 
@@ -2208,6 +2215,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = self.command_collision(session) {
+            return Ok(reply);
+        }
         if params
             .get("retention")
             .is_some_and(|value| !value.is_null() && value.as_u64().is_none())
@@ -3723,6 +3733,7 @@ impl FakeSubject {
                     model_calls: Mutex::new(BTreeSet::new()),
                     structured_output_support: Mutex::new(BTreeMap::new()),
                     model_requests: Mutex::new(BTreeMap::new()),
+                    user_commands: Mutex::new(user_commands::Commands::default()),
                     pending_model_holds: Mutex::new(BTreeSet::new()),
                     held_models: Mutex::new(BTreeMap::new()),
                     compaction: Mutex::new(compaction::Providers::new(
@@ -3844,6 +3855,22 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn prepare_user_commands(
+        &self,
+        session: &str,
+        fixture: &cortexkit_role_llm_runner_conformance::UserCommandFixture,
+    ) -> Result<(String, Map<String, Value>), HarnessError> {
+        self.prepare_commands(session, fixture)
+    }
+
+    async fn user_command_observation(
+        &self,
+        session: &str,
+    ) -> Result<cortexkit_role_llm_runner_conformance::UserCommandObservation, HarnessError> {
+        Ok(self.world().user_commands.lock().unwrap().sessions[session]
+            .observation
+            .clone())
+    }
     fn capabilities(&self) -> BTreeSet<Capability> {
         self.capabilities.clone()
     }

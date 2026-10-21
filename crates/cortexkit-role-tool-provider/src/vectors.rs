@@ -51,6 +51,9 @@ pub const SCHEMA_PIN_JSON: &str = include_str!("../test-vectors/tool-provider-v1
 /// The `withdraw-answers.json` vector cases.
 pub const WITHDRAW_ANSWERS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/withdraw-answers.json");
+/// Person-only command declarations, calls, replies, scope table and late entries.
+pub const USER_COMMANDS_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/user-commands.json");
 /// The vectors' `README.md`.
 pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.md");
 
@@ -72,6 +75,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("schema-digest.json", SCHEMA_DIGEST_JSON),
     ("schema-pin.json", SCHEMA_PIN_JSON),
     ("withdraw-answers.json", WITHDRAW_ANSWERS_JSON),
+    ("user-commands.json", USER_COMMANDS_JSON),
     ("README.md", README),
 ];
 

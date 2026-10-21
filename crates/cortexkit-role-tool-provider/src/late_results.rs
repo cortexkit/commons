@@ -23,6 +23,8 @@ pub const CURSOR_INCARNATION_CHANGED: &str = "cursor_incarnation_changed";
 
 /// Entry kinds. `kind` is an open string.
 pub mod kinds {
+    /// Non-terminal text for the person awaiting an accepted user command.
+    pub const PROGRESS: &str = "progress";
     /// The call settled; the entry carries `result` or, when reduced,
     /// `outcome`.
     pub const RESULT: &str = "result";
@@ -138,6 +140,9 @@ pub struct LateEntry {
     /// Why a `not_started` call never ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Person-only text on a `progress` entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// Members this crate does not know, kept so an entry is recorded
     /// verbatim.
     #[serde(flatten)]
@@ -145,9 +150,12 @@ pub struct LateEntry {
 }
 
 /// A decoded entry kind.
+/// Additional kinds may be added; consumers keep a wildcard match arm.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EntryKind {
     Result,
+    Progress,
     NotStarted,
     Expired,
     Unknown(String),
@@ -181,6 +189,7 @@ impl LateEntry {
             result: None,
             outcome: None,
             reason: None,
+            text: None,
             extra: Map::new(),
         }
     }
@@ -200,6 +209,12 @@ impl LateEntry {
     /// Include the retained result.
     pub fn with_result(mut self, result: Value) -> Self {
         self.result = Some(result);
+        self
+    }
+
+    /// Include non-terminal user-command progress.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
         self
     }
 
@@ -224,6 +239,7 @@ impl LateEntry {
     pub fn kind(&self) -> EntryKind {
         match self.kind.as_str() {
             kinds::RESULT => EntryKind::Result,
+            kinds::PROGRESS => EntryKind::Progress,
             kinds::NOT_STARTED => EntryKind::NotStarted,
             kinds::EXPIRED => EntryKind::Expired,
             other => EntryKind::Unknown(other.to_owned()),

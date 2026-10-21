@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.9
+
+- Keep the role independent of tool-provider at runtime. Runner-owned command
+  and reply types are checked against tool-provider vectors through a dev-only
+  dependency; `unknown_user_command` carries `{command}` detail on both roles.
+
+- Add the independent `user_commands` group, frozen provider-qualified
+  baseline commands, owner invoke/status shapes and refusals, and the plan's
+  optional boolean `interactive`. Absent baseline bytes stay unchanged.
+- Pin history isolation, once-per-invocation forwarding, bounded ordered
+  progress, retention and the 2–10 s pull rhythm. Host menus are optional:
+  only hosts with out-of-history replies may list commands; built-in or
+  already-registered names are qualified by module. Keys use the host's id or
+  a shim id minted once and reused on retry. Add packaged vectors.
+
 ## 0.3.8
 
 - Add optional `RoleDescribe.delivery_order_modes` and `with_delivery_order_modes` so a runner can name only the list modes it can ever land. Absence keeps the existing group mapping. Presence only narrows it; `steer` still requires `steer`, and `idle_start` still requires `queue`. Legacy string deliveries are unchanged.

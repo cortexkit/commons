@@ -7,8 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.9.3
-pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.9.3. Version
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.10.0
+pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.0. Version
 0.9.2 pairs with cortexkit-role-tool-provider 0.9.2; versions 0.8.x pair with
 subc-protocol 0.32; versions 0.7.x pair with protocol 0.31, and versions 0.6.x
 pair with protocol 0.30.
@@ -116,3 +116,20 @@ it is reported as a named skip. The case requests the full discovered
 exactly that list. It also checks that missing and empty lists select no tools,
 that filtering does not change `generation`, and that a changed tool selection
 changes `catalog_digest`. No subject flag can opt out of a live advertisement.
+
+## User commands
+
+The live catalog, not an adapter capability flag, enables command cases. The
+catalog case always runs, including the reserved-tool-name check. Implement
+`user_command_route` with actual daemon scope attributes for Session, Codemode
+(`run_id`) and Flow (`flow_id`), independent of the route's call-mode field.
+`user_command_input` supplies a safe probe for each declared command; an accepted
+probe must settle within the fixture's 30-second observation window. Every
+listed command is exercised. A synchronous reply has no late-result obligation.
+
+`user_commands_repeat` requires `ToolRoute::request_with_response_bytes`: retain
+the actual RESPONSE body before decoding JSON. Re-encoding a decoded value would
+hide a whitespace-only or member-order change. The other cases cover catalog
+and reply shape, the five-second first-reply deadline, codemode/flow refusals and
+accepted progress followed by a terminal command reply. Deliberately faulty
+fakes prove every named command case, including a bytes-only repeat defect.

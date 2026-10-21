@@ -38,3 +38,8 @@ The conformance crate reads `call-key.json` and `schema-pin.json` from the
 wire crate's public `vectors` module. Its dependency enables the
 `test-vectors` feature, so the published conformance package needs no vendored
 copies or repository checkout.
+
+`user-commands.json` pins separate command declarations, example-provider JCS
+catalog bytes and digests with and without commands, request/reply bounds, the
+route-scope admission table and late progress/result shapes. The absent catalog
+is the existing call-modes baseline. Catalog digests remain provider-defined.

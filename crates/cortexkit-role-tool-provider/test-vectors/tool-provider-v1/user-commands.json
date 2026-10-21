@@ -1,0 +1,388 @@
+{
+  "_about": "Catalog digests use the existing example provider scheme: SHA-256 of JCS excluding catalog_digest. Absent bytes and digest are copied from the pre-command catalog fixture. Request sizes are bytes; descriptions and hints count characters.",
+  "catalogs": [
+    {
+      "name": "absent",
+      "catalog": {
+        "generation": "g-2026-09-30.4",
+        "composition_digest": "sha256:c0",
+        "capabilities": {
+          "late_results": true
+        },
+        "tools": [
+          {
+            "name": "read",
+            "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
+            "semantics": 1,
+            "result_ops": [
+              "prepend",
+              "append"
+            ],
+            "capabilities": [
+              "code.read/v1",
+              "acme:code.read-lines/v1"
+            ],
+            "description": "Read a file.",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          {
+            "name": "grep",
+            "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+            "semantics": 3,
+            "capabilities": [],
+            "input_schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "catalog_digest": "sha256:cat4"
+      },
+      "encoded_jcs": "{\"capabilities\":{\"late_results\":true},\"catalog_digest\":\"sha256:cat4\",\"composition_digest\":\"sha256:c0\",\"generation\":\"g-2026-09-30.4\",\"tools\":[{\"capabilities\":[\"code.read/v1\",\"acme:code.read-lines/v1\"],\"description\":\"Read a file.\",\"input_schema\":{\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"read\",\"result_ops\":[\"prepend\",\"append\"],\"schema_digest\":\"923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b\",\"semantics\":1},{\"capabilities\":[],\"input_schema\":{\"type\":\"object\"},\"name\":\"grep\",\"schema_digest\":\"a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0\",\"semantics\":3}]}",
+      "content_digest": "c4c7292016bf1ee24942b7ee601958ddd51fcd43b0ef1d722220ade52541b2da"
+    },
+    {
+      "name": "present",
+      "catalog": {
+        "generation": "g-2026-09-30.4",
+        "composition_digest": "sha256:c0",
+        "capabilities": {
+          "late_results": true
+        },
+        "tools": [
+          {
+            "name": "read",
+            "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
+            "semantics": 1,
+            "result_ops": [
+              "prepend",
+              "append"
+            ],
+            "capabilities": [
+              "code.read/v1",
+              "acme:code.read-lines/v1"
+            ],
+            "description": "Read a file.",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          {
+            "name": "grep",
+            "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+            "semantics": 3,
+            "capabilities": [],
+            "input_schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "catalog_digest": "sha256:cat4",
+        "user_commands": [
+          {
+            "name": "ctx-wrapup",
+            "description": "Summarize older history now",
+            "argument_hint": "[messages to keep]"
+          }
+        ]
+      },
+      "encoded_jcs": "{\"capabilities\":{\"late_results\":true},\"catalog_digest\":\"sha256:cat4\",\"composition_digest\":\"sha256:c0\",\"generation\":\"g-2026-09-30.4\",\"tools\":[{\"capabilities\":[\"code.read/v1\",\"acme:code.read-lines/v1\"],\"description\":\"Read a file.\",\"input_schema\":{\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"read\",\"result_ops\":[\"prepend\",\"append\"],\"schema_digest\":\"923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b\",\"semantics\":1},{\"capabilities\":[],\"input_schema\":{\"type\":\"object\"},\"name\":\"grep\",\"schema_digest\":\"a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0\",\"semantics\":3}],\"user_commands\":[{\"argument_hint\":\"[messages to keep]\",\"description\":\"Summarize older history now\",\"name\":\"ctx-wrapup\"}]}",
+      "content_digest": "9581696b8cd5730f443f7af19ccc75531979c67f42b09dc7ea1d3ed1d713ea9e"
+    }
+  ],
+  "commands": [
+    {
+      "name": "ctx-status",
+      "description": "Show status"
+    },
+    {
+      "name": "a1-b2",
+      "description": "é",
+      "argument_hint": "[input]"
+    }
+  ],
+  "bad_commands": [
+    {
+      "name": "",
+      "description": "valid"
+    },
+    {
+      "name": "A",
+      "description": "valid"
+    },
+    {
+      "name": "a_1",
+      "description": "valid"
+    },
+    {
+      "name": "a--b",
+      "description": "valid"
+    },
+    {
+      "name": "a-",
+      "description": "valid"
+    },
+    {
+      "name": "1a",
+      "description": "valid"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "description": "valid"
+    },
+    {
+      "name": "ok",
+      "description": ""
+    },
+    {
+      "name": "ok",
+      "description": "two\nlines"
+    },
+    {
+      "name": "ok",
+      "description": "two\rlines"
+    },
+    {
+      "name": "ok",
+      "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "ok",
+      "description": "ok",
+      "argument_hint": ""
+    },
+    {
+      "name": "ok",
+      "description": "ok",
+      "argument_hint": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  ],
+  "invoke": [
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status",
+        "input": ""
+      },
+      "call_key": "runner/invocation-1"
+    },
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status",
+        "input": "  20\n "
+      },
+      "call_key": "runner/invocation-1"
+    },
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status",
+        "input": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      "call_key": "runner/invocation-1"
+    }
+  ],
+  "bad_invoke": [
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status",
+        "input": ""
+      }
+    },
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status",
+        "input": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      "call_key": "runner/1"
+    },
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status"
+      },
+      "call_key": "runner/1"
+    },
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": 2,
+        "input": ""
+      },
+      "call_key": "runner/1"
+    },
+    {
+      "name": "user_command.invoke",
+      "arguments": {
+        "command": "ctx-status",
+        "input": ""
+      },
+      "call_key": ""
+    }
+  ],
+  "replies": [
+    {
+      "state": "done",
+      "text": "ready"
+    },
+    {
+      "state": "accepted",
+      "text": "working",
+      "job": "job-1"
+    },
+    {
+      "state": "failed",
+      "text": "Usage: /ctx-wrapup [count]"
+    },
+    {
+      "state": "future-state",
+      "text": "Show this too"
+    }
+  ],
+  "bad_replies": [
+    {
+      "state": "done"
+    },
+    {
+      "state": false,
+      "text": "no"
+    },
+    {
+      "state": "done",
+      "text": 2
+    }
+  ],
+  "admission": [
+    {
+      "scope": null,
+      "admitted": false
+    },
+    {
+      "scope": {
+        "owner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "ref": "session-1",
+        "scope_epoch": 1,
+        "kind": "head",
+        "owner_authorized": false
+      },
+      "admitted": true
+    },
+    {
+      "scope": {
+        "owner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "ref": "session-1",
+        "scope_epoch": 1,
+        "kind": "head",
+        "owner_authorized": false,
+        "attributes": {
+          "run_id": "run-1"
+        }
+      },
+      "admitted": false
+    },
+    {
+      "scope": {
+        "owner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "ref": "session-1",
+        "scope_epoch": 1,
+        "kind": "head",
+        "owner_authorized": false,
+        "attributes": {
+          "flow_id": "flow-1"
+        }
+      },
+      "admitted": false
+    },
+    {
+      "scope": {
+        "owner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "ref": "session-1",
+        "scope_epoch": 1,
+        "kind": "head",
+        "owner_authorized": false,
+        "attributes": {
+          "run_id": "run-1",
+          "flow_id": "flow-1"
+        }
+      },
+      "admitted": false
+    },
+    {
+      "scope": {
+        "owner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "ref": "session-1",
+        "scope_epoch": 1,
+        "kind": "head",
+        "owner_authorized": false,
+        "attributes": {
+          "run_id": ""
+        }
+      },
+      "admitted": false
+    }
+  ],
+  "late": [
+    {
+      "kind": "progress",
+      "owner": "reserved:runner",
+      "ref": "session-1",
+      "scope_epoch": 1,
+      "custodian": "reserved:runner",
+      "call_key": "runner/1",
+      "event_id": "p1",
+      "settled_at": 1,
+      "reduced": false,
+      "text": "working"
+    },
+    {
+      "kind": "result",
+      "owner": "reserved:runner",
+      "ref": "session-1",
+      "scope_epoch": 1,
+      "custodian": "reserved:runner",
+      "call_key": "runner/1",
+      "event_id": "r1",
+      "settled_at": 2,
+      "reduced": false,
+      "result": {
+        "state": "done",
+        "text": "finished"
+      }
+    }
+  ]
+}

@@ -239,6 +239,9 @@ impl SchemaPin {
 /// Returns the parsed pin, which the provider then compares with its current
 /// catalog (refusing `tool_schema_changed` or `tool_semantics_changed`).
 pub fn check_call(request: &ToolCallRequest) -> Result<Option<SchemaPin>, ErrorBody> {
+    if request.name == crate::ops::USER_COMMAND_INVOKE {
+        crate::user_command::check_invoke(request)?;
+    }
     if let Some(key) = request.call_key.as_deref() {
         validate_call_key(key)
             .map_err(|error| errors::invalid_request(CALL_KEY_FIELD, error.to_string()))?;

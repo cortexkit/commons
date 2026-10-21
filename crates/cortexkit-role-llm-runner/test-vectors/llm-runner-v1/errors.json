@@ -1,5 +1,10 @@
 {
   "codes": [
+    {"code": "user_command_collision", "retryable": false},
+    {"code": "unknown_user_command", "retryable": false, "detail": {"command": "ctx-missing"}},
+    {"code": "unknown_invocation", "retryable": false},
+    {"code": "no_person", "retryable": false},
+    {"code": "user_commands_unsupported", "retryable": false},
     {
       "code": "invalid_params",
       "retryable": false

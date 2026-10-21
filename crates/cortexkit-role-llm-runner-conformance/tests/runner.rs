@@ -34,6 +34,7 @@ const LEFT_LINEAGE_CASE: &str = "tags_resolve_left_lineage_refused";
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::UserCommands,
     Capability::InputTokenCap,
     Capability::MaxSteps,
     Capability::MaxOutputTokens,
@@ -212,6 +213,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.insert(Capability::UserCommands);
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
@@ -517,6 +519,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::RunUsage,
                     Capability::DeliveryOrder,
                     Capability::SendStatus,
+                    Capability::UserCommands,
                     Capability::HoldToolCalls
                 ]
             );
@@ -874,7 +877,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunToolCalls,
                     Capability::RunUsage,
                     Capability::DeliveryOrder,
-                    Capability::SendStatus
+                    Capability::SendStatus,
+                    Capability::UserCommands
                 ],
                 "{}",
                 report.render()
@@ -1106,6 +1110,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.insert(Capability::UserCommands);
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
@@ -1132,6 +1137,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
+    subject.capabilities.insert(Capability::UserCommands);
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
@@ -2811,4 +2817,39 @@ async fn interrupt_reason_undeclared_skips_by_name() {
     assert!(
         matches!(report.outcome("interrupt_reason_shutdown_durable"), Some(CaseOutcome::Skipped { missing }) if missing == &[Capability::InterruptReason])
     );
+}
+
+fn command_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        user_command: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::UserCommands);
+    subject
+}
+
+#[tokio::test]
+async fn user_commands_keep_replies_out_of_history() {
+    let report = run(&command_subject(None)).await;
+    for case in CASES
+        .iter()
+        .filter(|case| case.name.starts_with("user_commands_"))
+    {
+        assert_passed(&report, case.name);
+    }
+}
+
+#[tokio::test]
+async fn user_command_faults_fail_by_name() {
+    for (defect, case) in [
+        ("history", "user_commands_history_isolation"),
+        ("duplicate", "user_commands_forward_once"),
+        ("no_person", "user_commands_no_person"),
+        ("collision", "user_commands_collision"),
+        ("progress", "user_commands_progress_order"),
+        ("unsafe_host", "user_commands_unsafe_host_menu"),
+        ("owner", "user_commands_owner_only"),
+    ] {
+        failed(&run(&command_subject(Some(defect))).await, case);
+    }
 }

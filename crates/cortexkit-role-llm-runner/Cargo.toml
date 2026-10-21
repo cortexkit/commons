@@ -11,7 +11,7 @@
 # suite.
 [package]
 name = "cortexkit-role-llm-runner"
-version = "0.3.8"
+version = "0.3.9"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -29,6 +29,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
 sha2 = "0.10"
+
+[dev-dependencies]
+cortexkit-role-tool-provider = { version = "0.10.0", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
 
 [[test]]
 name = "vectors_feature"

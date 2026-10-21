@@ -98,9 +98,19 @@ pub struct Baseline {
     /// ([`crate::capabilities::session`]), each declared with `true`.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub session_capabilities: Map<String, Value>,
+    /// Frozen commands and their declaring providers, never model tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_commands: Vec<crate::user_commands::FrozenUserCommand>,
 }
 
 impl Baseline {
+    pub fn with_user_commands(
+        mut self,
+        commands: Vec<crate::user_commands::FrozenUserCommand>,
+    ) -> Self {
+        self.user_commands = commands;
+        self
+    }
     /// The baseline of a session admitted with a fetch plan.
     pub fn new(
         items: Vec<BaselineItem>,

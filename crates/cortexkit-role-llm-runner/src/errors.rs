@@ -19,6 +19,28 @@ use serde_json::Value;
 /// excludes. `detail.field` names it.
 pub const INVALID_PARAMS: &str = "invalid_params";
 
+/// Two providers declare the same command. Detail: `{name, providers}`.
+pub const USER_COMMAND_COLLISION: &str = "user_command_collision";
+/// The requested command was not made available at admission. Detail: `{command}`.
+pub const UNKNOWN_USER_COMMAND: &str = "unknown_user_command";
+/// The session holds no invocation under that call key.
+pub const UNKNOWN_INVOCATION: &str = "unknown_invocation";
+/// The session's plan declares `interactive: false`.
+pub const NO_PERSON: &str = "no_person";
+/// The runner does not declare the `user_commands` group.
+pub const USER_COMMANDS_UNSUPPORTED: &str = "user_commands_unsupported";
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UserCommandCollisionDetail {
+    pub name: String,
+    pub providers: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UnknownUserCommandDetail {
+    pub command: String,
+}
+
 /// A session input-token cap stopped a tool call before dispatch. Not a
 /// retryable request refusal; the run ends in the state of the same name.
 pub const BUDGET_EXHAUSTED: &str = "budget_exhausted";
@@ -309,6 +331,11 @@ pub const SESSION_CHANGE_CODES: &[&str] = &[RUNG_UNSUPPORTED, PENDING_SUPERSEDED
 
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
+    USER_COMMAND_COLLISION,
+    UNKNOWN_USER_COMMAND,
+    UNKNOWN_INVOCATION,
+    NO_PERSON,
+    USER_COMMANDS_UNSUPPORTED,
     INVALID_PARAMS,
     LINEAGE_CHANGED,
     UNKNOWN_MID,

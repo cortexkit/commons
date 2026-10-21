@@ -495,6 +495,42 @@ or call context; providers enforce those prerequisites before sending.
 `test-vectors/tool-provider-v1/held-reply-v1.json` pins the valid reasons,
 malformed bodies and route-bind gating decision table.
 
+## 4.2. User commands
+
+- `CatalogAnswer.user_commands` is a list of `{name, description,
+  argument_hint?}` (`user_command::UserCommand`). Empty lists are omitted:
+  old catalogs keep their bytes and digests. A present list is catalog
+  content covered by `catalog_digest`. Names are unique within the answer,
+  1–32 bytes matching `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`; descriptions are one
+  line of 1–120 characters with no line break, and hints are 1–60 characters.
+  The runner freezes commands alongside tools at admission. A provider must
+  serve every listed command for the life of every session that froze it.
+- Commands are never tools. `user_command.invoke` is a reserved op; listing
+  it as a tool makes a catalog malformed (`user_command::check_catalog`).
+- The request is `{name: "user_command.invoke", arguments: {command, input},
+  call_key}`. `input` is the person's verbatim text after the name, possibly
+  empty, at most 4,096 bytes. `call_key` is required and validated as in §4.
+  A repeat of `(carrier, call_key)` returns the stored reply byte for byte
+  and never runs the command twice.
+- Only a session-scoped route with neither `attributes.run_id` nor
+  `attributes.flow_id` is admitted (`user_command::admitted`). Authority comes
+  from the daemon's route stamp, not arguments or the call-mode declaration.
+  Every other route is refused `user_command_not_admitted`. An unlisted
+  command is refused `unknown_user_command {command}`; malformed requests
+  are refused `invalid_request {field}`.
+- `UserCommandReply` is `{state, text, job?}`. Providers emit `done`,
+  `accepted` or `failed`; decoders read `state` open and show an unknown
+  state's text. `text` is plain text with light markdown, at most 64 KiB;
+  `job` is an optional opaque id. Bad command arguments yield `failed` with
+  usage text, not a refusal. The first reply arrives within 5 s.
+- Longer work replies `accepted`, which requires the `late_results` session
+  capability. The provider writes zero or more non-terminal `progress`
+  entries with `{text}`, then exactly one `result` whose `result` is a
+  `UserCommandReply` in `done` or `failed`, under the same `(carrier,
+  call_key)`. Replies, progress and final results are for the person only,
+  never model history. Older consumers record and ack unknown kinds without
+  retrying, so the added `progress` kind is safe for them.
+
 ## 5. `tool.withdraw`
 
 Served by a provider that can hold a call past its reply.

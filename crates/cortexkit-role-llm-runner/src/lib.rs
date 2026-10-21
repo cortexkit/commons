@@ -40,6 +40,7 @@ pub mod subscribe;
 pub mod tags;
 pub mod tool_calls;
 pub mod usage;
+pub mod user_commands;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
 
@@ -64,6 +65,10 @@ pub mod ops {
     /// The session's current baseline, answered only to the session's owner.
     /// Required.
     pub const SESSION_BASELINE: &str = "session.baseline";
+    /// Invoke a command made available at admission; only the owner may invoke it.
+    pub const SESSION_USER_COMMAND: &str = "session.user_command";
+    /// Read person-only command state; admitted only from the session's owner.
+    pub const SESSION_USER_COMMAND_STATUS: &str = "session.user_command_status";
     /// A page of the transcript. In `transcript_reads`, and in every group
     /// that adds fields to a page.
     pub const SESSION_READ: &str = "session.read";
@@ -201,6 +206,9 @@ pub mod capabilities {
     /// `send.status`: what a re-send of a `send_id` would answer, read
     /// without re-sending the send's body.
     pub const SEND_STATUS: &str = "send_status";
+    /// Owner relay for user commands, whose output never enters model history.
+    /// A host menu is optional; its replies must stay outside model history.
+    pub const USER_COMMANDS: &str = "user_commands";
     /// Hook phases run in their fixed order for every session. Module-level
     /// on a runner where that holds for every session; otherwise it is a
     /// session-level capability.
@@ -210,6 +218,10 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (
+            USER_COMMANDS,
+            &[ops::SESSION_USER_COMMAND, ops::SESSION_USER_COMMAND_STATUS],
+        ),
         (TRANSCRIPT_READS, &[ops::SESSION_READ, ops::SESSION_HEAD]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
@@ -333,6 +345,8 @@ mod tests {
         let role_ops = [
             ops::ROLE_DESCRIBE,
             ops::SESSION_BASELINE,
+            ops::SESSION_USER_COMMAND,
+            ops::SESSION_USER_COMMAND_STATUS,
             ops::SESSION_READ,
             ops::SESSION_HEAD,
             ops::RUN_RESULT,

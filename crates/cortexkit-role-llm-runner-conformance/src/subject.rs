@@ -79,6 +79,8 @@ pub enum Capability {
     /// `send.status`: what a re-send of a `send_id` would answer, without
     /// its body.
     SendStatus,
+    /// Owner user-command relay, with replies isolated from model history.
+    UserCommands,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -132,6 +134,7 @@ impl Capability {
         Self::RunUsage,
         Self::DeliveryOrder,
         Self::SendStatus,
+        Self::UserCommands,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -153,6 +156,7 @@ impl Capability {
     /// capability.
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
+            Self::UserCommands => groups::USER_COMMANDS,
             Self::TranscriptReads => groups::TRANSCRIPT_READS,
             Self::RunOps => groups::RUN_OPS,
             Self::RunStatus => groups::RUN_STATUS,
@@ -412,6 +416,32 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Install a scripted provider declaring `ctx-status` and `ctx-wrapup`.
+    /// The first replies done with `command-private-reply`; the second replies
+    /// accepted, then emits `command-progress-1`, `command-progress-2`, and a
+    /// done result `command-private-result`. Collision adds a second provider
+    /// declaring `ctx-status`. Return the session reference and admission fields
+    /// for those providers.
+    /// Set up the host's command-reply interface before session admission;
+    /// this setup is not a protocol operation.
+    async fn prepare_user_commands(
+        &self,
+        _session: &str,
+        _fixture: &UserCommandFixture,
+    ) -> Result<(String, Map<String, Value>), HarnessError> {
+        Err(HarnessError::new("user-command fixture is not implemented"))
+    }
+
+    /// External observations from the scripted provider, model and host menu.
+    /// Capture actual model inputs and provider invocations, not runner state.
+    async fn user_command_observation(
+        &self,
+        _session: &str,
+    ) -> Result<UserCommandObservation, HarnessError> {
+        Err(HarnessError::new(
+            "user-command observations are not implemented",
+        ))
+    }
     /// The capability groups the runner declares, plus the harness
     /// capabilities ([`Capability::HoldToolCalls`] and, when supported,
     /// [`Capability::RetentionClock`]). Kill points come from
@@ -780,4 +810,22 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Wait a short while between polls that check whether a run has ended.
     async fn pause(&self);
+}
+
+/// Configuration for scripted commands, interactivity and replies outside model history.
+#[derive(Clone, Debug)]
+pub struct UserCommandFixture {
+    pub collision: bool,
+    pub interactive: bool,
+    pub host_replies_outside_history: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct UserCommandObservation {
+    /// Each actual request received by the provider, including retries.
+    pub provider_calls: Vec<Value>,
+    /// Complete requests captured at the model boundary, across all turns.
+    pub model_inputs: Vec<Value>,
+    /// Names actually registered in the host menu, without a slash.
+    pub host_commands: Vec<String>,
 }
