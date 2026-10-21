@@ -189,6 +189,11 @@
       "state": "future",
       "text": "Show unknown state",
       "progress": []
+    },
+    {
+      "state": "outcome_unknown",
+      "text": "The command may have run; check before trying again.",
+      "progress": []
     }
   ],
   "collision": {

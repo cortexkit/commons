@@ -244,6 +244,7 @@ message-array results at the next ordinal and embedded results at the same
 ordinal, including repeated model ids across sibling positions.
 
 `user-commands.json` covers the independent owner relay, frozen provider-qualified
-commands, open reply/status states, the optional plan `interactive` boolean and
-safe host menu naming. The absent-command baseline reuses `baseline.json` and
-pins its unchanged JCS bytes. Command output is never transcript or model input.
+commands, open reply/status states including the stored terminal `outcome_unknown`
+status, the optional plan `interactive` boolean and safe host menu naming. The
+absent-command baseline reuses `baseline.json` and pins its unchanged JCS bytes.
+Command output is never transcript or model input.

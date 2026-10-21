@@ -1961,25 +1961,36 @@ re-send their bodies.
 - [pinned] `session.user_command {session_ref, command, input,
   invocation_id}` is owner-only, like `session.baseline`; every other caller
   is refused `scope_owner_mismatch`. It returns `{call_key, reply}`, where
-  `reply` is the provider's first `UserCommandReply`. Input is forwarded
+  `reply` is the first stored `UserCommandReply`; after a lost provider reply,
+  that stored answer is runner-assigned `outcome_unknown`. Input is forwarded
   verbatim (at most 4,096 bytes). The runner mints the key from the host's id
   for that invocation when available; otherwise its host shim mints an id
   once and reuses it on every retry. For the owner relay the identity is
-  `(owner, invocation_id)`. It sends `user_command.invoke` once on the
-  session's route to the declaring provider. A retry returns the stored
-  answer, never dispatching again.
+  `(owner, invocation_id)`. The runner durably records the invocation before
+  forwarding and sends `user_command.invoke` once on the session's route to the
+  declaring provider. A retry returns the stored answer, never dispatching
+  again. If the runner crashes, a forward times out or the connection is lost
+  before the provider's reply is stored, whether the command ran is unknowable.
+  The runner stores terminal `outcome_unknown` as the answer and status instead
+  of forwarding again; every retry and status read replays that outcome. Its
+  text tells the person the command may have run.
 - [pinned] `session.user_command_status {session_ref, call_key}` is also
   owner-only. It returns `{state, text, progress: [text], job?}`: the latest
   state, the first reply's or terminal result's text, and progress in order
-  (the last 20, at most 64 KiB total). State is decoded open. Invocation state
-  is retained until the session ends or 24 h after its terminal result,
-  whichever comes first. There is no notice path: notices are the model's
-  channel.
+  (the last 20, at most 64 KiB total). State accepts unrecognized strings and
+  leaves their values available to callers. `outcome_unknown` is terminal: the
+  module may have run the command but its reply was lost. A caller must never
+  retry it automatically and must tell the person it may have run. Invocation
+  state is retained until the session ends or 24 h after its terminal result,
+  whichever comes first. There is no separate notice for the person: notices go
+  to the model. The owner retrieves command replies and progress through the
+  invocation reply or this status operation.
 - [pinned] While accepted, the runner pulls provider `late_results` every
   2–10 s until the result, session end, or one hour. After an hour it tells
   the person no result arrived in that time. The owner polls status at the
   same 2–10 s rhythm while open. Progress is non-terminal; a result carries
-  a `done` or `failed` `UserCommandReply`.
+  a `done` or `failed` `UserCommandReply`, or terminal `outcome_unknown` after an
+  indeterminate forward.
 - [pinned] An unfrozen name is refused `unknown_user_command {command}`; a status key
   not held is refused `unknown_invocation`. A runner without the group
   refuses these ops with `user_commands_unsupported`.
@@ -2415,17 +2426,22 @@ state root (`cortexkit-role-harness`):
    existing state on retry, and nothing is written twice.
 7. [pinned] **Keys are stable.** A call's `call_key` read before a kill is
    the same after it.
-8. [pinned] **Resume is recorded.** Each resume writes one informational
-   record, before its first action, of what it replays, what it redoes and
-   which calls it marks indeterminate. It never enters what the model is
-    sent.
-9. **Expiry deletion survives a crash.** A durable retention tombstone makes
-   the lineage unreadable; restart finishes deleting its transcript and all
-   runner-held derived copies (§9.1).
+ 8. [pinned] **Resume is recorded.** Each resume writes one informational
+    record, before its first action, of what it replays, what it redoes and
+    which calls it marks indeterminate. The informational record is never
+    included in model input.
+ 9. **Expiry deletion survives a crash.** A durable retention tombstone makes
+    the lineage unreadable; restart finishes deleting its transcript and all
+    runner-held derived copies (§9.1).
+10. [pinned] **A forwarded person command is never resent after an indeterminate
+    result.** Its invocation key is durable before forwarding. If the reply is not
+    stored after a crash, timeout or lost connection, restart stores and replays
+    terminal `outcome_unknown`; it never forwards that key again (§9.10).
 
-Kill points (`points.rs`). [pinned] The list below. Approval-gated calls'
-points join it with the runner's approve-gate work.
-
+Kill points (`points.rs`). [pinned] The list below names durable states at which
+conformance can stop a runner. A runner serving `user_commands` includes
+`UserCommandForwarded`. Approval-gated calls may add kill points defined by
+their role.
 | Point | Durable state after the kill | Property |
 |---|---|---|
 | `Admitted` | the start record; no model request sent | 1, 6 |
@@ -2437,6 +2453,7 @@ points join it with the runner's approve-gate work.
 | `ToolResultRecorded` | a call's result with its PostTool output | 4, 5 |
 | `Terminal` | the run's terminal state | 3 |
 | `RetentionTombstoned` | a content-free expiry tombstone; transcript and derived copies not yet deleted | 9 |
+| `UserCommandForwarded` | the invocation is durably reserved and its provider received it; the reply is not stored | 10, §9.10 |
 
 A runner whose durable state lives in a store where truncation is not
 meaningful reaches these points with a fault hook followed by a real process

@@ -126,6 +126,16 @@ where
                     crate::structured_output::restart(subject, work_dir, &declared, &mint)
                         .await
                         .map(|()| Ending::Passed)
+                } else if spec.name == "user_commands_outcome_unknown" {
+                    crate::user_commands::crash_case(
+                        subject,
+                        &mut driver,
+                        work_dir,
+                        &declared,
+                        &mint,
+                    )
+                    .await
+                    .map(|()| Ending::Passed)
                 } else if spec.name == "interrupt_reason_shutdown_durable" {
                     crate::interrupt_reason::shutdown(subject, work_dir, &declared, &mint)
                         .await

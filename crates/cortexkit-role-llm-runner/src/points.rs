@@ -51,8 +51,13 @@ pub const TERMINAL: &str = "Terminal";
 /// them.
 pub const RETENTION_TOMBSTONED: &str = "RetentionTombstoned";
 
-/// Every point in the role's vocabulary, in the order a run that uses them
-/// all reaches them.
+/// A person-command invocation is durably reserved and sent to its provider,
+/// but the provider's reply is not stored. On resume, the runner must not send
+/// that invocation again; it stores terminal `outcome_unknown` for invocation
+/// and status reads.
+pub const USER_COMMAND_FORWARDED: &str = "UserCommandForwarded";
+
+/// Every point in the role's vocabulary.
 pub const ALL: &[&str] = &[
     ADMITTED,
     SEND_RECORDED,
@@ -63,6 +68,7 @@ pub const ALL: &[&str] = &[
     TOOL_RESULT_RECORDED,
     TERMINAL,
     RETENTION_TOMBSTONED,
+    USER_COMMAND_FORWARDED,
 ];
 
 #[cfg(test)]

@@ -112,6 +112,7 @@ from `session.baseline` has no admission reply to compare.
 | `run_result_completed_final_text`, `run_result_text_parts_joined_unchanged`, `run_result_completed_no_text_is_empty` | `run_ops`, `queue` |
 | `run_attribution_per_message` | `run_ops`, `queue`, `transcript_reads`, `hold_tool_calls`; needs the native fixture hook or explicit `CannotHoldUnattributable` declaration (missing hook fails, not skips) |
 | `run_result_interrupted_not_cancelled` | `run_ops`, `queue`, `transcript_reads`, kill point `DispatchIntent` |
+| `user_commands_outcome_unknown` | `user_commands`, `queue`, `run_ops`, kill point `UserCommandForwarded` |
 | `dispatched_to_per_call`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution`, `queue`, `transcript_reads` |
 | `indeterminate_until_closed` | `dispatch_attribution`, `queue`, `transcript_reads`, `hold_tool_calls` |
 | `subscribe_from_head_no_gap_no_duplicate` | `streaming`, `queue`, `transcript_reads` |
@@ -451,7 +452,11 @@ The named cases cover transcript/model-input isolation through a follow-up
 turn, once-only forwarding with verbatim input, `interactive: false`, admission
 provider collisions for the same command name, ordered late progress,
 owner-only access and a host that cannot keep user-command replies out of
-conversation history. A menu is not required: even with no safe menu,
+conversation history. `user_commands_outcome_unknown` kills the runner after
+forwarding but before storing the reply, then checks that restart replays
+`outcome_unknown` through both invocation and status without a second provider
+call. Callers must tell the person it may have run and must not retry it
+automatically. A menu is not required: even with no safe menu,
 user-command requests must still reach the provider. The asynchronous fixture must settle within 30 seconds;
 the protocol's normal one-hour pull limit is a contract rule, not a one-hour
 self-test. Each case has a deliberately faulty fake that fails it by name.

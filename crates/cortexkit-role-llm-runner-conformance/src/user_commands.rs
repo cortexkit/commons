@@ -1,8 +1,11 @@
 //! Live-route command checks observing provider calls, model inputs and host menus.
 
+use std::{collections::BTreeSet, path::Path};
+
+use cortexkit_role_harness::{CrashDriver, KillPoint, Trigger};
 use cortexkit_role_llm_runner::{
     baseline::BaselineReply,
-    capabilities as groups, errors, ops,
+    capabilities as groups, errors, ops, points,
     send::SendReply,
     user_commands::{UserCommandAnswer, UserCommandStatus},
 };
@@ -10,9 +13,11 @@ use serde_json::{json, Value};
 
 use crate::{
     cases::Case,
-    drive::{call, decode, expect_code, expect_error, expect_ok, read_all, wait_run_end},
+    drive::{call, decode, expect_code, expect_error, expect_ok, read_all, wait_run_end, Mint},
     route::RunnerRoute,
-    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn, UserCommandFixture},
+    subject::{
+        Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn, UserCommandFixture,
+    },
 };
 
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<(), String>
@@ -264,6 +269,148 @@ where
         if !observed.host_commands.is_empty() {
             return Err("unsafe host registered user commands in its menu".into());
         }
+    }
+    Ok(())
+}
+
+/// Kill after the provider has received a user command but before its reply is
+/// stored, then verify that restart exposes the same indeterminate outcome
+/// through the invocation and status operations without forwarding again.
+pub async fn crash_case<S>(
+    subject: &S,
+    driver: &mut CrashDriver<'_, S>,
+    work_dir: &Path,
+    declared: &BTreeSet<Capability>,
+    mint: &Mint,
+) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let root = work_dir.join("user-command-outcome-unknown");
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let name = mint.next("user-command-crash");
+    subject
+        .install_script(
+            &name,
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![ScriptedPart::Text("ordinary model answer".into())]),
+                    ScriptedTurn::new(vec![ScriptedPart::Text("follow-up answer".into())]),
+                ],
+            },
+        )
+        .await
+        .map_err(|error| format!("installing the script of {name}: {error}"))?;
+    let fixture = UserCommandFixture {
+        collision: false,
+        interactive: true,
+        host_replies_outside_history: true,
+    };
+    let (session_ref, fields) = subject
+        .prepare_user_commands(&name, &fixture)
+        .await
+        .map_err(|error| error.to_string())?;
+    let owner = subject.owner_stamp();
+    let invocation_id = mint.next("user-command-invocation");
+    let mut invocation = Value::Object(fields);
+    invocation["prompt"] = json!("ordinary prompt");
+    invocation["send_id"] = json!(mint.next("user-command-send"));
+
+    let handle = driver
+        .spawn(&root)
+        .await
+        .map_err(|error| format!("spawning the runner: {error}"))?;
+    let route = subject
+        .session_route(handle.inner(), &name, &owner)
+        .await
+        .map_err(|error| format!("opening the route of {name}: {error}"))?;
+    let admission: SendReply = decode(
+        "command-session admission",
+        expect_ok(
+            "command-session admission",
+            call(&route, ops::SESSION_SEND, invocation).await?,
+        )?,
+    )?;
+    wait_run_end(subject, &route, declared, None, &admission).await?;
+
+    let request = json!({
+        "session_ref": session_ref,
+        "command": "ctx-status",
+        "input": "check after restart",
+        "invocation_id": invocation_id,
+    });
+    let trigger: Trigger<'_> = {
+        let route = &route;
+        let request = request.clone();
+        Box::pin(async move {
+            let _ = route.request(ops::SESSION_USER_COMMAND, request).await;
+        })
+    };
+    let point = points::USER_COMMAND_FORWARDED;
+    driver
+        .kill_at(handle, &KillPoint::new(point), trigger)
+        .await
+        .map_err(|error| format!("killing at {point}: {error}"))?;
+    drop(route);
+
+    let handle = driver
+        .restart(&root)
+        .await
+        .map_err(|error| format!("restarting after {point}: {error}"))?;
+    let route = subject
+        .session_route(handle.inner(), &name, &owner)
+        .await
+        .map_err(|error| format!("reopening {name}: {error}"))?;
+    let answer: UserCommandAnswer = decode(
+        "retried command",
+        expect_ok(
+            "retried command",
+            call(&route, ops::SESSION_USER_COMMAND, request).await?,
+        )?,
+    )?;
+    answer.reply.check().map_err(str::to_owned)?;
+    if !answer.reply.is_outcome_unknown() || !answer.reply.text.contains("may have run") {
+        return Err(format!(
+            "lost provider reply must be reported as outcome_unknown with a person-facing warning: {:?}",
+            answer.reply
+        ));
+    }
+    let status: UserCommandStatus = decode(
+        "command status after restart",
+        expect_ok(
+            "command status after restart",
+            call(
+                &route,
+                ops::SESSION_USER_COMMAND_STATUS,
+                json!({"session_ref":session_ref,"call_key":answer.call_key}),
+            )
+            .await?,
+        )?,
+    )?;
+    status.check().map_err(str::to_owned)?;
+    if !status.is_outcome_unknown()
+        || status.text != answer.reply.text
+        || !status.progress.is_empty()
+    {
+        return Err(format!(
+            "status did not replay the stored outcome_unknown reply: {status:?}"
+        ));
+    }
+
+    let observed = subject
+        .user_command_observation(&name)
+        .await
+        .map_err(|error| error.to_string())?;
+    if observed.provider_calls.len() != 1
+        || observed.provider_calls[0]["name"] != "user_command.invoke"
+        || observed.provider_calls[0]["call_key"] != answer.call_key
+        || observed.provider_calls[0]["arguments"]["input"] != "check after restart"
+    {
+        return Err(format!(
+            "the lost-reply invocation must reach the provider exactly once: {:?}",
+            observed.provider_calls
+        ));
     }
     Ok(())
 }

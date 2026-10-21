@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.10
+
+- Require llm-runner 0.3.10. Add a crash-cut user-command case proving that a
+  forwarded invocation whose reply was lost is stored as `outcome_unknown`,
+  replayed by invocation and status reads, and never forwarded again. The
+  reference runner persists its reservation before forwarding; faulty runners
+  that forward again or report `failed` fail this case by name.
+
 ## 0.8.9
 
 - Require `cortexkit-role-compaction-provider` 0.3.3. Add

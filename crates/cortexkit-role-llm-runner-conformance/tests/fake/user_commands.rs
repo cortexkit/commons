@@ -12,8 +12,6 @@ pub(super) struct Commands {
 pub(super) struct CommandSession {
     fixture: UserCommandFixture,
     pub observation: UserCommandObservation,
-    answers: BTreeMap<String, Value>,
-    statuses: BTreeMap<String, Value>,
 }
 
 impl FakeSubject {
@@ -38,8 +36,6 @@ impl FakeSubject {
                     host_commands: menu,
                     ..Default::default()
                 },
-                answers: BTreeMap::new(),
-                statuses: BTreeMap::new(),
             },
         );
         let mut fields = self.send_fields(session, true);
@@ -98,52 +94,102 @@ impl Module {
         session: &str,
         method: &str,
         params: Value,
-    ) -> Reply {
+    ) -> Result<Reply, Killed> {
         if !self.world.serves(groups::USER_COMMANDS) {
-            return refuse(errors::USER_COMMANDS_UNSUPPORTED, None);
+            return Ok(refuse(errors::USER_COMMANDS_UNSUPPORTED, None));
         }
+        let _gate = self.user_command_gate.lock().unwrap();
         let mut sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get_mut(session) else {
-            return refuse(errors::UNKNOWN_INVOCATION, None);
+            return Ok(refuse(errors::UNKNOWN_INVOCATION, None));
         };
         if sess.owner != stamp.principal && self.world.defects.user_command != Some("owner") {
-            return refuse(errors::SCOPE_OWNER_MISMATCH, None);
+            return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+        }
+        if method == ops::SESSION_USER_COMMAND_STATUS {
+            let call_key = params["call_key"].as_str().unwrap_or("");
+            return Ok(sess
+                .user_commands
+                .values()
+                .find(|command| command.call_key == call_key)
+                .and_then(|command| command.status.clone())
+                .map(Reply::Response)
+                .unwrap_or_else(|| refuse(errors::UNKNOWN_INVOCATION, None)));
         }
         let mut commands = self.world.user_commands.lock().unwrap();
         let Some(config) = commands.sessions.get_mut(session) else {
-            return refuse(
+            return Ok(refuse(
                 errors::UNKNOWN_USER_COMMAND,
-                Some(json!({"command": params["command"]})),
-            );
+                Some(json!({"command":params["command"]})),
+            ));
         };
-        if method == ops::SESSION_USER_COMMAND_STATUS {
-            return config
-                .statuses
-                .get(params["call_key"].as_str().unwrap_or(""))
-                .cloned()
-                .map(Reply::Response)
-                .unwrap_or_else(|| refuse(errors::UNKNOWN_INVOCATION, None));
-        }
         if !config.fixture.interactive && self.world.defects.user_command != Some("no_person") {
-            return refuse(errors::NO_PERSON, None);
+            return Ok(refuse(errors::NO_PERSON, None));
         }
-        let command = params["command"].as_str().unwrap_or("");
-        if !["ctx-status", "ctx-wrapup"].contains(&command) {
-            return refuse(
+        let command = params["command"].as_str().unwrap_or("").to_owned();
+        if !["ctx-status", "ctx-wrapup"].contains(&command.as_str()) {
+            return Ok(refuse(
                 errors::UNKNOWN_USER_COMMAND,
-                Some(json!({"command": command})),
-            );
+                Some(json!({"command":command})),
+            ));
         }
-        let invocation = params["invocation_id"].as_str().unwrap();
+        let input = params["input"].as_str().unwrap_or("").to_owned();
+        let invocation = params["invocation_id"].as_str().unwrap().to_owned();
         let call_key = format!("command/{}/{invocation}", stamp.principal);
-        if let Some(answer) = config.answers.get(invocation) {
+        if let Some(stored) = sess.user_commands.get(&invocation).cloned() {
             if self.world.defects.user_command == Some("duplicate") {
-                let repeated = config.observation.provider_calls.last().unwrap().clone();
-                config.observation.provider_calls.push(repeated);
+                if let Some(repeated) = config.observation.provider_calls.last().cloned() {
+                    config.observation.provider_calls.push(repeated);
+                }
             }
-            return Reply::Response(answer.clone());
+            let retry_unknown = self.world.defects.user_command == Some("retry_after_crash")
+                && stored
+                    .answer
+                    .as_ref()
+                    .is_some_and(|answer| answer["reply"]["state"] == "outcome_unknown");
+            drop(commands);
+            drop(sessions);
+            if retry_unknown {
+                self.world
+                    .user_commands
+                    .lock()
+                    .unwrap()
+                    .sessions
+                    .get_mut(session)
+                    .unwrap()
+                    .observation
+                    .provider_calls
+                    .push(json!({"name":"user_command.invoke", "arguments":{"command":stored.command,"input":stored.input}, "call_key":stored.call_key}));
+                self.commit(session, json!({"kind":"user_command_forwarded"}))?;
+            }
+            return Ok(stored
+                .answer
+                .map(Reply::Response)
+                .unwrap_or_else(|| refuse(errors::UNKNOWN_INVOCATION, None)));
         }
-        config.observation.provider_calls.push(json!({"name":"user_command.invoke", "arguments":{"command":command,"input":params["input"]}, "call_key":call_key}));
+        drop(commands);
+        drop(sessions);
+
+        self.commit(
+            session,
+            json!({
+                "kind":"user_command_reservation",
+                "invocation":invocation,
+                "call_key":call_key,
+                "command":command,
+                "input":input,
+            }),
+        )?;
+        self.world
+            .user_commands
+            .lock()
+            .unwrap()
+            .sessions
+            .get_mut(session)
+            .unwrap()
+            .observation
+            .provider_calls
+            .push(json!({"name":"user_command.invoke", "arguments":{"command":command,"input":input}, "call_key":call_key}));
         let (reply, mut status) = if command == "ctx-wrapup" {
             (
                 json!({"state":"accepted","text":"command-private-reply"}),
@@ -159,11 +205,25 @@ impl Module {
             status["progress"] = json!(["command-progress-2", "command-progress-1"]);
         }
         if self.world.defects.user_command == Some("history") {
-            sess.push(json!({"role":"assistant","parts":[{"type":"text","text":"command-private-reply"}]}), "", vec![]);
+            if let Some(sess) = self.sessions.lock().unwrap().get_mut(session) {
+                sess.push(
+                    json!({"role":"assistant","parts":[{"type":"text","text":"command-private-reply"}]}),
+                    "",
+                    vec![],
+                );
+            }
         }
+        self.commit(session, json!({"kind":"user_command_forwarded"}))?;
         let answer = json!({"call_key":call_key,"reply":reply});
-        config.answers.insert(invocation.into(), answer.clone());
-        config.statuses.insert(call_key, status);
-        Reply::Response(answer)
+        self.commit(
+            session,
+            json!({
+                "kind":"user_command_result",
+                "invocation":invocation,
+                "answer":answer,
+                "status":status,
+            }),
+        )?;
+        Ok(Reply::Response(answer))
     }
 }

@@ -7,6 +7,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// A command may have run even though the runner lost its reply. Callers must
+/// not retry it automatically and must tell the person it may have run.
+pub const OUTCOME_UNKNOWN: &str = "outcome_unknown";
+
 pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 
 /// A command declaration, kept separate from the model's tool definitions.
@@ -89,6 +93,10 @@ impl UserCommandReply {
         self
     }
 
+    pub fn is_outcome_unknown(&self) -> bool {
+        self.state == OUTCOME_UNKNOWN
+    }
+
     pub fn check(&self) -> Result<(), &'static str> {
         if self.text.len() > MAX_TEXT_BYTES {
             return Err("text");
@@ -136,6 +144,10 @@ pub struct UserCommandStatus {
 }
 
 impl UserCommandStatus {
+    pub fn is_outcome_unknown(&self) -> bool {
+        self.state == OUTCOME_UNKNOWN
+    }
+
     pub fn check(&self) -> Result<(), &'static str> {
         if self.text.len() > MAX_TEXT_BYTES {
             return Err("text");
@@ -232,11 +244,16 @@ mod tests {
         );
         for row in data["statuses"].as_array().unwrap() {
             round_trip!(UserCommandStatus, row);
-            serde_json::from_value::<UserCommandStatus>(row.clone())
-                .unwrap()
-                .check()
-                .unwrap();
+            let status: UserCommandStatus = serde_json::from_value(row.clone()).unwrap();
+            status.check().unwrap();
+            assert_eq!(status.is_outcome_unknown(), status.state == OUTCOME_UNKNOWN);
         }
+        let unknown: UserCommandReply = serde_json::from_value(json!({
+            "state": OUTCOME_UNKNOWN,
+            "text": "It may have run; check before trying again."
+        }))
+        .unwrap();
+        assert!(unknown.is_outcome_unknown());
         let mut status: UserCommandStatus =
             serde_json::from_value(data["statuses"][0].clone()).unwrap();
         status.progress = vec![String::new(); 21];

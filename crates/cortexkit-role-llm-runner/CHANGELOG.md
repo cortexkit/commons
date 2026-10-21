@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.10
+
+- Persist user-command invocation records and the terminal `outcome_unknown`
+  answer/status after a crash, timeout or lost reply. Retries and status reads
+  replay the stored outcome without forwarding again; callers must not retry it
+  automatically and must tell the person it may have run. Add `is_outcome_unknown`
+  helpers for the open user-command state strings and a status vector without
+  changing wire members.
+
 ## 0.3.9
 
 - Keep the role independent of tool-provider at runtime. Runner-owned command

@@ -536,6 +536,15 @@ struct CallRec {
     result: bool,
 }
 
+#[derive(Clone, Debug)]
+struct UserCommandRec {
+    call_key: String,
+    command: String,
+    input: String,
+    answer: Option<Value>,
+    status: Option<Value>,
+}
+
 #[derive(Clone, Debug, Default)]
 struct Sess {
     compaction: compaction::State,
@@ -561,6 +570,7 @@ struct Sess {
     sends: BTreeMap<String, SendRec>,
     runs: Vec<RunRec>,
     calls: BTreeMap<String, CallRec>,
+    user_commands: BTreeMap<String, UserCommandRec>,
     /// The kind of every record, in order: the durable control events.
     events: Vec<String>,
     /// The highest tag number assigned.
@@ -636,6 +646,7 @@ fn point_of(kind: &str) -> &'static str {
         "tombstone" => points::RETENTION_TOMBSTONED,
         "compaction_message" => points::COMPACTION_APPLIED,
         "compaction_fold" => points::FOLD_RECORDED,
+        "user_command_forwarded" => points::USER_COMMAND_FORWARDED,
         _ => "",
     }
 }
@@ -683,6 +694,9 @@ pub struct Module {
     kill_hook: Mutex<Option<String>>,
     hook_fired: AtomicBool,
     sessions: Mutex<BTreeMap<String, Sess>>,
+    /// Serialize user-command reservation with forwarding so concurrent retries
+    /// cannot both pass the durable lookup before the invocation key is recorded.
+    user_command_gate: Mutex<()>,
     /// The module was opened over a log an earlier incarnation wrote: it is
     /// a restart.
     replayed: AtomicBool,
@@ -802,6 +816,7 @@ impl Module {
             kill_hook: Mutex::new(None),
             hook_fired: AtomicBool::new(false),
             sessions: Mutex::new(BTreeMap::new()),
+            user_command_gate: Mutex::new(()),
             replayed: AtomicBool::new(false),
         });
         if let Ok(text) = std::fs::read_to_string(&module.log) {
@@ -835,9 +850,46 @@ impl Module {
         Ok(module)
     }
 
-    /// Resume every run a kill cut, after writing one resume record per
-    /// session it touches.
+    /// On restart, record terminal `outcome_unknown` for reserved commands with
+    /// no stored reply, then resume runs interrupted by a kill. The durable log
+    /// stores each reservation beside session state, so it survives a process
+    /// restart.
     fn resume(&self) -> Result<(), Killed> {
+        let unfinished_commands: Vec<(String, String, UserCommandRec)> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|(session, sess)| {
+                sess.user_commands
+                    .iter()
+                    .filter(|(_, command)| command.answer.is_none())
+                    .map(|(invocation, command)| {
+                        (session.clone(), invocation.clone(), command.clone())
+                    })
+            })
+            .collect();
+        for (session, invocation, command) in unfinished_commands {
+            let state = if self.world.defects.user_command == Some("report_failed") {
+                "failed"
+            } else {
+                cortexkit_role_llm_runner::user_commands::OUTCOME_UNKNOWN
+            };
+            let text = if state == cortexkit_role_llm_runner::user_commands::OUTCOME_UNKNOWN {
+                "The command may have run, but its reply was lost. Check before trying again."
+            } else {
+                "The runner failed before it could determine whether the command ran."
+            };
+            self.commit(
+                &session,
+                json!({
+                    "kind":"user_command_result",
+                    "invocation":invocation,
+                    "answer":{"call_key":command.call_key,"reply":{"state":state,"text":text}},
+                    "status":{"state":state,"text":text,"progress":[]}
+                }),
+            )?;
+        }
         let cut: Vec<(String, String)> = self
             .sessions
             .lock()
@@ -1059,6 +1111,25 @@ impl Module {
                     (record["request"].clone(), record["reply"].clone()),
                 );
             }
+            "user_command_reservation" => {
+                sess.user_commands.insert(
+                    text("invocation"),
+                    UserCommandRec {
+                        call_key: text("call_key"),
+                        command: text("command"),
+                        input: text("input"),
+                        answer: None,
+                        status: None,
+                    },
+                );
+            }
+            "user_command_result" => {
+                if let Some(command) = sess.user_commands.get_mut(&text("invocation")) {
+                    command.answer = Some(record["answer"].clone());
+                    command.status = Some(record["status"].clone());
+                }
+            }
+            "user_command_forwarded" => {}
             "cancel" => {
                 if let Some(run) = sess.run_mut(&text("run_id")) {
                     run.cancel_requested = true;
@@ -1079,6 +1150,7 @@ impl Module {
                 sess.deleted = true;
                 sess.messages.clear();
                 sess.calls.clear();
+                sess.user_commands.clear();
                 sess.sends.clear();
                 sess.runs.clear();
                 sess.title = record["title"].as_str().map(str::to_owned);
@@ -1866,7 +1938,7 @@ impl Module {
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
             ops::SESSION_USER_COMMAND | ops::SESSION_USER_COMMAND_STATUS => {
-                Ok(self.user_command(stamp, session, method, params))
+                self.user_command(stamp, session, method, params)
             }
             ops::SESSION_SEND => self.send(stamp, session, params),
             ops::SESSION_ADOPT => {
@@ -3667,6 +3739,7 @@ pub const KILL_POINTS: &[&str] = &[
     points::RETENTION_TOMBSTONED,
     points::COMPACTION_APPLIED,
     points::FOLD_RECORDED,
+    points::USER_COMMAND_FORWARDED,
 ];
 
 impl FakeSubject {

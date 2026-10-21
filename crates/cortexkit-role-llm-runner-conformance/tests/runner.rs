@@ -2874,3 +2874,13 @@ async fn user_command_faults_fail_by_name() {
         failed(&run(&command_subject(Some(defect))).await, case);
     }
 }
+
+#[tokio::test]
+async fn user_command_crash_faults_fail_by_name() {
+    for defect in ["retry_after_crash", "report_failed"] {
+        failed(
+            &run(&command_subject(Some(defect))).await,
+            "user_commands_outcome_unknown",
+        );
+    }
+}
