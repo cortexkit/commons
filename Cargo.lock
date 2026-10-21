@@ -665,11 +665,12 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-store"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "cortexkit-lease",
  "cortexkit-store-types",
  "rusqlite",
+ "serde_json",
 ]
 
 [[package]]

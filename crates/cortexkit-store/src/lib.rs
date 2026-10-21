@@ -28,6 +28,13 @@
 //! writer still opens, but hard-link aliases may not see the owner until a later
 //! checkpoint copies the row into the main file. Matching-owner opens never
 //! checkpoint ownership.
+//!
+//! A module that deletes data keeps a removals journal beside its database
+//! (`<store dir>/removals/journal`) and opens with
+//! [`open_sqlite_with_removals`], which replays every journaled removal the
+//! database has not applied before it serves, so an older copy of the database
+//! can't bring removed data back. It removes through [`SqliteStore::remove`].
+//! A store that has adopted the journal refuses a plain [`open_sqlite`].
 
 pub use cortexkit_store_types::{
     postgres_database_name, sqlite_store_path, Isolation, StorageBackend, StorageDescriptor,
@@ -81,7 +88,12 @@ impl MigrationOutcome {
     }
 }
 
+/// Why a store operation failed.
+///
+/// Non-exhaustive: a later release may add a variant without a breaking
+/// version bump, so a match needs a catch-all arm.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum StoreError {
     /// A live writer already holds this module's store.
     Lease(LeaseError),
@@ -109,6 +121,30 @@ pub enum StoreError {
     /// writer has been superseded — for example a draining old instance attempting a
     /// late write after a replacement took the lease. The write was not applied.
     Fenced { holder_epoch: u64, db_epoch: u64 },
+    /// The store's removals journal (`<store dir>/removals/journal`) cannot be
+    /// read, or holds a damaged record before its final line, a sequence gap or a
+    /// repeated sequence. The store refuses to serve rather than risk serving data
+    /// a lost record had removed. `detail` names the file and the problem.
+    RemovalsUnreadable { detail: String },
+    /// The journal's newest record (`journal_seq`) is older than the last removal
+    /// the database has applied (`store_seq`): the journal came from an older
+    /// generation than the database.
+    RemovalsBehindStore { journal_seq: u64, store_seq: u64 },
+    /// The database has applied removals up to `store_seq`, but the removals
+    /// journal is missing.
+    RemovalsMissing { store_seq: u64 },
+    /// The journal's header names a different `(module_id, storage_namespace)`
+    /// owner from the store being opened.
+    RemovalsOwnerMismatch {
+        journal_module_id: String,
+        journal_storage_namespace: String,
+        expected_module_id: String,
+        expected_storage_namespace: String,
+    },
+    /// The store has adopted the removals journal (its database has applied a
+    /// removal, or a `removals/` directory sits beside it), so it must be opened
+    /// with the module's replay handler. Nothing was served.
+    RemovalsHandlerRequired,
 }
 
 impl std::fmt::Display for StoreError {
@@ -141,6 +177,43 @@ impl std::fmt::Display for StoreError {
                 "fenced write rejected: this writer holds epoch {holder_epoch} but the \
                  database was claimed by a newer writer at epoch {db_epoch}"
             ),
+            StoreError::RemovalsUnreadable { detail } => write!(
+                f,
+                "removals journal unreadable ({detail}); the store refuses to serve: restore \
+                 the newest removals journal from Engram"
+            ),
+            StoreError::RemovalsBehindStore {
+                journal_seq,
+                store_seq,
+            } => write!(
+                f,
+                "removals journal ends at record {journal_seq} but the store has applied \
+                 removals up to {store_seq}: restore the removals journal from the same or a \
+                 newer generation than the store"
+            ),
+            StoreError::RemovalsMissing { store_seq } => write!(
+                f,
+                "removals journal missing, but the store has applied removals up to \
+                 {store_seq}: restore the newest removals journal from Engram"
+            ),
+            StoreError::RemovalsOwnerMismatch {
+                journal_module_id,
+                journal_storage_namespace,
+                expected_module_id,
+                expected_storage_namespace,
+            } => write!(
+                f,
+                "removals journal belongs to ({journal_module_id:?}, \
+                 {journal_storage_namespace:?}), not ({expected_module_id:?}, \
+                 {expected_storage_namespace:?}): restore this store's own removals journal, \
+                 or, if the module changed its owner on purpose, run \
+                 RemovalJournal::rewrite_owner under acquire_store_lease"
+            ),
+            StoreError::RemovalsHandlerRequired => write!(
+                f,
+                "this store uses a removals journal: open it with open_sqlite_with_removals \
+                 (or StoreLease::open_scratch_with_removals) and the module's replay handler"
+            ),
         }
     }
 }
@@ -168,6 +241,11 @@ mod sqlite_backend {
 
     use cortexkit_lease::{protect_file, FileLeaseStore, LeaseHandle};
     use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
+
+    mod removals;
+    pub use removals::{
+        open_sqlite_with_removals, Removal, RemovalJournal, RemovalRecord, RemovalsHandler,
+    };
 
     /// Decides whether `open_sqlite` creates and narrows the store's directory:
     /// only when the store's file sits in a directory of its own.
@@ -336,6 +414,9 @@ mod sqlite_backend {
         readers: Option<ReadPool>,
         conn: Mutex<Connection>,
         epoch: u64,
+        // Where [`SqliteStore::remove`] appends, set only by
+        // `open_sqlite_with_removals`. Locked after `conn`, never before.
+        removals: Option<Mutex<removals::JournalWriter>>,
         // The held lease releases on drop; kept last so it remains held through
         // the writer's checkpoint and close. Shared because a scratch store opened
         // through `StoreLease::open_scratch` keeps the maintenance lease held until
@@ -397,6 +478,7 @@ mod sqlite_backend {
                 readers: None,
                 conn: Mutex::new(conn),
                 epoch,
+                removals: None,
                 _lease: Arc::new(NoLease(cortexkit_lease::LeaseKey::new(
                     "test", "sqlite", "test",
                 ))),
@@ -602,7 +684,26 @@ mod sqlite_backend {
         check_options(&options)?;
 
         let (path, lease) = take_store_lease(descriptor)?;
-        open_under_lease(path, descriptor, options, Arc::from(lease))
+        // A store that has adopted the removals journal must replay it before
+        // serving, which needs the module's handler. The directory check runs
+        // before SQLite opens, so a forgotten handler never creates or touches
+        // the database; `open_under_lease` then checks the database itself.
+        removals::refuse_if_journal_dir(&path)?;
+        open_under_lease(
+            path,
+            descriptor,
+            options,
+            Arc::from(lease),
+            AppliedRemovals::Refuse,
+        )
+    }
+
+    /// Whether [`open_under_lease`] refuses a database that has applied a
+    /// journaled removal: plain opens do, opens that replay the journal don't.
+    #[derive(Debug, Clone, Copy)]
+    enum AppliedRemovals {
+        Refuse,
+        Allow,
     }
 
     /// The SQLite file path a descriptor names, or `UnsupportedBackend` for a
@@ -667,17 +768,33 @@ mod sqlite_backend {
     /// On any error the connection closes before `lease` is dropped (locals drop
     /// before parameters), so a refused opener never holds the lease while its
     /// connection is still open.
+    ///
+    /// With [`AppliedRemovals::Refuse`], a database that has applied a journaled
+    /// removal is refused with [`StoreError::RemovalsHandlerRequired`]. That
+    /// check reads the database right after the owner check, before WAL is
+    /// enabled, so it leaves the connection in the same state the owner check
+    /// alone would.
     fn open_under_lease(
         path: String,
         owner: &StorageDescriptor,
         options: SqliteOpenOptions,
         lease: Arc<dyn LeaseHandle>,
+        applied_removals: AppliedRemovals,
     ) -> Result<SqliteStore, StoreError> {
         let mut conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
         conn.busy_timeout(options.busy_timeout)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         if !is_memory_or_uri(&path) {
             claim_owner(&mut conn, owner)?;
+            if let AppliedRemovals::Refuse = applied_removals {
+                // Catches a database restored without its `removals/`
+                // directory, which the directory check cannot see.
+                let applied = removals::read_applied_seq(&conn)
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                if applied > 0 {
+                    return Err(StoreError::RemovalsHandlerRequired);
+                }
+            }
         }
         // Beside the owner check and before WAL is enabled, so an open refused
         // here leaves a rollback-journal database in its own journal mode.
@@ -730,6 +847,7 @@ mod sqlite_backend {
             },
             conn: Mutex::new(conn),
             epoch,
+            removals: None,
             _lease: lease,
         })
     }
@@ -891,19 +1009,38 @@ mod sqlite_backend {
         /// place, so that its connection closes; dropping a store attempts to
         /// checkpoint its WAL into the main file and SQLite removes the `-wal` and
         /// `-shm` when the last connection closes cleanly.
+        ///
+        /// Refused with [`StoreError::RemovalsHandlerRequired`] when the live store
+        /// has a `removals/` directory or the copy has applied a removal: such a
+        /// copy must go through [`StoreLease::open_scratch_with_removals`], which
+        /// replays the live journal onto it.
         pub fn open_scratch(
             &self,
             path: impl AsRef<Path>,
             options: SqliteOpenOptions,
         ) -> Result<SqliteStore, StoreError> {
-            let path = path.as_ref();
+            let path = self.scratch_path(path.as_ref(), &options)?;
+            // The live store's journal decides, as in `open_sqlite_with`: a copy
+            // prepared without the handler would be placed with resurrected rows.
+            removals::refuse_if_journal_dir(&self.live_path)?;
+            self.open_scratch_at(path, options, AppliedRemovals::Refuse)
+        }
+
+        /// Validates a scratch path for [`StoreLease::open_scratch`] and
+        /// [`StoreLease::open_scratch_with_removals`]: valid UTF-8, a file path,
+        /// not the live store's database. Also checks `options`.
+        fn scratch_path(
+            &self,
+            path: &Path,
+            options: &SqliteOpenOptions,
+        ) -> Result<String, StoreError> {
             let path = path.to_str().map(str::to_owned).ok_or_else(|| {
                 StoreError::Backend(format!(
                     "scratch database path {} is not valid UTF-8",
                     path.display()
                 ))
             })?;
-            check_options(&options)?;
+            check_options(options)?;
             if is_memory_or_uri(&path) {
                 return Err(StoreError::Backend(format!(
                     "scratch database {path:?} must be a file path, not an in-memory \
@@ -916,8 +1053,24 @@ mod sqlite_backend {
                     self.live_path
                 )));
             }
+            Ok(path)
+        }
+
+        /// Opens a validated scratch path under this lease.
+        fn open_scratch_at(
+            &self,
+            path: String,
+            options: SqliteOpenOptions,
+            applied_removals: AppliedRemovals,
+        ) -> Result<SqliteStore, StoreError> {
             prepare_store_dir(&path, &parent_dir(&path))?;
-            open_under_lease(path, &self.descriptor, options, Arc::clone(&self.lease))
+            open_under_lease(
+                path,
+                &self.descriptor,
+                options,
+                Arc::clone(&self.lease),
+                applied_removals,
+            )
         }
     }
 
@@ -1505,6 +1658,7 @@ mod sqlite_backend {
                 &descriptor(&copy),
                 SqliteOpenOptions::default(),
                 fixed(),
+                AppliedRemovals::Refuse,
             ) {
                 Err(StoreError::Lease(LeaseError::Io(error))) => {
                     assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
@@ -1521,6 +1675,7 @@ mod sqlite_backend {
                 &descriptor(&fresh),
                 SqliteOpenOptions::default(),
                 fixed(),
+                AppliedRemovals::Refuse,
             )
             .unwrap();
             assert_eq!(store.epoch(), 1);
@@ -1530,7 +1685,8 @@ mod sqlite_backend {
 
 #[cfg(feature = "sqlite")]
 pub use sqlite_backend::{
-    acquire_store_lease, open_sqlite, open_sqlite_with, SqliteOpenOptions, SqliteStore, StoreLease,
+    acquire_store_lease, open_sqlite, open_sqlite_with, open_sqlite_with_removals, Removal,
+    RemovalJournal, RemovalRecord, RemovalsHandler, SqliteOpenOptions, SqliteStore, StoreLease,
 };
 
 #[cfg(all(test, feature = "sqlite"))]

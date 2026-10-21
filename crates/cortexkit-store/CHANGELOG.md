@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.0
+
+- Add a removals journal, so an older copy of `store.db` (a backup restore, a
+  hand-placed export, a new machine) can no longer serve data a module removed.
+  Each removal is recorded in `<store dir>/removals/journal` (directory 0700,
+  file 0600), append-only JSON lines with a header naming the store's owner and
+  CRC-32C-checked records numbered 1, 2, 3, ….
+- `open_sqlite_with_removals(descriptor, options, handler)` opens like
+  `open_sqlite_with`, then replays every record newer than the database's
+  `applied_removal_seq` through `RemovalsHandler::replay`, one transaction each,
+  before serving. Its first open of a store creates the journal, with one record
+  per tombstone `RemovalsHandler::backfill` returns.
+- `SqliteStore::remove(kind, ids, erase)` appends and syncs the record, then runs
+  `erase` in the transaction that advances `applied_removal_seq`. A torn final
+  line left by a crash during the append is dropped on the next open; a damaged
+  record anywhere else, a sequence gap or a repeated sequence refuses.
+  `SqliteStore::applied_removal_seq` reports the database's applied sequence.
+- `StoreLease::open_scratch_with_removals(path, options, handler)` replays the
+  live store's journal onto a scratch copy before returning, and refuses a copy
+  ahead of that journal. `RemovalJournal::rewrite_owner` rewrites the journal's
+  owner for a module that changes its owner on purpose; `RemovalJournal::path`
+  names the journal file.
+- Add `StoreError::RemovalsUnreadable`, `RemovalsBehindStore`, `RemovalsMissing`,
+  `RemovalsOwnerMismatch` and `RemovalsHandlerRequired`. These break downstream
+  exhaustive matches, hence the minor version bump.
+- Breaking: `StoreError` is now `#[non_exhaustive]`, so a match on it needs a
+  catch-all arm. Later releases can then add a variant without another breaking
+  bump.
+- Behaviour change: `open_sqlite` and `StoreLease::open_scratch` now refuse a
+  store with a `removals/` directory beside its database, or whose database has
+  applied a removal, with `StoreError::RemovalsHandlerRequired`. A store that
+  never adopted the journal opens exactly as before. The directory check runs
+  after the lease is taken and before SQLite opens.
+- New dependency: `serde_json` (with the `sqlite` feature), to read the journal.
+- The README now states that a store's database must be reachable through
+  exactly one path: a second path (a hard link, a second mount) takes a
+  different lease, and the fence does not stop two writers holding one each.
+
 ## 0.3.3
 
 - A `store.db` that arrives without its `*.lease` files (a backup restored onto
