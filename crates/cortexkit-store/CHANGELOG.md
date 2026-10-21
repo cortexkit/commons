@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.2
+
+- `open_sqlite` now takes the single-writer lease before it opens the
+  database, as its documentation always said. Previously it opened SQLite and
+  checked the recorded owner first, so a second opener of a held store read the
+  live database (and could create or write its `-wal` and `-shm`) before being
+  refused. A refused same-owner opener now never opens SQLite.
+- An opener under a different `(module_id, storage_namespace)` derives a
+  different lease key, so it now takes its own lease, is refused by the owner
+  check with `StoreError::OwnershipMismatch`, and releases that lease before
+  returning. Its lease file stays in the store's directory, as lease files
+  always do; before this release such an opener created no lease file.
+- Add `acquire_store_lease(&StorageDescriptor) -> Result<StoreLease, StoreError>`:
+  takes the same lease as `open_sqlite` (same directory and key, derived by the
+  same code) without opening SQLite, writing `cortexkit_owner` or touching the
+  database files, so a maintenance tool such as a restore can keep the module's
+  writer out. `StoreLease` releases on drop and exposes `epoch()`. A refused
+  acquire never changes the persisted epoch or creates a file; it can only
+  reapply owner-only permissions (see the function's documentation).
+- Add `StoreLease::open_scratch(path, options)`: opens a different database
+  file, such as a temporary copy being prepared to replace the live store, with
+  the same pragmas and file modes, checking its owner against the lease's
+  descriptor. It takes no second lease and never opens the live database; the
+  lease stays held until the guard and every scratch store are dropped.
+- A patch release: the new API is additive, and the reordering is a safety fix
+  that existing `0.3` dependents should pick up with `cargo update`.
+- Fix two documentation links to `with_conn` that did not resolve.
+
 ## 0.3.1
 
 - Close pooled read-only connections before checkpointing and closing the SQLite

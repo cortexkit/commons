@@ -1,8 +1,8 @@
 #![cfg(feature = "sqlite")]
 
 use cortexkit_store::{
-    open_sqlite, open_sqlite_with, Isolation, SqliteOpenOptions, SqliteStore, StorageBackend,
-    StorageDescriptor, StoreError,
+    acquire_store_lease, open_sqlite, open_sqlite_with, Isolation, SqliteOpenOptions, SqliteStore,
+    StorageBackend, StorageDescriptor, StoreError,
 };
 use rusqlite::{Connection, OpenFlags};
 use std::{
@@ -197,8 +197,12 @@ fn writer_with_points(db: &TestDb) -> SqliteStore {
     writer
 }
 
+/// An opener under another namespace derives its own lease key, so it takes a
+/// lease of its own before the owner check refuses it. It must release that
+/// lease before returning, and leave only that lease file behind: no sidecar or
+/// other file appears, and the first writer keeps writing.
 #[test]
-fn another_namespace_is_refused_before_lease_and_first_writer_keeps_writing() {
+fn another_namespace_is_refused_by_the_owner_check_and_releases_its_lease() {
     let db = TestDb::new();
     let writer = open_sqlite(&db.descriptor).unwrap();
     writer
@@ -209,11 +213,22 @@ fn another_namespace_is_refused_before_lease_and_first_writer_keeps_writing() {
     let before = entries(&db.root);
     let requested = db.other_namespace();
     mismatch(open_sqlite(&requested), &db.descriptor, &requested);
-    assert_eq!(
-        entries(&db.root),
-        before,
-        "a refused open must not create a lease"
+    let added: Vec<_> = entries(&db.root)
+        .into_iter()
+        .filter(|path| !before.contains(path))
+        .collect();
+    assert!(
+        added.len() == 1 && added[0].extension().is_some_and(|ext| ext == "lease"),
+        "a refused open may leave only its own lease file behind: {added:?}"
     );
+    // The refused opener's lease is free again, while the owner's is not.
+    let released =
+        acquire_store_lease(&requested).expect("the refused opener's lease was released");
+    drop(released);
+    assert!(matches!(
+        acquire_store_lease(&db.descriptor),
+        Err(StoreError::Lease(_))
+    ));
     writer
         .with_conn(|conn| conn.execute("INSERT INTO points VALUES (2)", []))
         .unwrap();
@@ -256,7 +271,11 @@ fn hard_link_under_another_namespace_is_refused() {
         path: alias.to_string_lossy().into_owned(),
     };
     mismatch(open_sqlite(&requested), &db.descriptor, &requested);
-    assert!(entries(&aliases).iter().all(|path| path == &alias));
+    // The refused opener took (and released) its own lease beside the alias;
+    // nothing else, in particular no `-wal` or `-shm` for the alias, remains.
+    assert!(entries(&aliases)
+        .iter()
+        .all(|path| path == &alias || path.extension().is_some_and(|ext| ext == "lease")));
     drop(writer);
 }
 

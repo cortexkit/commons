@@ -34,7 +34,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-role-step-transform-provider](crates/cortexkit-role-step-transform-provider/README.md) | Wire contract and vectors for step-transform hooks and operations. | [0.2.3](https://crates.io/crates/cortexkit-role-step-transform-provider) |
 | [cortexkit-role-tool-provider](crates/cortexkit-role-tool-provider/README.md) | Wire contract and vectors for tool catalogs, calls, results, and withdrawal. | [0.8.1](https://crates.io/crates/cortexkit-role-tool-provider) |
 | [cortexkit-role-tool-provider-conformance](crates/cortexkit-role-tool-provider-conformance/README.md) | Conformance runner for a live tool provider. | [0.8.0](https://crates.io/crates/cortexkit-role-tool-provider-conformance) |
-| [cortexkit-store](crates/cortexkit-store/README.md) | SQLite storage opening, migrations, and single-writer ownership. | [0.3.0](https://crates.io/crates/cortexkit-store) |
+| [cortexkit-store](crates/cortexkit-store/README.md) | SQLite storage opening, migrations, and single-writer ownership. | [0.3.2](https://crates.io/crates/cortexkit-store) |
 | [cortexkit-store-postgres](crates/cortexkit-store-postgres/README.md) | PostgreSQL storage opening, migrations, and single-writer leases. | Not published |
 | [cortexkit-store-types](crates/cortexkit-store-types/README.md) | Dependency-light storage descriptors and isolation types. | [0.2.2](https://crates.io/crates/cortexkit-store-types) |
 | [cortexkit-test-support](crates/cortexkit-test-support/README.md) | Portable scratch storage, executable staging, and daemon fencing. | [0.1.8](https://crates.io/crates/cortexkit-test-support) |

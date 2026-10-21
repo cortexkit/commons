@@ -19,10 +19,11 @@
 //! distributed/cloud backend's writes would compare-and-set on.
 //!
 //! File-backed SQLite databases also record their `(module_id, storage_namespace)`
-//! owner before taking a lease. A different owner is refused even through a path
-//! alias. Read-only operations do not claim or check ownership; in-memory and URI
-//! databases are exempt. Intentionally changing ownership requires clearing the
-//! row in `cortexkit_owner` while all writers are stopped; there is no API for it.
+//! owner, checked right after the lease is taken. A different owner is refused
+//! even through a path alias. Read-only operations do not claim or check
+//! ownership; in-memory and URI databases are exempt. Intentionally changing
+//! ownership requires clearing the row in `cortexkit_owner` while all writers
+//! are stopped; there is no API for it.
 //! A first claim attempts a best-effort WAL checkpoint. If readers delay it, the
 //! writer still opens, but hard-link aliases may not see the owner until a later
 //! checkpoint copies the row into the main file. Matching-owner opens never
@@ -93,7 +94,9 @@ pub enum StoreError {
     /// An io failure preparing the store location.
     Io(std::io::Error),
     /// The database belongs to a different module or storage namespace.
-    /// No writer lease was taken and no application writes were performed.
+    /// No application writes were performed. The opener had already taken the
+    /// lease for its own `(module_id, storage_namespace)` (a different lease from
+    /// the recorded owner's) and released it before returning this error.
     OwnershipMismatch {
         recorded_module_id: String,
         recorded_storage_namespace: String,
@@ -159,7 +162,7 @@ mod sqlite_backend {
     use super::*;
     use std::{
         path::{Path, PathBuf},
-        sync::{Condvar, Mutex},
+        sync::{Arc, Condvar, Mutex},
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
@@ -334,8 +337,10 @@ mod sqlite_backend {
         conn: Mutex<Connection>,
         epoch: u64,
         // The held lease releases on drop; kept last so it remains held through
-        // the writer's checkpoint and close.
-        _lease: Box<dyn LeaseHandle>,
+        // the writer's checkpoint and close. Shared because a scratch store opened
+        // through `StoreLease::open_scratch` keeps the maintenance lease held until
+        // both it and the `StoreLease` are gone.
+        _lease: Arc<dyn LeaseHandle>,
     }
 
     impl Drop for SqliteStore {
@@ -386,7 +391,7 @@ mod sqlite_backend {
                 readers: None,
                 conn: Mutex::new(conn),
                 epoch,
-                _lease: Box::new(NoLease(cortexkit_lease::LeaseKey::new(
+                _lease: Arc::new(NoLease(cortexkit_lease::LeaseKey::new(
                     "test", "sqlite", "test",
                 ))),
             }
@@ -447,7 +452,7 @@ mod sqlite_backend {
         /// rejected ([`StoreError::Fenced`]) if a newer writer has taken over the
         /// database, otherwise it commits atomically.
         ///
-        /// Use this instead of [`with_conn`] for a durable write that must NOT be
+        /// Use this instead of [`with_conn`](SqliteStore::with_conn) for a durable write that must NOT be
         /// applied by a superseded writer — for example a credential vault's
         /// token-rotation commit, where a draining old instance must never clobber a
         /// fresh token its replacement already wrote. The OS advisory lock already
@@ -463,7 +468,7 @@ mod sqlite_backend {
         /// error from `f` rolls the transaction back.
         ///
         /// Additive and opt-in: the fence table is created lazily on the first fenced
-        /// write, so existing [`with_conn`]-only stores have a byte-identical
+        /// write, so existing [`with_conn`](SqliteStore::with_conn)-only stores have a byte-identical
         /// database and are unaffected. A store mixes both paths freely.
         pub fn with_conn_fenced<T>(
             &self,
@@ -543,7 +548,18 @@ mod sqlite_backend {
     /// several independent per-domain chains into its one database.
     ///
     /// The lease is acquired BEFORE the file is opened, so a second live writer is
-    /// rejected (`StoreError::Lease`) rather than corrupting a shared file.
+    /// rejected (`StoreError::Lease`) without SQLite ever opening the database: the
+    /// database file and its `-wal` and `-shm` siblings are not read, created or
+    /// written by the refused opener.
+    ///
+    /// The recorded owner is checked right after the lease is taken. An opener
+    /// with a different `(module_id, storage_namespace)` derives a different lease
+    /// key, so its own lease succeeds; the owner check then refuses it
+    /// (`StoreError::OwnershipMismatch`) and its lease is released before the
+    /// error returns. That opener's lease file is left behind in the store's
+    /// directory (created on first use, epoch bumped on later ones), as every
+    /// lease file is; it is never deleted, since removing a lock file other
+    /// processes may have open would let two of them hold "the" lock at once.
     ///
     /// The lease lives next to the database file (its parent directory), DERIVED
     /// from the descriptor's path rather than passed in. This makes the
@@ -552,7 +568,8 @@ mod sqlite_backend {
     /// lease (the single-writer guarantee). A caller cannot accidentally point a
     /// shared lease directory at several distinct databases (which would falsely
     /// make them contend) or split one database across lease directories (which
-    /// would break single-writer).
+    /// would break single-writer). [`acquire_store_lease`] takes this same lease
+    /// for maintenance without opening the database.
     pub fn open_sqlite(descriptor: &StorageDescriptor) -> Result<SqliteStore, StoreError> {
         open_sqlite_with(descriptor, SqliteOpenOptions::default())
     }
@@ -564,38 +581,89 @@ mod sqlite_backend {
         descriptor: &StorageDescriptor,
         options: SqliteOpenOptions,
     ) -> Result<SqliteStore, StoreError> {
-        let path = match &descriptor.backend {
-            StorageBackend::Sqlite { path } => path.clone(),
-            other => return Err(StoreError::UnsupportedBackend(other.label().to_string())),
-        };
+        // Both checks run before anything touches the disk, so a descriptor or
+        // option this build cannot serve never creates a directory or a lease.
+        sqlite_path(descriptor)?;
+        check_options(&options)?;
+
+        let (path, lease) = take_store_lease(descriptor)?;
+        open_under_lease(path, descriptor, options, Arc::from(lease))
+    }
+
+    /// The SQLite file path a descriptor names, or `UnsupportedBackend` for a
+    /// descriptor of any other backend.
+    fn sqlite_path(descriptor: &StorageDescriptor) -> Result<String, StoreError> {
+        match &descriptor.backend {
+            StorageBackend::Sqlite { path } => Ok(path.clone()),
+            other => Err(StoreError::UnsupportedBackend(other.label().to_string())),
+        }
+    }
+
+    /// The directory a SQLite file lives in; `.` for a path with no parent.
+    fn parent_dir(path: &str) -> PathBuf {
+        Path::new(path)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn check_options(options: &SqliteOpenOptions) -> Result<(), StoreError> {
         if options.read_pool_size == 0 {
             return Err(StoreError::Backend(
                 "sqlite read pool size must be at least one".into(),
             ));
         }
+        Ok(())
+    }
 
-        let parent = Path::new(&path)
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        if owns_store_dir(&path, &parent) {
-            cortexkit_lease::create_private_dir(&parent).map_err(StoreError::Io)?;
+    /// Create the directory a store file lives in. When the file has a directory
+    /// of its own, it is created (or narrowed) owner-only; see [`owns_store_dir`].
+    fn prepare_store_dir(path: &str, parent: &Path) -> Result<(), StoreError> {
+        if owns_store_dir(path, parent) {
+            cortexkit_lease::create_private_dir(parent).map_err(StoreError::Io)
         } else {
-            std::fs::create_dir_all(&parent).map_err(StoreError::Io)?;
+            std::fs::create_dir_all(parent).map_err(StoreError::Io)
         }
+    }
 
+    /// Prepare a store's directory and take its single-writer lease, without
+    /// opening the database. Returns the database path with the held lease.
+    ///
+    /// This is the only place the lease's location and key are derived from a
+    /// descriptor. [`open_sqlite_with`] and [`acquire_store_lease`] both go
+    /// through it, so a maintenance tool and the module itself always contend on
+    /// the same lease for the same database.
+    fn take_store_lease(
+        descriptor: &StorageDescriptor,
+    ) -> Result<(String, Box<dyn LeaseHandle>), StoreError> {
+        let path = sqlite_path(descriptor)?;
+        let parent = parent_dir(&path);
+        prepare_store_dir(&path, &parent)?;
+        let lease = FileLeaseStore::new(&parent)
+            .acquire(&lease_key(descriptor))
+            .map_err(StoreError::Lease)?;
+        Ok((path, lease))
+    }
+
+    /// Open the SQLite file at `path` for a caller that already holds `lease`:
+    /// claim or check `owner` as the file's recorded owner, apply the durable
+    /// pragmas and owner-only file modes, and return the store holding `lease`.
+    ///
+    /// On any error the connection closes before `lease` is dropped (locals drop
+    /// before parameters), so a refused opener never holds the lease while its
+    /// connection is still open.
+    fn open_under_lease(
+        path: String,
+        owner: &StorageDescriptor,
+        options: SqliteOpenOptions,
+        lease: Arc<dyn LeaseHandle>,
+    ) -> Result<SqliteStore, StoreError> {
         let mut conn = Connection::open(&path).map_err(|e| StoreError::Backend(e.to_string()))?;
         conn.busy_timeout(options.busy_timeout)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         if !is_memory_or_uri(&path) {
-            claim_owner(&mut conn, descriptor)?;
+            claim_owner(&mut conn, owner)?;
         }
-
-        // Ownership must be checked before a descriptor-specific lease can admit
-        // a second writer to the same database under a different namespace.
-        let lease = FileLeaseStore::new(&parent)
-            .acquire(&lease_key(descriptor))
-            .map_err(StoreError::Lease)?;
         let epoch = lease.epoch();
 
         // WAL permits concurrent readers; foreign keys protect referential integrity.
@@ -647,6 +715,150 @@ mod sqlite_backend {
             epoch,
             _lease: lease,
         })
+    }
+
+    /// A store's single-writer lease, held WITHOUT the store's database open.
+    ///
+    /// For maintenance that must keep the module's own writer out while it works
+    /// on the store from outside, for example restoring a backup: while this guard
+    /// is held, [`open_sqlite`] for the same descriptor is refused with
+    /// [`StoreError::Lease`], exactly as if a live writer held the store.
+    ///
+    /// Dropping the guard releases the lease, unless a scratch store opened
+    /// through [`StoreLease::open_scratch`] is still alive: each scratch store
+    /// shares the lease and keeps it held until it is dropped too. That way a
+    /// scratch connection that is still open can never be writing to a file the
+    /// module has meanwhile reopened as its live store.
+    #[derive(Debug)]
+    pub struct StoreLease {
+        descriptor: StorageDescriptor,
+        live_path: String,
+        lease: Arc<dyn LeaseHandle>,
+    }
+
+    /// Take a store's single-writer lease without opening its database.
+    ///
+    /// The lease is the one [`open_sqlite`] takes for `descriptor`: same
+    /// directory (the database file's parent), same key, derived by the same
+    /// code. Like `open_sqlite`, it first creates the store's directory if it is
+    /// missing (owner-only when the store has a directory of its own). It does
+    /// not open SQLite, does not read or write `cortexkit_owner`, and does not
+    /// create or touch the database file or its `-wal` and `-shm` siblings.
+    ///
+    /// A successful acquire, like every lease acquire, creates the lease file if
+    /// it is missing and increments the epoch persisted in it; that new epoch is
+    /// [`StoreLease::epoch`].
+    ///
+    /// A refused acquire (`StoreError::Lease`, because a live writer or another
+    /// `StoreLease` holds the store) writes nothing to the lease file: the epoch
+    /// is only incremented after the OS lock is won. It creates no file either,
+    /// because a held lease's file and directory already exist. Its only possible
+    /// change is to permissions, which are reapplied on every attempt before the
+    /// lock is tried:
+    /// - on Unix, the lease file is reset to mode 0600 and the store's directory
+    ///   narrowed to owner-only only if something loosened them since the holder
+    ///   took the lease; that changes their ctime, not their contents or mtime;
+    /// - on Windows, the lease file's owner-only access list is rewritten on every
+    ///   attempt, which updates its change time but not its contents or last-write
+    ///   time.
+    ///
+    /// Only SQLite descriptors are supported; any other backend is refused with
+    /// [`StoreError::UnsupportedBackend`] before anything touches the disk.
+    pub fn acquire_store_lease(descriptor: &StorageDescriptor) -> Result<StoreLease, StoreError> {
+        let (live_path, lease) = take_store_lease(descriptor)?;
+        Ok(StoreLease {
+            descriptor: descriptor.clone(),
+            live_path,
+            lease: Arc::from(lease),
+        })
+    }
+
+    impl StoreLease {
+        /// The fence epoch this acquire persisted: strictly greater than any
+        /// earlier holder's, live writers included.
+        pub fn epoch(&self) -> u64 {
+            self.lease.epoch()
+        }
+
+        /// Open a SQLite database at `path`, a different file from the live store,
+        /// for preparing a replacement while the live store is held: for example a
+        /// temporary copy of a backup that a restore tool migrates and verifies
+        /// before moving it into place.
+        ///
+        /// The database gets the same treatment as [`open_sqlite_with`] gives a live
+        /// store: busy timeout, WAL, foreign keys, owner-only file modes (and an
+        /// owner-only directory when it has one of its own), and a read pool sized
+        /// by `options`. Its owner is claimed or checked against this lease's
+        /// descriptor, so a copy recorded for another module or namespace is refused
+        /// with [`StoreError::OwnershipMismatch`] before it can be placed where this
+        /// store's module would then refuse to open it.
+        ///
+        /// It takes no second lease: the returned store shares this one and carries
+        /// its epoch, and the lease stays held until both are dropped. It never opens
+        /// the live store's database, so nothing is claimed or written there.
+        ///
+        /// Refused with [`StoreError::Backend`] when `path` is not valid UTF-8, is an
+        /// in-memory database or a SQLite URI, or names the live store's database
+        /// (the same path, or the same file reached through a symlink, or on Unix
+        /// through a hard link). Drop the scratch store before moving its file into
+        /// place, so that its connection closes; dropping a store attempts to
+        /// checkpoint its WAL into the main file and SQLite removes the `-wal` and
+        /// `-shm` when the last connection closes cleanly.
+        pub fn open_scratch(
+            &self,
+            path: impl AsRef<Path>,
+            options: SqliteOpenOptions,
+        ) -> Result<SqliteStore, StoreError> {
+            let path = path.as_ref();
+            let path = path.to_str().map(str::to_owned).ok_or_else(|| {
+                StoreError::Backend(format!(
+                    "scratch database path {} is not valid UTF-8",
+                    path.display()
+                ))
+            })?;
+            check_options(&options)?;
+            if is_memory_or_uri(&path) {
+                return Err(StoreError::Backend(format!(
+                    "scratch database {path:?} must be a file path, not an in-memory \
+                     database or a SQLite URI"
+                )));
+            }
+            if names_same_file(&path, &self.live_path) {
+                return Err(StoreError::Backend(format!(
+                    "scratch database {path:?} is the live store's database {:?}",
+                    self.live_path
+                )));
+            }
+            prepare_store_dir(&path, &parent_dir(&path))?;
+            open_under_lease(path, &self.descriptor, options, Arc::clone(&self.lease))
+        }
+    }
+
+    /// Whether two SQLite paths name the same file: the same string, the same
+    /// resolved location (through symlinks), or on Unix the same inode (through a
+    /// hard link). A path that does not exist yet is compared by its resolved
+    /// directory and file name.
+    fn names_same_file(a: &str, b: &str) -> bool {
+        if a == b {
+            return true;
+        }
+        let (a, b) = (Path::new(a), Path::new(b));
+        #[cfg(unix)]
+        if let (Ok(a), Ok(b)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            use std::os::unix::fs::MetadataExt;
+            return (a.dev(), a.ino()) == (b.dev(), b.ino());
+        }
+        fn resolve(path: &Path) -> Option<PathBuf> {
+            if let Ok(resolved) = std::fs::canonicalize(path) {
+                return Some(resolved);
+            }
+            let dir = match path.parent() {
+                Some(dir) if !dir.as_os_str().is_empty() => dir,
+                _ => Path::new("."),
+            };
+            Some(std::fs::canonicalize(dir).ok()?.join(path.file_name()?))
+        }
+        matches!((resolve(a), resolve(b)), (Some(a), Some(b)) if a == b)
     }
 
     /// Switch to WAL, retrying while another connection briefly holds a lock.
@@ -716,14 +928,21 @@ mod sqlite_backend {
     ) -> Result<(), StoreError> {
         let backend = |e: rusqlite::Error| StoreError::Backend(e.to_string());
         // Almost every open finds an owner already recorded. Check that with a plain
-        // read first, so a reopen never waits for the write lock: behind a busy writer
-        // it would time out as a backend error instead of reaching the lease refusal.
+        // read first, so it never waits for the write lock. An opener under another
+        // namespace holds a lease of its own and gets this far even while the owner
+        // is writing; behind a busy writer it would otherwise time out as a backend
+        // error instead of reporting the ownership mismatch.
         if let Some(recorded) = read_owner(conn).map_err(backend)? {
             return check_owner(recorded, descriptor);
         }
         // No owner yet. Serialize the first claim with every other writer open, not
         // just openers whose descriptors happen to share a lease key, and look again
         // inside the transaction, since another opener may have claimed it meanwhile.
+        // IMMEDIATE takes SQLite's write lock when the transaction begins, so the
+        // second look and the insert are one atomic step: of two openers under
+        // different namespaces racing on an unowned database (each holding its own
+        // lease), the second to get the lock sees the first one's row and is
+        // refused. The single-row primary key would reject a second insert anyway.
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(backend)?;
@@ -943,7 +1162,9 @@ mod sqlite_backend {
 }
 
 #[cfg(feature = "sqlite")]
-pub use sqlite_backend::{open_sqlite, open_sqlite_with, SqliteOpenOptions, SqliteStore};
+pub use sqlite_backend::{
+    acquire_store_lease, open_sqlite, open_sqlite_with, SqliteOpenOptions, SqliteStore, StoreLease,
+};
 
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
