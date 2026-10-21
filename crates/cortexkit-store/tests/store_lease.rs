@@ -62,12 +62,15 @@ impl Drop for TestDb {
 }
 
 /// One file's observable state: length, modification time and full contents.
-type FileState = (u64, SystemTime, Vec<u8>);
+/// The contents are `None` only for a file Windows will not let this process
+/// read because a byte-range lock covers it (see `read_unless_locked`).
+type FileState = (u64, SystemTime, Option<Vec<u8>>);
 
 /// What a refused opener must not change in a store's directory: the
 /// directory's own modification time (which moves when a file is created or
 /// removed) and the length, mtime and bytes of every file in it, lease files
-/// included, so a bumped epoch shows up as changed contents. Permissions and
+/// included, so a bumped epoch shows up as changed contents (bytes only where
+/// the platform lets the test read them, see `read_unless_locked`). Permissions and
 /// change times are left out: a refused lease acquire may reapply owner-only
 /// permissions, which changes no contents.
 #[derive(Debug, PartialEq)]
@@ -85,7 +88,7 @@ fn dir_state(dir: &Path) -> DirState {
             let state = (
                 metadata.len(),
                 metadata.modified().unwrap(),
-                std::fs::read(&path).unwrap(),
+                read_unless_locked(&path),
             );
             (path, state)
         })
@@ -93,6 +96,22 @@ fn dir_state(dir: &Path) -> DirState {
     DirState {
         dir_mtime: std::fs::metadata(dir).unwrap().modified().unwrap(),
         files,
+    }
+}
+
+/// Reads a file's contents for comparison. Windows byte-range locks are
+/// mandatory: while a lease is held, or a SQLite connection holds its locks in
+/// `-shm`, reading the locked range fails with `ERROR_LOCK_VIOLATION` (33),
+/// even from the process holding the lock, through any other handle. Such a
+/// file is compared by length and modification time only; a write to it,
+/// such as a bumped lease epoch, still moves its modification time. Any other
+/// read error fails the test.
+fn read_unless_locked(path: &Path) -> Option<Vec<u8>> {
+    const ERROR_LOCK_VIOLATION: i32 = 33;
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if cfg!(windows) && error.raw_os_error() == Some(ERROR_LOCK_VIOLATION) => None,
+        Err(error) => panic!("reading {}: {error}", path.display()),
     }
 }
 
