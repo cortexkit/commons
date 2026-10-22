@@ -824,6 +824,13 @@ view (§6) appears in the model view is the runner role's to define.
 
 ## 13. Error codes
 
+- [pinned] A reply's `RESPONSE` body is the bare answer object (a
+  `SetupAnswer`, a `ViewGetAnswer`, a `RideAnswer`), never wrapped in
+  `{"result": ...}` as `llm-runner/v1` replies are. A refusal is an `ERROR`
+  frame whose body is `{code, message, detail?}`: every other refusal field
+  lives inside `detail`, never at the top level of the body.
+  `reply-shape.json` pins one of each.
+
 Codes ride as the `code` of an `ERROR` frame's body `{code, message,
 detail?}` (`ErrorBody`). They are open strings: a party that meets one it
 does not know treats it as a terminal refusal of that one request, and

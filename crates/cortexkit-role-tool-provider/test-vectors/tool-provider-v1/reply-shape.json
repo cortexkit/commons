@@ -1,0 +1,23 @@
+{
+  "replies": [
+    {
+      "name": "a tool.withdraw answer is the bare answer object, never wrapped in result",
+      "op": "tool.withdraw",
+      "body": {
+        "answer": "withdrawn"
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "a refusal's other fields ride inside detail, never at the top level",
+      "body": {
+        "code": "unknown_tool",
+        "message": "no such tool",
+        "detail": {
+          "tool": "conformance_missing"
+        }
+      }
+    }
+  ]
+}

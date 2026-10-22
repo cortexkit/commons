@@ -112,6 +112,14 @@
       "retryable": false
     },
     {
+      "code": "generation_stale",
+      "retryable": false
+    },
+    {
+      "code": "tool_outside_host_set",
+      "retryable": false
+    },
+    {
       "code": "a_code_this_role_does_not_define",
       "retryable": false
     }

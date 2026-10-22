@@ -1,0 +1,101 @@
+{
+  "replies": [
+    {
+      "name": "a wrapped session.baseline answer is accepted",
+      "answer": "BaselineReply",
+      "body": {
+        "result": {
+          "state": "not_yet"
+        }
+      }
+    },
+    {
+      "name": "a wrapped run.cancel answer, a bare string inside result, is accepted",
+      "answer": "string",
+      "body": {
+        "result": "ack"
+      }
+    },
+    {
+      "name": "a bare session.baseline answer is refused",
+      "answer": "BaselineReply",
+      "body": {
+        "state": "not_yet"
+      },
+      "refused": {
+        "problem": "bare_answer"
+      }
+    },
+    {
+      "name": "a bare string answer is refused",
+      "answer": "string",
+      "body": "ack",
+      "refused": {
+        "problem": "bare_answer"
+      }
+    },
+    {
+      "name": "a wrapped answer with another top-level key is refused, naming the key",
+      "answer": "BaselineReply",
+      "body": {
+        "result": {
+          "state": "not_yet"
+        },
+        "request_id": "r-1"
+      },
+      "refused": {
+        "problem": "extra_keys",
+        "keys": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "name": "a wrapped answer of the wrong shape is refused",
+      "answer": "BaselineReply",
+      "body": {
+        "result": {
+          "baseline": {}
+        }
+      },
+      "refused": {
+        "problem": "bad_answer"
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "a refusal's other fields ride inside detail, class included",
+      "body": {
+        "code": "transient",
+        "message": "the store is briefly unavailable",
+        "detail": {
+          "class": "transient"
+        }
+      }
+    },
+    {
+      "name": "a refusal without detail",
+      "body": {
+        "code": "unknown_mid",
+        "message": "after_mid names no message"
+      }
+    }
+  ],
+  "stream_events": [
+    {
+      "name": "a session.subscribe STREAM_DATA frame carries the bare event",
+      "frame": {
+        "kind": "control",
+        "cursor": {
+          "wal_seq": 1204,
+          "sub_index": 0
+        },
+        "unit": {
+          "type": "message",
+          "ordinal": 500
+        }
+      }
+    }
+  ]
+}

@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.1
+
+Additive for 0.4.0 callers: no published signature changes.
+
+- `session_change` (§10.2) has pinned shapes in the new `session_change`
+  module. `session.refresh {plan, policy, generation}` (strict) fetches the
+  plan's items as admission does and holds them as the pending change; it
+  answers `{accepted_generation, pending, run_in_progress,
+  applies_from_next_run}`, and an identical repeat gets the same answer.
+  `session.refresh_policy {generation, policy, send_id}` answers `{pending}`
+  and is idempotent on `send_id`; `session.flush_prefix {send_id}` answers
+  `{pending_generation?}`. Refusals carry typed details:
+  `rung_unsupported {surface, rung}`, `pending_superseded {generation,
+  pending}`, `already_applied {generation, applied_by}`, and the new
+  `generation_stale {accepted}` and `tool_outside_host_set {names}` (a tool
+  outside the set the host fixed at start, or a changed definition under a
+  kept name; `outside_host_set` decides membership). A refresh can also meet
+  admission's `fetch_unavailable`, `plan_stale` and `tool_name_collision`.
+- The next-run rule: a change never applies inside a running run; the
+  earliest is the start of the next run, and `immediately` means from the
+  next run. `session.flush_prefix` applies at the next run, never mid-run
+  (it previously said the next step). While a change is pending, a send
+  carrying the effective or the latest accepted plan is not drift
+  (`check_send_drift`); `plan_drift` then names the latest accepted plan.
+- `stop_when.max_steps` (§9.3.1): a run ends `max_steps` only when the step
+  that reached the limit requested a tool call that would lead to another
+  step. A limiting step with no tool call ends `completed` with its final
+  message, directives and structured output, and one calling
+  `submit_result` ends as `submit_result` always does.
+- Reply bodies: every role reply is exactly `{"result": <answer>}`. New
+  `wire::reply_body` builds one, and `wire::read_reply` refuses a bare
+  answer or extra top-level keys by name (`ReplyShapeError`). Stream events
+  stay bare; a refusal's fields other than `code` and `message`, `class`
+  included, live inside `detail`. New `reply-envelope.json` vectors.
+- `TRANSPORT_FRAME_LIMIT` (4,194,304 bytes, header included) names the
+  limit `reply_too_large` reports; it equals the daemon's
+  `MAX_DELIVERED_FRAME_LEN`.
+- `tags::try_number_parts` refuses numbering that would pass `u64::MAX`
+  with `NumberingOverflow {checkpoint, counted}` instead of repeating a
+  number. `tags::number_parts`, which saturates, is deprecated.
+  `tag-numbering.json` gains `overflow` vectors.
+
 ## 0.4.0
 
 - In-process hosts clean the model's text at their save seam (the hook where

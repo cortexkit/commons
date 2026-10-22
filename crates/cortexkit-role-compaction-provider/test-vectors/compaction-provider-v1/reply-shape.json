@@ -1,0 +1,23 @@
+{
+  "replies": [
+    {
+      "name": "a compaction.ride answer is the bare answer object, never wrapped in result",
+      "op": "compaction.ride",
+      "body": {
+        "answer": "nothing"
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "a refusal's other fields ride inside detail, never at the top level",
+      "body": {
+        "code": "invalid_params",
+        "message": "unknown preset",
+        "detail": {
+          "field": "preset"
+        }
+      }
+    }
+  ]
+}

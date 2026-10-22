@@ -36,6 +36,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/compaction-provider-v1/errors.json"),
     ),
     (
+        "reply-shape.json",
+        include_str!("../test-vectors/compaction-provider-v1/reply-shape.json"),
+    ),
+    (
         "role-describe.json",
         include_str!("../test-vectors/compaction-provider-v1/role-describe.json"),
     ),

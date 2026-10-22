@@ -803,3 +803,24 @@ fn provider_route_identity_vectors_keep_conversation_and_child_scopes_distinct()
         assert_ne!(faulty, expected, "{}", name(fault));
     }
 }
+
+/// A reply body is the bare answer object, never `{"result": ...}`, and a
+/// refusal's fields other than `code` and `message` live inside `detail`.
+#[test]
+fn replies_are_bare_answers_and_refusals_keep_detail_inside() {
+    let file = vectors::load("reply-shape.json");
+    for case in vectors::cases(&file, "replies") {
+        assert!(case["body"].get("result").is_none(), "{}", name(case));
+        let answer = vectors::round_trip::<RideAnswer>(name(case), &case["body"]);
+        assert_eq!(answer, RideAnswer::nothing(), "{}", name(case));
+    }
+    for case in vectors::cases(&file, "refusals") {
+        let body = case["body"].as_object().unwrap();
+        assert!(
+            body.keys().all(|key| ["code", "message", "detail"].contains(&key.as_str())),
+            "{}",
+            name(case)
+        );
+        vectors::round_trip::<crate::errors::ErrorBody>(name(case), &case["body"]);
+    }
+}

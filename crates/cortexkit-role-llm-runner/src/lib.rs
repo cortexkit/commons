@@ -35,6 +35,7 @@ pub mod run;
 pub mod send;
 pub mod send_status;
 pub mod serializer_profile;
+pub mod session_change;
 pub mod session_ref;
 pub mod structured_output;
 pub mod subscribe;
@@ -44,6 +45,7 @@ pub mod usage;
 pub mod user_commands;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
+pub mod wire;
 
 pub use run::RUN_REASON_CONTEXT_CEILING_WAIT;
 
@@ -57,6 +59,17 @@ pub const VERSION: &str = "v1";
 
 /// The string a runner lists in its manifest's `capabilities.provides`.
 pub const PROVIDES: &str = "llm-runner/v1";
+
+/// The largest encoded frame the transport delivers, in bytes, its 21-byte
+/// header included: the limit a `reply_too_large` refusal names
+/// (`errors::ReplyTooLargeDetail::limit`). A reply whose complete encoded
+/// frame is longer is refused, never cut short.
+///
+/// It equals `subc_protocol::MAX_DELIVERED_FRAME_LEN`, the subconscious
+/// daemon's limit on a frame it delivers. This crate states the number
+/// itself rather than depending on `subc-protocol`, so the two must be kept
+/// equal by hand.
+pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
@@ -412,10 +425,6 @@ mod tests {
             let op = case["op"].as_str().unwrap();
             assert!(group.contains(&op), "{name}: {op} is not in session_change");
             let code = case["refusal"]["code"].as_str().unwrap();
-            assert!(
-                errors::SESSION_CHANGE_CODES.contains(&code),
-                "{name}: {code}"
-            );
             assert!(errors::CODES.contains(&code), "{name}: {code}");
             assert_eq!(
                 errors::is_retryable(code),
@@ -427,8 +436,18 @@ mod tests {
             .iter()
             .map(|case| case["refusal"]["code"].as_str().unwrap())
             .collect();
-        for code in errors::SESSION_CHANGE_CODES {
+        for code in errors::SESSION_CHANGE_CODES.iter().chain(&[
+            errors::FETCH_UNAVAILABLE,
+            errors::PLAN_STALE,
+            errors::TOOL_NAME_COLLISION,
+        ]) {
             assert!(declared.contains(code), "{code} has no vector");
         }
+    }
+
+    #[test]
+    fn the_transport_frame_limit_is_the_daemon_delivered_frame() {
+        // The daemon's `subc_protocol::MAX_DELIVERED_FRAME_LEN`, 4 MiB.
+        assert_eq!(TRANSPORT_FRAME_LIMIT, 4 * 1024 * 1024);
     }
 }

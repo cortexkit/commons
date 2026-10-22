@@ -1,4 +1,328 @@
 {
+  "requests": [
+    {
+      "name": "a refresh with the full plan, a rung and the owner's generation",
+      "op": "session.refresh",
+      "request": {
+        "plan": {
+          "tools": [
+            "read",
+            "edit",
+            "grep"
+          ],
+          "composition": {
+            "order": [
+              "aft"
+            ]
+          }
+        },
+        "policy": "immediately",
+        "generation": 3
+      }
+    },
+    {
+      "name": "a refresh waiting for the next prefix rebuild",
+      "op": "session.refresh",
+      "request": {
+        "plan": {
+          "tools": [
+            "read",
+            "edit",
+            "grep"
+          ],
+          "composition": {
+            "order": [
+              "aft"
+            ]
+          }
+        },
+        "policy": "on_prefix_rebuild",
+        "generation": 4
+      }
+    },
+    {
+      "name": "a new rung for the pending change",
+      "op": "session.refresh_policy",
+      "request": {
+        "generation": 4,
+        "policy": "immediately",
+        "send_id": "policy-1"
+      }
+    },
+    {
+      "name": "a prefix flush",
+      "op": "session.flush_prefix",
+      "request": {
+        "send_id": "flush-1"
+      }
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "a refresh with an unknown field",
+      "op": "session.refresh",
+      "request": {
+        "plan": {
+          "tools": [
+            "read",
+            "edit",
+            "grep"
+          ],
+          "composition": {
+            "order": [
+              "aft"
+            ]
+          }
+        },
+        "policy": "immediately",
+        "generation": 3,
+        "note": "x"
+      },
+      "field": "note"
+    },
+    {
+      "name": "a refresh without a generation",
+      "op": "session.refresh",
+      "request": {
+        "plan": {
+          "tools": [
+            "read",
+            "edit",
+            "grep"
+          ],
+          "composition": {
+            "order": [
+              "aft"
+            ]
+          }
+        },
+        "policy": "immediately"
+      },
+      "field": "generation"
+    },
+    {
+      "name": "a refresh naming no rung",
+      "op": "session.refresh",
+      "request": {
+        "plan": {
+          "tools": [
+            "read",
+            "edit",
+            "grep"
+          ],
+          "composition": {
+            "order": [
+              "aft"
+            ]
+          }
+        },
+        "policy": "someday",
+        "generation": 3
+      },
+      "field": "policy"
+    },
+    {
+      "name": "a policy change naming no rung",
+      "op": "session.refresh_policy",
+      "request": {
+        "generation": 4,
+        "policy": "later",
+        "send_id": "policy-1"
+      },
+      "field": "policy"
+    },
+    {
+      "name": "a policy change without a send_id",
+      "op": "session.refresh_policy",
+      "request": {
+        "generation": 4,
+        "policy": "immediately"
+      },
+      "field": "send_id"
+    },
+    {
+      "name": "a prefix flush with an unknown field",
+      "op": "session.flush_prefix",
+      "request": {
+        "send_id": "flush-1",
+        "now": true
+      },
+      "field": "now"
+    }
+  ],
+  "answers": [
+    {
+      "name": "idle session, immediately: the next run uses the new plan",
+      "op": "session.refresh",
+      "answer": {
+        "accepted_generation": 3,
+        "pending": {
+          "generation": 3,
+          "policy": "immediately"
+        },
+        "run_in_progress": false,
+        "applies_from_next_run": true
+      }
+    },
+    {
+      "name": "a run is running: the change applies from the run queued behind it, never inside it",
+      "op": "session.refresh",
+      "answer": {
+        "accepted_generation": 3,
+        "pending": {
+          "generation": 3,
+          "policy": "immediately"
+        },
+        "run_in_progress": true,
+        "applies_from_next_run": true
+      }
+    },
+    {
+      "name": "idle session, a rung whose point it does not meet: the current plan stays live",
+      "op": "session.refresh",
+      "answer": {
+        "accepted_generation": 4,
+        "pending": {
+          "generation": 4,
+          "policy": "on_prefix_rebuild"
+        },
+        "run_in_progress": false,
+        "applies_from_next_run": false
+      }
+    },
+    {
+      "name": "a run is running and the rung's point is not met",
+      "op": "session.refresh",
+      "answer": {
+        "accepted_generation": 4,
+        "pending": {
+          "generation": 4,
+          "policy": "on_prefix_rebuild"
+        },
+        "run_in_progress": true,
+        "applies_from_next_run": false
+      }
+    },
+    {
+      "name": "the pending change's new rung",
+      "op": "session.refresh_policy",
+      "answer": {
+        "pending": {
+          "generation": 4,
+          "policy": "immediately"
+        }
+      }
+    },
+    {
+      "name": "a flush that applies the pending change at the next run",
+      "op": "session.flush_prefix",
+      "answer": {
+        "pending_generation": 4
+      }
+    },
+    {
+      "name": "a flush with nothing pending",
+      "op": "session.flush_prefix",
+      "answer": {}
+    }
+  ],
+  "baselines_after_refresh": [
+    {
+      "name": "after a lost refresh reply, the change is still pending",
+      "refresh": {
+        "accepted_generation": 4,
+        "pending": {
+          "generation": 4,
+          "policy": "on_prefix_rebuild"
+        },
+        "run_in_progress": false,
+        "applies_from_next_run": false
+      },
+      "answer": {
+        "state": "ready",
+        "baseline": {
+          "items": [
+            {
+              "provider": "aft",
+              "item_digest": "d2"
+            }
+          ],
+          "composition_digest": "c2",
+          "tool_names": [
+            "edit",
+            "read"
+          ],
+          "effective": {
+            "generation": 3,
+            "applied_by": "append",
+            "manifest_digest": "m3"
+          },
+          "accepted_generation": 4,
+          "applied_generation": 3,
+          "pending": {
+            "generation": 4,
+            "policy": "on_prefix_rebuild"
+          },
+          "rungs": {
+            "tools": [
+              "on_prefix_rebuild",
+              "immediately"
+            ],
+            "system_text": [
+              "on_prefix_rebuild",
+              "immediately"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "after a lost refresh reply, the next run already applied it",
+      "refresh": {
+        "accepted_generation": 3,
+        "pending": {
+          "generation": 3,
+          "policy": "immediately"
+        },
+        "run_in_progress": false,
+        "applies_from_next_run": true
+      },
+      "answer": {
+        "state": "ready",
+        "baseline": {
+          "items": [
+            {
+              "provider": "aft",
+              "item_digest": "d3"
+            }
+          ],
+          "composition_digest": "c3",
+          "tool_names": [
+            "edit",
+            "grep",
+            "read"
+          ],
+          "effective": {
+            "generation": 3,
+            "applied_by": "append",
+            "manifest_digest": "m3"
+          },
+          "accepted_generation": 3,
+          "applied_generation": 3,
+          "rungs": {
+            "tools": [
+              "on_prefix_rebuild",
+              "immediately"
+            ],
+            "system_text": [
+              "on_prefix_rebuild",
+              "immediately"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "refusals": [
     {
       "name": "a refresh whose policy names a rung the session does not support",
@@ -6,7 +330,11 @@
       "retryable": false,
       "refusal": {
         "code": "rung_unsupported",
-        "message": "this session does not support on_history_rebuild for tools"
+        "message": "this session does not support on_history_rebuild for tools",
+        "detail": {
+          "surface": "tools",
+          "rung": "on_history_rebuild"
+        }
       }
     },
     {
@@ -15,7 +343,11 @@
       "retryable": false,
       "refusal": {
         "code": "rung_unsupported",
-        "message": "this session does not support immediately for system_text"
+        "message": "this session does not support immediately for system_text",
+        "detail": {
+          "surface": "system_text",
+          "rung": "immediately"
+        }
       }
     },
     {
@@ -24,7 +356,11 @@
       "retryable": false,
       "refusal": {
         "code": "pending_superseded",
-        "message": "generation 3 is no longer pending; generation 4 is"
+        "message": "generation 3 is no longer pending; generation 4 is",
+        "detail": {
+          "generation": 3,
+          "pending": 4
+        }
       }
     },
     {
@@ -33,7 +369,476 @@
       "retryable": false,
       "refusal": {
         "code": "already_applied",
-        "message": "generation 3 was applied by a prefix rebuild"
+        "message": "generation 3 was applied by a prefix rebuild",
+        "detail": {
+          "generation": 3,
+          "applied_by": "fold"
+        }
+      }
+    },
+    {
+      "name": "a policy change reusing a send_id with another rung",
+      "op": "session.refresh_policy",
+      "retryable": false,
+      "refusal": {
+        "code": "send_id_reuse",
+        "message": "send_id policy-1 was used with another policy",
+        "detail": {
+          "field": "policy"
+        }
+      }
+    },
+    {
+      "name": "a refresh at the accepted generation with another plan or policy",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "generation_stale",
+        "message": "generation 4 was accepted with another plan or policy",
+        "detail": {
+          "accepted": 4
+        }
+      }
+    },
+    {
+      "name": "a refresh below the accepted generation",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "generation_stale",
+        "message": "generation 2 is below the accepted generation 4",
+        "detail": {
+          "accepted": 4
+        }
+      }
+    },
+    {
+      "name": "a plan naming a tool outside the host's fixed tool set",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "tool_outside_host_set",
+        "message": "the host fixed its tools at start",
+        "detail": {
+          "names": [
+            "grep"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a plan keeping a tool's name with a changed description or schema",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "tool_outside_host_set",
+        "message": "the host fixed its tools at start",
+        "detail": {
+          "names": [
+            "read"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a required item missed the fetch deadline",
+      "op": "session.refresh",
+      "retryable": true,
+      "refusal": {
+        "code": "fetch_unavailable",
+        "message": "aft did not answer in time",
+        "detail": {
+          "provider": "aft"
+        }
+      }
+    },
+    {
+      "name": "fetched items disagree with the composition",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "plan_stale",
+        "message": "the fetched items disagree with the composition",
+        "detail": {
+          "differences": [
+            "aft"
+          ]
+        }
+      }
+    },
+    {
+      "name": "two providers offer one model-facing name",
+      "op": "session.refresh",
+      "retryable": false,
+      "refusal": {
+        "code": "tool_name_collision",
+        "message": "read is offered twice",
+        "detail": {
+          "name": "read",
+          "providers": [
+            "aft",
+            "other"
+          ]
+        }
+      }
+    }
+  ],
+  "host_set": [
+    {
+      "name": "every offered tool identical to a registered one is inside",
+      "host": [
+        {
+          "name": "read",
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "offered": [
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "outside": []
+    },
+    {
+      "name": "a tool the host never registered is outside",
+      "host": [
+        {
+          "name": "read",
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "offered": [
+        {
+          "name": "read",
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "grep",
+          "description": "Search.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "outside": [
+        "grep"
+      ]
+    },
+    {
+      "name": "a kept name with a changed description is outside",
+      "host": [
+        {
+          "name": "read",
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "offered": [
+        {
+          "name": "read",
+          "description": "Read a file, faster.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "outside": [
+        "read"
+      ]
+    },
+    {
+      "name": "a kept name with a changed input schema is outside",
+      "host": [
+        {
+          "name": "read",
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      ],
+      "offered": [
+        {
+          "name": "read",
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "edit",
+          "description": "Edit a file.",
+          "input_schema": {
+            "type": "object"
+          }
+        }
+      ],
+      "outside": [
+        "edit"
+      ]
+    }
+  ],
+  "generations": [
+    {
+      "name": "above the accepted generation: a new change",
+      "accepted": 3,
+      "generation": 4,
+      "plan": "plan-b",
+      "policy": "immediately",
+      "earlier": null,
+      "order": "new"
+    },
+    {
+      "name": "the accepted generation, same plan and policy: an identical repeat",
+      "accepted": 4,
+      "generation": 4,
+      "plan": "plan-b",
+      "policy": "immediately",
+      "earlier": {
+        "plan": "plan-b",
+        "policy": "immediately"
+      },
+      "order": "repeat"
+    },
+    {
+      "name": "an older accepted generation repeated exactly: an identical repeat",
+      "accepted": 4,
+      "generation": 3,
+      "plan": "plan-a",
+      "policy": "on_prefix_rebuild",
+      "earlier": {
+        "plan": "plan-a",
+        "policy": "on_prefix_rebuild"
+      },
+      "order": "repeat"
+    },
+    {
+      "name": "the accepted generation, another policy: stale",
+      "accepted": 4,
+      "generation": 4,
+      "plan": "plan-b",
+      "policy": "on_prefix_rebuild",
+      "earlier": {
+        "plan": "plan-b",
+        "policy": "immediately"
+      },
+      "order": "stale"
+    },
+    {
+      "name": "the accepted generation, another plan: stale",
+      "accepted": 4,
+      "generation": 4,
+      "plan": "plan-c",
+      "policy": "immediately",
+      "earlier": {
+        "plan": "plan-b",
+        "policy": "immediately"
+      },
+      "order": "stale"
+    },
+    {
+      "name": "below the accepted generation, never accepted: stale",
+      "accepted": 4,
+      "generation": 2,
+      "plan": "plan-b",
+      "policy": "immediately",
+      "earlier": null,
+      "order": "stale"
+    }
+  ],
+  "drift": [
+    {
+      "name": "the effective plan while a change is pending is not drift",
+      "effective": "plan-a",
+      "accepted": "plan-b",
+      "sent": "plan-a"
+    },
+    {
+      "name": "the latest accepted plan is not drift",
+      "effective": "plan-a",
+      "accepted": "plan-b",
+      "sent": "plan-b"
+    },
+    {
+      "name": "any other plan is drift, naming the latest accepted plan as frozen",
+      "effective": "plan-a",
+      "accepted": "plan-b",
+      "sent": "plan-c",
+      "refused": {
+        "frozen": "plan-b",
+        "sent": "plan-c"
+      }
+    },
+    {
+      "name": "with nothing accepted since admission, frozen is the effective plan",
+      "effective": "plan-a",
+      "accepted": null,
+      "sent": "plan-c",
+      "refused": {
+        "frozen": "plan-a",
+        "sent": "plan-c"
       }
     }
   ]

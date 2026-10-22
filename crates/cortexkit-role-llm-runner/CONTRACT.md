@@ -28,9 +28,8 @@ Every item is marked:
 
 A question the role's owner has settled keeps its number and is marked
 "settled" there; the items it governs are marked **[pinned]** here. In this
-revision every numbered question, including Q22 (§6.1), is settled.
-One item waits on the fetch-plan section (§10): the `session_change` request
-and reply types (§10.2, open).
+revision every numbered question, including Q22 (§6.1), is settled, and
+the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation; "Gaps in broca today" at the end compares the one
@@ -62,6 +61,23 @@ shipping runner with this document.
   session-bound management route: `method` is the op's name and `params` its
   request. The session it acts on is the session the route is bound to; no
   request names its session.
+- [pinned] Every role reply is a `RESPONSE` frame whose body is exactly
+  `{"result": <answer>}`, an object with the single key `result` holding the
+  op's answer (`wire::reply_body` builds it). A reader refuses a bare answer,
+  and a body with any other top-level key, by name (`wire::read_reply`,
+  `wire::ReplyShapeError`: `bare_answer`, `extra_keys`, or `bad_answer` for
+  an answer of the wrong shape inside `result`). A `session.subscribe`
+  `STREAM_DATA` frame carries the bare event, never wrapped. A refusal is an
+  `ERROR` frame whose body is `{code, message, detail?}` (§12): `class`, and
+  every other refusal field, lives inside `detail`, never at the top level.
+  A run error (`RunResult::error`, §6) is part of an answer, not a refusal,
+  and keeps `class` at its own top level. `reply-envelope.json` pins a
+  wrapped answer accepted, bare answers and an extra key refused, refusal
+  bodies and a bare stream event.
+- [pinned] The transport delivers a frame of at most 4,194,304 bytes, its
+  21-byte header included (`TRANSPORT_FRAME_LIMIT`, equal to the
+  subconscious daemon's `MAX_DELIVERED_FRAME_LEN`). It is the limit
+  `reply_too_large` names (§12.1).
 
 ## 2. `role.describe`
 
@@ -1296,9 +1312,18 @@ A runner that declares `retract` serves `session.retract`.
   `with_no_tools` write those same positions; the limit builders preserve
   sibling members. Decoding alone preserves even malformed legacy values.
 - [pinned] `stop_when.max_steps` is a positive u64 integer. One step is one
-  model response. Reaching the limit ends the run in terminal state
-  `max_steps`; §6's hard-stop rule seals every pending, undispatched call
-  with its never-executed result in the same durable commit. On a runner
+  model response. A run ends `max_steps` only when the limit cut it off:
+  the step that reached the limit requested at least one tool call that
+  would lead to another step. §6's hard-stop rule then seals every pending,
+  undispatched call with its never-executed result in the same durable
+  commit.
+- [pinned] A step that reaches the limit with no tool call ends the run
+  `completed`, with its final message, directives (§9.9) and structured
+  output (§9.4), as any completed run does. A step that reaches the limit
+  and calls `submit_result` ends the run as `submit_result` always does:
+  `completed` with the submitted value, its sibling calls
+  `skipped_after_submit`. Neither is `max_steps`.
+- [pinned] On a runner
   declaring `max_steps`, a value that is not a representable positive u64
   integer (including zero, null, negatives, non-integers and overflow) is refused `invalid_params` naming
   `stop_when.max_steps`; a non-object `stop_when` names `stop_when`.
@@ -1631,12 +1656,18 @@ part's key and its content digest, never a number.
 **Numbers.**
 
 - [pinned] A part's number is the checkpoint plus its position
-  (`tags::number_parts`). The checkpoint counts the counted parts before
+  (`tags::try_number_parts`). The checkpoint counts the counted parts before
   the cut, the first retained message. Positions run in the order the
   runner renders the history from the cut, never in storage order: a steer
   stored while a tool call ran but rendered after that call's result is
   numbered after the result. The computation is deterministic, so no
   per-part ledger is stored.
+- [pinned] A runner refuses a checkpoint whose numbering would pass
+  `u64::MAX`, and never repeats a number: `tags::try_number_parts` answers
+  `NumberingOverflow {checkpoint, counted}` instead of numbers.
+  A numbering that ends exactly at `u64::MAX` is accepted. The older
+  `tags::number_parts` saturates there, giving two parts one number, and is
+  deprecated. `tag-numbering.json` pins both (`overflow`).
 - [pinned] The cut is keyed on the field, not on who wrote the marker
   (`tags::Marker::cut`): a marker's `tail_start_id` when present, otherwise
   the message holding its compaction part. That covers standalone Magic
@@ -1656,7 +1687,7 @@ part's key and its content digest, never a number.
   included, by kind exactly as they were counted when rendered, in the
   order they rendered while the anchor's marker was the newest (on OpenCode,
   storage order with marker pairs skipped): the runner feeds
-  `tags::number_parts` those parts, not only the ones it renders now. A
+  `tags::try_number_parts` those parts, not only the ones it renders now. A
   compaction message and its summary never count, wherever they sit and
   with or without the key; a dropped part keeps its placeholder number and
   still counts. So the numbers equal the ones computed with every key
@@ -2360,28 +2391,108 @@ re-send their bodies.
 
 ### 10.2 `session_change`: mid-session changes
 
+The group stays opt-in: a runner declares it only when it serves all three
+ops below. Their types are in `session_change`; `session-change.json` pins
+every request, answer and refusal.
+
 - [pinned] The `session_change` group holds the owner's mid-session change
-  ops: `session.refresh {plan, policy, generation}` (fetch a new plan's
-  items and hold them as the pending change, under its generation, with its
-  policy), `session.refresh_policy {generation, policy, send_id}` (a new
-  policy for the pending change) and `session.flush_prefix` (drop the
-  frozen prefix and apply any pending change on the next step, whatever its
-  policy). They are role ops, so one owner drives every runner through the
-  same interface.
-- [pinned] Their refusals, none retryable and each writing nothing:
-  `rung_unsupported` (a policy naming a rung the session does not support
-  for that surface), `pending_superseded` (a `session.refresh_policy` for a
-  generation a later refresh has superseded) and `already_applied` (a
-  `session.refresh_policy` for a generation a prefix rebuild or an append
-  already applied) (`errors::SESSION_CHANGE_CODES`).
+  ops: `session.refresh`, `session.refresh_policy` and
+  `session.flush_prefix`. They are role ops, so one owner drives every
+  runner through the same interface. Like `session.baseline`, they are
+  answered only to the session's owner; anyone else is refused
+  `scope_owner_mismatch`.
 - [pinned] A runner that does not declare the group gets no mid-session
   changes: its owner never sends one undeclared, and applies the change at
   the next session instead.
-- [pinned] The members are the ones listed.
-- [open] Their request and reply types, the detail shape of each refusal,
-  and the refusals of a stale or reused generation are not pinned. They
-  follow the fetch-plan section of this crate (§10), which defines `plan`.
-  Do not build against them yet.
+- [pinned] A runner that declares the group states `rungs` in every ready
+  baseline, so the owner can choose a policy the session supports.
+
+**The next-run rule.**
+
+- [pinned] A change never applies inside a run that is already running.
+  The earliest it applies is the start of the next run, and the
+  `immediately` rung means "from the next run". No step ever sees text or
+  tools its run did not start with.
+- [pinned] A change applies at the start of the first run at or after its
+  rung's point: `immediately` at the next run; `on_prefix_rebuild`,
+  `on_system_rebuild` and `on_history_rebuild` at the first run that starts
+  with the prefix, the system text or the history rebuilt (a compaction
+  fold, a model switch, a `session.flush_prefix`). Applying it moves
+  `applied_generation` to its generation and sets `effective`, and clears
+  `pending` (§10).
+
+**`session.refresh {plan, policy, generation}`** (`RefreshRequest`, strict).
+
+- [pinned] `plan` is the full fetch-plan object, as `SendRequest::plan`
+  carries it (§10.1). `policy` is one rung name from `rungs::ALL`; any other
+  value is refused `invalid_params {field: "policy"}`. `generation` is a
+  u64 the owner chooses, strictly increasing per session.
+- [pinned] The runner fetches the new plan's items under one deadline,
+  exactly as admission does (§10.1), and holds them as the pending change,
+  replacing any change pending before. It applies the change at the rung's
+  point, under the next-run rule.
+- [pinned] The answer is `{accepted_generation, pending: {generation,
+  policy}, run_in_progress, applies_from_next_run}` (`RefreshReply`):
+  - `applies_from_next_run` is true when the next run will use the new
+    plan: the `immediately` rung, or a rung whose point the session already
+    meets (a `session.flush_prefix` is waiting, say). It is false when the
+    change waits for a later rebuild; the current plan then stays live until
+    `session.baseline` shows `applied_generation` at or above the
+    generation;
+  - `run_in_progress` says whether that next run is queued behind one
+    running now.
+- [pinned] An identical repeat (the same generation, plan identity and
+  policy as an accepted refresh) gets the same answer as the refresh it
+  repeats, and fetches and writes nothing (`session_change::refresh_order`).
+- [pinned] Refusals, none of which writes anything:
+  - admission's `fetch_unavailable {provider}` (retryable), `plan_stale
+    {differences}` and `tool_name_collision {name, providers}` (§10.1);
+  - `rung_unsupported {surface, rung}` (`RungUnsupportedDetail`), when the
+    session does not support the rung for a surface the change touches,
+    `tools` or `system_text` (`session_change::surfaces`);
+  - `generation_stale {accepted}` (`GenerationStaleDetail`), for a
+    generation at or below the accepted one that is not an identical
+    repeat: the same generation with another plan or policy, or a lower one;
+  - `tool_outside_host_set {names}` (`ToolOutsideHostSetDetail`), terminal.
+    A host that fixes its tool set when it starts (OpenCode registers each
+    tool's name, description and input schema then) refuses a plan naming
+    any tool outside that set. A tool is inside the set only if its
+    definition is identical: name, description and input schema
+    (`session_change::outside_host_set`). A changed definition under a kept
+    name is refused the same way, naming those tools. `names` is sorted.
+    System text, and which of the set's tools the plan offers, may change.
+
+**`session.refresh_policy {generation, policy, send_id}`**
+(`RefreshPolicyRequest`, strict).
+
+- [pinned] Changes the pending change's rung. The answer is `{pending:
+  {generation, policy}}` (`RefreshPolicyReply`).
+- [pinned] Idempotent on `send_id`: a repeat with the same body gets the
+  same answer; the same `send_id` with another `generation` or `policy` is
+  refused `send_id_reuse {field}` (`RefreshPolicyRequest::reused_field`).
+- [pinned] Refusals, none retryable and each writing nothing:
+  `pending_superseded {generation, pending}` (`PendingSupersededDetail`: a
+  later refresh superseded the generation named), `already_applied
+  {generation, applied_by}` (`AlreadyAppliedDetail`: a rebuild or an append
+  applied it) and `rung_unsupported {surface, rung}`.
+
+**`session.flush_prefix {send_id}`** (`FlushPrefixRequest`, strict).
+
+- [pinned] Applies any pending change, whatever its policy, and drops the
+  frozen prefix, at the start of the next run, never mid-run. The answer is
+  `{pending_generation?}` (`FlushPrefixReply`): the pending change the flush
+  will apply, absent when none is pending. Idempotent on `send_id`: a repeat
+  gets the same answer.
+
+**Drift and lost replies.**
+
+- [pinned] While a change is pending, an owner send whose plan is either the
+  effective plan or the latest accepted one is not drift. Any other plan is
+  `plan_drift {frozen, sent}`, with `frozen` naming the latest accepted plan
+  (`session_change::check_send_drift`).
+- [pinned] After a lost reply, the owner reads `session.baseline`: its
+  `accepted_generation`, `applied_generation`, `pending` and `effective`
+  (§10) carry everything a `session_change` answer says.
 
 ## 11. Calls the runner makes
 
@@ -2467,7 +2578,8 @@ owes.
 ## 12. Error codes
 
 Error codes ride as the `code` of an `ERROR` frame's body `{code, message,
-detail?}`. Codes are open strings: a consumer that meets one it does not know
+detail?}`. Every other refusal field, `class` included, lives inside
+`detail`, never at the top level of the body (§1). Codes are open strings: a consumer that meets one it does not know
 treats it as a terminal refusal of that one request.
 
 ### 12.1 Refusals (`errors`)
@@ -2477,7 +2589,7 @@ treats it as a terminal refusal of that one request.
 | `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage | — | no |
-| `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit, including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
+| `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit (`TRANSPORT_FRAME_LIMIT`), including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
 | `unknown_tag` | `session.resolve` names a well-formed tag that no part of the session's current lineage carries: one no part shows in this lineage, including one that named a part only under a lineage it has left (§9.6) | — | no |
 | `fork_unsupported` | a `session.send` or `session.adopt` for a session the runner knows was forked or cloned from a managed session, one whose plan names a compaction provider (§9.6) | `{parent?}`: the session it was forked from, when known (`errors::ForkUnsupportedDetail`) | no |
@@ -2485,14 +2597,14 @@ treats it as a terminal refusal of that one request.
 | `unknown_send` | `send.status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
-| `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), or a `session.adopt` `send_id` reused with another plan (§9.5) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
+| `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
 | `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract`, `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
-| `fetch_unavailable` | a required plan item missed the admission deadline | `provider` | **yes** |
+| `fetch_unavailable` | a required plan item missed the admission deadline, or a `session.refresh` fetch's (§10.2) | `provider` | **yes** |
 | `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
 | `user_command_collision` | plan providers share a command name | `name`, `providers` (every declaring provider) | no |
@@ -2500,13 +2612,15 @@ treats it as a terminal refusal of that one request.
 | `unknown_invocation` | status key is not held by the session | — | no |
 | `no_person` | the session plan has `interactive: false` | — | no |
 | `user_commands_unsupported` | runner does not declare `user_commands` | — | no |
-| `plan_drift` | a later send's plan differs from the frozen one; a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode, or on `session.adopt` when no plan was applied) | no |
+| `plan_drift` | a later send's plan differs from the frozen one (while a change is pending, from both the effective and the latest accepted plan, which `frozen` then names, §10.2); a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode, or on `session.adopt` when no plan was applied) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
-| `rung_unsupported` | a `session.refresh` or `session.refresh_policy` whose policy names a rung the session does not support for that surface | — | no |
-| `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | — | no |
-| `already_applied` | a `session.refresh_policy` for a generation already applied | — | no |
+| `rung_unsupported` | a `session.refresh` or `session.refresh_policy` whose policy names a rung the session does not support for a surface the change touches | `{surface, rung}` | no |
+| `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | `{generation, pending}` | no |
+| `already_applied` | a `session.refresh_policy` for a generation already applied | `{generation, applied_by}` | no |
+| `generation_stale` | a `session.refresh` at or below the accepted generation that is not an identical repeat (§10.2) | `{accepted}` | no |
+| `tool_outside_host_set` | a `session.refresh` plan naming a tool outside the tool set the host fixed at start, a changed definition under a kept name included (§10.2) | `{names}` | no |
 
 - [pinned] Only the codes marked retryable are retried with the same request
   (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
@@ -2598,14 +2712,17 @@ above.
   strings): `role.describe`, every reply and event a consumer decodes
   (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
   `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
-  `ToolCallsPage`, and the `run.status`, `run.cancel` and `session.retract`
-  answers). A run call's `outcome`, a ceiling's
+  `ToolCallsPage`, `RefreshReply`, `RefreshPolicyReply`,
+  `FlushPrefixReply`, and the `run.status`, `run.cancel` and
+  `session.retract` answers). Leniency is inside the answer: the reply body
+  around it is exactly `{"result": <answer>}` (§1). A run call's `outcome`, a ceiling's
   `cause` and a read entry's `delivered_as.mode` are open strings. One
   exception: a model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `run.result`, `run.status`,
   `run.tool_calls`, `session.subscribe`, `session.baseline`,
-  `session.adopt` and `session.resolve` requests. A
+  `session.adopt`, `session.resolve`, `session.refresh`,
+  `session.refresh_policy` and `session.flush_prefix` requests. A
   runner refuses an unknown field with `invalid_params` naming it.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
   `session.send` tolerates unknown fields (a newer owner against an older
@@ -2771,7 +2888,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `dispatched_to_per_call`, `indeterminate_until_closed`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution` |
 | `subscribe_from_head_no_gap_no_duplicate` | `streaming` |
 | `model_view_differs_only_by_compaction`, `model_view_entry_sources`, `model_view_replacement_once_on_its_first_page`, `model_view_after_mid_refused`, `model_view_names_compaction_state` | `model_view` |
-| `refresh_unsupported_rung_refused`, `refresh_policy_superseded_refused`, `refresh_policy_already_applied_refused`, `flush_prefix_applies_pending` | `session_change` |
+| `session_refresh_applies_from_next_run`, `session_refresh_waits_for_its_rung`, `session_refresh_repeat_same_answer`, `session_refresh_generation_stale_refused`, `session_refresh_tool_outside_host_set_refused` | `session_change`, `queue`, `run_ops`, and the adapter's refresh plans and model-request observations; each answer shape of `session.refresh`, an identical repeat answered the same, `generation_stale`, and `tool_outside_host_set` for a tool outside the host's fixed set and for a changed definition under a kept name (inapplicable on a host that fixes no tool set) |
+| `session_refresh_never_changes_a_running_run`, `flush_prefix_applies_pending` | the above, and held tool calls; a refresh, or a flush, while a run is running leaves that run's tools unchanged and applies at the next run |
+| `refresh_unsupported_rung_refused`, `refresh_policy_superseded_refused`, `refresh_policy_already_applied_refused` | `session_change`; planned |
 | `steer_lands_at_step_boundary`, `steer_never_between_call_and_result` | `steer` |
 | `guaranteed_steer_never_pending_or_unknown` | `run_ops`, `queue`, `transcript_reads`; not applicable without `steer`, on a runner that declares `steer_receipt: confirm`, or without a held tool call; a delivered step receipt names the joined run |
 | `steer_without_run_ops_reports_state_and_step` | `steer`, `queue`, `transcript_reads`, held tool call, and no `run_ops`; a steer into the active turn answers `active` or `finished`, `delivered.as: "step"`, a non-empty `ref`, and no `run_id`; `step` is never a state value |
@@ -2834,6 +2953,8 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_usage_counts_reported_steps` | `run_usage`, `queue`, `run_ops`; after a two-step scripted run whose provider reports input, cache-read, cache-write and output counts but no reasoning, `run.result` carries `usage` with `steps: 2`, the scripted totals, `by_model` summing to them, and `reasoning_tokens` absent rather than `0`; `run.status`, where the major lists it, carries the same `usage`; reported as a named skip without `run_usage` |
 | `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
+| `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a model whose one step is text ends `completed` with its final message, and with its directives where `turn_directives` is declared, never `max_steps` |
+| `max_steps_submit_result_completes` | `max_steps`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; with `max_steps: 1`, a step calling `submit_result` ends `completed` with the submitted value and its sibling `skipped_after_submit`, never `max_steps` |
 | `max_output_tokens_caps_response` | `max_output_tokens`, `run_usage`, `queue`, `transcript_reads`, `run_ops`; the actual dispatched output maximum and the single response's reported usage are positive and never above the requested cap, including a request above the model's own maximum |
 | `no_tools_offered_to_model` | `no_tools`, `queue`, `transcript_reads`; an unsuppressed control offers tools and `tools: []` offers none, observed at the scripted model |
 | `no_tools_later_plan_send_refused` | `no_tools`, `queue`, `transcript_reads`; a fetch-plan session refuses any later `tools` member naming `tools`, writing nothing; reported inapplicable by name when the adapter cannot create a plan session |

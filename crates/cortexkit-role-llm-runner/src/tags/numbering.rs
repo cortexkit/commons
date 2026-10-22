@@ -95,6 +95,61 @@ impl RenderedPart {
 /// number: it is still rendered, as `[dropped §N§]`, so it is still counted.
 /// The only gaps are behind the cut, where the checkpoint may count parts no
 /// longer rendered, or parts an earlier tagger numbered.
+///
+/// Refused with [`NumberingOverflow`] when the last number would pass
+/// `u64::MAX`: a runner refuses such a checkpoint rather than give two parts
+/// the same number. A numbering that ends exactly at `u64::MAX` is accepted.
+pub fn try_number_parts(
+    checkpoint: u64,
+    parts: &[RenderedPart],
+) -> Result<Vec<Option<u64>>, NumberingOverflow> {
+    let mut order: Vec<usize> = (0..parts.len()).collect();
+    order.sort_by_key(|index| parts[*index].rendered_at);
+    let mut numbers = vec![None; parts.len()];
+    let mut next = checkpoint;
+    for index in order {
+        if counts(parts[index].kind) {
+            next = next.checked_add(1).ok_or_else(|| NumberingOverflow {
+                checkpoint,
+                counted: parts.iter().filter(|part| counts(part.kind)).count() as u64,
+            })?;
+            numbers[index] = Some(next);
+        }
+    }
+    Ok(numbers)
+}
+
+/// Numbering would pass `u64::MAX`: `checkpoint` plus `counted` counted
+/// parts does not fit. A runner refuses the checkpoint instead of repeating
+/// a number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NumberingOverflow {
+    /// The checkpoint numbering started from.
+    pub checkpoint: u64,
+    /// How many of the parts count, every one of which needs a number.
+    pub counted: u64,
+}
+
+impl std::fmt::Display for NumberingOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "tag numbering from checkpoint {} over {} counted parts would pass u64::MAX",
+            self.checkpoint, self.counted
+        )
+    }
+}
+
+impl std::error::Error for NumberingOverflow {}
+
+/// Like [`try_number_parts`], except that near `u64::MAX` it saturates:
+/// every counted part past the limit gets `u64::MAX`, so two parts can show
+/// the same number.
+#[deprecated(
+    since = "0.4.1",
+    note = "saturates at u64::MAX, so two parts can get one number; use try_number_parts, which refuses the overflow"
+)]
 pub fn number_parts(checkpoint: u64, parts: &[RenderedPart]) -> Vec<Option<u64>> {
     let mut order: Vec<usize> = (0..parts.len()).collect();
     order.sort_by_key(|index| parts[*index].rendered_at);

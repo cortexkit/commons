@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- The contract states the reply shape: a `RESPONSE` body is the bare answer
+  object, never wrapped in `result`, and a refusal's fields other than
+  `code` and `message` live inside `detail`. New `reply-shape.json` vector.
+  Nothing else changes.
+
 ## 0.4.0
 
 - Move the complete `compaction-provider-v1` vector set

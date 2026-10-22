@@ -65,7 +65,8 @@ pub const REPLY_TOO_LARGE: &str = "reply_too_large";
 pub struct ReplyTooLargeDetail {
     /// Length of the complete encoded reply frame, including its header.
     pub bytes: u64,
-    /// Maximum encoded frame length accepted by the transport.
+    /// Maximum encoded frame length accepted by the transport:
+    /// [`crate::TRANSPORT_FRAME_LIMIT`].
     pub limit: u64,
     pub subject: ReplyTooLargeSubject,
 }
@@ -362,22 +363,48 @@ pub const TRANSIENT: &str = "transient";
 pub const SCOPE_NOT_SYNCED: &str = "scope_not_synced";
 
 /// A `session.refresh` or `session.refresh_policy` names a policy whose rung
-/// the session does not support for that surface. Refused when the policy is
-/// set; nothing was written.
+/// the session does not support for a surface the change touches. Refused
+/// when the policy is set; nothing was written. `detail` is
+/// `session_change::RungUnsupportedDetail`.
 pub const RUNG_UNSUPPORTED: &str = "rung_unsupported";
 
 /// A `session.refresh_policy` names a generation that is no longer the
 /// pending one, because the runner has since accepted a later refresh.
-/// Nothing was written.
+/// Nothing was written. `detail` is
+/// `session_change::PendingSupersededDetail`.
 pub const PENDING_SUPERSEDED: &str = "pending_superseded";
 
 /// A `session.refresh_policy` names a generation a prefix rebuild or an
 /// append has already applied, so there is no pending change left for the
-/// policy to govern. Nothing was written.
+/// policy to govern. Nothing was written. `detail` is
+/// `session_change::AlreadyAppliedDetail`.
 pub const ALREADY_APPLIED: &str = "already_applied";
 
-/// The refusals of the `session_change` group's ops.
-pub const SESSION_CHANGE_CODES: &[&str] = &[RUNG_UNSUPPORTED, PENDING_SUPERSEDED, ALREADY_APPLIED];
+/// A `session.refresh` names a generation at or below the highest one the
+/// runner accepted, and is not an identical repeat of an accepted refresh
+/// (the same generation, plan identity and policy). `detail` is
+/// `session_change::GenerationStaleDetail`. Nothing was written.
+pub const GENERATION_STALE: &str = "generation_stale";
+
+/// A `session.refresh` plan names a tool outside the tool set the host fixed
+/// when it started (OpenCode registers each tool's name, description and
+/// input schema then). A tool is inside only with an identical definition, so
+/// a changed description or schema under a kept name is outside too.
+/// `detail` is `session_change::ToolOutsideHostSetDetail`. Terminal; nothing
+/// was written.
+pub const TOOL_OUTSIDE_HOST_SET: &str = "tool_outside_host_set";
+
+/// The refusals only the `session_change` group's ops answer. A refresh can
+/// also meet admission's `fetch_unavailable`, `plan_stale` and
+/// `tool_name_collision`, and a `send_id` reused with another body meets
+/// `send_id_reuse`.
+pub const SESSION_CHANGE_CODES: &[&str] = &[
+    RUNG_UNSUPPORTED,
+    PENDING_SUPERSEDED,
+    ALREADY_APPLIED,
+    GENERATION_STALE,
+    TOOL_OUTSIDE_HOST_SET,
+];
 
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
@@ -414,6 +441,8 @@ pub const CODES: &[&str] = &[
     RUNG_UNSUPPORTED,
     PENDING_SUPERSEDED,
     ALREADY_APPLIED,
+    GENERATION_STALE,
+    TOOL_OUTSIDE_HOST_SET,
 ];
 
 /// Whether a runner's refusal is retryable with the same request. Route
@@ -601,7 +630,7 @@ mod tests {
             assert_eq!(refusal["code"], REPLY_TOO_LARGE);
             let detail: ReplyTooLargeDetail =
                 serde_json::from_value(refusal["detail"].clone()).unwrap();
-            assert_eq!(detail.limit, 4_194_304);
+            assert_eq!(detail.limit, crate::TRANSPORT_FRAME_LIMIT as u64);
             assert!(detail.bytes > detail.limit);
             assert_eq!(
                 serde_json::to_value(detail).unwrap(),

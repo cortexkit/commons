@@ -505,6 +505,33 @@ mod tests {
         }
     }
 
+    /// A reply body is the bare answer object, never `{"result": ...}`, and
+    /// a refusal's fields other than `code` and `message` live inside
+    /// `detail`.
+    #[test]
+    fn replies_are_bare_answers_and_refusals_keep_detail_inside() {
+        let vectors = vectors::load("reply-shape.json");
+        for case in vectors["replies"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            assert!(case["body"].get("result").is_none(), "{name}");
+            assert_eq!(
+                WithdrawAnswer::decode(&case["body"]).expect(name),
+                WithdrawAnswer::Withdrawn,
+                "{name}"
+            );
+        }
+        for case in vectors["refusals"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let body = case["body"].as_object().unwrap();
+            assert!(
+                body.keys()
+                    .all(|key| ["code", "message", "detail"].contains(&key.as_str())),
+                "{name}"
+            );
+            assert!(body["code"].is_string() && body["message"].is_string(), "{name}");
+        }
+    }
+
     #[test]
     fn known_withdraw_answers_decode_as_recorded() {
         let vectors = vectors::load("withdraw-answers.json");

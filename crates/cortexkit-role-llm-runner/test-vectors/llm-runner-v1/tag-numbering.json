@@ -898,5 +898,70 @@
         "m7:0": 8
       }
     }
+  ],
+  "overflow": [
+    {
+      "name": "two counted parts from u64::MAX - 1 would pass u64::MAX: refused, never a repeated number",
+      "checkpoint": 18446744073709551614,
+      "parts": [
+        {
+          "kind": "user_text",
+          "rendered_at": 0
+        },
+        {
+          "kind": "reasoning",
+          "rendered_at": 1
+        },
+        {
+          "kind": "assistant_text",
+          "rendered_at": 2
+        }
+      ],
+      "refused": {
+        "checkpoint": 18446744073709551614,
+        "counted": 2
+      }
+    },
+    {
+      "name": "one counted part from u64::MAX - 1 ends exactly at u64::MAX: numbered",
+      "checkpoint": 18446744073709551614,
+      "parts": [
+        {
+          "kind": "reasoning",
+          "rendered_at": 0
+        },
+        {
+          "kind": "assistant_text",
+          "rendered_at": 1
+        }
+      ],
+      "numbers": [
+        null,
+        18446744073709551615
+      ]
+    },
+    {
+      "name": "two counted parts from u64::MAX - 2 end exactly at u64::MAX: numbered",
+      "checkpoint": 18446744073709551613,
+      "parts": [
+        {
+          "kind": "user_text",
+          "rendered_at": 0
+        },
+        {
+          "kind": "tool_call",
+          "rendered_at": 1
+        },
+        {
+          "kind": "tool_result_text",
+          "rendered_at": 2
+        }
+      ],
+      "numbers": [
+        18446744073709551614,
+        null,
+        18446744073709551615
+      ]
+    }
   ]
 }

@@ -180,6 +180,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/refuse-tool-name-collision.json"),
     ),
     (
+        "reply-envelope.json",
+        include_str!("../test-vectors/llm-runner-v1/reply-envelope.json"),
+    ),
+    (
         "reply-too-large.json",
         include_str!("../test-vectors/llm-runner-v1/reply-too-large.json"),
     ),

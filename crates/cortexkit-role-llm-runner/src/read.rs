@@ -214,9 +214,9 @@ pub struct ReadPage {
     /// by count or by bytes: the ordinal to read from next. A single message
     /// larger than the byte cap comes alone on its page, over the cap, with
     /// this set if more follow; a message is never truncated. The complete
-    /// encoded reply is served only if it fits the 4,194,304-byte transport
-    /// frame limit including the 21-byte header; otherwise it is refused
-    /// `reply_too_large`.
+    /// encoded reply is served only if it fits the transport frame limit
+    /// ([`crate::TRANSPORT_FRAME_LIMIT`], 4,194,304 bytes) including the
+    /// 21-byte header; otherwise it is refused `reply_too_large`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_from_ordinal: Option<u64>,
     /// The position of the last durable event covered by the same snapshot
@@ -294,7 +294,8 @@ pub struct ModelPage {
     /// exclusive end. All insertions at A travel with that anchored entry,
     /// even if doing so exceeds the requested count or byte cap; tail
     /// insertions have no next cursor. The complete encoded reply is served
-    /// only if it fits the 4,194,304-byte transport frame limit including the
+    /// only if it fits the transport frame limit
+    /// ([`crate::TRANSPORT_FRAME_LIMIT`], 4,194,304 bytes) including the
     /// 21-byte header. Otherwise the reply is refused `reply_too_large`; on a
     /// model-view page, its detail identifies the group of insertions and
     /// their anchored entry by that entry's `source`.

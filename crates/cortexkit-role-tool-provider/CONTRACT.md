@@ -360,6 +360,12 @@ to them. Nothing here names a particular implementation.
 - Every request gets exactly one terminal frame (`RESPONSE`, `STREAM_END` or
   `ERROR`), and it is the last frame: on success, refusal, cancel, drain, and
   when the provider stops tracking the request.
+- A `RESPONSE` body is the bare answer object (a catalog answer, a call's
+  reply, a `WithdrawAnswer`), never wrapped in `{"result": ...}` as
+  `llm-runner/v1` replies are. A refusal is an `ERROR` frame whose body is
+  `{code, message, detail?}`: every other refusal field (`tool`, `expected`,
+  `reason` and the rest) lives inside `detail`, never at the top level of
+  the body. `reply-shape.json` pins one of each.
 - Refusal codes: `unknown_tool {tool}` for a tool the provider does not serve;
   `tool_disabled {tool}` for a disabled tool; and, recorded by the runner as
   the call's error result and never re-dispatched, `tool_schema_changed`,

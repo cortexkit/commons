@@ -28,9 +28,13 @@ pub mod clean;
 pub mod numbering;
 
 pub use clean::{clean_model_text, strip_leading_tag_notation};
+// Kept so 0.4.0 callers still build; it saturates, and its own deprecation
+// note points them at `try_number_parts`.
+#[allow(deprecated)]
+pub use numbering::number_parts;
 pub use numbering::{
-    anchor, counts, number_parts, Anchor, Marker, MarkerCheckpoint, PartKind, RenderedPart,
-    SetupCheckpoint,
+    anchor, counts, try_number_parts, Anchor, Marker, MarkerCheckpoint, NumberingOverflow,
+    PartKind, RenderedPart, SetupCheckpoint,
 };
 
 /// The name under which a run freezes these numbering and cleaning rules
@@ -713,8 +717,8 @@ mod numbering_tests {
             let expected: Vec<Option<u64>> =
                 serde_json::from_value(case["numbers"].clone()).unwrap();
             assert_eq!(
-                number_parts(case["checkpoint"].as_u64().unwrap(), &parts),
-                expected,
+                try_number_parts(case["checkpoint"].as_u64().unwrap(), &parts),
+                Ok(expected),
                 "{name}"
             );
             reordered |= parts
@@ -724,9 +728,44 @@ mod numbering_tests {
         assert!(reordered, "no vector stores parts out of rendered order");
     }
 
+    /// Numbering that would pass `u64::MAX` is refused, naming the
+    /// checkpoint and the counted parts, and one ending exactly at
+    /// `u64::MAX` is numbered. The saturating `number_parts` would give the
+    /// refused case's two parts the same number.
+    #[test]
+    fn numbering_past_u64_max_is_refused_never_repeated() {
+        let file = vectors::load("tag-numbering.json");
+        let cases = vectors::cases(&file, "overflow");
+        assert!(cases.iter().any(|case| case.get("refused").is_some()));
+        assert!(cases.iter().any(|case| case.get("numbers").is_some()));
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let checkpoint = case["checkpoint"].as_u64().unwrap();
+            let parts: Vec<RenderedPart> = serde_json::from_value(case["parts"].clone()).unwrap();
+            let numbered = try_number_parts(checkpoint, &parts);
+            match case.get("refused") {
+                Some(refused) => {
+                    let overflow = numbered.expect_err(name);
+                    assert_eq!(overflow.checkpoint, refused["checkpoint"].as_u64().unwrap(), "{name}");
+                    assert_eq!(overflow.counted, refused["counted"].as_u64().unwrap(), "{name}");
+                    #[allow(deprecated)]
+                    let saturated = number_parts(checkpoint, &parts);
+                    let shown: Vec<u64> = saturated.into_iter().flatten().collect();
+                    assert!(shown.windows(2).any(|w| w[0] == w[1]), "{name}: {shown:?}");
+                }
+                None => {
+                    let expected: Vec<Option<u64>> =
+                        serde_json::from_value(case["numbers"].clone()).unwrap();
+                    assert!(expected.contains(&Some(u64::MAX)), "{name}");
+                    assert_eq!(numbered, Ok(expected), "{name}");
+                }
+            }
+        }
+    }
+
     /// Number a session from the anchor `markers` and `setup` give: every
     /// part from the anchor's cut, in storage order (as OpenCode renders,
-    /// marker pairs never counting), fed to [`number_parts`]. Answers the
+    /// marker pairs never counting), fed to [`try_number_parts`]. Answers the
     /// numbers by `message:part` and the anchor.
     fn number_from_anchor(
         case: &serde_json::Value,
@@ -760,7 +799,7 @@ mod numbering_tests {
         }
         let numbers = keys
             .into_iter()
-            .zip(number_parts(checkpoint, &parts))
+            .zip(try_number_parts(checkpoint, &parts).expect(name))
             .filter_map(|(key, number)| Some((key, number?)))
             .collect();
         (numbers, found)
