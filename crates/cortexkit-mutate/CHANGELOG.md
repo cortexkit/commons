@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.9
+
+- On Windows, stopping a command that has already exited no longer prints
+  taskkill's "ERROR: The process ... not found." line on stderr.
+
 ## 0.12.8
 
 - Add `check --anchors-only` for a fast local gate that validates catalogue

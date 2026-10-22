@@ -2263,8 +2263,14 @@ fn kill_tree(child: &mut std::process::Child) {
     }
     #[cfg(windows)]
     {
+        // taskkill prints "ERROR: The process ... not found." when the command
+        // has already exited. The result is ignored, so is its output: it must
+        // not reach this tool's own stderr.
         let _ = Command::new("taskkill")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status();
     }
     let _ = child.kill();
