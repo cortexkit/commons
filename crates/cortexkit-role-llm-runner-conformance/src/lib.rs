@@ -73,6 +73,7 @@
 #![forbid(unsafe_code)]
 
 mod adopt;
+mod attachments;
 mod cache_ttl;
 mod cancel;
 mod cases;

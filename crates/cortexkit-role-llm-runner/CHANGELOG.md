@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.3
+
+Additive `attachments` group (CONTRACT §9.12). Runners gain session-bound
+chunked uploads, decoded-size and commit-integrity admission helpers, and a
+shared media marker/text-result renderer. Callers can upload a photo or PDF
+larger than one daemon frame, then name committed ids in optional ordered
+`session.send.content` after the prompt. Absent content is omitted; existing
+prompt-only sends keep their exact bytes. Callers must discover the group
+before sending references, since older runners ignore unknown send members.
+
+- New non-exhaustive upload and media-read types, constructors/accessors,
+  `ContentPart::upload`, `SendRequest::with_content`, and open upload states.
+  Every new refusal travels as a plain code string with a helper predicate,
+  so a reader built before 0.5.3 decodes it as an unknown code instead of
+  failing. An id from another session is indistinguishable from an unknown
+  one.
+- Default reads render media as text markers and multi-part tool results as
+  ordered newline-joined text. `MediaMode::Blocks` opts in to stored blocks;
+  descriptors keep `media_ref`. Message/part digests stay over stored content.
+- `session.media_read` serves at most 2 MiB of decoded bytes per chunk, only
+  for digests the bound session's history references. Zero-length requests
+  probe full size/MIME without returning data. Upload status distinguishes
+  lost open data after restart; committed media has pinned retention.
+- Packaged vectors cover discovery, every new request/reply/refusal, legacy
+  send bytes, marker renders, a text/image/text tool result, and cross-session
+  status/commit refusals; `SHA256SUMS` pins their bytes.
+
 ## 0.5.2
 
 An additive release. The Alfonso apps now send messages into sessions

@@ -33,6 +33,8 @@ const LEFT_LINEAGE_CASE: &str = "tags_resolve_answers_the_current_lineage";
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::Attachments,
+    Capability::RetentionClock,
     Capability::UserCommands,
     Capability::InputTokenCap,
     Capability::MaxSteps,
@@ -277,6 +279,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.claim_process_kill = true;
     subject.descriptor_fixtures = true;
+    subject.capabilities.insert(Capability::Attachments);
     subject.enable_retention();
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
@@ -306,6 +309,18 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let started = Instant::now();
     let report = run(&subject).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    for spec in CASES
+        .iter()
+        .filter(|case| case.name.starts_with("media_") || case.name.starts_with("attachments_"))
+    {
+        assert_eq!(
+            report.outcome(spec.name),
+            Some(&CaseOutcome::Passed),
+            "{}\n{}",
+            spec.name,
+            report.render()
+        );
+    }
     for name in TIMED_RETENTION_CASES {
         assert_eq!(
             report.outcome(name),
@@ -587,6 +602,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
             assert_eq!(
                 skipped,
                 &vec![
+                    Capability::Attachments,
                     Capability::HostHistory,
                     Capability::Streaming,
                     Capability::SessionChange,
@@ -608,6 +624,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::LiveEvents,
                     Capability::ClientMessageId,
                     Capability::RunCause,
+                    Capability::RetentionClock,
                     Capability::HoldToolCalls
                 ]
             );
@@ -952,6 +969,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
             assert_eq!(
                 skipped,
                 &vec![
+                    Capability::Attachments,
                     Capability::HostHistory,
                     Capability::RunOps,
                     Capability::SessionChange,
@@ -972,7 +990,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::HistoryDisplay,
                     Capability::LiveEvents,
                     Capability::ClientMessageId,
-                    Capability::RunCause
+                    Capability::RunCause,
+                    Capability::RetentionClock
                 ],
                 "{}",
                 report.render()
@@ -1194,6 +1213,7 @@ retention_violation!(
 #[tokio::test(start_paused = true)]
 async fn retention_paused_non_terminal_run_passes() {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Attachments);
     subject.enable_retention();
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
@@ -1230,6 +1250,7 @@ async fn retention_paused_non_terminal_run_passes() {
 #[tokio::test(start_paused = true)]
 async fn retention_status_is_inapplicable_when_not_served() {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Attachments);
     subject.enable_retention();
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
@@ -4621,4 +4642,73 @@ async fn a_ride_wait_above_the_cap_accepted_fails_the_cap_case() {
         &["ride_wait_above_cap_fails_setup"],
         "failed Setup naming ride_wait_ms",
     );
+}
+
+fn attachment_subject(defect: &'static str) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        attachments: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::Attachments);
+    subject.capabilities.insert(Capability::DeliveryOrder);
+    subject.enable_retention();
+    subject
+}
+
+#[tokio::test]
+async fn attachments_reference_fake() {
+    let report = run(&attachment_subject("")).await;
+    for case in CASES
+        .iter()
+        .filter(|case| case.name.starts_with("attachments_"))
+    {
+        assert_passed(&report, case.name);
+    }
+}
+
+macro_rules! attachment_control {
+    ($name:ident) => {
+        #[tokio::test]
+        async fn $name() {
+            let report = run(&attachment_subject("")).await;
+            assert_passed(&report, stringify!($name));
+        }
+    };
+}
+attachment_control!(attachments_default_read);
+attachment_control!(attachments_media_unreferenced);
+attachment_control!(attachments_commit_sha256);
+attachment_control!(attachments_chunk_cap);
+
+#[tokio::test]
+async fn attachment_faults_fail_cases_by_name() {
+    for spec in CASES
+        .iter()
+        .filter(|case| case.name.starts_with("attachments_"))
+    {
+        let report = run(&attachment_subject(spec.name)).await;
+        failed(&report, spec.name);
+        for other in CASES
+            .iter()
+            .filter(|case| case.name.starts_with("attachments_") && case.name != spec.name)
+        {
+            assert_passed(&report, other.name);
+        }
+    }
+}
+
+#[tokio::test]
+async fn attachments_are_inapplicable_without_the_group() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for spec in CASES
+        .iter()
+        .filter(|case| case.name.starts_with("attachments_"))
+    {
+        assert!(
+            matches!(report.outcome(spec.name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::Attachments)),
+            "{}: {:?}",
+            spec.name,
+            report.outcome(spec.name)
+        );
+    }
 }

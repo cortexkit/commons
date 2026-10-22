@@ -45,6 +45,22 @@ fn collect(value: &Value, path: &str, key: Option<String>, out: &mut Vec<Payload
         return;
     };
     let kind = value["type"].as_str().unwrap_or("");
+    if kind == "media" {
+        out.push(Payload {
+            pointer: path.into(),
+            reference: Reference::MediaRef {
+                part: key,
+                kind: value["kind"].as_str().unwrap().into(),
+                mime: value["mime"].as_str().unwrap().into(),
+                byte_size: value["bytes"].as_u64().unwrap(),
+                sha256: value["sha256"].as_str().unwrap().into(),
+                width: None,
+                height: None,
+            },
+            required: true,
+        });
+        return;
+    }
     if ["image", "document", "audio", "file"].contains(&kind) && value["source"]["type"] == "base64"
     {
         let bytes = STANDARD
@@ -247,6 +263,9 @@ pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &De
                 return refuse(errors::REPLY_TOO_LARGE, Some(json!({"ordinal":ordinal})))
             }
         };
+    }
+    if mode != Some(MediaMode::Descriptors) {
+        attachments::page(&mut page, mode, defects);
     }
     let value = serde_json::to_value(page).unwrap();
     if mode != Some(MediaMode::Descriptors)

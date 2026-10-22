@@ -64,6 +64,7 @@ use cortexkit_role_llm_runner_conformance::{
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
+mod attachments;
 mod compaction;
 mod display;
 mod history;
@@ -157,6 +158,7 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub attachments: &'static str,
     pub media: Option<&'static str>,
     pub user_command: Option<&'static str>,
     pub compaction: CompactionDefect,
@@ -760,6 +762,7 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    attachment_accepts: Option<bool>,
     ever_served: bool,
     standalone_handed_off: bool,
     compaction: compaction::State,
@@ -946,6 +949,7 @@ fn baseline() -> Baseline {
 
 /// One running incarnation: its log on disk and what it rebuilt from it.
 pub struct Module {
+    attachments: Mutex<attachments::Store>,
     world: Arc<World>,
     log: PathBuf,
     alive: AtomicBool,
@@ -1068,6 +1072,7 @@ impl Module {
     fn open(root: &Path, world: Arc<World>) -> Result<Arc<Self>, HarnessError> {
         std::fs::create_dir_all(root).map_err(|e| HarnessError::new(e.to_string()))?;
         let module = Arc::new(Self {
+            attachments: Mutex::new(attachments::Store::open(root)),
             world,
             log: root.join("records.jsonl"),
             alive: AtomicBool::new(true),
@@ -1410,7 +1415,8 @@ impl Module {
                 } else {
                     "user"
                 };
-                let body = json!({ "role": role, "text": queued.text });
+                let mut body = json!({ "role": role, "text": queued.text });
+                attachments::add_parts(&mut body, record);
                 let sender = queued.sender.clone();
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
                 let message = sess.at_mut(ordinal);
@@ -1488,6 +1494,9 @@ impl Module {
                 sess.title = record["title"].as_str().map(str::to_owned);
             }
             "send" | "steer" => {
+                if let Some(accepts) = record["attachment_accepts"].as_bool() {
+                    sess.attachment_accepts = Some(accepts);
+                }
                 if let Some(limit) = record["input_cap"].as_u64() {
                     sess.input_cap = Some(limit);
                 }
@@ -1511,11 +1520,12 @@ impl Module {
                     sess.history_version += 1;
                     sess.numbering.clear();
                 }
-                let body = if profiled(&session) {
+                let mut body = if profiled(&session) {
                     json!({ "role": "user", "content": [{ "type": "text", "text": text("prompt") }] })
                 } else {
                     json!({ "role": "user", "text": text("prompt") })
                 };
+                attachments::add_parts(&mut body, record);
                 let ordinal = sess.push(body, &run_id, Vec::new());
                 sess.at_mut(ordinal).client_message_id =
                     record["client_message_id"].as_str().map(str::to_owned);
@@ -1712,6 +1722,9 @@ impl Module {
                 };
                 if let Some(reason) = record.get("reason") {
                     body["reason"] = reason.clone();
+                }
+                if self.world.serves(groups::ATTACHMENTS) {
+                    attachments::ingest(self, &mut body);
                 }
                 sess.push(body, &run_id, Vec::new());
             }
@@ -2200,6 +2213,7 @@ impl Module {
             self.commit(
                 session,
                 json!({ "kind": "order_delivered", "id": id, "run_id": run_id,
+                        "attachment_parts": attachments::queued_parts(self, session, &queued.request),
                         "delivered_as": delivered_as }),
             )?;
             delivered = true;
@@ -2255,6 +2269,7 @@ impl Module {
             self.commit(
                 session,
                 json!({ "kind": "send", "send_id": format!("order:{id}"), "prompt": text,
+                        "attachment_parts": attachments::queued_parts(self, session, &sess.ordered[&id].request),
                         "delivery": groups::QUEUE, "run_id": run_id, "admitted": false,
                         "cause": cause, "sender": sender,
                         "delivered_as": { "mode": order::modes::IDLE_START } }),
@@ -2327,6 +2342,15 @@ impl Module {
             return Ok(refuse(errors::TRANSIENT, None));
         }
         let reply = match method {
+            ops::SESSION_UPLOAD_BEGIN
+            | ops::SESSION_UPLOAD_APPEND
+            | ops::SESSION_UPLOAD_STATUS
+            | ops::SESSION_UPLOAD_COMMIT
+            | ops::SESSION_MEDIA_READ
+                if self.world.serves(groups::ATTACHMENTS) =>
+            {
+                Ok(attachments::handle(self, stamp, session, method, params))
+            }
             "session.list" | "session.export" => Ok(self.listing(session)),
             "run.status" if self.world.advertise_status => Ok(self.run_status(session, params)),
             ops::SESSION_RESOLVE if self.world.serves(groups::TAGS) => {
@@ -2777,6 +2801,10 @@ impl Module {
             Err(_) if listed => return Ok(invalid(DELIVERY_FIELD)),
             Err(_) => return Ok(invalid("prompt")),
         };
+        let attachment_parts = match attachments::admit_send(self, session, &request) {
+            Ok(parts) => parts,
+            Err(reply) => return Ok(reply),
+        };
         if let Err(field) = request.check_delivery_order(&self.world.groups) {
             if !self.world.defects.order_list_accepted_without_group {
                 return Ok(invalid(field));
@@ -3047,6 +3075,7 @@ impl Module {
                 self.commit(
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
+                            "attachment_parts": attachment_parts,
                             "prompt": request.prompt_text(), "delivery": delivery,
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
                             "sender": stamp.principal,
@@ -3163,6 +3192,8 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
+                    "attachment_parts": attachment_parts,
+                    "attachment_accepts": request.runner_params.get("attachment_accepts"),
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "cause": cause, "sender": stamp.principal,
                     "retention":request.retention, "title":request.runner_params.get("title"),
@@ -3585,6 +3616,22 @@ impl Module {
         let mut head = HeadMeta::new(&sess.lineage, sess.first_ordinal, sess.last_activity)
             .with_head(cursor(sess.events.len()))
             .with_history_version(sess.history_version);
+        if self.world.serves(groups::ATTACHMENTS) {
+            let accepts = sess.attachment_accepts.unwrap_or(true);
+            head = head.with_input(
+                cortexkit_role_llm_runner::read::HeadInput::new(if accepts { "yes" } else { "no" })
+                    .with_modalities(if accepts {
+                        vec!["text".into(), "image".into(), "document".into()]
+                    } else {
+                        vec!["text".into()]
+                    })
+                    .with_mime_types(if accepts {
+                        vec!["image/png".into(), "application/pdf".into()]
+                    } else {
+                        vec![]
+                    }),
+            );
+        }
         if let Some(cut) = history::head_cut(sess, &self.world.defects) {
             head = head.with_cut(cut);
         }
@@ -4634,6 +4681,32 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    fn attachment_model_fields(&self, _session: &str, accepts: bool) -> Option<Map<String, Value>> {
+        Some(Map::from_iter([(
+            "attachment_accepts".into(),
+            json!(accepts),
+        )]))
+    }
+
+    fn attachment_tool_result(&self, png: &[u8]) -> Option<Value> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        Some(
+            json!({"type":"tool_result","tool_use_id":"attachment-tool-media","content":[{"type":"text","text":"before-media"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":STANDARD.encode(png)}},{"type":"text","text":"after-media"}]}),
+        )
+    }
+
+    async fn restart_attachments(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<FakeRoute, HarnessError> {
+        let broken = self.defects.attachments == "attachments_restart_gone"
+            && session.contains("attachments_restart_gone");
+        *handle.0.attachments.lock().unwrap() =
+            attachments::Store::reopen(handle.0.log.parent().unwrap(), broken);
+        self.session_route(handle, session, &self.owner_stamp())
+            .await
+    }
     fn multipart_tool_result(&self, texts: &[String]) -> Option<Value> {
         self.descriptor_fixtures.then(|| json!({"type":"tool_result","tool_use_id":"fallback-call","content":texts.iter().map(|s| json!({"type":"text","text":s})).collect::<Vec<_>>()}))
     }

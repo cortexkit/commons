@@ -18,6 +18,8 @@ use serde_json::{Map, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Capability {
+    /// Chunked uploads, send references and session-scoped media reads.
+    Attachments,
     /// The `transcript_reads` group: `session.read` and `session.head`.
     TranscriptReads,
     /// The `host_history` group: `session.history`, the session's whole
@@ -135,6 +137,7 @@ impl Capability {
     /// Every capability group of the role, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
+        Self::Attachments,
         Self::TranscriptReads,
         Self::HostHistory,
         Self::RunOps,
@@ -191,6 +194,7 @@ impl Capability {
     /// capability.
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
+            Self::Attachments => groups::ATTACHMENTS,
             Self::UserCommands => groups::USER_COMMANDS,
             Self::TranscriptReads => groups::TRANSCRIPT_READS,
             Self::HostHistory => groups::HOST_HISTORY,
@@ -502,6 +506,36 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Configure the scripted model to accept only PNG/PDF media (besides text)
+    /// when true, or only text when false. These are provider/catalog facts, not a
+    /// synthesized `session.head` answer. Required with `attachments`.
+    fn attachment_model_fields(
+        &self,
+        _session: &str,
+        _accepts: bool,
+    ) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// Encode a tool result containing text `before-media`, the supplied PNG,
+    /// and text `after-media`, in that order, in the host's parts format.
+    fn attachment_tool_result(&self, _png: &[u8]) -> Option<Value> {
+        None
+    }
+
+    /// Simulate a restart that loses open uploads, preserving committed media
+    /// and session history. Reopen the owner's session route after restart.
+    /// Required with `attachments`; existing adapters need no new hook unless
+    /// they declare that group.
+    async fn restart_attachments(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<Self::Route, HarnessError> {
+        Err(HarnessError::new(
+            "attachment restart fixture is not implemented",
+        ))
+    }
     /// Install a scripted provider declaring `ctx-status` and `ctx-wrapup`.
     /// The first replies done with `command-private-reply`; the second replies
     /// accepted, then emits `command-progress-1`, `command-progress-2`, and a

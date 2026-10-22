@@ -1,10 +1,11 @@
 //! Descriptor reads observed on the runner route, with actual media bytes
-//! supplied by the adapter and digests computed from separate inline reads.
+//! supplied by the adapter and digests computed from independent stored-content
+//! reads (blocks on attachment runners, inline on older runners).
 use crate::{
     cases::{Case, Ending},
     drive::{call, decode, expect_code, expect_error, expect_field, expect_ok, wait_run_end},
     route::RunnerRoute,
-    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
+    subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
 use cortexkit_role_llm_runner::{
     content_digest::{content_digest, sha256_hex},
@@ -77,7 +78,7 @@ fn png_1x1() -> Vec<u8> {
 /// The 1×1 PNG grown to exactly `total` bytes by a zero-filled
 /// [`PADDING_CHUNK`] inserted before IEND, with its own correct CRC, so the
 /// image stays a well-formed PNG with nothing after IEND.
-fn padded_png(total: usize) -> Vec<u8> {
+pub(crate) fn padded_png(total: usize) -> Vec<u8> {
     let png = png_1x1();
     let iend = png.len() - CHUNK_OVERHEAD;
     let length = total - png.len() - CHUNK_OVERHEAD;
@@ -471,18 +472,24 @@ where
         | "media_descriptors_full_content_digests"
         | "media_descriptors_pairing"
         | "media_descriptors_part_keys" => {
-            let inline = pages(case, &session.route, MediaMode::Inline).await?;
-            for old in &inline {
+            let mode = if case.declared.contains(&Capability::Attachments)
+                && matches!(
+                    name,
+                    "media_descriptors_full_content_digests" | "media_descriptors_pairing"
+                ) {
+                MediaMode::Blocks
+            } else {
+                MediaMode::Inline
+            };
+            let baseline = pages(case, &session.route, mode).await?;
+            for old in &baseline {
                 let new = described
                     .iter()
                     .find(|m| m.mid == old.mid)
                     .ok_or("descriptor read lost a message")?;
                 if name == "media_descriptors_full_content_digests" {
                     if new.digest.as_deref() != Some(content_digest(&old.message).as_str()) {
-                        return Err(
-                            "message digest hashed descriptors rather than full inline content"
-                                .into(),
-                        );
+                        return Err("message digest does not identify stored content".into());
                     }
                     let expected = case
                         .subject
@@ -495,9 +502,7 @@ where
                         })
                         .collect::<Vec<_>>();
                     if new.part_digests.as_ref() != Some(&expected) {
-                        return Err(
-                            "part digest hashed descriptors rather than full inline content".into(),
-                        );
+                        return Err("part digest does not identify stored content".into());
                     }
                 }
                 if name == "media_descriptors_pairing" {
@@ -512,7 +517,7 @@ where
                         call(&session.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?,
                     )?,
                 )?;
-                if default.messages != inline {
+                if default.messages != baseline {
                     return Err("default inline read changed".into());
                 }
                 for op in [ops::SESSION_READ, ops::SESSION_RESOLVE] {

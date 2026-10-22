@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.3
+
+Requires `cortexkit-role-llm-runner` 0.5.3. Runners can now verify the optional
+`attachments` group over their real session-bound routes; callers gain checked
+upload resumption, integrity, model admission, legacy-safe reads and digest
+isolation guarantees before relying on that group.
+
+- Capability-gated attachment cases cover a multi-frame lifecycle, lost
+  append replies, restart loss, the inclusive 2 MiB cap, size/hash refusals,
+  new-run and frozen-model input, unknown/open/gone/other-session ids,
+  default markers versus blocks/descriptors and stored digests, nested tool
+  media, read/upload admission, and committed-media lifetime.
+- Defaulted `attachment_model_fields`, `attachment_tool_result`, and
+  `restart_attachments` fixture hooks keep existing adapters source-compatible.
+  An adapter without the group reports every case inapplicable/skipped by
+  name. Plan-sender and controlled-clock cases also require their existing
+  capabilities. Declaring attachments requires implementing its fixtures.
+- The reference fake implements uploads and a persistent byte store separate
+  from history references. Each attachment case has a named faulty fake and
+  an independent passing control, including cross-session status and commit.
+
 ## 0.10.2
 
 Requires `cortexkit-role-llm-runner` 0.5.2 and

@@ -1,0 +1,55 @@
+{
+  "requests": [
+    {"method":"session.upload_begin","params":{"mime":"image/png","bytes":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}},
+    {"method":"session.upload_append","params":{"upload_id":"u1","offset":0,"data":"YWJj"}},
+    {"method":"session.upload_status","params":{"upload_id":"u1"}},
+    {"method":"session.upload_commit","params":{"upload_id":"u1"}},
+    {"method":"session.media_read","params":{"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","offset":0,"length":2097152}}
+  ],
+  "replies": [
+    {"method":"session.upload_begin","result":{"upload_id":"u1"}},
+    {"method":"session.upload_append","result":{"received":3}},
+    {"method":"session.upload_status","result":{"state":"open","received":3}},
+    {"method":"session.upload_status","result":{"state":"committed","received":3}},
+    {"method":"session.upload_status","result":{"state":"gone","received":0}},
+    {"method":"session.upload_commit","result":{"state":"committed","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","mime":"image/png","bytes":3}},
+    {"method":"session.media_read","result":{"data":"YWJj","size":3,"mime":"image/png"}},
+    {"method":"session.media_read","result":{"size":3,"mime":"image/png"}},
+    {"method":"session.media_read","result":{"data":"","size":3,"mime":"image/png"}}
+  ],
+  "send":{"prompt":"Look","content":[{"type":"upload","upload_id":"u1"}],"send_id":"s1"},
+  "legacy_send_bytes":"{\"prompt\":\"Look\",\"send_id\":\"s1\"}",
+  "markers":[
+    {"kind":"image","mime":"image/png","bytes":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","reason":"not_requested","text":"[media not shown: kind=image mime=image/png bytes=3 sha256=ba7816bf8f01 reason=not_requested]"},
+    {"kind":"document","mime":"application/pdf","bytes":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","reason":"unsupported","text":"[media not shown: kind=document mime=application/pdf bytes=3 sha256=ba7816bf8f01 reason=unsupported]"}
+  ],
+  "refusals":[
+    {"code":"unknown_session","message":"session does not exist"},
+    {"code":"unknown_upload","message":"unknown upload"},
+    {"code":"upload_not_committed","message":"upload is still open"},
+    {"code":"upload_gone","message":"upload was lost"},
+    {"code":"upload_chunk_too_large","message":"decoded chunk exceeds 2097152 bytes"},
+    {"code":"upload_offset_mismatch","message":"resume at received","detail":{"received":3}},
+    {"code":"upload_size_mismatch","message":"declared size differs"},
+    {"code":"upload_sha256_mismatch","message":"declared SHA-256 differs"},
+    {"code":"media_unsupported","message":"frozen model cannot accept this media"},
+    {"code":"unknown_media","message":"session history does not reference this digest"}
+  ],
+  "blocks_request":{"media":"blocks"},
+  "describe": {
+    "majors":[{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.upload_begin","session.upload_append","session.upload_status","session.upload_commit","session.media_read","session.send","session.read"],"stability":"alpha"}],
+    "implementation_version":"0.5.3",
+    "capabilities":["attachments"],
+    "session_capabilities_from":"baseline"
+  },
+  "other_session_id": [
+    {"method":"session.upload_status","params":{"upload_id":"another-session-id"},"result":{"state":"gone","received":0}},
+    {"method":"session.upload_commit","params":{"upload_id":"another-session-id"},"error":{"code":"unknown_upload","message":"unknown upload"}},
+    {"method":"session.upload_append","params":{"upload_id":"another-session-id","offset":0,"data":""},"error":{"code":"unknown_upload","message":"unknown upload"}},
+    {"method":"session.send","params":{"prompt":"Look","send_id":"s2","content":[{"type":"upload","upload_id":"another-session-id"}]},"error":{"code":"unknown_upload","message":"unknown upload"}}
+  ],
+  "multipart_tool_result": {
+    "stored":{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"before"},{"type":"media","kind":"image","mime":"image/png","bytes":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},{"type":"text","text":"after"}]},
+    "inline":{"type":"tool_result","tool_use_id":"t1","content":"before\n[media not shown: kind=image mime=image/png bytes=3 sha256=ba7816bf8f01 reason=not_requested]\nafter"}
+  }
+}

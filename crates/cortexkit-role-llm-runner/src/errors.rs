@@ -19,6 +19,42 @@ use serde_json::Value;
 /// excludes. `detail.field` names it.
 pub const INVALID_PARAMS: &str = "invalid_params";
 
+macro_rules! attachment_codes {
+    ($($name:ident, $predicate:ident, $value:literal;)+) => {
+        $(pub const $name: &str = $value;
+        pub fn $predicate(code: &str) -> bool { code == $name })+
+    };
+}
+
+attachment_codes! {
+    UNKNOWN_SESSION, is_unknown_session, "unknown_session";
+    UNKNOWN_UPLOAD, is_unknown_upload, "unknown_upload";
+    UPLOAD_NOT_COMMITTED, is_upload_not_committed, "upload_not_committed";
+    UPLOAD_GONE, is_upload_gone, "upload_gone";
+    UPLOAD_CHUNK_TOO_LARGE, is_upload_chunk_too_large, "upload_chunk_too_large";
+    UPLOAD_OFFSET_MISMATCH, is_upload_offset_mismatch, "upload_offset_mismatch";
+    UPLOAD_SIZE_MISMATCH, is_upload_size_mismatch, "upload_size_mismatch";
+    UPLOAD_SHA256_MISMATCH, is_upload_sha256_mismatch, "upload_sha256_mismatch";
+    MEDIA_UNSUPPORTED, is_media_unsupported, "media_unsupported";
+    UNKNOWN_MEDIA, is_unknown_media, "unknown_media";
+}
+
+/// A contiguous append retry resumes at the runner's acknowledged byte count.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct UploadOffsetMismatchDetail {
+    pub received: u64,
+}
+
+impl UploadOffsetMismatchDetail {
+    pub fn new(received: u64) -> Self {
+        Self { received }
+    }
+    pub fn received(&self) -> u64 {
+        self.received
+    }
+}
+
 /// Two providers declare the same command. Detail: `{name, providers}`.
 pub const USER_COMMAND_COLLISION: &str = "user_command_collision";
 /// The requested command was not made available at admission. Detail: `{command}`.
@@ -445,6 +481,16 @@ pub const SESSION_CHANGE_CODES: &[&str] = &[
 
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
+    UNKNOWN_SESSION,
+    UNKNOWN_UPLOAD,
+    UPLOAD_NOT_COMMITTED,
+    UPLOAD_GONE,
+    UPLOAD_CHUNK_TOO_LARGE,
+    UPLOAD_OFFSET_MISMATCH,
+    UPLOAD_SIZE_MISMATCH,
+    UPLOAD_SHA256_MISMATCH,
+    MEDIA_UNSUPPORTED,
+    UNKNOWN_MEDIA,
     USER_COMMAND_COLLISION,
     UNKNOWN_USER_COMMAND,
     UNKNOWN_INVOCATION,

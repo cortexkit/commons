@@ -581,7 +581,12 @@ impl Module {
         if matches!(mode, ReadMode::After { .. }) {
             return invalid("view");
         }
-        let entries = canonical(sess);
+        let mut entries = canonical(sess);
+        if request.media != Some(cortexkit_role_llm_runner::read::MediaMode::Blocks) {
+            for entry in &mut entries {
+                attachments::render(&mut entry.message);
+            }
+        }
         let mut groups: Vec<Vec<ModelEntry>> = Vec::new();
         for entry in entries {
             if groups

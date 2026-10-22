@@ -146,6 +146,7 @@ shipping runner with this document.
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
+| `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `run_cancel` | `run.cancel` | §6.2 |
@@ -326,9 +327,11 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   are stated in `role.describe` (§2).
 - [pinned] `include_originals: true` adds `originals` to each message a hook
   changed (§4.2).
-- [pinned] `media` is `"inline"` (the default) or `"descriptors"`. Unknown
-  values are refused `invalid_params {field: "media"}`. Inline preserves the
-  existing payload bytes, whole-message paging and `reply_too_large` behavior.
+- [pinned] `media` is `"inline"` (the default), `"descriptors"`, or, on an
+  `attachments` runner, `"blocks"` (§9.12). Unknown values are refused
+  `invalid_params {field: "media"}`. Inline preserves existing non-media
+  payload bytes, whole-message paging and `reply_too_large` behavior; §9.12
+  defines the text rendering of media on an `attachments` runner.
   Descriptors are offered only on raw transcript reads and `session.resolve`.
   `view: "model"` with `media: "descriptors"` is refused before read work with
   `invalid_params {field: "media"}`; model-view descriptors are not offered.
@@ -442,8 +445,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   `part_digests: [{part, digest}]`, every top-level part in message order,
   nested media excluded. Both fields are optional in inline mode and are
   independent of the tags group. Digests use `content_digest::content_digest`:
-  lowercase SHA-256 over RFC 8785 (JCS) of the full message or full part exactly
-  as inline mode serves it. This is the same function used for compaction
+  lowercase SHA-256 over RFC 8785 (JCS) of the full stored message or full
+  stored part, before any media rendering (§9.12). This is the same function used for compaction
   notices' `through_digest` and `descends_from`, re-exported by the provider
   crate; it never hashes descriptors. Digest rows with keys not matching the
   actual parts, missing rows, duplicate keys or wrong order are decode errors
@@ -2801,6 +2804,104 @@ re-send their bodies.
   send carried none; any other is refused `send_id_reuse {field:
   "client_message_id"}` and writes nothing (`SendRequest::same_client_message_id`).
 
+### 9.12 `attachments`: uploads, sends and media reads
+
+Added in 0.5.3. All operations act on the session bound to the management
+route (§1); no request carries a second session selector. The runner uses
+its host's file storage, not a second copy of the host's media store.
+
+- [pinned] A caller sends upload references only to a runner declaring
+  `attachments`. An older runner ignores unknown send members and would
+  silently drop the file. The group is all of this section, with no extra
+  discovery metadata; `session.head.input` (§4.3) still describes the model's
+  input, not whether this group is declared.
+- [pinned] `session.upload_begin {mime, bytes, sha256}`
+  (`attachments::UploadBeginRequest`) returns `{upload_id}`. It requires an
+  existing session: there are no pre-session uploads, and an absent session
+  is refused `unknown_session`. `sha256` is lowercase hex over decoded bytes.
+  Malformed metadata is `invalid_params` naming `mime` or `sha256`.
+- [pinned] Upload operations admit exactly the owner or a plan-named sender
+  who may send to the bound session (§9.7); any other caller is refused
+  `scope_owner_mismatch`. An upload belongs to the session where it began.
+- [pinned] `session.upload_append {upload_id, offset, data}` returns
+  `{received}`. `data` is base64 of at most 2,097,152 raw bytes
+  (`attachments::CHUNK_MAX`), inclusive; a larger decoded chunk is refused
+  `upload_chunk_too_large`. Base64 grows a chunk by 4/3: 3 MiB raw would fill
+  the 4 MiB daemon frame. Malformed base64 is `invalid_params {field: "data"}`.
+  Appends are contiguous: an offset other than `received` is refused
+  `upload_offset_mismatch {received}`. After a lost append reply, a sender
+  resumes at that count, without replaying the bytes. An append that would
+  exceed begin's declared size is refused at once `upload_size_mismatch`.
+  Every refusal leaves the upload unchanged.
+- [pinned] `session.upload_status {upload_id}` returns `{state, received}`,
+  where the known states are `open`, `committed` and `gone`; an unknown
+  state string is preserved, not a decode error (§13). `received` is the
+  accepted decoded-byte count for `open`, the full size for `committed`,
+  and 0 for `gone`. An uncommitted
+  upload may be lost at restart; status then answers `gone`, never `open`
+  with 0 bytes. `gone` has `received: 0` and also covers an unknown id.
+  The caller uses `state` alone to decide whether to re-upload (`gone`
+  means re-upload); for `open`, it resumes at `received`.
+- [pinned] `session.upload_commit {upload_id}` verifies total size and
+  SHA-256 before returning `{state: "committed", sha256, mime, bytes}`.
+  Mismatches are `upload_size_mismatch` or `upload_sha256_mismatch`, and
+  leave the id unusable. Only a committed id is valid in a send. Repeating
+  commit of a committed id returns the same metadata; appending to it is
+  `invalid_params {field: "upload_id"}`.
+- [pinned] Upload ids are looked up by (bound session, id). An unknown id
+  on append, commit or send is `unknown_upload`; a known lost/deleted id is
+  `upload_gone`. An id from another session is indistinguishable from one
+  that never existed: status answers `gone`, and append, commit and send
+  refuse `unknown_upload`. A runner never reveals that another session
+  holds an upload. These refusals write nothing.
+- [pinned] A committed upload no send names is kept at least 3,600 seconds
+  after commit, then may be deleted. Once a send names it, it lives as long
+  as the session history referencing it, across runner restarts included.
+- [pinned] `session.send` adds optional `content: [{type: "upload",
+  upload_id}, ...]` (`attachments::ContentPart`), in order, after the
+  existing prompt text. Absent `content` is omitted and prompt-only sends
+  keep their bytes. The prompt and template rules of §9 are unchanged.
+  Each id must be committed in this session: an open id is refused
+  `upload_not_committed`. Admission checks all references before writing
+  anything, including the send's idempotency record. Media types are checked
+  against the model frozen by the run it joins, or the model the send would
+  freeze when starting a run, using the same facts as `session.head.input`.
+  A known unsupported modality or MIME type is refused `media_unsupported`
+  and writes nothing; an unknown fact is not a known lack of support.
+- [pinned] Default inline `session.read` never exposes new block types.
+  Every media block becomes a text block whose text is exactly
+  `[media not shown: kind=… mime=… bytes=… sha256=<first 12 hex> reason=not_requested]`.
+  Each media part of a multi-part tool result becomes the same marker, and
+  the result is the existing text form built from its parts in order (joined
+  by a single `\n`, without a trailing newline), not a new multi-part shape. Strict readers, including
+  compaction readers, therefore see only their existing shapes. The rule
+  also applies to inline history and resolve reads where those are served.
+- [pinned] `media: "blocks"` opts in to stored media blocks, never binary
+  payload bytes added by this group. Older runners refuse the unknown
+  `MediaMode` value as `invalid_params {field: "media"}`, so readers fail
+  closed. Descriptors mode keeps `media_ref`, and display rows still use
+  refs (§4.7). `digest` and `part_digests` always identify the stored message
+  and its stored parts, never the marker render or descriptors.
+- [pinned] Model fallback and reads share `attachments::marker` and the
+  grammar above. The context selects `reason`: `not_requested` for default
+  reads, `unsupported` when a model cannot take stored media. Size and hash
+  are over decoded bytes; `kind` and `mime` are the media's metadata.
+- [pinned] `session.media_read {sha256, offset, length}` returns base64
+  `{data, size, mime}` (`attachments::MediaReadReply`); `size` is the full
+  decoded size. `length` is at most 2,097,152 decoded bytes; a larger value
+  is `invalid_params {field: "length"}`. A zero length is a metadata probe:
+  `data` is omitted. At EOF (`offset == size`), positive length returns
+  empty `data`; past EOF is `invalid_params {field: "offset"}`. Reads may be
+  short at EOF. Admission is exactly that of a read of this session.
+- [pinned] A digest is served only when this session's history references
+  it, including an image in a tool result. Every other digest, even one
+  held for an unreferenced committed upload or another session, is refused
+  `unknown_media`. Knowing a hash never grants another session's bytes.
+- [informative] Thumbnails and full-size renders are the reader's job
+  (Thalamus renders on demand); runners never store those derived renders.
+  Images OpenCode already holds as data URLs in its file parts are served
+  by digest like any other media.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -3140,6 +3241,16 @@ treats it as a terminal refusal of that one request.
 | `fork_unsupported` | a `session.send` or `session.adopt` for a session the runner knows was forked or cloned from a managed session, one whose plan names a compaction provider (§9.6) | `{parent?}`: the session it was forked from, when known (`errors::ForkUnsupportedDetail`) | no |
 | `template_part_gone` | a template send whose `part_tag` slot names a part the request that would carry it does not show (§9.7); a queued send meeting it later ends in the send state of the same name instead | `{slot}` (`errors::TemplatePartGoneDetail`) | no |
 | `unknown_send` | `send.status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
+| `unknown_session` | an upload into a session that does not exist (§9.12) | — | no |
+| `unknown_upload` | append, commit or send names an unknown upload (§9.12) | — | no |
+| `upload_not_committed` | a send names an open upload | — | no |
+| `upload_gone` | append, commit or send names a known lost/deleted upload | — | no |
+| `upload_chunk_too_large` | an append exceeds 2 MiB decoded bytes | — | no |
+| `upload_offset_mismatch` | an append is not at the current offset | `{received}` (`errors::UploadOffsetMismatchDetail`) | no: resume at received |
+| `upload_size_mismatch` | an append overruns the declared size, or commit finds a different size | — | no |
+| `upload_sha256_mismatch` | commit finds a different SHA-256 | — | no |
+| `media_unsupported` | a send's media is unsupported by the frozen model | — | no |
+| `unknown_media` | the bound session's history does not reference the digest | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |

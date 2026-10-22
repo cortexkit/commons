@@ -1,5 +1,15 @@
 {
   "codes": [
+    {"code":"unknown_session","retryable":false},
+    {"code":"unknown_upload","retryable":false},
+    {"code":"upload_not_committed","retryable":false},
+    {"code":"upload_gone","retryable":false},
+    {"code":"upload_chunk_too_large","retryable":false},
+    {"code":"upload_offset_mismatch","retryable":false,"detail":{"received":3}},
+    {"code":"upload_size_mismatch","retryable":false},
+    {"code":"upload_sha256_mismatch","retryable":false},
+    {"code":"media_unsupported","retryable":false},
+    {"code":"unknown_media","retryable":false},
     {"code": "user_command_collision", "retryable": false},
     {"code": "unknown_user_command", "retryable": false, "detail": {"command": "ctx-missing"}},
     {"code": "unknown_invocation", "retryable": false},

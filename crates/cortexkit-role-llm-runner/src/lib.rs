@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adopt;
+pub mod attachments;
 pub mod baseline;
 pub mod compaction;
 pub mod content_digest;
@@ -78,6 +79,11 @@ pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
+    pub const SESSION_UPLOAD_BEGIN: &str = "session.upload_begin";
+    pub const SESSION_UPLOAD_APPEND: &str = "session.upload_append";
+    pub const SESSION_UPLOAD_STATUS: &str = "session.upload_status";
+    pub const SESSION_UPLOAD_COMMIT: &str = "session.upload_commit";
+    pub const SESSION_MEDIA_READ: &str = "session.media_read";
     /// Discovery before use: the role's majors, ops and capabilities.
     /// Required.
     pub const ROLE_DESCRIBE: &str = "role.describe";
@@ -144,6 +150,9 @@ pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::SESSION_BASELINE];
 /// declares.
 pub mod capabilities {
     use crate::ops;
+
+    /// Session-scoped uploads, upload references on sends and media by digest.
+    pub const ATTACHMENTS: &str = "attachments";
 
     /// Tail, range and after-message reads, head metadata and `lineage_id`
     /// on every page.
@@ -277,6 +286,18 @@ pub mod capabilities {
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
         (
+            ATTACHMENTS,
+            &[
+                ops::SESSION_UPLOAD_BEGIN,
+                ops::SESSION_UPLOAD_APPEND,
+                ops::SESSION_UPLOAD_STATUS,
+                ops::SESSION_UPLOAD_COMMIT,
+                ops::SESSION_MEDIA_READ,
+                ops::SESSION_SEND,
+                ops::SESSION_READ,
+            ],
+        ),
+        (
             USER_COMMANDS,
             &[ops::SESSION_USER_COMMAND, ops::SESSION_USER_COMMAND_STATUS],
         ),
@@ -407,6 +428,11 @@ mod tests {
     #[test]
     fn every_group_names_only_role_ops() {
         let role_ops = [
+            ops::SESSION_UPLOAD_BEGIN,
+            ops::SESSION_UPLOAD_APPEND,
+            ops::SESSION_UPLOAD_STATUS,
+            ops::SESSION_UPLOAD_COMMIT,
+            ops::SESSION_MEDIA_READ,
             ops::ROLE_DESCRIBE,
             ops::SESSION_BASELINE,
             ops::SESSION_USER_COMMAND,

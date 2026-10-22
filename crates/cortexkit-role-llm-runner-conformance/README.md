@@ -3,7 +3,8 @@
 Descriptor-read adapters supply `media_tool_result` (actual decoded image
 bytes, with a nested tool-result layout when requested), `multipart_tool_result`
 for the fixed-budget fallback, and `read_parts` for their host's stable part
-keys. The kit validates message/part digest rows against the inline content,
+keys. The kit validates message/part digest rows against stored content
+(a separate blocks read on attachment runners, inline otherwise),
 never descriptor JSON; unsupported image fixtures are named inapplicable.
 Compaction providers must read with `media: "descriptors"` and trust served
 content digests. This runner kit exercises Setup, not a provider's reverse-read
@@ -16,6 +17,18 @@ real management route. It is never run against a double; the in-process
 fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
+
+New in 0.10.3: declare `Capability::Attachments` only for the complete
+`attachments` group, then implement `attachment_model_fields` (configure
+real provider/catalog PNG/PDF or text-only input facts),
+`attachment_tool_result` (text/image/text in the host's result format), and
+`restart_attachments` (simulate loss of open uploads and reopen the owner's
+route, preserving committed media and history). Hooks configure fixtures;
+they never synthesize management replies. All have defaults, so older
+adapters build unchanged and every attachment case is skipped by name when
+the group is absent. Declaring the group without its fixture hooks fails
+the affected case. The plan-sender and one-hour lifetime cases additionally
+  use the existing `DeliveryOrder` and `RetentionClock` capabilities/hooks.
 
 New in 0.10.1, each with a default that makes its cases inapplicable by
 name: `serializer_profile` (the profile of a session's stored bodies, for

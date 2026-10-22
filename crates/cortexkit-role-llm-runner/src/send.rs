@@ -197,6 +197,8 @@ where
 struct WireSendRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content: Option<Vec<crate::attachments::ContentPart>>,
     send_id: String,
     #[serde(
         default,
@@ -225,6 +227,7 @@ impl From<WireSendRequest> for SendRequest {
         };
         Self {
             prompt: wire.prompt,
+            content: wire.content,
             send_id: wire.send_id,
             delivery,
             delivery_order,
@@ -243,6 +246,7 @@ impl From<SendRequest> for WireSendRequest {
         };
         Self {
             prompt: request.prompt,
+            content: request.content,
             send_id: request.send_id,
             delivery,
             plan: request.plan,
@@ -350,6 +354,9 @@ pub struct SendRequest {
     /// template send, which carries no `prompt` and whose text the runner
     /// renders from the plan's template ([`Self::check_prompt`]).
     pub prompt: Option<String>,
+    /// Ordered committed upload references, rendered after the prompt.
+    /// Send only to a runner declaring `attachments`.
+    pub content: Option<Vec<crate::attachments::ContentPart>>,
     /// The idempotency key. The owner derives it from what it delivers,
     /// never from the attempt.
     pub send_id: String,
@@ -377,10 +384,20 @@ pub struct SendRequest {
 }
 
 impl SendRequest {
+    pub fn with_content(mut self, content: Vec<crate::attachments::ContentPart>) -> Self {
+        self.content = Some(content);
+        self
+    }
+
+    pub fn content(&self) -> Option<&[crate::attachments::ContentPart]> {
+        self.content.as_deref()
+    }
+
     /// A send of `prompt`.
     pub fn new(prompt: impl Into<String>, send_id: impl Into<String>) -> Self {
         Self {
             prompt: Some(prompt.into()),
+            content: None,
             send_id: send_id.into(),
             delivery: None,
             delivery_order: None,

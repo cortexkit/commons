@@ -19,13 +19,17 @@ pub enum MediaMode {
     #[default]
     Inline,
     Descriptors,
+    /// Opt in to stored media blocks; default reads render text markers.
+    Blocks,
 }
 
 pub(crate) fn deserialize_media<'de, D: Deserializer<'de>>(
     d: D,
 ) -> Result<Option<MediaMode>, D::Error> {
     MediaMode::deserialize(d).map(Some).map_err(|error| {
-        serde::de::Error::custom(format!("media must be inline or descriptors: {error}"))
+        serde::de::Error::custom(format!(
+            "media must be inline, descriptors or blocks: {error}"
+        ))
     })
 }
 
