@@ -381,7 +381,10 @@ where
     let stated = tool_rungs(&baseline(&session.route).await?)?;
     // The refresh case needs `immediately`, the rung that would apply
     // soonest. The flush case prefers a rung that would otherwise wait, so
-    // only the flush can make it apply at the next run.
+    // only the flush can make it apply at the next run. When the session
+    // states only `immediately`, the flush case falls back to it: the change
+    // then applies at the next run with or without the flush, so the case
+    // checks the next-run rule and names the flush's own effect unchecked.
     let rung = if flush {
         stated
             .iter()
@@ -490,6 +493,13 @@ where
         ));
     }
     applied(&session.route, 1).await?;
+    if flush && rung == rungs::IMMEDIATELY {
+        return Ok(Ending::PassedWithInapplicableRule(
+            "the session states only the immediately rung for tools, so a flush applying a \
+             change that would otherwise wait is unchecked; the next-run rule was checked"
+                .into(),
+        ));
+    }
     Ok(Ending::Passed)
 }
 

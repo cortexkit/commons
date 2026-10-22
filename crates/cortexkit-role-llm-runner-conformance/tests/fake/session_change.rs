@@ -29,11 +29,17 @@ const UNREGISTERED_TOOL: &str = "conformance_unregistered";
 /// The rungs every fake session supports, on both surfaces.
 const FAKE_RUNGS: &[&str] = &[rungs::ON_PREFIX_REBUILD, rungs::IMMEDIATELY];
 
-/// The rungs of [`FAKE_RUNGS`], on both surfaces, as a baseline states them.
-pub fn fake_rungs() -> Rungs {
+/// The rungs a fake session states, on both surfaces: [`FAKE_RUNGS`], or
+/// only `immediately` when `defects.states_only_immediately` is set.
+pub fn fake_rungs(defects: &Defects) -> Rungs {
+    let stated: &[&str] = if defects.states_only_immediately {
+        &[rungs::IMMEDIATELY]
+    } else {
+        FAKE_RUNGS
+    };
     Rungs {
-        tools: FAKE_RUNGS.iter().map(|rung| (*rung).to_owned()).collect(),
-        system_text: FAKE_RUNGS.iter().map(|rung| (*rung).to_owned()).collect(),
+        tools: stated.iter().map(|rung| (*rung).to_owned()).collect(),
+        system_text: stated.iter().map(|rung| (*rung).to_owned()).collect(),
     }
 }
 
@@ -437,7 +443,7 @@ impl Module {
         if !self.world.serves(groups::SESSION_CHANGE) {
             return base;
         }
-        let mut baseline = base.with_rungs(fake_rungs());
+        let mut baseline = base.with_rungs(fake_rungs(&self.world.defects));
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
             return baseline;

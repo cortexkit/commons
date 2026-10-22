@@ -371,6 +371,9 @@ pub struct Defects {
     pub refresh_claims_next_run: bool,
     /// The `immediately` rung waits for a rebuild like the other rungs.
     pub immediately_waits_for_rebuild: bool,
+    /// Not a defect: the session's baseline states only the `immediately`
+    /// rung, as a runner that applies every change at the next run would.
+    pub states_only_immediately: bool,
     /// An identical repeat of a refresh is refused `generation_stale`.
     pub refresh_repeat_refused: bool,
     /// A refresh at or below the accepted generation is accepted.
@@ -2380,7 +2383,7 @@ impl Module {
             // adds only the rungs a session_change runner states.
             let mut admitted = baseline();
             if self.world.serves(groups::SESSION_CHANGE) {
-                admitted = admitted.with_rungs(session_change::fake_rungs());
+                admitted = admitted.with_rungs(session_change::fake_rungs(defects));
             }
             reply = reply.with_baseline(admitted);
         }

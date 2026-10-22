@@ -3376,6 +3376,37 @@ async fn a_session_change_runner_passes_every_session_change_case() {
     assert_none_failed_but(&report, &[]);
 }
 
+/// A session stating only the `immediately` rung applies every change at the
+/// next run with or without a flush, so the flush case can't see the flush's
+/// own effect: it still checks the next-run rule, passes, and names the rest
+/// unchecked, and the case that needs a waiting rung is inapplicable by name.
+#[tokio::test]
+async fn a_session_stating_only_immediately_names_the_flush_effect_unchecked() {
+    let report = run(&changing(Defects {
+        states_only_immediately: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        matches!(
+            report.outcome("flush_prefix_applies_pending"),
+            Some(CaseOutcome::PassedWithInapplicableRule { reason })
+                if reason.contains("only the immediately rung")
+        ),
+        "{}",
+        report.render()
+    );
+    assert!(
+        matches!(
+            report.outcome("session_refresh_waits_for_its_rung"),
+            Some(CaseOutcome::Inapplicable { .. })
+        ),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
 #[tokio::test]
 async fn session_change_cases_skip_by_name_without_the_group() {
     let report = run(&FakeSubject::new(Defects::default())).await;

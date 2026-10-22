@@ -532,9 +532,11 @@ a tool's name with another description or input schema; their `tools` are
 the names `tool_outside_host_set` must list. A host that does not fix its
 tool set at start answers `None` for both, and the host-set case is then
 inapplicable by name. Each case reads the rungs the session states in
-`session.baseline`: the next-run cases need `immediately`, the rung case a
-rung other than `immediately`, and the flush case prefers one, so that only
-the flush makes the change apply at the next run. The cases check that a
+`session.baseline`: the next-run cases need `immediately`, and the rung case a
+rung other than `immediately`. The flush case prefers such a rung, so that only
+the flush makes the change apply at the next run; when the session states only
+`immediately`, it still checks the next-run rule and names the flush's own
+effect unchecked. The cases check that a
 step of a run that was running when the change arrived offers exactly the
 tools the run started with.
 
