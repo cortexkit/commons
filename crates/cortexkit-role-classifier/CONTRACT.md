@@ -37,7 +37,7 @@ only what is this role's own. Route roles and model discovery follow RULES §18.
 - [pinned] Starting providers: Cloudflare Workers AI `@cf/cloudflare/clef`
   (catalog ids `cloudflare-workers-ai/@cf/cloudflare/clef`,
   `cloudflare-workers-ai/@cf/cloudflare/clef-flash`) and TypeSafe
-  `jev-latest` (catalog id `typesafe/jev-1.13.0`, `POST
+  `jev-1.13.0` (catalog id `typesafe/jev-1.13.0`, `POST
   https://api.typesafe.ai/v1/systemone`). Each provider call takes one
   item's `state` with every question of the batch.
 - [pinned] A catalog id is as RULES §1 states it.
@@ -281,15 +281,21 @@ Both providers share one shape; Cloudflare calls clef "fully Jev-API
 compatible" (`provider` module).
 
 - Request: `{model, state, questions, images?}`. clef takes `model: "clef"`
-  (or `"clef-flash"`); TypeSafe takes `"jev-latest"`. The module maps the
-  catalog id to the provider's own value. `state` is a string or structured
-  data (an object or array); the provider truncates a long state silently.
-  `questions` maps id to question (clef: 1 to 64 entries). `images` is clef
-  only: at most 4, each a `data:` URL or `{content_type, base64}`; 4 MiB and
-  16 megapixels each, 8 MiB in total, a body of at most 13 MiB, no remote
-  URLs.
+  (or `"clef-flash"`); TypeSafe takes `"jev-1.13.0"` for catalog id
+  `typesafe/jev-1.13.0`. The module maps the catalog id to the provider's
+  own value. `state` is a string or structured data (an object or array);
+  the provider truncates a long state silently. `questions` maps id to
+  question (clef: 1 to 64 entries). `images` is clef only: at most 4, each
+  a `data:` URL or `{content_type, base64}`; 4 MiB and 16 megapixels each,
+  8 MiB in total, a body of at most 13 MiB, no remote URLs.
 - Response: `{model, answers: {<id>: Answer}, usage: {input_tokens,
   output_tokens}}`.
+- [pinned] A runner sends the pinned `model` value of the catalog row it
+  serves (`provider::models`), never a moving alias such as TypeSafe's
+  `jev-latest`: when the provider moves an alias, the row's pricing and
+  behaviour stop matching the model that answers. When a response's `model`
+  names a different model than the one sent, the runner keeps the answers
+  and logs the mismatch, naming both values.
 - Errors: clef answers Workers AI errors, an HTTP status with
   `errors[].code` (the codes RULES §15 maps); there is no documented 529
   and no content-refusal code. TypeSafe answers 401, 422 (validation, naming
@@ -303,10 +309,13 @@ compatible" (`provider` module).
   <https://developers.cloudflare.com/workers-ai/platform/errors/>
 - Cloudflare Workers AI, clef-flash model page:
   <https://developers.cloudflare.com/workers-ai/models/clef-flash/>
-- TypeSafe, Jev API reference (request and answer shapes, `jev-latest`):
+- TypeSafe, Jev API reference (request and answer shapes):
   <https://jevtypesafeai.com/docs>; the endpoint is `POST
   https://api.typesafe.ai/v1/systemone`
   (<https://www.jevtypesafeai.com/how-to-use>).
+- TypeSafe, models (versioned ids such as `jev-1.13.0` are accepted in
+  `model`, and a response's `model` names the version that answered):
+  <https://docs.typesafe.ai/models>
 
 `test-vectors/classifier-v1/provider-examples.json` holds the providers'
 examples verbatim.

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.2
+
+- Added `provider::models::JEV_1_13_0` (`"jev-1.13.0"`), the `model` value
+  for catalog row `typesafe/jev-1.13.0`. The crate offered only
+  `JEV_LATEST` (`"jev-latest"`), TypeSafe's moving alias, and the contract
+  and vectors paired the pinned row with it, so a runner following them
+  sent the alias. When TypeSafe moves the alias, the row's pricing and
+  behaviour no longer match the model that answers. TypeSafe accepts
+  versioned ids in `model` and names the answering version in the
+  response's `model`.
+- `JEV_LATEST` stays, documented as the alias for callers that do not pin
+  a version; a runner serving a catalog row never sends it.
+- CONTRACT.md §9 maps the row to `"jev-1.13.0"` and adds a rule: a runner
+  sends the pinned `model` value of the row it serves, never a moving
+  alias, and when a response's `model` names a different model than the
+  one sent, it keeps the answers and logs the mismatch with both values.
+- Vectors: every TypeSafe provider request and response `model` is now
+  `"jev-1.13.0"`, `provider-examples.json` no longer names the alias in its
+  `about`, and `SHA256SUMS` is refreshed. No type or wire shape changed.
+
 ## 0.4.1
 
 - `CONTRACT.md` now directs callers to the shared rules for role-specific

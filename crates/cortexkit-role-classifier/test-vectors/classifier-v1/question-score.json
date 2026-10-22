@@ -106,7 +106,7 @@
     {
       "provider": "typesafe/jev-1.13.0",
       "provider_request": {
-        "model": "jev-latest",
+        "model": "jev-1.13.0",
         "state": "This is the third time this month I have had to ask about the same refund.",
         "questions": {
           "mood": {
@@ -121,7 +121,7 @@
         }
       },
       "provider_response": {
-        "model": "jev-latest",
+        "model": "jev-1.13.0",
         "answers": {
           "mood": {
             "type": "score",

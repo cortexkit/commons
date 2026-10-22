@@ -235,7 +235,7 @@ fn check_wrapping(file: &str, expected_type: Option<QuestionType>) {
         assert_eq!(vector.request.model, vector.provider, "{name}");
         let provider_model = match vector.provider.as_str() {
             provider::catalog_ids::CLEF => provider::models::CLEF,
-            provider::catalog_ids::JEV_1_13_0 => provider::models::JEV_LATEST,
+            provider::catalog_ids::JEV_1_13_0 => provider::models::JEV_1_13_0,
             other => panic!("{name}: unknown provider {other}"),
         };
         assert_eq!(vector.provider_request.model, provider_model, "{name}");

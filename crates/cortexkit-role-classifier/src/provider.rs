@@ -28,12 +28,23 @@ pub mod catalog_ids {
 }
 
 /// The `model` value each provider expects in its request body.
+///
+/// A runner serving a catalog row sends that row's pinned value, never a
+/// moving alias: an alias can start naming a newer model whose pricing and
+/// behaviour differ from the row's.
 pub mod models {
     /// Cloudflare Workers AI `@cf/cloudflare/clef`.
     pub const CLEF: &str = "clef";
     /// Cloudflare Workers AI's faster clef variant.
     pub const CLEF_FLASH: &str = "clef-flash";
-    /// TypeSafe's current model.
+    /// The `model` value for catalog row `typesafe/jev-1.13.0`
+    /// ([`super::catalog_ids::JEV_1_13_0`]). TypeSafe accepts versioned ids
+    /// in `model` and names the version that answered in the reply's
+    /// `model`.
+    pub const JEV_1_13_0: &str = "jev-1.13.0";
+    /// TypeSafe's moving alias for its newest model, for callers that do not
+    /// pin a version. A runner serving a catalog row never sends it; it sends
+    /// the row's pinned value, such as [`JEV_1_13_0`].
     pub const JEV_LATEST: &str = "jev-latest";
 }
 

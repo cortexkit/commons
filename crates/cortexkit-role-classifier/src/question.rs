@@ -1,7 +1,7 @@
 //! The providers' shared question shape, and the images an item may carry.
 //!
 //! Both starting providers (Cloudflare Workers AI `@cf/cloudflare/clef` and
-//! TypeSafe `jev-latest`) take the same question object, and a runner
+//! TypeSafe `jev-1.13.0`) take the same question object, and a runner
 //! forwards each question to the provider as the caller wrote it. The field
 //! names are the providers' own; see `CONTRACT.md` for the sources.
 

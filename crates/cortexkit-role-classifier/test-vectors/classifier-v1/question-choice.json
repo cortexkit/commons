@@ -90,7 +90,7 @@
     {
       "provider": "typesafe/jev-1.13.0",
       "provider_request": {
-        "model": "jev-latest",
+        "model": "jev-1.13.0",
         "state": "I was charged twice for my last invoice.",
         "questions": {
           "team": {
@@ -105,7 +105,7 @@
         }
       },
       "provider_response": {
-        "model": "jev-latest",
+        "model": "jev-1.13.0",
         "answers": {
           "team": {
             "type": "choice",

@@ -1,5 +1,5 @@
 {
-  "about": "The providers' own examples, verbatim from their documentation (CONTRACT.md cites the pages). clef_request is Cloudflare's example request for @cf/cloudflare/clef; typesafe_answers are TypeSafe's example answers for jev-latest, one per question type, and typesafe_usage its example usage. The answers are keyed by question type here only to name them; in a response they are keyed by question id.",
+  "about": "The providers' own examples, verbatim from their documentation (CONTRACT.md cites the pages). clef_request is Cloudflare's example request for @cf/cloudflare/clef; typesafe_answers are TypeSafe's example answers from its Jev API reference, one per question type, and typesafe_usage its example usage. The answers are keyed by question type here only to name them; in a response they are keyed by question id.",
   "clef_request": {
     "model": "clef",
     "state": "Checkout has been failing for every customer for the last hour.",

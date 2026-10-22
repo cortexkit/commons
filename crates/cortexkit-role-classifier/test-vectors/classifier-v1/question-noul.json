@@ -68,7 +68,7 @@
     {
       "provider": "typesafe/jev-1.13.0",
       "provider_request": {
-        "model": "jev-latest",
+        "model": "jev-1.13.0",
         "state": "Checkout has been failing for every customer for the last hour.",
         "questions": {
           "urgent": {
@@ -78,7 +78,7 @@
         }
       },
       "provider_response": {
-        "model": "jev-latest",
+        "model": "jev-1.13.0",
         "answers": {
           "urgent": {
             "type": "noul",
