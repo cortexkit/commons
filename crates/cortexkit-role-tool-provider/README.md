@@ -26,3 +26,4 @@ Consumers opt into `content/v1` on the route bind. Understanding held first
 replies additionally requires `held-reply/v1`; providers use
 `consumer_reads_held_reply_v1` to check both declarations. `ToolResult::held()`
 exposes the interim marker: the answer arrives later through `late_results`.
+`result::is_person_wait` says whether the held reason means a person must act.

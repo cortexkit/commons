@@ -13,6 +13,10 @@
       "body": {"content": [{"type": "text", "text": "Complete the login capture."}], "held": {"reason": "login_capture", "detail": {}}}
     },
     {
+      "name": "held_running",
+      "body": {"content": [{"type": "text", "text": "The program is still running. Its result will arrive later."}], "held": {"reason": "running"}}
+    },
+    {
       "name": "held_unknown_reason",
       "body": {"content": [{"type": "text", "text": "A person must complete another step."}], "held": {"reason": "provider_step_v2", "detail": {"reason": "opaque"}}}
     }
@@ -58,5 +62,12 @@
     {"name": "both_with_other", "consumer_capabilities": ["other/v1", "held-reply/v1", "content/v1"], "held": true},
     {"name": "wrong_content_version", "consumer_capabilities": ["content/v2", "held-reply/v1"], "held": false},
     {"name": "wrong_held_version", "consumer_capabilities": ["content/v1", "held-reply/v2"], "held": false}
+  ],
+  "person_wait": [
+    {"name": "consent", "reason": "consent", "person_wait": true},
+    {"name": "login_handoff", "reason": "login_handoff", "person_wait": true},
+    {"name": "login_capture", "reason": "login_capture", "person_wait": true},
+    {"name": "running", "reason": "running", "person_wait": false},
+    {"name": "unknown_reason", "reason": "provider_step_v2", "person_wait": false}
   ]
 }

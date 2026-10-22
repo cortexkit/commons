@@ -79,7 +79,7 @@ impl ToolResult {
         self
     }
 
-    /// Mark an interim reply that needs a person to act before a late answer.
+    /// Mark an interim reply whose real answer arrives later through `late_results`.
     pub fn with_held(mut self, held: HeldReply) -> Self {
         self.held = Some(held);
         self
@@ -97,10 +97,11 @@ impl ToolResult {
     }
 }
 
-/// Why a person must act before the call's answer arrives via `late_results`.
+/// Why the call's answer arrives later through `late_results`.
 ///
-/// Reasons are open snake_case strings. The first documented values are
-/// `consent`, `login_handoff` and `login_capture`; unknown values are preserved.
+/// Reasons are open snake_case strings; unknown values are preserved.
+/// [`held_reasons`] names the documented values, and [`is_person_wait`] says
+/// which of them mean a person must act.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeldReply {
@@ -127,6 +128,35 @@ impl HeldReply {
         self.detail = Some(Value::Object(detail));
         self
     }
+}
+
+/// The documented `held.reason` values. The set is open: a consumer keeps any
+/// other snake_case reason, shows only its interim content and never prompts
+/// a person for it.
+pub mod held_reasons {
+    /// A person must approve the call.
+    pub const CONSENT: &str = "consent";
+    /// A person must finish signing in, for example in a browser.
+    pub const LOGIN_HANDOFF: &str = "login_handoff";
+    /// A person must sign in so the provider can capture and keep that login.
+    pub const LOGIN_CAPTURE: &str = "login_capture";
+    /// The call's work continues and no person needs to act. The interim
+    /// content says the result will arrive later.
+    pub const RUNNING: &str = "running";
+}
+
+/// Whether a held reply's reason means a person must act before the answer
+/// can arrive.
+///
+/// True only for `consent`, `login_handoff` and `login_capture`. A consumer may
+/// prompt a person, or count the call as waiting on one, only when this is
+/// true. It is false for `running` and for every reason this crate does not
+/// document. A consumer pulls `late_results` for every held reply either way.
+pub fn is_person_wait(reason: &str) -> bool {
+    matches!(
+        reason,
+        held_reasons::CONSENT | held_reasons::LOGIN_HANDOFF | held_reasons::LOGIN_CAPTURE
+    )
 }
 
 fn deserialize_held_detail<'de, D: Deserializer<'de>>(

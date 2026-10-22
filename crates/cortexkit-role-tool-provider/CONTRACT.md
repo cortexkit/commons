@@ -482,8 +482,8 @@ check the tool opt-in and the call/provider prerequisites below.
   `isError: true` is malformed.
 - `reason` is an open snake_case string with exactly the `errorCode` grammar:
   lowercase letters and digits in nonempty underscore-separated words,
-  starting with a letter. Unknown reasons are kept, not refused. The first
-  documented values are `consent`, `login_handoff` and `login_capture`.
+  starting with a letter. Unknown reasons are kept, not refused. The documented
+  values are `consent`, `login_handoff`, `login_capture` and `running`.
 - `detail`, when present, is a JSON object, owned by the provider and opaque
   to the role. A non-object, including explicit `null`, is malformed.
 - A provider may send `held` only for a call that carried a `call_key`, and
@@ -491,15 +491,30 @@ check the tool opt-in and the call/provider prerequisites below.
   **not** the call's answer: the answer is the §7 `late_results` entry for that
   `(carrier, call_key)`, of kind `result`, `not_started` or `expired`.
   `tool.withdraw` applies unchanged (§5).
-- `held` means a person must act and the answer comes later. Refusals no person
-  can fix, such as busy, validation failure or unavailable consent, are ordinary
-  final replies and never carry `held`.
+- `held` means the call's answer comes later through `late_results`. The
+  reason says why:
+  - `consent`, `login_handoff` and `login_capture` are the person-wait
+    reasons. A person must act before the answer can arrive.
+  - `running` means the call's work continues and no person needs to act. The
+    interim `content` says so and says that the result will arrive later.
+- The prerequisites above apply to every reason, `running` included: a
+  `call_key`, the `late_results` capability, and a route whose bind declared
+  both `held-reply/v1` and `content/v1`.
+- A consumer may show a person a prompt to act, or count the call as waiting
+  on a person, only for the three person-wait reasons
+  (`result::is_person_wait`). For `running` and for any reason it does not
+  know, it shows the provider's interim content only. It still pulls
+  `late_results` for every held reply, whatever the reason.
+- Refusals no person can fix, such as busy, validation failure or unavailable
+  consent, are ordinary final replies and never carry `held`.
 
 `result::validate` returns typed `ResultProblem`s for held/error conflicts,
 invalid reason grammar and non-object detail. It does not have route, catalog
 or call context; providers enforce those prerequisites before sending.
+`result::held_reasons` names the documented reasons.
 `test-vectors/tool-provider-v1/held-reply-v1.json` pins the valid reasons,
-malformed bodies and route-bind gating decision table.
+malformed bodies, route-bind gating decision table and which reasons are
+person waits.
 
 ## 4.2. User commands
 

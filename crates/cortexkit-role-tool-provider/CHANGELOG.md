@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.2
+
+- A `held` reply now means the call's answer comes later through
+  `late_results`; the reason says why. New documented reason `running`: the
+  call's work continues and no person needs to act. `consent`,
+  `login_handoff` and `login_capture` remain the person-wait reasons, and a
+  consumer prompts a person only for those. Unknown reasons are not person
+  waits. Every held reply still needs a `call_key`, the `late_results`
+  capability and both route-bind declarations. Additive: no wire change.
+- Add `result::held_reasons` with a constant for each documented reason, and
+  `result::is_person_wait`. `held-reply-v1.json` gains a `running` reply and a
+  `person_wait` table.
+
 ## 0.10.1
 
 - The contract states the reply shape: a `RESPONSE` body is the bare answer

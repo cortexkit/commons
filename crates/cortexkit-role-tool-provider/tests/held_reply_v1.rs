@@ -1,6 +1,6 @@
 use cortexkit_role_tool_provider::{
     consumer_reads_held_reply_v1,
-    result::{validate, ContentPart, HeldReply, ToolResult},
+    result::{held_reasons, is_person_wait, validate, ContentPart, HeldReply, ToolResult},
     vectors, CONTENT_V1_CAPABILITY, HELD_REPLY_V1,
 };
 use serde_json::{json, Value};
@@ -50,6 +50,7 @@ vector_tests!(
     held_consent,
     held_login_handoff,
     held_login_capture,
+    held_running,
     held_unknown_reason
 );
 vector_tests!(
@@ -101,6 +102,35 @@ fn held_route_gating_decision_table() {
     }
     assert_eq!(HELD_REPLY_V1, "held-reply/v1");
     assert_eq!(CONTENT_V1_CAPABILITY, "content/v1");
+}
+
+#[test]
+fn person_wait_reasons_match_vectors() {
+    let vectors = vectors();
+    let cases = vectors["person_wait"].as_array().unwrap();
+    let reasons: Vec<&str> = cases
+        .iter()
+        .map(|case| case["reason"].as_str().unwrap())
+        .collect();
+    // Every documented reason has a vector, plus at least one unknown reason.
+    for documented in [
+        held_reasons::CONSENT,
+        held_reasons::LOGIN_HANDOFF,
+        held_reasons::LOGIN_CAPTURE,
+        held_reasons::RUNNING,
+    ] {
+        assert!(reasons.contains(&documented), "{documented}");
+    }
+    assert!(reasons.contains(&"provider_step_v2"));
+    for case in cases {
+        let reason = case["reason"].as_str().unwrap();
+        assert_eq!(
+            is_person_wait(reason),
+            case["person_wait"].as_bool().unwrap(),
+            "{}",
+            case["name"]
+        );
+    }
 }
 
 #[test]
