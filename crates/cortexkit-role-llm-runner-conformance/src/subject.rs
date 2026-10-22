@@ -134,7 +134,7 @@ pub enum Capability {
 }
 
 impl Capability {
-    /// Every capability group of the role, in the order of
+    /// The role groups represented by this enum, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
         Self::Attachments,
@@ -397,6 +397,49 @@ pub struct ScriptedToolCall {
     pub hold: bool,
 }
 
+/// An entry the scripted provider publishes after its held first reply.
+/// Kinds and reasons remain open strings, like the tool-provider wire contract.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ScriptedLateEntry {
+    pub kind: String,
+    pub result: Option<Value>,
+    pub reason: Option<String>,
+}
+
+impl ScriptedLateEntry {
+    pub fn result(result: Value) -> Self {
+        Self {
+            kind: "result".into(),
+            result: Some(result),
+            reason: None,
+        }
+    }
+    pub fn not_started(reason: impl Into<String>) -> Self {
+        Self {
+            kind: "not_started".into(),
+            result: None,
+            reason: Some(reason.into()),
+        }
+    }
+    pub fn expired() -> Self {
+        Self {
+            kind: "expired".into(),
+            result: None,
+            reason: None,
+        }
+    }
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+    pub fn result_body(&self) -> Option<&Value> {
+        self.result.as_ref()
+    }
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
+}
+
 impl Script {
     /// Every tool call in the script, in order.
     pub fn tool_calls(&self) -> impl Iterator<Item = &ScriptedToolCall> {
@@ -506,6 +549,40 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Configure the actual scripted provider to answer this call with a
+    /// `held-reply/v1` first reply, not an unanswered request. Declare
+    /// `late_results` and opt the tool into `content/v1`; the runner must bind
+    /// with both consumer capabilities. Do not synthesize runner status.
+    async fn install_held_reply(
+        &self,
+        _session: &str,
+        _arguments: &Value,
+        _reason: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("held-reply provider is not implemented"))
+    }
+
+    /// Wait until the provider has sent the held first reply and return the
+    /// call_key captured from the actual incoming call, never from run.status.
+    async fn await_held_reply(&self, _arguments: &Value) -> Result<String, HarnessError> {
+        Err(HarnessError::new(
+            "held-reply observation is not implemented",
+        ))
+    }
+
+    /// Publish a durable provider `late_results` entry for the observed call,
+    /// preserving its carrier, custodian and call_key. The runner must pull
+    /// and apply it normally; this hook never writes a runner tool result.
+    async fn publish_late_entry(
+        &self,
+        _arguments: &Value,
+        _entry: ScriptedLateEntry,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "late-entry publication is not implemented",
+        ))
+    }
+
     /// Configure the scripted model to accept only PNG/PDF media (besides text)
     /// when true, or only text when false. These are provider/catalog facts, not a
     /// synthesized `session.head` answer. Required with `attachments`.

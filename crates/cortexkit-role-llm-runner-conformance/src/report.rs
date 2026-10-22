@@ -110,6 +110,14 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("held_calls_lists_waiting_call", &[Queue, TranscriptReads, RunOps],
+        "when role.describe declares held_calls, a provider's held reply is listed with its call_key, tool, provider, reason and held_at_ms while waiting"),
+    case("held_calls_applies_late_result", &[Queue, TranscriptReads, RunOps, Capability::RenderedModelInput],
+        "when role.describe declares held_calls, applying the provider's late result removes the held call and continues the run with that result in model input"),
+    case("held_calls_not_started_becomes_tool_result", &[Queue, TranscriptReads, RunOps, Capability::RenderedModelInput],
+        "when role.describe declares held_calls, a not_started late entry becomes a tool result saying the call never ran and the run continues"),
+    case("held_calls_expired_becomes_tool_result", &[Queue, TranscriptReads, RunOps, Capability::RenderedModelInput],
+        "when role.describe declares held_calls, an expired late entry becomes a tool result saying its answer expired and the run continues"),
     case("cut_starts_a_new_lineage", CUT,
         "after a view with a cut applies, session.head names a new lineage_id and first_ordinal is the cut's first retained ordinal; inapplicable without the view-publishing hook"),
     case("old_lineage_reads_refused_after_a_cut", CUT,

@@ -149,6 +149,7 @@ shipping runner with this document.
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
+| `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
 | `run_cancel` | `run.cancel` | §6.2 |
 | `dispatch_attribution` | `session.read` (per-call fields) | §5 |
 | `streaming` | `session.read` (`head`), `session.subscribe` | §7 |
@@ -851,12 +852,13 @@ display-ready row for an app's reader on a runner declaring
   stream event that reports the wait (§7)) is in a wait the runner owns and
   ends by itself, whatever its `reason`. A watchdog or owner MUST NOT nudge
   it, stop it or end it before `deadline_ms`. Once `deadline_ms` has passed,
-  the run counts as ordinary silence again. A caller recognizes such a wait
+  this deadline no longer protects the run; a non-empty `held_calls` list
+  still protects it independently (§6.1). A caller recognizes such a wait
   by `deadline_ms`, never by `reason` (`RunStatus::runner_wait_until`):
   `reason` stays an open, display-only string, so a wait kind added later
   needs no watchdog change.
   - A runner sets `deadline_ms` only while the run is in such a wait, never
-    on a run that waits for a caller (a `paused` run waiting for a retry
+    on a run that only waits for a caller (a `paused` run waiting for a retry
     carries none), and never later than that wait's own bound.
 - [pinned] **Waiting at the ceiling** is the first such wait. A run the runner holds at the
   ceiling while it waits for a compaction view (up to the provider's bound,
@@ -960,7 +962,7 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?, usage?, directives?}`,
+  structured_output?, context_ceiling?, deadline_ms?, held_calls?, usage?, directives?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason` and
   `retries_used` stay runner members, not pinned.
@@ -975,6 +977,8 @@ state, polled without reading the transcript.
   - `deadline_ms`: on an `active` or `paused` run in a wait the runner owns
     and ends by itself, when that wait ends at the latest (§6, runner-owned
     waits; `context_ceiling_wait` is one such wait); absent otherwise.
+  - `held_calls`: on a runner declaring `held_calls`, the held tool calls
+    whose late answers the run awaits, as specified below.
   - `error`: on a run that ended `error`, the same run error `run.result`
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
@@ -985,6 +989,36 @@ state, polled without reading the transcript.
   - `directives`: exactly what `run.result` carries for the run (§9.9).
   - `usage`: the run's token usage so far, on a runner that declares
     `run_usage` (§6.4).
+- [pinned] **Held calls** (added in 0.5.4). A runner declares the describe
+  group `held_calls` when it reports held tool-provider calls. It requires
+  `run_status` and adds optional `held_calls: [{call_key, tool, provider,
+  reason, held_at_ms}]` (`run::HeldCall`) to `run.status` and to run status
+  events carrying the same state (§7). `call_key` is the dispatched call's
+  key, `tool` its name, `provider` the provider module id, and `held_at_ms`
+  the Unix epoch milliseconds when the runner received its held reply.
+  The list is present only while the run waits on at least one held call;
+  an empty list is omitted, preserving the exact bytes of older statuses.
+- [pinned] A run whose status lists a non-empty `held_calls` is a
+  runner-owned wait with no deadline. A consumer's watchdog MUST NOT nudge,
+  interrupt or end that run for lack of progress, however long it waits.
+  The owner MAY still cancel or interrupt it on purpose. Consumers decide
+  from `held_calls`, never from the run's display-only `reason` string.
+  A run MAY carry both `held_calls` and `deadline_ms`; each rule applies
+  independently, so expiry of the deadline does not end held-call protection.
+- [pinned] Each held call's `reason` is the provider's held reason, an open
+  string for display (tool-provider §4.1, `held-reply/v1`). A consumer may
+  show that a person must act only for the tool-provider person-wait reasons
+  (`cortexkit_role_tool_provider::result::is_person_wait`: `consent`,
+  `login_handoff`, `login_capture`). `running` and unknown reasons display
+  as waiting, never as requiring a person to act.
+- [pinned] The held first reply is interim content, not the tool's final
+  answer. The runner pulls the provider's `late_results` (tool-provider §7),
+  correlated by `(carrier, call_key)`, and drops the call from `held_calls`
+  when it applies that entry. A `result` entry becomes the tool result;
+  `not_started` becomes a tool result saying the call never ran, and
+  `expired` becomes a tool result saying its answer expired. The run then
+  continues with that result. Intake deduplication and acknowledgements
+  follow tool-provider §7, including re-reading after an incarnation change.
 - [pinned] `undelivered_steers` is the list of `send_id`s of the steers
   this run accepted and never rendered to the model before it ended, in
   the order they were accepted. On the status of a run that has ended:
@@ -1236,7 +1270,11 @@ run's token usage whichever runner served it.
   wait's `reason`; a reader recognizes the wait by `deadline_ms`, never by
   `reason`. A wait at the context ceiling is reported this way with
   `reason: context_ceiling_wait`, and a step waiting on a rewrite ride with
-  `reason: compaction_wait`.
+  `reason: compaction_wait`. A runner declaring `held_calls` also carries
+  the same `held_calls` list as `run.status` on status events while waiting
+  for held tool calls, and emits a durable `control` status event when that
+  list changes. It omits the list when empty. This wait has no deadline;
+  readers recognize it by the non-empty list, independently of `deadline_ms`.
 
 ### 7.1 `live_events`: typed events on `session.subscribe`
 
@@ -3646,6 +3684,10 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `no_tools_offered_to_model` | `no_tools`, `queue`, `transcript_reads`; an unsuppressed control offers tools and `tools: []` offers none, observed at the scripted model |
 | `no_tools_later_plan_send_refused` | `no_tools`, `queue`, `transcript_reads`; a fetch-plan session refuses any later `tools` member naming `tools`, writing nothing; reported inapplicable by name when the adapter cannot create a plan session |
 | `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
+| `held_calls_lists_waiting_call` | `held_calls`, `run_status`, `queue`, `transcript_reads`, `run_ops`; a scripted held first reply lists its call key, tool, provider, held reason and receipt time while waiting |
+| `held_calls_applies_late_result` | the above plus rendered model-input observations; applying the provider's late result removes the entry and continues the run with that result |
+| `held_calls_not_started_becomes_tool_result` | the above plus rendered model-input observations; a `not_started` late entry continues the run with a tool result saying the call never ran |
+| `held_calls_expired_becomes_tool_result` | the above plus rendered model-input observations; an `expired` late entry removes the held call and continues the run with a tool result saying its answer expired |
 
 The `context_ceiling` refusal and run state (§6, §12.1) have no live case:
 the suite has no way to bring a runner's context to its ceiling. They are

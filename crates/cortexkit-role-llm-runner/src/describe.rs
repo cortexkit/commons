@@ -324,6 +324,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    if describe.declares(capabilities::HELD_CALLS) && !describe.declares(capabilities::RUN_STATUS) {
+        problems.push(DescribeProblem::Undecodable(
+            "held_calls requires run_status".into(),
+        ));
+    }
     match describe.major(PROVIDES) {
         None => problems.push(DescribeProblem::MissingMajor {
             found: describe.majors.iter().map(|m| m.version.clone()).collect(),

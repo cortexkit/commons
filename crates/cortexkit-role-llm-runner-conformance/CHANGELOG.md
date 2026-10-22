@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.4
+
+- Require `cortexkit-role-llm-runner` 0.5.4 and exercise `held_calls` when
+  declared on the real `role.describe` reply. Existing adapters need no new
+  enum match arms; undeclared `held_calls` is inapplicable by name and does
+  not lower the runner's verdict.
+- Add default fixture hooks for a held first reply and separately published
+  late entries, plus `ScriptedLateEntry`. Cases check the waiting list,
+  removal and continuation with a late result, `not_started` conversion,
+  and conversion of an `expired` answer to a tool result before continuing.
+- Add never-listed and stale-entry faulty runners, each rejected by exactly
+  one named case.
+
 ## 0.10.3
 
 Requires `cortexkit-role-llm-runner` 0.5.3. Runners can now verify the optional

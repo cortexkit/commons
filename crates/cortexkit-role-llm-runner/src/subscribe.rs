@@ -93,6 +93,31 @@ pub struct SubscribeEvent {
     pub body: Map<String, Value>,
 }
 
+impl SubscribeEvent {
+    /// The typed held-call list on a run status event. Other event fields
+    /// remain in the runner's schema. Absence means no held calls reported.
+    pub fn held_calls(&self) -> Result<Vec<crate::run::HeldCall>, serde_json::Error> {
+        self.body.get("held_calls").map_or_else(
+            || Ok(Vec::new()),
+            |calls| serde_json::from_value(calls.clone()),
+        )
+    }
+
+    /// Set the same list carried by run.status, omitting it when empty so
+    /// older event bytes are unchanged.
+    pub fn with_held_calls(mut self, held_calls: Vec<crate::run::HeldCall>) -> Self {
+        if held_calls.is_empty() {
+            self.body.remove("held_calls");
+        } else {
+            self.body.insert(
+                "held_calls".into(),
+                serde_json::to_value(held_calls).expect("held calls serialize"),
+            );
+        }
+        self
+    }
+}
+
 /// Event lanes.
 pub mod kinds {
     /// Durable events, replayable from a cursor.
@@ -105,6 +130,23 @@ pub mod kinds {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn status_events_carry_the_same_held_calls_and_omit_empty_lists() {
+        let status: crate::run::RunStatus =
+            serde_json::from_str(vectors::file("run_status.held.json").unwrap()).unwrap();
+        let bytes = r#"{"kind":"control","cursor":{"seq":1},"state":"active"}"#;
+        let event: SubscribeEvent = serde_json::from_str(bytes).unwrap();
+        let held = event.with_held_calls(status.held_calls().to_vec());
+        assert_eq!(held.held_calls().unwrap(), status.held_calls());
+        let round_trip: SubscribeEvent =
+            serde_json::from_value(serde_json::to_value(&held).unwrap()).unwrap();
+        assert_eq!(round_trip.held_calls().unwrap(), status.held_calls());
+        assert_eq!(
+            serde_json::to_string(&round_trip.with_held_calls(vec![])).unwrap(),
+            bytes
+        );
+    }
 
     #[test]
     fn subscribe_vectors_decode_and_round_trip() {

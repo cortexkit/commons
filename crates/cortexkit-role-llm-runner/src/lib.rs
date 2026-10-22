@@ -185,6 +185,8 @@ pub mod capabilities {
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
     pub const RUN_STATUS: &str = "run_status";
+    /// Held tool calls on run status and status events; requires `run_status`.
+    pub const HELD_CALLS: &str = "held_calls";
     /// Cancel an active or paused run.
     pub const RUN_CANCEL: &str = "run_cancel";
     /// Withdraw a queued submission or a pending steer on a confirm runner.
@@ -309,6 +311,7 @@ pub mod capabilities {
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
+        (HELD_CALLS, &[ops::RUN_STATUS]),
         (RUN_CANCEL, &[ops::RUN_CANCEL]),
         (RETRACT, &[ops::SESSION_RETRACT]),
         (DISPATCH_ATTRIBUTION, &[ops::SESSION_READ]),

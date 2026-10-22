@@ -3,6 +3,67 @@
 
 mod fake;
 
+fn held_call_subject(defects: fake::Defects) -> fake::FakeSubject {
+    let mut subject = fake::FakeSubject::new(defects);
+    subject.held_calls_group = true;
+    subject.advertise_status = true;
+    subject.capabilities.insert(Capability::RunStatus);
+    subject
+}
+
+#[tokio::test]
+async fn held_calls_faithful_runner_passes_all_cases() {
+    let report = run(&held_call_subject(Defects::default())).await;
+    for name in cases_of(&["held_calls_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn held_calls_never_listed_fails_only_listing_case() {
+    let report = run(&held_call_subject(Defects {
+        held_calls_never_listed: true,
+        ..Defects::default()
+    }))
+    .await;
+    let name = "held_calls_lists_waiting_call";
+    let reason = failed(&report, name);
+    println!("{name}: {reason}");
+    assert!(reason.contains("never listed"), "{reason}");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn held_calls_stale_entry_fails_only_late_result_case() {
+    let report = run(&held_call_subject(Defects {
+        held_calls_stale: true,
+        ..Defects::default()
+    }))
+    .await;
+    let name = "held_calls_applies_late_result";
+    let reason = failed(&report, name);
+    println!("{name}: {reason}");
+    assert!(reason.contains("kept the held call"), "{reason}");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn held_calls_undeclared_group_is_inapplicable_by_name() {
+    let mut subject = held_call_subject(Defects::default());
+    subject.held_calls_group = false;
+    let report = run(&subject).await;
+    for name in cases_of(&["held_calls_"]) {
+        assert!(matches!(report.outcome(name),
+            Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare held_calls"));
+    }
+}
+
 use cortexkit_role_llm_runner::send::{delivered_as, Delivered};
 use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
@@ -73,6 +134,12 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("held_calls_")
+        && matches!(report.outcome(case),
+        Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare held_calls")
+    {
+        return;
+    }
     if case == "cut_setup_leaves_reads_alone"
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("never refuses reads"))
     {
@@ -277,6 +344,8 @@ const TIMED_RETENTION_CASES: &[&str] = &[
 #[tokio::test(start_paused = true)]
 async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.held_calls_group = true;
+    subject.capabilities.insert(Capability::RunStatus);
     subject.claim_process_kill = true;
     subject.descriptor_fixtures = true;
     subject.capabilities.insert(Capability::Attachments);
@@ -1213,6 +1282,8 @@ retention_violation!(
 #[tokio::test(start_paused = true)]
 async fn retention_paused_non_terminal_run_passes() {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.held_calls_group = true;
+    subject.capabilities.insert(Capability::RunStatus);
     subject.capabilities.insert(Capability::Attachments);
     subject.enable_retention();
     subject.claim_process_kill = true;
@@ -1284,6 +1355,10 @@ async fn retention_status_is_inapplicable_when_not_served() {
         matches!(report.outcome("retention_run_status_expired"), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("run.status"))
     );
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    println!(
+        "retention_status_is_inapplicable_when_not_served verdict: {:?}",
+        report.verdict
+    );
 }
 
 #[tokio::test(start_paused = true)]

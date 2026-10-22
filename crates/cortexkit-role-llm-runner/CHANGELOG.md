@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.4
+
+- Add the optional `held_calls` describe group: typed `run::HeldCall` entries
+  on run status and status events identify provider late-result waits with no
+  deadline. Progress watchdogs leave these runs alone; owner cancellation is
+  still allowed. Held reasons remain open, display-only strings.
+- Pin late-result application and omission of empty lists, including exact
+  status bytes and feature-gated vectors. No public enum variants added.
+
 ## 0.5.3
 
 Additive `attachments` group (CONTRACT §9.12). Runners gain session-bound

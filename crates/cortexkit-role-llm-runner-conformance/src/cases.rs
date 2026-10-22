@@ -89,6 +89,7 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("held_calls_") => crate::held_calls::run(self, name).await,
             name if name.starts_with("attachments_") => crate::attachments::run(self, name).await,
             name if name.starts_with("media_") => crate::media::run(self, name).await,
             "user_commands_cutoff_after_forward" | "user_commands_cutoff_before_forward" => {

@@ -320,6 +320,18 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/live-events.json"),
     ),
     (
+        "run_status.held.json",
+        include_str!("../test-vectors/llm-runner-v1/run_status.held.json"),
+    ),
+    (
+        "run_status.held_after_late.json",
+        include_str!("../test-vectors/llm-runner-v1/run_status.held_after_late.json"),
+    ),
+    (
+        "run_status.held_absent.json",
+        include_str!("../test-vectors/llm-runner-v1/run_status.held_absent.json"),
+    ),
+    (
         "README.md",
         include_str!("../test-vectors/llm-runner-v1/README.md"),
     ),

@@ -18,6 +18,19 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+New in 0.10.4: `held_calls` is discovered directly by its open string on
+`role.describe` (no new `Capability` enum variant). Its four cases require
+`run_status`, `queue`, `transcript_reads` and `run_ops`; continuation cases
+also use `RenderedModelInput` and `model_requests`. Implement
+`install_held_reply`, `await_held_reply` (return the call key observed at the
+provider, not status), and `publish_late_entry(ScriptedLateEntry)`. The provider
+must send an actual `held-reply/v1` first reply, then expose the separately
+published entry through `late_results`; merely holding an unanswered request
+is not sufficient. Missing hooks fail when the group is declared; an absent
+group makes the cases N/A (inapplicable) by name, without lowering the
+runner's verdict. The existing `ScriptedToolCall::hold` seam remains
+unchanged for older cases.
+
 New in 0.10.3: declare `Capability::Attachments` only for the complete
 `attachments` group, then implement `attachment_model_fields` (configure
 real provider/catalog PNG/PDF or text-only input facts),
@@ -152,11 +165,14 @@ impossible to exercise is reported inapplicable, which is neither a pass
 nor a missing capability: a runner that declares every delivery mode has
 no undeclared mode to refuse, and a runner whose session capabilities come
 from `session.baseline` has no admission reply to compare.
+The discovery-gated `held_calls` cases are also inapplicable when
+`role.describe` does not declare that optional group, not skipped.
 
 ## Cases in this subset
 
 | Case | Requires |
 |---|---|
+| `held_calls_lists_waiting_call`, `held_calls_applies_late_result`, `held_calls_not_started_becomes_tool_result`, `held_calls_expired_becomes_tool_result` | `held_calls` on `role.describe`, `run_status`, `queue`, `transcript_reads`, `run_ops`; the last three also require `RenderedModelInput`; late entries continue the run with the result, a note that the call never ran, or a note that its answer expired, respectively |
 | `cut_starts_a_new_lineage`, `old_lineage_reads_refused_after_a_cut`, `read_below_first_ordinal_refused`, `ordinals_never_renumber_across_a_cut`, `setup_once_per_lineage`, `view_ranges_start_at_first_ordinal`, `cut_lineage_notice_descends_from` | `compaction`, `queue`, `transcript_reads`, `run_ops`, and the view hook |
 | `history_pages_back_to_the_first_message`, `history_mid_matches_read`, `history_never_serves_a_reverted_branch`, `history_cursor_expired_after_a_revert_past_it`, `history_boundary_order`, `history_before_mid_continues_below_the_window` | `host_history`, `queue`, `transcript_reads`; the revert cases need the revert hook, the last two the host-history hook |
 | `head_names_the_cut`, `notice_carries_first_ordinal`, `revert_below_the_cut_restarts_at_the_previous_cut`, `revert_below_a_cut_before_adoption_has_no_descent`, `checkpoint_on_descending_setup_refused`, `cut_setup_leaves_reads_alone`, `cut_numbering_continues_from_the_old_lineage` | as the cut cases; the revert cases need the revert hook, the adoption case `seed_host_history` with `cut`, the checkpoint case `tag_checkpoint`, the reads case the Setup-hold hooks and `holds_reads_during_setup`, the numbering case `tags` |

@@ -471,6 +471,53 @@ impl From<RunReason> for String {
     }
 }
 
+/// A tool-provider call whose final answer will arrive through `late_results`.
+/// The provider's reason is open and display-only; it is not a run state.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HeldCall {
+    pub call_key: String,
+    pub tool: String,
+    pub provider: String,
+    pub reason: String,
+    /// When the runner received the held reply, in Unix epoch milliseconds.
+    pub held_at_ms: u64,
+}
+
+impl HeldCall {
+    pub fn new(
+        call_key: impl Into<String>,
+        tool: impl Into<String>,
+        provider: impl Into<String>,
+        reason: impl Into<String>,
+        held_at_ms: u64,
+    ) -> Self {
+        Self {
+            call_key: call_key.into(),
+            tool: tool.into(),
+            provider: provider.into(),
+            reason: reason.into(),
+            held_at_ms,
+        }
+    }
+
+    pub fn call_key(&self) -> &str {
+        &self.call_key
+    }
+    pub fn tool(&self) -> &str {
+        &self.tool
+    }
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+    pub fn held_at_ms(&self) -> u64 {
+        self.held_at_ms
+    }
+}
+
 /// The lenient run-id `run.status` answer. Session-level answers may use a
 /// runner's own schema. An unknown run answers only `{state: "unknown"}`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -500,6 +547,11 @@ pub struct RunStatus {
     /// ([`RunStatus::runner_wait_until`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_ms: Option<u64>,
+    /// Calls awaiting a tool-provider late answer. Empty lists are omitted,
+    /// preserving older status bytes. A nonempty list protects the run from
+    /// progress watchdogs without a deadline, independently of `deadline_ms`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held_calls: Vec<HeldCall>,
     /// The run's token usage so far (§6.4). A runner that declares
     /// `run_usage` always includes it once a step of the run has completed,
     /// and may include it earlier with `steps: 0`. Absent means not
@@ -522,6 +574,7 @@ impl RunStatus {
             structured_output: None,
             context_ceiling: None,
             deadline_ms: None,
+            held_calls: Vec::new(),
             usage: None,
             directives: None,
         }
@@ -542,6 +595,18 @@ impl RunStatus {
     pub fn with_deadline_ms(mut self, deadline_ms: u64) -> Self {
         self.deadline_ms = Some(deadline_ms);
         self
+    }
+    pub fn with_held_calls(mut self, held_calls: Vec<HeldCall>) -> Self {
+        self.held_calls = held_calls;
+        self
+    }
+    pub fn held_calls(&self) -> &[HeldCall] {
+        &self.held_calls
+    }
+    /// Whether a held tool call makes this a runner-owned wait with no
+    /// deadline. Owner-requested cancellation or interruption is still allowed.
+    pub fn is_held_wait(&self) -> bool {
+        !self.held_calls.is_empty()
     }
     pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
         self.context_ceiling = Some(detail);
@@ -582,7 +647,8 @@ impl RunStatus {
     /// must not nudge, stop or end it. Whatever the run's `reason` is: a
     /// caller recognizes the wait by `deadline_ms` alone. `None` for any
     /// other run, and for a run without `deadline_ms`. After the returned
-    /// time has passed, the run counts as ordinary silence again.
+    /// time has passed, this deadline no longer protects the run. A nonempty
+    /// `held_calls` list protects it independently, with no deadline.
     pub fn runner_wait_until(&self) -> Option<u64> {
         matches!(self.state.as_str(), states::ACTIVE | states::PAUSED)
             .then_some(self.deadline_ms)
@@ -969,6 +1035,55 @@ mod tests {
             serde_json::from_value::<RunResult>(encoded).unwrap(),
             result
         );
+    }
+}
+
+#[cfg(test)]
+mod held_calls_tests {
+    use super::*;
+    use crate::vectors;
+
+    #[test]
+    fn held_status_vectors_pin_bytes_and_wait_lifecycle() {
+        for name in [
+            "run_status.held.json",
+            "run_status.held_after_late.json",
+            "run_status.held_absent.json",
+        ] {
+            let bytes = vectors::file(name).unwrap();
+            let status: RunStatus = serde_json::from_str(bytes).unwrap();
+            assert_eq!(
+                format!("{}\n", serde_json::to_string(&status).unwrap()),
+                bytes,
+                "{name}"
+            );
+            assert_eq!(status.is_held_wait(), name == "run_status.held.json");
+        }
+        let absent = RunStatus::new(states::ACTIVE).with_held_calls(vec![]);
+        assert_eq!(
+            serde_json::to_string(&absent).unwrap(),
+            "{\"state\":\"active\"}"
+        );
+        let held = HeldCall::new(
+            "carrier:held-1",
+            "approve",
+            "approval-provider",
+            "consent",
+            1790000000000,
+        );
+        assert_eq!(held.call_key(), "carrier:held-1");
+        assert_eq!(held.tool(), "approve");
+        assert_eq!(held.provider(), "approval-provider");
+        assert_eq!(held.reason(), "consent");
+        assert_eq!(held.held_at_ms(), 1790000000000);
+        let status = absent.with_held_calls(vec![held]).with_deadline_ms(1);
+        assert!(status.is_held_wait());
+        assert_eq!(status.held_calls().len(), 1);
+        assert_eq!(status.runner_wait_until(), Some(1));
+        let unknown: RunStatus = serde_json::from_value(serde_json::json!({
+            "state":"active", "held_calls":[{"call_key":"k", "tool":"t", "provider":"p", "reason":"future_reason", "held_at_ms":2, "future":true}]
+        })).unwrap();
+        assert_eq!(unknown.held_calls()[0].reason(), "future_reason");
     }
 }
 

@@ -67,6 +67,7 @@ use subc_protocol::ErrorBody;
 mod attachments;
 mod compaction;
 mod display;
+mod held_calls;
 mod history;
 mod media;
 mod session_change;
@@ -158,6 +159,8 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub held_calls_never_listed: bool,
+    pub held_calls_stale: bool,
     pub attachments: &'static str,
     pub media: Option<&'static str>,
     pub user_command: Option<&'static str>,
@@ -485,6 +488,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    held_replies: Mutex<BTreeMap<String, held_calls::HeldReply>>,
     standalone_in_process: bool,
     /// Host entries every session holds before the runner numbered
     /// anything, unless the hook seeded another count for it.
@@ -1843,6 +1847,9 @@ impl Module {
                 .collect();
             if let Some((key, call)) = mine.iter().find(|(_, call)| !call.intent) {
                 self.commit(session, json!({ "kind": "intent", "call_key": key }))?;
+                if self.world.held_first_reply(&call.arguments, key) {
+                    return Ok(());
+                }
                 match self.world.invoke(&call.arguments) {
                     Some(content) => self.commit(
                         session,
@@ -3796,6 +3803,10 @@ impl Module {
         let run_id = params["run_id"].as_str().unwrap_or_default().to_owned();
         let mut reply = self.run_result(session, params);
         if let Reply::Response(body) = &mut reply {
+            let held = self.held_status(session, &run_id);
+            if !held.is_empty() {
+                body["held_calls"] = json!(held);
+            }
             let (ceiling, ride) = self
                 .sessions
                 .lock()
@@ -4365,6 +4376,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
     /// The tool provider cannot answer an image-only result, so a scripted
@@ -4470,6 +4482,7 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            held_calls_group: false,
             descriptor_case: None,
             descriptor_fixtures: false,
             no_image_results: false,
@@ -4513,6 +4526,7 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    held_replies: Mutex::new(BTreeMap::new()),
                     standalone_in_process: self.standalone_in_process,
                     host_prefix_everywhere: self.host_prefix_everywhere,
                     host_prefixes: Mutex::new(BTreeMap::new()),
@@ -4543,6 +4557,7 @@ impl FakeSubject {
                         .iter()
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
+                        .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
                         .collect(),
                     delivery_order_modes: self.delivery_order_modes.clone(),
                     scripts: Mutex::new(BTreeMap::new()),
@@ -4682,6 +4697,25 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn install_held_reply(
+        &self,
+        _session: &str,
+        arguments: &Value,
+        reason: &str,
+    ) -> Result<(), HarnessError> {
+        self.install_held(arguments, reason);
+        Ok(())
+    }
+    async fn await_held_reply(&self, arguments: &Value) -> Result<String, HarnessError> {
+        self.observed_held(arguments)
+    }
+    async fn publish_late_entry(
+        &self,
+        arguments: &Value,
+        entry: cortexkit_role_llm_runner_conformance::ScriptedLateEntry,
+    ) -> Result<(), HarnessError> {
+        self.publish_late(arguments, entry)
+    }
     fn attachment_model_fields(&self, _session: &str, accepts: bool) -> Option<Map<String, Value>> {
         Some(Map::from_iter([(
             "attachment_accepts".into(),

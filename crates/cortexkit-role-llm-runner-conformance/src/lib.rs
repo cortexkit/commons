@@ -86,6 +86,7 @@ mod directives;
 mod display;
 mod drive;
 mod follow;
+mod held_calls;
 mod host_history;
 mod input_token_cap;
 mod interrupt_reason;
@@ -117,8 +118,8 @@ pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
     AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
-    RefreshPlan, RefreshVariant, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn,
-    ScriptedUsage, ToolResultObservation, UserCommandFixture, UserCommandObservation,
+    RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall,
+    ScriptedTurn, ScriptedUsage, ToolResultObservation, UserCommandFixture, UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool
