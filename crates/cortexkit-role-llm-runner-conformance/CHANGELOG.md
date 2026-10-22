@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.10.1
+
+Requires `cortexkit-role-llm-runner` 0.5.1. An additive release: every new
+subject hook has a default, and a case whose hook is missing is reported
+inapplicable by name, so an existing adapter builds and runs unchanged.
+
+- New capabilities `Capability::HistoryDisplay`, `Capability::LiveEvents`
+  and `Capability::ClientMessageId` for the role's new groups.
+- Display cases (`history_display`): a served row equals the serializer
+  profile's projection of the same entry's raw body, every assistant row
+  names its model, `limits` cut on a UTF-8 boundary and set the flags,
+  absent `limits` serve whole content, and display pages carry finished
+  messages only.
+- `client_message_id` cases: the id appears on the user message's display
+  row and never in the default `session.read`; a re-send under the same
+  `send_id` with another id, or without it, is refused `send_id_reuse`
+  naming `client_message_id`.
+- Live-event cases (`live_events`): message and tool lifecycle events that
+  replay identically and resume from a cursor, run events, the attach
+  replay of the step in flight, and `seq` rising across both lanes.
+- Live `cache_ttl` cases (compaction-provider §8.1): an entry for another
+  model is ignored, a configured `ms: null` never declares `ttl_expired`
+  even with an observed lifetime, and after a missed `model_change` ride
+  the runner falls through to the observed lifetime, never the old model's
+  entry.
+- New subject hooks, each with a default: `serializer_profile`,
+  `hold_next_model_stream`, `advance_prompt_cache_clock`, `switch_model` and
+  `set_observed_cache_lifetime`. New `CompactionSetup::ReadyWithCacheTtl`
+  answers Setup with a `cache_ttl` entry; the enum is non-exhaustive, and an
+  adapter's `_` arm answers it as a failed Setup until it handles it.
+
 ## 0.10.0
 
 Requires `cortexkit-role-llm-runner` 0.5.0 and

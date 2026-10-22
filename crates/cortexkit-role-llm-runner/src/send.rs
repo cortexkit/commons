@@ -110,6 +110,10 @@ impl Delivered {
 /// `send_id` reused with another mode.
 pub const DELIVERY_FIELD: &str = "delivery";
 
+/// The `session.send` member carrying the caller's id for the user message
+/// the send creates, and the `field` its refusals name.
+pub const CLIENT_MESSAGE_ID_FIELD: &str = "client_message_id";
+
 /// How a prompt is delivered when a run is already active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -650,6 +654,48 @@ impl SendRequest {
     pub fn with_runner_params(mut self, runner_params: Map<String, Value>) -> Self {
         self.runner_params = runner_params;
         self
+    }
+
+    /// Set `client_message_id`, the caller's own id for the user message
+    /// this send creates. Send it only to a runner declaring the
+    /// `client_message_id` group.
+    pub fn with_client_message_id(mut self, id: impl Into<String>) -> Self {
+        self.runner_params
+            .insert(CLIENT_MESSAGE_ID_FIELD.into(), Value::String(id.into()));
+        self
+    }
+
+    /// The send's `client_message_id`, read from `runner_params` without
+    /// moving it: `Ok(None)` when absent, and `Err` with the field of an
+    /// `invalid_params` refusal for a value that is not 1 to 64 characters
+    /// of `[A-Za-z0-9_-]`, or for any value on a runner whose module-level
+    /// capabilities (`declared`) lack the `client_message_id` group.
+    pub fn client_message_id<S: AsRef<str>>(
+        &self,
+        declared: &[S],
+    ) -> Result<Option<&str>, &'static str> {
+        let Some(raw) = self.runner_params.get(CLIENT_MESSAGE_ID_FIELD) else {
+            return Ok(None);
+        };
+        let declares = declared
+            .iter()
+            .any(|name| name.as_ref() == crate::capabilities::CLIENT_MESSAGE_ID);
+        match raw.as_str() {
+            Some(id) if declares && crate::display::client_message_id_valid(id) => Ok(Some(id)),
+            _ => Err(CLIENT_MESSAGE_ID_FIELD),
+        }
+    }
+
+    /// Whether a re-send of a recorded send carries the same
+    /// `client_message_id` the first send did (`recorded`), absence
+    /// included. A re-send under the same `send_id` with another id, or
+    /// with one added or dropped, is refused `send_id_reuse` naming
+    /// `client_message_id`.
+    pub fn same_client_message_id(&self, recorded: Option<&str>) -> bool {
+        self.runner_params
+            .get(CLIENT_MESSAGE_ID_FIELD)
+            .and_then(Value::as_str)
+            == recorded
     }
 
     /// The delivery mode, with absence read as [`Delivery::Queue`].

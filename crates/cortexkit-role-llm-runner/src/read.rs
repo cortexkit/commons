@@ -847,6 +847,71 @@ pub struct HeadMeta {
     /// epoch. Present whenever `lineage_id` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<u64>,
+    /// What a send that names no model can carry. Absent means unknown.
+    /// Outside the lineage rule: a never-written session may state it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<HeadInput>,
+}
+
+/// `session.head.input`: what a send that names no model can carry.
+/// Decoded leniently.
+///
+/// Non-exhaustive: build one with [`HeadInput::new`] and the `with_*`
+/// setters, or decode one.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HeadInput {
+    /// Whether such a send can carry attachments: `yes`, `no` or `unknown`
+    /// ([`attachments`]), decoded open. A fact the runner lacks is
+    /// `unknown`, never `no`; `no` is a known fact, such as a runner that
+    /// cannot carry attachments at all.
+    pub attachments: String,
+    /// The input modalities the model accepts, as the model catalog states
+    /// them (`text`, `image`, `pdf`, `audio`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modalities: Option<Vec<String>>,
+    /// The media types the runner's own provider adapter accepts. Absent
+    /// means the modalities are accepted but the exact types are unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_types: Option<Vec<String>>,
+}
+
+/// The values of [`HeadInput::attachments`].
+pub mod attachments {
+    pub const YES: &str = "yes";
+    pub const NO: &str = "no";
+    pub const UNKNOWN: &str = "unknown";
+}
+
+impl HeadInput {
+    pub fn new(attachments: impl Into<String>) -> Self {
+        Self {
+            attachments: attachments.into(),
+            modalities: None,
+            mime_types: None,
+        }
+    }
+
+    pub fn with_modalities(mut self, modalities: Vec<String>) -> Self {
+        self.modalities = Some(modalities);
+        self
+    }
+
+    pub fn with_mime_types(mut self, mime_types: Vec<String>) -> Self {
+        self.mime_types = Some(mime_types);
+        self
+    }
+
+    /// Whether attachments are known to be carried (`Some(true)`), known
+    /// not to be (`Some(false)`), or not known (`None`, an unknown value
+    /// included).
+    pub fn carries_attachments(&self) -> Option<bool> {
+        match self.attachments.as_str() {
+            attachments::YES => Some(true),
+            attachments::NO => Some(false),
+            _ => None,
+        }
+    }
 }
 
 impl HeadMeta {
@@ -865,6 +930,7 @@ impl HeadMeta {
             head: None,
             last_run_state: None,
             updated_at: Some(updated_at),
+            input: None,
         }
     }
 
@@ -879,6 +945,7 @@ impl HeadMeta {
             head: None,
             last_run_state: None,
             updated_at: None,
+            input: None,
         }
     }
 
@@ -904,6 +971,11 @@ impl HeadMeta {
 
     pub fn with_last_run_state(mut self, last_run_state: LastRunState) -> Self {
         self.last_run_state = Some(last_run_state);
+        self
+    }
+
+    pub fn with_input(mut self, input: HeadInput) -> Self {
+        self.input = Some(input);
         self
     }
 

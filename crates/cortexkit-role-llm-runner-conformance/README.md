@@ -17,6 +17,15 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+New in 0.10.1, each with a default that makes its cases inapplicable by
+name: `serializer_profile` (the profile of a session's stored bodies, for
+the display projection case), `hold_next_model_stream` (stream the first
+parts of the next answer, then hold it), `advance_prompt_cache_clock`,
+`switch_model` and `set_observed_cache_lifetime` (the live `cache_ttl`
+cases), and the `CompactionSetup::ReadyWithCacheTtl` answer. Display
+sessions are minted with the label `display` (`cf-display-<n>`).
+
+
 The crate-level Rust documentation defines compaction terms in its Contract
 vocabulary section and identifies the governing contract sections.
 
@@ -140,6 +149,11 @@ from `session.baseline` has no admission reply to compare.
 | `head_names_the_cut`, `notice_carries_first_ordinal`, `revert_below_the_cut_restarts_at_the_previous_cut`, `revert_below_a_cut_before_adoption_has_no_descent`, `checkpoint_on_descending_setup_refused`, `cut_setup_leaves_reads_alone`, `cut_numbering_continues_from_the_old_lineage` | as the cut cases; the revert cases need the revert hook, the adoption case `seed_host_history` with `cut`, the checkpoint case `tag_checkpoint`, the reads case the Setup-hold hooks and `holds_reads_during_setup`, the numbering case `tags` |
 | `history_version_unchanged_by_a_cut`, `history_version_rises_at_a_revert`, `history_from_ordinal_and_before_ordinal`, `history_unknown_ordinal_refused`, `history_before_lowest_ordinal_reaches_unnumbered_entries` | `host_history`, `queue`, `transcript_reads`; the cut case the cut requirements, the revert case the revert hook, the last the host-history hook |
 | `history_no_tags_below_first_ordinal`, `history_ordinal_kept_below_the_cut`, `history_cursor_survives_a_cut` | `host_history`, `compaction`, `queue`, `transcript_reads`, `run_ops`, and the view hook |
+| `display_row_is_the_profile_projection`, `display_limits_cut_on_a_utf8_boundary`, `display_without_limits_is_whole`, `display_pages_carry_finished_messages_only` | `history_display`, `host_history`, `queue`, `transcript_reads`; the projection case needs `serializer_profile`, the finished-only case `hold_next_model_step` |
+| `client_message_id_on_display_rows_never_in_read` | `client_message_id`, `history_display`, `host_history`, `queue`, `transcript_reads` |
+| `client_message_id_resend_with_another_id_refused` | `client_message_id`, `queue` |
+| `live_message_and_tool_events_durable`, `live_run_events`, `live_attach_replays_the_current_step`, `live_seq_rises_across_lanes` | `live_events`, `streaming`, `queue`, `transcript_reads`; the attach and order cases need `hold_next_model_stream` |
+| `cache_ttl_entry_for_another_model_ignored`, `cache_ttl_configured_null_never_expires`, `cache_ttl_missed_model_change_falls_through_to_observed` | `compaction`, `queue`, `transcript_reads`, `run_ops`, and the hooks `switch_model`, `set_observed_cache_lifetime` and `advance_prompt_cache_clock`; inapplicable when the runner never declares `ttl_expired` for its own model's expired entry |
 | `per_step_cost_scales_with_new_messages` | `queue`, `transcript_reads` or `run_ops`, and the seeding hook (opt-in) |
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
@@ -276,13 +290,13 @@ suite against its real process and unpaused clock.
 
 ## Not yet implemented
 
-- The prompt cache's lifetime (compaction-provider §8.1): `cache_ttl`'s
-  precedence and its model scoping are checked only at unit level, in
-  `cortexkit-role-compaction-provider`, against `cache_ttl::lifetime` and
-  the named `cache_ttl` decision vectors, each of three faulty rules failing
-  its named vector. Live cases would need adapter hooks this kit does not
-  have yet: a prompt-cache clock, a model switch, and observation of the
-  lifetime the runner saw in its own final request options.
+- The prompt cache's lifetime (compaction-provider §8.1) is checked live
+  only through the `ttl_expired` token of advance notices, with entries on
+  Setup's answer. A ride's `ttl_expired` cause, and the newest-entry rule
+  across several entries, are checked only at unit level, against
+  `cache_ttl::lifetime` and its decision vectors.
+- `session.head`'s `input` has no live case; it is checked against the
+  role crate's vectors.
 
 These cases, planned in §15 of the role contract, belong to a later
 subset:

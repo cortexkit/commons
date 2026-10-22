@@ -72,7 +72,7 @@ async fn history_refusal<R: RunnerRoute>(
 /// Every entry, from the newest page back through `older`, oldest first.
 /// Checks that no `mid` repeats across pages, that a page with `older` is
 /// never empty, and that the newest page carries no `newer`.
-async fn walk_older<R: RunnerRoute>(route: &R) -> Result<Vec<HistoryEntry>, String> {
+pub(crate) async fn walk_older<R: RunnerRoute>(route: &R) -> Result<Vec<HistoryEntry>, String> {
     let mut page = history(route, &HistoryRequest::newest().with_limit(PAGE)).await?;
     if page.newer.is_some() {
         return Err("the newest history page carries a newer cursor".into());

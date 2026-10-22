@@ -53,6 +53,8 @@ pub(super) struct State {
     pub applied: Option<history::Applied>,
     /// Every view version the runner fetched and disposed of.
     pub disposed: BTreeSet<u64>,
+    /// Every `cache_ttl` entry the provider answered, oldest first.
+    pub cache_ttl: Vec<cortexkit_role_compaction_provider::cache_ttl::CacheTtl>,
 }
 
 #[derive(Default)]
@@ -116,6 +118,9 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
             state.setup_lineage = record["lineage"].as_str().map(str::to_owned);
             state.setup = Some(m.clone());
             state.fold = Some(m);
+            if let Ok(entry) = serde_json::from_value(record["cache_ttl"].clone()) {
+                state.cache_ttl.push(entry);
+            }
             if let (Some(n), Some(cut)) = (
                 record["checkpoint"]["tag_checkpoint"].as_u64(),
                 record["checkpoint"]["cut"].as_str(),
@@ -334,6 +339,20 @@ impl Module {
                     json!({"kind":"compaction_fold","message":encode(&m)}),
                 )
             }
+            CompactionSetup::ReadyWithCacheTtl {
+                initial: m,
+                cache_ttl,
+            } => {
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_message","setup":true,"message":encode(&m),
+                           "lineage":sess.lineage, "cache_ttl": cache_ttl}),
+                )?;
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_fold","message":encode(&m)}),
+                )
+            }
             // A checkpoint on a Setup that descends from another lineage
             // (a cut's) fails that Setup: such a lineage continues the old
             // lineage's numbering.
@@ -446,7 +465,9 @@ impl Module {
             return Ok(false);
         }
         // Capture at the model boundary, independently of session.read.
-        let sess = self.sessions.lock().unwrap()[session].clone();
+        let mut sess = self.sessions.lock().unwrap()[session].clone();
+        sess.notice_events
+            .extend(self.cache_events(session, &sess.compaction.cache_ttl));
         self.publish_notice(session, &sess)?;
         let mut providers = self.world.compaction.lock().unwrap();
         let p = providers.sessions.get_mut(session).unwrap();
@@ -628,5 +649,108 @@ impl FakeSubject {
                 r["session"] == session && r["kind"] == "compaction_message" && r["setup"] == true
             })
             .map(|r| decode_message(&r["message"])))
+    }
+}
+
+/// How the fake decides the prompt cache's lifetime: correctly, or by one
+/// of the rules the `cache_ttl` cases must catch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CacheTtlDefect {
+    #[default]
+    None,
+    /// The newest entry is used whatever model it names.
+    IgnoreModel,
+    /// A configured entry whose `ms` is `null` is read as no entry.
+    NullAsAbsent,
+    /// After a model switch with no entry for the new model, the lifetime
+    /// judged for the previous model is kept.
+    KeepPrevious,
+}
+
+/// One session's prompt-cache clock, as the adapter's hook moves it.
+#[derive(Clone, Debug, Default)]
+pub(super) struct CacheClock {
+    pub now: u64,
+    last_request: Option<u64>,
+    last_model: Option<String>,
+    last_lifetime: Option<u64>,
+}
+
+impl Module {
+    /// The model the session's requests go to now.
+    pub(super) fn session_model(&self, session: &str) -> String {
+        self.world
+            .models
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .unwrap_or_else(|| FAKE_MODEL.to_owned())
+    }
+
+    /// The notice events a model request about to go out declares for the
+    /// prompt cache: `model_change` after a switch, and `ttl_expired` when
+    /// the cache idled at least as long as the lifetime judged for the
+    /// request's model.
+    fn cache_events(
+        &self,
+        session: &str,
+        entries: &[cortexkit_role_compaction_provider::cache_ttl::CacheTtl],
+    ) -> Vec<String> {
+        use cortexkit_role_compaction_provider::cache_ttl::lifetime;
+        let model = self.session_model(session);
+        let observed = self
+            .world
+            .observed_cache_lifetimes
+            .lock()
+            .unwrap()
+            .get(session)
+            .copied()
+            .flatten();
+        let mut clocks = self.world.cache_clocks.lock().unwrap();
+        let clock = clocks.entry(session.to_owned()).or_default();
+        let switched = clock.last_model.as_ref().is_some_and(|last| *last != model);
+        let judged = match self.world.cache_ttl_defect {
+            CacheTtlDefect::None => lifetime(&model, entries, observed),
+            CacheTtlDefect::IgnoreModel => {
+                let renamed: Vec<_> = entries
+                    .iter()
+                    .map(|e| {
+                        cortexkit_role_compaction_provider::cache_ttl::CacheTtl::new(
+                            &model,
+                            e.ms,
+                            e.configured,
+                        )
+                    })
+                    .collect();
+                lifetime(&model, &renamed, observed)
+            }
+            CacheTtlDefect::NullAsAbsent => {
+                let kept: Vec<_> = entries
+                    .iter()
+                    .filter(|e| !(e.configured && e.ms.is_none()))
+                    .cloned()
+                    .collect();
+                lifetime(&model, &kept, observed)
+            }
+            CacheTtlDefect::KeepPrevious
+                if switched && !entries.iter().any(|e| e.model == model) =>
+            {
+                clock.last_lifetime
+            }
+            CacheTtlDefect::KeepPrevious => lifetime(&model, entries, observed),
+        };
+        let idle = clock.last_request.map(|last| clock.now - last);
+        let mut events = Vec::new();
+        if switched {
+            events.push("model_change".to_owned());
+        }
+        if idle.zip(judged).is_some_and(|(idle, ms)| idle >= ms) {
+            events.push("ttl_expired".to_owned());
+        }
+        clock.last_request = Some(clock.now);
+        clock.last_model = Some(model);
+        clock.last_lifetime = judged;
+        events
     }
 }

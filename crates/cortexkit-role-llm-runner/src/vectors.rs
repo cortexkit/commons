@@ -300,6 +300,22 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/tags.json"),
     ),
     (
+        "display-anthropic-messages.json",
+        include_str!("../test-vectors/llm-runner-v1/display-anthropic-messages.json"),
+    ),
+    (
+        "display-opencode-aisdk.json",
+        include_str!("../test-vectors/llm-runner-v1/display-opencode-aisdk.json"),
+    ),
+    (
+        "display-requests.json",
+        include_str!("../test-vectors/llm-runner-v1/display-requests.json"),
+    ),
+    (
+        "live-events.json",
+        include_str!("../test-vectors/llm-runner-v1/live-events.json"),
+    ),
+    (
         "README.md",
         include_str!("../test-vectors/llm-runner-v1/README.md"),
     ),

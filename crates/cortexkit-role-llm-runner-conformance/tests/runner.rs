@@ -9,8 +9,8 @@ use cortexkit_role_llm_runner_conformance::{
     SuiteVerdict, CASES,
 };
 use fake::{
-    CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject, LineageDefect,
-    RetentionDefect, StepRecovery,
+    CacheTtlDefect, CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject,
+    LineageDefect, RetentionDefect, StepRecovery,
 };
 use std::time::{Duration, Instant};
 
@@ -50,6 +50,9 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::SendStatus,
     Capability::SessionChange,
     Capability::HostHistory,
+    Capability::HistoryDisplay,
+    Capability::LiveEvents,
+    Capability::ClientMessageId,
 ];
 
 /// The opt-in cost case: a subject without the seeding hook cannot run it.
@@ -253,6 +256,11 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
     subject.capabilities.insert(Capability::HostHistory);
+    subject.capabilities.extend([
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+        Capability::ClientMessageId,
+    ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
         Capability::MaxSteps,
@@ -563,6 +571,9 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::DeliveryOrder,
                     Capability::SendStatus,
                     Capability::UserCommands,
+                    Capability::HistoryDisplay,
+                    Capability::LiveEvents,
+                    Capability::ClientMessageId,
                     Capability::HoldToolCalls
                 ]
             );
@@ -923,7 +934,10 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunUsage,
                     Capability::DeliveryOrder,
                     Capability::SendStatus,
-                    Capability::UserCommands
+                    Capability::UserCommands,
+                    Capability::HistoryDisplay,
+                    Capability::LiveEvents,
+                    Capability::ClientMessageId
                 ],
                 "{}",
                 report.render()
@@ -1157,6 +1171,11 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
     subject.capabilities.insert(Capability::HostHistory);
+    subject.capabilities.extend([
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+        Capability::ClientMessageId,
+    ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
         Capability::MaxSteps,
@@ -1187,6 +1206,11 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
     subject.capabilities.insert(Capability::HostHistory);
+    subject.capabilities.extend([
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+        Capability::ClientMessageId,
+    ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
         Capability::MaxSteps,
@@ -4053,4 +4077,250 @@ async fn numbering_restarted_at_a_cut_fails_the_numbering_case() {
     )
     .await;
     assert!(reason.contains("renumbers nothing"), "{reason}");
+}
+
+/// The display, client-message-id and live-event cases.
+const DISPLAY_AND_LIVE_CASES: &[&str] = &[
+    "display_row_is_the_profile_projection",
+    "display_limits_cut_on_a_utf8_boundary",
+    "display_without_limits_is_whole",
+    "display_pages_carry_finished_messages_only",
+    "client_message_id_on_display_rows_never_in_read",
+    "client_message_id_resend_with_another_id_refused",
+    "live_message_and_tool_events_durable",
+    "live_run_events",
+    "live_attach_replays_the_current_step",
+    "live_seq_rises_across_lanes",
+];
+
+/// The live `cache_ttl` cases.
+const CACHE_TTL_CASES: &[&str] = &[
+    "cache_ttl_entry_for_another_model_ignored",
+    "cache_ttl_configured_null_never_expires",
+    "cache_ttl_missed_model_change_falls_through_to_observed",
+];
+
+/// A fake declaring the display, client-message-id and live-event groups.
+fn displaying(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.extend([
+        Capability::HostHistory,
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+        Capability::ClientMessageId,
+    ]);
+    subject
+}
+
+/// Each of `failing` failed, with a reason holding `says`, and every other
+/// display, live-event and `cache_ttl` case passed.
+fn fails_only(report: &SuiteReport, failing: &[&str], says: &str) {
+    for case in DISPLAY_AND_LIVE_CASES.iter().chain(CACHE_TTL_CASES) {
+        if failing.contains(case) {
+            let reason = failed(report, case);
+            assert!(reason.contains(says), "{case}: {reason}");
+        } else {
+            assert_eq!(
+                report.outcome(case),
+                Some(&CaseOutcome::Passed),
+                "{case}\n{}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_faithful_runner_passes_the_display_live_and_cache_ttl_cases() {
+    fails_only(&run(&displaying(Defects::default())).await, &[], "");
+}
+
+#[tokio::test]
+async fn a_display_row_without_model_fails_the_projection_case() {
+    let report = run(&displaying(Defects {
+        display_drops_model: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["display_row_is_the_profile_projection"],
+        "carries no model",
+    );
+}
+
+#[tokio::test]
+async fn a_cut_inside_a_character_fails_the_cut_case() {
+    let report = run(&displaying(Defects {
+        display_cut_lossy: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["display_limits_cut_on_a_utf8_boundary"],
+        "UTF-8 character boundary",
+    );
+}
+
+#[tokio::test]
+async fn a_cut_without_its_flag_fails_the_cut_case() {
+    let report = run(&displaying(Defects {
+        display_cut_unflagged: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["display_limits_cut_on_a_utf8_boundary"],
+        "arguments_truncated or truncated",
+    );
+}
+
+#[tokio::test]
+async fn a_default_cut_fails_the_whole_content_case() {
+    let report = run(&displaying(Defects {
+        display_default_limits: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["display_without_limits_is_whole"],
+        "absent limits mean whole content",
+    );
+}
+
+#[tokio::test]
+async fn a_row_for_the_step_in_flight_fails_the_finished_only_case() {
+    let report = run(&displaying(Defects {
+        display_in_progress_row: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["display_pages_carry_finished_messages_only"],
+        "finished messages only",
+    );
+}
+
+#[tokio::test]
+async fn a_client_message_id_in_the_default_read_fails_its_case() {
+    let report = run(&displaying(Defects {
+        client_id_in_read: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["client_message_id_on_display_rows_never_in_read"],
+        "never in a session.read entry",
+    );
+}
+
+#[tokio::test]
+async fn a_resend_with_another_client_message_id_accepted_fails_its_case() {
+    let report = run(&displaying(Defects {
+        client_id_reuse_accepted: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["client_message_id_resend_with_another_id_refused"],
+        "not refused",
+    );
+}
+
+#[tokio::test]
+async fn a_missing_tool_finished_fails_the_lifecycle_case() {
+    let report = run(&displaying(Defects {
+        live_tool_finished_missing: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_message_and_tool_events_durable"],
+        "tool_finished",
+    );
+}
+
+#[tokio::test]
+async fn a_missing_run_finished_fails_the_run_events_case() {
+    let report = run(&displaying(Defects {
+        live_run_finished_missing: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(&report, &["live_run_events"], "run_finished");
+}
+
+#[tokio::test]
+async fn an_attach_without_the_step_replay_fails_the_attach_case() {
+    let report = run(&displaying(Defects {
+        live_attach_skips_replay: true,
+        ..Defects::default()
+    }))
+    .await;
+    // The stream-order case reads its display frames from the same replay,
+    // so it has none to number and fails too.
+    fails_only(
+        &report,
+        &[
+            "live_attach_replays_the_current_step",
+            "live_seq_rises_across_lanes",
+        ],
+        "display",
+    );
+}
+
+#[tokio::test]
+async fn a_seq_per_lane_fails_the_stream_order_case() {
+    let report = run(&displaying(Defects {
+        live_seq_per_lane: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_seq_rises_across_lanes"],
+        "rising by one per frame",
+    );
+}
+
+/// A fake declaring the display groups and judging the cache lifetime by
+/// the faulty `rule`.
+fn caching(rule: CacheTtlDefect) -> FakeSubject {
+    let mut subject = displaying(Defects::default());
+    subject.cache_ttl_defect = rule;
+    subject
+}
+
+#[tokio::test]
+async fn an_entry_used_for_another_model_fails_its_cache_ttl_case() {
+    let report = run(&caching(CacheTtlDefect::IgnoreModel)).await;
+    let reason = failed(&report, "cache_ttl_entry_for_another_model_ignored");
+    assert!(reason.contains("the model it names"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_configured_null_read_as_absent_fails_its_cache_ttl_case() {
+    let report = run(&caching(CacheTtlDefect::NullAsAbsent)).await;
+    fails_only(
+        &report,
+        &["cache_ttl_configured_null_never_expires"],
+        "configured null",
+    );
+}
+
+#[tokio::test]
+async fn a_previous_model_lifetime_kept_fails_the_model_change_case() {
+    let report = run(&caching(CacheTtlDefect::KeepPrevious)).await;
+    fails_only(
+        &report,
+        &["cache_ttl_missed_model_change_falls_through_to_observed"],
+        "never keeps a previous model's value",
+    );
 }

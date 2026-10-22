@@ -521,6 +521,7 @@ pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defec
                     marker_key: None,
                     delivered_as: None,
                     written_at: at,
+                    client_message_id: None,
                 });
             }
             let split = all.len() - window.min(all.len());
@@ -709,7 +710,7 @@ impl Module {
             last.ordinal,
             digest,
             1_000,
-            FAKE_MODEL,
+            self.session_model(session),
         );
         if let Some(applied) = &sess.compaction.applied {
             notice = notice.with_applied_view_version(applied.version);
@@ -802,12 +803,20 @@ impl Module {
 
     /// `session.history`.
     pub(super) fn history(&self, session: &str, params: &Value) -> Reply {
-        if let Some(field) = unknown_field(params, HISTORY_FIELDS) {
+        let mut fields = HISTORY_FIELDS.to_vec();
+        if self.world.serves(groups::HISTORY_DISPLAY) {
+            fields.extend(["form", "limits"]);
+        }
+        if let Some(field) = unknown_field(params, &fields) {
             return invalid(&field);
         }
         let request: HistoryRequest = match serde_json::from_value(params.clone()) {
             Ok(request) => request,
             Err(e) if e.to_string().contains("media") => return invalid("media"),
+            Err(e) if e.to_string().contains("form") => return invalid("form"),
+            Err(e) if params.get("limits").is_some() && !e.to_string().contains("view") => {
+                return invalid("limits")
+            }
             Err(_) => return invalid("view"),
         };
         let mode = match request.mode() {
@@ -951,6 +960,9 @@ impl Module {
             } else {
                 cursor_of(session, &sess.lineage, "at", &entries[end].mid, end)
             });
+        }
+        if request.form() == cortexkit_role_llm_runner::history::HistoryForm::Display {
+            return self.display_reply(session, sess, &page, request.limits.as_ref());
         }
         respond(page)
     }

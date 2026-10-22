@@ -56,6 +56,12 @@ pub enum CompactionSetup {
         initial: CompactionMessage,
         tag_checkpoint: u64,
     },
+    /// Answer `ready` with `initial` and the `cache_ttl` entry
+    /// (compaction-provider §8.1), whatever model it names.
+    ReadyWithCacheTtl {
+        initial: CompactionMessage,
+        cache_ttl: cortexkit_role_compaction_provider::cache_ttl::CacheTtl,
+    },
     /// Fail the actual provider call without an answer, not a REFUSE answer.
     Unavailable,
     Refuse {
@@ -581,7 +587,9 @@ where
                 reason,
                 provider_code,
             } => refusal_error(&error, code.as_str(), reason, provider_code.as_deref())?,
-            CompactionSetup::Ready(_) | CompactionSetup::ReadyWithCheckpoint { .. } => {
+            CompactionSetup::Ready(_)
+            | CompactionSetup::ReadyWithCheckpoint { .. }
+            | CompactionSetup::ReadyWithCacheTtl { .. } => {
                 unreachable!()
             }
         }

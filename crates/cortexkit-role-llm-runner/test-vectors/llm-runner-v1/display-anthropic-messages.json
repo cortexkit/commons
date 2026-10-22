@@ -1,0 +1,579 @@
+{
+  "profile": "anthropic-messages",
+  "rows": [
+    {
+      "name": "a string content is one text part",
+      "body": {
+        "role": "user",
+        "content": "hello"
+      },
+      "row": {
+        "role": "user",
+        "text": "hello",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "hello"
+          }
+        ]
+      }
+    },
+    {
+      "name": "text and reasoning blocks keep their order; text joins without a separator",
+      "body": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "let me think",
+            "signature": "c2ln"
+          },
+          {
+            "type": "text",
+            "text": "first, "
+          },
+          {
+            "type": "text",
+            "text": "second"
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "first, second",
+        "parts": [
+          {
+            "type": "reasoning",
+            "part": "0",
+            "text": "let me think"
+          },
+          {
+            "type": "text",
+            "part": "1",
+            "text": "first, "
+          },
+          {
+            "type": "text",
+            "part": "2",
+            "text": "second"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a tool call carries its arguments as compact JSON text",
+      "body": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "running"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_1",
+            "name": "echo",
+            "input": {
+              "q": "x",
+              "n": [
+                1,
+                2
+              ]
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "running",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "running"
+          },
+          {
+            "type": "tool_call",
+            "part": "1",
+            "tool_call_id": "toolu_1",
+            "name": "echo",
+            "arguments": "{\"n\":[1,2],\"q\":\"x\"}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a tool result with string content",
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": "done"
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "toolu_1",
+            "content": "done"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an error result joins its text blocks",
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_2",
+            "is_error": true,
+            "content": [
+              {
+                "type": "text",
+                "text": "boom: "
+              },
+              {
+                "type": "text",
+                "text": "no such file"
+              }
+            ]
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "toolu_2",
+            "content": "boom: no such file",
+            "is_error": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "files and media are described by refs, never inlined",
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "look"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAA="
+            }
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "url",
+              "url": "https://example.com/a.png"
+            }
+          },
+          {
+            "type": "document",
+            "source": {
+              "type": "base64",
+              "media_type": "application/pdf",
+              "data": "JVBERi0xLjcKJeLjz9MKMSAwIG9iajw8Pj5lbmRvYmoKJSVFT0YK"
+            }
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_3",
+            "content": [
+              {
+                "type": "text",
+                "text": "shot"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAA="
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "look",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "look"
+          },
+          {
+            "type": "file",
+            "part": "1",
+            "media": {
+              "type": "media_ref",
+              "kind": "image",
+              "mime": "image/png",
+              "byte_size": 29,
+              "sha256": "71fde3856a298a052c6edb5155638d8422114e55bf0e28374d90dea8be99ef6c",
+              "part": "1"
+            }
+          },
+          {
+            "type": "file",
+            "part": "2",
+            "url": "https://example.com/a.png"
+          },
+          {
+            "type": "file",
+            "part": "3",
+            "media": {
+              "type": "media_ref",
+              "kind": "pdf",
+              "mime": "application/pdf",
+              "byte_size": 39,
+              "sha256": "624fbff8c023cac4fd8c1b0d229e6c558c63468eadab2cef4173981636441d32",
+              "part": "3"
+            }
+          },
+          {
+            "type": "tool_result",
+            "part": "4",
+            "tool_call_id": "toolu_3",
+            "content": "shot",
+            "files": [
+              {
+                "media": {
+                  "type": "media_ref",
+                  "kind": "image",
+                  "mime": "image/png",
+                  "byte_size": 29,
+                  "sha256": "71fde3856a298a052c6edb5155638d8422114e55bf0e28374d90dea8be99ef6c"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "blocks the profile does not show are other parts",
+      "body": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "redacted_thinking",
+            "data": "opaque"
+          },
+          {
+            "type": "document",
+            "source": {
+              "type": "text",
+              "media_type": "text/plain",
+              "data": "plain"
+            }
+          },
+          {
+            "type": "server_tool_use",
+            "id": "srv_1",
+            "name": "web_search",
+            "input": {}
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "other",
+            "part": "0",
+            "kind": "redacted_thinking"
+          },
+          {
+            "type": "other",
+            "part": "1",
+            "kind": "document"
+          },
+          {
+            "type": "other",
+            "part": "2",
+            "kind": "server_tool_use"
+          }
+        ]
+      }
+    },
+    {
+      "name": "multi-byte arguments and results cut back to a character boundary",
+      "limits": {
+        "arguments_bytes": 9,
+        "result_bytes": 4,
+        "error_result_bytes": 5
+      },
+      "body": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "héllo wörld"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_cut",
+            "name": "echo",
+            "input": {
+              "t": "ééé🦀"
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "héllo wörld",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "héllo wörld"
+          },
+          {
+            "type": "tool_call",
+            "part": "1",
+            "tool_call_id": "toolu_cut",
+            "name": "echo",
+            "arguments": "{\"t\":\"é",
+            "arguments_truncated": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "multi-byte results and error results cut by their own bounds",
+      "limits": {
+        "arguments_bytes": 9,
+        "result_bytes": 4,
+        "error_result_bytes": 5
+      },
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_cut",
+            "content": "漢字漢字"
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_err",
+            "is_error": true,
+            "content": [
+              {
+                "type": "text",
+                "text": "失败: é🦀"
+              }
+            ]
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "toolu_cut",
+            "content": "漢",
+            "truncated": true
+          },
+          {
+            "type": "tool_result",
+            "part": "1",
+            "tool_call_id": "toolu_err",
+            "content": "失",
+            "is_error": true,
+            "truncated": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "without limits the same tool call is untouched",
+      "body": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "héllo wörld"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_cut",
+            "name": "echo",
+            "input": {
+              "t": "ééé🦀"
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "héllo wörld",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "héllo wörld"
+          },
+          {
+            "type": "tool_call",
+            "part": "1",
+            "tool_call_id": "toolu_cut",
+            "name": "echo",
+            "arguments": "{\"t\":\"ééé🦀\"}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "without limits the same results are untouched",
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_cut",
+            "content": "漢字漢字"
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_err",
+            "is_error": true,
+            "content": [
+              {
+                "type": "text",
+                "text": "失败: é🦀"
+              }
+            ]
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "toolu_cut",
+            "content": "漢字漢字"
+          },
+          {
+            "type": "tool_result",
+            "part": "1",
+            "tool_call_id": "toolu_err",
+            "content": "失败: é🦀",
+            "is_error": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "content that fits its bound is not flagged",
+      "limits": {
+        "arguments_bytes": 1000,
+        "result_bytes": 1000,
+        "error_result_bytes": 1000
+      },
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_cut",
+            "content": "漢字漢字"
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_err",
+            "is_error": true,
+            "content": [
+              {
+                "type": "text",
+                "text": "失败: é🦀"
+              }
+            ]
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "toolu_cut",
+            "content": "漢字漢字"
+          },
+          {
+            "type": "tool_result",
+            "part": "1",
+            "tool_call_id": "toolu_err",
+            "content": "失败: é🦀",
+            "is_error": true
+          }
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "no role",
+      "body": {
+        "content": "hi"
+      }
+    },
+    {
+      "name": "content neither string nor array",
+      "body": {
+        "role": "user",
+        "content": 3
+      }
+    },
+    {
+      "name": "media data that is not base64",
+      "body": {
+        "role": "user",
+        "content": [
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "not base64!"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

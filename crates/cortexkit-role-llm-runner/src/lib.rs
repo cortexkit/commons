@@ -27,8 +27,10 @@ pub mod content_digest;
 pub mod delivery_order;
 pub mod describe;
 pub mod directives;
+pub mod display;
 pub mod errors;
 pub mod history;
+pub mod live;
 pub mod points;
 pub mod read;
 pub mod retract;
@@ -150,6 +152,18 @@ pub mod capabilities {
     /// runner that is its own host declares it; a runner on a host may, and
     /// then serves history from the host's own storage.
     pub const HOST_HISTORY: &str = "host_history";
+    /// `session.history` with `form: "display"`: each entry as a canonical
+    /// row (`display::DisplayRow`), cut only by the caller's `limits`.
+    pub const HISTORY_DISPLAY: &str = "history_display";
+    /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
+    /// durable message, tool and run lifecycle events, display deltas with
+    /// `mid` and `part`, `seq` on every frame, and the attach replay of the
+    /// step in flight.
+    pub const LIVE_EVENTS: &str = "live_events";
+    /// `client_message_id` on `session.send`, kept beside the user message
+    /// and shown on its display row. A caller never sends the member to a
+    /// runner without the group, whose strict decoding may refuse it.
+    pub const CLIENT_MESSAGE_ID: &str = "client_message_id";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -260,6 +274,9 @@ pub mod capabilities {
         ),
         (TRANSCRIPT_READS, &[ops::SESSION_READ, ops::SESSION_HEAD]),
         (HOST_HISTORY, &[ops::SESSION_HISTORY]),
+        (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
+        (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
+        (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (RUN_CANCEL, &[ops::RUN_CANCEL]),

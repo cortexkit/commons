@@ -105,6 +105,46 @@ pub struct HistoryRequest {
         deserialize_with = "deserialize_view"
     )]
     pub view: Option<ReadView>,
+    /// `display` serves each entry as a canonical row
+    /// ([`crate::display::DisplayPage`]) on a runner declaring
+    /// `history_display`; absent or `raw` serves stored bodies.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_form"
+    )]
+    pub form: Option<HistoryForm>,
+    /// Byte bounds on a display row's tool payloads. Only with
+    /// `form: "display"`; absent means whole content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<crate::display::Limits>,
+}
+
+/// What a `session.history` entry carries: the stored body, or a display
+/// row in its place.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum HistoryForm {
+    /// The stored body, as `session.read` serves it. The default.
+    #[default]
+    Raw,
+    /// A canonical row ([`crate::display::DisplayRow`]) in place of the
+    /// body.
+    Display,
+}
+
+/// The request members of the display form.
+pub mod history_fields {
+    pub const FORM: &str = "form";
+    pub const LIMITS: &str = "limits";
+}
+
+fn deserialize_form<'de, D>(deserializer: D) -> Result<Option<HistoryForm>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    crate::strict::optional(deserializer, history_fields::FORM, "\"raw\" or \"display\"")
 }
 
 /// The position a well-formed [`HistoryRequest`] names.
@@ -196,13 +236,40 @@ impl HistoryRequest {
         self
     }
 
+    pub fn with_form(mut self, form: HistoryForm) -> Self {
+        self.form = Some(form);
+        self
+    }
+
+    pub fn with_limits(mut self, limits: crate::display::Limits) -> Self {
+        self.limits = Some(limits);
+        self
+    }
+
+    /// The form the request asks for, with absence read as raw.
+    pub fn form(&self) -> HistoryForm {
+        self.form.unwrap_or_default()
+    }
+
     /// The position the request names, or the field an `invalid_params`
-    /// refusal names: `view` for the model view, and otherwise the second
-    /// of `cursor`, `from_mid`, `before_mid`, `from_ordinal` and
-    /// `before_ordinal` present, in that order.
+    /// refusal names: `view` for the model view; in display form, `media`
+    /// or `include_originals` when given (a row always describes media by
+    /// refs and carries no originals); `limits` outside display form; and
+    /// otherwise the second of `cursor`, `from_mid`, `before_mid`,
+    /// `from_ordinal` and `before_ordinal` present, in that order.
     pub fn mode(&self) -> Result<HistoryMode<'_>, &'static str> {
         if self.view == Some(ReadView::Model) {
             return Err(fields::VIEW);
+        }
+        if self.form() == HistoryForm::Display {
+            if self.media.is_some() {
+                return Err(fields::MEDIA);
+            }
+            if self.include_originals {
+                return Err("include_originals");
+            }
+        } else if self.limits.is_some() {
+            return Err(history_fields::LIMITS);
         }
         let positions = [
             (

@@ -1,0 +1,243 @@
+{
+  "history_requests": [
+    {
+      "name": "the newest display page",
+      "request": {
+        "form": "display"
+      },
+      "form": "display",
+      "mode": "newest"
+    },
+    {
+      "name": "a display page with the app limits",
+      "request": {
+        "form": "display",
+        "before_mid": "m9",
+        "limits": {
+          "arguments_bytes": 2048,
+          "result_bytes": 16384,
+          "error_result_bytes": 65536
+        }
+      },
+      "form": "display",
+      "mode": "before_mid"
+    },
+    {
+      "name": "raw spelled out",
+      "request": {
+        "form": "raw",
+        "cursor": "c1"
+      },
+      "form": "raw",
+      "mode": "cursor"
+    }
+  ],
+  "history_refused": [
+    {
+      "name": "limits on a raw page",
+      "request": {
+        "limits": {
+          "arguments_bytes": 2048,
+          "result_bytes": 16384,
+          "error_result_bytes": 65536
+        }
+      },
+      "field": "limits"
+    },
+    {
+      "name": "media on a display page",
+      "request": {
+        "form": "display",
+        "media": "descriptors"
+      },
+      "field": "media"
+    },
+    {
+      "name": "originals on a display page",
+      "request": {
+        "form": "display",
+        "include_originals": true
+      },
+      "field": "include_originals"
+    },
+    {
+      "name": "an unknown form",
+      "request": {
+        "form": "pretty"
+      },
+      "field": "form"
+    }
+  ],
+  "pages": [
+    {
+      "name": "a display page",
+      "first_ordinal": 0,
+      "page": {
+        "lineage_id": "lin_1",
+        "history_version": 1,
+        "older": "c0",
+        "messages": [
+          {
+            "mid": "host_1",
+            "written_at": 1790000000000,
+            "row": {
+              "role": "user",
+              "text": "earlier",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "earlier"
+                }
+              ]
+            }
+          },
+          {
+            "ordinal": 0,
+            "mid": "m0",
+            "written_at": 1790000000100,
+            "tags": [
+              {
+                "part": "0",
+                "tag": "§1§"
+              }
+            ],
+            "row": {
+              "role": "user",
+              "text": "hi",
+              "client_message_id": "cm_1",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "hi"
+                }
+              ]
+            }
+          },
+          {
+            "ordinal": 1,
+            "mid": "m1",
+            "written_at": 1790000000200,
+            "row": {
+              "role": "assistant",
+              "text": "hello",
+              "model": "acme/model-1",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "hello"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "head_inputs": [
+    {
+      "name": "a runner that cannot carry attachments",
+      "input": {
+        "attachments": "no"
+      },
+      "carries": false
+    },
+    {
+      "name": "modalities from the catalog, types unknown",
+      "input": {
+        "attachments": "yes",
+        "modalities": [
+          "text",
+          "image"
+        ]
+      },
+      "carries": true
+    },
+    {
+      "name": "exact types from the provider adapter",
+      "input": {
+        "attachments": "yes",
+        "modalities": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "mime_types": [
+          "image/png",
+          "image/jpeg",
+          "application/pdf"
+        ]
+      },
+      "carries": true
+    },
+    {
+      "name": "not known",
+      "input": {
+        "attachments": "unknown"
+      },
+      "carries": null
+    },
+    {
+      "name": "a value this crate does not name reads as not known",
+      "input": {
+        "attachments": "sometimes"
+      },
+      "carries": null
+    }
+  ],
+  "sends": [
+    {
+      "name": "a send with a client_message_id",
+      "send": {
+        "prompt": "hi",
+        "send_id": "s1",
+        "client_message_id": "cm_01-A"
+      },
+      "id": "cm_01-A"
+    },
+    {
+      "name": "a send without one",
+      "send": {
+        "prompt": "hi",
+        "send_id": "s1"
+      },
+      "id": null
+    }
+  ],
+  "sends_refused": [
+    {
+      "name": "an empty id",
+      "send": {
+        "prompt": "hi",
+        "send_id": "s1",
+        "client_message_id": ""
+      }
+    },
+    {
+      "name": "65 characters",
+      "send": {
+        "prompt": "hi",
+        "send_id": "s1",
+        "client_message_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "a character outside the grammar",
+      "send": {
+        "prompt": "hi",
+        "send_id": "s1",
+        "client_message_id": "cm.1"
+      }
+    },
+    {
+      "name": "not a string",
+      "send": {
+        "prompt": "hi",
+        "send_id": "s1",
+        "client_message_id": 7
+      }
+    }
+  ]
+}

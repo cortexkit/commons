@@ -1,0 +1,268 @@
+{
+  "events": [
+    {
+      "name": "message started",
+      "event": {
+        "type": "message_started",
+        "mid": "m7"
+      }
+    },
+    {
+      "name": "message finished",
+      "event": {
+        "type": "message_finished",
+        "mid": "m7"
+      }
+    },
+    {
+      "name": "tool started",
+      "event": {
+        "type": "tool_started",
+        "mid": "m7",
+        "tool_call_id": "toolu_1",
+        "name": "echo",
+        "arguments": "{\"q\":\"x\"}",
+        "started_at": 1790000000000
+      }
+    },
+    {
+      "name": "tool started with cut arguments",
+      "event": {
+        "type": "tool_started",
+        "mid": "m7",
+        "tool_call_id": "toolu_1",
+        "name": "echo",
+        "arguments": "{\"t\":\"é",
+        "arguments_truncated": true,
+        "started_at": 1790000000000
+      }
+    },
+    {
+      "name": "tool finished",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m7",
+        "tool_call_id": "toolu_1",
+        "outcome": "ok",
+        "output_bytes": 12,
+        "finished_at": 1790000000500
+      }
+    },
+    {
+      "name": "tool finished with an outcome this crate does not name",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m7",
+        "tool_call_id": "toolu_1",
+        "outcome": "quarantined",
+        "output_bytes": 0,
+        "finished_at": 1790000000500
+      }
+    },
+    {
+      "name": "run started",
+      "event": {
+        "type": "run_started",
+        "run_id": "run_1"
+      }
+    },
+    {
+      "name": "run finished",
+      "event": {
+        "type": "run_finished",
+        "run_id": "run_1",
+        "reason": "completed"
+      }
+    },
+    {
+      "name": "run paused",
+      "event": {
+        "type": "run_paused",
+        "run_id": "run_1",
+        "reason": "auth_required"
+      }
+    },
+    {
+      "name": "text delta",
+      "event": {
+        "type": "text_delta",
+        "message_id": "msg_01",
+        "delta": "Hel",
+        "mid": "m8",
+        "part": "1"
+      }
+    },
+    {
+      "name": "text delta of a tool call, with an empty provider id",
+      "event": {
+        "type": "text_delta",
+        "message_id": "",
+        "delta": "x",
+        "tool_call_id": "toolu_2",
+        "mid": "m8",
+        "part": "2"
+      }
+    },
+    {
+      "name": "reasoning delta",
+      "event": {
+        "type": "reasoning_delta",
+        "message_id": "msg_01",
+        "delta": "hmm",
+        "mid": "m8",
+        "part": "0"
+      }
+    },
+    {
+      "name": "tool input delta",
+      "event": {
+        "type": "tool_input_delta",
+        "tool_call_id": "toolu_2",
+        "delta": "{\"q\":",
+        "mid": "m8",
+        "part": "2"
+      }
+    },
+    {
+      "name": "display gap",
+      "event": {
+        "type": "display_gap",
+        "dropped": 3
+      }
+    },
+    {
+      "name": "display reset",
+      "event": {
+        "type": "display_reset"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "name": "a control frame with its unit and event",
+      "seq": 4,
+      "type": "message_finished",
+      "frame": {
+        "kind": "control",
+        "cursor": {
+          "seq": 41
+        },
+        "seq": 4,
+        "unit": {
+          "record": "step",
+          "ordinal": 3
+        },
+        "event": {
+          "type": "message_finished",
+          "mid": "m3"
+        }
+      }
+    },
+    {
+      "name": "a display frame in Broca's shape with mid and part",
+      "seq": 5,
+      "type": "text_delta",
+      "frame": {
+        "kind": "display",
+        "seq": 5,
+        "event": {
+          "type": "text_delta",
+          "message_id": "",
+          "delta": "hi",
+          "mid": "m4",
+          "part": "0"
+        }
+      }
+    },
+    {
+      "name": "a frame of a runner without live_events",
+      "seq": null,
+      "type": null,
+      "frame": {
+        "kind": "control",
+        "cursor": {
+          "seq": 2
+        },
+        "record": "send"
+      }
+    }
+  ],
+  "reset_on_read": [
+    {
+      "name": "an unknown type",
+      "event": {
+        "type": "hologram",
+        "beam": true
+      }
+    },
+    {
+      "name": "no type",
+      "event": {
+        "mid": "m1"
+      }
+    },
+    {
+      "name": "a known type missing a member",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m1"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "live without limits",
+      "request": {},
+      "limits": false
+    },
+    {
+      "name": "from start with the app limits",
+      "request": {
+        "from": "start",
+        "limits": {
+          "arguments_bytes": 2048,
+          "result_bytes": 16384,
+          "error_result_bytes": 65536
+        }
+      },
+      "limits": true
+    },
+    {
+      "name": "after a head with limits",
+      "request": {
+        "from": {
+          "seq": 41
+        },
+        "limits": {
+          "arguments_bytes": 0,
+          "result_bytes": 0,
+          "error_result_bytes": 0
+        }
+      },
+      "limits": true
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "a misspelled member",
+      "request": {
+        "limit": {
+          "arguments_bytes": 2048,
+          "result_bytes": 16384,
+          "error_result_bytes": 65536
+        }
+      },
+      "field": "limit"
+    },
+    {
+      "name": "limits missing a bound",
+      "request": {
+        "limits": {
+          "arguments_bytes": 1,
+          "result_bytes": 1
+        }
+      },
+      "field": "error_result_bytes"
+    }
+  ]
+}

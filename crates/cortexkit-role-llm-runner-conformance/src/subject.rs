@@ -90,6 +90,16 @@ pub enum Capability {
     SendStatus,
     /// Owner user-command relay, with replies isolated from model history.
     UserCommands,
+    /// The `history_display` group: `session.history` with `form:
+    /// "display"`, each entry as a canonical display row.
+    HistoryDisplay,
+    /// The `live_events` group: typed control and display events, `seq`
+    /// on every frame and the attach replay of the step in flight on
+    /// `session.subscribe`.
+    LiveEvents,
+    /// The `client_message_id` group: `client_message_id` on
+    /// `session.send`, shown on the user message's display row.
+    ClientMessageId,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -151,6 +161,9 @@ impl Capability {
         Self::DeliveryOrder,
         Self::SendStatus,
         Self::UserCommands,
+        Self::HistoryDisplay,
+        Self::LiveEvents,
+        Self::ClientMessageId,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -203,6 +216,9 @@ impl Capability {
             Self::RunUsage => groups::RUN_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::SendStatus => groups::SEND_STATUS,
+            Self::HistoryDisplay => groups::HISTORY_DISPLAY,
+            Self::LiveEvents => groups::LIVE_EVENTS,
+            Self::ClientMessageId => groups::CLIENT_MESSAGE_ID,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
@@ -1133,6 +1149,69 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(format!(
             "unclassified retention probe op: {method}"
         )))
+    }
+
+    /// The serializer profile (`cortexkit_role_llm_runner::serializer_profile`)
+    /// of `session`'s stored bodies, as `session.history` serves them raw, or
+    /// `None` when they follow no profile this role defines. The display
+    /// case comparing a served row with the profile's projection of the same
+    /// entry is then inapplicable, by name.
+    fn serializer_profile(&self, _session: &str) -> Option<String> {
+        None
+    }
+
+    /// Make the scripted model stream the first `parts` parts of its next
+    /// answer for `session`, each whole, and then hold the rest of the
+    /// answer until [`Self::release_model_step`]; [`Self::await_model_step`]
+    /// resolves once those parts are streamed. Called before the send. The
+    /// live-event cases that attach while a step is in flight are
+    /// inapplicable, by name, when this answers an error.
+    async fn hold_next_model_stream(
+        &self,
+        _session: &str,
+        _parts: usize,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "holding a model answer mid-stream is not implemented",
+        ))
+    }
+
+    /// Move `session`'s prompt-cache clock forward by `milliseconds`: the
+    /// runner's next model request finds that much more time passed since
+    /// its previous request reached the cache. The `cache_ttl` cases are
+    /// inapplicable, by name, when this answers an error.
+    async fn advance_prompt_cache_clock(
+        &self,
+        _session: &str,
+        _milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("a prompt-cache clock is not implemented"))
+    }
+
+    /// Make `session`'s model requests from the next one on go to `model`
+    /// (1 to 256 bytes of printable ASCII, no space), as the runner's own
+    /// model switch would; the `model` header of the runner's compaction
+    /// advance notices then names it. Before the session's first send this
+    /// sets the model the session starts with. A switch after that is a
+    /// model change, and the scripted compaction provider answers its
+    /// `model_change` ride without a `cache_ttl` entry, so the runner holds
+    /// no entry for the new model, as when it missed the ride.
+    async fn switch_model(&self, _session: &str, _model: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("switching models is not implemented"))
+    }
+
+    /// Make the final options of `session`'s next model requests carry the
+    /// prompt-cache lifetime `milliseconds` (`None`: carry none), so the
+    /// runner observes that lifetime in its own request, as it would from
+    /// a provider adapter that sets one.
+    async fn set_observed_cache_lifetime(
+        &self,
+        _session: &str,
+        _milliseconds: Option<u64>,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "an observed prompt-cache lifetime is not implemented",
+        ))
     }
 
     /// Wait a short while between polls that check whether a run has ended.

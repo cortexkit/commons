@@ -140,6 +140,9 @@ shipping runner with this document.
 |---|---|---|
 | `transcript_reads` | `session.read`, `session.head` | §4 |
 | `host_history` | `session.history` | §4.6 |
+| `history_display` | `session.history` with `form: "display"` | §4.7 |
+| `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
+| `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `run_cancel` | `run.cancel` | §6.2 |
@@ -191,6 +194,15 @@ shipping runner with this document.
   `turn_directives` (§9.9). `check_describe` checks the group for
   `session.send` and `run.result`; `run.status` carries the same answer when
   the runner also serves `run_status`. It adds no discovery metadata.
+- [pinned] `history_display`, `live_events` and `client_message_id` are each
+  declared on their own (added in 0.5.1). A caller MUST NOT send `form` or
+  `limits` on `session.history` unless the runner declares
+  `history_display`, nor `limits` on `session.subscribe` unless it declares
+  `live_events`, nor `client_message_id` on `session.send` unless it
+  declares `client_message_id`: an older runner decodes those requests
+  strictly and refuses the member. A consumer relies on the typed events of
+  §7.1 only from a runner declaring `live_events`. `check_describe` checks
+  each group for its op; none adds discovery metadata.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
@@ -465,6 +477,17 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   describes the most recent run, never the transcript; `updated_at` is
   milliseconds since the Unix epoch. `last_run_state` is the pinned run
   summary; a page's `lineage_state` is a runner member, not pinned.
+- [pinned] `input?: {attachments, modalities?, mime_types?}`
+  (`read::HeadInput`, added in 0.5.1) describes what a send that names no
+  model can carry. `attachments` is `yes`, `no` or `unknown`, decoded open
+  (an unknown value reads as `unknown`). `modalities` come from the model
+  catalog (Fusiform's `capability.input_modalities`); `mime_types` come only
+  from the runner's own provider adapter, and absent they mean the
+  modalities are accepted but the exact types are unknown. A fact the runner
+  lacks is `unknown`, never `no`; `no` is a known fact, such as a runner that
+  cannot carry attachments at all. An absent `input` means unknown, so the
+  member needs no group. It is outside the lineage rule below: a
+  never-written session may state it.
 - [pinned] It follows the read rule (§4.2): an absent `lineage_id` means the
   session has no lineage yet. For a session never written, `lineage_id`,
   `last_ordinal`, `first_ordinal`, `head`, `last_run_state` and
@@ -491,6 +514,16 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   (`serializer_profile::strip_cache_control`). Never inside a `tool_use`
   block's `input`, never inside a block of a type the profile does not
   name, and a string `content` is kept as sent.
+- [pinned] **`opencode-aisdk`** (`serializer_profile::OPENCODE_AISDK`). An
+  entry's body is OpenCode's stored message `{info, parts}`, not an AI SDK
+  model message: `info` is the message record (`id`, `role`, `time`, and
+  `providerID` and `modelID` on an assistant message, `model: {providerID,
+  modelID}` on a user message) and `parts` its parts in order, each `{id,
+  type, ...}`: `text`, `reasoning`, `tool` (`callID`, `tool`, `state:
+  {status, input, output?, error?, attachments?}`), `file` (`mime`, `url`,
+  `filename?`) and OpenCode's bookkeeping parts. Fields OpenCode changes
+  after a message finished stay as the runner first read them (read
+  stability, §4.2). `display::opencode_aisdk` is its decoder (§4.7).
 - [pinned] Read stability (§4.2) applies: the runner serves the form it
   first ingested (`serializer_profile::ingest`). A client re-sending the
   same message with its cache marker moved (a string `content` turning
@@ -649,6 +682,64 @@ need the whole-session walk the cost rule removes.
   index from `mid` to ordinal, written once at ingest, kept on disk and
   never resident. That satisfies the cost rule (§14.2), which bounds
   per-step work and resident memory, not disk.
+
+### 4.7 `history_display`: display rows on `session.history`
+
+`session.read` stays the compaction lane's read: raw or descriptors,
+finished messages only. `session.history` additionally serves a
+display-ready row for an app's reader on a runner declaring
+`history_display` (added in 0.5.1).
+
+- [pinned] The request takes `form?: "raw" | "display"` (`history::HistoryForm`,
+  strict: an unknown value is refused naming `form`) and `limits?:
+  {arguments_bytes, result_bytes, error_result_bytes}` (`display::Limits`,
+  strict, every member required). Absent `form` means `raw`. `limits` is
+  valid only with `form: "display"`; otherwise it is refused
+  `invalid_params {field: "limits"}`. With `form: "display"`, `media` and
+  `include_originals` are refused naming them: a row always describes media
+  by refs and carries no originals (`HistoryRequest::mode`). Positions,
+  cursors, `limit`, `max_bytes` and every refusal are those of a raw read.
+- [pinned] The display page (`display::DisplayPage`) is a history page whose
+  entries (`display::DisplayEntry`) are `{ordinal?, mid, written_at, row,
+  tags?}`: the raw entry's `mid`, `written_at`, `ordinal` where present and
+  `tags`, with the canonical `row` in place of `message`. It follows every
+  rule of §4.6, and `DisplayPage::check` checks the ones a page shows.
+- [pinned] A row (`display::DisplayRow`) is `{role, text, parts, model?,
+  client_message_id?}`. `parts` keeps the stored message's order; each part
+  is `{type, part, ...}`, where `part` is the stored part's key (a content
+  block's index for `anthropic-messages`, the part's `id` for
+  `opencode-aisdk`): `text {text}`, `reasoning {text}`, `tool_call
+  {tool_call_id, name, arguments, arguments_truncated?}` with `arguments`
+  the call's arguments as compact JSON text, `tool_result {tool_call_id,
+  is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
+  filename?}` and `other {kind}` for a part the projection does not show.
+  A reader decodes a part type it does not know as `other`. `text` joins the
+  text parts as `run.result` does (§6). Media is described by the
+  `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
+  URL.
+- [pinned] The row comes from one pure function per serializer profile
+  (`display::anthropic_messages`, `display::opencode_aisdk`, or
+  `display::project` by name). A runner calls it on the entry's stored body
+  and then fills what the body lacks: `model` (the model that wrote it,
+  carried by every assistant row; an `anthropic-messages` body names none)
+  and `client_message_id` (§9.11). The conformance kit checks that a served
+  row equals the function applied to the same entry's raw form, with only
+  those two members taken from the served row.
+- [pinned] **Cuts.** `limits` bounds, in UTF-8 bytes, a tool call's
+  `arguments` (`arguments_bytes`), a tool result's `content`
+  (`result_bytes`) and an error result's `content` (`error_result_bytes`).
+  A cut ends on the last UTF-8 character boundary at or below its bound
+  (`display::cut`) and sets `arguments_truncated` or `truncated`; a payload
+  within its bound is served whole and unflagged. Absent `limits` means
+  whole content: a runner never cuts by a default of its own. The apps'
+  values are `display::APP_LIMITS`, `{arguments_bytes: 2048, result_bytes:
+  16384, error_result_bytes: 65536}`.
+- [pinned] Pages stay finished-only, as `session.read`'s do (§4.2): there is
+  no entry for a message still being generated. Live progress reaches a
+  reader through §7.1.
+- [pinned] Nothing new rides on stored message bodies or on the default
+  `session.read` entry: everything this section adds is on the display row
+  or the request.
 
 ## 5. `dispatch_attribution`
 
@@ -1080,6 +1171,70 @@ run's token usage whichever runner served it.
   `context_ceiling_wait`, as `run.status` does (§6.1). A runner reports a
   wait at the context ceiling with a durable `control` event carrying
   `reason: context_ceiling_wait` and `deadline_ms` when the wait starts.
+
+### 7.1 `live_events`: typed events on `session.subscribe`
+
+A runner declaring `live_events` (added in 0.5.1) puts a typed `event:
+{type, ...}` (`live::LiveEvent`) on its stream frames beside its own
+members, such as its `unit`. A reader that predates the group ignores the
+new members.
+
+- [pinned] The request may carry `limits` (`live::LiveSubscribeRequest`,
+  §4.7's `display::Limits`), which cuts `tool_started.arguments` as it cuts
+  a display row's. It is otherwise `session.subscribe`'s request.
+- [pinned] **Control events** are durable: each maps onto a record the
+  runner already writes, so a replay from a cursor serves them again.
+  - `message_started {mid}` and `message_finished {mid}` for every stored
+    message, started first. `message_finished` rides the control frame that
+    carries the stored message's unit, so a consumer gets the re-read signal
+    and the unit together.
+  - `tool_started {mid, tool_call_id, name, arguments,
+    arguments_truncated?, started_at}`: `mid` is the message holding the
+    call, `tool_call_id` the model's id as the stored row carries it, and
+    `arguments` the arguments as JSON text.
+  - `tool_finished {mid, tool_call_id, outcome, output_bytes,
+    finished_at}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
+    `error`, `cancelled` when a caller asked, `interrupted` when a restart
+    cut the call and it was never sent again, `denied` when an approval or a
+    hook refused it); `output_bytes` is the byte length of the result's
+    content uncut, as a display row's `tool_result.content` holds it.
+  - `run_started {run_id}`, `run_finished {run_id, reason}` with `reason` an
+    open string (`live::run_reasons`: `completed`, `cancelled`,
+    `interrupted`, `max_steps`, `error`, `budget_exhausted`,
+    `context_ceiling`, ...), and `run_paused {run_id, reason}` for a run
+    that stopped and can resume under the same `run_id`. A runner that never
+    pauses never sends `run_paused`; a reader never requires it.
+  - Times are milliseconds since the Unix epoch.
+- [pinned] **Display events** are best-effort and never replayed, in
+  Broca's deployed shape `{kind: "display", event: {type, ...}}`:
+  `text_delta {message_id, delta, tool_call_id?}`, `reasoning_delta
+  {message_id, delta}`, `tool_input_delta {tool_call_id, delta}`,
+  `display_gap {dropped}` and `display_reset`. `message_id` is the model
+  provider's id and may be empty. On a `live_events` runner the deltas also
+  carry `mid` (the message's final `mid`, known from its first event and
+  unchanged across a `display_reset`) and `part` (the key the stored row
+  gives the part). Deltas are coalesced chunks, never one per token.
+- [pinned] `display_reset` means: drop all live state for the step in
+  flight (a provider retry, or a write-time hook rewriting a finished
+  message); the step's deltas stream again. A reader decodes an event whose
+  `type` it does not know, on either lane, as `display_reset`
+  (`LiveEvent`'s lenient decoding; `LiveEvent::decode_strict` is the strict
+  one).
+- [pinned] **Ids.** A consumer replaces a live row with the stored one by
+  `mid`, and a live tool row by `mid` plus `tool_call_id`, because the
+  model's id alone is not unique in a session.
+- [pinned] **Order.** Every frame of one stream carries `seq`
+  (`live::SEQ_FIELD`), starting at `live::FIRST_SEQ` (1) and rising by one
+  per frame, control and display together. A new stream starts again at 1.
+  Control frames keep their durable `cursor`, which is what a consumer
+  resumes from. A jump in `seq`, or a `display_gap`, means frames were lost:
+  the consumer drops its live rows and attaches again.
+- [pinned] **Attach replay.** A newly attached stream first gets the step in
+  flight as it stands, after any durable replay its attach point asks for:
+  `display_reset`, then one coalesced delta per part so far (with `mid` and
+  `part`), then the live deltas, all in the stream's `seq` order. With no
+  step in flight there is nothing to replay. It is the only recovery for
+  live state.
 
 ## 8. `model_view`
 
@@ -2513,6 +2668,26 @@ re-send their bodies.
 - [pinned] An unfrozen name is refused `unknown_user_command {command}`; a status key
   not held is refused `unknown_invocation`. A runner without the group
   refuses these ops with `user_commands_unsupported`.
+
+### 9.11 `client_message_id`: the caller's id for a sent message
+
+- [pinned] `session.send` may carry `client_message_id` on a runner
+  declaring `client_message_id` (added in 0.5.1): 1 to 64 characters of
+  `[A-Za-z0-9_-]` (`display::client_message_id_valid`), the caller's own id
+  for the user message the send creates. Any other value, or the member on a
+  runner without the group, is refused `invalid_params {field:
+  "client_message_id"}` (`SendRequest::client_message_id`).
+- [pinned] The runner stores it beside the user entry the send creates,
+  never inside the stored body, and a runner on a host keeps it in its own
+  per-message record, never in the host's stored message, so the model
+  never sees it. Prompts typed into the host directly carry none.
+- [pinned] It appears on that message's display row (§4.7) and nowhere in
+  the default `session.read` entry. No `session.read` member opts into it in
+  this version.
+- [pinned] It is part of the send's identity: a re-send under the same
+  `send_id` must carry the same `client_message_id`, or none if the first
+  send carried none; any other is refused `send_id_reuse {field:
+  "client_message_id"}` and writes nothing (`SendRequest::same_client_message_id`).
 
 ## 10. `session.baseline` and the admission reply
 

@@ -6,7 +6,9 @@
 //! profile can read the body. The same value reaches a session's providers
 //! as their plan item's `params.serializer_profile` (pinned in the
 //! step-transform-provider and compaction-provider contracts, which name
-//! `opencode-aisdk`). This module defines [`ANTHROPIC_MESSAGES`].
+//! `opencode-aisdk`). This module defines [`ANTHROPIC_MESSAGES`] and pins
+//! the body schema of [`OPENCODE_AISDK`]; `display` holds each profile's
+//! projection to a display row.
 
 use serde_json::Value;
 
@@ -15,6 +17,18 @@ use serde_json::Value;
 /// its Messages request, with `cache_control` members removed only where
 /// [`strip_cache_control`] removes them.
 pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
+
+/// A runner serving OpenCode's own stored messages: an entry body is the
+/// message as OpenCode stores it, `{info, parts}`, where `info` is the
+/// message record (`id`, `role`, `time`, and on an assistant message
+/// `providerID` and `modelID`, on a user message `model: {providerID,
+/// modelID}`) and `parts` its parts in order, each `{id, type, ...}` (`text`,
+/// `reasoning`, `tool` with `callID`, `tool` and `state: {status, input,
+/// output?, error?, attachments?}`, `file` with `mime`, `url` and
+/// `filename?`, and OpenCode's bookkeeping parts). It is not an AI SDK model
+/// message. Read stability applies: fields OpenCode changes after a message
+/// finished stay as the runner first read them.
+pub const OPENCODE_AISDK: &str = "opencode-aisdk";
 
 /// The member the Anthropic Messages format uses for cache markers.
 pub const CACHE_CONTROL: &str = "cache_control";

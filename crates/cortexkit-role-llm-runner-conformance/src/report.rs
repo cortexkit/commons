@@ -56,6 +56,21 @@ const USAGE: &[Capability] = &[Capability::RunUsage, Queue, RunOps];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
 const ORDER_STEER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads, Steer];
 const SESSION_CHANGE: &[Capability] = &[Capability::SessionChange, Queue, RunOps];
+const DISPLAY: &[Capability] = &[
+    Capability::HistoryDisplay,
+    Capability::HostHistory,
+    Queue,
+    TranscriptReads,
+];
+const CLIENT_ID: &[Capability] = &[
+    Capability::ClientMessageId,
+    Capability::HistoryDisplay,
+    Capability::HostHistory,
+    Queue,
+    TranscriptReads,
+];
+const LIVE: &[Capability] = &[Capability::LiveEvents, Streaming, Queue, TranscriptReads];
+const CACHE_TTL: &[Capability] = &[Compaction, Queue, TranscriptReads, RunOps];
 const SESSION_CHANGE_HELD: &[Capability] =
     &[Capability::SessionChange, Queue, RunOps, HoldToolCalls];
 const STRUCTURED_RESTART: &[Capability] = &[
@@ -612,6 +627,32 @@ pub const CASES: &[CaseSpec] = &[
         &[Queue, TranscriptReads, KillAt(points::TERMINAL)],
         "killed at Terminal and restarted: the run keeps its one terminal state, completed, and nothing is written twice",
     ),
+    case("display_row_is_the_profile_projection", DISPLAY,
+        "a display row equals the serializer profile's projection of the same entry's raw body, without limits and with the apps' limits, taking only model and client_message_id from the served row; every assistant row carries model; the envelope keeps ordinal, written_at and tags; inapplicable when the adapter names no profile"),
+    case("display_limits_cut_on_a_utf8_boundary", DISPLAY,
+        "with limits falling inside a multi-byte character of a call's arguments and of its result, each is cut to the last character boundary at or below its bound with arguments_truncated or truncated set, and nothing else changes"),
+    case("display_without_limits_is_whole", DISPLAY,
+        "without limits a call's arguments and result larger than the apps' bounds are served whole and unflagged; with the apps' limits both fit their bounds"),
+    case("display_pages_carry_finished_messages_only", DISPLAY,
+        "while a model step is held, the display walk serves exactly the raw walk's finished entries and no row for the step in flight; once the run ends, the answer is there"),
+    case("client_message_id_on_display_rows_never_in_read", CLIENT_ID,
+        "a send's client_message_id appears on the display row of the user message it created and on no other row, and nowhere in the default session.read page"),
+    case("client_message_id_resend_with_another_id_refused", &[Capability::ClientMessageId, Queue],
+        "a re-send under the same send_id with the same client_message_id is a retry; with another id or without one it is refused send_id_reuse naming client_message_id; an id outside [A-Za-z0-9_-]{1,64} is refused invalid_params naming it"),
+    case("live_message_and_tool_events_durable", LIVE,
+        "a replay from start carries message_started then message_finished for every stored mid, tool_started (the holding message's mid, the model's id, the tool, the whole arguments) then tool_finished with outcome ok; a second replay serves the same control frames and one after the tool_started cursor exactly what followed it"),
+    case("live_run_events", LIVE,
+        "a completed run has one run_started and, after it, one run_finished with reason completed; any run_paused lies between"),
+    case("live_attach_replays_the_current_step", LIVE,
+        "a stream attached while a model answer is held after two parts streamed gets display_reset, then one coalesced delta per part so far with mid and part, in seq order; the mid is the stored message's; inapplicable without the held-stream hook"),
+    case("live_seq_rises_across_lanes", LIVE,
+        "a stream from start while a step is in flight carries control and display frames whose seq starts at 1 and rises by one across both lanes; inapplicable without the held-stream hook"),
+    case("cache_ttl_entry_for_another_model_ignored", CACHE_TTL,
+        "a configured cache_ttl entry naming another model never leads to ttl_expired, however long the prompt cache idles; inapplicable when the runner declares no ttl_expired for its own model's expired entry, or without the clock, model and observed-lifetime hooks"),
+    case("cache_ttl_configured_null_never_expires", CACHE_TTL,
+        "a configured entry with ms null never leads to ttl_expired, even with an observed lifetime that has passed"),
+    case("cache_ttl_missed_model_change_falls_through_to_observed", CACHE_TTL,
+        "after a model switch whose ride brought no entry, the old model's lifetime is never used: no ttl_expired before the observed lifetime passes, ttl_expired once it has"),
     case("retention_honoured", RETAINED,
         "after retention plus delete_within_ms and margin all role reads answer expired with the last-activity expiry time, never-written sessions still answer empty, deletion is complete and a fresh send starts a new lineage with its own retention"),
     case("retention_run_status_expired", RETAINED,
@@ -646,7 +687,10 @@ pub const NARROWINGS: &[&str] = &[
     "compaction cases check Setup durability, refusals and model-view insertion, plus whether a single-session provider route's session agrees with Setup; adapters must observe the actual route bind separately from Setup, and shared project routes with an empty bind session are valid. The cut cases publish views through the adapter's hook and read advance notices the adapter captured at the bus; rides, the ceiling and native markers still have no live case",
     "read_below_first_ordinal_refused checks range and after-message reads; session.resolve's before_lineage_start is not exercised, because the cut fixture's session renders no tags",
     "per_step_cost_scales_with_new_messages measures wall time over the real route, which includes writing the model request; the two sessions keep the same window, so that part is equal on both sides. Memory is not measured",
-    "the prompt cache's lifetime (compaction-provider §8.1) has no live case: cache_ttl precedence and model scoping are checked only against cache_ttl::lifetime and its vectors, because the kit has no prompt-cache clock, model-switch hook or observation of the lifetime a request carried",
+    "the prompt cache's lifetime (compaction-provider §8.1) is observed only through the ttl_expired token of advance notices; a ride's ttl_expired cause is not seen, and entries reach the runner only on Setup's answer (the scripted provider answers a model_change ride with none, as a missed ride would), so the newest-entry-wins rule across several entries is checked only against cache_ttl::lifetime and its vectors",
+    "the display cases read rows of a session whose tool results are not errors, because a scripted tool result cannot be made an error result; error_result_bytes is checked against each profile's vectors, and live only as a bound that cuts nothing",
+    "the attach replay is checked up to the moment the stream goes quiet, because RunnerRoute::subscribe collects a stream only until then; the live deltas that follow the replay are not seen, and message_finished riding the frame of the stored message's unit is not checked, because a unit is the runner's own",
+    "session.head's input has no live case: what a send that names no model can carry depends on the runner's model catalog, so input is checked against the vectors only",
     "the history cases page with a limit of two entries; byte caps and descriptor media on session.history are not exercised separately from session.read's cases",
     "structured-output cases cannot see a runner's commits, so 'in the same commit as the run's end' is checked as: once the run reads terminal, every skipped sibling already has exactly one never-executed result; schema subsets (schema_outside_subset, mode_not_enforceable) are runner-specific and are checked against the vectors only",
     "structured_output_frozen_across_restart cuts ToolResultRecorded with a crash driver of its own, on its own state root, because the suite's driver cuts each point once and the shared crash scenario owns that cut; its kill is not in the run's kill ledger and does not count toward the real-kill rule",

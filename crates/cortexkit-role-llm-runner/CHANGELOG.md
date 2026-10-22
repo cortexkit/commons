@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.5.1
+
+An additive release. Every new wire member is optional and left out when
+absent, so existing payloads keep their bytes; stored message bodies and the
+default `session.read` entry gain nothing. Three new capability groups gate
+what an older runner does not serve.
+
+- `session.history` takes `form: "display"` on a runner declaring the new
+  `history_display` group (CONTRACT §4.7). Each entry then carries a
+  canonical row (`display::DisplayRow`: role, text, parts in order, tool
+  calls with their arguments, tool results, files described by refs, and
+  `model`) in place of the stored body, on a `display::DisplayPage`.
+- The new `display` module holds one pure projection per serializer
+  profile, `display::anthropic_messages` and `display::opencode_aisdk`
+  (and `display::project` by name). A runner calls it and fills what its
+  body lacks with `DisplayRow::with_model` and
+  `DisplayRow::with_client_message_id`.
+- Caller-chosen cuts: `limits: {arguments_bytes, result_bytes,
+  error_result_bytes}` (`display::Limits`) on the display read and on
+  `session.subscribe`. A cut ends on a UTF-8 character boundary
+  (`display::cut`) and sets `arguments_truncated` or `truncated`. Without
+  `limits` nothing is cut. `display::APP_LIMITS` holds the Alfonso apps'
+  values: 2,048, 16,384 and 65,536 bytes.
+- `serializer_profile::OPENCODE_AISDK` names the `opencode-aisdk` profile
+  and pins its body: OpenCode's stored message `{info, parts}` (§4.4).
+- `session.subscribe` carries typed events on a runner declaring the new
+  `live_events` group (§7.1, the `live` module): durable
+  `message_started`, `message_finished`, `tool_started`, `tool_finished`,
+  `run_started`, `run_finished` and `run_paused`, and display deltas in
+  Broca's deployed shape with `mid` and `part` added. Every frame carries
+  `seq`, from 1, rising across both lanes; a newly attached stream first
+  gets `display_reset` and one coalesced delta per part of the step in
+  flight. A reader decodes an unknown event type as `display_reset`.
+  `live::LiveSubscribeRequest` is the request with `limits`.
+- `session.send` takes `client_message_id` on a runner declaring the new
+  `client_message_id` group (§9.11): 1 to 64 characters of `[A-Za-z0-9_-]`,
+  shown on the user message's display row, never in `session.read`, and part
+  of the send's identity (`SendRequest::with_client_message_id`,
+  `client_message_id`, `same_client_message_id`).
+- `session.head` may carry `input: {attachments, modalities?, mime_types?}`
+  (`read::HeadInput`), what a send that names no model can carry. Absent
+  means unknown.
+- New vectors: `display-anthropic-messages.json`,
+  `display-opencode-aisdk.json`, `display-requests.json` and
+  `live-events.json`, pinned in `SHA256SUMS`.
+
 ## 0.5.0
 
 A breaking release. A runner never does per-step work, or holds memory, in

@@ -52,7 +52,7 @@ use cortexkit_role_llm_runner_conformance::{
         run::{FinalMessage, RunResult, RunResultRequest, RunState, RunUsage, StepUsage},
         send::{
             delivered_as, delivery_unsupported_detail, Delivered, SendReply, SendRequest,
-            DELIVERY_FIELD,
+            CLIENT_MESSAGE_ID_FIELD, DELIVERY_FIELD,
         },
         structured_output::{SkippedSibling, StructuredOutputResult, SUBMIT_RESULT_TOOL},
         subscribe::{SubscribeFrom, SubscribeRequest},
@@ -65,12 +65,14 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 mod compaction;
+mod display;
 mod history;
 mod media;
 mod session_change;
 mod tags;
 mod user_commands;
-pub use compaction::{CompactionDefect, CompactionRouteMode};
+pub use compaction::{CacheTtlDefect, CompactionDefect, CompactionRouteMode};
+use display::{anthropic_assistant, live_events, profiled, result_text};
 pub use history::LineageDefect;
 
 pub const TOOL_MODULE: &str = "fake.tools";
@@ -400,6 +402,32 @@ pub struct Defects {
     pub no_tools_ignored: bool,
     /// A later tools member on a plan session is silently ignored.
     pub late_plan_tools_ignored: bool,
+    /// A display row of an assistant message whose stored body names no
+    /// model is served without `model`.
+    pub display_drops_model: bool,
+    /// A cut keeps exactly its bound's bytes, splitting a character and
+    /// patching the split with U+FFFD.
+    pub display_cut_lossy: bool,
+    /// A cut payload is served without `arguments_truncated` or `truncated`.
+    pub display_cut_unflagged: bool,
+    /// A display read without `limits` is cut by the apps' limits.
+    pub display_default_limits: bool,
+    /// While a model step is held, the display page serves a row for it.
+    pub display_in_progress_row: bool,
+    /// The default `session.read` entry of a user message carries the
+    /// send's `client_message_id` inside its body.
+    pub client_id_in_read: bool,
+    /// A re-send under the same `send_id` with another `client_message_id`
+    /// is answered as a retry.
+    pub client_id_reuse_accepted: bool,
+    /// No `tool_finished` event is written.
+    pub live_tool_finished_missing: bool,
+    /// No `run_finished` event is written.
+    pub live_run_finished_missing: bool,
+    /// A newly attached stream gets no replay of the step in flight.
+    pub live_attach_skips_replay: bool,
+    /// Display frames carry a `seq` of their own, apart from control frames.
+    pub live_seq_per_lane: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -476,6 +504,19 @@ struct World {
     turn_system: bool,
     /// Sessions whose next model request waits at the context ceiling.
     ceiling_holds: Mutex<BTreeSet<String>>,
+    /// The model each session's requests go to, when switched from the
+    /// fake's own.
+    models: Mutex<BTreeMap<String, String>>,
+    /// The prompt-cache lifetime each session's requests carry.
+    observed_cache_lifetimes: Mutex<BTreeMap<String, Option<u64>>>,
+    /// Each session's prompt-cache clock.
+    cache_clocks: Mutex<BTreeMap<String, compaction::CacheClock>>,
+    cache_ttl_defect: CacheTtlDefect,
+    /// Sessions whose next model answer streams this many parts and holds.
+    stream_holds: Mutex<BTreeMap<String, usize>>,
+    /// The step in flight of each session whose answer is held mid-stream:
+    /// the `mid` its message will have, and the parts streamed so far.
+    in_flight: Mutex<BTreeMap<String, (String, Vec<ScriptedPart>)>>,
     /// How many `run.result` reads of an ended run still answer `active`,
     /// modelling a runner that reports the run as ended only a moment after
     /// the send returns.
@@ -567,6 +608,9 @@ struct Msg {
     delivered_as: Option<Value>,
     /// When the record that wrote the message was committed.
     written_at: u64,
+    /// The `client_message_id` of the send that wrote this user message,
+    /// kept beside its body.
+    client_message_id: Option<String>,
 }
 
 /// A `session.send` carrying a `delivery_order` list that the fake
@@ -608,6 +652,7 @@ struct SendRec {
     steered_into_running: bool,
     admitted: bool,
     resend_count: usize,
+    client_message_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -732,6 +777,9 @@ struct Sess {
     notice_events: Vec<String>,
     /// The history version: raised at every lineage change but a cut.
     history_version: u64,
+    /// The typed live events each record maps onto, by the record's index
+    /// in `events`.
+    live: Vec<(usize, Value)>,
 }
 
 impl Sess {
@@ -776,6 +824,7 @@ impl Sess {
             marker_key: None,
             delivered_as: None,
             written_at: 0,
+            client_message_id: None,
         });
         ordinal
     }
@@ -1207,6 +1256,8 @@ impl Module {
             return;
         };
         sess.events.push(kind.clone());
+        let messages_before: BTreeSet<String> =
+            sess.messages.iter().map(|m| m.mid.clone()).collect();
         session_change::apply(sess, &kind, record);
         compaction::apply(&mut sess.compaction, record, self.world.defects.compaction);
         if matches!(kind.as_str(), "send" | "steer" | "step" | "terminal")
@@ -1390,11 +1441,14 @@ impl Module {
                     sess.history_version += 1;
                     sess.numbering.clear();
                 }
-                let ordinal = sess.push(
-                    json!({ "role": "user", "text": text("prompt") }),
-                    &run_id,
-                    Vec::new(),
-                );
+                let body = if profiled(&session) {
+                    json!({ "role": "user", "content": [{ "type": "text", "text": text("prompt") }] })
+                } else {
+                    json!({ "role": "user", "text": text("prompt") })
+                };
+                let ordinal = sess.push(body, &run_id, Vec::new());
+                sess.at_mut(ordinal).client_message_id =
+                    record["client_message_id"].as_str().map(str::to_owned);
                 if let Some(delivered) = record.get("delivered_as").filter(|d| !d.is_null()) {
                     sess.at_mut(ordinal).delivered_as = Some(delivered.clone());
                 }
@@ -1409,6 +1463,7 @@ impl Module {
                         steered_into_running: kind == "steer",
                         admitted: record["admitted"] == json!(true),
                         resend_count: 0,
+                        client_message_id: record["client_message_id"].as_str().map(str::to_owned),
                     },
                 );
                 if kind == "send" && record["no_run"] != json!(true) {
@@ -1482,11 +1537,12 @@ impl Module {
                 // The model request this step answers was made at a step
                 // boundary: a renumbering detected since takes effect now.
                 tags::settle(sess, &self.world.defects, self.world.honours_checkpoint());
-                sess.push(
-                    json!({ "role": "assistant", "parts": record["parts"] }),
-                    &run_id,
-                    keys,
-                );
+                let body = if profiled(&session) {
+                    anthropic_assistant(&record["parts"])
+                } else {
+                    json!({ "role": "assistant", "parts": record["parts"] })
+                };
+                sess.push(body, &run_id, keys);
                 tags::save_in_host(sess.messages.last_mut().unwrap(), &self.world.defects);
             }
             "drop_step" => {
@@ -1572,8 +1628,17 @@ impl Module {
                 if self.world.defects.run_tool_calls_embedded_results {
                     return;
                 }
-                let mut body =
-                    json!({ "role": "tool", "call_key": key, "content": record["content"] });
+                let mut body = if profiled(&session) {
+                    let id = sess
+                        .calls
+                        .get(&key)
+                        .map(|c| c.tool_call_id.clone())
+                        .unwrap_or_default();
+                    json!({ "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id,
+                            "content": result_text(&record["content"]) }] })
+                } else {
+                    json!({ "role": "tool", "call_key": key, "content": record["content"] })
+                };
                 if let Some(reason) = record.get("reason") {
                     body["reason"] = reason.clone();
                 }
@@ -1662,6 +1727,7 @@ impl Module {
         for message in sess.messages.iter_mut().filter(|m| m.written_at == 0) {
             message.written_at = at;
         }
+        live_events(sess, &kind, record, &messages_before, &self.world.defects);
         tags::note_write(sess, &self.world.defects, self.world.honours_checkpoint());
     }
 
@@ -1817,6 +1883,19 @@ impl Module {
                     .insert(session.into(), run_id.into());
             }
             if self.world.held_models.lock().unwrap().contains_key(session) {
+                if let Some(parts) = self.world.stream_holds.lock().unwrap().remove(session) {
+                    let mid = format!(
+                        "{}.m{}",
+                        sess.lineage,
+                        sess.base + sess.messages.len() as u64
+                    );
+                    let streamed = turn.parts.iter().take(parts).cloned().collect();
+                    self.world
+                        .in_flight
+                        .lock()
+                        .unwrap()
+                        .insert(session.into(), (mid, streamed));
+                }
                 return Ok(());
             }
             // The output-cap fixture is text-only. Its fake provider uses
@@ -2621,6 +2700,9 @@ impl Module {
                 return Ok(invalid(field));
             }
         }
+        if let Err(field) = request.client_message_id(&self.world.groups) {
+            return Ok(invalid(field));
+        }
         // A send that is not a list send must carry a non-empty prompt; a
         // list send's prompt is checked with its members below.
         if request.delivery_order.is_none() || !self.world.serves(groups::DELIVERY_ORDER) {
@@ -2798,6 +2880,14 @@ impl Module {
                         Some(json!({ "field": DELIVERY_FIELD })),
                     ));
                 }
+                if !request.same_client_message_id(send.client_message_id.as_deref())
+                    && !self.world.defects.client_id_reuse_accepted
+                {
+                    return Ok(refuse(
+                        errors::SEND_ID_REUSE,
+                        Some(json!({ "field": CLIENT_MESSAGE_ID_FIELD })),
+                    ));
+                }
                 let mut sessions = self.sessions.lock().unwrap();
                 let sess = sessions.get_mut(session).unwrap();
                 let send = sess.sends.get_mut(&request.send_id).unwrap();
@@ -2932,7 +3022,8 @@ impl Module {
                     "directives":directives,
                     "max_steps":max_steps, "max_output_tokens":max_output_tokens,
                     "no_tools":no_tools == Some(true),
-                    "structured_output": frozen }),
+                    "structured_output": frozen,
+                    "client_message_id": request.client_message_id(&self.world.groups).ok().flatten() }),
         )?;
         self.drive(session, &run_id)?;
         self.deliver_idle(session)?;
@@ -3229,6 +3320,11 @@ impl Module {
             })
             .collect();
         let mut body = m.body.clone();
+        if self.world.defects.client_id_in_read {
+            if let Some(id) = &m.client_message_id {
+                body["client_message_id"] = json!(id);
+            }
+        }
         for part in body
             .get_mut("parts")
             .and_then(Value::as_array_mut)
@@ -3800,6 +3896,9 @@ impl Module {
     }
 
     fn subscribe(&self, session: &str, params: Value) -> SubscribeOutcome {
+        if self.world.serves(groups::LIVE_EVENTS) {
+            return self.live_subscribe(session, params);
+        }
         let request: SubscribeRequest = match serde_json::from_value(params) {
             Ok(request) => request,
             Err(_) => {
@@ -4093,6 +4192,8 @@ pub struct FakeSubject {
     /// Refuse reads `transient` while a tag-rendering run waits for a Setup
     /// without descent, as the contract lets a runner.
     pub holds_reads_during_setup: bool,
+    /// How the fake judges the prompt cache's lifetime.
+    pub cache_ttl_defect: CacheTtlDefect,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -4169,6 +4270,7 @@ impl FakeSubject {
             seed_hook: false,
             host_prefix_everywhere: 0,
             holds_reads_during_setup: false,
+            cache_ttl_defect: CacheTtlDefect::None,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
         }
@@ -4233,6 +4335,12 @@ impl FakeSubject {
                     adopt_calls: AtomicUsize::new(0),
                     turn_system: self.turn_system,
                     ceiling_holds: Mutex::new(BTreeSet::new()),
+                    models: Mutex::new(BTreeMap::new()),
+                    observed_cache_lifetimes: Mutex::new(BTreeMap::new()),
+                    cache_clocks: Mutex::new(BTreeMap::new()),
+                    cache_ttl_defect: self.cache_ttl_defect,
+                    stream_holds: Mutex::new(BTreeMap::new()),
+                    in_flight: Mutex::new(BTreeMap::new()),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
                 })
             })
@@ -4859,6 +4967,67 @@ impl LlmRunnerSubject for FakeSubject {
         Err(HarnessError::new("the call was never held"))
     }
 
+    fn serializer_profile(&self, session: &str) -> Option<String> {
+        profiled(session)
+            .then(|| cortexkit_role_llm_runner::serializer_profile::ANTHROPIC_MESSAGES.to_owned())
+    }
+
+    async fn hold_next_model_stream(
+        &self,
+        session: &str,
+        parts: usize,
+    ) -> Result<(), HarnessError> {
+        let world = self.world();
+        world
+            .stream_holds
+            .lock()
+            .unwrap()
+            .insert(session.into(), parts);
+        world
+            .pending_model_holds
+            .lock()
+            .unwrap()
+            .insert(session.into());
+        Ok(())
+    }
+
+    async fn advance_prompt_cache_clock(
+        &self,
+        session: &str,
+        milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .cache_clocks
+            .lock()
+            .unwrap()
+            .entry(session.into())
+            .or_default()
+            .now += milliseconds;
+        Ok(())
+    }
+
+    async fn switch_model(&self, session: &str, model: &str) -> Result<(), HarnessError> {
+        self.world()
+            .models
+            .lock()
+            .unwrap()
+            .insert(session.into(), model.into());
+        Ok(())
+    }
+
+    async fn set_observed_cache_lifetime(
+        &self,
+        session: &str,
+        milliseconds: Option<u64>,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .observed_cache_lifetimes
+            .lock()
+            .unwrap()
+            .insert(session.into(), milliseconds);
+        Ok(())
+    }
+
     async fn hold_next_model_step(&self, session: &str) -> Result<(), HarnessError> {
         self.world()
             .pending_model_holds
@@ -4890,6 +5059,7 @@ impl LlmRunnerSubject for FakeSubject {
             .unwrap()
             .remove(session)
             .ok_or_else(|| HarnessError::new("the model request is not held"))?;
+        self.world().in_flight.lock().unwrap().remove(session);
         for module in self.modules.lock().unwrap().clone() {
             if module.alive.load(Ordering::SeqCst) {
                 module
