@@ -578,7 +578,15 @@ struct World {
     /// provider's delay and the ride's deadline both count on it. Each
     /// `pause` of the subject moves it [`RIDE_TICK_MS`].
     ride_clock: AtomicU64,
+    /// Shared with [`FakeSubject::current_case`].
+    current_case: Arc<Mutex<Option<&'static str>>>,
+    /// Shared with [`FakeSubject::route_calls`].
+    route_calls: RouteCalls,
 }
+
+/// Route requests in arrival order: the case marked current when each
+/// arrived, and its method.
+pub type RouteCalls = Arc<Mutex<Vec<(Option<&'static str>, String)>>>;
 
 /// A rewrite ride that resolved: the run and step it held, and the notice
 /// events computed for that step.
@@ -4363,6 +4371,13 @@ pub struct FakeRoute {
 #[async_trait]
 impl RunnerRoute for FakeRoute {
     async fn request(&self, method: &str, params: Value) -> Result<Reply, RouteFailure> {
+        let world = &self.module.world;
+        let case = *world.current_case.lock().unwrap();
+        world
+            .route_calls
+            .lock()
+            .unwrap()
+            .push((case, method.to_owned()));
         self.module
             .handle(&self.stamp, &self.session, method, params)
     }
@@ -4435,6 +4450,13 @@ pub struct FakeSubject {
     pub holds_reads_during_setup: bool,
     /// How the fake judges the prompt cache's lifetime.
     pub cache_ttl_defect: CacheTtlDefect,
+    /// The case the suite is in, as a test's progress callback sets it: the
+    /// case's name from its `CaseStarted` until its `CaseFinished`, `None`
+    /// between cases. The fake only reads it, to label `route_calls`.
+    pub current_case: Arc<Mutex<Option<&'static str>>>,
+    /// Every route request the fake received, in order: the `current_case`
+    /// when it arrived, and the method.
+    pub route_calls: RouteCalls,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -4513,6 +4535,8 @@ impl FakeSubject {
             host_prefix_everywhere: 0,
             holds_reads_during_setup: false,
             cache_ttl_defect: CacheTtlDefect::None,
+            current_case: Arc::new(Mutex::new(None)),
+            route_calls: Arc::new(Mutex::new(Vec::new())),
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
         }
@@ -4590,6 +4614,8 @@ impl FakeSubject {
                     rides: Mutex::new(BTreeMap::new()),
                     resolved_rides: Mutex::new(BTreeMap::new()),
                     ride_clock: AtomicU64::new(0),
+                    current_case: Arc::clone(&self.current_case),
+                    route_calls: Arc::clone(&self.route_calls),
                 })
             })
             .clone()

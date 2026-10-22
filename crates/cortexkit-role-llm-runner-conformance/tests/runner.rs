@@ -66,14 +66,17 @@ async fn held_calls_undeclared_group_is_inapplicable_by_name() {
 
 use cortexkit_role_llm_runner::send::{delivered_as, Delivered};
 use cortexkit_role_llm_runner_conformance::{
-    harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
-    SuiteVerdict, CASES,
+    harness::KillMechanism, progress, run_suite, run_suite_with, Capability, CaseOutcome,
+    SetupError, SuiteOptions, SuiteProgress, SuiteReport, SuiteVerdict, CASES,
 };
 use fake::{
     CacheTtlDefect, CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject,
     LineageDefect, RetentionDefect, StepRecovery,
 };
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -1114,6 +1117,148 @@ async fn a_used_work_dir_is_refused() {
         .await
         .unwrap_err();
     assert!(matches!(error, SetupError::WorkDirNotEmpty(_)));
+}
+
+/// A faulty fake with the default (partial) declarations: its run has a
+/// failing case and cases gated off for a missing capability.
+fn tail_returns_oldest() -> FakeSubject {
+    FakeSubject::new(Defects {
+        tail_returns_oldest: true,
+        ..Defects::default()
+    })
+}
+
+#[tokio::test]
+async fn progress_reports_every_case_started_then_finished_in_suite_order() {
+    let subject = tail_returns_oldest();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&events);
+    let options = SuiteOptions::new()
+        .with_progress(move |event: &SuiteProgress| recorder.lock().unwrap().push(event.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let report = run_suite_with(&subject, dir.path(), options).await.unwrap();
+    let events = events.lock().unwrap().clone();
+
+    assert_eq!(events.len(), 2 * CASES.len(), "{events:#?}");
+    let mut gated = 0;
+    for (index, (spec, pair)) in CASES.iter().zip(events.chunks(2)).enumerate() {
+        assert_eq!(
+            pair[0],
+            SuiteProgress::CaseStarted {
+                case: spec.name,
+                index,
+                total: CASES.len(),
+            }
+        );
+        match &pair[1] {
+            SuiteProgress::CaseFinished {
+                case,
+                outcome,
+                elapsed_ms,
+            } => {
+                assert_eq!(*case, spec.name);
+                assert_eq!(Some(outcome), report.outcome(spec.name), "{case}");
+                // A case skipped for a missing capability is decided before
+                // anything runs, so its START and END come back to back.
+                if matches!(outcome, CaseOutcome::Skipped { .. }) {
+                    gated += 1;
+                    assert!(*elapsed_ms < 1_000, "{case} took {elapsed_ms} ms");
+                }
+            }
+            other => panic!("expected {} to finish, got {other:?}", spec.name),
+        }
+    }
+    assert!(gated > 0, "the run should gate off at least one case");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        SuiteProgress::CaseFinished {
+            case: "tail_read_is_newest_page",
+            outcome: CaseOutcome::Failed { .. },
+            ..
+        }
+    )));
+}
+
+/// The property progress exists for: START goes out before a case does any
+/// work, so a case stuck in the runner leaves START with no END. The
+/// callback marks the case the suite is in from its START to its END, and
+/// the fake labels every route request it receives with that mark.
+#[tokio::test]
+async fn progress_starts_each_case_before_its_route_calls() {
+    let subject = tail_returns_oldest();
+    let current = Arc::clone(&subject.current_case);
+    let options = SuiteOptions::new().with_progress(move |event: &SuiteProgress| {
+        *current.lock().unwrap() = match event {
+            SuiteProgress::CaseStarted { case, .. } => Some(*case),
+            _ => None,
+        };
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let report = run_suite_with(&subject, dir.path(), options).await.unwrap();
+    let calls = subject.route_calls.lock().unwrap().clone();
+
+    let outside: Vec<&str> = calls
+        .iter()
+        .filter(|(case, _)| case.is_none())
+        .map(|(_, method)| method.as_str())
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "{} of {} route requests arrived outside every case's START..END: {outside:?}",
+        outside.len(),
+        calls.len()
+    );
+    let with_calls: std::collections::BTreeSet<&str> =
+        calls.iter().filter_map(|(case, _)| *case).collect();
+    for case in &with_calls {
+        // A case skipped for a missing capability never reaches the runner,
+        // so requests labelled with it belong to some other case.
+        assert!(
+            !matches!(report.outcome(case), Some(CaseOutcome::Skipped { .. })),
+            "route requests were labelled with {case}, which was skipped"
+        );
+    }
+    assert!(
+        with_calls.contains("tail_read_is_newest_page"),
+        "{with_calls:?}"
+    );
+    assert!(
+        with_calls.len() >= 50,
+        "only {} cases made route requests",
+        with_calls.len()
+    );
+}
+
+#[tokio::test]
+async fn run_suite_reports_the_same_with_or_without_progress() {
+    // A fake keeps state between runs (held calls, sessions), so each run
+    // gets its own.
+    let plain = run(&tail_returns_oldest()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let no_options = run_suite_with(&tail_returns_oldest(), dir.path(), SuiteOptions::new())
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let events = Arc::new(Mutex::new(0usize));
+    let counter = Arc::clone(&events);
+    let observed = run_suite_with(
+        &tail_returns_oldest(),
+        dir.path(),
+        SuiteOptions::new().with_progress(move |_: &SuiteProgress| *counter.lock().unwrap() += 1),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(plain.verdict, SuiteVerdict::Failed { .. }));
+    assert_eq!(plain, no_options);
+    assert_eq!(plain, observed);
+    assert_eq!(*events.lock().unwrap(), 2 * CASES.len());
+}
+
+/// The ready-made stderr printer fits `with_progress` as is. It is not run
+/// here: its lines would bypass the test harness's output capture.
+#[allow(dead_code)]
+fn stderr_lines_fit_suite_options() -> SuiteOptions {
+    SuiteOptions::new().with_progress(progress::stderr_lines())
 }
 
 // Retention tests use the fake's explicit clock hook and can therefore run with

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.5
+
+An additive release: per-case progress for runs that can be cut off before
+they report. `run_suite` keeps its signature and report.
+
+- `run_suite_with(subject, work_dir, SuiteOptions)`, beside `run_suite`.
+  `SuiteOptions::new().with_progress(callback)` takes an
+  `FnMut(&SuiteProgress) + Send`, called synchronously before each case
+  starts and right after its outcome is known. `SuiteOptions` and
+  `SuiteProgress` are `#[non_exhaustive]`.
+- `SuiteProgress::CaseStarted { case, index, total }` and
+  `SuiteProgress::CaseFinished { case, outcome, elapsed_ms }`. Every case
+  gets both, in suite order, including a case skipped for a missing
+  capability or inapplicable before it runs.
+- `progress::stderr_lines()` writes `START <case>` and
+  `END <case> <PASS|FAIL|SKIP|N/A> <ms>` lines to stderr, flushing after
+  each. The outcome word is the one `SuiteReport::render` uses for the case.
+  Nothing turns it on but passing it.
+
 ## 0.10.4
 
 - Require `cortexkit-role-llm-runner` 0.5.4 and exercise `held_calls` when

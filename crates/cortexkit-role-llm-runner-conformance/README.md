@@ -168,6 +168,30 @@ from `session.baseline` has no admission reply to compare.
 The discovery-gated `held_calls` cases are also inapplicable when
 `role.describe` does not declare that optional group, not skipped.
 
+## Progress while a run is in flight
+
+A full run takes many minutes, and a CI job can be cut off before the report
+is printed. `run_suite_with` takes `SuiteOptions`; its progress callback is
+called synchronously before each case starts and right after its outcome is
+known (`SuiteProgress::CaseStarted` / `CaseFinished`). Every case gets both
+events, including one skipped or inapplicable before it runs.
+`progress::stderr_lines()` prints them to stderr, flushing after each line:
+
+```rust
+let options = SuiteOptions::new().with_progress(progress::stderr_lines());
+let report = run_suite_with(&my_runner_subject, tempdir.path(), options).await?;
+```
+
+```text
+START tail_read_is_newest_page
+END tail_read_is_newest_page PASS 412
+```
+
+`END` carries the case's outcome word as the report renders it (`PASS`,
+`FAIL`, `SKIP` or `N/A`) and its elapsed milliseconds. A log cut off after a
+`START` with no matching `END` names the case that was running. `run_suite`
+is unchanged and prints nothing.
+
 ## Cases in this subset
 
 | Case | Requires |

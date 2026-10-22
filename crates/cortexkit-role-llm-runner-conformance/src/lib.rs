@@ -61,6 +61,11 @@
 //! case fails, or if no kill ended a real process: simulated kills cannot
 //! catch a runner that keeps something only in memory.
 //!
+//! [`run_suite_with`] takes [`SuiteOptions`]; its progress callback hears
+//! each case start and end ([`SuiteProgress`]), and
+//! [`progress::stderr_lines`] prints those events to stderr, so a run cut
+//! off before its report still names the case it was in.
+//!
 //! Every place a case narrows a check because the role leaves the rule
 //! open is listed in [`NARROWINGS`] and printed with the report.
 //!
@@ -93,6 +98,7 @@ mod interrupt_reason;
 mod lineage;
 mod live;
 mod media;
+pub mod progress;
 mod report;
 mod retention;
 mod ride_wait;
@@ -113,9 +119,10 @@ pub use compaction::{
 };
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;
+pub use progress::{SuiteOptions, SuiteProgress};
 pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES, NARROWINGS};
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
-pub use runner::{run_suite, SetupError};
+pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
     AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
     RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall,

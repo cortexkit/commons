@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use cortexkit_role_harness::{CrashDriver, RealKillVerdict};
@@ -13,6 +14,7 @@ use crate::{
     compaction,
     crash::{self, CrashObservation},
     drive::Mint,
+    progress::{SuiteOptions, SuiteProgress},
     report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES},
     retention,
     route::RunnerRoute,
@@ -42,6 +44,21 @@ impl std::error::Error for SetupError {}
 /// Run every case against `subject`, with state roots under `work_dir`,
 /// which must be empty or absent.
 pub async fn run_suite<S>(subject: &S, work_dir: &Path) -> Result<SuiteReport, SetupError>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    run_suite_with(subject, work_dir, SuiteOptions::new()).await
+}
+
+/// [`run_suite`] with `options`, for example a progress callback that hears
+/// about each case as it starts and ends. With [`SuiteOptions::new`] it is
+/// exactly [`run_suite`].
+pub async fn run_suite_with<S>(
+    subject: &S,
+    work_dir: &Path,
+    mut options: SuiteOptions,
+) -> Result<SuiteReport, SetupError>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
@@ -78,7 +95,13 @@ where
 
     let mut crashes: BTreeMap<&'static str, Result<CrashObservation, String>> = BTreeMap::new();
     let mut cases = Vec::with_capacity(CASES.len());
-    for spec in CASES {
+    for (index, spec) in CASES.iter().enumerate() {
+        options.report(|| SuiteProgress::CaseStarted {
+            case: spec.name,
+            index,
+            total: CASES.len(),
+        });
+        let started = Instant::now();
         let outcome = match gate(spec, &declared) {
             Some(outcome) => outcome,
             None => {
@@ -198,6 +221,11 @@ where
                 }
             }
         };
+        options.report(|| SuiteProgress::CaseFinished {
+            case: spec.name,
+            outcome: outcome.clone(),
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        });
         cases.push(CaseReport {
             case: spec.name,
             requires: spec
