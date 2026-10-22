@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.6
+
+- Label dependency events as `<module_id>.dep.<crate>` and add dependency
+  filtering with a default WARN cap and per-crate level ceilings.
+- Recheck event levels and ceilings while writing so an outer `filter_fn`
+  cannot bypass `CK_LOG`.
+
 ## 0.3.5
 
 - On Windows, log files and newly created log directories are now owner-only:

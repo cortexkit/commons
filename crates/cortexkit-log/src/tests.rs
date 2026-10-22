@@ -159,7 +159,7 @@ fn config(logs_dir: PathBuf, module_id: &str) -> Config {
 }
 
 fn build_test_layer(config: Config, capture: &CaptureWriter) -> (LogLayer, Handle) {
-    build_layer(config, Box::new(capture.clone()), false).expect("build test layer")
+    build_layer(config, Box::new(capture.clone()), false, None).expect("build test layer")
 }
 
 fn dispatch(layer: LogLayer) -> tracing::Dispatch {
@@ -298,6 +298,7 @@ fn stderr_copy_repeats_each_segment_line_and_is_off_by_default() {
             config(root.path().to_path_buf(), "aft"),
             Box::new(capture.clone()),
             copy,
+            None,
         )
         .expect("layer");
         tracing::dispatcher::with_default(&dispatch(layer), || {

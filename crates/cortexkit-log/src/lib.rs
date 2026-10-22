@@ -1,8 +1,16 @@
 //! A synchronous `tracing` layer for CortexKit's module-owned fleet logs.
 //!
-//! One crate, one format, one file per module per day. See
-//! `subconscious/docs/specs/fleet-logging.md` (r2) for the contract every line
-//! here implements; the golden fixture beside it is what the tests pin to.
+//! One crate, one format, one file per module per day. Every line follows the
+//! stable fleet logging format pinned by the crate's golden fixtures.
+//!
+//! A [`Crates`] policy labels dependency events `<module_id>.dep.<crate>`, with
+//! underscores in Rust crate names written as hyphens. Dependencies default to
+//! WARN or the module's own level, whichever is lower; a matching `CK_LOG`
+//! directive can raise that level. Per-crate ceilings always win, including an
+//! OFF ceiling for dependencies whose verbose output may expose credentials or
+//! connection details. An outer `filter_fn` cannot bypass the layer's
+//! per-event level and ceiling checks, although its own predicate can suppress
+//! events; it is unnecessary for enforcing `CK_LOG`.
 
 mod filter;
 mod format;
@@ -15,6 +23,7 @@ pub use sink::LineSink;
 
 use std::backtrace::Backtrace;
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::io::{self, Write};
@@ -24,13 +33,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
-use filter::LevelFilter;
+use filter::LevelFilter as CkLogFilter;
 pub use format::{ParseError, ParsedLevel, ParsedLine};
 use redaction::fleet_redact;
 use segment::{SegmentDestination, SegmentNotice};
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
+pub use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
@@ -87,6 +97,67 @@ impl Retention {
 
 /// A complete-line redactor composed after the fleet credential redactor.
 pub type Redactor = dyn for<'line> Fn(&'line str) -> Cow<'line, str> + Send + Sync;
+
+/// Dependency crates whose log names and maximum levels are controlled by this
+/// logger.
+///
+/// `Crates::own` takes crate names in Rust spelling, for example
+/// `my_module_core`; events from those crates retain the logger-name behavior used
+/// without a crate policy. Other crates are labelled `<module_id>.dep.<crate>`, with
+/// underscores changed to hyphens. Unless a `CK_LOG` directive names a
+/// dependency, its level is capped at WARN or the module's own resolved level,
+/// whichever is lower. A ceiling is enforced after all `CK_LOG` directives;
+/// use it for transports whose debug output may contain credentials or
+/// connection secrets. The cap and ceilings are also checked while writing,
+/// so an outer `filter_fn` cannot bypass them, although its own predicate can
+/// still suppress events.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default)]
+pub struct Crates {
+    own: HashSet<String>,
+    ceilings: HashMap<String, Option<tracing::Level>>,
+}
+
+impl Crates {
+    /// Creates an empty crate policy.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds crate names that belong to this module rather than its dependencies.
+    ///
+    /// Events from these crates keep the logger-name behavior used without a
+    /// crate policy.
+    pub fn own<I, S>(mut self, crate_names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.own.extend(crate_names.into_iter().map(Into::into));
+        self
+    }
+
+    /// Sets the maximum level for one dependency crate.
+    ///
+    /// This limit is applied after `CK_LOG`, so no directive can raise the
+    /// dependency above it. `crate_name` uses Rust crate-identifier spelling,
+    /// such as `transport_layer`; underscores become hyphens in the logger
+    /// label. An OFF ceiling drops the dependency's events. This is useful when
+    /// verbose transport logs can contain credentials or connection secrets.
+    pub fn ceiling(mut self, crate_name: impl Into<String>, level: LevelFilter) -> Self {
+        let level = match level.to_string().to_ascii_lowercase().as_str() {
+            "off" => None,
+            "error" => Some(tracing::Level::ERROR),
+            "warn" => Some(tracing::Level::WARN),
+            "info" => Some(tracing::Level::INFO),
+            "debug" => Some(tracing::Level::DEBUG),
+            "trace" => Some(tracing::Level::TRACE),
+            _ => unreachable!("tracing level filters have a fixed set of levels"),
+        };
+        self.ceilings.insert(crate_name.into(), level);
+        self
+    }
+}
 
 /// Logger configuration for one process.
 pub struct Config {
@@ -297,7 +368,16 @@ impl std::error::Error for InitError {}
 
 /// Installs the fleet logger as the process-global `tracing` subscriber.
 pub fn init(config: Config) -> Result<Handle, InitError> {
-    let (layer, handle) = build_layer(config, Box::new(io::stderr()), false)?;
+    init_inner(config, None)
+}
+
+/// Installs the fleet logger with dependency crate labels and level controls.
+pub fn init_with_crates(config: Config, crates: Crates) -> Result<Handle, InitError> {
+    init_inner(config, Some(crates))
+}
+
+fn init_inner(config: Config, crates: Option<Crates>) -> Result<Handle, InitError> {
+    let (layer, handle) = build_layer(config, Box::new(io::stderr()), false, crates)?;
     let panic_inner = Arc::clone(&handle.inner);
     let subscriber = Registry::default().with(layer);
     tracing::subscriber::set_global_default(subscriber)
@@ -312,7 +392,7 @@ pub fn init(config: Config) -> Result<Handle, InitError> {
 /// global subscriber and no panic hook ([`Handle::install_panic_hook`] does
 /// that), and [`installed`] does not return its handle.
 pub fn layer(config: Config) -> Result<(LogLayer, Handle), InitError> {
-    build_layer(config, Box::new(io::stderr()), false)
+    build_layer(config, Box::new(io::stderr()), false, None)
 }
 
 /// [`layer`] that also writes every rendered line to stderr after it reaches
@@ -322,13 +402,19 @@ pub fn layer(config: Config) -> Result<(LogLayer, Handle), InitError> {
 /// separately, so every line would be stored twice. When the segment directory
 /// cannot be opened, lines already go to stderr and are not doubled.
 pub fn layer_with_stderr_copy(config: Config) -> Result<(LogLayer, Handle), InitError> {
-    build_layer(config, Box::new(io::stderr()), true)
+    build_layer(config, Box::new(io::stderr()), true, None)
 }
 
 /// [`init`] with [`Config::from_env`]: the whole setup for a supervised module.
 #[cfg(feature = "store-paths")]
 pub fn init_from_env() -> Result<Handle, InitError> {
     init(Config::from_env()?)
+}
+
+/// [`init_from_env`] with dependency crate labels and level controls.
+#[cfg(feature = "store-paths")]
+pub fn init_from_env_with_crates(crates: Crates) -> Result<Handle, InitError> {
+    init_with_crates(Config::from_env()?, crates)
 }
 
 /// Creates a span carrying canonical session lineage for nested events. Every
@@ -505,19 +591,89 @@ impl LoggerInner {
 /// for a caller that installs its own subscriber.
 pub struct LogLayer {
     inner: Arc<LoggerInner>,
-    filter: LevelFilter,
+    filter: CkLogFilter,
+    crates: Option<Crates>,
+}
+
+impl LogLayer {
+    /// Adds dependency crate labels and level controls to an existing layer.
+    ///
+    /// This is available for layers created by either [`layer`] or
+    /// [`layer_with_stderr_copy`].
+    pub fn with_crates(mut self, crates: Crates) -> Self {
+        self.crates = Some(crates);
+        self
+    }
+
+    fn event_path<'a>(&self, metadata: &'a Metadata<'_>) -> format::LoggerPath<'a> {
+        let Some(crates) = &self.crates else {
+            return format::LoggerPath::from_target(&self.inner.module_id, metadata.target());
+        };
+
+        let module_path = metadata.module_path().unwrap_or(metadata.target());
+        let crate_name = module_path.split("::").next().unwrap_or(module_path);
+        if crates.own.contains(crate_name) {
+            return format::LoggerPath::from_target(&self.inner.module_id, metadata.target());
+        }
+
+        format::LoggerPath::dependency(crate_name)
+    }
+
+    fn metadata_enabled(&self, metadata: &Metadata<'_>) -> bool {
+        if metadata.is_span() {
+            return true;
+        }
+        let path = self.event_path(metadata);
+        self.event_enabled(metadata, path)
+    }
+
+    fn event_enabled(&self, metadata: &Metadata<'_>, path: format::LoggerPath<'_>) -> bool {
+        match path.dependency_name() {
+            Some(crate_name) => self.filter.dependency_enabled_path(
+                &self.inner.module_id,
+                path,
+                metadata.level(),
+                self.crates
+                    .as_ref()
+                    .and_then(|crates| crates.ceilings.get(crate_name).copied()),
+            ),
+            None => self
+                .filter
+                .enabled_path(&self.inner.module_id, path, metadata.level()),
+        }
+    }
 }
 
 impl<S> Layer<S> for LogLayer
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    fn enabled(&self, metadata: &Metadata<'_>, _context: Context<'_, S>) -> bool {
-        if metadata.is_span() {
-            return true;
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> tracing::subscriber::Interest {
+        if !metadata.is_event() || self.metadata_enabled(metadata) {
+            tracing::subscriber::Interest::always()
+        } else {
+            tracing::subscriber::Interest::never()
         }
-        let logger = format::logger_name(&self.inner.module_id, metadata.target());
-        self.filter.enabled(&logger, metadata.level())
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        let own_crates_possible = self
+            .crates
+            .as_ref()
+            .is_none_or(|crates| !crates.own.is_empty());
+        let level = self.filter.max_level_hint(
+            &self.inner.module_id,
+            own_crates_possible,
+            self.crates.as_ref().map(|crates| &crates.ceilings),
+        );
+        Some(level.map_or(LevelFilter::OFF, LevelFilter::from_level))
+    }
+
+    fn enabled(&self, metadata: &Metadata<'_>, _context: Context<'_, S>) -> bool {
+        self.metadata_enabled(metadata)
     }
 
     fn on_new_span(&self, attributes: &Attributes<'_>, id: &Id, context: Context<'_, S>) {
@@ -541,6 +697,13 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, context: Context<'_, S>) {
+        let metadata = event.metadata();
+        let path = self.event_path(metadata);
+        if !self.event_enabled(metadata, path) {
+            return;
+        }
+        let logger = path.logger_name(&self.inner.module_id);
+
         let mut visitor = EventVisitor::default();
         event.record(&mut visitor);
         // Every field on every span enclosing the event is bound context,
@@ -560,9 +723,8 @@ where
                 }
             }
         }
-        let logger = format::logger_name(&self.inner.module_id, event.metadata().target());
         self.inner.emit(
-            event.metadata().level(),
+            metadata.level(),
             &logger,
             &scoped,
             visitor.message.as_deref().unwrap_or(""),
@@ -674,6 +836,7 @@ fn build_layer(
     config: Config,
     stderr: Box<dyn Write + Send>,
     stderr_copy: bool,
+    crates: Option<Crates>,
 ) -> Result<(LogLayer, Handle), InitError> {
     let clock = config.clock.unwrap_or_else(|| Arc::new(SystemTime::now));
     let now = clock();
@@ -722,26 +885,27 @@ fn build_layer(
     let layer = LogLayer {
         inner: Arc::clone(&inner),
         filter,
+        crates,
     };
     Ok((layer, Handle { inner }))
 }
 
-fn make_filter(spec_override: Option<String>, inner: &LoggerInner) -> LevelFilter {
+fn make_filter(spec_override: Option<String>, inner: &LoggerInner) -> CkLogFilter {
     let spec = spec_override.or_else(|| env::var("CK_LOG").ok());
     let spec = spec
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
     match spec {
-        Some(spec) => LevelFilter::parse(spec).unwrap_or_else(|error| {
+        Some(spec) => CkLogFilter::parse(spec).unwrap_or_else(|error| {
             if !FILTER_FAILURE_REPORTED.swap(true, Ordering::Relaxed) {
                 inner.report(&format!(
                     "cortexkit-log: invalid CK_LOG value {spec:?}; using info: {error}\n"
                 ));
             }
-            LevelFilter::info()
+            CkLogFilter::info()
         }),
-        None => LevelFilter::info(),
+        None => CkLogFilter::info(),
     }
 }
 

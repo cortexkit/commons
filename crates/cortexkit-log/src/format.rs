@@ -6,10 +6,8 @@ use tracing::Level;
 
 /// Renders one r2 fleet log line: `<ts> <LEVEL> <logger>: [<bound>] <message> <fields>`.
 ///
-/// `logger` is the full dotted name (`engram`, `engram.gc.walk`), already
-/// validated by [`logger_name`]. `bound` renders inside the bracket in the order
-/// given; an empty slice renders NO bracket, because "nothing bound" and "an
-/// empty context" are different facts and only the first is ever true.
+/// `logger` is a full dotted name such as `module.component.action`. Bound fields render
+/// in order inside a bracket; an empty `bound` slice renders no bracket.
 pub(crate) fn render_line(
     at: SystemTime,
     level: &Level,
@@ -47,19 +45,110 @@ pub(crate) fn render_line(
     line
 }
 
-/// Joins a module id and an optional component into the logger name, refusing
-/// a component that is not in the segment grammar. A `tracing` target that is
-/// a Rust module path (`synapse::engine::decode`) is NOT a component: it would
-/// make logger names an accident of code layout, so it maps to the bare module
-/// id. A target equal to the module id is the same case spelled differently.
-pub(crate) fn logger_name(module_id: &str, target: &str) -> String {
-    if target.is_empty() || target == module_id || target.contains("::") {
-        return module_id.to_owned();
+#[derive(Clone, Copy)]
+pub(crate) enum LoggerPath<'a> {
+    Bare,
+    Component(&'a str),
+    Dependency(&'a str),
+}
+
+impl<'a> LoggerPath<'a> {
+    pub(crate) fn from_target(module_id: &str, target: &'a str) -> Self {
+        if target.is_empty() || target == module_id || target.contains("::") {
+            return Self::Bare;
+        }
+        if target.split('.').all(is_segment) {
+            Self::Component(target)
+        } else {
+            Self::Bare
+        }
     }
-    if !target.split('.').all(is_segment) {
-        return module_id.to_owned();
+
+    pub(crate) fn dependency(crate_name: &'a str) -> Self {
+        Self::Dependency(crate_name)
     }
-    format!("{module_id}.{target}")
+
+    pub(crate) fn dependency_name(self) -> Option<&'a str> {
+        match self {
+            Self::Dependency(crate_name) => Some(crate_name),
+            Self::Bare | Self::Component(_) => None,
+        }
+    }
+
+    pub(crate) fn logger_name(self, module_id: &str) -> String {
+        match self {
+            Self::Bare => module_id.to_owned(),
+            Self::Component(target) => format!("{module_id}.{target}"),
+            Self::Dependency(crate_name) if valid_crate_segment(crate_name) => {
+                let mut logger = String::with_capacity(module_id.len() + crate_name.len() + 5);
+                logger.push_str(module_id);
+                logger.push_str(".dep.");
+                for character in crate_name.chars() {
+                    logger.push(if character == '_' { '-' } else { character });
+                }
+                logger
+            }
+            Self::Dependency(_) => module_id.to_owned(),
+        }
+    }
+
+    pub(crate) fn matches_prefix(self, module_id: &str, prefix: &str) -> bool {
+        let mut directive = prefix.split('.');
+        for segment in module_id.split('.') {
+            if let Some(matches) = match_segment(&mut directive, segment) {
+                return matches;
+            }
+        }
+
+        match self {
+            Self::Bare => directive.next().is_none(),
+            Self::Component(target) => {
+                for segment in target.split('.') {
+                    if let Some(matches) = match_segment(&mut directive, segment) {
+                        return matches;
+                    }
+                }
+                directive.next().is_none()
+            }
+            Self::Dependency(crate_name) if valid_crate_segment(crate_name) => {
+                if let Some(matches) = match_segment(&mut directive, "dep") {
+                    return matches;
+                }
+                let Some(crate_segment) = directive.next() else {
+                    return true;
+                };
+                crate_segment_matches(crate_segment, crate_name) && directive.next().is_none()
+            }
+            Self::Dependency(_) => directive.next().is_none(),
+        }
+    }
+}
+
+fn match_segment<'a>(directive: &mut std::str::Split<'a, char>, segment: &str) -> Option<bool> {
+    match directive.next() {
+        None => Some(true),
+        Some(expected) if expected == segment => None,
+        Some(_) => Some(false),
+    }
+}
+
+fn crate_segment_matches(expected: &str, crate_name: &str) -> bool {
+    let mut actual = crate_name.chars();
+    expected.chars().all(|expected| {
+        actual.next().is_some_and(|actual| {
+            if actual == '_' {
+                expected == '-'
+            } else {
+                actual == expected
+            }
+        })
+    }) && actual.next().is_none()
+}
+
+fn valid_crate_segment(crate_name: &str) -> bool {
+    let mut characters = crate_name.chars();
+    matches!(characters.next(), Some('a'..='z'))
+        && characters.all(|character| matches!(character, 'a'..='z' | '0'..='9' | '_'))
 }
 
 pub(crate) fn is_segment(segment: &str) -> bool {
