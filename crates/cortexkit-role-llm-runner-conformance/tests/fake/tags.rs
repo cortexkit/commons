@@ -56,6 +56,18 @@ pub fn kinds(sess: &Sess, m: &Msg, defects: &Defects) -> Vec<(String, PartKind)>
             .enumerate()
             .map(|(index, part)| {
                 let kind = match part["type"].as_str().unwrap_or_default() {
+                    // An embedded layout stores a call's result in the call's
+                    // own tool part: the part then counts as the result.
+                    "tool_call"
+                        if part.get("result").is_some()
+                            && !defects.tags_embedded_result_unnumbered =>
+                    {
+                        if part["result"].get(IMAGE_RESULT).is_some() {
+                            PartKind::ToolResultImageOnly
+                        } else {
+                            PartKind::ToolResultText
+                        }
+                    }
                     "tool_call" => PartKind::ToolCall,
                     "reasoning" if defects.tags_count_reasoning => PartKind::AssistantText,
                     "reasoning" => PartKind::Reasoning,
@@ -74,6 +86,7 @@ pub fn kinds(sess: &Sess, m: &Msg, defects: &Defects) -> Vec<(String, PartKind)>
     }
     let kind = match role {
         "system" => PartKind::TurnSystem,
+        "tool" if defects.tags_tool_result_entry_unnumbered => PartKind::ToolCall,
         "tool" if m.body["content"].get(IMAGE_RESULT).is_some() => PartKind::ToolResultImageOnly,
         "tool" => PartKind::ToolResultText,
         _ if m.body["text"].as_str().is_some_and(str::is_empty) => PartKind::EmptyText,
@@ -320,6 +333,9 @@ pub fn rendered_texts(sess: &Sess, defects: &Defects, honour_checkpoint: bool) -
                     let part = &parts[part.parse::<usize>().unwrap_or_default()];
                     match kind {
                         PartKind::ToolCall => continue,
+                        PartKind::ToolResultText | PartKind::ToolResultImageOnly => {
+                            part["result"].to_string()
+                        }
                         PartKind::Reasoning => part["text"].as_str().unwrap_or_default().to_owned(),
                         _ => exposed(sess, m, part["text"].as_str().unwrap_or_default(), defects),
                     }

@@ -259,6 +259,13 @@ pub struct Defects {
     pub tags_renumber_without_new_lineage: bool,
     /// Reasoning parts are counted and numbered like the model's text.
     pub tags_count_reasoning: bool,
+    /// With results embedded in the requesting entry's tool part, that tool
+    /// part is left unnumbered as if it held only the call, though it holds
+    /// the call's result.
+    pub tags_embedded_result_unnumbered: bool,
+    /// A tool-result entry of its own (message-array layout) is left
+    /// unnumbered, as if it held only a tool call.
+    pub tags_tool_result_entry_unnumbered: bool,
     /// A session whose plan renders no tags is numbered all the same.
     pub tags_numbered_without_render_tags: bool,
     /// The compaction provider's Setup checkpoint is ignored: numbering
@@ -3865,6 +3872,9 @@ impl RunnerRoute for FakeRoute {
 pub struct FakeSubject {
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
+    /// The tool provider cannot answer an image-only result, so a scripted
+    /// call that would carry one carries its default text result instead.
+    pub no_image_results: bool,
     pub standalone_in_process: bool,
     /// The first `late_seal_reads` `run.result` reads of an ended run answer
     /// `active`, as if the runner reported the end late.
@@ -3952,6 +3962,7 @@ impl FakeSubject {
         Self {
             descriptor_case: None,
             descriptor_fixtures: false,
+            no_image_results: false,
             standalone_in_process: false,
             late_seal_reads: 0,
             retention_defect: RetentionDefect::None,
@@ -4387,7 +4398,7 @@ impl LlmRunnerSubject for FakeSubject {
     }
 
     fn image_tool_result(&self, marker: &str) -> Option<Value> {
-        Some(tags::image_result(marker))
+        (!self.no_image_results).then(|| tags::image_result(marker))
     }
 
     async fn fork_session(

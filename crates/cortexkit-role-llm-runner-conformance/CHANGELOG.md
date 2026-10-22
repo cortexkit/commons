@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.9.1
+
+`media_descriptors_frame_budget` and `media_descriptors_stable_across_pages`
+now fit runners whose module tool traffic crosses the subconscious daemon.
+The daemon never delivers a module-to-client frame over 4,194,304 bytes
+(header included), so a scripted tool provider could not return either case's
+result and the run never ended; some client SDKs also refuse to send a
+request of that size. The rules both cases check are unchanged.
+
+- `media_descriptors_frame_budget`: the image result is 2,400,000 decoded
+  bytes (3,200,000 base64) instead of 3,200,000. The single 4,194,304-byte
+  `oversize` argument is now two sibling calls in the same step, each with a
+  2,200,000-byte `oversize` argument: no one request exceeds the frame, and
+  the assistant message holding both is still over 4 MiB. The case checks
+  that both calls are described as `args_ref`s in that one message, that an
+  inline read of it is still refused `reply_too_large`, and that the
+  mixed-size fallback still describes parts `[1, 3]`.
+- `media_descriptors_stable_across_pages`: the multipart result is 14 parts
+  of 256,000 bytes (3,584,000) instead of 20 (5,120,000). Still over the
+  descriptor message budget (3,145,728), it now expects exactly 2 described
+  parts instead of 8, and still the same selection on every page.
+- A unit test checks that every payload a scripted tool provider receives or
+  returns in the media cases, as JSON plus an envelope allowance, stays under
+  the daemon's 4,194,304-byte frame.
+- `tags_on_every_read_entry` and `tags_count_only_parts_rendered_with_a_number`
+  now accept embedded layouts such as `opencode-aisdk`, where a call's result
+  is stored in the requesting entry's tool part, so that entry carries two
+  numbers: the model's text's and its tool result's (a tool result counts, a
+  tool call never does). Both cases used to require exactly one number per
+  entry. The number of a marker is now the number of the part holding it,
+  and the counted-parts case finds the part holding the call's result from
+  what the runner serves (the call's `result_ordinal` where `run_tool_calls`
+  is declared, otherwise the entry holding the result's marker), requires
+  that part to carry a number wherever it is, and still requires reasoning
+  and a part holding only a tool call to carry none.
+
 ## 0.9.0
 
 Breaking. Requires llm-runner 0.4.0 and compaction-provider 0.4.0, whose tag

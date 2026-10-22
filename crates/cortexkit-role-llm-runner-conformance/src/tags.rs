@@ -273,16 +273,61 @@ fn numbers_of(entry: &ReadMessage) -> Vec<u64> {
         .collect()
 }
 
-/// The one number the entry holding `marker` carries.
-fn number_of(messages: &[ReadMessage], marker: &str, what: &str) -> Result<u64, String> {
-    let entry = entry_holding(messages, marker)?;
-    match numbers_of(entry).as_slice() {
-        [one] => Ok(*one),
+/// The key of the one top-level part of `entry` holding `marker`, keyed as
+/// the entry's tag rows key it.
+fn part_holding<S: LlmRunnerSubject>(
+    subject: &S,
+    entry: &ReadMessage,
+    marker: &str,
+) -> Result<String, String> {
+    let holding: Vec<String> = subject
+        .read_parts(&entry.message)
+        .into_iter()
+        .filter(|(_, part)| part.to_string().contains(marker))
+        .map(|(key, _)| key)
+        .collect();
+    match holding.as_slice() {
+        [one] => Ok(one.clone()),
         other => Err(format!(
-            "{what} at ordinal {} carries the numbers {other:?}, expected exactly one",
+            "{} parts {other:?} of the entry at ordinal {} hold {marker}, expected exactly one",
+            other.len(),
             entry.ordinal
         )),
     }
+}
+
+/// The number part `part` of `entry` carries, if any.
+fn number_of_part(entry: &ReadMessage, part: &str) -> Result<Option<u64>, String> {
+    let row = entry
+        .tags
+        .iter()
+        .find(|row| row.part == part)
+        .ok_or_else(|| {
+            format!(
+                "the entry at ordinal {} has no tag row for its part {part:?}; its rows are {:?}",
+                entry.ordinal, entry.tags
+            )
+        })?;
+    Ok(row.tag.as_deref().and_then(tags::parse_tag))
+}
+
+/// The number of the part holding `marker`. An entry may carry several
+/// numbers: in an embedded layout one entry holds both the model's text and
+/// the tool part holding its call's result, and both count.
+fn number_of<S: LlmRunnerSubject>(
+    subject: &S,
+    messages: &[ReadMessage],
+    marker: &str,
+    what: &str,
+) -> Result<u64, String> {
+    let entry = entry_holding(messages, marker)?;
+    let part = part_holding(subject, entry, marker)?;
+    number_of_part(entry, &part)?.ok_or_else(|| {
+        format!(
+            "{what} (part {part:?} at ordinal {}) carries no number; the entry's rows are {:?}",
+            entry.ordinal, entry.tags
+        )
+    })
 }
 
 async fn resolve_raw<R: RunnerRoute>(route: &R, request: &ResolveRequest) -> Result<Reply, String> {
@@ -365,7 +410,7 @@ where
     let (_, messages) = read_all(&session.route).await?;
     let tagged = check_tags("the transcript", &messages)?;
     for marker in [&prompt, &answer_marker, &last_marker] {
-        number_of(&messages, marker, "a text part")?;
+        number_of(case.subject, &messages, marker, "a text part")?;
     }
     let (_, again) = read_all(&session.route).await?;
     let key = |messages: &[ReadMessage]| {
@@ -461,8 +506,8 @@ where
         let (_, messages) = read_all(&session.route).await?;
         if render {
             check_tags("a session whose plan renders tags", &messages)?;
-            number_of(&messages, &prompt, "the prompt")?;
-            number_of(&messages, &answer_marker, "the answer")?;
+            number_of(case.subject, &messages, &prompt, "the prompt")?;
+            number_of(case.subject, &messages, &answer_marker, "the answer")?;
             continue;
         }
         if let Some(entry) = messages.iter().find(|m| !numbers_of(m).is_empty()) {
@@ -907,7 +952,7 @@ where
     let mut seen = Vec::new();
     for marker in &held.markers {
         let entry = entry_holding(messages, marker)?;
-        let read = number_of(messages, marker, "a counted part")?;
+        let read = number_of(case.subject, messages, marker, "a counted part")?;
         let (index, text) = last
             .rendered
             .iter()
@@ -1008,8 +1053,61 @@ where
     Ok(())
 }
 
-/// Only parts rendered with a number are counted: the model's text and an
-/// image-only tool result count, reasoning and a tool call never do.
+/// The entry holding the result of the call with `arguments`, requested in
+/// `step`: the entry its `result_ordinal` names where the runner declares
+/// `run.tool_calls`, otherwise the one entry holding `result_marker`. Never
+/// assumed from a layout.
+async fn result_entry<'m, S>(
+    case: &Case<'_, S>,
+    route: &S::Route,
+    messages: &'m [ReadMessage],
+    step: &ReadMessage,
+    arguments: &Value,
+    result_marker: &str,
+) -> Result<&'m ReadMessage, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    if !case.declared.contains(&Capability::RunToolCalls) {
+        return entry_holding(messages, result_marker)
+            .map_err(|e| format!("locating the tool call's result by its marker: {e}"));
+    }
+    let run_id = &step
+        .run
+        .as_ref()
+        .ok_or_else(|| format!("the step at ordinal {} names no run", step.ordinal))?
+        .run_id;
+    let calls = crate::tool_calls::list(route, run_id, 50).await?;
+    let listed = calls
+        .iter()
+        .find(|listed| listed.args == *arguments)
+        .ok_or_else(|| format!("run.tool_calls of {run_id} does not list the step's call"))?;
+    let ordinal = listed.result_ordinal.ok_or_else(|| {
+        format!("run.tool_calls of {run_id} lists the finished call with no result_ordinal")
+    })?;
+    let entry = messages
+        .iter()
+        .find(|message| message.ordinal == ordinal)
+        .ok_or_else(|| format!("no read entry has the call's result_ordinal {ordinal}"))?;
+    if !entry.message.to_string().contains(result_marker) {
+        return Err(format!(
+            "the entry at the call's result_ordinal {ordinal} does not hold its result \
+             {result_marker}"
+        ));
+    }
+    Ok(entry)
+}
+
+/// Only parts rendered with a number are counted: the model's text, the part
+/// holding a tool call's result (an image-only result included) count;
+/// reasoning and a part holding only a tool call never do. Where the result
+/// is stored is the runner's layout: a message-array layout stores it in an
+/// entry of its own, an embedded layout in the requesting entry's tool part,
+/// which then holds both the call and its numbered result. The case finds it
+/// from what the runner serves: the call's `result_ordinal` where
+/// `run.tool_calls` is declared, otherwise the entry holding the result's
+/// marker, and within that entry the part holding the marker.
 async fn counted_parts<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
@@ -1025,6 +1123,13 @@ where
         call.result = result.clone();
     }
     let prompt = case.mint.next("counted-prompt");
+    let arguments = call.arguments.clone();
+    let arguments_marker = arguments["marker"].as_str().unwrap_or_default().to_owned();
+    let result_marker = if image.is_some() {
+        image_marker.clone()
+    } else {
+        crate::drive::result_marker(&call)
+    };
     let session = session_with(
         case,
         "tags-counted",
@@ -1042,16 +1147,54 @@ where
     let (_, messages) = read_all(&session.route).await?;
     check_tags("the transcript", &messages)?;
     let entry = entry_holding(&messages, &answer_marker)?;
-    let numbered = numbers_of(entry);
-    if numbered.len() != 1 || entry.tags.len() < 3 {
-        return Err(format!(
-            "the step holding reasoning, text and a tool call reads rows {:?}: only its text \
-             counts, reasoning and the tool call carry no number",
-            entry.tags
-        ));
-    }
     if !entry.message.to_string().contains(&reasoning) {
         return Err("the step's reasoning is not in its entry".into());
+    }
+    let text_part = part_holding(case.subject, entry, &answer_marker)?;
+    let reasoning_part = part_holding(case.subject, entry, &reasoning)?;
+    let call_part = part_holding(case.subject, entry, &arguments_marker)?;
+    if text_part == reasoning_part || text_part == call_part {
+        return Err(format!(
+            "the step's text shares part {text_part:?} with its reasoning or its tool call: \
+             they are separate parts, so only the text can carry its number"
+        ));
+    }
+    let result_entry = result_entry(
+        case,
+        &session.route,
+        &messages,
+        entry,
+        &arguments,
+        &result_marker,
+    )
+    .await?;
+    let result_part = part_holding(case.subject, result_entry, &result_marker)?;
+    let result_number = number_of_part(result_entry, &result_part)?;
+    if result_number.is_none() {
+        return Err(format!(
+            "part {result_part:?} of the entry at ordinal {} holds the tool call's result and \
+             carries no number; its rows are {:?}: a tool result counts, wherever the runner \
+             stores it (an embedded layout stores it in the requesting entry's tool part)",
+            result_entry.ordinal, result_entry.tags
+        ));
+    }
+    // Every part of the step entry carries no number except its text and,
+    // in an embedded layout, the tool part holding the call's result.
+    let mut counted = vec![text_part.as_str()];
+    if result_entry.ordinal == entry.ordinal {
+        counted.push(result_part.as_str());
+    }
+    let wrongly_numbered = entry
+        .tags
+        .iter()
+        .any(|row| row.tag.is_some() != counted.contains(&row.part.as_str()));
+    if wrongly_numbered || number_of_part(entry, &reasoning_part)?.is_some() {
+        return Err(format!(
+            "the step holding reasoning, text and a tool call reads rows {:?}: only its text \
+             counts, and the part holding its call's result ({result_part:?} at ordinal {}); \
+             reasoning and a part holding only a tool call carry no number",
+            entry.tags, result_entry.ordinal
+        ));
     }
     let Some(_) = image else {
         return Ok(Ending::PassedWithInapplicableRule(
@@ -1060,7 +1203,12 @@ where
                 .into(),
         ));
     };
-    let number = number_of(&messages, &image_marker, "the image-only tool result")?;
+    let number = number_of(
+        case.subject,
+        &messages,
+        &image_marker,
+        "the image-only tool result",
+    )?;
     if case.declared.contains(&Capability::RenderedModelInput) {
         let requests = case
             .subject
@@ -1127,7 +1275,7 @@ where
     wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
     let (_, messages) = read_all(&session.route).await?;
     for (marker, expected) in [(&prompt, CHECKPOINT + 1), (&answer_marker, CHECKPOINT + 2)] {
-        let number = number_of(&messages, marker, "a counted part")?;
+        let number = number_of(case.subject, &messages, marker, "a counted part")?;
         if number != expected {
             return Err(format!(
                 "the part holding {marker} is numbered {number}, not {expected}: with a Setup \

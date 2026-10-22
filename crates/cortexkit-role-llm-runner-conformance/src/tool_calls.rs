@@ -55,7 +55,7 @@ async fn page<R: RunnerRoute>(
 /// Every call of run `run_id`: pages of at most `limit` calls, each request
 /// passing the previous page's `next` back as `after`, until a page has no
 /// `next`.
-async fn list<R: RunnerRoute>(
+pub(crate) async fn list<R: RunnerRoute>(
     route: &R,
     run_id: &str,
     limit: u64,

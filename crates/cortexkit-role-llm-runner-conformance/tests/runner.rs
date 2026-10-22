@@ -2164,6 +2164,122 @@ async fn a_tagging_runner_passes_the_tags_cases() {
     }
 }
 
+/// The two cases that read which parts carry a number, each of which must
+/// accept both layouts.
+const PART_COUNTING_CASES: [&str; 2] = [
+    "tags_on_every_read_entry",
+    "tags_count_only_parts_rendered_with_a_number",
+];
+
+/// A tagging fake in an embedded layout, as OpenCode's: a call's result is
+/// stored in the requesting entry's tool part, so that entry carries two
+/// numbers, its text's and its tool part's. `tool_calls` also declares
+/// `run_tool_calls`, so the case locates the result through `result_ordinal`
+/// rather than the result's marker.
+fn embedded_tags_runner(defects: Defects, tool_calls: bool) -> FakeSubject {
+    let mut subject = declaring(
+        Capability::Tags,
+        Defects {
+            run_tool_calls_embedded_results: true,
+            ..defects
+        },
+    );
+    if tool_calls {
+        subject.capabilities.insert(Capability::RunToolCalls);
+    }
+    subject
+}
+
+#[tokio::test]
+async fn an_embedded_layout_runner_passes_the_part_counting_cases() {
+    for tool_calls in [false, true] {
+        let report = run(&embedded_tags_runner(Defects::default(), tool_calls)).await;
+        for name in PART_COUNTING_CASES {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} (run_tool_calls declared: {tool_calls})\n{}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_message_array_runner_declaring_run_tool_calls_passes_the_part_counting_cases() {
+    let mut subject = declaring(Capability::Tags, Defects::default());
+    subject.capabilities.insert(Capability::RunToolCalls);
+    let report = run(&subject).await;
+    for name in PART_COUNTING_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_embedded_runner_leaving_its_result_part_unnumbered_fails_by_name() {
+    for tool_calls in [false, true] {
+        let defects = Defects {
+            tags_embedded_result_unnumbered: true,
+            ..Defects::default()
+        };
+        let report = run(&embedded_tags_runner(defects, tool_calls)).await;
+        let reason = failed(&report, "tags_count_only_parts_rendered_with_a_number");
+        assert!(
+            reason.contains("holds the tool call's result and carries no number"),
+            "{reason}"
+        );
+        assert_passed(&report, "tags_on_every_read_entry");
+    }
+}
+
+/// A message-array runner stores a call's text result in a tool-result
+/// entry of its own; leaving that entry unnumbered fails the counted-parts
+/// case by name, whether the case finds the entry through `result_ordinal`
+/// (`run_tool_calls` declared) or through the result's marker. The same
+/// runner without the defect passes, naming the image rule it could not
+/// check.
+#[tokio::test]
+async fn a_message_array_runner_leaving_its_result_entry_unnumbered_fails_by_name() {
+    for tool_calls in [false, true] {
+        for defective in [false, true] {
+            let mut subject = declaring(
+                Capability::Tags,
+                Defects {
+                    tags_tool_result_entry_unnumbered: defective,
+                    ..Defects::default()
+                },
+            );
+            subject.no_image_results = true;
+            if tool_calls {
+                subject.capabilities.insert(Capability::RunToolCalls);
+            }
+            let report = run(&subject).await;
+            let name = "tags_count_only_parts_rendered_with_a_number";
+            if defective {
+                let reason = failed(&report, name);
+                assert!(
+                    reason.contains("holds the tool call's result and carries no number"),
+                    "run_tool_calls declared: {tool_calls}: {reason}"
+                );
+            } else {
+                assert!(
+                    matches!(
+                        report.outcome(name),
+                        Some(CaseOutcome::PassedWithInapplicableRule { .. })
+                    ),
+                    "run_tool_calls declared: {tool_calls}: {:?}",
+                    report.outcome(name)
+                );
+            }
+        }
+    }
+}
+
 /// Each defect fails its named rule. Restarting numbering every run also
 /// breaks the lost-key case, whose setup spans runs; other tag cases pass.
 #[tokio::test]

@@ -16,6 +16,22 @@ use serde_json::{json, Value};
 
 type Check = Result<(), String>;
 
+/// Decoded size of the frame-budget case's image. Its base64 form
+/// (3,200,000 characters) still fits one daemon-delivered provider reply.
+const FRAME_IMAGE_BYTES: usize = 2_400_000;
+
+/// Size of the `oversize` argument of each of the frame-budget case's two
+/// sibling calls. Each call's request fits the daemon frame on its own, while
+/// the assistant message holding both calls is over the daemon's 4 MiB frame,
+/// so an inline read of that message must be refused.
+const FRAME_ARGUMENT_BYTES: usize = 2_200_000;
+
+/// Number and size of the equal text parts in the stable-across-pages case's
+/// result: 3,584,000 bytes, over the descriptor message budget yet within one
+/// daemon-delivered provider reply.
+const STABLE_PARTS: usize = 14;
+const STABLE_PART_BYTES: usize = 250 * 1024;
+
 const MIXED_FALLBACK_SIZES: &[usize] = &[
     128_000, 230_000, 160_000, 240_000, 180_000, 230_000, 180_000, 180_000, 180_000, 180_000,
     180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 180_000,
@@ -30,6 +46,45 @@ fn mixed_fallback_texts() -> Vec<String> {
             format!("{prefix}{}", "x".repeat(size - prefix.len()))
         })
         .collect()
+}
+
+/// What a media case hands the scripted tool provider, before the adapter
+/// shapes the results in its host's schema. The run and the frame guard test
+/// both read it, so the guard measures exactly what a case scripts.
+struct Fixture {
+    /// Decoded bytes of the image result.
+    image: Vec<u8>,
+    /// Texts of a multipart result that replaces the image result.
+    multipart: Option<Vec<String>>,
+    /// The `oversize` argument of each call in the image call's step whose
+    /// arguments are too large to stay inline in a descriptors read; the
+    /// first goes on the image call, each later one on a sibling call of its
+    /// own.
+    oversize: Vec<Value>,
+    /// Texts of the mixed-size fallback result scripted in the same step.
+    mixed: Option<Vec<String>>,
+}
+
+fn fixture(name: &str) -> Fixture {
+    let frame = name == "media_descriptors_frame_budget";
+    let mut image = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8ioAAAAASUVORK5CYII=").unwrap();
+    if frame {
+        image.resize(FRAME_IMAGE_BYTES, 0);
+    }
+    Fixture {
+        image,
+        multipart: (name == "media_descriptors_stable_across_pages")
+            .then(|| vec!["x".repeat(STABLE_PART_BYTES); STABLE_PARTS]),
+        // Two sibling calls in one step instead of one over-frame argument:
+        // each call's request to the tool provider fits the daemon frame,
+        // while the assistant message holding both does not.
+        oversize: if frame {
+            vec![json!("x".repeat(FRAME_ARGUMENT_BYTES)); 2]
+        } else {
+            vec![]
+        },
+        mixed: frame.then(mixed_fallback_texts),
+    }
 }
 
 async fn pages<S: LlmRunnerSubject>(
@@ -147,13 +202,10 @@ where
         )?;
         return Ok(Ending::Passed);
     }
-    let frame = name == "media_descriptors_frame_budget";
     let head = name == "media_descriptors_utf8_head";
     let marker = case.mint.next("descriptor");
-    let mut bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8ioAAAAASUVORK5CYII=").unwrap();
-    if frame {
-        bytes.resize(3_200_000, 0);
-    }
+    let fixture = fixture(name);
+    let bytes = fixture.image;
     let Some(image) =
         case.subject
             .media_tool_result(&bytes, name != "media_descriptors_image_bytes", name)
@@ -165,18 +217,24 @@ where
     let text = format!("{}🦀{}", "a".repeat(4095), "z".repeat(PART_INLINE_MAX));
     let mut tool = case.mint.call("descriptor-tool");
     tool.result = image;
-    if name == "media_descriptors_stable_across_pages" {
+    if let Some(texts) = &fixture.multipart {
         tool.result = case
             .subject
-            .multipart_tool_result(&vec!["x".repeat(250 * 1024); 20])
+            .multipart_tool_result(texts)
             .ok_or("the media adapter cannot supply multipart results")?;
     }
-    if frame {
-        tool.arguments["oversize"] = json!("x".repeat(4_194_304));
+    let mut oversize = fixture.oversize.into_iter();
+    if let Some(argument) = oversize.next() {
+        tool.arguments["oversize"] = argument;
     }
     let mut calls = vec![ScriptedPart::ToolCall(tool)];
-    if frame {
-        let Some(result) = case.subject.multipart_tool_result(&mixed_fallback_texts()) else {
+    for argument in oversize {
+        let mut sibling = case.mint.call("descriptor-sibling-tool");
+        sibling.arguments["oversize"] = argument;
+        calls.push(ScriptedPart::ToolCall(sibling));
+    }
+    if let Some(texts) = &fixture.mixed {
+        let Some(result) = case.subject.multipart_tool_result(texts) else {
             return Ok(Ending::Inapplicable(
                 "the adapter cannot supply a mixed-size multipart result".into(),
             ));
@@ -213,8 +271,10 @@ where
     match name {
         "media_descriptors_stable_across_pages" => {
             let reference_count = found.iter().filter(|r| r["type"] == "text_ref").count();
-            if reference_count != 8 {
-                return Err(format!("fixed message budget must describe exactly 8 tied parts, got {reference_count}"));
+            // 14 x 256,000 = 3,584,000 bytes against DESCRIPTOR_MESSAGE_MAX
+            // 3,145,728; each described part saves about 251,700 bytes, so 2.
+            if reference_count != 2 {
+                return Err(format!("fixed message budget must describe exactly 2 tied parts, got {reference_count}"));
             }
             let mut again = Vec::new();
             for original in &described {
@@ -240,8 +300,21 @@ where
             }
         }
         "media_descriptors_frame_budget" => {
-            if !found.iter().any(|r| r["type"] == "args_ref") {
-                return Err("over-frame arguments were not described".into());
+            let described_arguments = |refs: &[Value]| {
+                refs.iter()
+                    .filter(|r| {
+                        r["type"] == "args_ref"
+                            && r["byte_size"]
+                                .as_u64()
+                                .is_some_and(|size| size >= FRAME_ARGUMENT_BYTES as u64)
+                    })
+                    .filter_map(|r| r["sha256"].as_str())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+            };
+            let count = described_arguments(&found);
+            if count != 2 {
+                return Err(format!("each of the two sibling calls' oversize arguments must be described as an args_ref, got {count} distinct"));
             }
             let mut selected: Vec<usize> = found
                 .iter()
@@ -265,9 +338,9 @@ where
                 .find(|m| {
                     let mut refs_in_message = Vec::new();
                     refs(&m.message, &mut refs_in_message);
-                    refs_in_message.iter().any(|r| r["type"] == "args_ref")
+                    described_arguments(&refs_in_message) == 2
                 })
-                .ok_or("missing described argument message")?;
+                .ok_or("the two sibling calls of one step must be one assistant message whose descriptors hold both args_refs")?;
             let request = ReadRequest::range(huge.ordinal)
                 .with_media(MediaMode::Inline)
                 .with_max_bytes(1_048_576);
@@ -359,4 +432,83 @@ where
         _ => return Err(format!("unknown media case {name}")),
     }
     Ok(Ending::Passed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    /// The largest module-to-client frame the subconscious daemon delivers,
+    /// header included. A runner whose module tools cross the daemon never
+    /// receives a tool provider's reply larger than this (the run simply never
+    /// ends), and some client SDKs refuse to send a request of this size, so
+    /// every payload a scripted tool provider receives or returns in a media
+    /// case must stay below it.
+    const DAEMON_FRAME_MAX: usize = 4_194_304;
+
+    /// Room for what wraps a payload on the way to or from a tool provider:
+    /// the frame header, the request or reply envelope, ids and the host's
+    /// own tool-result fields, which differ from the reference schema below.
+    const ENVELOPE_ALLOWANCE: usize = 16 * 1024;
+
+    fn text_result(texts: &[String]) -> Value {
+        json!({"type":"tool_result","tool_use_id":"call","content":texts
+            .iter()
+            .map(|text| json!({"type":"text","text":text}))
+            .collect::<Vec<_>>()})
+    }
+
+    /// Every payload a scripted tool provider receives (a call's arguments)
+    /// or returns (a call's result) in the media case `name`, shaped in a
+    /// reference host schema: images as base64 content blocks, multipart
+    /// results as text blocks.
+    fn provider_payloads(name: &str) -> Vec<(String, Value)> {
+        let fixture = fixture(name);
+        let image = json!({"type":"image","source":{"type":"base64",
+            "media_type":"image/png","data":STANDARD.encode(&fixture.image)}});
+        let mut payloads = vec![(
+            "image result".to_owned(),
+            json!({"type":"tool_result","tool_use_id":"call","content":[image]}),
+        )];
+        if let Some(texts) = &fixture.multipart {
+            payloads.push(("multipart result".to_owned(), text_result(texts)));
+        }
+        if let Some(texts) = &fixture.mixed {
+            payloads.push(("mixed-size result".to_owned(), text_result(texts)));
+        }
+        for (i, oversize) in fixture.oversize.into_iter().enumerate() {
+            payloads.push((
+                format!("arguments of oversize call {i}"),
+                json!({"marker":"cf-call-0000000000-args","oversize":oversize}),
+            ));
+        }
+        payloads
+    }
+
+    #[test]
+    fn every_media_provider_payload_fits_a_daemon_frame() {
+        let names: Vec<_> = crate::CASES
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| name.starts_with("media_"))
+            .collect();
+        assert!(
+            names.contains(&"media_descriptors_frame_budget"),
+            "the media cases were not found in CASES: {names:?}"
+        );
+        let mut over = Vec::new();
+        for name in names {
+            for (what, payload) in provider_payloads(name) {
+                let size = serde_json::to_vec(&payload).unwrap().len() + ENVELOPE_ALLOWANCE;
+                if size >= DAEMON_FRAME_MAX {
+                    over.push(format!("{name}: {what} is {size} bytes with envelope"));
+                }
+            }
+        }
+        assert!(
+            over.is_empty(),
+            "provider payloads that cannot cross the daemon's {DAEMON_FRAME_MAX}-byte frame: {over:#?}"
+        );
+    }
 }
