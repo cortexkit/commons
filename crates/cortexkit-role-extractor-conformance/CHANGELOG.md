@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- `README.md` explains that the adapter behind `ExtractorRoute` opens its
+  route with `role_versions` naming `extractor/v1`; the conformance kit does
+  not open routes itself.
+
 ## 0.1.0
 
 Reply side:

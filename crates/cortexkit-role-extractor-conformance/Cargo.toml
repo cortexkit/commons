@@ -9,7 +9,7 @@
 # module's production build never compiles the suite.
 [package]
 name = "cortexkit-role-extractor-conformance"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -21,7 +21,7 @@ publish = true
 async-trait = "0.1"
 # `test-vectors` compiles in `provider-replies.json`: the Clairic replies
 # the stand-in replays.
-cortexkit-role-extractor = { version = "0.1.0", path = "../cortexkit-role-extractor", features = ["test-vectors"] }
+cortexkit-role-extractor = { version = "0.1.1", path = "../cortexkit-role-extractor", features = ["test-vectors"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 subc-protocol = "0.32"

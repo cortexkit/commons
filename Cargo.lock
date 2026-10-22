@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-model-batch"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "serde",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor-conformance"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "cortexkit-role-extractor",

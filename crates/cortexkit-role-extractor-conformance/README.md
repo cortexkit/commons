@@ -9,9 +9,11 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a module supplies
 
-- An `ExtractorRoute` adapter: send one `{method, params}` request over the
-  real route, with `params` inserted as the exact JSON text the suite gives,
-  and return the reply's exact text (or the `ERROR` body).
+- An `ExtractorRoute` adapter: open its route with `role_versions` naming
+  `extractor/v1` (`{"extractor": "v1"}`); the kit itself does not open
+  routes. Send one `{method, params}` request over the real route, with
+  `params` inserted as the exact JSON text the suite gives, and return the
+  reply's exact text (or the `ERROR` body).
 - An `ExtractorSubject`:
   - the route;
   - the models its catalog serves (`ServedModel`: the provider's model

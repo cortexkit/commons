@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- `README.md` explains that the adapter behind `ClassifierRoute` opens its
+  route with `role_versions` naming `classifier/v1`; the conformance kit does
+  not open routes itself.
+
 ## 0.4.0
 
 - Depends on `cortexkit-role-classifier` 0.4.0, which it re-exports as

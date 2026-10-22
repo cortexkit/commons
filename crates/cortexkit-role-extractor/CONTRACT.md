@@ -22,7 +22,7 @@ error vocabulary, provider status mapping, images, number text) are stated
 once, in `cortexkit-model-batch`'s
 [`RULES.md`](../cortexkit-model-batch/RULES.md), cited here as "RULES §n".
 They are pinned for this role as written there; this document states only
-what is this role's own.
+what is this role's own. Route roles and model discovery follow RULES §18.
 
 ## 1. Role identity
 
@@ -34,9 +34,11 @@ what is this role's own.
   makes one provider call per item, sending that item and every field of
   the batch, and returns the provider's answers untouched. It does no
   inference itself.
-- [pinned] A caller picks the module by **model id**, through the catalog
-  row's serving module. The module serves only rows whose catalog `kind` is
-  `extraction` (§6.8). A catalog id is as RULES §1 states it.
+- [pinned] A caller opens a route for `extractor/v1` as RULES §18
+  requires, then picks the module by **model id** using that section's
+  discovery procedure, not by capability alone. The module serves only rows
+  whose catalog `kind` is `extraction` (§6.8). A catalog id is as RULES §1
+  states it.
 - [pinned] Starting provider: Cloudflare Workers AI Clairic, catalog id
   `cloudflare-workers-ai/@cf/cloudflare/clairic`, called at `POST
   https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clairic`
@@ -353,7 +355,9 @@ say what is this role's own.
   `detail.kind`; a row that states no kind is `model_not_extractor` with
   `detail.model` only, never an invented kind. A model whose row is an
   extraction model but which `role.describe` does not list is
-  `model_unknown`: this module does not serve it.
+  `model_unknown`: this module does not serve it. A caller does not send such
+  a model to this module (RULES §18); when no module lists the model, the
+  caller refuses `model_unserved` before any call.
 
 ### 6.9 Spend guard
 

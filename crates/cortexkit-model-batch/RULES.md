@@ -274,7 +274,7 @@ Admission refusals:
 | `invalid_params` | malformed request or a limit exceeded | `field`, `limit?` | permanent |
 | `batch_id_reuse` | same key, different body | `field` | permanent |
 | `model_unknown` | model not in the catalog | `model` | permanent |
-| `model_not_classifier` | `classifier/v1`: the row is not a classifier | `model`, `kind` | permanent |
+| `model_not_classifier` | `classifier/v1`: the row is not a classifier | `model`, `kind?` | permanent |
 | `model_not_extractor` | `extractor/v1`: the row is not an extraction model, or states no kind | `model`, `kind?` | permanent |
 | `cost_exceeded` | estimate over `max_cost_usd` | `estimate_usd`, `max_cost_usd` | permanent |
 | `account_walled` | the module's own spend guard knows the account is at its limit | `resets_at_ms?` | transient |
@@ -283,6 +283,8 @@ Admission refusals:
 | `model_unavailable` | the call's first provider call met "no such model" | `model` | permanent |
 | `account_limit_exhausted` | the call's first provider call met Workers AI 3036 | `resets_at_ms?` | transient |
 | `account_not_entitled` | the call's first provider call met Workers AI 5035, 5016 or 3023 | — | permanent |
+| `model_unserved` | caller found no module that lists the model | `model` | permanent (caller-raised; not a module error) |
+| `model_ambiguous` | caller found more than one module that lists the model | `model`, `modules` (sorted module ids) | permanent (caller-raised; not a module error) |
 
 - [pinned] A batch-level code met on the call's first provider call comes
   after validation and the spend guard. The call sends no further item,
@@ -386,3 +388,39 @@ then checks it against the code:
   <https://www.rfc-editor.org/rfc/rfc8785>
 - RFC 2397, the `data:` URL scheme:
   <https://www.rfc-editor.org/rfc/rfc2397>
+
+## 18. Routes and discovery
+
+- [pinned] A module serves a model-batch role (`classifier/v1` or
+  `extractor/v1`) only on a management route whose `route.open` declares that
+  role in `role_versions` (`{"classifier": "v1"}` or
+  `{"extractor": "v1"}`). `role_versions` is the subc route field
+  (`subc_protocol::session::ROLE_VERSIONS_FIELD`). The daemon validates it
+  and forwards it unchanged on the module's `route.bind`.
+- [pinned] A module serving more than one role on its management surface
+  serves exactly one role per route: the role that route declared. A route
+  that declares no role keeps whatever role the module served there before
+  (Broca's `llm-runner/v1` routes are unchanged), and a model-batch role is
+  never served on it. On a route of one role, ops of another role are refused
+  `unknown_method`.
+- [pinned] A bind that declares two of the module's roles, or a version of a
+  role the module does not serve, is refused at bind, naming `role_versions`
+  in `detail.field`.
+- [pinned] A caller checks for the daemon's `route-role-versions/v1`
+  capability (`subc_protocol::scope::CAP_ROUTE_ROLE_VERSIONS_V1`) before
+  relying on forwarded route roles. The daemon advertises this capability in
+  `HELLO_ACK` and `server.describe` when it forwards `role_versions`. A daemon
+  without it drops the field silently. The caller also checks that `role` in
+  the `role.describe` answer is the role it declared.
+- [pinned] Which module serves a model is a fact about one install, not about
+  the model, so it is not in the catalog. From the daemon's `catalog.list`, a
+  caller lists the modules whose manifest `capabilities.provides` names the
+  role. It opens one route of that role to each, reads `role.describe`, and
+  picks the module whose `models` lists the model's catalog id. It may cache
+  model id to module until the daemon's module catalog changes.
+- [pinned] If no module lists the model, the caller refuses before any call
+  with `model_unserved` and `detail.model`.
+- [pinned] If more than one module lists the model, the caller refuses
+  `model_ambiguous` with `detail.model` and `detail.modules` (the module ids,
+  sorted). It never picks one, so an operator who installs a second provider
+  of the same model sees the ambiguity at once.

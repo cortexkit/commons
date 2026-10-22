@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- `CONTRACT.md` now directs callers to the shared rules for role-specific
+  management routes and model-id discovery. A caller selects the serving
+  module by checking which matching role's `role.describe` lists the model,
+  not from a catalog row's serving-module field.
+
 ## 0.4.0
 
 - Breaking: `request::check_catalog_row` takes the shared `CatalogRow`

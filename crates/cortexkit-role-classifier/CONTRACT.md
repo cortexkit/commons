@@ -17,7 +17,7 @@ vocabulary, provider status mapping, images, number text) are stated once,
 in `cortexkit-model-batch`'s
 [`RULES.md`](../cortexkit-model-batch/RULES.md), cited here as "RULES
 §n". They are pinned for this role as written there; this document states
-only what is this role's own.
+only what is this role's own. Route roles and model discovery follow RULES §18.
 
 ## 1. Role identity
 
@@ -31,8 +31,9 @@ only what is this role's own.
   one hosted classifier model for each item, and returns the provider's
   answers untouched. It does no inference itself. Local inference, when it
   exists, is another module under the same capability.
-- [pinned] A caller picks the module by **model id**, through the catalog
-  row's serving module, not by capability alone.
+- [pinned] A caller opens a route for `classifier/v1` as RULES §18
+  requires, then picks the module by **model id** using that section's
+  discovery procedure, not by capability alone.
 - [pinned] Starting providers: Cloudflare Workers AI `@cf/cloudflare/clef`
   (catalog ids `cloudflare-workers-ai/@cf/cloudflare/clef`,
   `cloudflare-workers-ai/@cf/cloudflare/clef-flash`) and TypeSafe

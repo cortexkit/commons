@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- `RULES.md` now pins role-specific management routes and the capability
+  check callers need before relying on them. Callers find which module serves
+  a catalog model id by checking each module's `role.describe`; if none or
+  more than one module lists the model, they refuse with permanent,
+  caller-raised `model_unserved` or `model_ambiguous` errors.
+
 ## 0.2.0
 
 Breaking: the cost estimate follows the billing measured on Cloudflare's
