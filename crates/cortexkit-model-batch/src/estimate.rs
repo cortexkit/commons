@@ -14,7 +14,11 @@
 use serde::Serialize;
 use serde_json::Number;
 
-pub use cortexkit_model_catalog::RateNanosPerMtok;
+/// A price in integer nanodollars per million tokens. It is the same type as
+/// the model catalog's rate (`cortexkit-model-catalog`'s `RateNanosPerMtok`,
+/// an `i64`), so a catalog price passes in as it is, without this crate
+/// depending on the catalog.
+pub type RateNanosPerMtok = i64;
 
 use crate::identity::{canonical_json, IdentityError};
 

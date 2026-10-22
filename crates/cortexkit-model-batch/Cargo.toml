@@ -24,7 +24,6 @@ test-vectors = []
 
 [dependencies]
 base64 = "0.22"
-cortexkit-model-catalog = { version = "0.2.0", path = "../cortexkit-model-catalog" }
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2"
 # `raw_value` keeps a provider's number text as written. Never enable

@@ -477,7 +477,6 @@ name = "cortexkit-model-batch"
 version = "0.1.0"
 dependencies = [
  "base64",
- "cortexkit-model-catalog",
  "serde",
  "serde_jcs",
  "serde_json",
