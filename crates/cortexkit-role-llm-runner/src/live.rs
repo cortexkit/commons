@@ -209,18 +209,34 @@ impl ToolFinished {
     }
 }
 
-/// `run_started`.
+/// `run_started`. On a runner declaring `run_cause`
+/// ([`crate::capabilities::RUN_CAUSE`]), `send_id` names the send that
+/// started the run: for a queued send, that send's own `send_id`, never an
+/// id the runner made for its queue; for an interrupt, the interrupting
+/// send, never the one it interrupted. It is left out only for a turn the
+/// host started with no send (a person typing in the host's own app on an
+/// adopted session), and is never an empty string or a guess. On a runner
+/// without the group an absent `send_id` says nothing about the cause.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RunStarted {
     pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_id: Option<String>,
 }
 
 impl RunStarted {
     pub fn new(run_id: impl Into<String>) -> Self {
         Self {
             run_id: run_id.into(),
+            send_id: None,
         }
+    }
+
+    /// Name the send that started the run.
+    pub fn with_send_id(mut self, send_id: impl Into<String>) -> Self {
+        self.send_id = Some(send_id.into());
+        self
     }
 }
 
@@ -464,6 +480,35 @@ mod tests {
             assert_eq!(
                 frame.live_event().map(|e| e.type_name()),
                 case["type"].as_str(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_started_names_its_cause_or_none() {
+        let file = vectors::load("live-events.json");
+        for case in vectors::cases(&file, "run_causes") {
+            let name = case["name"].as_str().unwrap();
+            let LiveEvent::RunStarted(started) =
+                LiveEvent::decode_strict(&case["event"]).unwrap_or_else(|e| panic!("{name}: {e}"))
+            else {
+                panic!("{name}: not a run_started event");
+            };
+            assert_eq!(
+                started.send_id.as_deref(),
+                case["send_id"].as_str(),
+                "{name}"
+            );
+            // A send id is never empty: absence is how "no send" is said.
+            assert_ne!(started.send_id.as_deref(), Some(""), "{name}");
+            let mut built = RunStarted::new(&started.run_id);
+            if let Some(send_id) = &started.send_id {
+                built = built.with_send_id(send_id);
+            }
+            assert_eq!(
+                serde_json::to_value(LiveEvent::RunStarted(built)).unwrap(),
+                case["event"],
                 "{name}"
             );
         }

@@ -153,7 +153,11 @@ from `session.baseline` has no admission reply to compare.
 | `client_message_id_on_display_rows_never_in_read` | `client_message_id`, `history_display`, `host_history`, `queue`, `transcript_reads` |
 | `client_message_id_resend_with_another_id_refused` | `client_message_id`, `queue` |
 | `live_message_and_tool_events_durable`, `live_run_events`, `live_attach_replays_the_current_step`, `live_seq_rises_across_lanes` | `live_events`, `streaming`, `queue`, `transcript_reads`; the attach and order cases need `hold_next_model_stream` |
+| `run_cause_queued_start_names_its_send`, `run_cause_send_started_runs_never_omit_send_id` | `run_cause`, `live_events`, `streaming`, `queue`, `transcript_reads` |
+| `run_cause_interrupt_names_the_new_send` | as the other `run_cause` cases; inapplicable without `interrupt` or `hold_next_model_step` |
+| `display_row_names_the_sender_never_in_read` | `history_display`, `host_history`, `delivery_order`, `queue`, `transcript_reads`, and a plan sender; inapplicable when `idle_start` is not a declared list mode |
 | `cache_ttl_entry_for_another_model_ignored`, `cache_ttl_configured_null_never_expires`, `cache_ttl_missed_model_change_falls_through_to_observed` | `compaction`, `queue`, `transcript_reads`, `run_ops`, and the hooks `switch_model`, `set_observed_cache_lifetime` and `advance_prompt_cache_clock`; inapplicable when the runner never declares `ttl_expired` for its own model's expired entry |
+| `ride_wait_provider_wait_honoured`, `ride_wait_slow_answer_reported`, `ride_wait_fast_answer_not_reported`, `ride_wait_above_cap_fails_setup` | `compaction`, `queue`, `transcript_reads`, `run_ops`, and the hooks `observed_ride_wait_max_ms`, `script_next_ride`, `switch_model`, `set_observed_cache_lifetime` and `advance_prompt_cache_clock`; inapplicable when the runner sends no `ride_wait_max_ms` in its Setup request or never declares `ttl_expired`, and the first three when its cap is below 4,000 ms |
 | `per_step_cost_scales_with_new_messages` | `queue`, `transcript_reads` or `run_ops`, and the seeding hook (opt-in) |
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
@@ -190,6 +194,9 @@ from `session.baseline` has no admission reply to compare.
 | `adopt_host_turn_is_a_run` | `adopt`, `transcript_reads`, `run_ops`; inapplicable unless the adapter can start a host turn |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer` |
 | `delivery_order_members_without_list_refused` | `delivery_order`, `queue`, `transcript_reads` |
+| `delivery_order_named_sender_queue_string_admitted` | `delivery_order`, `queue`, `transcript_reads` |
+| `delivery_order_ungranted_interrupt_refused` | `delivery_order`, `queue`, `transcript_reads`; inapplicable without `interrupt` |
+| `delivery_order_granted_interrupt_interrupts` | `delivery_order`, `queue`, `transcript_reads`, `run_ops`; inapplicable without `interrupt` or `hold_next_model_step` |
 | `delivery_order_first_possible_mode` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls` |
 | `delivery_order_declared_modes_respected` | `delivery_order`, `queue`, `transcript_reads`; inapplicable without live `delivery_order_modes`; all lists containing only undeclared modes are refused with `detail.delivery` and no writes, and lists with a listed mode are accepted |
 | `delivery_order_template_renders_as_system` | `delivery_order`, `queue`, `transcript_reads`; needs `steer` for fallback or a route that supports `turn_system`; inapplicable if neither is available |

@@ -23,7 +23,7 @@ type Check = Result<(), String>;
 
 /// Whether the live `role.describe` lists `run.status`, so the case may ask
 /// it.
-async fn serves_run_status<R: RunnerRoute>(route: &R) -> Result<bool, String> {
+pub(crate) async fn serves_run_status<R: RunnerRoute>(route: &R) -> Result<bool, String> {
     let describe: RoleDescribe = decode(
         "role.describe",
         expect_ok(
@@ -36,7 +36,7 @@ async fn serves_run_status<R: RunnerRoute>(route: &R) -> Result<bool, String> {
         .is_some_and(|major| major.serves(ops::RUN_STATUS)))
 }
 
-async fn status<R: RunnerRoute>(route: &R, run_id: &str) -> Result<RunStatus, String> {
+pub(crate) async fn status<R: RunnerRoute>(route: &R, run_id: &str) -> Result<RunStatus, String> {
     let params =
         serde_json::to_value(RunStatusRequest::new().with_run_id(run_id)).expect("serializes");
     decode(

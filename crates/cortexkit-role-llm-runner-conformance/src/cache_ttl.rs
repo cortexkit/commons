@@ -145,7 +145,7 @@ where
 /// The runner declares `ttl_expired` once its own model's configured
 /// lifetime has passed. `Ok(Err(reason))` when it does not, or when the
 /// adapter lacks a hook: the cases are then inapplicable.
-async fn control<S>(case: &Case<'_, S>) -> Result<Result<(), String>, String>
+pub(crate) async fn control<S>(case: &Case<'_, S>) -> Result<Result<(), String>, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,

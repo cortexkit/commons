@@ -1,5 +1,6 @@
 //! The live-event cases: typed events on `session.subscribe` (the
-//! `live_events` group, `cortexkit-role-llm-runner` CONTRACT §7.1).
+//! `live_events` group, `cortexkit-role-llm-runner` CONTRACT §7.1), and the
+//! `run_cause` cases, which read the `send_id` of `run_started`.
 //!
 //! The route collects a stream only until it goes quiet
 //! ([`RunnerRoute::subscribe`]), so the suite reads replays of idle sessions
@@ -7,6 +8,7 @@
 //! model answer mid-stream.
 
 use cortexkit_role_llm_runner::{
+    capabilities as groups,
     live::{LiveEvent, LiveSubscribeRequest, FIRST_SEQ},
     ops,
     send::SendReply,
@@ -16,9 +18,9 @@ use serde_json::{Map, Value};
 
 use crate::{
     cases::{Case, Ending, Session},
-    drive::{call, decode, expect_ok, read_all, send_params, wait_run_end, MAX_POLLS},
+    drive::{call, decode, expect_ok, head, read_all, send_params, wait_run_end, MAX_POLLS},
     route::SubscribeOutcome,
-    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
+    subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
     RunnerRoute, SCRIPTED_TOOL,
 };
 
@@ -34,6 +36,13 @@ where
         "live_run_events" => runs(case).await.map(|()| Ending::Passed),
         "live_attach_replays_the_current_step" => attach(case).await,
         "live_seq_rises_across_lanes" => seq(case).await,
+        "run_cause_queued_start_names_its_send" => {
+            queued_cause(case).await.map(|()| Ending::Passed)
+        }
+        "run_cause_send_started_runs_never_omit_send_id" => {
+            every_cause(case).await.map(|()| Ending::Passed)
+        }
+        "run_cause_interrupt_names_the_new_send" => interrupt_cause(case).await,
         other => Err(format!("unknown live-event case {other}")),
     }
 }
@@ -487,4 +496,203 @@ where
     outcome?;
     wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
     Ok(Ending::Passed)
+}
+
+/// Send `prompt` as the owner with a fresh `send_id` and `delivery`, and
+/// wait for the run it starts to end. Returns the `send_id` and the run.
+async fn send_until_end<S>(
+    case: &Case<'_, S>,
+    session: &Session<S::Route>,
+    first: bool,
+    prompt: &str,
+    delivery: Option<&str>,
+) -> Result<(String, String), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let send_id = case.mint.next("send");
+    let before = head(&session.route)
+        .await?
+        .last_run_state
+        .map(|last| last.run_id);
+    let params = send_params(
+        case.subject,
+        &session.name,
+        first,
+        prompt,
+        &send_id,
+        delivery,
+    );
+    let reply: SendReply = decode(
+        "session.send",
+        expect_ok(
+            "session.send",
+            call(&session.route, ops::SESSION_SEND, params).await?,
+        )?,
+    )?;
+    let end = wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        before.as_deref(),
+        &reply,
+    )
+    .await?;
+    Ok((send_id, end.run_id))
+}
+
+/// The `send_id` the one replayed `run_started` of `run_id` names.
+async fn cause_of<R: RunnerRoute>(route: &R, run_id: &str) -> Result<Option<String>, String> {
+    let started: Vec<Option<String>> = control(&stream(route, SubscribeFrom::Start).await?)
+        .into_iter()
+        .filter_map(|(_, event)| match event {
+            Some(LiveEvent::RunStarted(run)) if run.run_id == run_id => Some(run.send_id),
+            _ => None,
+        })
+        .collect();
+    match started.as_slice() {
+        [send_id] => Ok(send_id.clone()),
+        other => Err(format!(
+            "a replay from start carries {} run_started events for run {run_id}, not one",
+            other.len()
+        )),
+    }
+}
+
+/// A session whose model answers each of `turns` runs with one text part.
+async fn cause_session<S>(case: &Case<'_, S>, turns: usize) -> Result<Session<S::Route>, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let turns = (0..turns)
+        .map(|_| ScriptedTurn::new(vec![case.mint.text("cause-answer").0]))
+        .collect();
+    case.open("run-cause", Script { turns }).await
+}
+
+/// The run a `queue` send started on an idle session names that send's own
+/// `send_id` on `run_started`.
+async fn queued_cause<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let session = cause_session(case, 1).await?;
+    let prompt = case.mint.next("cause-prompt");
+    let (send_id, run_id) = send_until_end(case, &session, true, &prompt, None).await?;
+    match cause_of(&session.route, &run_id).await? {
+        Some(named) if named == send_id => Ok(()),
+        other => Err(format!(
+            "run {run_id}, which the queue send {send_id} started, has run_started naming \
+             send_id {other:?}: a run a queued send started names that send's own send_id, never \
+             an id the runner made for its queue"
+        )),
+    }
+}
+
+/// Every run of a session that only sends started (the admitting send and
+/// two later `queue` sends) has a `run_started` carrying a non-empty
+/// `send_id`.
+async fn every_cause<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let session = cause_session(case, 3).await?;
+    let mut runs = Vec::new();
+    for index in 0..3 {
+        let prompt = case.mint.next("cause-prompt");
+        runs.push(send_until_end(case, &session, index == 0, &prompt, None).await?);
+    }
+    for (send_id, run_id) in runs {
+        match cause_of(&session.route, &run_id).await? {
+            Some(named) if !named.is_empty() => {}
+            other => {
+                return Err(format!(
+                    "run {run_id}, which the send {send_id} started, has run_started with send_id \
+                     {other:?}: on a run_cause runner a run a send started never omits send_id, \
+                     and never sends it empty; only a turn the host started with no send has none"
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// While a run's model step is held, the owner's `interrupt` starts a run
+/// whose `run_started` names the interrupting send, not the send of the run
+/// it interrupted.
+async fn interrupt_cause<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    if !case.declared.contains(&Capability::Interrupt) {
+        return Ok(Ending::Inapplicable(
+            "the runner does not declare interrupt".into(),
+        ));
+    }
+    let session = cause_session(case, 3).await?;
+    send_until_end(case, &session, true, &case.mint.next("cause-prompt"), None).await?;
+    if let Err(e) = case.subject.hold_next_model_step(&session.name).await {
+        return Ok(Ending::Inapplicable(format!(
+            "the adapter cannot hold a model step, so there is no running turn to interrupt: {e}"
+        )));
+    }
+    let held_send = case.mint.next("send");
+    let params = send_params(
+        case.subject,
+        &session.name,
+        false,
+        &case.mint.next("cause-held"),
+        &held_send,
+        None,
+    );
+    expect_ok(
+        "the send whose model step is held",
+        call(&session.route, ops::SESSION_SEND, params).await?,
+    )?;
+    case.subject
+        .await_model_step(&session.name)
+        .await
+        .map_err(|e| format!("waiting for the held model step: {e}"))?;
+    let held_run = head(&session.route)
+        .await?
+        .last_run_state
+        .map(|last| last.run_id)
+        .ok_or("the held turn has no run state")?;
+    let interrupting = case.mint.next("send");
+    let params = send_params(
+        case.subject,
+        &session.name,
+        false,
+        &case.mint.next("cause-interrupt"),
+        &interrupting,
+        Some(groups::INTERRUPT),
+    );
+    let reply = call(&session.route, ops::SESSION_SEND, params).await;
+    // The interrupt aborts the held stream, so releasing it may find
+    // nothing left to release; the release only keeps a runner that
+    // waited from hanging.
+    let _ = case.subject.release_model_step(&session.name).await;
+    let reply: SendReply = decode("the interrupt", expect_ok("the interrupt", reply?)?)?;
+    let end = wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&held_run),
+        &reply,
+    )
+    .await?;
+    match cause_of(&session.route, &end.run_id).await? {
+        Some(named) if named == interrupting => Ok(Ending::Passed),
+        other => Err(format!(
+            "run {}, which the interrupt {interrupting} started, has run_started naming send_id \
+             {other:?} (the interrupted run {held_run} was started by {held_send}): it names the \
+             interrupting send, never the send of the run it interrupted",
+            end.run_id
+        )),
+    }
 }

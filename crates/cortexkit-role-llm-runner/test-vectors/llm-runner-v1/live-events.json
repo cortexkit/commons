@@ -67,6 +67,14 @@
       }
     },
     {
+      "name": "run started by a send, on a run_cause runner",
+      "event": {
+        "type": "run_started",
+        "run_id": "run_2",
+        "send_id": "send-app-42"
+      }
+    },
+    {
       "name": "run finished",
       "event": {
         "type": "run_finished",
@@ -263,6 +271,34 @@
         }
       },
       "field": "error_result_bytes"
+    }
+  ],
+  "run_causes": [
+    {
+      "name": "a run a queued send started names that send",
+      "event": {
+        "type": "run_started",
+        "run_id": "run_3",
+        "send_id": "send-core-wake-7"
+      },
+      "send_id": "send-core-wake-7"
+    },
+    {
+      "name": "a run an interrupt started names the interrupting send",
+      "event": {
+        "type": "run_started",
+        "run_id": "run_4",
+        "send_id": "send-app-interrupt-2"
+      },
+      "send_id": "send-app-interrupt-2"
+    },
+    {
+      "name": "a turn the host started on an adopted session names no send",
+      "event": {
+        "type": "run_started",
+        "run_id": "run_5"
+      },
+      "send_id": null
     }
   ]
 }

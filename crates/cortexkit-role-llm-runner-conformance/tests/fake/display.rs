@@ -94,7 +94,12 @@ pub(super) fn live_events(
     match kind {
         "send" if record["no_run"] != json!(true) => {
             if let Some(run_id) = record["run_id"].as_str().filter(|id| !id.is_empty()) {
-                out.push(event(LiveEvent::RunStarted(RunStarted::new(run_id))));
+                // A run a send started names that send; a host turn has none.
+                let mut started = RunStarted::new(run_id);
+                if let Some(cause) = record["cause"].as_str() {
+                    started = started.with_send_id(cause);
+                }
+                out.push(event(LiveEvent::RunStarted(started)));
             }
         }
         "intent" => {
@@ -262,13 +267,13 @@ impl Module {
         if row.role == "assistant" && !defects.display_drops_model {
             row = row.with_model(self.session_model(session));
         }
-        if let Some(id) = sess
-            .messages
-            .iter()
-            .find(|m| m.mid == entry.mid)
-            .and_then(|m| m.client_message_id.clone())
-        {
-            row = row.with_client_message_id(id);
+        if let Some(message) = sess.messages.iter().find(|m| m.mid == entry.mid) {
+            if let Some(id) = &message.client_message_id {
+                row = row.with_client_message_id(id);
+            }
+            if let Some(sender) = message.sender.as_ref().filter(|_| row.role == "user") {
+                row = row.with_sender(sender);
+            }
         }
         row
     }

@@ -51,7 +51,7 @@ use cortexkit_role_llm_runner_conformance::{
         retract::{RetractReply, RetractRequest},
         run::{FinalMessage, RunResult, RunResultRequest, RunState, RunUsage, StepUsage},
         send::{
-            delivered_as, delivery_unsupported_detail, Delivered, SendReply, SendRequest,
+            delivered_as, delivery_unsupported_detail, Delivered, Delivery, SendReply, SendRequest,
             CLIENT_MESSAGE_ID_FIELD, DELIVERY_FIELD,
         },
         structured_output::{SkippedSibling, StructuredOutputResult, SUBMIT_RESULT_TOOL},
@@ -81,6 +81,13 @@ pub const TOOL_MODULE: &str = "fake.tools";
 pub const SENDER_MODULE: &str = "fake.sender";
 /// How long the fake holds a run at the context ceiling before its bound.
 const CEILING_WAIT_MS: u64 = 300_000;
+/// The `ride_wait_max_ms` the fake's Setup requests carry: the longest it
+/// holds a step for a rewrite ride.
+pub const RIDE_WAIT_MAX_MS: u64 = 60_000;
+/// The fake's own deadline for a rewrite ride when Setup set none.
+const OWN_RIDE_DEADLINE_MS: u64 = 2_000;
+/// How far one `pause` moves the clock rewrite rides are timed by.
+const RIDE_TICK_MS: u64 = 50;
 pub const RETENTION_MAX: u64 = 4;
 const RETENTION_DELETE_MS: u64 = 100;
 // Self-tests neutralize this switch to prove their named failure assertions
@@ -428,6 +435,38 @@ pub struct Defects {
     pub live_attach_skips_replay: bool,
     /// Display frames carry a `seq` of their own, apart from control frames.
     pub live_seq_per_lane: bool,
+    /// A run a `queue` send started names an id the runner made for its
+    /// queue in `run_started.send_id`, not the send's own `send_id`.
+    pub run_cause_internal_id: bool,
+    /// A run a later `queue` send started (any but the admitting send)
+    /// carries no `send_id` on `run_started`.
+    pub run_cause_omitted_after_admission: bool,
+    /// A run an interrupt started names the interrupted run's send in
+    /// `run_started.send_id`, not the interrupting send.
+    pub run_cause_names_interrupted: bool,
+    /// A plan-named sender's `interrupt` is admitted without the entry's
+    /// `interrupt` grant.
+    pub order_interrupt_grant_ignored: bool,
+    /// `interrupt` stays the owner's: a plan-named sender's interrupt is
+    /// refused even with the grant.
+    pub order_interrupt_owner_only: bool,
+    /// A plan-named sender's string `queue` or `steer` is refused
+    /// `scope_owner_mismatch`, as if only lists came from named senders.
+    pub order_named_sender_strings_refused: bool,
+    /// The default `session.read` entry of a user message carries the
+    /// sender's module as `sender`.
+    pub sender_in_read: bool,
+    /// A rewrite ride waits the fake's own fixed deadline, whatever Setup's
+    /// `ride_wait_ms` says.
+    pub ride_wait_fixed_deadline: bool,
+    /// A step waiting on a rewrite ride is never reported `compaction_wait`.
+    pub ride_wait_never_reported: bool,
+    /// A step waiting on a rewrite ride is reported `compaction_wait` as soon
+    /// as the ride is sent, not once its answer has been pending for 1 s.
+    pub ride_wait_reported_at_once: bool,
+    /// A Setup answer whose `ride_wait_ms` is above the fake's own
+    /// `ride_wait_max_ms` is accepted.
+    pub ride_wait_cap_ignored: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -521,7 +560,23 @@ struct World {
     /// modelling a runner that reports the run as ended only a moment after
     /// the send returns.
     late_seal_reads: AtomicUsize,
+    /// How each session's next rewrite ride is answered, until a ride takes
+    /// it.
+    ride_scripts: Mutex<BTreeMap<String, cortexkit_role_llm_runner_conformance::ScriptedRide>>,
+    /// The rewrite ride each session's step waits on.
+    rides: Mutex<BTreeMap<String, compaction::PendingRide>>,
+    /// A resolved ride's step, by session: the run and step it held, and the
+    /// notice events computed for it, which the step's notice carries.
+    resolved_rides: Mutex<BTreeMap<String, ResolvedRide>>,
+    /// The clock rewrite rides are timed by, in milliseconds: the scripted
+    /// provider's delay and the ride's deadline both count on it. Each
+    /// `pause` of the subject moves it [`RIDE_TICK_MS`].
+    ride_clock: AtomicU64,
 }
+
+/// A rewrite ride that resolved: the run and step it held, and the notice
+/// events computed for that step.
+type ResolvedRide = (String, usize, Vec<String>);
 
 impl World {
     fn now(&self) -> u64 {
@@ -611,6 +666,9 @@ struct Msg {
     /// The `client_message_id` of the send that wrote this user message,
     /// kept beside its body.
     client_message_id: Option<String>,
+    /// The route principal whose send wrote this user message, kept beside
+    /// its body; `None` for a turn the host started.
+    sender: Option<String>,
 }
 
 /// A `session.send` carrying a `delivery_order` list that the fake
@@ -755,6 +813,10 @@ struct Sess {
     /// The run waiting at the context ceiling, and the time its wait ends
     /// (milliseconds since the Unix epoch).
     ceiling_wait: Option<(String, u64)>,
+    /// The run whose step waits on a rewrite ride reported as
+    /// `compaction_wait`, and the ride's deadline (milliseconds since the
+    /// Unix epoch).
+    compaction_wait: Option<(String, u64)>,
     /// What the `session_change` group's records built.
     change: session_change::ChangeState,
     /// The current lineage's first ordinal: the latest cut's first retained
@@ -825,6 +887,7 @@ impl Sess {
             delivered_as: None,
             written_at: 0,
             client_message_id: None,
+            sender: None,
         });
         ordinal
     }
@@ -1348,9 +1411,11 @@ impl Module {
                     "user"
                 };
                 let body = json!({ "role": role, "text": queued.text });
+                let sender = queued.sender.clone();
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
                 let message = sess.at_mut(ordinal);
                 message.delivered_as = Some(record["delivered_as"].clone());
+                message.sender = Some(sender);
                 let row = message.mid.clone();
                 if let Some(queued) = sess.ordered.get_mut(&id) {
                     queued.delivery = Some(QueuedDelivery {
@@ -1364,6 +1429,11 @@ impl Module {
                 sess.ceiling_wait = Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
             }
             "ceiling_view" => sess.ceiling_wait = None,
+            "compaction_wait" => {
+                sess.compaction_wait =
+                    Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
+            }
+            "ride_resolved" => sess.compaction_wait = None,
             "adopt" => {
                 sess.owner = text("owner");
                 sess.adopts.insert(
@@ -1449,6 +1519,7 @@ impl Module {
                 let ordinal = sess.push(body, &run_id, Vec::new());
                 sess.at_mut(ordinal).client_message_id =
                     record["client_message_id"].as_str().map(str::to_owned);
+                sess.at_mut(ordinal).sender = record["sender"].as_str().map(str::to_owned);
                 if let Some(delivered) = record.get("delivered_as").filter(|d| !d.is_null()) {
                     sess.at_mut(ordinal).delivered_as = Some(delivered.clone());
                 }
@@ -1704,6 +1775,7 @@ impl Module {
                     .find(|m| m.run_id == run_id && m.body["role"] == "assistant")
                     .map(|m| m.ordinal);
                 sess.ceiling_wait = None;
+                sess.compaction_wait = None;
                 tags::settle(sess, &self.world.defects, self.world.honours_checkpoint());
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
@@ -2161,11 +2233,16 @@ impl Module {
                     chosen = Some(Mode::IdleStart);
                 }
                 if chosen == Some(Mode::IdleStart) {
-                    started = Some((id.clone(), queued.text.clone()));
+                    started = Some((
+                        id.clone(),
+                        queued.text.clone(),
+                        queued.send_id.clone(),
+                        queued.sender.clone(),
+                    ));
                     break;
                 }
             }
-            let Some((id, text)) = started else {
+            let Some((id, text, cause, sender)) = started else {
                 return Ok(());
             };
             let run_id = format!("run-{}", sess.runs.len() + 1);
@@ -2173,10 +2250,13 @@ impl Module {
                 session,
                 json!({ "kind": "order_end", "id": id, "state": "delivered", "run_id": run_id }),
             )?;
+            // The run is keyed internally by the queue entry, but its cause
+            // is the send's own `send_id`, as `run_started` names it.
             self.commit(
                 session,
                 json!({ "kind": "send", "send_id": format!("order:{id}"), "prompt": text,
                         "delivery": groups::QUEUE, "run_id": run_id, "admitted": false,
+                        "cause": cause, "sender": sender,
                         "delivered_as": { "mode": order::modes::IDLE_START } }),
             )?;
             self.drive(session, &run_id)?;
@@ -2220,6 +2300,8 @@ impl Module {
             return Err(RouteFailure::new("the module is not running"));
         }
         self.sweep(session)
+            .map_err(|Killed| RouteFailure::new("the module was killed"))?;
+        self.tick_ride(session)
             .map_err(|Killed| RouteFailure::new("the module was killed"))?;
         if matches!(
             method,
@@ -2865,7 +2947,40 @@ impl Module {
         }
         if let Some(sess) = &existing {
             if sess.owner != stamp.principal {
-                return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+                if !self.world.serves(groups::DELIVERY_ORDER) {
+                    return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+                }
+                // A plan-named sender's string: `queue` and `steer` stand
+                // for their lists, `interrupt` needs the entry's grant.
+                let defects = &self.world.defects;
+                let interrupt = request.delivery() == Delivery::Interrupt;
+                let named = sess
+                    .senders
+                    .iter()
+                    .any(|sender| sender.module == stamp.principal);
+                let admitted = if interrupt && named && defects.order_interrupt_grant_ignored {
+                    Ok(())
+                } else if interrupt && named && defects.order_interrupt_owner_only {
+                    Err((errors::INVALID_PARAMS, Some(DELIVERY_FIELD)))
+                } else if !interrupt && defects.order_named_sender_strings_refused {
+                    Err((errors::SCOPE_OWNER_MISMATCH, None))
+                } else {
+                    order::admit_delivery(
+                        &stamp.principal,
+                        Some(&sess.owner),
+                        &sess.senders,
+                        request.delivery(),
+                    )
+                };
+                if let Err((code, field)) = admitted {
+                    return Ok(refuse(code, field.map(|field| json!({ "field": field }))));
+                }
+                if !interrupt {
+                    let modes = order::legacy_equivalent(request.delivery())
+                        .expect("queue and steer have lists");
+                    return self.ordered_send(stamp, session, &request, DeliveryOrder::new(modes));
+                }
+                // A granted interrupt goes on exactly as the owner's would.
             }
             if let Some(send) = sess.sends.get(&request.send_id) {
                 if send.prompt != request.prompt_text() && !self.world.defects.reuse_accepted {
@@ -2902,7 +3017,10 @@ impl Module {
             {
                 return Ok(invalid("tools"));
             }
-            if let Some(run) = sess.runs.iter().find(|run| run.state == "active") {
+            if let Some(run) = sess.runs.iter().find(|run| {
+                run.state == "active"
+                    && !(delivery == groups::INTERRUPT && self.world.serves(groups::INTERRUPT))
+            }) {
                 if delivery != groups::STEER || !self.world.serves(groups::STEER) {
                     return Ok(refuse(errors::TRANSIENT, None));
                 }
@@ -2931,6 +3049,7 @@ impl Module {
                     json!({ "kind": "steer", "send_id": request.send_id,
                             "prompt": request.prompt_text(), "delivery": delivery,
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
+                            "sender": stamp.principal,
                             "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
                 )?;
                 if self.world.defects.held_steer_ends_run
@@ -3013,10 +3132,39 @@ impl Module {
         // A pending change that is due applies here, at the start of the
         // run, never inside one already running.
         self.apply_due_change(session)?;
+        // An interrupt into a running turn names the turn it interrupts.
+        let interrupted = existing
+            .as_ref()
+            .filter(|_| delivery == groups::INTERRUPT)
+            .and_then(|sess| sess.runs.iter().find(|run| run.state == "active"))
+            .map(|run| run.run_id.clone());
+        let defects = &self.world.defects;
+        // The send that started the run, as `run_started.send_id` names it.
+        let cause = match &interrupted {
+            Some(old) if defects.run_cause_names_interrupted => {
+                existing.as_ref().and_then(|sess| {
+                    sess.sends
+                        .iter()
+                        .find(|(_, send)| send.run_id == *old && !send.steered_into_running)
+                        .map(|(send_id, _)| send_id.clone())
+                })
+            }
+            _ if delivery == groups::QUEUE && defects.run_cause_internal_id => {
+                Some(format!("sub-{run_id}"))
+            }
+            _ if delivery == groups::QUEUE
+                && !admitted
+                && defects.run_cause_omitted_after_admission =>
+            {
+                None
+            }
+            _ => Some(request.send_id.clone()),
+        };
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
+                    "cause": cause, "sender": stamp.principal,
                     "retention":request.retention, "title":request.runner_params.get("title"),
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
                     "directives":directives,
@@ -3025,6 +3173,18 @@ impl Module {
                     "structured_output": frozen,
                     "client_message_id": request.client_message_id(&self.world.groups).ok().flatten() }),
         )?;
+        if let Some(old) = &interrupted {
+            // The interrupting message is written; now the turn it
+            // interrupts ends `cancelled`, its model stream aborted. The fake
+            // aborts only a held model stream: no case interrupts a turn
+            // while one of its tool calls runs.
+            self.world.held_models.lock().unwrap().remove(session);
+            self.world.in_flight.lock().unwrap().remove(session);
+            self.commit(
+                session,
+                json!({ "kind": "terminal", "run_id": old, "state": "cancelled" }),
+            )?;
+        }
         self.drive(session, &run_id)?;
         self.deliver_idle(session)?;
         let send = self.sessions.lock().unwrap()[session].sends[&request.send_id].clone();
@@ -3325,6 +3485,11 @@ impl Module {
                 body["client_message_id"] = json!(id);
             }
         }
+        if self.world.defects.sender_in_read {
+            if let Some(sender) = &m.sender {
+                body["sender"] = json!(sender);
+            }
+        }
         for part in body
             .get_mut("parts")
             .and_then(Value::as_array_mut)
@@ -3442,6 +3607,14 @@ impl Module {
                     .as_ref()
                     .filter(|(waiting, _)| *waiting == run.run_id)
                     .map(|_| cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT.to_owned())
+                    .or_else(|| {
+                        sess.compaction_wait
+                            .as_ref()
+                            .filter(|(waiting, _)| *waiting == run.run_id)
+                            .map(|_| {
+                                cortexkit_role_llm_runner::RUN_REASON_COMPACTION_WAIT.to_owned()
+                            })
+                    })
                     .or_else(|| run.reason.clone()),
             });
         }
@@ -3570,21 +3743,29 @@ impl Module {
     }
 
     /// `run.status`: the `run.result` answer, plus the waiting reason and
-    /// deadline of a run held at the context ceiling.
+    /// deadline of a run held at the context ceiling or on a rewrite ride.
     fn run_status(&self, session: &str, params: Value) -> Reply {
         let run_id = params["run_id"].as_str().unwrap_or_default().to_owned();
         let mut reply = self.run_result(session, params);
         if let Reply::Response(body) = &mut reply {
-            let waiting = self
+            let (ceiling, ride) = self
                 .sessions
                 .lock()
                 .unwrap()
                 .get(session)
-                .and_then(|sess| sess.ceiling_wait.clone());
-            if let Some((waiting_run, deadline)) = waiting.filter(|(run, _)| *run == run_id) {
-                debug_assert_eq!(waiting_run, run_id);
-                body["reason"] = json!(cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT);
-                body["deadline_ms"] = json!(deadline);
+                .map(|sess| (sess.ceiling_wait.clone(), sess.compaction_wait.clone()))
+                .unwrap_or_default();
+            for (wait, reason) in [
+                (
+                    ceiling,
+                    cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT,
+                ),
+                (ride, cortexkit_role_llm_runner::RUN_REASON_COMPACTION_WAIT),
+            ] {
+                if let Some((_, deadline)) = wait.filter(|(run, _)| *run == run_id) {
+                    body["reason"] = json!(reason);
+                    body["deadline_ms"] = json!(deadline);
+                }
             }
         }
         reply
@@ -4342,6 +4523,10 @@ impl FakeSubject {
                     stream_holds: Mutex::new(BTreeMap::new()),
                     in_flight: Mutex::new(BTreeMap::new()),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
+                    ride_scripts: Mutex::new(BTreeMap::new()),
+                    rides: Mutex::new(BTreeMap::new()),
+                    resolved_rides: Mutex::new(BTreeMap::new()),
+                    ride_clock: AtomicU64::new(0),
                 })
             })
             .clone()
@@ -5134,7 +5319,35 @@ impl LlmRunnerSubject for FakeSubject {
         }
     }
 
+    async fn observed_ride_wait_max_ms(&self, session: &str) -> Result<Option<u64>, HarnessError> {
+        if self.setup_received(session) {
+            Ok(Some(RIDE_WAIT_MAX_MS))
+        } else {
+            Err(HarnessError::new(
+                "the session's provider received no Setup",
+            ))
+        }
+    }
+
+    async fn script_next_ride(
+        &self,
+        session: &str,
+        ride: cortexkit_role_llm_runner_conformance::ScriptedRide,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .ride_scripts
+            .lock()
+            .unwrap()
+            .insert(session.into(), ride);
+        Ok(())
+    }
+
     async fn pause(&self) {
+        // Rewrite rides are timed on their own clock, so a case waiting on
+        // one moves it without real or Tokio time passing.
+        self.world()
+            .ride_clock
+            .fetch_add(RIDE_TICK_MS, Ordering::SeqCst);
         match self.pause_for {
             None => tokio::task::yield_now().await,
             Some(pause) => tokio::time::sleep(pause).await,

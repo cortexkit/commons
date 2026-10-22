@@ -12,12 +12,20 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{ceiling::MAX_CEILING_WAIT_MS, notice::is_session_ref, view::CompactionView};
+use crate::{notice::is_session_ref, view::CompactionView};
 
-/// Upper bound on `deadline_ms` for the rewrite causes `ttl_expired`,
-/// `model_change` and `surface_change`. Those rides sit in front of a
-/// request the user is waiting for, so they stay short.
+/// Upper bound on the runner's own `deadline_ms` for the rewrite causes
+/// `ttl_expired`, `model_change` and `surface_change` when Setup's answer
+/// set no `ride_wait_ms`: without the provider's word, such a ride stays
+/// short, because it sits in front of a request the user is waiting for.
 pub const MAX_REWRITE_RIDE_DEADLINE_MS: u64 = 10_000;
+
+/// Upper bound on any ride's `deadline_ms`, and on Setup's
+/// `ride_wait_max_ms` and `ride_wait_ms`: five minutes. A rewrite ride waits
+/// as long as Setup's `ride_wait_ms` when the answer carried one; the user
+/// sees that wait (`llm-runner/v1`'s `compaction_wait`). Bounding a
+/// session's rides by its own `ride_wait_ms` is the runner's job.
+pub const MAX_RIDE_WAIT_MS: u64 = 300_000;
 
 /// Why the runner asks. A cause this crate does not know still decodes, as
 /// [`RideCause::Unknown`], so a newer runner does not break an older
@@ -80,9 +88,12 @@ pub struct RideRequest {
     pub session_ref: String,
     pub cause: RideCause,
     /// How long the runner waits for the answer, in milliseconds from when it
-    /// sent the request. Above 0; at most [`MAX_REWRITE_RIDE_DEADLINE_MS`]
-    /// for a rewrite cause; for `ceiling`, the time left of the ceiling
-    /// policy's `wait_ms`, at most [`MAX_CEILING_WAIT_MS`].
+    /// sent the request. Above 0 and at most [`MAX_RIDE_WAIT_MS`]. For a
+    /// rewrite cause it is Setup's `ride_wait_ms` when the answer carried
+    /// one, and otherwise the runner's own short deadline, at most
+    /// [`MAX_REWRITE_RIDE_DEADLINE_MS`]; for `ceiling`, the time left of the
+    /// ceiling policy's `wait_ms`, at most
+    /// [`crate::ceiling::MAX_CEILING_WAIT_MS`].
     pub deadline_ms: u64,
     /// On a `ceiling` ride only: present when the ride follows a model
     /// provider error saying the request exceeded the model's context window.
@@ -162,19 +173,17 @@ impl RideRequest {
         }
     }
 
-    /// Check the session reference and the deadline. `overflow` is never a
-    /// reason to fail: on a cause other than `ceiling` it is ignored.
+    /// Check the session reference and the deadline: above 0 and at most
+    /// [`MAX_RIDE_WAIT_MS`], whatever the cause. A rewrite ride may wait as
+    /// long as the session's Setup `ride_wait_ms`, which the request does
+    /// not carry, so the per-session bound is the runner's to keep.
+    /// `overflow` is never a reason to fail: on a cause other than `ceiling`
+    /// it is ignored.
     pub fn check(&self) -> Result<(), RideProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(RideProblem::SessionRef);
         }
-        let bound = match self.cause {
-            RideCause::TtlExpired | RideCause::ModelChange | RideCause::SurfaceChange => {
-                MAX_REWRITE_RIDE_DEADLINE_MS
-            }
-            RideCause::Ceiling | RideCause::Unknown(_) => MAX_CEILING_WAIT_MS,
-        };
-        if self.deadline_ms == 0 || self.deadline_ms > bound {
+        if self.deadline_ms == 0 || self.deadline_ms > MAX_RIDE_WAIT_MS {
             return Err(RideProblem::DeadlineOutOfRange);
         }
         Ok(())

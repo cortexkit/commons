@@ -522,11 +522,18 @@ ride = {
                     "overflow": {"reported_limit_tokens": 128000}},
          "ceiling_overflow": None},
     ],
+    "long_deadline_requests": [
+        {"name": "a rewrite ride with a 240,000 ms deadline: a Setup ride_wait_ms at the Claude Code gateway's ride_wait_max_ms cap",
+         "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 240000}},
+        {"name": "a model-change ride waiting the most a ride may: 300,000 ms",
+         "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 300000}},
+        {"name": "a surface-change ride just past the runner's own 10,000 ms default",
+         "params": {"session_ref": SR, "cause": "surface_change", "deadline_ms": 10001}},
+    ],
     "requests_refused": [
         {"name": "zero deadline", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 0}, "problem": "deadline_out_of_range"},
         {"name": "deadline over five minutes", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},
-        {"name": "a rewrite ride over ten seconds", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 10001}, "problem": "deadline_out_of_range"},
-        {"name": "a model-change ride over ten seconds", "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 30000}, "problem": "deadline_out_of_range"},
+        {"name": "a rewrite ride over five minutes", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},
         {"name": "raw session id", "params": {"session_ref": "ses_1", "cause": "ttl_expired", "deadline_ms": 1500}, "problem": "session_ref"},
     ],
     "answers": [

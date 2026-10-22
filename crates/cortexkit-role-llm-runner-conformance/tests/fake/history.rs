@@ -522,6 +522,7 @@ pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defec
                     delivered_as: None,
                     written_at: at,
                     client_message_id: None,
+                    sender: None,
                 });
             }
             let split = all.len() - window.min(all.len());
@@ -972,7 +973,14 @@ impl FakeSubject {
     /// Publish `view` from the session's scripted provider, as the next
     /// version.
     pub(super) fn publish_view(&self, session: &str, view: ScriptedView) -> u64 {
-        let world = self.world();
+        publish(&self.world(), session, view)
+    }
+}
+
+/// Publish `view` from `session`'s scripted provider as the next version,
+/// and answer that version.
+pub(super) fn publish(world: &World, session: &str, view: ScriptedView) -> u64 {
+    {
         let mut providers = world.compaction.lock().unwrap();
         let provider = providers.sessions.get_mut(session).unwrap();
         let version = provider.views.last().map_or(1, |v| v.view_version + 1);

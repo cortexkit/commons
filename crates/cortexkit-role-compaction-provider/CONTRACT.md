@@ -207,7 +207,8 @@ the session and freezes that plan for use.
   answered last time (kill point `SetupRecorded`).
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
   preset?, params, composition, model, variant?, context_window?,
-  output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?}`.
+  output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?,
+  ride_wait_max_ms?}`.
   `model` is a string; `variant`, `context_window` and `output_limit` are
   sibling fields, not a nested model object. `params` defaults to `{}`; an
   absent `preset` selects the provider's default. `composition` is an opaque
@@ -219,6 +220,16 @@ the session and freezes that plan for use.
   empty, and an absent list honors none. A provider puts on a view only a
   mark listed here (§7) and ignores names it does not know. Setup decodes
   leniently (§14), so a provider that predates the member ignores it.
+- [pinned] Optional `ride_wait_max_ms` (`u64`, 1 to 300,000,
+  `ride::MAX_RIDE_WAIT_MS`; added in 0.5.1,
+  `SetupRequest::with_ride_wait_max_ms`) is the longest this runner can
+  hold a step for a rewrite ride (cause `ttl_expired`, `model_change` or
+  `surface_change`, §8). Absent means the runner does not honour a
+  provider-set ride wait. It declares runner support in the request, as
+  `view_apply` does; a provider that predates the member ignores it (§14).
+- Informative, not a rule: a runner sends its host's real limit. The Claude Code
+  gateway sends 240,000: Claude Code times a request out 360 s before its
+  first byte, which leaves room for the model's own time to that byte.
 - [pinned] Before accepting Setup, the provider checks whether the incoming
   route is bound to a single session. If its bind session is non-empty and
   differs from Setup's session, the provider may refuse with the named,
@@ -277,7 +288,7 @@ the session and freezes that plan for use.
   is not a declaration of support. Later forks within the session are
   announced on advance notices instead (§5).
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, ceiling?, checkpoint?, cache_ttl?}` or `{answer: "refuse", request_id, code,
+  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§10).
   - `initial` is a CompactionMessage (`message::CompactionMessage`,
     `{compaction_id, version, range: {from, to}, replacement}`): the
@@ -294,6 +305,18 @@ the session and freezes that plan for use.
     (§7). A view replaces it entirely and is never a delta over it.
   - `ceiling` (`ceiling::CeilingPolicy`) says when the runner pauses for a
     view and, failing one, refuses the run (§8). It is omitted when absent.
+  - `ride_wait_ms` (`u64`, added in 0.5.1, `SetupAnswer::with_ride_wait_ms`,
+    `SetupAnswer::ride_wait_ms`) is how long the runner holds a step for a
+    rewrite ride's answer (§8): at least 1, and at most the request's
+    `ride_wait_max_ms`. It is frozen with the session, as `ceiling` is
+    (§12), and omitted when absent. A provider sends it only when the
+    request carried `ride_wait_max_ms`. A runner that sent a cap and
+    receives a `ride_wait_ms` above it, or 0, or that receives one without
+    having sent a cap, treats the answer as a failed Setup, no model call,
+    on the same path as a malformed `initial`, naming `ride_wait_ms`
+    (`setup::RIDE_WAIT_MS`, `SetupAnswer::check_for`) in what it records.
+    It never clamps the value. Answers decode leniently (§14), so an older
+    runner ignores the member and keeps its own short deadline.
   - `checkpoint` (`setup::SetupCheckpoint`, `llm-runner/v1`'s
     `tags::SetupCheckpoint`) is `{tag_checkpoint, cut}`: for a session the
     provider moved from standalone Magic Context, the highest tag number
@@ -802,13 +825,19 @@ provider.
   reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
   (`RideCause::Unknown`); a provider answers `nothing` to a cause it does not
   know. `deadline_ms` is how long the runner waits for the answer, counted
-  from sending, and is above 0. For the three rewrite causes it is the
+  from sending, and is above 0. For the three rewrite causes it is Setup's
+  `ride_wait_ms` when the answer carried one (§4), and otherwise the
   runner's own short deadline, at most 10,000
-  (`ride::MAX_REWRITE_RIDE_DEADLINE_MS`), because the ride sits in front of a
-  request the user is waiting for. Only `ceiling` uses the ceiling policy's
-  `wait_ms`: its `deadline_ms` is the time left of that wait, at most 300,000
+  (`ride::MAX_REWRITE_RIDE_DEADLINE_MS`). The ride sits in front of a
+  request the user is waiting for; the user sees the wait (`llm-runner/v1`
+  reports it as `compaction_wait` once the answer has been pending for
+  1 s), and the provider chooses how long it may be, within the runner's
+  cap. Only `ceiling` uses the ceiling policy's `wait_ms`: its
+  `deadline_ms` is the time left of that wait, at most 300,000
   (`ceiling::MAX_CEILING_WAIT_MS`). `RideRequest::check` refuses a deadline
-  out of range (`deadline_out_of_range`).
+  of 0 or above 300,000 (`ride::MAX_RIDE_WAIT_MS`) for any cause
+  (`deadline_out_of_range`); the request does not carry the session's
+  `ride_wait_ms`, so bounding a session's rides by it is the runner's job.
 - [pinned] Optional `overflow: {reported_limit_tokens?}` (`ride::Overflow`)
   is allowed only with `cause: "ceiling"`. Present, it says the ride follows a
   model provider error stating that the request exceeded the model's context
@@ -980,8 +1009,9 @@ view (§6) appears in the model view is the runner role's to define.
 
 ## 12. Purity and identity
 
-- [pinned] What the runner freezes from Setup, `ceiling`, derives only from
-  the preset, the params, the provider's configuration and the composition.
+- [pinned] What the runner freezes from Setup, `ceiling` and `ride_wait_ms`,
+  derives only from the preset, the params, the provider's configuration,
+  the composition and, for `ride_wait_ms`, the request's `ride_wait_max_ms`.
   The same inputs give the same bytes.
 - [pinned] No request in this role carries scope, agent or session identity
   beyond the opaque `session` handle, the caller's `harness` and the session
@@ -1076,9 +1106,10 @@ terminal behavior per message.
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
-- [pinned] Setup's `descends_from` and `view_apply`, a view's `apply`, the
-  answer's `ceiling`, and `cache_ttl` on a Setup answer, a ride answer or a
-  view default to absent and are omitted when absent; inside an entry, `ms`
+- [pinned] Setup's `descends_from`, `view_apply` and `ride_wait_max_ms`, a
+  view's `apply`, the answer's `ceiling` and `ride_wait_ms`, and `cache_ttl`
+  on a Setup answer, a ride answer or a view default to absent and are
+  omitted when absent, never encoded as `null`; inside an entry, `ms`
   is always encoded, `null` included. A
   present `descends_from` requires string `lineage_id` and `u64`
   `through_ordinal`.

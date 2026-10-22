@@ -418,6 +418,20 @@ impl RunStatusRequest {
 /// or in the terminal `context_ceiling` state.
 pub const RUN_REASON_CONTEXT_CEILING_WAIT: &str = "context_ceiling_wait";
 
+/// The `reason` of an `active` run whose step waits on a rewrite ride
+/// (compaction-provider's `ttl_expired`, `model_change` or `surface_change`
+/// cause) whose answer has been pending for at least
+/// [`COMPACTION_WAIT_REPORT_AFTER_MS`], with `deadline_ms` beside it on
+/// `run.status`: the absolute time the ride's deadline ends. The wait ends
+/// when the ride resolves (an answer, a refusal or the missed deadline), and
+/// the reason and deadline go with it.
+pub const RUN_REASON_COMPACTION_WAIT: &str = "compaction_wait";
+
+/// How long a rewrite ride's answer is pending before the runner reports the
+/// wait as `compaction_wait`, in milliseconds. A ride answered sooner is
+/// never reported, so a quick `nothing` never shows.
+pub const COMPACTION_WAIT_REPORT_AFTER_MS: u64 = 1_000;
+
 /// Known reasons a run names on `run.status`, `session.head` and stream
 /// events: why a paused run is paused, or why an active run is waiting.
 /// Other reasons survive decoding unchanged.
@@ -429,6 +443,9 @@ pub enum RunReason {
     Restart,
     /// An `active` run held at the context ceiling until `deadline_ms`.
     ContextCeilingWait,
+    /// An `active` run whose step waits on a rewrite ride until
+    /// `deadline_ms`.
+    CompactionWait,
     Unknown(String),
 }
 impl From<String> for RunReason {
@@ -437,6 +454,7 @@ impl From<String> for RunReason {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
             RUN_REASON_CONTEXT_CEILING_WAIT => Self::ContextCeilingWait,
+            RUN_REASON_COMPACTION_WAIT => Self::CompactionWait,
             _ => Self::Unknown(value),
         }
     }
@@ -447,6 +465,7 @@ impl From<RunReason> for String {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
             RunReason::ContextCeilingWait => RUN_REASON_CONTEXT_CEILING_WAIT.into(),
+            RunReason::CompactionWait => RUN_REASON_COMPACTION_WAIT.into(),
             RunReason::Unknown(s) => s,
         }
     }
@@ -474,9 +493,11 @@ pub struct RunStatus {
     /// Exactly what `run.result` carries for the same run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_ceiling: Option<crate::errors::ContextCeilingDetail>,
-    /// With `reason: context_ceiling_wait`: when the wait ends, in
-    /// milliseconds since the Unix epoch. A watchdog treats the run as
-    /// healthy until then.
+    /// When the run is in a wait the runner owns and ends by itself, in
+    /// milliseconds since the Unix epoch: on an `active` or `paused` run,
+    /// whatever its `reason` (`context_ceiling_wait` is one such wait). A
+    /// watchdog treats the run as healthy until then
+    /// ([`RunStatus::runner_wait_until`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_ms: Option<u64>,
     /// The run's token usage so far (§6.4). A runner that declares
@@ -510,6 +531,13 @@ impl RunStatus {
         let mut status = Self::new(states::ACTIVE).with_reason(RunReason::ContextCeilingWait);
         status.deadline_ms = Some(deadline_ms);
         status
+    }
+    /// An `active` run whose step waits on a rewrite ride until
+    /// `deadline_ms`, the absolute time the ride's deadline ends.
+    pub fn compaction_wait(deadline_ms: u64) -> Self {
+        Self::new(states::ACTIVE)
+            .with_reason(RunReason::CompactionWait)
+            .with_deadline_ms(deadline_ms)
     }
     pub fn with_deadline_ms(mut self, deadline_ms: u64) -> Self {
         self.deadline_ms = Some(deadline_ms);
@@ -547,6 +575,18 @@ impl RunStatus {
     pub fn with_usage(mut self, usage: RunUsage) -> Self {
         self.usage = Some(usage);
         self
+    }
+    /// When an `active` or `paused` run carries `deadline_ms`: the run is in
+    /// a wait the runner owns and ends by itself, and this is the time (in
+    /// milliseconds since the Unix epoch) before which a watchdog or owner
+    /// must not nudge, stop or end it. Whatever the run's `reason` is: a
+    /// caller recognizes the wait by `deadline_ms` alone. `None` for any
+    /// other run, and for a run without `deadline_ms`. After the returned
+    /// time has passed, the run counts as ordinary silence again.
+    pub fn runner_wait_until(&self) -> Option<u64> {
+        matches!(self.state.as_str(), states::ACTIVE | states::PAUSED)
+            .then_some(self.deadline_ms)
+            .flatten()
     }
     pub fn run_state(&self) -> RunState {
         RunState::parse(&self.state)
@@ -626,6 +666,39 @@ impl From<RunCancelReply> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A runner-owned wait is read from `deadline_ms` on an `active` or
+    /// `paused` run, whatever its `reason`; never on an ended run, and never
+    /// from `reason` alone.
+    #[test]
+    fn a_runner_owned_wait_is_recognized_by_its_deadline() {
+        assert_eq!(
+            RunStatus::context_ceiling_wait(7).runner_wait_until(),
+            Some(7)
+        );
+        assert_eq!(RunStatus::compaction_wait(8).runner_wait_until(), Some(8));
+        // A wait kind this crate does not name is still a wait.
+        let unnamed = RunStatus::new(states::ACTIVE)
+            .with_reason(RunReason::from("some_later_wait".to_owned()))
+            .with_deadline_ms(9);
+        assert_eq!(unnamed.runner_wait_until(), Some(9));
+        let paused = RunStatus::new(states::PAUSED).with_deadline_ms(11);
+        assert_eq!(paused.runner_wait_until(), Some(11));
+        // A paused run waiting for a caller's retry carries no deadline.
+        let retry = RunStatus::new(states::PAUSED).with_reason(RunReason::AuthRequired);
+        assert_eq!(retry.runner_wait_until(), None);
+        // The reason alone is display text, never a wait.
+        let reason_only = RunStatus::new(states::ACTIVE).with_reason(RunReason::ContextCeilingWait);
+        assert_eq!(reason_only.runner_wait_until(), None);
+        for ended in [
+            states::COMPLETED,
+            states::CONTEXT_CEILING,
+            "some_later_state",
+        ] {
+            let status = RunStatus::new(ended).with_deadline_ms(5);
+            assert_eq!(status.runner_wait_until(), None, "{ended}");
+        }
+    }
 
     #[test]
     fn every_named_state_round_trips_through_its_own_variant() {

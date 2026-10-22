@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.1
+
+An additive release: the compaction provider sets how long a rewrite ride
+may hold a step, and the runner shows the wait. Every new member is
+optional and omitted when absent, and answers decode leniently, so an older
+runner ignores them and keeps its own short ride deadline.
+
+- `SetupRequest` gains optional `ride_wait_max_ms` (1 to 300,000,
+  `SetupRequest::with_ride_wait_max_ms`): the longest this runner can hold a
+  step for a rewrite ride (`ttl_expired`, `model_change`,
+  `surface_change`). Absent means it does not honour a provider-set wait.
+  CONTRACT §4 notes, as information, that the Claude Code gateway sends
+  240,000, because Claude Code times a request out 360 s before its first
+  byte; a runner sends its host's real limit.
+- `SetupAnswer`'s `ready` answer gains optional `ride_wait_ms`
+  (`SetupAnswer::with_ride_wait_ms`, `SetupAnswer::ride_wait_ms`): at least
+  1 and at most the request's cap, frozen with the session like `ceiling`
+  (§12). A provider sends it only when the request carried a cap.
+  `SetupAnswer::check_for` now also fails an answer whose `ride_wait_ms` is
+  0, above the request's `ride_wait_max_ms`, or present without one,
+  naming `setup::RIDE_WAIT_MS`; a runner treats that as a failed Setup on
+  the path of a malformed `initial`, and never clamps the value.
+- §8: a rewrite ride's `deadline_ms` is Setup's `ride_wait_ms` when the
+  answer carried one, and otherwise the runner's own short deadline, at
+  most 10,000 (`ride::MAX_REWRITE_RIDE_DEADLINE_MS`, now that default's
+  bound). New `ride::MAX_RIDE_WAIT_MS` (300,000). `RideRequest::check`
+  accepts any cause's deadline up to 300,000, so a rewrite ride's deadline
+  above 10,000 is no longer refused `deadline_out_of_range`; bounding a
+  session's rides by its `ride_wait_ms` is the runner's job. The user sees
+  the wait as `llm-runner/v1`'s `compaction_wait` (llm-runner 0.5.2).
+- Vectors: `setup.json` gains a request carrying `ride_wait_max_ms`, an
+  answer carrying `ride_wait_ms`, and a `ride_wait` section of request and
+  answer pairs a runner accepts or fails naming `ride_wait_ms`;
+  `async.json` (regenerated) moves the rewrite rides over 10,000 ms from
+  refused to a new `long_deadline_requests` section and refuses a rewrite
+  ride over 300,000 ms. `SHA256SUMS` and `ASYNC_SHA256SUMS` refreshed.
+
 ## 0.5.0
 
 Requires `cortexkit-role-llm-runner` 0.5.0, whose lineage rules this release

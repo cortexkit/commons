@@ -151,5 +151,45 @@
         }
       }
     ]
+  },
+  "compaction_waiting": {
+    "name": "a step held 1 s or more for a rewrite ride's answer is waiting, until the ride's deadline",
+    "status": {
+      "state": "active",
+      "reason": "compaction_wait",
+      "deadline_ms": 1790000004000
+    },
+    "head": {
+      "lineage_id": "lin-1",
+      "last_ordinal": 9,
+      "head": {
+        "seq": 15
+      },
+      "last_run_state": {
+        "run_id": "run-5",
+        "state": "active",
+        "reason": "compaction_wait"
+      },
+      "updated_at": 1790000001000
+    },
+    "event": {
+      "kind": "control",
+      "cursor": {
+        "seq": 15
+      },
+      "type": "run_waiting",
+      "run_id": "run-5",
+      "state": "active",
+      "reason": "compaction_wait",
+      "deadline_ms": 1790000004000
+    },
+    "ends": [
+      {
+        "name": "the ride resolved (an answer, a refusal or the missed deadline): the run goes on",
+        "status": {
+          "state": "active"
+        }
+      }
+    ]
   }
 }

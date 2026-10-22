@@ -419,6 +419,10 @@ pub struct PlanSender {
     /// Whether this sender may list `idle_start`, and so start a run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub idle_start: bool,
+    /// Whether this sender may send the `interrupt` delivery string, which
+    /// cancels the running turn and starts its message, as the owner's does.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub interrupt: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<Template>,
 }
@@ -428,11 +432,17 @@ impl PlanSender {
         Self {
             module: module.into(),
             idle_start: false,
+            interrupt: false,
             templates: Vec::new(),
         }
     }
     pub fn with_idle_start(mut self) -> Self {
         self.idle_start = true;
+        self
+    }
+    /// Grant this sender the `interrupt` delivery string.
+    pub fn with_interrupt(mut self) -> Self {
+        self.interrupt = true;
         self
     }
     pub fn with_templates(mut self, templates: Vec<Template>) -> Self {
@@ -555,6 +565,39 @@ pub fn admit(
         .find(|sender| sender.module == caller)
         .ok_or((errors::SCOPE_OWNER_MISMATCH, None))?;
     if modes.contains(&Mode::IdleStart) && !sender.idle_start {
+        return Err((errors::INVALID_PARAMS, Some(FIELD)));
+    }
+    Ok(())
+}
+
+/// A string `delivery`'s admission on a runner that declares
+/// `delivery_order`, with the arguments of [`admit`]. `queue` and `steer`
+/// stand for their lists ([`legacy_equivalent`]) and are admitted exactly as
+/// those lists are, so a named sender granted `idle_start` may send either
+/// string. `interrupt` has no list form: a named sender may send it only
+/// when its entry grants `interrupt`, and is otherwise refused
+/// `invalid_params` naming [`FIELD`]. The owner is admitted with any string.
+///
+/// Admission decides only who may send. A run the send starts or joins
+/// runs under the session owner's authority (its principal and scope),
+/// never the sender's.
+pub fn admit_delivery(
+    caller: &str,
+    owner: Option<&str>,
+    senders: &[PlanSender],
+    delivery: Delivery,
+) -> Result<(), (&'static str, Option<&'static str>)> {
+    if let Some(modes) = legacy_equivalent(delivery) {
+        return admit(caller, owner, senders, &modes);
+    }
+    if owner.is_none_or(|owner| owner == caller) {
+        return Ok(());
+    }
+    let sender = senders
+        .iter()
+        .find(|sender| sender.module == caller)
+        .ok_or((errors::SCOPE_OWNER_MISMATCH, None))?;
+    if !sender.interrupt {
         return Err((errors::INVALID_PARAMS, Some(FIELD)));
     }
     Ok(())
@@ -1037,6 +1080,54 @@ mod tests {
             }
         }
         assert!(unnamed_refused);
+    }
+
+    #[test]
+    fn string_deliveries_follow_the_sender_grants() {
+        let file = file();
+        let plan = file["plans"][0]["plan"].as_object().unwrap().clone();
+        let senders = plan_senders(&plan).unwrap();
+        let granted = senders
+            .iter()
+            .find(|sender| sender.interrupt)
+            .expect("a vector sender holds the interrupt grant");
+        let rebuilt = PlanSender::new(&granted.module)
+            .with_idle_start()
+            .with_interrupt();
+        assert_eq!(&rebuilt, granted);
+        let mut refused_interrupt = false;
+        let mut admitted_named_queue = false;
+        for case in vectors::cases(&file, "string_admission") {
+            let name = case["name"].as_str().unwrap();
+            let caller = case["caller"].as_str().unwrap();
+            let owner = case["owner"].as_str();
+            let request: SendRequest = vectors::round_trip(name, &case["request"]);
+            let delivery = request.delivery();
+            match (
+                admit_delivery(caller, owner, &senders, delivery),
+                case.get("refusal"),
+            ) {
+                (Ok(()), None) => {
+                    admitted_named_queue |= delivery == Delivery::Queue && Some(caller) != owner;
+                }
+                (Err((code, field)), Some(refusal)) => {
+                    assert_eq!(refusal["code"], code, "{name}");
+                    assert_eq!(refusal["detail"]["field"].as_str(), field, "{name}");
+                    assert!(!crate::errors::is_retryable(code), "{name}");
+                    refused_interrupt |=
+                        delivery == Delivery::Interrupt && code == crate::errors::INVALID_PARAMS;
+                }
+                (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
+            }
+        }
+        assert!(
+            refused_interrupt,
+            "no vector refuses an ungranted interrupt"
+        );
+        assert!(
+            admitted_named_queue,
+            "no vector admits a named sender's string queue"
+        );
     }
 
     #[test]

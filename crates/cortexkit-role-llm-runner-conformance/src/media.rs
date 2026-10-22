@@ -32,6 +32,11 @@ const FRAME_ARGUMENT_BYTES: usize = 2_200_000;
 const STABLE_PARTS: usize = 14;
 const STABLE_PART_BYTES: usize = 250 * 1024;
 
+/// Size of the `oversize` argument of the pairing case's call: over
+/// `PART_INLINE_MAX`, so a descriptors read describes the call's arguments
+/// as an `args_ref`, yet well within one daemon frame.
+const PAIRING_ARGUMENT_BYTES: usize = PART_INLINE_MAX + 4096;
+
 const MIXED_FALLBACK_SIZES: &[usize] = &[
     128_000, 230_000, 160_000, 240_000, 180_000, 230_000, 180_000, 180_000, 180_000, 180_000,
     180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 180_000,
@@ -125,10 +130,16 @@ struct Fixture {
     oversize: Vec<Value>,
     /// Texts of the mixed-size fallback result scripted in the same step.
     mixed: Option<Vec<String>>,
+    /// Top-level argument members of the image call besides `marker` and
+    /// `oversize`. The pairing case names them `id` and `name`, as tool
+    /// parameters often are: inside arguments a descriptors read replaces
+    /// whole with an `args_ref`, they are payload, not pairing fields.
+    arguments: Vec<(&'static str, Value)>,
 }
 
 fn fixture(name: &str) -> Fixture {
     let frame = name == "media_descriptors_frame_budget";
+    let pairing = name == "media_descriptors_pairing";
     let image = if frame {
         padded_png(FRAME_IMAGE_BYTES)
     } else {
@@ -143,10 +154,20 @@ fn fixture(name: &str) -> Fixture {
         // while the assistant message holding both does not.
         oversize: if frame {
             vec![json!("x".repeat(FRAME_ARGUMENT_BYTES)); 2]
+        } else if pairing {
+            vec![json!("x".repeat(PAIRING_ARGUMENT_BYTES))]
         } else {
             vec![]
         },
         mixed: frame.then(mixed_fallback_texts),
+        arguments: if pairing {
+            vec![
+                ("id", json!("argument-id")),
+                ("name", json!("argument-name")),
+            ]
+        } else {
+            vec![]
+        },
     }
 }
 
@@ -211,7 +232,19 @@ fn refs(value: &Value, out: &mut Vec<Value>) {
     }
 }
 
+/// Every call and result pairing field (and reasoning signature) of
+/// `inline` is kept, unchanged, at the same place in `described`. A value
+/// `described` replaced with a `*_ref` stands for the whole payload, so the
+/// walk does not descend into it: a member named `id` or `name` inside a
+/// call's arguments is payload, not pairing. Pairing fields beside the ref,
+/// on the part that holds it, are still compared.
 fn pairing(inline: &Value, described: &Value) -> Check {
+    if described["type"]
+        .as_str()
+        .is_some_and(|kind| kind.ends_with("_ref"))
+    {
+        return Ok(());
+    }
     if let Some(map) = inline.as_object() {
         for (key, value) in map {
             if [
@@ -289,6 +322,9 @@ where
     let mut oversize = fixture.oversize.into_iter();
     if let Some(argument) = oversize.next() {
         tool.arguments["oversize"] = argument;
+    }
+    for (key, value) in fixture.arguments {
+        tool.arguments[key] = value;
     }
     let mut calls = vec![ScriptedPart::ToolCall(tool)];
     for argument in oversize {
@@ -541,12 +577,48 @@ mod tests {
             payloads.push(("mixed-size result".to_owned(), text_result(texts)));
         }
         for (i, oversize) in fixture.oversize.into_iter().enumerate() {
-            payloads.push((
-                format!("arguments of oversize call {i}"),
-                json!({"marker":"cf-call-0000000000-args","oversize":oversize}),
-            ));
+            let mut arguments = json!({"marker":"cf-call-0000000000-args","oversize":oversize});
+            if i == 0 {
+                for (key, value) in &fixture.arguments {
+                    arguments[*key] = value.clone();
+                }
+            }
+            payloads.push((format!("arguments of oversize call {i}"), arguments));
         }
         payloads
+    }
+
+    /// A call whose arguments a descriptors read replaced with an
+    /// `args_ref` keeps its pairing: `id` and `name` inside the inline
+    /// arguments are payload the ref stands for. A result that lost its
+    /// `tool_use_id`, or a call part that lost its own `id` beside the ref,
+    /// still fails by name.
+    #[test]
+    fn pairing_stops_at_a_ref_and_still_checks_beside_it() {
+        let arguments = json!({"id": "argument-id", "name": "argument-name", "oversize": "x"});
+        let args_ref = json!({"type": "args_ref", "name": "echo", "byte_size": 9, "sha256": "ab"});
+        let inline = json!({"parts": [
+            {"type": "tool_use", "id": "call-1", "name": "echo", "input": arguments},
+            {"type": "tool_result", "tool_use_id": "call-1", "content": "done"}
+        ]});
+        let described = json!({"parts": [
+            {"type": "tool_use", "id": "call-1", "name": "echo", "input": args_ref},
+            {"type": "tool_result", "tool_use_id": "call-1", "content": "done"}
+        ]});
+        assert_eq!(pairing(&inline, &described), Ok(()));
+
+        let mut lost_result = described.clone();
+        lost_result["parts"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("tool_use_id");
+        let error = pairing(&inline, &lost_result).unwrap_err();
+        assert!(error.contains("tool_use_id"), "{error}");
+
+        let mut lost_call = described.clone();
+        lost_call["parts"][0].as_object_mut().unwrap().remove("id");
+        let error = pairing(&inline, &lost_call).unwrap_err();
+        assert!(error.ends_with("field id"), "{error}");
     }
 
     /// Every problem with `png` as a PNG: its signature, each chunk's

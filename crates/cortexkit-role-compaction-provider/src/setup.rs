@@ -84,6 +84,14 @@ pub struct SetupRequest {
     /// when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub view_apply: Vec<String>,
+    /// The longest this runner can hold a step for a rewrite ride's answer
+    /// (cause `ttl_expired`, `model_change` or `surface_change`), in
+    /// milliseconds, from 1 to [`crate::ride::MAX_RIDE_WAIT_MS`]: its
+    /// host's real limit. Absent means the runner does not honour a
+    /// provider-set ride wait, and the provider sends no `ride_wait_ms`.
+    /// Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ride_wait_max_ms: Option<u64>,
 }
 
 impl SetupRequest {
@@ -111,6 +119,7 @@ impl SetupRequest {
             newest: None,
             now,
             view_apply: Vec::new(),
+            ride_wait_max_ms: None,
         }
     }
 
@@ -153,7 +162,20 @@ impl SetupRequest {
         self.view_apply = view_apply;
         self
     }
+
+    /// Declare the longest this runner can hold a step for a rewrite
+    /// ride's answer.
+    pub fn with_ride_wait_max_ms(mut self, cap: u64) -> Self {
+        self.ride_wait_max_ms = Some(cap);
+        self
+    }
 }
+
+/// The `ready` answer's member a runner names when it treats the answer as
+/// a failed Setup over it ([`SetupAnswer::check_for`]): a `ride_wait_ms`
+/// that is 0, above the `ride_wait_max_ms` its request carried, or present
+/// when its request carried none.
+pub const RIDE_WAIT_MS: &str = "ride_wait_ms";
 
 /// The reason a runner records when a Setup answer carries `checkpoint` for
 /// a request with `descends_from`: it treats the answer as a failed Setup
@@ -202,6 +224,13 @@ pub enum SetupAnswer {
         /// §8.1). Omitted when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cache_ttl: Option<crate::cache_ttl::CacheTtl>,
+        /// How long the runner holds a step for a rewrite ride's answer,
+        /// in milliseconds: at least 1, and at most the `ride_wait_max_ms`
+        /// of the request (CONTRACT.md §4, §8). Sent only when the request
+        /// carried `ride_wait_max_ms`, and frozen with the session like
+        /// `ceiling` (§12). Omitted when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ride_wait_ms: Option<u64>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own
@@ -228,6 +257,7 @@ impl SetupAnswer {
             ceiling: None,
             checkpoint: None,
             cache_ttl: None,
+            ride_wait_ms: None,
         }
     }
 
@@ -268,6 +298,15 @@ impl SetupAnswer {
     pub fn with_cache_ttl(mut self, entry: crate::cache_ttl::CacheTtl) -> Self {
         if let Self::Ready { cache_ttl, .. } = &mut self {
             *cache_ttl = Some(entry);
+        }
+        self
+    }
+
+    /// A `ready` answer with `ride_wait_ms` set. A `refuse` has no ride wait
+    /// and is returned unchanged.
+    pub fn with_ride_wait_ms(mut self, wait: u64) -> Self {
+        if let Self::Ready { ride_wait_ms, .. } = &mut self {
+            *ride_wait_ms = Some(wait);
         }
         self
     }
@@ -316,6 +355,14 @@ impl SetupAnswer {
         }
     }
 
+    /// The ride wait a `ready` answer carries, if any.
+    pub fn ride_wait_ms(&self) -> Option<u64> {
+        match self {
+            Self::Ready { ride_wait_ms, .. } => *ride_wait_ms,
+            Self::Refuse { .. } => None,
+        }
+    }
+
     /// The role code of a `refuse` answer.
     pub fn refuse_code(&self) -> Option<&RefuseCode> {
         match self {
@@ -349,15 +396,28 @@ impl SetupAnswer {
     }
 
     /// The runner's check of a `ready` answer against the request it
-    /// answers: a `checkpoint` on a Setup with `descends_from` is refused
-    /// [`CHECKPOINT_ON_DESCENT`]. A `refuse` passes, as it ends the run on
-    /// its own.
+    /// answers. Each `Err` names what the runner records for a failed
+    /// Setup (no model call, run error `compaction_unavailable`):
+    /// [`CHECKPOINT_ON_DESCENT`] for a `checkpoint` on a Setup with
+    /// `descends_from`, and [`RIDE_WAIT_MS`] for a `ride_wait_ms` that is 0,
+    /// above the request's `ride_wait_max_ms`, or present though the
+    /// request carried no `ride_wait_max_ms`. A runner never clamps the
+    /// wait. A `refuse` passes, as it ends the run on its own.
     pub fn check_for(&self, request: &SetupRequest) -> Result<(), &'static str> {
         if request.descends_from.is_some() && self.checkpoint().is_some() {
-            Err(CHECKPOINT_ON_DESCENT)
-        } else {
-            Ok(())
+            return Err(CHECKPOINT_ON_DESCENT);
         }
+        if let Some(wait) = self.ride_wait_ms() {
+            // Above the role's own bound fails even under a larger cap: a ride
+            // deadline over it is refused, so such a wait could never be honoured.
+            if wait == 0
+                || wait > crate::ride::MAX_RIDE_WAIT_MS
+                || request.ride_wait_max_ms.is_none_or(|cap| wait > cap)
+            {
+                return Err(RIDE_WAIT_MS);
+            }
+        }
+        Ok(())
     }
 
     /// Whether a `refuse` may be retried; `None` for `ready`. Its
@@ -390,9 +450,11 @@ mod tests {
                 "setup_answers",
             ));
         let mut cache_ttl_seen = false;
+        let mut ride_wait_seen = false;
         for case in cases {
             let answer: SetupAnswer = serde_json::from_value(case["answer"].clone()).unwrap();
             cache_ttl_seen |= answer.cache_ttl().is_some();
+            ride_wait_seen |= answer.ride_wait_ms().is_some();
             let rebuilt = if answer.is_ready() {
                 let mut built =
                     SetupAnswer::ready(answer.request_id(), answer.initial().unwrap().clone());
@@ -404,6 +466,9 @@ mod tests {
                 }
                 if let Some(entry) = answer.cache_ttl() {
                     built = built.with_cache_ttl(entry.clone());
+                }
+                if let Some(wait) = answer.ride_wait_ms() {
+                    built = built.with_ride_wait_ms(wait);
                 }
                 built
             } else {
@@ -420,6 +485,46 @@ mod tests {
             assert_eq!(rebuilt, answer, "{}", case["name"]);
         }
         assert!(cache_ttl_seen, "no vector answer carries cache_ttl");
+        assert!(ride_wait_seen, "no vector answer carries ride_wait_ms");
+    }
+
+    /// A runner accepts a `ride_wait_ms` from 1 to the cap its request
+    /// carried, and treats any other one as a failed Setup naming
+    /// `ride_wait_ms`; a request that carries no cap accepts none.
+    #[test]
+    fn a_ride_wait_outside_the_runners_cap_is_a_failed_setup() {
+        let file = vectors::load("setup.json");
+        for case in vectors::cases(&file, "ride_wait") {
+            let name = case["name"].as_str().unwrap();
+            let request: SetupRequest = vectors::round_trip(name, &case["request"]);
+            let answer: SetupAnswer = vectors::round_trip(name, &case["answer"]);
+            let expected = case["failed_setup"].as_str();
+            assert_eq!(answer.check_for(&request).err(), expected, "{name}");
+        }
+        let capped = SetupRequest::new("s", "claude-code", "setup", Map::new(), "m", 1)
+            .with_ride_wait_max_ms(240_000);
+        let initial = CompactionMessage::new("c", 1, crate::message::Range::new(0, 0), Vec::new());
+        for (wait, outcome) in [
+            (1, Ok(())),
+            (240_000, Ok(())),
+            (240_001, Err(RIDE_WAIT_MS)),
+            (0, Err(RIDE_WAIT_MS)),
+        ] {
+            let answer = SetupAnswer::ready("setup", initial.clone()).with_ride_wait_ms(wait);
+            assert_eq!(answer.check_for(&capped), outcome, "{wait}");
+        }
+        let over_bound = SetupRequest::new("s", "broca", "setup", Map::new(), "m", 1)
+            .with_ride_wait_max_ms(crate::ride::MAX_RIDE_WAIT_MS + 100_000);
+        let answer = SetupAnswer::ready("setup", initial.clone())
+            .with_ride_wait_ms(crate::ride::MAX_RIDE_WAIT_MS + 1);
+        assert_eq!(answer.check_for(&over_bound), Err(RIDE_WAIT_MS));
+        let uncapped = SetupRequest::new("s", "opencode", "setup", Map::new(), "m", 1);
+        let answer = SetupAnswer::ready("setup", initial.clone()).with_ride_wait_ms(1);
+        assert_eq!(answer.check_for(&uncapped), Err(RIDE_WAIT_MS));
+        assert_eq!(
+            SetupAnswer::ready("setup", initial).check_for(&uncapped),
+            Ok(())
+        );
     }
 
     #[test]

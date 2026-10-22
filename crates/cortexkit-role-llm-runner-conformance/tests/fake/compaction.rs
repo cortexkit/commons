@@ -55,6 +55,29 @@ pub(super) struct State {
     pub disposed: BTreeSet<u64>,
     /// Every `cache_ttl` entry the provider answered, oldest first.
     pub cache_ttl: Vec<cortexkit_role_compaction_provider::cache_ttl::CacheTtl>,
+    /// How long the latest Setup answer lets a step wait for a rewrite
+    /// ride's answer, when it says.
+    pub ride_wait_ms: Option<u64>,
+}
+
+/// A rewrite ride a step waits on.
+#[derive(Clone, Debug)]
+pub(super) struct PendingRide {
+    run_id: String,
+    step: usize,
+    /// The notice events computed for the step, which its notice carries
+    /// once the ride resolves.
+    events: Vec<String>,
+    /// When the ride was sent, on the ride clock.
+    started: u64,
+    /// How long the runner waits for the answer.
+    deadline_ms: u64,
+    /// When that wait ends, in milliseconds since the Unix epoch, as
+    /// `deadline_ms` reports it.
+    ends_at: u64,
+    script: cortexkit_role_llm_runner_conformance::ScriptedRide,
+    /// Whether the wait was reported `compaction_wait`.
+    reported: bool,
 }
 
 #[derive(Default)]
@@ -121,6 +144,7 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
             if let Ok(entry) = serde_json::from_value(record["cache_ttl"].clone()) {
                 state.cache_ttl.push(entry);
             }
+            state.ride_wait_ms = record["ride_wait_ms"].as_u64();
             if let (Some(n), Some(cut)) = (
                 record["checkpoint"]["tag_checkpoint"].as_u64(),
                 record["checkpoint"]["cut"].as_str(),
@@ -353,6 +377,35 @@ impl Module {
                     json!({"kind":"compaction_fold","message":encode(&m)}),
                 )
             }
+            CompactionSetup::ReadyWithRideWait {
+                initial: m,
+                cache_ttl,
+                ride_wait_ms,
+            } => {
+                // A wait above the cap the Setup request carried, or none
+                // at all, fails Setup, naming the member.
+                if (ride_wait_ms == 0 || ride_wait_ms > RIDE_WAIT_MAX_MS)
+                    && !self.world.defects.ride_wait_cap_ignored
+                {
+                    return self.compaction_error(
+                        session,
+                        run_id,
+                        "compaction_unavailable",
+                        "ride_wait_ms is 0 or above the ride_wait_max_ms of the Setup request",
+                        None,
+                    );
+                }
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_message","setup":true,"message":encode(&m),
+                           "lineage":sess.lineage, "cache_ttl": cache_ttl,
+                           "ride_wait_ms": ride_wait_ms}),
+                )?;
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_fold","message":encode(&m)}),
+                )
+            }
             // A checkpoint on a Setup that descends from another lineage
             // (a cut's) fails that Setup: such a lineage continues the old
             // lineage's numbering.
@@ -464,10 +517,49 @@ impl Module {
         {
             return Ok(false);
         }
+        // A rewrite ride in flight holds the step until it resolves.
+        if self.world.rides.lock().unwrap().contains_key(session) {
+            return Ok(false);
+        }
         // Capture at the model boundary, independently of session.read.
         let mut sess = self.sessions.lock().unwrap()[session].clone();
-        sess.notice_events
-            .extend(self.cache_events(session, &sess.compaction.cache_ttl));
+        let resolved = {
+            let mut resolved = self.world.resolved_rides.lock().unwrap();
+            match resolved.get(session) {
+                Some((run, at, _)) if run == run_id && *at == step => {
+                    resolved.remove(session).map(|(_, _, events)| events)
+                }
+                _ => None,
+            }
+        };
+        let events = match resolved {
+            Some(events) => events,
+            None => {
+                let events = self.cache_events(session, &sess.compaction.cache_ttl);
+                let rewrite = events.iter().any(|e| {
+                    matches!(
+                        e.as_str(),
+                        "ttl_expired" | "model_change" | "surface_change"
+                    )
+                });
+                let script = rewrite
+                    .then(|| self.world.ride_scripts.lock().unwrap().remove(session))
+                    .flatten();
+                if let Some(script) = script {
+                    self.start_ride(
+                        session,
+                        run_id,
+                        step,
+                        events,
+                        script,
+                        sess.compaction.ride_wait_ms,
+                    )?;
+                    return Ok(false);
+                }
+                events
+            }
+        };
+        sess.notice_events.extend(events);
         self.publish_notice(session, &sess)?;
         let mut providers = self.world.compaction.lock().unwrap();
         let p = providers.sessions.get_mut(session).unwrap();
@@ -586,6 +678,16 @@ impl FakeSubject {
             );
         }
     }
+    /// Whether the session's scripted provider has received a Setup call.
+    pub(super) fn setup_received(&self, session: &str) -> bool {
+        self.world()
+            .compaction
+            .lock()
+            .unwrap()
+            .sessions
+            .get(session)
+            .is_some_and(|provider| !provider.calls.is_empty())
+    }
     pub(super) fn observe_compaction(&self, session: &str) -> CompactionObservation {
         let world = self.world();
         let providers = world.compaction.lock().unwrap();
@@ -686,6 +788,94 @@ impl Module {
             .get(session)
             .cloned()
             .unwrap_or_else(|| FAKE_MODEL.to_owned())
+    }
+
+    /// Send the step's rewrite ride: the step waits on it until the
+    /// scripted answer arrives or the ride's deadline passes
+    /// ([`Module::tick_ride`]).
+    fn start_ride(
+        &self,
+        session: &str,
+        run_id: &str,
+        step: usize,
+        events: Vec<String>,
+        script: cortexkit_role_llm_runner_conformance::ScriptedRide,
+        ride_wait_ms: Option<u64>,
+    ) -> Result<(), Killed> {
+        let deadline_ms = match ride_wait_ms {
+            Some(ms) if !self.world.defects.ride_wait_fixed_deadline => ms,
+            _ => OWN_RIDE_DEADLINE_MS,
+        };
+        let mut ride = PendingRide {
+            run_id: run_id.to_owned(),
+            step,
+            events,
+            started: self.world.ride_clock.load(Ordering::SeqCst),
+            deadline_ms,
+            ends_at: self.world.now() + deadline_ms,
+            script,
+            reported: false,
+        };
+        if self.world.defects.ride_wait_reported_at_once {
+            self.commit(
+                session,
+                json!({"kind":"compaction_wait","run_id":run_id,"deadline_ms":ride.ends_at}),
+            )?;
+            ride.reported = true;
+        }
+        self.world
+            .rides
+            .lock()
+            .unwrap()
+            .insert(session.to_owned(), ride);
+        Ok(())
+    }
+
+    /// Move `session`'s pending rewrite ride on by the ride clock: report it
+    /// `compaction_wait` once its answer has been pending for 1 s, and
+    /// resolve it when the scripted answer arrives within the deadline (a
+    /// view is published, and applies at the step) or the deadline passes
+    /// (the step goes on without it). A resolved ride's step then goes on.
+    pub(super) fn tick_ride(&self, session: &str) -> Result<(), Killed> {
+        let Some(mut ride) = self.world.rides.lock().unwrap().get(session).cloned() else {
+            return Ok(());
+        };
+        let elapsed = self.world.ride_clock.load(Ordering::SeqCst) - ride.started;
+        let answer_after = ride.script.answer_after_ms;
+        let answered = answer_after <= ride.deadline_ms && elapsed >= answer_after;
+        if answered || elapsed >= ride.deadline_ms {
+            self.world.rides.lock().unwrap().remove(session);
+            if let Some(view) = ride.script.view.clone().filter(|_| answered) {
+                history::publish(&self.world, session, view);
+            }
+            if ride.reported {
+                self.commit(
+                    session,
+                    json!({"kind":"ride_resolved","run_id":ride.run_id}),
+                )?;
+            }
+            self.world.resolved_rides.lock().unwrap().insert(
+                session.to_owned(),
+                (ride.run_id.clone(), ride.step, ride.events),
+            );
+            return self.drive(session, &ride.run_id);
+        }
+        if !ride.reported
+            && !self.world.defects.ride_wait_never_reported
+            && elapsed >= cortexkit_role_llm_runner::COMPACTION_WAIT_REPORT_AFTER_MS
+        {
+            self.commit(
+                session,
+                json!({"kind":"compaction_wait","run_id":ride.run_id,"deadline_ms":ride.ends_at}),
+            )?;
+            ride.reported = true;
+            self.world
+                .rides
+                .lock()
+                .unwrap()
+                .insert(session.to_owned(), ride);
+        }
+        Ok(())
     }
 
     /// The notice events a model request about to go out declares for the

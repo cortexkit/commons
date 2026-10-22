@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.10.2
+
+Requires `cortexkit-role-llm-runner` 0.5.2 and
+`cortexkit-role-compaction-provider` 0.5.1. An additive release: it adds no
+subject hook, so an existing adapter builds and runs unchanged. The new
+cases reuse the plan-sender and held-model-step hooks, and a case whose
+hook or group is missing is skipped or reported inapplicable by name.
+
+- New capability `Capability::RunCause` for the role's new `run_cause`
+  group.
+- `run_cause` cases: the run a `queue` send started names that send's own
+  `send_id` on `run_started`, never an id the runner made for its queue;
+  every run a send started carries a non-empty `send_id`; and an
+  interrupt's run names the interrupting send, never the interrupted one
+  (inapplicable without `interrupt` or the held-step hook).
+- Interrupt-grant cases (`delivery_order`, inapplicable without
+  `interrupt`): a plan sender whose entry lacks `interrupt: true` is refused
+  `invalid_params` naming `delivery` for the `interrupt` string, writing
+  nothing; one holding the grant interrupts a held run, which ends
+  `cancelled`, and its message starts the next run.
+- A plan sender granted `idle_start` that sends the string `queue` (not a
+  list) is admitted and starts a run. A runner that takes only lists from
+  named senders fails this case by name.
+- The display `sender` case: a plan sender's message has a display row
+  naming the sender's module, and the default `session.read` page carries
+  no `sender` member. The projection case takes `sender` from the served
+  row, as it takes `model` and `client_message_id`.
+- Provider-set rewrite-ride waits (compaction-provider 0.5.1 §4 and §8,
+  llm-runner §6 `compaction_wait`), each case inapplicable unless the
+  runner sends `ride_wait_max_ms` in its Setup request:
+  `ride_wait_provider_wait_honoured` (Setup answers `ride_wait_ms: 4000`
+  and the provider's view for a `ttl_expired` ride, answered after 3 s,
+  applies at the ride's step), `ride_wait_slow_answer_reported` (a ride
+  answered after 2.5 s reads `compaction_wait` while it waits),
+  `ride_wait_fast_answer_not_reported` (one answered within 200 ms never
+  does) and `ride_wait_above_cap_fails_setup` (a `ride_wait_ms` above the
+  runner's cap fails Setup, naming `ride_wait_ms`). New
+  `CompactionSetup::ReadyWithRideWait` (the enum is non-exhaustive; an
+  adapter's `_` arm answers it as a failed Setup until it handles it), new
+  `ScriptedRide`, and two subject hooks with defaults that make the cases
+  inapplicable: `observed_ride_wait_max_ms` and `script_next_ride`.
+- Fix: `media_descriptors_pairing` no longer reports "descriptors lost
+  non-payload pairing field id" when a runner correctly describes a call's
+  arguments as an `args_ref` whose inline arguments hold an `id` or `name`
+  member, as tool parameters often do. The pairing check stops at a value
+  described as a `*_ref`, which stands for the whole payload; pairing
+  fields beside the ref, on the part that holds it, are still checked. The
+  case's call now carries such arguments, over the inline limit.
+- New narrowings: the owner's authority over a run a named sender started
+  is not observable through the route (CONTRACT §9), and `run_cause`'s
+  omission for a host turn on an adopted session is checked against the
+  vectors only.
+
 ## 0.10.1
 
 Requires `cortexkit-role-llm-runner` 0.5.1. An additive release: every new

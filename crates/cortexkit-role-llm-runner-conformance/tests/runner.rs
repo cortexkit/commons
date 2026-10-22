@@ -53,10 +53,22 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::HistoryDisplay,
     Capability::LiveEvents,
     Capability::ClientMessageId,
+    Capability::RunCause,
 ];
 
 /// The opt-in cost case: a subject without the seeding hook cannot run it.
 const COST_CASE: &str = "per_step_cost_scales_with_new_messages";
+
+/// The cases that interrupt a running turn: inapplicable on a runner
+/// without `interrupt`.
+const INTERRUPT_CASES: &[&str] = &[
+    "run_cause_interrupt_names_the_new_send",
+    "delivery_order_ungranted_interrupt_refused",
+    "delivery_order_granted_interrupt_interrupts",
+];
+
+/// The case reading the `sender` of a plan sender's display row.
+const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
     if case == "cut_setup_leaves_reads_alone"
@@ -136,6 +148,26 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         && matches!(
             report.outcome(case),
             Some(CaseOutcome::Inapplicable { reason }) if reason.contains("no lineage")
+        )
+    {
+        return;
+    }
+    // The fake leaves interrupt undeclared unless a test declares it, so the
+    // cases that interrupt a running turn cannot be asked.
+    if INTERRUPT_CASES.contains(&case)
+        && matches!(
+            report.outcome(case),
+            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("interrupt")
+        )
+    {
+        return;
+    }
+    // A fake narrowing its list modes may leave idle_start out, which the
+    // sender case lists.
+    if case == SENDER_CASE
+        && matches!(
+            report.outcome(case),
+            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("idle_start")
         )
     {
         return;
@@ -260,6 +292,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         Capability::HistoryDisplay,
         Capability::LiveEvents,
         Capability::ClientMessageId,
+        Capability::RunCause,
     ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
@@ -574,6 +607,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::HistoryDisplay,
                     Capability::LiveEvents,
                     Capability::ClientMessageId,
+                    Capability::RunCause,
                     Capability::HoldToolCalls
                 ]
             );
@@ -937,7 +971,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::UserCommands,
                     Capability::HistoryDisplay,
                     Capability::LiveEvents,
-                    Capability::ClientMessageId
+                    Capability::ClientMessageId,
+                    Capability::RunCause
                 ],
                 "{}",
                 report.render()
@@ -1175,6 +1210,7 @@ async fn retention_paused_non_terminal_run_passes() {
         Capability::HistoryDisplay,
         Capability::LiveEvents,
         Capability::ClientMessageId,
+        Capability::RunCause,
     ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
@@ -1210,6 +1246,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
         Capability::HistoryDisplay,
         Capability::LiveEvents,
         Capability::ClientMessageId,
+        Capability::RunCause,
     ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
@@ -3307,6 +3344,19 @@ async fn descriptor_defects_fail_their_cases_by_name() {
     }
 }
 
+/// The pairing case's call carries arguments over the inline limit with
+/// top-level `id` and `name` members, which a descriptors read replaces
+/// with an `args_ref`; a faithful runner keeps every pairing field and
+/// passes.
+#[tokio::test]
+async fn described_arguments_with_id_and_name_keep_their_pairing() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.descriptor_fixtures = true;
+    subject.descriptor_case = Some("media_descriptors_pairing");
+    let report = run(&subject).await;
+    assert_passed(&report, "media_descriptors_pairing");
+}
+
 #[tokio::test]
 async fn mixed_size_fallback_frame_budget_case() {
     let mut subject = FakeSubject::new(Defects::default());
@@ -4108,6 +4158,7 @@ fn displaying(defects: Defects) -> FakeSubject {
         Capability::HistoryDisplay,
         Capability::LiveEvents,
         Capability::ClientMessageId,
+        Capability::RunCause,
     ]);
     subject
 }
@@ -4322,5 +4373,252 @@ async fn a_previous_model_lifetime_kept_fails_the_model_change_case() {
         &report,
         &["cache_ttl_missed_model_change_falls_through_to_observed"],
         "never keeps a previous model's value",
+    );
+}
+
+/// The `run_cause`, interrupt-grant, named-sender string and display
+/// `sender` cases.
+const SENDER_AND_CAUSE_CASES: &[&str] = &[
+    "run_cause_queued_start_names_its_send",
+    "run_cause_send_started_runs_never_omit_send_id",
+    "run_cause_interrupt_names_the_new_send",
+    "delivery_order_ungranted_interrupt_refused",
+    "delivery_order_granted_interrupt_interrupts",
+    "delivery_order_named_sender_queue_string_admitted",
+    "display_row_names_the_sender_never_in_read",
+];
+
+/// A fake declaring the display and live groups, `run_cause`,
+/// `delivery_order` and `interrupt`.
+fn sending(defects: Defects) -> FakeSubject {
+    let mut subject = displaying(defects);
+    subject
+        .capabilities
+        .extend([Capability::DeliveryOrder, Capability::Interrupt]);
+    subject
+}
+
+/// Each of `failing` failed with a reason holding `says`, and every other
+/// sender and run-cause case passed.
+fn only_sender_cases_fail(report: &SuiteReport, failing: &[&str], says: &str) {
+    for case in SENDER_AND_CAUSE_CASES {
+        if failing.contains(case) {
+            let reason = failed(report, case);
+            assert!(reason.contains(says), "{case}: {reason}");
+        } else {
+            assert_eq!(
+                report.outcome(case),
+                Some(&CaseOutcome::Passed),
+                "{case}\n{}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_faithful_runner_passes_the_sender_and_run_cause_cases() {
+    only_sender_cases_fail(&run(&sending(Defects::default())).await, &[], "");
+}
+
+#[tokio::test]
+async fn a_queue_id_as_the_run_cause_fails_the_queued_start_case() {
+    let report = run(&sending(Defects {
+        run_cause_internal_id: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["run_cause_queued_start_names_its_send"],
+        "never an id the runner made for its queue",
+    );
+}
+
+#[tokio::test]
+async fn an_omitted_run_cause_fails_the_never_omit_case() {
+    let report = run(&sending(Defects {
+        run_cause_omitted_after_admission: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["run_cause_send_started_runs_never_omit_send_id"],
+        "never omits send_id",
+    );
+}
+
+#[tokio::test]
+async fn naming_the_interrupted_send_fails_the_interrupt_cause_case() {
+    let report = run(&sending(Defects {
+        run_cause_names_interrupted: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["run_cause_interrupt_names_the_new_send"],
+        "never the send of the run it interrupted",
+    );
+}
+
+#[tokio::test]
+async fn an_ungranted_interrupt_admitted_fails_its_case() {
+    let report = run(&sending(Defects {
+        order_interrupt_grant_ignored: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["delivery_order_ungranted_interrupt_refused"],
+        "not refused",
+    );
+}
+
+#[tokio::test]
+async fn a_granted_interrupt_refused_fails_its_case() {
+    let report = run(&sending(Defects {
+        order_interrupt_owner_only: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["delivery_order_granted_interrupt_interrupts"],
+        "a granted interrupt is admitted",
+    );
+}
+
+#[tokio::test]
+async fn a_named_sender_queue_string_refused_fails_its_case() {
+    let report = run(&sending(Defects {
+        order_named_sender_strings_refused: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["delivery_order_named_sender_queue_string_admitted"],
+        "stands for [idle_start]",
+    );
+}
+
+#[tokio::test]
+async fn a_sender_in_the_default_read_fails_the_sender_case() {
+    let report = run(&sending(Defects {
+        sender_in_read: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_sender_cases_fail(
+        &report,
+        &["display_row_names_the_sender_never_in_read"],
+        "never in a session.read entry",
+    );
+}
+
+#[tokio::test]
+async fn without_interrupt_the_interrupt_cases_cannot_be_asked() {
+    let mut subject = sending(Defects::default());
+    subject.capabilities.remove(&Capability::Interrupt);
+    let report = run(&subject).await;
+    for case in INTERRUPT_CASES {
+        assert!(
+            matches!(
+                report.outcome(case),
+                Some(CaseOutcome::Inapplicable { reason }) if reason.contains("interrupt")
+            ),
+            "{case}\n{}",
+            report.render()
+        );
+    }
+}
+
+/// The provider-set rewrite-ride wait cases.
+const RIDE_WAIT_CASES: &[&str] = &[
+    "ride_wait_provider_wait_honoured",
+    "ride_wait_slow_answer_reported",
+    "ride_wait_fast_answer_not_reported",
+    "ride_wait_above_cap_fails_setup",
+];
+
+/// Each of `failing` failed with a reason holding `says`, and every other
+/// ride-wait case passed.
+fn only_ride_cases_fail(report: &SuiteReport, failing: &[&str], says: &str) {
+    for case in RIDE_WAIT_CASES {
+        if failing.contains(case) {
+            let reason = failed(report, case);
+            assert!(reason.contains(says), "{case}: {reason}");
+        } else {
+            assert_eq!(
+                report.outcome(case),
+                Some(&CaseOutcome::Passed),
+                "{case}\n{}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_faithful_runner_passes_the_ride_wait_cases() {
+    only_ride_cases_fail(&run(&FakeSubject::new(Defects::default())).await, &[], "");
+}
+
+#[tokio::test]
+async fn a_fixed_ride_deadline_fails_the_provider_wait_case() {
+    let report = run(&FakeSubject::new(Defects {
+        ride_wait_fixed_deadline: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_ride_cases_fail(
+        &report,
+        &["ride_wait_provider_wait_honoured"],
+        "as long as Setup's ride_wait_ms says",
+    );
+}
+
+#[tokio::test]
+async fn an_unreported_slow_ride_fails_the_report_case() {
+    let report = run(&FakeSubject::new(Defects {
+        ride_wait_never_reported: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_ride_cases_fail(
+        &report,
+        &["ride_wait_slow_answer_reported"],
+        "never read compaction_wait",
+    );
+}
+
+#[tokio::test]
+async fn a_ride_reported_at_once_fails_the_fast_answer_case() {
+    let report = run(&FakeSubject::new(Defects {
+        ride_wait_reported_at_once: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_ride_cases_fail(
+        &report,
+        &["ride_wait_fast_answer_not_reported"],
+        "is never reported",
+    );
+}
+
+#[tokio::test]
+async fn a_ride_wait_above_the_cap_accepted_fails_the_cap_case() {
+    let report = run(&FakeSubject::new(Defects {
+        ride_wait_cap_ignored: true,
+        ..Defects::default()
+    }))
+    .await;
+    only_ride_cases_fail(
+        &report,
+        &["ride_wait_above_cap_fails_setup"],
+        "failed Setup naming ride_wait_ms",
     );
 }

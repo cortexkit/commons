@@ -62,6 +62,16 @@ pub enum CompactionSetup {
         initial: CompactionMessage,
         cache_ttl: cortexkit_role_compaction_provider::cache_ttl::CacheTtl,
     },
+    /// Answer `ready` with `initial`, the `cache_ttl` entry when given, and
+    /// `ride_wait_ms` (compaction-provider §4): how long the runner holds a
+    /// step for a rewrite ride's answer. The runner checks it against the
+    /// `ride_wait_max_ms` its Setup request carried, and treats a value
+    /// above that cap as a failed Setup naming `ride_wait_ms`.
+    ReadyWithRideWait {
+        initial: CompactionMessage,
+        cache_ttl: Option<cortexkit_role_compaction_provider::cache_ttl::CacheTtl>,
+        ride_wait_ms: u64,
+    },
     /// Fail the actual provider call without an answer, not a REFUSE answer.
     Unavailable,
     Refuse {
@@ -160,6 +170,44 @@ pub struct ScriptedView {
     /// The view's cut: the last ordinal its replacements stand for. Its
     /// `cut_id` is the adapter's to choose.
     pub cut: Option<u64>,
+}
+
+/// How the scripted compaction provider answers the next rewrite ride of a
+/// session (compaction-provider §8: cause `ttl_expired`, `model_change` or
+/// `surface_change`): after `answer_after_ms` milliseconds from the ride's
+/// arrival, with `view` or, when it is `None`, `nothing`. A delay past the
+/// runner's deadline for the ride means the runner never sees the answer:
+/// the ride times out. A view is
+/// published and translated as [`LlmRunnerSubject::publish_compaction_view`]
+/// does, so it can apply at the ride's step.
+///
+/// Non-exhaustive: build one with [`ScriptedRide::view_after`] or
+/// [`ScriptedRide::nothing_after`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScriptedRide {
+    pub answer_after_ms: u64,
+    pub view: Option<ScriptedView>,
+}
+
+impl ScriptedRide {
+    /// Answer with `view` after `answer_after_ms` milliseconds; a runner
+    /// whose ride deadline is shorter never sees it.
+    pub fn view_after(answer_after_ms: u64, view: ScriptedView) -> Self {
+        Self {
+            answer_after_ms,
+            view: Some(view),
+        }
+    }
+
+    /// Answer `nothing` after `answer_after_ms` milliseconds; a runner whose
+    /// ride deadline is shorter times the ride out first.
+    pub fn nothing_after(answer_after_ms: u64) -> Self {
+        Self {
+            answer_after_ms,
+            view: None,
+        }
+    }
 }
 
 pub(crate) fn initial(marker: &str) -> CompactionMessage {
@@ -589,7 +637,8 @@ where
             } => refusal_error(&error, code.as_str(), reason, provider_code.as_deref())?,
             CompactionSetup::Ready(_)
             | CompactionSetup::ReadyWithCheckpoint { .. }
-            | CompactionSetup::ReadyWithCacheTtl { .. } => {
+            | CompactionSetup::ReadyWithCacheTtl { .. }
+            | CompactionSetup::ReadyWithRideWait { .. } => {
                 unreachable!()
             }
         }

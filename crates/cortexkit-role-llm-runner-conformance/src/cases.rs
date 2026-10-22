@@ -218,8 +218,11 @@ where
             name if name.starts_with("display_") || name.starts_with("client_message_id_") => {
                 crate::display::run(self, name).await
             }
-            name if name.starts_with("live_") => crate::live::run(self, name).await,
+            name if name.starts_with("live_") || name.starts_with("run_cause_") => {
+                crate::live::run(self, name).await
+            }
             name if name.starts_with("cache_ttl_") => crate::cache_ttl::run(self, name).await,
+            name if name.starts_with("ride_wait_") => crate::ride_wait::run(self, name).await,
             "per_step_cost_scales_with_new_messages" => crate::cost::run(self).await,
             name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
                 crate::compaction::run(self, name)

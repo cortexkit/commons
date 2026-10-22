@@ -1,12 +1,13 @@
 //! The display cases: `session.history` with `form: "display"` (the
-//! `history_display` group) and `client_message_id` on `session.send` (the
-//! `client_message_id` group), `cortexkit-role-llm-runner` CONTRACT §4.7
-//! and §9.11.
+//! `history_display` group), `client_message_id` on `session.send` (the
+//! `client_message_id` group) and the `sender` a row names,
+//! `cortexkit-role-llm-runner` CONTRACT §4.7 and §9.11.
 //!
 //! Sessions here are minted with the label `display`, so an adapter that
 //! keeps some sessions in a serializer profile can tell them apart.
 
 use cortexkit_role_llm_runner::{
+    delivery_order::{DeliveryOrder, Mode},
     display::{self, DisplayEntry, DisplayPage, DisplayPart, Limits, APP_LIMITS},
     errors,
     history::{HistoryEntry, HistoryForm, HistoryRequest},
@@ -46,6 +47,9 @@ where
         }
         "client_message_id_resend_with_another_id_refused" => {
             client_id_reuse(case).await.map(|()| Ending::Passed)
+        }
+        "display_row_names_the_sender_never_in_read" => {
+            sender_shown(case).await.map(|()| Ending::Passed)
         }
         other => Err(format!("unknown display case {other}")),
     }
@@ -159,8 +163,8 @@ where
 }
 
 /// A served row equals the profile's projection of the same entry's raw
-/// body, with only the fields the runner fills (`model`, and
-/// `client_message_id`) taken from the served row; every assistant row
+/// body, with only the fields the runner fills (`model`,
+/// `client_message_id` and `sender`) taken from the served row; every assistant row
 /// carries `model`. Checked without limits and with the apps' limits.
 async fn projection<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
@@ -195,6 +199,7 @@ where
                 expected = expected.with_model(model.clone());
             }
             expected.client_message_id = shown.row.client_message_id.clone();
+            expected.sender = shown.row.sender.clone();
             if expected.role == "assistant" && expected.model.is_none() {
                 return Err(format!(
                     "{what}, the assistant row of {} carries no model: every assistant row names \
@@ -616,4 +621,94 @@ where
         errors::INVALID_PARAMS,
         CLIENT_MESSAGE_ID_FIELD,
     )
+}
+
+/// Whether `value` holds a member named `key` at any depth.
+fn has_member(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(k, v)| k == key || has_member(v, key)),
+        Value::Array(items) => items.iter().any(|v| has_member(v, key)),
+        _ => false,
+    }
+}
+
+/// A plan sender's `[idle_start]` message has a display row naming the
+/// sender's module as `sender`, and the default `session.read` page carries
+/// no `sender` member anywhere.
+async fn sender_shown<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let identity = case
+        .subject
+        .plan_sender()
+        .ok_or("the subject names no plan sender, which this case requires")?;
+    let (session, named) = crate::delivery_order::sender_session(
+        case,
+        "display-sender",
+        vec![ScriptedTurn::new(vec![case.mint.text("display-answer").0])],
+        true,
+        false,
+    )
+    .await?;
+    let before = head(&session.route)
+        .await?
+        .last_run_state
+        .map(|last| last.run_id);
+    let marker = case.mint.next("display-sender");
+    let order = DeliveryOrder::new(vec![Mode::IdleStart]);
+    let what = "the plan sender's [idle_start] send";
+    let reply: SendReply = decode(
+        what,
+        expect_ok(
+            what,
+            call(
+                &named,
+                ops::SESSION_SEND,
+                crate::tags::params(
+                    case,
+                    &session,
+                    None,
+                    &marker,
+                    &case.mint.next("send"),
+                    &order.to_send_members(),
+                ),
+            )
+            .await?,
+        )?,
+    )?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        before.as_deref(),
+        &reply,
+    )
+    .await?;
+    let shown = display_walk(&session.route, None).await?;
+    let Some(entry) = shown
+        .iter()
+        .find(|e| e.row.role == "user" && e.row.text.contains(&marker))
+    else {
+        return Err(format!("no user display row shows the message of {what}"));
+    };
+    if entry.row.sender.as_deref() != Some(identity.module.as_str()) {
+        return Err(format!(
+            "the display row of {what} names sender {:?}, not {}: a user message's row names the \
+             module that sent it",
+            entry.row.sender, identity.module
+        ));
+    }
+    let page = expect_ok(
+        "session.read",
+        call(&session.route, ops::SESSION_READ, json!({})).await?,
+    )?;
+    if has_member(&page, "sender") {
+        return Err(format!(
+            "the default session.read page {page} carries a sender member: who sent a message is \
+             shown only on display rows, never in a session.read entry or a stored body"
+        ));
+    }
+    Ok(())
 }

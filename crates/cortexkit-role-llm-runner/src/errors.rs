@@ -841,6 +841,25 @@ mod context_ceiling_tests {
                 "{name}"
             );
         }
+        // A step held for a rewrite ride's answer reads the same way, under
+        // its own reason, with the ride's deadline.
+        let ride = &file["compaction_waiting"];
+        let status: RunStatus = vectors::round_trip("ride status", &ride["status"]);
+        let deadline = status.deadline_ms.expect("deadline_ms");
+        assert_eq!(status, RunStatus::compaction_wait(deadline));
+        assert_eq!(status.runner_wait_until(), Some(deadline));
+        let head: crate::read::HeadMeta = vectors::round_trip("ride head", &ride["head"]);
+        assert_eq!(
+            head.last_run_state.unwrap().reason.as_deref(),
+            Some(crate::RUN_REASON_COMPACTION_WAIT)
+        );
+        assert_eq!(ride["event"]["reason"], crate::RUN_REASON_COMPACTION_WAIT);
+        assert_eq!(ride["event"]["deadline_ms"], ride["status"]["deadline_ms"]);
+        for end in vectors::cases(ride, "ends") {
+            let name = end["name"].as_str().unwrap();
+            let status: RunStatus = vectors::round_trip(name, &end["status"]);
+            assert_eq!(status.runner_wait_until(), None, "{name}");
+        }
         // A provider's own overflow refusal stays a provider failure.
         let overflow: RunResult =
             vectors::round_trip("provider overflow", &file["provider_overflow"]["answer"]);

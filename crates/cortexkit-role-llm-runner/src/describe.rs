@@ -43,6 +43,9 @@ pub mod problem_names {
     /// The answer declares `tag_checkpoint` without `compaction`, whose
     /// Setup answer carries the checkpoint.
     pub const TAG_CHECKPOINT_WITHOUT_COMPACTION: &str = "tag_checkpoint_without_compaction";
+    /// The answer declares `run_cause` without `live_events`, whose
+    /// `run_started` event carries the run's cause.
+    pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -373,6 +376,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into(),
         ));
     }
+    if describe.declares(capabilities::RUN_CAUSE) && !describe.declares(capabilities::LIVE_EVENTS) {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS.into(),
+        ));
+    }
     if let Some(modes) = &describe.delivery_order_modes {
         use crate::delivery_order::modes as names;
         if !describe.declares(capabilities::DELIVERY_ORDER) {
@@ -584,6 +592,9 @@ mod tests {
                 problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,
                 problem_names::DUPLICATE_RUN_CANCEL_AT => problem_names::DUPLICATE_RUN_CANCEL_AT,
                 problem_names::COMPACTION_WITHOUT_TAGS => problem_names::COMPACTION_WITHOUT_TAGS,
+                problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS => {
+                    problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS
+                }
                 _ => "undecodable",
             },
             DescribeProblem::MissingMajor { .. } => "missing_major",

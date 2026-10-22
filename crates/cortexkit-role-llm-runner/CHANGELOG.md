@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.5.2
+
+An additive release. The Alfonso apps now send messages into sessions
+through Thalamus, a sender the session's plan names, while the session's
+owner (core) keeps sending its own messages into the same sessions. These
+additions let the owner tell a person's turns from its own, let an app interrupt,
+and say whose authority such a run uses. Every new wire member is optional
+and left out when absent, so existing payloads keep their bytes; stored
+message bodies and the default `session.read` entry gain nothing.
+
+- New capability group `run_cause` (CONTRACT §3, §7.1,
+  `capabilities::RUN_CAUSE`). On a runner declaring it, the live
+  `run_started` event carries `send_id`, the send that started the run
+  (`live::RunStarted::send_id`, `RunStarted::with_send_id`): a queued send's
+  own `send_id` (never an id the runner made for its queue), the
+  interrupting send for an interrupt (never the interrupted one), and
+  nothing only for a turn the host started with no send, such as a person
+  typing in the host on an adopted session (§9.5). It is never empty and
+  never guessed. It is a group rather than a bare optional member because
+  absence must mean something: from an older runner a missing `send_id`
+  says nothing, while from a `run_cause` runner it means no send started
+  the run. The owner then reads its own `send_id` as its own message, any
+  other as an app's (a person's), and none as the person typing in the
+  host. A runner that cannot name the causing send does not declare the
+  group. `check_describe` refuses `run_cause` without `live_events` by name
+  (`describe::problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS`).
+- The interrupt grant (§9.7). A plan `senders` entry may carry
+  `interrupt: true` (`delivery_order::PlanSender::interrupt`,
+  `PlanSender::with_interrupt`), frozen with the plan at admission. A named
+  sender may send the `interrupt` delivery string only with that grant;
+  otherwise it is refused `invalid_params {field: "delivery"}`, writing
+  nothing. A granted interrupt behaves exactly as the owner's. `interrupt`
+  stays a string; it is not a list mode. The new
+  `delivery_order::admit_delivery` admits a string `delivery` from the
+  caller: `queue` and `steer` as the lists they stand for (so a sender
+  granted `idle_start` may send the string `queue`), `interrupt` on its
+  grant. `PlanSender` is `#[non_exhaustive]`, so the new field breaks no
+  caller; one that builds it uses `PlanSender::new` and the setters.
+- Authority stays the owner's (§9, §9.7), for every runner: a run that a
+  named sender's send starts or joins runs under the session owner's
+  principal and scope, never the sender's, and its tool calls carry the
+  owner's principal.
+- A display row (§4.7) of a user message may carry `sender`, the attested
+  module id of whoever sent it, where the runner recorded it
+  (`display::DisplayRow::sender`, `DisplayRow::with_sender`). Like
+  `client_message_id` it is kept beside the stored message, never in its
+  body or in the default `session.read` entry, whose readers decode stored
+  bodies strictly.
+- Runner-owned waits are recognized by `deadline_ms`, not by `reason` (§6,
+  §6.1, §7). A run in `active` or `paused` that carries `deadline_ms` is
+  in a wait the runner owns and ends by itself, whatever its `reason`; a
+  watchdog or owner must not nudge, stop or end it before `deadline_ms`,
+  and once that time has passed the run counts as ordinary silence again.
+  Callers should key on `deadline_ms` (the new
+  `run::RunStatus::runner_wait_until` returns it for such a run), never on
+  `reason`, which stays an open, display-only string, so a later wait kind
+  needs no watchdog change. A runner sets `deadline_ms` only during such a
+  wait, never on a run waiting for a caller, and never later than the
+  wait's own bound. The context-ceiling wait is the first such wait.
+- New known run `reason` `compaction_wait` (CONTRACT §6,
+  `run::RUN_REASON_COMPACTION_WAIT`, `RunReason::CompactionWait`,
+  `RunStatus::compaction_wait`). A runner holding a step for a rewrite ride
+  (compaction-provider's `ttl_expired`, `model_change` or `surface_change`)
+  reports it once the ride's answer has been pending for 1 s
+  (`run::COMPACTION_WAIT_REPORT_AFTER_MS`): the run stays `active` with
+  that reason and `deadline_ms`, the absolute time the ride's deadline
+  ends, on `run.status` and on a durable control event when the wait
+  starts; `session.head`'s run state, where served, carries the reason
+  only. Both go when the ride
+  resolves. A ride answered within 1 s is never reported. It is a
+  runner-owned wait, so a watchdog keys on its `deadline_ms`. How long the
+  ride may take is now the compaction provider's choice, within the
+  runner's cap (compaction-provider 0.5.1, Setup's `ride_wait_max_ms` and
+  `ride_wait_ms`). `context-ceiling.json` gains a `compaction_waiting`
+  section.
+- §9.7 gains informative caller guidance: a sender whose message only
+  makes sense inside the run in flight sets `expires_at_ms`, so a send that
+  cannot be delivered now does not land in a later run. It adds no runner
+  obligation. CONTRACT defines the `[informative]` marker it uses.
+- Vectors: `role-describe.json` accepts `run_cause` beside `live_events`
+  and refuses it alone; `live-events.json` gains `run_started` with
+  `send_id` and a `run_causes` section (a queued send, an interrupt, a host
+  turn without `send_id`); `display-requests.json` gains a page whose user
+  rows name their `sender`; `delivery-order.json` gains a sender granted
+  `interrupt`, a plan refused for a grant that is not a boolean, and a
+  `string_admission` section of send requests with a string `delivery`.
+  `SHA256SUMS` is updated.
+
 ## 0.5.1
 
 An additive release. Every new wire member is optional and left out when

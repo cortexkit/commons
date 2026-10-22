@@ -25,6 +25,8 @@ Every item is marked:
 - **[provisional]**: settled in substance, but its exact name or position
   depends on an unwritten section and may still change. Do not build
   against the spelling yet.
+- **[informative]**: guidance for callers. It adds no obligation on a
+  runner, and no conformance case checks it.
 
 A question the role's owner has settled keeps its number and is marked
 "settled" there; the items it governs are marked **[pinned]** here. In this
@@ -143,6 +145,7 @@ shipping runner with this document.
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
+| `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `run_cancel` | `run.cancel` | §6.2 |
@@ -203,6 +206,20 @@ shipping runner with this document.
   strictly and refuses the member. A consumer relies on the typed events of
   §7.1 only from a runner declaring `live_events`. `check_describe` checks
   each group for its op; none adds discovery metadata.
+- [pinned] `run_cause` is a group of its own (added in 0.5.2), declared
+  only beside `live_events`, whose `run_started` event it extends:
+  `check_describe` refuses it without that group by name
+  (`run_cause_without_live_events`) and checks it for `session.subscribe`.
+  It adds no discovery metadata. It is a group, not a bare optional member,
+  because absence has to mean something: from a runner before 0.5.2, a
+  `run_started` without `send_id` may only mean an older runner, while from
+  a runner declaring `run_cause` it means that no send started the run
+  (§7.1). A consumer that tells a person's turns from its own (the session
+  owner reads its own `send_id` as its own message, any other `send_id` as
+  another sender's, and an absent one as a person typing in the host)
+  relies on that reading only from a runner declaring the group. A runner
+  that cannot name the send that started a send-started run does not
+  declare it.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
@@ -705,7 +722,7 @@ display-ready row for an app's reader on a runner declaring
   `tags`, with the canonical `row` in place of `message`. It follows every
   rule of §4.6, and `DisplayPage::check` checks the ones a page shows.
 - [pinned] A row (`display::DisplayRow`) is `{role, text, parts, model?,
-  client_message_id?}`. `parts` keeps the stored message's order; each part
+  client_message_id?, sender?}`. `parts` keeps the stored message's order; each part
   is `{type, part, ...}`, where `part` is the stored part's key (a content
   block's index for `anthropic-messages`, the part's `id` for
   `opencode-aisdk`): `text {text}`, `reasoning {text}`, `tool_call
@@ -721,10 +738,21 @@ display-ready row for an app's reader on a runner declaring
   (`display::anthropic_messages`, `display::opencode_aisdk`, or
   `display::project` by name). A runner calls it on the entry's stored body
   and then fills what the body lacks: `model` (the model that wrote it,
-  carried by every assistant row; an `anthropic-messages` body names none)
-  and `client_message_id` (§9.11). The conformance kit checks that a served
-  row equals the function applied to the same entry's raw form, with only
-  those two members taken from the served row.
+  carried by every assistant row; an `anthropic-messages` body names none),
+  `client_message_id` (§9.11) and `sender` (below). The conformance kit
+  checks that a served row equals the function applied to the same entry's
+  raw form, with only those three members taken from the served row.
+- [pinned] **Who sent a message.** A user message's row may carry `sender`
+  (added in 0.5.2, `DisplayRow::with_sender`): the attested module id of the
+  caller whose send wrote the message (the route principal it arrived on,
+  the owner's or a plan-named sender's, §9.7), where the runner recorded it.
+  The runner keeps it beside the stored entry, as it keeps
+  `client_message_id`, and a runner on a host keeps it in its own
+  per-message record. A prompt typed into the host directly has none.
+  Neither `sender` nor `client_message_id` ever enters a stored message
+  body or the default `session.read` entry: a reader such as a compaction
+  provider decodes stored bodies strictly, and a member it does not know
+  would fail that decode.
 - [pinned] **Cuts.** `limits` bounds, in UTF-8 bytes, a tool call's
   `arguments` (`arguments_bytes`), a tool result's `content`
   (`result_bytes`) and an error result's `content` (`error_result_bytes`).
@@ -814,23 +842,52 @@ display-ready row for an app's reader on a runner declaring
   backoff to the model, or mark it unhealthy, for it. A send that would start
   or join a run while the context is already at or over the ceiling is
   refused `context_ceiling` instead, writing nothing (§9).
-- [pinned] **Waiting at the ceiling.** A run the runner holds at the
+- [pinned] **Runner-owned waits** (stated in general in 0.5.2). A run in
+  `active` or `paused` that carries `deadline_ms` (the absolute time, in
+  milliseconds since the Unix epoch, on `run.status` (§6.1) and on the
+  stream event that reports the wait (§7)) is in a wait the runner owns and
+  ends by itself, whatever its `reason`. A watchdog or owner MUST NOT nudge
+  it, stop it or end it before `deadline_ms`. Once `deadline_ms` has passed,
+  the run counts as ordinary silence again. A caller recognizes such a wait
+  by `deadline_ms`, never by `reason` (`RunStatus::runner_wait_until`):
+  `reason` stays an open, display-only string, so a wait kind added later
+  needs no watchdog change.
+  - A runner sets `deadline_ms` only while the run is in such a wait, never
+    on a run that waits for a caller (a `paused` run waiting for a retry
+    carries none), and never later than that wait's own bound.
+- [pinned] **Waiting at the ceiling** is the first such wait. A run the runner holds at the
   ceiling while it waits for a compaction view (up to the provider's bound,
   300 s, say) is waiting, not stalled. It stays in the non-terminal state
   `active` and names `reason: context_ceiling_wait`
   (`run::RUN_REASON_CONTEXT_CEILING_WAIT`, `RunReason::ContextCeilingWait`)
   on `run.status`, on `session.head`'s `last_run_state` and on the stream
-  event that reports the wait (§7), with `deadline_ms`, the absolute time
-  the wait ends in milliseconds since the Unix epoch, on `run.status`
+  event that reports the wait (§7), with `deadline_ms`, when the wait ends
+  at the latest, on `run.status`
   (`RunStatus::context_ceiling_wait`) and on that event. This reuses the
   shape a non-terminal run already uses to say why it is not moving, a
   state with an open `reason`, as `paused` does with `auth_required`; it is
   not `paused`, because a paused run waits for a caller's retry and changes
-  how sends behind it are admitted (§9), while this wait ends on its own. A
-  watchdog MUST NOT nudge or stop a run waiting this way before
+  how sends behind it are admitted (§9), while this wait ends on its own.
+  As a runner-owned wait, it is not nudged or stopped before
   `deadline_ms`. The wait ends in progress, when a view arrived (the reason
   and deadline are gone), or in the terminal `context_ceiling` state with
   `cause: view_timeout`.
+- [pinned] **Waiting for a rewrite ride** (added in 0.5.2) is another. A
+  runner holding a step for a rewrite ride (compaction-provider §8: cause
+  `ttl_expired`, `model_change` or `surface_change`) reports the wait once
+  the ride's answer has been pending for 1 s
+  (`run::COMPACTION_WAIT_REPORT_AFTER_MS`): the run stays `active` and names
+  `reason: compaction_wait` (`run::RUN_REASON_COMPACTION_WAIT`,
+  `RunReason::CompactionWait`) with `deadline_ms`, the absolute time the
+  ride's deadline ends (`RunStatus::compaction_wait`), on `run.status`, on
+  `session.head`'s `last_run_state` where served (the reason only), and on
+  a durable `control` event when the wait starts (§7). The reason and the
+  deadline go when the ride resolves: an answer, a refusal or the missed
+  deadline. A ride answered within 1 s is never reported, so a quick
+  `nothing` never shows. How long the ride may take is the compaction
+  provider's choice, within the runner's cap (compaction-provider §4
+  `ride_wait_max_ms` and `ride_wait_ms`); the user sees the wait instead of
+  a silent pause.
 - [pinned] A provider's own refusal of a request as too long is different:
   that is the provider refusing, and the run ends `error` with
   `provider_code: context_overflow` (§12.2). A runner reports
@@ -910,9 +967,11 @@ state, polled without reading the transcript.
   - `reason`, where the runner names one: why a paused run is paused, why
     an active run is waiting, or why an ended run ended. It is an open
     string; the known pause reasons are `auth_required` and `restart`, and
-    the known waiting reason is `context_ceiling_wait` (§6).
-  - `deadline_ms`: with `reason: context_ceiling_wait`, when the wait ends
-    (§6); absent otherwise.
+    the known waiting reasons are `context_ceiling_wait` and
+    `compaction_wait` (§6).
+  - `deadline_ms`: on an `active` or `paused` run in a wait the runner owns
+    and ends by itself, when that wait ends at the latest (§6, runner-owned
+    waits; `context_ceiling_wait` is one such wait); absent otherwise.
   - `error`: on a run that ended `error`, the same run error `run.result`
     answers (§6), with the same `provider_code` and `provider_detail_code`
     rules.
@@ -1167,10 +1226,14 @@ run's token usage whichever runner served it.
   later subscription may attach after; `display` events are best-effort and
   never replayed.
 - [pinned] A stream event that names why a run is paused or waiting uses
-  `reason`, an open string with known values `auth_required`, `restart` and
-  `context_ceiling_wait`, as `run.status` does (§6.1). A runner reports a
-  wait at the context ceiling with a durable `control` event carrying
-  `reason: context_ceiling_wait` and `deadline_ms` when the wait starts.
+  `reason`, an open, display-only string with known values `auth_required`,
+  `restart`, `context_ceiling_wait` and `compaction_wait`, as `run.status`
+  does (§6.1). A runner reports a wait it owns (§6, runner-owned waits) with a durable
+  `control` event carrying `deadline_ms` when the wait starts, beside the
+  wait's `reason`; a reader recognizes the wait by `deadline_ms`, never by
+  `reason`. A wait at the context ceiling is reported this way with
+  `reason: context_ceiling_wait`, and a step waiting on a rewrite ride with
+  `reason: compaction_wait`.
 
 ### 7.1 `live_events`: typed events on `session.subscribe`
 
@@ -1198,12 +1261,28 @@ new members.
     cut the call and it was never sent again, `denied` when an approval or a
     hook refused it); `output_bytes` is the byte length of the result's
     content uncut, as a display row's `tool_result.content` holds it.
-  - `run_started {run_id}`, `run_finished {run_id, reason}` with `reason` an
+  - `run_started {run_id, send_id?}`, `run_finished {run_id, reason}` with `reason` an
     open string (`live::run_reasons`: `completed`, `cancelled`,
     `interrupted`, `max_steps`, `error`, `budget_exhausted`,
     `context_ceiling`, ...), and `run_paused {run_id, reason}` for a run
     that stopped and can resume under the same `run_id`. A runner that never
     pauses never sends `run_paused`; a reader never requires it.
+  - `run_started` may carry `send_id`, the send that started the run
+    (`live::RunStarted::send_id`). On a runner declaring `run_cause` (added
+    in 0.5.2, §3):
+    - a run a queued send started names that send's own `send_id`, the one
+      its caller sent, never an id the runner made for its queue or
+      submission;
+    - a run an interrupt started (§9) names the interrupting send, never
+      the send of the run it interrupted;
+    - `send_id` is left out only for a turn the host started with no send:
+      a person's turn on an adopted session (§9.5). It is never an empty
+      string and never a guess;
+    - a run a named sender's send started names that send, as any send
+      (§9.7).
+    A runner that cannot name the send that started a send-started run does
+    not declare the group. On a runner without it, `send_id` may be absent
+    for any run, and its absence says nothing.
   - Times are milliseconds since the Unix epoch.
 - [pinned] **Display events** are best-effort and never replayed, in
   Broca's deployed shape `{kind: "display", event: {type, ...}}`:
@@ -1375,6 +1454,13 @@ new members.
 - [pinned] Owner sends use the session's frozen scope. A runner MAY admit
   unkeyed non-owner sends, without retry idempotency; otherwise any other
   caller is refused `scope_owner_mismatch`.
+- [pinned] **Authority stays the owner's** (stated in 0.5.2 for every
+  runner). A run that a non-owner's send starts or joins (a plan-named
+  sender's, §9.7, or an unkeyed non-owner send above) runs under the
+  session owner's authority: the owner's principal and the session's frozen
+  scope, never the sender's. Its tool calls carry the owner's principal. The
+  sender's identity decides only whether the send is admitted, and is
+  recorded beside the message it wrote (§4.7 `sender`).
 - [pinned] The `delivery` value is strict: an unknown mode is refused naming
   `delivery`, never read as `queue`. Except for the scoped closed `budget`
   rules on an `input_token_cap` runner (§9.3), the strict
@@ -1905,7 +1991,9 @@ without a prompt.
   the runner declares those groups. `directives` follow §9.9 unchanged: a
   run whose admission named no directive reports none, so a host turn
   reports one only where the host admits its turns with the names. It carries no `send_id`, and that is
-  how the owner tells it from its own runs: there is no origin field.
+  how the owner tells it from its own runs: there is no origin field. On a
+  runner declaring `run_cause` (§7.1), its `run_started` event is the one
+  `run_started` that carries no `send_id`.
 - [pinned] Drift: the runner computes the identity of the request's plan,
   the same identity admission uses for `plan_drift` (§10.1), and compares
   it with the identity of the plan it applied when the host started the
@@ -2474,13 +2562,15 @@ say who may send and which texts are system text.
 
 **Senders.**
 
-- [pinned] The plan's optional `senders: [{module, idle_start?,
+- [pinned] The plan's optional `senders: [{module, idle_start?, interrupt?,
   templates?}]` (`delivery_order::PlanSender`) names the modules other than
   the owner whose sends the session admits, and the templates each may use.
+  Each entry, its grants included, is frozen at admission with the plan.
   It is malformed (a module twice, a template id twice within a sender, a
   placeholder without a slot or a slot without a placeholder, an integer
   slot with `min` over `max`, an enum with no value, an unknown member or
-  slot type) or present on a runner without the group, and is then refused
+  slot type, a grant that is not a boolean) or present on a runner without
+  the group, and is then refused
   at admission `invalid_params {field: "plan.senders"}`, writing nothing
   (`delivery_order::check_plan`). The owner's own templates, when it has
   any, are an entry naming the owner.
@@ -2493,8 +2583,30 @@ say who may send and which texts are system text.
 - [pinned] A named sender may list `idle_start`, and so start a run, only
   when its entry grants `idle_start: true`; otherwise its list (or its
   string `queue` or `steer`, which stand for lists holding `idle_start`) is
-  refused `invalid_params {field: "delivery"}`. `interrupt` stays the
-  owner's.
+  refused `invalid_params {field: "delivery"}`. A sender granted
+  `idle_start` that sends the string `queue` or `steer` is admitted as its
+  list would be, never refused for being a string
+  (`delivery_order::admit_delivery`).
+- [pinned] **The interrupt grant** (added in 0.5.2). A named sender may send
+  the `interrupt` delivery string only when its entry grants `interrupt:
+  true` (`PlanSender::with_interrupt`); otherwise it is refused
+  `invalid_params {field: "delivery"}`, writing nothing, as an ungranted
+  `idle_start` is (`delivery_order::admit_delivery`). A granted interrupt
+  behaves exactly as the owner's does (§9): written durably first, then the
+  running turn cancelled, then its message started. The grant does not
+  grant `idle_start`, nor `idle_start` the interrupt. `interrupt` is not a
+  list mode and stays a string. Before 0.5.2 `interrupt` was the owner's
+  alone, which an entry without the grant still means.
+- [pinned] A run a named sender's send starts or joins runs under the
+  session owner's authority, never the sender's (§9).
+- [informative] **When a send stops making sense.** A sender whose message
+  only makes sense inside the run in flight (an app's steer into a worker,
+  say) sets `expires_at_ms` on its list. Without it, a list that cannot be
+  delivered now waits, queued, and may land in a later run long after it
+  stopped making sense. A send still undelivered at that time ends
+  `expired` and is never written, as the expiry rule above says. This is
+  guidance for senders, not a new runner obligation; how long to wait is
+  the sender's choice.
 
 ### 9.8 `send_status`: `send.status`
 

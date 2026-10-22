@@ -181,6 +181,32 @@
         ],
         "session_capabilities_from": "admission"
       }
+    },
+    {
+      "name": "run_cause declared beside live_events",
+      "declares": [
+        "live_events",
+        "run_cause"
+      ],
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.subscribe"
+            ]
+          }
+        ],
+        "implementation_version": "0.5.2",
+        "capabilities": [
+          "live_events",
+          "run_cause"
+        ],
+        "session_capabilities_from": "admission"
+      }
     }
   ],
   "canonical": [
@@ -574,6 +600,28 @@
         "implementation_version": "1",
         "capabilities": [
           "compaction"
+        ],
+        "session_capabilities_from": "admission"
+      }
+    },
+    {
+      "name": "run_cause declared without live_events",
+      "problem": "run_cause_without_live_events",
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "stability": "alpha",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.subscribe"
+            ]
+          }
+        ],
+        "implementation_version": "1",
+        "capabilities": [
+          "run_cause"
         ],
         "session_capabilities_from": "admission"
       }

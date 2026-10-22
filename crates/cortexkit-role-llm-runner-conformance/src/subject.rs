@@ -100,6 +100,10 @@ pub enum Capability {
     /// The `client_message_id` group: `client_message_id` on
     /// `session.send`, shown on the user message's display row.
     ClientMessageId,
+    /// The `run_cause` group: `send_id` on the live `run_started` event,
+    /// naming the send that started the run, absent only for a turn the
+    /// host started with no send.
+    RunCause,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -164,6 +168,7 @@ impl Capability {
         Self::HistoryDisplay,
         Self::LiveEvents,
         Self::ClientMessageId,
+        Self::RunCause,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -219,6 +224,7 @@ impl Capability {
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
             Self::LiveEvents => groups::LIVE_EVENTS,
             Self::ClientMessageId => groups::CLIENT_MESSAGE_ID,
+            Self::RunCause => groups::RUN_CAUSE,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
@@ -1211,6 +1217,37 @@ pub trait LlmRunnerSubject: Harness {
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "an observed prompt-cache lifetime is not implemented",
+        ))
+    }
+
+    /// The `ride_wait_max_ms` the runner's latest Setup request for
+    /// `session` carried, as the scripted compaction provider received it
+    /// (compaction-provider §4): `None` when the request carried none,
+    /// which means the runner does not honour provider-set ride waits. The
+    /// `ride_wait_` cases are inapplicable, by name, when this answers
+    /// `None` or an error.
+    async fn observed_ride_wait_max_ms(&self, _session: &str) -> Result<Option<u64>, HarnessError> {
+        Err(HarnessError::new(
+            "observing a Setup request's ride_wait_max_ms is not implemented",
+        ))
+    }
+
+    /// Make the scripted compaction provider of `session` answer the
+    /// session's next rewrite ride as `ride` says: after
+    /// `ride.answer_after_ms` milliseconds from the ride's arrival, with its
+    /// view or `nothing`; an answer later than the runner's deadline for the
+    /// ride is never seen, and the ride times out. Only that one ride
+    /// follows the script; every
+    /// other ride is answered as the scripted provider answers it without
+    /// one. The `ride_wait_` cases are inapplicable, by name, when this
+    /// answers an error.
+    async fn script_next_ride(
+        &self,
+        _session: &str,
+        _ride: crate::compaction::ScriptedRide,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "scripting a ride's answer is not implemented",
         ))
     }
 

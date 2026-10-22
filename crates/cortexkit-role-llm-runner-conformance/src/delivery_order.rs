@@ -53,6 +53,13 @@ where
     S::Route: RunnerRoute,
 {
     let required: &[Mode] = match name {
+        "delivery_order_ungranted_interrupt_refused"
+        | "delivery_order_granted_interrupt_interrupts" => {
+            let describe = case.checked_describe().await?;
+            return Ok((!describe.declares(groups::INTERRUPT))
+                .then(|| "role.describe does not declare interrupt".to_owned()));
+        }
+        "display_row_names_the_sender_never_in_read" => &[Mode::IdleStart],
         "delivery_order_declared_modes_respected" => &[],
         "delivery_order_first_possible_mode" => &[Mode::ToolResult, Mode::IdleStart],
         "delivery_order_retract_pending_tool_result" => &[Mode::ToolResult],
@@ -111,6 +118,11 @@ where
         "delivery_order_template_renders_as_system" => passed(template_renders(case).await),
         "delivery_order_bad_slot_refused" => passed(bad_slot(case).await),
         "delivery_order_template_part_gone_refused" => passed(part_gone(case).await),
+        "delivery_order_ungranted_interrupt_refused" => passed(ungranted_interrupt(case).await),
+        "delivery_order_granted_interrupt_interrupts" => granted_interrupt(case).await,
+        "delivery_order_named_sender_queue_string_admitted" => {
+            passed(named_queue_string(case).await)
+        }
         other => Err(format!("unknown delivery_order case {other}")),
     }
 }
@@ -231,6 +243,22 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    sender_session(case, label, turns, grant, false).await
+}
+
+/// [`ordered_session`], whose plan sender also holds the `interrupt` grant
+/// when `interrupt`.
+pub(crate) async fn sender_session<S>(
+    case: &Case<'_, S>,
+    label: &str,
+    turns: Vec<ScriptedTurn>,
+    grant: bool,
+    interrupt: bool,
+) -> Result<(Session<S::Route>, S::Route), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
     let mut all = vec![ScriptedTurn::new(vec![case.mint.text("opening-answer").0])];
     all.extend(turns);
     let mut session = case.open(label, Script { turns: all }).await?;
@@ -239,6 +267,9 @@ where
     let mut entry = PlanSender::new(&identity.module).with_templates(vec![template()]);
     if grant {
         entry = entry.with_idle_start();
+    }
+    if interrupt {
+        entry = entry.with_interrupt();
     }
     let mut members = Map::new();
     members.insert("senders".into(), json!([entry]));
@@ -1310,4 +1341,222 @@ where
         return Err(format!("after {what}, an entry went out as turn_system"));
     }
     Ok(())
+}
+
+/// The `delivery` member of a send carrying the string `mode`.
+fn string_delivery(mode: &str) -> Map<String, Value> {
+    [(FIELD.to_owned(), json!(mode))].into_iter().collect()
+}
+
+/// A plan sender whose entry grants `idle_start` but not `interrupt` sends
+/// the `interrupt` string: refused `invalid_params` naming `delivery`,
+/// writing nothing.
+async fn ungranted_interrupt<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (session, named) = ordered_session(
+        case,
+        "order-ungranted-interrupt",
+        vec![ScriptedTurn::new(vec![
+            case.mint.text("ungranted-answer").0,
+        ])],
+        true,
+    )
+    .await?;
+    let before = snapshot(&session.route).await?;
+    let marker = case.mint.next("ungranted-interrupt");
+    let what = "a plan sender without the interrupt grant sending interrupt";
+    let error = expect_error(
+        what,
+        call(
+            &named,
+            ops::SESSION_SEND,
+            params(
+                case,
+                &session,
+                None,
+                &marker,
+                &case.mint.next("send"),
+                &string_delivery(groups::INTERRUPT),
+            ),
+        )
+        .await?,
+    )?;
+    expect_field(what, &error, errors::INVALID_PARAMS, FIELD)?;
+    if !same(&before, &snapshot(&session.route).await?) {
+        return Err(format!("{what} was refused but changed the transcript"));
+    }
+    Ok(())
+}
+
+/// While the owner's run waits on a held model step, a plan sender granted
+/// `interrupt` sends the `interrupt` string: it is admitted, the run it
+/// interrupts ends `cancelled`, and its message starts a run that ends.
+async fn granted_interrupt<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (session, named) = sender_session(
+        case,
+        "order-granted-interrupt",
+        vec![
+            ScriptedTurn::new(vec![case.mint.text("held-answer").0]),
+            ScriptedTurn::new(vec![case.mint.text("interrupt-answer").0]),
+        ],
+        true,
+        true,
+    )
+    .await?;
+    if let Err(e) = case.subject.hold_next_model_step(&session.name).await {
+        return Ok(Ending::Inapplicable(format!(
+            "the adapter cannot hold a model step, so there is no running turn to interrupt: {e}"
+        )));
+    }
+    expect_ok(
+        "the owner's send whose model step is held",
+        call(
+            &session.route,
+            ops::SESSION_SEND,
+            params(
+                case,
+                &session,
+                None,
+                &case.mint.next("held-turn"),
+                &case.mint.next("send"),
+                &Map::new(),
+            ),
+        )
+        .await?,
+    )?;
+    case.subject
+        .await_model_step(&session.name)
+        .await
+        .map_err(|e| format!("waiting for the held model step: {e}"))?;
+    let held_run = head(&session.route)
+        .await?
+        .last_run_state
+        .map(|last| last.run_id)
+        .ok_or("the held turn has no run state")?;
+    let marker = case.mint.next("granted-interrupt");
+    let reply = call(
+        &named,
+        ops::SESSION_SEND,
+        params(
+            case,
+            &session,
+            None,
+            &marker,
+            &case.mint.next("send"),
+            &string_delivery(groups::INTERRUPT),
+        ),
+    )
+    .await;
+    // The interrupt aborts the held stream, so releasing it may find
+    // nothing left to release; the release only keeps a runner that did
+    // not interrupt from waiting forever.
+    let _ = case.subject.release_model_step(&session.name).await;
+    let what = "a plan sender granted interrupt sending interrupt";
+    let reply: SendReply = decode(
+        what,
+        expect_ok(what, reply?).map_err(|e| {
+            format!("{e}: a granted interrupt is admitted and behaves as the owner's")
+        })?,
+    )?;
+    let end = wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&held_run),
+        &reply,
+    )
+    .await?;
+    let interrupted = crate::drive::run_result(&session.route, &held_run).await?;
+    if interrupted.state != cortexkit_role_llm_runner::run::states::CANCELLED {
+        return Err(format!(
+            "the run {held_run} that {what} interrupted ended {}, not cancelled",
+            interrupted.state
+        ));
+    }
+    let (_, messages) = read_all(&session.route).await?;
+    match holding(&messages, &marker).as_slice() {
+        [entry]
+            if entry
+                .run
+                .as_ref()
+                .is_some_and(|run| run.run_id == end.run_id) =>
+        {
+            Ok(Ending::Passed)
+        }
+        other => Err(format!(
+            "{} entries hold the interrupting message, attributed to {:?}: it is written once, in \
+             the run it started ({})",
+            other.len(),
+            other.iter().map(|m| &m.run).collect::<Vec<_>>(),
+            end.run_id
+        )),
+    }
+}
+
+/// A plan sender granted `idle_start` sends the string `queue`, which stands
+/// for `[idle_start]`: it is admitted, and its message starts a run.
+async fn named_queue_string<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (session, named) = ordered_session(
+        case,
+        "order-named-queue",
+        vec![ScriptedTurn::new(vec![
+            case.mint.text("named-queue-answer").0,
+        ])],
+        true,
+    )
+    .await?;
+    let before = head(&session.route)
+        .await?
+        .last_run_state
+        .map(|last| last.run_id);
+    let marker = case.mint.next("named-queue");
+    let what = "a plan sender granted idle_start sending the string queue";
+    let reply: SendReply = decode(
+        what,
+        expect_ok(
+            what,
+            call(
+                &named,
+                ops::SESSION_SEND,
+                params(
+                    case,
+                    &session,
+                    None,
+                    &marker,
+                    &case.mint.next("send"),
+                    &string_delivery(groups::QUEUE),
+                ),
+            )
+            .await?,
+        )
+        .map_err(|e| {
+            format!("{e}: a named sender's string queue stands for [idle_start] and is admitted on its idle_start grant")
+        })?,
+    )?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        before.as_deref(),
+        &reply,
+    )
+    .await?;
+    let (_, messages) = read_all(&session.route).await?;
+    match holding(&messages, &marker).len() {
+        1 => Ok(()),
+        n => Err(format!(
+            "{n} entries hold the message of {what}: it is written exactly once"
+        )),
+    }
 }

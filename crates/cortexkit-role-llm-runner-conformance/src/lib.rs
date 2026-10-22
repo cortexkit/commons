@@ -93,6 +93,7 @@ mod live;
 mod media;
 mod report;
 mod retention;
+mod ride_wait;
 mod route;
 mod run_parameters;
 mod run_usage;
@@ -106,7 +107,7 @@ mod user_commands;
 
 pub use compaction::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
-    CompactionSetup, CompactionSetupIdentity, ScriptedRange, ScriptedView,
+    CompactionSetup, CompactionSetupIdentity, ScriptedRange, ScriptedRide, ScriptedView,
 };
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;

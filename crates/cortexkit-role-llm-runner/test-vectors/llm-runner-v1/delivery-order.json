@@ -837,10 +837,15 @@
           {
             "module": "broker",
             "idle_start": true
+          },
+          {
+            "module": "ck-thalamus",
+            "idle_start": true,
+            "interrupt": true
           }
         ]
       },
-      "senders": 2
+      "senders": 3
     },
     {
       "name": "absent is no sender",
@@ -881,6 +886,26 @@
           },
           {
             "module": "a"
+          }
+        ]
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "plan.senders"
+        }
+      }
+    },
+    {
+      "name": "an interrupt grant that is not a boolean",
+      "declares": [
+        "delivery_order"
+      ],
+      "plan": {
+        "senders": [
+          {
+            "module": "a",
+            "interrupt": "yes"
           }
         ]
       },
@@ -1135,6 +1160,118 @@
       },
       "refusal": {
         "code": "scope_owner_mismatch"
+      }
+    }
+  ],
+  "string_admission": [
+    {
+      "name": "the owner's interrupt",
+      "caller": "reserved:owner",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-owner-int",
+        "prompt": "stop and look at this",
+        "delivery": "interrupt"
+      }
+    },
+    {
+      "name": "a named sender granted interrupt interrupts as the owner does",
+      "caller": "ck-thalamus",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-app-int",
+        "prompt": "stop and look at this",
+        "delivery": "interrupt"
+      }
+    },
+    {
+      "name": "a named sender without the interrupt grant is refused",
+      "caller": "ck-mc",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-mc-int",
+        "prompt": "stop",
+        "delivery": "interrupt"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "delivery"
+        }
+      }
+    },
+    {
+      "name": "the idle_start grant does not grant interrupt",
+      "caller": "broker",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-broker-int",
+        "prompt": "stop",
+        "delivery": "interrupt"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "delivery"
+        }
+      }
+    },
+    {
+      "name": "an unnamed module's interrupt",
+      "caller": "stranger",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-stranger-int",
+        "prompt": "stop",
+        "delivery": "interrupt"
+      },
+      "refusal": {
+        "code": "scope_owner_mismatch"
+      }
+    },
+    {
+      "name": "a named sender granted idle_start sends the string queue",
+      "caller": "ck-thalamus",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-app-queue",
+        "prompt": "next, please",
+        "delivery": "queue"
+      }
+    },
+    {
+      "name": "a named sender granted idle_start sends the string steer",
+      "caller": "broker",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-broker-steer",
+        "prompt": "also this",
+        "delivery": "steer"
+      }
+    },
+    {
+      "name": "an absent delivery is queue, admitted on the idle_start grant",
+      "caller": "broker",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-broker-absent",
+        "prompt": "next"
+      }
+    },
+    {
+      "name": "a named sender without idle_start sends the string queue",
+      "caller": "ck-mc",
+      "owner": "reserved:owner",
+      "request": {
+        "send_id": "s-mc-queue",
+        "prompt": "next",
+        "delivery": "queue"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "delivery"
+        }
       }
     }
   ],

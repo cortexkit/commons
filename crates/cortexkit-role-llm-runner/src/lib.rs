@@ -50,7 +50,9 @@ pub mod user_commands;
 pub mod vectors;
 pub mod wire;
 
-pub use run::RUN_REASON_CONTEXT_CEILING_WAIT;
+pub use run::{
+    COMPACTION_WAIT_REPORT_AFTER_MS, RUN_REASON_COMPACTION_WAIT, RUN_REASON_CONTEXT_CEILING_WAIT,
+};
 
 pub use session_ref::session_ref;
 
@@ -164,6 +166,12 @@ pub mod capabilities {
     /// and shown on its display row. A caller never sends the member to a
     /// runner without the group, whose strict decoding may refuse it.
     pub const CLIENT_MESSAGE_ID: &str = "client_message_id";
+    /// `send_id` on the live `run_started` event: the send that started the
+    /// run, left out only for a turn the host started with no send. On a
+    /// runner declaring it, an absent `send_id` means no send started the
+    /// run; on any other runner it may only mean an older runner. Requires
+    /// [`LIVE_EVENTS`], whose event it extends.
+    pub const RUN_CAUSE: &str = "run_cause";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -277,6 +285,7 @@ pub mod capabilities {
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
+        (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (RUN_CANCEL, &[ops::RUN_CANCEL]),

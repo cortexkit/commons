@@ -8,8 +8,8 @@
 //! stored body to a row ([`anthropic_messages`], [`opencode_aisdk`], or
 //! [`project`] by profile name). A runner calls the projection and then fills
 //! the fields its stored body lacks ([`DisplayRow::with_model`],
-//! [`DisplayRow::with_client_message_id`]); a reader of several runners
-//! needs no runner's schema.
+//! [`DisplayRow::with_client_message_id`], [`DisplayRow::with_sender`]); a
+//! reader of several runners needs no runner's schema.
 //!
 //! Cuts are the caller's choice: [`Limits`] bounds tool-call arguments and
 //! tool results in bytes, cut back to a UTF-8 character boundary, with
@@ -103,6 +103,12 @@ pub struct DisplayRow {
     /// kept by the runner beside the stored body, never inside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<String>,
+    /// For a user message: the attested module id of whoever sent it (the
+    /// route principal the send arrived on), where the runner recorded it,
+    /// kept beside the stored body and never inside it. Absent for a prompt
+    /// a person typed into the host directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
 }
 
 impl DisplayRow {
@@ -118,6 +124,7 @@ impl DisplayRow {
             parts,
             model: None,
             client_message_id: None,
+            sender: None,
         }
     }
 
@@ -132,6 +139,12 @@ impl DisplayRow {
 
     pub fn with_client_message_id(mut self, id: impl Into<String>) -> Self {
         self.client_message_id = Some(id.into());
+        self
+    }
+
+    /// Name the module that sent this user message.
+    pub fn with_sender(mut self, module: impl Into<String>) -> Self {
+        self.sender = Some(module.into());
         self
     }
 }
@@ -1017,6 +1030,18 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let page: DisplayPage = vectors::round_trip(name, &case["page"]);
             assert_eq!(page.check(case["first_ordinal"].as_u64()), Ok(()), "{name}");
+            // Where a vector names each row's sender, the decoded row says
+            // the same; a row it leaves out names none.
+            if let Some(senders) = case.get("senders") {
+                for entry in &page.messages {
+                    assert_eq!(
+                        entry.row.sender.as_deref(),
+                        senders[entry.mid.as_str()].as_str(),
+                        "{name}: {}",
+                        entry.mid
+                    );
+                }
+            }
         }
         for case in vectors::cases(&file, "head_inputs") {
             let name = case["name"].as_str().unwrap();

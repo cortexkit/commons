@@ -453,6 +453,18 @@ fn ride_vectors() {
             RideCause::Unknown("provider_switch".into()),
         ]
     );
+    // A rewrite ride may wait as long as Setup's ride_wait_ms, up to five
+    // minutes: past the runner's own 10,000 ms default is no refusal.
+    for case in vectors::cases(ride, "long_deadline_requests") {
+        let request: RideRequest = vectors::round_trip(name(case), &case["params"]);
+        assert_eq!(request.check(), Ok(()), "{}", name(case));
+        assert!(
+            request.deadline_ms > crate::ride::MAX_REWRITE_RIDE_DEADLINE_MS
+                && request.deadline_ms <= crate::ride::MAX_RIDE_WAIT_MS,
+            "{}",
+            name(case)
+        );
+    }
     for case in vectors::cases(ride, "requests_refused") {
         let request: RideRequest = serde_json::from_value(case["params"].clone()).unwrap();
         assert_eq!(

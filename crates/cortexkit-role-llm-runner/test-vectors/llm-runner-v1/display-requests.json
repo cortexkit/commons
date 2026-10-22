@@ -134,6 +134,88 @@
           }
         ]
       }
+    },
+    {
+      "name": "user rows naming who sent them",
+      "first_ordinal": 0,
+      "senders": {
+        "m0": "ck-core",
+        "m2": "ck-thalamus"
+      },
+      "page": {
+        "lineage_id": "lin_1",
+        "history_version": 1,
+        "messages": [
+          {
+            "ordinal": 0,
+            "mid": "m0",
+            "written_at": 1790000000100,
+            "row": {
+              "role": "user",
+              "text": "wake: the build finished",
+              "sender": "ck-core",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "wake: the build finished"
+                }
+              ]
+            }
+          },
+          {
+            "ordinal": 1,
+            "mid": "m1",
+            "written_at": 1790000000200,
+            "row": {
+              "role": "assistant",
+              "text": "noted",
+              "model": "acme/model-1",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "noted"
+                }
+              ]
+            }
+          },
+          {
+            "ordinal": 2,
+            "mid": "m2",
+            "written_at": 1790000000300,
+            "row": {
+              "role": "user",
+              "text": "what changed?",
+              "client_message_id": "cm_2",
+              "sender": "ck-thalamus",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "what changed?"
+                }
+              ]
+            }
+          },
+          {
+            "ordinal": 3,
+            "mid": "m3",
+            "written_at": 1790000000400,
+            "row": {
+              "role": "user",
+              "text": "typed in the host's own app",
+              "parts": [
+                {
+                  "type": "text",
+                  "part": "0",
+                  "text": "typed in the host's own app"
+                }
+              ]
+            }
+          }
+        ]
+      }
     }
   ],
   "head_inputs": [
