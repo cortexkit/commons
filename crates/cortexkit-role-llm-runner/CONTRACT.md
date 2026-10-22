@@ -2511,7 +2511,11 @@ owes.
   which that contract defines (its §4 to §10) and this one does not restate:
   - Setup (`compaction.setup`), called once when a session starts. Its
     initial CompactionMessage is recorded before the first model call, and
-    once recorded Setup never runs again for the session;
+    Setup does not run again while the runner holds that record. A runner
+    that no longer holds it, as when a detected restore starts a new
+    lineage whose recorded Setup answer did not survive or that the runner
+    discards with the lost lineage (§9.6), calls Setup again before its
+    next model call, as after a failed Setup (compaction-provider §4);
   - advance notices on ck-bus after every committed transcript change the
     provider should see, from which the provider reads with `session.read`
     (§4) and `session.resolve` (§9.6);
@@ -2522,7 +2526,11 @@ owes.
   - rides (`compaction.ride`) when the runner's prefix is being rewritten
     anyway, and at the ceiling;
   - the ceiling Setup sets, with the `context_ceiling` refusal and run state
-    and the `context_ceiling_wait` status (§6);
+    and the `context_ceiling_wait` status (§6) wherever those surfaces are
+    served. A runner that serves none of them, such as one without
+    `run_ops` that fronts a host's own requests, reports the ceiling to its
+    host instead: the refused host request carries the window, the size and
+    the cause;
   - native markers, where the runner's host has them, kept outside the
     transcript (§4.2).
 - [pinned] It requires `tags` (§9.6): views address parts by their key and

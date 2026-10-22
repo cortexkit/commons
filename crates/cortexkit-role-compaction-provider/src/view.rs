@@ -164,6 +164,17 @@ impl ViewCut {
     }
 }
 
+/// Marks a provider may put in a view's `apply` member (CONTRACT.md §6,
+/// §7). Open: a view carrying another mark still decodes, and a runner that
+/// did not list that mark in Setup's `view_apply` refuses the view with
+/// [`crate::notice::refusal_reasons::UNSUPPORTED_APPLY`].
+pub mod apply_marks {
+    /// Apply the view at the runner's next step boundary, with any companion
+    /// edits the model provider requires there; defer it only when no
+    /// companion edit makes the request acceptable at that step.
+    pub const NEXT_STEP: &str = "next_step";
+}
+
 /// A view. Decoded leniently on fields; strict on each range's `kind`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -181,6 +192,12 @@ pub struct CompactionView {
     pub ranges: Vec<ViewRange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cut: Option<ViewCut>,
+    /// When the provider asks the runner to apply the view: one of
+    /// [`apply_marks`], or a mark this crate does not know. Absent means
+    /// unmarked: the runner chooses between deferring the view and applying
+    /// it with companion edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply: Option<String>,
     /// [`CompactionView::compute_digest`], lowercase hexadecimal.
     pub digest: String,
 }
@@ -279,6 +296,7 @@ impl CompactionView {
             covers_through,
             ranges,
             cut: None,
+            apply: None,
             digest: String::new(),
         };
         view.digest = view.compute_digest();
@@ -292,6 +310,14 @@ impl CompactionView {
         self
     }
 
+    /// Set the `apply` mark (one of [`apply_marks`]) and recompute the
+    /// digest.
+    pub fn with_apply(mut self, apply: impl Into<String>) -> Self {
+        self.apply = Some(apply.into());
+        self.digest = self.compute_digest();
+        self
+    }
+
     /// The view's digest. The input is a sequence of frames, each an 8-byte
     /// big-endian length followed by that many bytes: [`VIEW_DIGEST_DOMAIN`],
     /// `session_ref`, `view_version` in decimal, `lineage_id`,
@@ -301,8 +327,10 @@ impl CompactionView {
     /// number of its edits in decimal followed, for each edit in order, by its
     /// `ordinal` in decimal, its `mid`, its `part`, and either `bytes` and the
     /// bytes or `drop`; then, only when a cut is present, `cut`, its `cut_id`
-    /// and its `through_ordinal` in decimal. Lowercase hexadecimal SHA-256.
-    /// `digest` itself is not an input.
+    /// and its `through_ordinal` in decimal; then, only when an `apply` mark
+    /// is present, `apply` and the mark. Lowercase hexadecimal SHA-256.
+    /// `digest` itself is not an input. A view without a mark therefore has
+    /// the digest it had before the mark existed.
     pub fn compute_digest(&self) -> String {
         let mut hasher = Sha256::new();
         frame(&mut hasher, VIEW_DIGEST_DOMAIN.as_bytes());
@@ -347,6 +375,10 @@ impl CompactionView {
             frame(&mut hasher, b"cut");
             frame(&mut hasher, cut.cut_id.as_bytes());
             frame(&mut hasher, cut.through_ordinal.to_string().as_bytes());
+        }
+        if let Some(apply) = &self.apply {
+            frame(&mut hasher, b"apply");
+            frame(&mut hasher, apply.as_bytes());
         }
         finish(hasher)
     }

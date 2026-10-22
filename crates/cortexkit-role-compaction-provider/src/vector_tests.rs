@@ -15,10 +15,10 @@ use crate::{
         NoticeDescent, ViewReady,
     },
     ride::{Overflow, RideAnswer, RideCause, RideRequest},
-    setup::SetupAnswer,
+    setup::{SetupAnswer, SetupRequest},
     vectors,
     view::{
-        dispose_fetched, CompactionView, PartEdit, TranscriptMessage, ViewCut, ViewGetAnswer,
+        self, dispose_fetched, CompactionView, PartEdit, TranscriptMessage, ViewCut, ViewGetAnswer,
         ViewGetRequest, ViewRange,
     },
     OpRequest,
@@ -719,6 +719,92 @@ fn lost_runner_state_continues_under_a_new_lineage_and_resyncs() {
     );
     assert_eq!(outcome, DescentOutcome::Resync);
     assert_eq!(case["outcome"], "resync");
+}
+
+fn apply_view(key: &str) -> CompactionView {
+    let file = file();
+    let case = &file["view_apply"][key];
+    vectors::round_trip::<CompactionView>(name(case), &case["view"])
+}
+
+/// The marked view's digest, computed by the generator, frames `apply` and
+/// the mark: this crate computes the same value, it differs from the same
+/// view unmarked, and the builder reproduces the vector.
+#[test]
+fn a_marked_view_digest_covers_its_apply_mark() {
+    let marked = apply_view("marked");
+    let unmarked = apply_view("unmarked");
+    assert_eq!(marked.apply.as_deref(), Some(view::apply_marks::NEXT_STEP));
+    assert_eq!(marked.compute_digest(), marked.digest);
+    assert_eq!(marked.check(), Ok(()));
+    assert_ne!(marked.digest, unmarked.digest);
+    let built = unmarked.clone().with_apply(view::apply_marks::NEXT_STEP);
+    assert_eq!(built, marked);
+}
+
+/// A view without a mark is digested exactly as before the mark existed: the
+/// generator frames nothing for it, and removing the mark from the marked
+/// view gives back the unmarked view's digest. Every older view vector keeps
+/// its digest too (`views_check_and_assemble_as_recorded`).
+#[test]
+fn an_unmarked_view_keeps_the_digest_it_had_before_the_mark() {
+    let unmarked = apply_view("unmarked");
+    assert_eq!(unmarked.apply, None);
+    assert_eq!(unmarked.compute_digest(), unmarked.digest);
+    assert_eq!(unmarked.check(), Ok(()));
+    let encoded = serde_json::to_value(&unmarked).unwrap();
+    assert!(encoded.get("apply").is_none());
+    let mut stripped = apply_view("marked");
+    stripped.apply = None;
+    assert_eq!(stripped.compute_digest(), unmarked.digest);
+}
+
+/// A mark this crate does not define still decodes, round-trips and passes
+/// the view's own checks: refusing it with `unsupported_apply` is the
+/// runner's decision, made against the marks it listed in Setup.
+#[test]
+fn a_view_with_an_unknown_apply_mark_still_decodes() {
+    let unknown = apply_view("unknown_mark");
+    assert_eq!(unknown.apply.as_deref(), Some("when_idle"));
+    assert_eq!(unknown.check(), Ok(()));
+    assert_eq!(
+        notice::refusal_reasons::UNSUPPORTED_APPLY,
+        "unsupported_apply"
+    );
+    let refused = Event::ViewRefused {
+        view_version: unknown.view_version,
+        reason: notice::refusal_reasons::UNSUPPORTED_APPLY.into(),
+    };
+    assert_eq!(Event::parse(&refused.token()), Ok(refused));
+}
+
+/// Setup's `view_apply` round-trips and matches the builder; it is omitted
+/// when empty, and a name the provider does not know still decodes.
+#[test]
+fn setup_view_apply_round_trips() {
+    let file = file();
+    let case = &vectors::cases(&file["view_apply"], "setup_requests")[0];
+    let request = vectors::round_trip::<SetupRequest>(name(case), &case["request"]);
+    assert_eq!(request.view_apply, vec![view::apply_marks::NEXT_STEP]);
+    let composition = case["request"]["composition"].as_object().unwrap().clone();
+    let built = SetupRequest::new(
+        "ses_1",
+        "demo-harness",
+        "req-setup-2",
+        composition,
+        "acme/model-1",
+        1790000000000,
+    )
+    .with_view_apply(vec![view::apply_marks::NEXT_STEP.into()]);
+    assert_eq!(built, request);
+    let mut without = case["request"].clone();
+    without.as_object_mut().unwrap().remove("view_apply");
+    let plain = vectors::round_trip::<SetupRequest>("no view_apply", &without);
+    assert!(plain.view_apply.is_empty());
+    let mut unknown = case["request"].clone();
+    unknown["view_apply"] = serde_json::json!(["next_step", "when_idle"]);
+    let decoded: SetupRequest = serde_json::from_value(unknown).unwrap();
+    assert_eq!(decoded.view_apply, vec!["next_step", "when_idle"]);
 }
 
 #[test]

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.2
+
+- CONTRACT §7 states when a deferral ends: at the latest at the first step
+  of the session's next run. A steer, a delivered notice or a tool result
+  continues the running run, whoever sent it, so a step that starts from one
+  does not end a deferral, and a runner that can still defer a view does not
+  refuse it. The text said "the next step that starts from a user message",
+  which runners could read as including a steer.
+- §4 states that Setup runs again when a runner no longer holds its
+  recorded answer, as after a restore of its store. A provider already answers Setup
+  for a session it has seen before.
+- A view may carry an optional `apply` mark (`CompactionView::apply`,
+  `view::apply_marks`). The one mark defined, `next_step`, asks the runner to
+  apply the view at its next step boundary, with the companion edits the
+  model provider accepts there, and to defer only when no such edit exists.
+  The provider decides when holding a view back costs more than stripping
+  signed reasoning; the runner still decides what its model provider
+  accepts. An unmarked view behaves as before. An informative note in §7
+  records the measured models on which a marked view can apply mid-run with
+  `strip_signed_reasoning`.
+- Setup gains an optional `view_apply` list (`SetupRequest::view_apply`,
+  `with_view_apply`): the marks the runner honors for the session. A
+  provider marks a view only with a listed mark, and a runner refuses a view
+  whose mark it did not list with the new refusal reason
+  `unsupported_apply` (`notice::refusal_reasons::UNSUPPORTED_APPLY`).
+- When `apply` is present, the view digest frames `apply` and the mark after
+  the cut. A view without it keeps its digest, so every existing view and
+  vector keeps its bytes. `async.json` adds a `view_apply` section: a marked
+  view, the same view unmarked with a different digest, a view with a mark
+  this crate does not define, and a Setup request carrying `view_apply`.
+
 ## 0.4.1
 
 - The contract states the reply shape: a `RESPONSE` body is the bare answer

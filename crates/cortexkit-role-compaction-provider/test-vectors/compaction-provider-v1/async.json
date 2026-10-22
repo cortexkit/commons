@@ -5250,5 +5250,142 @@
       }
     ],
     "outcome": "resync"
+  },
+  "view_apply": {
+    "marked": {
+      "name": "a view marked to apply at the next step",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 7,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 5,
+          "mid": "m5"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 6,
+            "edits": [
+              {
+                "ordinal": 4,
+                "mid": "m4",
+                "part": "prt_4a",
+                "bytes": "{\"type\":\"text\",\"text\":\"Fixed: the parser dropped trailing commas.\"}"
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-4",
+          "through_ordinal": 1
+        },
+        "apply": "next_step",
+        "digest": "790aaadad8838ad1d46428b1b4310cdeb75f5abffe482803d49241b3e768b87d"
+      }
+    },
+    "unmarked": {
+      "name": "the same view unmarked",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 7,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 5,
+          "mid": "m5"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 6,
+            "edits": [
+              {
+                "ordinal": 4,
+                "mid": "m4",
+                "part": "prt_4a",
+                "bytes": "{\"type\":\"text\",\"text\":\"Fixed: the parser dropped trailing commas.\"}"
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-4",
+          "through_ordinal": 1
+        },
+        "digest": "74297f80146ef7d19c3d22884277598e5750ade558423f26e4c356807c2c8b14"
+      }
+    },
+    "unknown_mark": {
+      "name": "a mark this crate does not define decodes; the runner refuses it unsupported_apply",
+      "view": {
+        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "view_version": 7,
+        "lineage_id": "lin_a",
+        "covers_through": {
+          "ordinal": 5,
+          "mid": "m5"
+        },
+        "ranges": [
+          {
+            "kind": "replace",
+            "from": 0,
+            "to": 2,
+            "bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<session-history>The user asked to fix the parser.</session-history>\"}]}]"
+          },
+          {
+            "kind": "keep",
+            "from": 2,
+            "to": 6,
+            "edits": [
+              {
+                "ordinal": 4,
+                "mid": "m4",
+                "part": "prt_4a",
+                "bytes": "{\"type\":\"text\",\"text\":\"Fixed: the parser dropped trailing commas.\"}"
+              }
+            ]
+          }
+        ],
+        "cut": {
+          "cut_id": "cut-4",
+          "through_ordinal": 1
+        },
+        "apply": "when_idle",
+        "digest": "8d310c6c42b1ddb48cbf4a4702f2fa0b79e5248d10a7efc5a683d0917560cec1"
+      }
+    },
+    "setup_requests": [
+      {
+        "name": "Setup listing the apply marks the runner honors",
+        "request": {
+          "session": "ses_1",
+          "harness": "demo-harness",
+          "request_id": "req-setup-2",
+          "params": {},
+          "composition": {
+            "providers": []
+          },
+          "model": "acme/model-1",
+          "now": 1790000000000,
+          "view_apply": [
+            "next_step"
+          ]
+        }
+      }
+    ]
   }
 }

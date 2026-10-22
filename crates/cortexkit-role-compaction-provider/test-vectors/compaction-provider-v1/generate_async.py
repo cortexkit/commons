@@ -113,14 +113,18 @@ def view_digest(v):
                 parts += ["bytes", e["bytes"]] if "bytes" in e else ["drop"]
     if "cut" in v:
         parts += ["cut", v["cut"]["cut_id"], str(v["cut"]["through_ordinal"])]
+    if "apply" in v:
+        parts += ["apply", v["apply"]]
     return framed(parts)
 
 
-def view(version, through, ranges, cut=None, lineage="lin_a", digest=None):
+def view(version, through, ranges, cut=None, lineage="lin_a", digest=None, apply=None):
     v = {"session_ref": SR, "view_version": version, "lineage_id": lineage,
          "covers_through": {"ordinal": through, "mid": M[through][0]}, "ranges": ranges}
     if cut:
         v["cut"] = cut
+    if apply is not None:
+        v["apply"] = apply
     v["digest"] = digest or view_digest(v)
     return v
 
@@ -564,6 +568,32 @@ id_collision = {
     "view_ready_id": f"{SR}:view_ready:3",
 }
 
+# The optional `apply` mark. A marked view's digest frames `apply` and the
+# mark after the cut; the same view unmarked keeps the digest it would have
+# had before the mark existed, so the two digests differ. A mark this crate
+# does not define still decodes and checks: refusing it is the runner's call.
+MARKED_RANGES = [replace(0, 2, HEAD), keep(2, 6, [edit(4, "prt_4a", part=COMPRESSED_PART)])]
+MARKED_CUT = {"cut_id": "cut-4", "through_ordinal": 1}
+V7_MARKED = view(7, 5, MARKED_RANGES, cut=MARKED_CUT, apply="next_step")
+V7_UNMARKED = view(7, 5, MARKED_RANGES, cut=MARKED_CUT)
+V7_UNKNOWN_MARK = view(7, 5, MARKED_RANGES, cut=MARKED_CUT, apply="when_idle")
+assert V7_MARKED["digest"] != V7_UNMARKED["digest"]
+
+view_apply = {
+    "marked": {"name": "a view marked to apply at the next step", "view": V7_MARKED},
+    "unmarked": {"name": "the same view unmarked", "view": V7_UNMARKED},
+    "unknown_mark": {"name": "a mark this crate does not define decodes; the runner refuses it unsupported_apply",
+                     "view": V7_UNKNOWN_MARK},
+    "setup_requests": [{
+        "name": "Setup listing the apply marks the runner honors",
+        "request": {
+            "session": "ses_1", "harness": "demo-harness", "request_id": "req-setup-2", "params": {},
+            "composition": {"providers": []}, "model": "acme/model-1", "now": 1790000000000,
+            "view_apply": ["next_step"],
+        },
+    }],
+}
+
 doc = {
     "session": {"harness": "opencode", "project_root": "/work/demo", "session": "ses_1", "session_ref": SR,
                 "account": ACCT, "runner_module_id": RUNNER, "provider_module_id": PROVIDER},
@@ -584,6 +614,7 @@ doc = {
     "descent": descent,
     "id_collision": id_collision,
     "state_loss": state_loss,
+    "view_apply": view_apply,
 }
 
 with open(OUT, "w") as f:

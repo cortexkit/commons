@@ -6,8 +6,10 @@
 //! Setup returns the initial CompactionMessage, which the runner renders
 //! until it applies the session's first view (a provider with no head
 //! returns an empty replacement), and optionally the ceiling policy. The
-//! runner records the answer before the first model call; once it is
-//! recorded, Setup never runs again for the session.
+//! runner records the answer before the first model call, and Setup does not
+//! run again while the runner holds that record; a runner that no longer
+//! holds it (after a restore of its store, say) calls Setup again before its
+//! next model call.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -72,6 +74,12 @@ pub struct SetupRequest {
     pub newest: Option<MessageRef>,
     /// The runner's clock, in milliseconds since the Unix epoch.
     pub now: u64,
+    /// The view `apply` marks the runner honors for this session
+    /// (`view::apply_marks`), each listed once. A provider puts on a view
+    /// only a mark listed here, and ignores names it does not know. Omitted
+    /// when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub view_apply: Vec<String>,
 }
 
 impl SetupRequest {
@@ -98,6 +106,7 @@ impl SetupRequest {
             output_limit: None,
             newest: None,
             now,
+            view_apply: Vec::new(),
         }
     }
 
@@ -132,6 +141,12 @@ impl SetupRequest {
 
     pub fn with_newest(mut self, newest: MessageRef) -> Self {
         self.newest = Some(newest);
+        self
+    }
+
+    /// Set the view `apply` marks the runner honors for this session.
+    pub fn with_view_apply(mut self, view_apply: Vec<String>) -> Self {
+        self.view_apply = view_apply;
         self
     }
 }

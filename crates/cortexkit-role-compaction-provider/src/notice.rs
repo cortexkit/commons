@@ -176,6 +176,9 @@ pub mod refusal_reasons {
     /// The current model provider's rules forbid applying the view now, and
     /// the runner can neither defer it nor apply it with companion edits.
     pub const PROVIDER_CONSTRAINT: &str = "provider_constraint";
+    /// The view carries an `apply` mark the runner did not list in Setup's
+    /// `view_apply` for the session.
+    pub const UNSUPPORTED_APPLY: &str = "unsupported_apply";
 }
 
 /// Reasons a runner gives in `view_deferred`. Open, like the refusal
@@ -224,8 +227,11 @@ pub enum Event {
     ViewRefused { view_version: u64, reason: String },
     /// `view_deferred:<view_version>:<reason>`: the runner holds this view
     /// until a step boundary where applying it is safe for the current model
-    /// provider, and keeps rendering its current one meanwhile. `reason` is
-    /// one of [`defer_reasons`] or another word of the same form.
+    /// provider, at the latest the first step of the session's next run, and
+    /// keeps rendering its current one meanwhile. A view marked `apply:
+    /// "next_step"` is deferred only when no companion edit makes it
+    /// acceptable to the model provider at that step. `reason` is one of
+    /// [`defer_reasons`] or another word of the same form.
     ViewDeferred { view_version: u64, reason: String },
     /// `view_companion:<view_version>:<edit>`: the runner applied this view
     /// together with a companion edit the model provider requires. `edit` is

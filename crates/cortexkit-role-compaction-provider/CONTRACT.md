@@ -173,8 +173,10 @@ the session and freezes that plan for use.
 ## 4. `compaction.setup`
 
 - [pinned] Called once per session, before its first model call. Its answer
-  is recorded before the first model call; once recorded, Setup never runs
-  again for the session.
+  is recorded before the first model call, and Setup does not run again
+  while the runner holds that record. A runner that no longer holds it
+  (after a restore of its store, say) calls Setup again before its next
+  model call, as after a failed Setup below.
 - [pinned] If Setup fails or times out with no answer, no model call is
   made and the run ends `error` with `provider_code`
   `compaction_unavailable`, `llm-runner/v1`'s code, which this crate
@@ -186,13 +188,18 @@ the session and freezes that plan for use.
   answered last time (kill point `SetupRecorded`).
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
   preset?, params, composition, model, variant?, context_window?,
-  output_limit?, newest?, lineage_id?, descends_from?, now}`. `model` is a
-  string; `variant`, `context_window` and `output_limit` are sibling fields,
-  not a nested model object. `params` defaults to `{}`; an absent `preset`
-  selects the provider's default. `composition` is an opaque object passed
-  verbatim. `newest` is `{ordinal, mid}` when a message is already written;
-  `lineage_id` is absent when no lineage exists. `now` is milliseconds since
-  the Unix epoch.
+  output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?}`.
+  `model` is a string; `variant`, `context_window` and `output_limit` are
+  sibling fields, not a nested model object. `params` defaults to `{}`; an
+  absent `preset` selects the provider's default. `composition` is an opaque
+  object passed verbatim. `newest` is `{ordinal, mid}` when a message is
+  already written; `lineage_id` is absent when no lineage exists. `now` is
+  milliseconds since the Unix epoch.
+- [pinned] Optional `view_apply` is the list of view `apply` marks (§6) the
+  runner honors for this session, each listed once; it is omitted when
+  empty, and an absent list honors none. A provider puts on a view only a
+  mark listed here (§7) and ignores names it does not know. Setup decodes
+  leniently (§14), so a provider that predates the member ignores it.
 - [pinned] Before accepting Setup, the provider checks whether the incoming
   route is bound to a single session. If its bind session is non-empty and
   differs from Setup's session, the provider may refuse with the named,
@@ -335,7 +342,7 @@ provider.
 | `revert_below:<ordinal>` | the transcript was truncated; every message at `ordinal` or above is gone |
 | `marker_outcome:<applied\|deferred\|unknown>:<cut_id>` | the host's native compaction marker for the cut of the view named by `applied_view_version` in the same notice (§9). `cut_id` is 1 to 64 bytes of `[A-Za-z0-9._-]` |
 | `view_discarded:<view_version>` | the runner discarded that view because its coverage is no longer a prefix of the transcript; always with `revert_below` in the same notice |
-| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§7). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
+| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§7). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, `unsupported_apply`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
 | `view_deferred:<view_version>:<reason>` | the runner holds that view until a step boundary where applying it is safe for the current model provider, and keeps rendering its current one meanwhile (§7). `reason` has the same form: `signed_reasoning`, or another (`notice::defer_reasons`) |
 | `view_companion:<view_version>:<edit>` | the runner applied that view together with a companion edit the model provider requires, and nothing more (§7). `edit` has the same form: `strip_signed_reasoning`, or another (`notice::companion_edits`) |
 
@@ -490,12 +497,12 @@ provider.
 ## 6. Views: provider to runner
 
 - [pinned] A view (`view::CompactionView`) is `{session_ref, view_version,
-  lineage_id, covers_through: {ordinal, mid}, ranges, cut?, digest}`. It is
-  the provider's preferred shape for the prefix of the transcript through
-  message `covers_through`. Every message after it goes out unchanged. A view
-  never replaces or rewrites the runner's transcript or the records in its
-  write-ahead log, so a session can later switch to another compaction
-  provider, or to none, with its history intact.
+  lineage_id, covers_through: {ordinal, mid}, ranges, cut?, apply?,
+  digest}`. It is the provider's preferred shape for the prefix of the
+  transcript through message `covers_through`. Every message after it goes
+  out unchanged. A view never replaces or rewrites the runner's transcript
+  or the records in its write-ahead log, so a session can later switch to
+  another compaction provider, or to none, with its history intact.
 - [pinned] `ranges` (`view::ViewRange`) are half-open over ordinals of
   `lineage_id`, `from` included and `to` excluded, the convention of a
   CompactionMessage (§4). Together they tile `[0, covers_through.ordinal +
@@ -534,6 +541,12 @@ provider.
   the point through which the provider's replacements stand for the whole
   transcript. It lies on a range boundary within the coverage, with only
   replace ranges before it (§9).
+- [pinned] Optional `apply` (`view::apply_marks`) is a mark asking the
+  runner when to apply the view. Absent means unmarked. The only mark
+  defined is `next_step`: apply the view at the runner's next step boundary
+  (§7). A provider sends only a mark the runner listed in Setup's
+  `view_apply` (§4). Another mark still decodes, and the runner refuses the
+  view (§7). `apply` is omitted when absent.
 - [pinned] `view_version` is a `u64` from 1, raised for every view of the
   session, including ride views. It is never reused across a provider
   restart: the provider resumes above both the highest version it published
@@ -548,8 +561,9 @@ provider.
   `keep`, the number of its edits in decimal followed, for each edit in
   order, by its `ordinal` in decimal, its `mid`, its `part`, and either
   `bytes` and the edit's bytes or `drop`; then, only when a cut is present,
-  `cut`, its `cut_id` and its `through_ordinal` in decimal. `digest` itself
-  is not an input.
+  `cut`, its `cut_id` and its `through_ordinal` in decimal; then, only when
+  `apply` is present, `apply` and the mark. `digest` itself is not an input.
+  A view without `apply` has the digest it had before the member existed.
 - [pinned] A view is well formed (`CompactionView::check`) when, checked in
   this order: `session_ref` is a session reference (`session_ref`);
   `view_version` is not 0 (`version_zero`); `digest` is lowercase hexadecimal
@@ -642,10 +656,42 @@ provider.
     a model that binds signed reasoning to its prefix requires.
   A runner that can do neither refuses the view with
   `view_refused:<version>:provider_constraint`.
-- [pinned] A deferral lasts no later than the next step that starts from a
-  user message: at that step the runner applies the view (with companion
-  edits if the model provider requires them) or refuses it with
-  `view_refused:<version>:provider_constraint`; it never keeps deferring.
+- [pinned] A deferral lasts no later than the first step of the session's
+  next run. At that step the runner applies the view (with companion edits
+  if the model provider requires them) or refuses it with
+  `view_refused:<version>:provider_constraint`; it never keeps deferring
+  past it. A steer, a delivered notice or a tool result continues the
+  running run, whoever sent it, so a step that starts from one does not end
+  a deferral. A runner that can still defer a view does not refuse it.
+- [pinned] For an unmarked view the runner chooses between Defer and
+  Companion edits. A view marked `apply: "next_step"` (§6) applies at the
+  runner's next step boundary: if the model provider forbids applying it as
+  it stands there, the runner applies it with companion edits that provider
+  accepts at that step and reports `view_companion`. It defers only when no
+  companion edit it can make gives a request the provider accepts at that
+  step, and that deferral then ends as above. The refusals below apply to a
+  marked view as to any other.
+- [pinned] A provider marks a view only with a mark the runner listed in
+  Setup's `view_apply` for the session (§4). A runner refuses a view whose
+  `apply` it did not list with `view_refused:<version>:unsupported_apply`.
+- The mark splits the decision between the two sides: the provider knows
+  when holding a view back costs more than stripping signed reasoning, so
+  it decides when a hold should lift, and the runner knows what its model
+  provider accepts, so it decides which companion edits make the request
+  valid.
+- Informative, not a rule. Measured in October 2026 on the Anthropic
+  Messages API; facts for other model providers and families are added as
+  they are measured. `claude-opus-5-5`, `claude-sonnet-5-5`,
+  `claude-fable-5-1` and `claude-haiku-5-5` each accept a step inside a tool
+  loop whose history has every signed thinking block removed, the last
+  assistant message's included, with thinking set to `adaptive` or to
+  budget-style `enabled`; the prompt cache still served the prefix before
+  the first changed byte. A runner on any of them can therefore apply a
+  marked view mid-run with `strip_signed_reasoning`. Turning thinking off
+  for one step is not an alternative: Opus 5.5, Sonnet 5.5 and Fable 5.1
+  refuse `thinking.type: disabled`, and Haiku 5.5 accepts it but loses the
+  whole cached prefix, because the thinking setting is part of the cache
+  key.
 - [pinned] The runner also refuses a view, reporting
   `view_refused:<version>:<reason>` on its next notice and keeping its
   current view, when applying it would separate a tool call from its result
@@ -898,15 +944,16 @@ terminal behavior per message.
   cannot act on an answer it does not understand, and each view range's
   `kind`. Values a runner may grow are decoded open: ride `cause`, unknown
   event tokens, the reasons and edits in `view_refused`, `view_deferred` and
-  `view_companion`, `view.get` refusal codes, and a refusal's
-  `provider_code`. So is a refusal's `code`, whose unknown values are never
-  retried (§10).
+  `view_companion`, a view's `apply` mark and the names in Setup's
+  `view_apply`, `view.get` refusal codes, and a refusal's `provider_code`.
+  So is a refusal's `code`, whose unknown values are never retried (§10).
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
-- [pinned] Setup's `descends_from` and the answer's `ceiling` default to
-  absent and are omitted when absent. A present `descends_from` requires
-  string `lineage_id` and `u64` `through_ordinal`.
+- [pinned] Setup's `descends_from` and `view_apply`, a view's `apply`, and
+  the answer's `ceiling` default to absent and are omitted when absent. A
+  present `descends_from` requires string `lineage_id` and `u64`
+  `through_ordinal`.
 
 ## 15. Crash and durability guarantees
 

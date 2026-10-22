@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.3
+
+Contract text only; no code, wire or vector changes.
+
+- §11.1: the ceiling's run state and `context_ceiling_wait` status apply
+  wherever those surfaces are served. A runner that serves none of them,
+  such as one without `run_ops` that fronts a host's own requests, reports
+  the ceiling to its host, and the refused host request carries the window,
+  the size and the cause.
+- §11.1: Setup does not run again while the runner holds its recorded
+  answer. A runner that no longer holds it, as when a detected restore
+  starts a new lineage whose recorded answer did not survive or that the
+  runner discards with the lost lineage, calls Setup again before its next
+  model call.
+
 ## 0.4.2
 
 - Correct the descriptor-mode resolve vector: it previously resolved a
