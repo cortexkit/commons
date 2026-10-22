@@ -876,6 +876,19 @@ verified and unverified rows and all unverified ids, rather than claiming that
 every exact test name was verified. Missing listing support is not a check error;
 a broken declared listing command is.
 
+Use **`ckdev-mutate check --anchors-only` locally** for the fast gate: it validates
+the catalogue and every row's mutation anchor, but does not list test names or
+start Cargo/rustc. Run the full `ckdev-mutate check` on the build server or in CI
+to verify test names. Anchors-only mode reports that names were not checked so
+its output cannot be mistaken for the full check.
+
+Use **`ckdev-mutate check --platform <linux|macos|windows>`** to check test names
+only for rows whose `platforms` field includes that operating system; rows with no
+`platforms` field apply to every platform. Anchors are checked for all rows,
+including skipped rows. The output counts platform-skipped rows and explains why;
+add `-v` to list each skipped row and its reason. Without `--platform`, `check`
+continues to use the current host and keeps its existing output.
+
 Use **`ckdev-mutate check --strict`** as a CI gate to require listing support.
 It exits nonzero if any active command row lacks `list_command`, reporting
 `command row has no list_command` and every offending row id. Rows skipped because

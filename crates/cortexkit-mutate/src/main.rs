@@ -27,10 +27,21 @@ struct Cli {
 #[derive(Subcommand)]
 enum Action {
     /// Validate anchors and exact full test names without mutating source.
+    ///
+    /// Use --anchors-only locally for the fast, no-build gate; run the full check on the build server or in CI.
     Check {
         /// Refuse active command rows without list_command; legitimate skipped rows are exempt.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "anchors_only")]
         strict: bool,
+        /// Check anchors only, without starting Cargo or checking test names.
+        #[arg(long, conflicts_with_all = ["strict", "platform"])]
+        anchors_only: bool,
+        /// Check test names only for rows assigned to this operating system.
+        #[arg(long, value_parser = ["linux", "macos", "windows"], conflicts_with = "anchors_only")]
+        platform: Option<String>,
+        /// List each row skipped because its platform does not match --platform.
+        #[arg(short, long)]
+        verbose: bool,
     },
     /// Replay selected catalogue rows.
     Run {
@@ -668,7 +679,12 @@ fn run() -> Result<bool> {
     let _lock = TreeLock::acquire(&root)?;
     let stop = signal_flag()?;
     match cli.command {
-        Action::Check { strict } => {
+        Action::Check {
+            strict,
+            anchors_only,
+            platform,
+            verbose,
+        } => {
             let catalogue = load(&catalogue_path)?;
             validate(&root, &catalogue)?;
             let failures = anchor_failures(&root, &catalogue)?;
@@ -683,19 +699,62 @@ fn run() -> Result<bool> {
                     if failures.len() == 1 { "row" } else { "rows" }
                 ));
             }
-            let report = check(&root, &catalogue, &stop)?;
+            if anchors_only {
+                println!(
+                    "Test names were not checked (--anchors-only); catalogue anchors checked for {} rows.",
+                    catalogue.control.len()
+                );
+                return Ok(true);
+            }
+            let report = if let Some(platform) = platform.as_deref() {
+                check_for_platform(&root, &catalogue, &stop, Some(platform))?
+            } else {
+                check(&root, &catalogue, &stop)?
+            };
+            let platform_skips = report
+                .not_verified
+                .iter()
+                .filter(|(_, reason)| reason.starts_with("platform does not match --platform "))
+                .collect::<Vec<_>>();
+            if let Some(platform) = platform.as_deref() {
+                if !platform_skips.is_empty() {
+                    let row_word = if platform_skips.len() == 1 {
+                        "row"
+                    } else {
+                        "rows"
+                    };
+                    let listing = if verbose {
+                        String::new()
+                    } else if platform_skips.len() == 1 {
+                        "; use -v to list it".to_owned()
+                    } else {
+                        "; use -v to list them".to_owned()
+                    };
+                    println!(
+                        "Skipped {} {row_word} for platform mismatch (--platform {platform}){listing}",
+                        platform_skips.len()
+                    );
+                }
+            }
             for (id, reason) in &report.not_verified {
+                let is_platform_skip = reason.starts_with("platform does not match --platform ");
+                if is_platform_skip && !verbose {
+                    continue;
+                }
                 println!("{id}: test names not verified: {reason}");
             }
             let ids = report
                 .not_verified
                 .iter()
+                .filter(|(_, reason)| {
+                    verbose || !reason.starts_with("platform does not match --platform ")
+                })
                 .map(|(id, _)| id.as_str())
                 .collect::<Vec<_>>();
             println!(
                 "Catalogue anchors checked; verified {} rows; {} rows not verified{}",
                 report.verified.len(),
-                ids.len(),
+                report.not_verified.len(),
                 if ids.is_empty() {
                     String::new()
                 } else {

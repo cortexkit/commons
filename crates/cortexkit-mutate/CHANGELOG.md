@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.8
+
+- Add `check --anchors-only` for a fast local gate that validates catalogue
+  structure and mutation anchors without running configured prebuild commands,
+  invoking Cargo, or checking test names. Use the full `check` on the Linux build
+  server or in CI to run prebuilds and verify test names.
+- Add `check --platform <linux|macos|windows>` to list and verify names only for
+  rows whose `platforms` includes the selected OS; rows without `platforms` apply
+  to every OS. Anchors remain checked for every row. Platform-skipped rows are
+  counted, with `-v` showing their ids and reasons.
+
 ## 0.12.7
 
 - `check` now reports every catalogue row whose anchor fails, not just the

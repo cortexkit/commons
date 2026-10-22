@@ -303,9 +303,13 @@ impl Control {
     }
 
     pub fn matches_platform(&self) -> bool {
+        self.matches_platform_on(std::env::consts::OS)
+    }
+
+    fn matches_platform_on(&self, platform: &str) -> bool {
         self.platforms
             .as_ref()
-            .is_none_or(|names| names.iter().any(|name| name == std::env::consts::OS))
+            .is_none_or(|names| names.iter().any(|name| name == platform))
     }
 
     fn validate_platforms(&self) -> Result<()> {
@@ -5348,6 +5352,20 @@ pub fn anchor_failures(root: &Path, catalogue: &Catalogue) -> Result<Vec<String>
 }
 
 pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<CheckReport> {
+    check_for_platform(root, catalogue, stop, None)
+}
+
+pub fn check_for_platform(
+    root: &Path,
+    catalogue: &Catalogue,
+    stop: &AtomicBool,
+    platform: Option<&str>,
+) -> Result<CheckReport> {
+    if let Some(platform) = platform {
+        if !known_os(platform) {
+            return Err(format!("unknown target_os for --platform: {platform:?}"));
+        }
+    }
     validate(root, catalogue)?;
     // Anchors are checked before the prebuild so a broken row is reported
     // without waiting for a build; the error lists every broken row, one per line.
@@ -5356,23 +5374,45 @@ pub fn check(root: &Path, catalogue: &Catalogue, stop: &AtomicBool) -> Result<Ch
         return Err(failures.join("\n"));
     }
     let rows: Vec<_> = catalogue.control.iter().collect();
-    let mut session = ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?;
+    let mut session = if let Some(platform) = platform {
+        let preparation_rows: Vec<_> = catalogue
+            .control
+            .iter()
+            .filter(|c| c.matches_platform_on(platform))
+            .map(|c| {
+                let mut selected = c.clone();
+                selected.platforms = None;
+                selected
+            })
+            .collect();
+        let preparation_refs: Vec<_> = preparation_rows.iter().collect();
+        ReplaySession::prepare(root, &catalogue.prebuild, &preparation_refs, false, stop)?
+    } else {
+        ReplaySession::prepare(root, &catalogue.prebuild, &rows, false, stop)?
+    };
     let mut report = CheckReport::default();
     for c in &catalogue.control {
-        let reason = if !c.matches_platform() {
-            Some("platform does not match this host")
+        let platform_matches = platform.map_or_else(
+            || c.matches_platform(),
+            |platform| c.matches_platform_on(platform),
+        );
+        let reason = if !platform_matches {
+            Some(match platform {
+                Some(platform) => format!("platform does not match --platform {platform}"),
+                None => "platform does not match this host".to_owned(),
+            })
         } else if c.unreachable.is_some() {
-            Some("unreachable row")
+            Some("unreachable row".to_owned())
         } else if c.desk_only.is_some() {
-            Some("desk-only row")
+            Some("desk-only row".to_owned())
         } else if c.runner == "command" && c.list_command.is_none() {
             report.missing_list_commands.push(c.id.clone());
-            Some("command row has no list_command")
+            Some("command row has no list_command".to_owned())
         } else {
             None
         };
         if let Some(reason) = reason {
-            report.not_verified.push((c.id.clone(), reason.into()));
+            report.not_verified.push((c.id.clone(), reason));
             continue;
         }
         if c.runner == "command" {
@@ -6536,6 +6576,41 @@ mod restoration_tests {
         });
         assert!(caught.is_err());
         assert_eq!(fs::read(file).unwrap(), b"original\r\nbytes\n");
+    }
+
+    #[test]
+    fn saved_restore_checks_original_bytes_and_reports_a_failed_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let original = b"original\r\nnon-utf8: \xff\n";
+        let file = root.join("lib.rs");
+        fs::write(&file, original).unwrap();
+        let edit = Edit {
+            file: "lib.rs".into(),
+            old: "original".into(),
+            new: "mutated".into(),
+        };
+        let mut saved = Saved::new(&root, std::slice::from_ref(&edit), true).unwrap();
+        fs::write(&file, b"mutated").unwrap();
+        saved.restore().unwrap();
+        assert_eq!(fs::read(&file).unwrap(), original);
+
+        let failed_file = root.join("unwritable.rs");
+        fs::write(&failed_file, b"saved bytes").unwrap();
+        let failed_edit = Edit {
+            file: "unwritable.rs".into(),
+            old: "saved".into(),
+            new: "mutated".into(),
+        };
+        let mut failed = Saved::new(&root, &[failed_edit], true).unwrap();
+        fs::remove_file(&failed_file).unwrap();
+        fs::create_dir(&failed_file).unwrap();
+        let error = failed.restore().unwrap_err();
+        assert!(
+            error.contains("restore failed") && error.contains("unwritable.rs"),
+            "restore must name an unrestored source file: {error}"
+        );
+        failed.active = false;
     }
 }
 

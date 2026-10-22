@@ -60,6 +60,38 @@ impl Fixture {
             .output()
             .unwrap()
     }
+
+    #[cfg(unix)]
+    fn cli_with_tool_probe(&self, args: &[&str]) -> (std::process::Output, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let probe_dir = self.root().join(".git/tool-probe");
+        fs::create_dir_all(&probe_dir).unwrap();
+        let marker = self.root().join(".git/tool-spawned");
+        let marker_quoted = marker.display().to_string().replace('\'', "'\\''");
+        for tool in ["cargo", "rustc"] {
+            let binary = probe_dir.join(tool);
+            fs::write(
+                &binary,
+                format!("#!/bin/sh\nprintf '%s\\n' \"$0\" >> '{marker_quoted}'\nexit 91\n"),
+            )
+            .unwrap();
+            let mut permissions = fs::metadata(&binary).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&binary, permissions).unwrap();
+        }
+        let mut search_path = vec![probe_dir];
+        search_path.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        let output = Command::new(env!("CARGO_BIN_EXE_ckdev-mutate"))
+            .current_dir(self.root())
+            .args(args)
+            .env("PATH", std::env::join_paths(search_path).unwrap())
+            .output()
+            .unwrap();
+        (output, marker)
+    }
 }
 
 fn row(id: &str) -> String {
@@ -548,9 +580,67 @@ fn check_passes_a_clean_catalogue() {
     let out = f.cli(&["check"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "");
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.stdout,
+        b"one: test names not verified: unreachable row\ntwo: test names not verified: unreachable row\nCatalogue anchors checked; verified 0 rows; 2 rows not verified: one, two\n"
+    );
+}
+
+#[cfg(unix)]
+fn active_cargo_row(id: &str, old: &str) -> String {
+    format!(
+        r#"[[control]]
+id = "{id}"
+guards = "the guard rejects invalid input"
+file = "guard.txt"
+old = "{old}"
+new = "changed"
+test_file = "guard.txt"
+runner = "cargo"
+package = "unused"
+expect_red = ["tests::guard_rejects_invalid_input"]
+"#
+    )
+}
+
+#[test]
+fn check_help_documents_fast_and_platform_modes() {
+    let f = Fixture::new();
+    let out = f.cli(&["check", "--help"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(help.contains("--anchors-only"), "{help}");
+    assert!(help.contains("--platform <PLATFORM>"), "{help}");
+    assert!(help.contains("in CI"), "{help}");
+}
+
+#[cfg(unix)]
+#[test]
+fn check_anchors_only_does_not_start_cargo() {
+    let f = Fixture::new();
+    f.write("mutations.toml", &active_cargo_row("active-row", "guard"));
+    let (out, tool_marker) = f.cli_with_tool_probe(&["check", "--anchors-only"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!tool_marker.exists(), "Cargo or rustc was started");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "Test names were not checked (--anchors-only); catalogue anchors checked for 1 rows.\n"
+    );
+    assert_eq!(stderr(&out), "");
+}
+
+#[cfg(unix)]
+#[test]
+fn check_anchors_only_catches_a_broken_anchor_without_cargo() {
+    let f = Fixture::new();
+    f.write("mutations.toml", &active_cargo_row("broken-row", "absent"));
+    let (out, tool_marker) = f.cli_with_tool_probe(&["check", "--anchors-only"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(!tool_marker.exists(), "Cargo or rustc was started");
+    let error = stderr(&out);
+    assert!(error.contains("broken-row"), "{error}");
     assert!(
-        stdout.contains("Catalogue anchors checked; verified 0 rows; 2 rows not verified"),
-        "{stdout}"
+        error.contains("ANCHOR_MISSING guard.txt: replaced 0 occurrences"),
+        "{error}"
     );
 }

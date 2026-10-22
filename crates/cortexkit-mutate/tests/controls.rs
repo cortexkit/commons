@@ -982,7 +982,11 @@ fn command_check_accepts_matching_anchored_expect_red_and_replay_agrees() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("verified 1 rows; 0 rows not verified"));
+    assert_eq!(
+        out.stdout,
+        b"Catalogue anchors checked; verified 1 rows; 0 rows not verified\n"
+    );
+    assert_eq!(out.stderr, b"");
     assert_eq!(f.run(&c, false).outcome, Outcome::Caught);
 }
 
@@ -1046,6 +1050,74 @@ fn command_check_reports_rows_without_listing_as_unverified() {
     );
     assert!(text.contains("verified 1 rows; 4 rows not verified: no-list-protocol, desktop-only, unreachable, other-platform"), "{text}");
     assert!(!text.contains("exact test names verified"), "{text}");
+}
+
+#[test]
+fn check_platform_lists_only_selected_os_rows_and_verbose_names_skips() {
+    assert!(
+        python_available(),
+        "Python is required for the listing fixture"
+    );
+    let (f, mut selected) = command_listing_fixture();
+    let host_platform = std::env::consts::OS;
+    let selected_platform = if host_platform == "linux" {
+        "macos"
+    } else {
+        "linux"
+    };
+    selected.id = "selected-row".into();
+    selected.platforms = Some(vec![selected_platform.into()]);
+    selected.expect_red = vec!["selected.test".into()];
+    selected.list_command = Some(vec![
+        "python3".into(),
+        "-c".into(),
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2]); print('[\"listed\"]')".into(),
+        ".git/selected-listed".into(),
+        "{test}".into(),
+    ]);
+    let mut host = selected.clone();
+    host.id = "host-row".into();
+    host.platforms = Some(vec![host_platform.into()]);
+    host.expect_red = vec!["host.test".into()];
+    host.list_command = Some(vec![
+        "python3".into(),
+        "-c".into(),
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2]); print('[\"listed\"]')".into(),
+        ".git/host-listed".into(),
+        "{test}".into(),
+    ]);
+    let platform_args = ["--platform", selected_platform];
+    let out = command_check_cli_options(&f, vec![host.clone(), selected.clone()], &platform_args);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(f.root().join(".git/selected-listed").exists());
+    assert!(!f.root().join(".git/host-listed").exists());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Skipped 1 row"), "{stdout}");
+    assert!(stdout.contains("platform mismatch (--platform"), "{stdout}");
+    assert!(
+        !stdout.contains("host-row: test names not verified"),
+        "{stdout}"
+    );
+
+    fs::remove_file(f.root().join(".git/selected-listed")).unwrap();
+    let verbose_args = ["--platform", selected_platform, "-v"];
+    let out = command_check_cli_options(&f, vec![host, selected], &verbose_args);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(f.root().join(".git/selected-listed").exists());
+    assert!(!f.root().join(".git/host-listed").exists());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("host-row: test names not verified: platform does not match --platform"),
+        "{stdout}"
+    );
 }
 
 #[test]
