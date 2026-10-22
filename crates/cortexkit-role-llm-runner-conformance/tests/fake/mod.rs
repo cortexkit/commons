@@ -1037,7 +1037,6 @@ impl Module {
         for value in kept {
             writeln!(file, "{value}").unwrap();
         }
-        file.sync_all().unwrap();
         self.apply(&record);
     }
 
@@ -1242,9 +1241,12 @@ impl Module {
         Ok(())
     }
 
-    /// Append one durable record, then apply it. A kill armed for the
-    /// record's point takes effect right after it is on disk: nothing later
-    /// is written or done.
+    /// Append one record to the log, then apply it. A kill armed for the
+    /// record's point takes effect right after the record is written: nothing
+    /// later is written or done. The fake never syncs: its kill only stops this
+    /// process's state, and the replay reads the log back through the same OS,
+    /// so a written record survives every crash these tests simulate. A real
+    /// runner must sync before it replies.
     fn commit(&self, session: &str, mut record: Value) -> Result<(), Killed> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
@@ -1265,7 +1267,6 @@ impl Module {
             .open(&self.log)
             .expect("fake log opens");
         writeln!(file, "{record}").expect("fake log writes");
-        file.sync_all().expect("fake log syncs");
         let point = point_of(record["kind"].as_str().unwrap_or_default());
         if !point.is_empty() && self.kill_hook.lock().unwrap().as_deref() == Some(point) {
             self.alive.store(false, Ordering::SeqCst);

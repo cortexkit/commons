@@ -2,15 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, 'train/**']
   pull_request:
   # Reusable so release.yml gates publish on the exact same matrix —
   # release-time and PR-time CI can never drift.
   workflow_call:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Release commits must finish independently; PRs and training refs still supersede older runs.
+  group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/master' && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,6 +35,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
 
       - name: Check path dependencies stay inside the repository
         if: matrix.os == 'ubuntu-latest'
