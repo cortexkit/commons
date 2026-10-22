@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.2
+
+Requires `cortexkit-role-llm-runner` 0.4.1.
+
+- The media cases' PNG now has a valid IDAT checksum, and the frame-budget
+  case pads the image with a zero-filled private `ckPd` chunk inside the PNG
+  (before IEND, same 2,400,000-byte total) instead of zeros after IEND, so a
+  host that decodes tool-result images (OpenCode) passes them. A unit test
+  checks every scripted PNG's chunk CRCs and its IHDR to IEND structure.
+- `session_change` cases, gated on the group: `session_refresh_applies_from_next_run`,
+  `session_refresh_waits_for_its_rung`, `session_refresh_never_changes_a_running_run`,
+  `session_refresh_repeat_same_answer`, `session_refresh_generation_stale_refused`,
+  `session_refresh_tool_outside_host_set_refused` and
+  `flush_prefix_applies_pending`. They need the new
+  `LlmRunnerSubject::refresh_plan` hook (`RefreshVariant`, `RefreshPlan`),
+  defaulted to `None`, and `model_requests`.
+- `max_steps_final_step_completes` and `max_steps_submit_result_completes`:
+  a step that reaches `max_steps` without a tool call leading to another
+  step ends the run `completed`, not `max_steps`.
+- `RunnerRoute` documents that adapters decode every reply body with
+  `wire::read_reply` and return the answer inside; the suite sees no raw
+  reply bytes, so it has no case for a bare reply.
+
 ## 0.9.1
 
 `media_descriptors_frame_budget` and `media_descriptors_stable_across_pages`

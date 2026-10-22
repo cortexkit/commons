@@ -746,8 +746,16 @@ mod numbering_tests {
             match case.get("refused") {
                 Some(refused) => {
                     let overflow = numbered.expect_err(name);
-                    assert_eq!(overflow.checkpoint, refused["checkpoint"].as_u64().unwrap(), "{name}");
-                    assert_eq!(overflow.counted, refused["counted"].as_u64().unwrap(), "{name}");
+                    assert_eq!(
+                        overflow.checkpoint,
+                        refused["checkpoint"].as_u64().unwrap(),
+                        "{name}"
+                    );
+                    assert_eq!(
+                        overflow.counted,
+                        refused["counted"].as_u64().unwrap(),
+                        "{name}"
+                    );
                     #[allow(deprecated)]
                     let saturated = number_parts(checkpoint, &parts);
                     let shown: Vec<u64> = saturated.into_iter().flatten().collect();

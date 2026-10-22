@@ -639,6 +639,85 @@ where
     }
 }
 
+/// With `max_steps: 1`, a step that calls `submit_result` beside a sibling
+/// call ends the run the way `submit_result` always does: `completed` with
+/// the submitted value and the sibling `skipped_after_submit`, never
+/// `max_steps`, since the limit cut nothing off.
+pub async fn submit_at_step_limit<S>(case: &Case<'_, S>) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let answer = json!({ "answer": case.mint.next("limit-answer") });
+    let sibling = case.mint.call("so-limit-sibling");
+    let mut session = open(
+        case,
+        "so-step-limit",
+        Script {
+            turns: vec![
+                turn(vec![
+                    submit("so-limit-submit", answer.clone()),
+                    ScriptedPart::ToolCall(sibling.clone()),
+                ]),
+                must_not_start(),
+            ],
+        },
+        Some(true),
+    )
+    .await?;
+    crate::tags::require_declared(
+        &session.route,
+        cortexkit_role_llm_runner::capabilities::MAX_STEPS,
+        ops::SESSION_SEND,
+    )
+    .await?;
+    let send_id = case.mint.next("so-limit-send");
+    let mut params = params(
+        case.subject,
+        &session.name,
+        true,
+        &[SCRIPTED_TOOL],
+        &send_id,
+        Some(&request(Mode::SubmitTool)),
+    )?;
+    params["stop_when"]["max_steps"] = json!(1);
+    let reply: SendReply = decode(
+        "session.send",
+        expect_ok(
+            "session.send",
+            call(&session.route, ops::SESSION_SEND, params).await?,
+        )?,
+    )?;
+    session.first.get_or_insert((send_id, String::new()));
+    let end = wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    let result = settled(&session.route, case.declared, &end.run_id).await?;
+    if result.state != "completed" {
+        return Err(format!(
+            "a step that reached max_steps: 1 calling submit_result must end the run \
+             completed, got {}: {result:?}",
+            result.state
+        ));
+    }
+    let output = completed(&result)?;
+    if output.value.as_ref() != Some(&answer) {
+        return Err(format!(
+            "value {:?} is not the submitted {answer}",
+            output.value
+        ));
+    }
+    let listed = vec![SkippedSibling::new(&sibling.tool_call_id, SCRIPTED_TOOL)];
+    if output.skipped_siblings.as_ref() != Some(&listed) {
+        return Err(format!(
+            "skipped_siblings {:?} is not {listed:?}",
+            output.skipped_siblings
+        ));
+    }
+    if case.subject.tool_invocations(&sibling.arguments).await != 0 {
+        return Err("the submitting step's sibling was dispatched".into());
+    }
+    never_executed(case, &session, &[&sibling.tool_call_id]).await
+}
+
 /// Kill the runner right after a step's tool result is durable, restart it
 /// on the same root, and check that the run's next model request carries the
 /// same tools and the same schema bytes as its first. A runner that resumes

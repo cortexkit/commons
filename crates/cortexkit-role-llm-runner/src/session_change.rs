@@ -82,11 +82,7 @@ pub struct RefreshReply {
 }
 
 impl RefreshReply {
-    pub fn new(
-        pending: PendingChange,
-        run_in_progress: bool,
-        applies_from_next_run: bool,
-    ) -> Self {
+    pub fn new(pending: PendingChange, run_in_progress: bool, applies_from_next_run: bool) -> Self {
         Self {
             accepted_generation: pending.generation,
             pending,
@@ -406,10 +402,8 @@ mod tests {
                         Err(error) => error.to_string().contains(field),
                     }
                 }
-                ops::SESSION_FLUSH_PREFIX => {
-                    serde_json::from_value::<FlushPrefixRequest>(request)
-                        .is_err_and(|error| error.to_string().contains(field))
-                }
+                ops::SESSION_FLUSH_PREFIX => serde_json::from_value::<FlushPrefixRequest>(request)
+                    .is_err_and(|error| error.to_string().contains(field)),
                 other => panic!("{name}: {other}"),
             };
             assert!(refused, "{name}: not refused naming {field}");
@@ -426,8 +420,14 @@ mod tests {
             match case["op"].as_str().unwrap() {
                 ops::SESSION_REFRESH => {
                     let reply: RefreshReply = vectors::round_trip(name, answer);
-                    assert_eq!(reply.accepted_generation, reply.pending.generation, "{name}");
-                    assert!(rungs::ALL.contains(&reply.pending.policy.as_str()), "{name}");
+                    assert_eq!(
+                        reply.accepted_generation, reply.pending.generation,
+                        "{name}"
+                    );
+                    assert!(
+                        rungs::ALL.contains(&reply.pending.policy.as_str()),
+                        "{name}"
+                    );
                     shapes.push((reply.run_in_progress, reply.applies_from_next_run));
                 }
                 ops::SESSION_REFRESH_POLICY => {
@@ -448,13 +448,18 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let reply: BaselineReply = vectors::round_trip(name, &case["answer"]);
             let baseline = reply.baseline.expect(name);
-            let refreshed: RefreshReply =
-                serde_json::from_value(case["refresh"].clone()).unwrap();
-            assert_eq!(baseline.accepted_generation, refreshed.accepted_generation, "{name}");
+            let refreshed: RefreshReply = serde_json::from_value(case["refresh"].clone()).unwrap();
+            assert_eq!(
+                baseline.accepted_generation, refreshed.accepted_generation,
+                "{name}"
+            );
             match &baseline.pending {
                 Some(pending) => assert_eq!(pending, &refreshed.pending, "{name}"),
                 None => {
-                    assert!(baseline.applied_generation >= refreshed.accepted_generation, "{name}");
+                    assert!(
+                        baseline.applied_generation >= refreshed.accepted_generation,
+                        "{name}"
+                    );
                     assert_eq!(
                         baseline.effective.as_ref().map(|e| e.generation),
                         Some(baseline.applied_generation),

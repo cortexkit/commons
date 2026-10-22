@@ -25,7 +25,12 @@ vocabulary section and identifies the governing contract sections.
   on the same root. The points it declares decide which crash cases run.
 - A `RunnerRoute` adapter: send one `{method, params}` request over the real
   route and return the reply; collect a `session.subscribe` stream until it
-  goes quiet.
+  goes quiet. The suite sees decoded answers, never a reply's raw bytes, so
+  no case can catch a runner that sends a bare answer: the adapter decodes
+  every `RESPONSE` body, `{"result": <answer>}`, with
+  `cortexkit_role_llm_runner::wire::read_reply` and returns the answer
+  inside, reporting a body it refuses (a bare answer, extra top-level keys)
+  as a route failure naming the problem. Stream events arrive bare.
 - An `LlmRunnerSubject`: the capability groups and harness capabilities it
   declares, the owner and stranger identities, how to open a session's
   route, the fields of a session's first send (its plan, whose shape the
@@ -157,6 +162,10 @@ from `session.baseline` has no admission reply to compare.
 | `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, `hold_tool_calls`; restarts its own runner |
 | `send_status_answers_as_a_resend_after_restart` | `send_status`, the above; the live `role.describe` must declare `send_status` before any `send.status` is sent |
 | `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads` |
+| `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a one-text-step model ends `completed` with its final message, and its directives where `turn_directives` is declared |
+| `max_steps_submit_result_completes` | `max_steps`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; with `max_steps: 1`, a step calling `submit_result` ends `completed` with the value and its sibling `skipped_after_submit` |
+| `session_refresh_applies_from_next_run`, `session_refresh_waits_for_its_rung`, `session_refresh_repeat_same_answer`, `session_refresh_generation_stale_refused`, `session_refresh_tool_outside_host_set_refused` | `session_change`, `queue`, `run_ops`, and the adapter's `refresh_plan` and `model_requests`; inapplicable by name when the session states no fitting rung or the adapter has no fitting plan |
+| `session_refresh_never_changes_a_running_run`, `flush_prefix_applies_pending` | the above, and `hold_tool_calls` |
 | `retention_honoured`, `retention_no_content_served`, `retention_equal_noop`, `retention_shorten_continues_lineage`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
 | `retention_run_status_expired` | same; not applicable if `run.status` is not advertised |
 | `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
@@ -260,8 +269,7 @@ subset:
 - hooks: `include_originals`, `pre_user_refuse_writes_nothing`;
 - `session_change`: `refresh_unsupported_rung_refused`,
   `refresh_policy_superseded_refused`,
-  `refresh_policy_already_applied_refused`, `flush_prefix_applies_pending`,
-  and `crash_at_FoldRecorded`;
+  `refresh_policy_already_applied_refused`, and `crash_at_FoldRecorded`;
 - also `baseline_not_yet_before_first_request`;
 - `run_status_undelivered_steers_present_when_clean` is planned and not
   implemented. It will check that `run.status` on an ended run lists the
@@ -510,3 +518,23 @@ automatically. A menu is not required: even with no safe menu,
 user-command requests must still reach the provider. The asynchronous fixture must settle within 30 seconds;
 the protocol's normal one-hour pull limit is a contract rule, not a one-hour
 self-test. Each case has a deliberately faulty fake that fails it by name.
+
+## Mid-session changes
+
+The `session_change` cases need `LlmRunnerSubject::refresh_plan`, which
+builds a plan for `session.refresh` of a session admitted with
+`send_fields`' first plan, and `model_requests`, which shows the tools each
+model request offered. `RefreshVariant::ChangedTools` is a plan the runner
+accepts whose tool set differs from the first plan's; its `tools` are the
+names a request offers once it applies. `OutsideHostSet` and
+`ChangedDefinition` name a tool the host never registered at start and keep
+a tool's name with another description or input schema; their `tools` are
+the names `tool_outside_host_set` must list. A host that does not fix its
+tool set at start answers `None` for both, and the host-set case is then
+inapplicable by name. Each case reads the rungs the session states in
+`session.baseline`: the next-run cases need `immediately`, the rung case a
+rung other than `immediately`, and the flush case prefers one, so that only
+the flush makes the change apply at the next run. The cases check that a
+step of a run that was running when the change arrived offers exactly the
+tools the run started with.
+

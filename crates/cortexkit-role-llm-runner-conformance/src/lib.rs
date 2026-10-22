@@ -87,6 +87,7 @@ mod route;
 mod run_parameters;
 mod run_usage;
 mod runner;
+mod session_change;
 mod structured_output;
 mod subject;
 mod tags;
@@ -104,8 +105,8 @@ pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, SetupError};
 pub use subject::{
     AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
-    Script, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage, ToolResultObservation,
-    UserCommandFixture, UserCommandObservation,
+    RefreshPlan, RefreshVariant, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn,
+    ScriptedUsage, ToolResultObservation, UserCommandFixture, UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

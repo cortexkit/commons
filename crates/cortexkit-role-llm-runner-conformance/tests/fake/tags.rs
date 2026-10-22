@@ -225,7 +225,11 @@ pub fn fresh(sess: &Sess, defects: &Defects, honour_checkpoint: bool) -> BTreeMa
         return numbers;
     }
     keys.into_iter()
-        .zip(tags::number_parts(checkpoint, &parts))
+        .zip(
+            // The fake's checkpoints are small, so numbering never nears
+            // u64::MAX; a real runner refuses the checkpoint instead.
+            tags::try_number_parts(checkpoint, &parts).expect("fake checkpoints never overflow"),
+        )
         .filter_map(|(key, number)| Some((key, number?)))
         .collect()
 }

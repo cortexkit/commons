@@ -528,7 +528,10 @@ mod tests {
                     .all(|key| ["code", "message", "detail"].contains(&key.as_str())),
                 "{name}"
             );
-            assert!(body["code"].is_string() && body["message"].is_string(), "{name}");
+            assert!(
+                body["code"].is_string() && body["message"].is_string(),
+                "{name}"
+            );
         }
     }
 

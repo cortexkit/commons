@@ -48,6 +48,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::DeliveryOrder,
     Capability::Retract,
     Capability::SendStatus,
+    Capability::SessionChange,
 ];
 
 fn assert_passed(report: &SuiteReport, case: &str) {
@@ -238,6 +239,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         Capability::NoTools,
         Capability::TurnDirectives,
         Capability::InterruptReason,
+        Capability::SessionChange,
     ]);
     let started = Instant::now();
     let report = run(&subject).await;
@@ -524,6 +526,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                 skipped,
                 &vec![
                     Capability::Streaming,
+                    Capability::SessionChange,
                     Capability::Retention,
                     Capability::InputTokenCap,
                     Capability::MaxSteps,
@@ -883,6 +886,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                 skipped,
                 &vec![
                     Capability::RunOps,
+                    Capability::SessionChange,
                     Capability::Retention,
                     Capability::InputTokenCap,
                     Capability::MaxSteps,
@@ -1135,6 +1139,7 @@ async fn retention_paused_non_terminal_run_passes() {
         Capability::NoTools,
         Capability::TurnDirectives,
         Capability::InterruptReason,
+        Capability::SessionChange,
     ]);
     subject.held_paused = true;
     let report = run(&subject).await;
@@ -1162,6 +1167,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
         Capability::NoTools,
         Capability::TurnDirectives,
         Capability::InterruptReason,
+        Capability::SessionChange,
     ]);
     subject.advertise_status = false;
     let report = run(&subject).await;
@@ -3273,4 +3279,252 @@ async fn shared_tag_rules_control_keeps_structured_output_raw() {
 async fn shared_tag_rules_control_numbers_in_rendered_order() {
     let report = run(&declaring(Capability::Tags, Defects::default())).await;
     assert_passed(&report, "tags_numbered_in_rendered_order");
+}
+
+/// The cases where a step reaches `max_steps` without the limit cutting
+/// anything off.
+const FINAL_STEP_CASES: &[&str] = &[
+    "max_steps_final_step_completes",
+    "max_steps_submit_result_completes",
+];
+
+fn final_steps(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.extend([
+        Capability::MaxSteps,
+        Capability::StructuredOutput,
+        Capability::TurnDirectives,
+    ]);
+    subject
+}
+
+#[tokio::test]
+async fn a_limiting_step_without_a_further_step_completes() {
+    let report = run(&final_steps(Defects::default())).await;
+    for name in FINAL_STEP_CASES.iter().chain(&[
+        "max_steps_seals_pending_calls",
+        "turn_directives_max_steps_reports_none",
+    ]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn ending_a_final_step_max_steps_fails_both_cases_by_name() {
+    let report = run(&final_steps(Defects {
+        max_steps_on_final_step: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in FINAL_STEP_CASES {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("must end the run completed"),
+            "{name}: {reason}"
+        );
+        println!("NON-VACUITY BREAK {name}: {reason}");
+    }
+    assert_none_failed_but(&report, FINAL_STEP_CASES);
+    assert_passed(&report, "max_steps_seals_pending_calls");
+    assert_passed(&report, "turn_directives_max_steps_reports_none");
+}
+
+#[tokio::test]
+async fn the_final_step_cases_skip_by_name_without_their_groups() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in FINAL_STEP_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::MaxSteps)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+}
+
+/// The `session_change` cases.
+const SESSION_CHANGE_CASES: &[&str] = &[
+    "session_refresh_applies_from_next_run",
+    "session_refresh_waits_for_its_rung",
+    "session_refresh_never_changes_a_running_run",
+    "session_refresh_repeat_same_answer",
+    "session_refresh_generation_stale_refused",
+    "session_refresh_tool_outside_host_set_refused",
+    "flush_prefix_applies_pending",
+];
+
+fn changing(defects: Defects) -> FakeSubject {
+    declaring(Capability::SessionChange, defects)
+}
+
+#[tokio::test]
+async fn a_session_change_runner_passes_every_session_change_case() {
+    let report = run(&changing(Defects::default())).await;
+    for name in SESSION_CHANGE_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn session_change_cases_skip_by_name_without_the_group() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in SESSION_CHANGE_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::SessionChange)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+        assert!(report.render().contains(&format!("SKIP {name}")));
+    }
+}
+
+/// Each faulty runner fails exactly the named cases, each with a reason
+/// holding `message`, and passes every other session_change case.
+async fn session_change_break(defects: Defects, expected: &[&str], message: &str) {
+    let report = run(&changing(defects)).await;
+    for name in expected {
+        let reason = failed(&report, name);
+        assert!(reason.contains(message), "{name}: {reason}");
+        println!("NON-VACUITY BREAK {name}: {reason}");
+    }
+    assert_none_failed_but(&report, expected);
+    for name in SESSION_CHANGE_CASES {
+        if !expected.contains(name) {
+            assert_passed(&report, name);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_refresh_applied_inside_a_running_run_fails_the_next_run_rule() {
+    session_change_break(
+        Defects {
+            refresh_applies_mid_run: true,
+            ..Defects::default()
+        },
+        &["session_refresh_never_changes_a_running_run"],
+        "the change applied inside a running run",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_flush_applied_inside_a_running_run_fails_the_flush_case() {
+    session_change_break(
+        Defects {
+            flush_applies_mid_run: true,
+            ..Defects::default()
+        },
+        &["flush_prefix_applies_pending"],
+        "the change applied inside a running run",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_flush_that_never_applies_fails_the_flush_case() {
+    session_change_break(
+        Defects {
+            flush_ignored: true,
+            ..Defects::default()
+        },
+        &["flush_prefix_applies_pending"],
+        "not the new plan's tools",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hiding_the_running_run_fails_the_held_cases() {
+    session_change_break(
+        Defects {
+            refresh_hides_running_run: true,
+            ..Defects::default()
+        },
+        &[
+            "session_refresh_never_changes_a_running_run",
+            "flush_prefix_applies_pending",
+        ],
+        "run_in_progress: false",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn claiming_the_next_run_for_a_waiting_rung_fails_the_rung_case() {
+    session_change_break(
+        Defects {
+            refresh_claims_next_run: true,
+            ..Defects::default()
+        },
+        &["session_refresh_waits_for_its_rung"],
+        "applies_from_next_run: true",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_immediately_rung_that_waits_fails_the_next_run_cases() {
+    session_change_break(
+        Defects {
+            immediately_waits_for_rebuild: true,
+            ..Defects::default()
+        },
+        &[
+            "session_refresh_applies_from_next_run",
+            "session_refresh_never_changes_a_running_run",
+        ],
+        "offered",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn refusing_an_identical_repeat_fails_the_repeat_case() {
+    session_change_break(
+        Defects {
+            refresh_repeat_refused: true,
+            ..Defects::default()
+        },
+        &["session_refresh_repeat_same_answer"],
+        "generation_stale",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn accepting_a_stale_generation_fails_the_stale_case() {
+    session_change_break(
+        Defects {
+            refresh_stale_accepted: true,
+            ..Defects::default()
+        },
+        &["session_refresh_generation_stale_refused"],
+        "not refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_host_set_checked_by_name_only_fails_the_host_set_case() {
+    session_change_break(
+        Defects {
+            host_set_by_name_only: true,
+            ..Defects::default()
+        },
+        &["session_refresh_tool_outside_host_set_refused"],
+        "a kept name with a changed definition",
+    )
+    .await;
 }

@@ -250,7 +250,8 @@ pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &De
     }
     let value = serde_json::to_value(page).unwrap();
     if mode != Some(MediaMode::Descriptors)
-        && serde_json::to_vec(&value).unwrap().len() + 21 > 4_194_304
+        && serde_json::to_vec(&value).unwrap().len() + 21
+            > cortexkit_role_llm_runner::TRANSPORT_FRAME_LIMIT
     {
         return refuse(errors::REPLY_TOO_LARGE, None);
     }

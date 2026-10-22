@@ -5,9 +5,16 @@ use serde_json::{json, Value};
 use subc_protocol::ErrorBody;
 
 /// How a runner answered one request.
+///
+/// The suite sees decoded answers, never a reply's raw bytes. A runner's
+/// `RESPONSE` body is `{"result": <answer>}`; the adapter decodes it with
+/// `cortexkit_role_llm_runner::wire::read_reply` and returns the answer
+/// inside as [`Reply::Response`]. A body `read_reply` refuses (a bare
+/// answer, extra top-level keys) is the runner's failure, which the adapter
+/// reports as a [`RouteFailure`] naming the problem, never as an answer.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Reply {
-    /// A `RESPONSE` frame with its JSON body.
+    /// A `RESPONSE` frame's answer: what its `{"result": ...}` body holds.
     Response(Value),
     /// An `ERROR` frame with its body.
     Error(ErrorBody),
@@ -51,11 +58,13 @@ pub fn envelope(method: &str, params: Value) -> Value {
 #[async_trait]
 pub trait RunnerRoute: Send + Sync {
     /// Send one `REQUEST` whose body is [`envelope`]`(method, params)` and
-    /// return the terminal frame the runner answered with.
+    /// return the terminal frame the runner answered with: the answer read
+    /// from a `RESPONSE` body with `wire::read_reply`, or an `ERROR` body.
     async fn request(&self, method: &str, params: Value) -> Result<Reply, RouteFailure>;
 
     /// Send `session.subscribe` with `params` and collect every event the
-    /// runner streams back, in order, until no event has arrived for a
+    /// runner streams back (each `STREAM_DATA` frame carries one bare event,
+    /// never wrapped in `result`), in order, until no event has arrived for a
     /// short quiet window; then close the subscription. The suite only
     /// subscribes to idle sessions, so the stream it sees is a replay.
     async fn subscribe(&self, params: Value) -> Result<SubscribeOutcome, RouteFailure>;

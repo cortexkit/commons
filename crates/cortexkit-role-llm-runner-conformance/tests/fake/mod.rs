@@ -66,6 +66,7 @@ use subc_protocol::ErrorBody;
 
 mod compaction;
 mod media;
+mod session_change;
 mod tags;
 mod user_commands;
 pub use compaction::{CompactionDefect, CompactionRouteMode};
@@ -359,6 +360,33 @@ pub struct Defects {
     pub max_steps_ignored: bool,
     /// The max_steps terminal is written without its pending calls' results.
     pub max_steps_unsealed: bool,
+    /// A `session.refresh` with the `immediately` rung applies inside the
+    /// run that is running, so its next step sees the new tools.
+    pub refresh_applies_mid_run: bool,
+    /// A `session.refresh` answers `run_in_progress: false` while a run is
+    /// running.
+    pub refresh_hides_running_run: bool,
+    /// A `session.refresh` answers `applies_from_next_run: true` whatever
+    /// its rung, though a rung whose point is not met waits.
+    pub refresh_claims_next_run: bool,
+    /// The `immediately` rung waits for a rebuild like the other rungs.
+    pub immediately_waits_for_rebuild: bool,
+    /// An identical repeat of a refresh is refused `generation_stale`.
+    pub refresh_repeat_refused: bool,
+    /// A refresh at or below the accepted generation is accepted.
+    pub refresh_stale_accepted: bool,
+    /// The host's tool set is checked by name only, so a changed
+    /// definition under a kept name is accepted.
+    pub host_set_by_name_only: bool,
+    /// `session.flush_prefix` never applies the pending change.
+    pub flush_ignored: bool,
+    /// `session.flush_prefix` applies the pending change inside the run
+    /// that is running.
+    pub flush_applies_mid_run: bool,
+    /// A step that reaches the limit ends the run `max_steps` even when it
+    /// asked for no tool call, or called `submit_result`, instead of
+    /// completing it.
+    pub max_steps_on_final_step: bool,
     /// The requested output maximum is not passed to the scripted model.
     pub max_output_tokens_ignored: bool,
     /// Empty tools leaves the plan's tools offered to the model.
@@ -659,6 +687,8 @@ struct Sess {
     /// The run waiting at the context ceiling, and the time its wait ends
     /// (milliseconds since the Unix epoch).
     ceiling_wait: Option<(String, u64)>,
+    /// What the `session_change` group's records built.
+    change: session_change::ChangeState,
 }
 
 impl Sess {
@@ -1114,6 +1144,7 @@ impl Module {
             return;
         };
         sess.events.push(kind.clone());
+        session_change::apply(sess, &kind, record);
         compaction::apply(&mut sess.compaction, record, self.world.defects.compaction);
         if matches!(kind.as_str(), "send" | "steer" | "step" | "terminal")
             && (self.world.retention_defect != RetentionDefect::ClockNotRestarted
@@ -1780,10 +1811,18 @@ impl Module {
                 json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls,
                         "input_spent": input_spent, "usage": usage }),
             )?;
+            // The limit cuts the run off only when this step asked for a
+            // tool call that would lead to another step. A step with no call
+            // completes the run, and one calling `submit_result` ends it the
+            // way `submit_result` always does, below.
+            let submits = frozen.as_ref().is_some_and(|f| f["mode"] == "submit_tool")
+                && tools.iter().any(|tool| tool == SUBMIT_RESULT_TOOL);
+            let leads_to_another_step = !no_calls && !submits;
             if run
                 .max_steps
                 .is_some_and(|limit| run.usage.steps + 1 >= limit)
                 && !self.world.defects.max_steps_ignored
+                && (leads_to_another_step || self.world.defects.max_steps_on_final_step)
             {
                 let blocked = if self.world.defects.max_steps_unsealed {
                     vec![]
@@ -2075,6 +2114,11 @@ impl Module {
                 self.user_command(stamp, session, method, params)
             }
             ops::SESSION_SEND => self.send(stamp, session, params),
+            ops::SESSION_REFRESH | ops::SESSION_REFRESH_POLICY | ops::SESSION_FLUSH_PREFIX
+                if self.world.serves(groups::SESSION_CHANGE) =>
+            {
+                self.session_change(stamp, session, method, params)
+            }
             ops::SESSION_ADOPT => {
                 self.world.adopt_calls.fetch_add(1, Ordering::SeqCst);
                 if self.world.serves(groups::ADOPT) {
@@ -2287,14 +2331,21 @@ impl Module {
         if let Some(field) = unknown_field(params, &[]) {
             return invalid(&field);
         }
-        let sessions = self.sessions.lock().unwrap();
-        match sessions.get(session) {
+        let owner = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session)
+            .map(|sess| sess.owner.clone());
+        match owner {
             None => respond(BaselineReply::not_yet()),
-            Some(sess) if sess.owner != stamp.principal => refuse(
+            Some(owner) if owner != stamp.principal => refuse(
                 errors::SCOPE_OWNER_MISMATCH,
-                Some(json!({ "accepted": sess.owner })),
+                Some(json!({ "accepted": owner })),
             ),
-            Some(_) => respond(BaselineReply::ready(self.command_baseline(session))),
+            Some(_) => respond(BaselineReply::ready(
+                self.change_baseline(session, self.command_baseline(session)),
+            )),
         }
     }
 
@@ -2325,7 +2376,13 @@ impl Module {
             }
         }
         if send.admitted {
-            reply = reply.with_baseline(baseline());
+            // At admission nothing is accepted or applied yet: the baseline
+            // adds only the rungs a session_change runner states.
+            let mut admitted = baseline();
+            if self.world.serves(groups::SESSION_CHANGE) {
+                admitted = admitted.with_rungs(session_change::fake_rungs());
+            }
+            reply = reply.with_baseline(admitted);
         }
         if defects.retry_new_submission_id {
             reply = reply.with_submission_id(format!("sub-{}-{}", run.run_id, send.resend_count));
@@ -2779,6 +2836,9 @@ impl Module {
                 )?;
             }
         }
+        // A pending change that is due applies here, at the start of the
+        // run, never inside one already running.
+        self.apply_due_change(session)?;
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
@@ -3513,7 +3573,9 @@ impl Module {
                 )
                 .unwrap();
             }
-        } else if serde_json::to_vec(&reply).unwrap().len() + 21 > 4_194_304 {
+        } else if serde_json::to_vec(&reply).unwrap().len() + 21
+            > cortexkit_role_llm_runner::TRANSPORT_FRAME_LIMIT
+        {
             return refuse(
                 errors::REPLY_TOO_LARGE,
                 Some(json!({"ordinal":message.ordinal})),
@@ -4422,6 +4484,14 @@ impl LlmRunnerSubject for FakeSubject {
             .0
             .commit(session, json!({ "kind": "host_meta" }))
             .map_err(|Killed| HarnessError::new("the module was killed"))
+    }
+
+    fn refresh_plan(
+        &self,
+        _session: &str,
+        variant: cortexkit_role_llm_runner_conformance::RefreshVariant,
+    ) -> Option<cortexkit_role_llm_runner_conformance::RefreshPlan> {
+        session_change::refresh_plan(variant)
     }
 
     fn host_plan(&self, _session: &str, alternate: bool) -> Option<Map<String, Value>> {

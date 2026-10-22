@@ -48,6 +48,68 @@ fn mixed_fallback_texts() -> Vec<String> {
         .collect()
 }
 
+/// A 1×1 grey-and-alpha PNG, base64-encoded: signature, IHDR, one IDAT and
+/// IEND, each chunk with a correct CRC-32. Hosts that decode every image a
+/// tool returns (OpenCode decodes with photon) drop an image that fails to
+/// decode, so every byte of it must be a valid PNG.
+const PNG_1X1_BASE64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+
+/// The chunk type that pads the frame-budget image. Lowercase first letter:
+/// ancillary, so a decoder that does not know it skips it; lowercase second:
+/// private; uppercase third: as the PNG specification requires; lowercase
+/// fourth: safe to copy.
+const PADDING_CHUNK: &[u8; 4] = b"ckPd";
+
+/// Bytes of a chunk around its data: length, type and CRC, four each.
+const CHUNK_OVERHEAD: usize = 12;
+
+fn png_1x1() -> Vec<u8> {
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, PNG_1X1_BASE64)
+        .expect("the 1x1 PNG is valid base64")
+}
+
+/// The 1×1 PNG grown to exactly `total` bytes by a zero-filled
+/// [`PADDING_CHUNK`] inserted before IEND, with its own correct CRC, so the
+/// image stays a well-formed PNG with nothing after IEND.
+fn padded_png(total: usize) -> Vec<u8> {
+    let png = png_1x1();
+    let iend = png.len() - CHUNK_OVERHEAD;
+    let length = total - png.len() - CHUNK_OVERHEAD;
+    let mut chunk = Vec::with_capacity(length + CHUNK_OVERHEAD);
+    chunk.extend_from_slice(
+        &u32::try_from(length)
+            .expect("padding fits a chunk")
+            .to_be_bytes(),
+    );
+    chunk.extend_from_slice(PADDING_CHUNK);
+    chunk.resize(chunk.len() + length, 0);
+    let crc = crc32(&chunk[4..]);
+    chunk.extend_from_slice(&crc.to_be_bytes());
+    let mut image = png[..iend].to_vec();
+    image.extend_from_slice(&chunk);
+    image.extend_from_slice(&png[iend..]);
+    image
+}
+
+/// CRC-32 as PNG chunks carry it (ISO 3309: reflected polynomial
+/// 0xEDB88320, initial and final XOR 0xFFFFFFFF), over a chunk's type and
+/// data.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
 /// What a media case hands the scripted tool provider, before the adapter
 /// shapes the results in its host's schema. The run and the frame guard test
 /// both read it, so the guard measures exactly what a case scripts.
@@ -67,10 +129,11 @@ struct Fixture {
 
 fn fixture(name: &str) -> Fixture {
     let frame = name == "media_descriptors_frame_budget";
-    let mut image = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8ioAAAAASUVORK5CYII=").unwrap();
-    if frame {
-        image.resize(FRAME_IMAGE_BYTES, 0);
-    }
+    let image = if frame {
+        padded_png(FRAME_IMAGE_BYTES)
+    } else {
+        png_1x1()
+    };
     Fixture {
         image,
         multipart: (name == "media_descriptors_stable_across_pages")
@@ -445,7 +508,7 @@ mod tests {
     /// ends), and some client SDKs refuse to send a request of this size, so
     /// every payload a scripted tool provider receives or returns in a media
     /// case must stay below it.
-    const DAEMON_FRAME_MAX: usize = 4_194_304;
+    const DAEMON_FRAME_MAX: usize = cortexkit_role_llm_runner::TRANSPORT_FRAME_LIMIT;
 
     /// Room for what wraps a payload on the way to or from a tool provider:
     /// the frame header, the request or reply envelope, ids and the host's
@@ -484,6 +547,100 @@ mod tests {
             ));
         }
         payloads
+    }
+
+    /// Every problem with `png` as a PNG: its signature, each chunk's
+    /// length and CRC-32, IHDR first with 13 bytes, at least one IDAT, IEND
+    /// last and empty, and nothing after IEND. Empty when it is well formed.
+    fn png_problems(png: &[u8]) -> Vec<String> {
+        const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+        if !png.starts_with(SIGNATURE) {
+            return vec!["no PNG signature".into()];
+        }
+        let mut problems = Vec::new();
+        let mut types = Vec::new();
+        let mut at = SIGNATURE.len();
+        while at < png.len() {
+            if types.last() == Some(b"IEND") {
+                problems.push(format!("{} bytes after IEND", png.len() - at));
+                break;
+            }
+            if png.len() - at < CHUNK_OVERHEAD {
+                problems.push(format!("a truncated chunk at byte {at}"));
+                break;
+            }
+            let length = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
+            let end = at + 8 + length;
+            if end + 4 > png.len() {
+                problems.push(format!("a chunk at byte {at} runs past the end"));
+                break;
+            }
+            let kind: [u8; 4] = png[at + 4..at + 8].try_into().unwrap();
+            let stored = u32::from_be_bytes(png[end..end + 4].try_into().unwrap());
+            let computed = crc32(&png[at + 4..end]);
+            if stored != computed {
+                problems.push(format!(
+                    "{} stores CRC {stored:#010x}, but its type and data give {computed:#010x}",
+                    String::from_utf8_lossy(&kind)
+                ));
+            }
+            if &kind == b"IHDR" && length != 13 {
+                problems.push(format!("IHDR holds {length} bytes, not 13"));
+            }
+            if &kind == b"IEND" && length != 0 {
+                problems.push(format!("IEND holds {length} bytes, not 0"));
+            }
+            types.push(kind);
+            at = end + 4;
+        }
+        if types.first() != Some(b"IHDR") {
+            problems.push("the first chunk is not IHDR".into());
+        }
+        if !types.contains(b"IDAT") {
+            problems.push("no IDAT chunk".into());
+        }
+        if types.last() != Some(b"IEND") {
+            problems.push("the last chunk is not IEND".into());
+        }
+        problems
+    }
+
+    /// The checksum used to judge the scripted PNGs is CRC-32 itself: the
+    /// standard check value, and the IEND chunk every PNG ends with.
+    #[test]
+    fn png_crc32_matches_the_standard_check_values() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(crc32(b"IEND"), 0xAE42_6082);
+    }
+
+    /// Every PNG a media case scripts (the 1×1 image and the padded
+    /// frame-budget image) is well formed: correct chunk CRCs, IHDR to
+    /// IEND, and nothing after IEND. A host that decodes tool-result images
+    /// drops one that is not, and the case could then never pass there.
+    #[test]
+    fn every_scripted_png_is_well_formed() {
+        let mut checked = vec![("the 1x1 image".to_owned(), png_1x1())];
+        for spec in crate::CASES
+            .iter()
+            .filter(|spec| spec.name.starts_with("media_"))
+        {
+            checked.push((spec.name.to_owned(), fixture(spec.name).image));
+        }
+        let padded = fixture("media_descriptors_frame_budget").image;
+        assert_eq!(padded.len(), FRAME_IMAGE_BYTES);
+        assert!(padded
+            .windows(PADDING_CHUNK.len())
+            .any(|window| window == PADDING_CHUNK));
+        let mut problems = Vec::new();
+        for (what, png) in &checked {
+            for problem in png_problems(png) {
+                problems.push(format!("{what}: {problem}"));
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "malformed scripted PNGs: {problems:#?}"
+        );
     }
 
     #[test]

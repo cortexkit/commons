@@ -55,6 +55,9 @@ const TOOL_CALLS: &[Capability] = &[Capability::RunToolCalls, Queue, TranscriptR
 const USAGE: &[Capability] = &[Capability::RunUsage, Queue, RunOps];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
 const ORDER_STEER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads, Steer];
+const SESSION_CHANGE: &[Capability] = &[Capability::SessionChange, Queue, RunOps];
+const SESSION_CHANGE_HELD: &[Capability] =
+    &[Capability::SessionChange, Queue, RunOps, HoldToolCalls];
 const STRUCTURED_RESTART: &[Capability] = &[
     Capability::StructuredOutput,
     Queue,
@@ -98,6 +101,24 @@ pub const CASES: &[CaseSpec] = &[
         "unknown, non-array and duplicate directives are refused invalid_params naming directives"),
     case("max_steps_seals_pending_calls", &[Capability::MaxSteps, Queue, TranscriptReads, RunOps],
         "a tool-calling model ends at the response limit in max_steps, with every pending call sealed before the terminal is observable and none dispatched"),
+    case("session_refresh_applies_from_next_run", SESSION_CHANGE,
+        "on an idle session, a refresh with the immediately rung answers its generation as pending, no run in progress and applies_from_next_run; the next run offers the new plan's tools and session.baseline then shows it applied"),
+    case("session_refresh_waits_for_its_rung", SESSION_CHANGE,
+        "a refresh with a rung other than immediately answers whether the next run uses the new plan, and the next run and session.baseline agree with that answer"),
+    case("session_refresh_never_changes_a_running_run", SESSION_CHANGE_HELD,
+        "a refresh while a run is running answers run_in_progress, the running run's later steps keep the tools it started with, and the next run uses the new plan"),
+    case("session_refresh_repeat_same_answer", SESSION_CHANGE,
+        "an identical repeat of a refresh (same generation, plan and policy) gets the same answer and changes nothing"),
+    case("session_refresh_generation_stale_refused", SESSION_CHANGE,
+        "a refresh at the accepted generation with another policy or plan, or below it, is refused generation_stale naming the accepted generation, writing nothing"),
+    case("session_refresh_tool_outside_host_set_refused", SESSION_CHANGE,
+        "on a host that fixes its tool set at start, a plan naming a tool outside it, or keeping a tool's name with a changed definition, is refused tool_outside_host_set naming those tools, writing nothing"),
+    case("flush_prefix_applies_pending", SESSION_CHANGE_HELD,
+        "a flush while a run is running answers the pending generation, leaves the running run's tools unchanged, and applies the pending change from the next run; a repeat of its send_id gets the same answer"),
+    case("max_steps_final_step_completes", &[Capability::MaxSteps, Queue, RunOps],
+        "with max_steps 1, a step that asks for no tool call ends the run completed with its final message, and its directives where turn_directives is declared, never max_steps"),
+    case("max_steps_submit_result_completes", &[Capability::MaxSteps, Capability::StructuredOutput, Queue, TranscriptReads, RunOps],
+        "with max_steps 1, a step calling submit_result ends the run completed with the submitted value and its sibling skipped_after_submit, never max_steps"),
     case("max_output_tokens_caps_response", &[Capability::MaxOutputTokens, Capability::RunUsage, Queue, TranscriptReads, RunOps],
         "the dispatched per-response output maximum and the single response's reported output usage never exceed the requested cap"),
     case("no_tools_offered_to_model", &[Capability::NoTools, Queue, TranscriptReads],

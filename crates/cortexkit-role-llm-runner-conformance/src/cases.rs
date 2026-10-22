@@ -156,7 +156,18 @@ where
                 crate::directives::run(self, name).await
             }
             "send_status_unknown_send_refused" => passed(crate::follow::unknown_send(self).await),
+            "max_steps_submit_result_completes" => {
+                crate::structured_output::submit_at_step_limit(self)
+                    .await
+                    .map(|()| Ending::Passed)
+            }
+            name if name.starts_with("session_refresh_")
+                || name == "flush_prefix_applies_pending" =>
+            {
+                crate::session_change::run(self, name).await
+            }
             "max_steps_seals_pending_calls"
+            | "max_steps_final_step_completes"
             | "max_output_tokens_caps_response"
             | "no_tools_offered_to_model"
             | "no_tools_later_plan_send_refused" => crate::run_parameters::run(self, name).await,

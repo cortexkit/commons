@@ -94,7 +94,10 @@ impl std::fmt::Display for ReplyShapeError {
                 "the reply body has top-level keys beside \"{RESULT_KEY}\": {keys:?}"
             ),
             Self::BadAnswer(error) => {
-                write!(f, "the answer inside \"{RESULT_KEY}\" does not decode: {error}")
+                write!(
+                    f,
+                    "the answer inside \"{RESULT_KEY}\" does not decode: {error}"
+                )
             }
         }
     }
@@ -111,8 +114,9 @@ mod tests {
     /// that op would.
     fn read_named(answer: &str, body: &[u8]) -> Result<Value, ReplyShapeError> {
         match answer {
-            "BaselineReply" => read_reply::<BaselineReply>(body)
-                .map(|reply| serde_json::to_value(reply).unwrap()),
+            "BaselineReply" => {
+                read_reply::<BaselineReply>(body).map(|reply| serde_json::to_value(reply).unwrap())
+            }
             "string" => read_reply::<String>(body).map(Value::String),
             other => panic!("no answer type {other}"),
         }
@@ -143,7 +147,9 @@ mod tests {
                     if let Some(keys) = refusal.get("keys") {
                         assert_eq!(
                             error,
-                            ReplyShapeError::ExtraKeys(serde_json::from_value(keys.clone()).unwrap()),
+                            ReplyShapeError::ExtraKeys(
+                                serde_json::from_value(keys.clone()).unwrap()
+                            ),
                             "{name}"
                         );
                     }
@@ -163,13 +169,17 @@ mod tests {
                 keys == ["code", "detail", "message"] || keys == ["code", "message"],
                 "{name}: a refusal body has only code, message and detail: {keys:?}"
             );
-            assert!(errors::CODES.contains(&body["code"].as_str().unwrap()), "{name}");
+            assert!(
+                errors::CODES.contains(&body["code"].as_str().unwrap()),
+                "{name}"
+            );
         }
         for case in vectors::cases(&file, "stream_events") {
             let name = case["name"].as_str().unwrap();
             let event: crate::subscribe::SubscribeEvent =
-                serde_json::from_value(case["frame"].clone())
-                    .unwrap_or_else(|e| panic!("{name}: a stream frame carries the bare event: {e}"));
+                serde_json::from_value(case["frame"].clone()).unwrap_or_else(|e| {
+                    panic!("{name}: a stream frame carries the bare event: {e}")
+                });
             assert!(case["frame"].get(RESULT_KEY).is_none(), "{name}");
             assert!(!event.kind.is_empty(), "{name}");
         }
@@ -185,8 +195,14 @@ mod tests {
             read_reply::<String>(br#"{"result":"ack","id":1,"at":2}"#),
             Err(ReplyShapeError::ExtraKeys(vec!["at".into(), "id".into()]))
         );
-        assert_eq!(read_reply::<String>(br#"{"result":"ack"}"#), Ok("ack".into()));
-        assert_eq!(read_reply::<String>(b"not json").unwrap_err().name(), "not_json");
+        assert_eq!(
+            read_reply::<String>(br#"{"result":"ack"}"#),
+            Ok("ack".into())
+        );
+        assert_eq!(
+            read_reply::<String>(b"not json").unwrap_err().name(),
+            "not_json"
+        );
         assert_eq!(reply_body("ack").unwrap(), br#"{"result":"ack"}"#);
     }
 }

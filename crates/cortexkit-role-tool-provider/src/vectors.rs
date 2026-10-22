@@ -53,7 +53,8 @@ pub const WITHDRAW_ANSWERS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/withdraw-answers.json");
 /// A reply body as the bare answer object, and a refusal body with its
 /// other fields inside `detail`.
-pub const REPLY_SHAPE_JSON: &str = include_str!("../test-vectors/tool-provider-v1/reply-shape.json");
+pub const REPLY_SHAPE_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/reply-shape.json");
 /// Person-only command declarations, calls, replies, scope table and late entries.
 pub const USER_COMMANDS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/user-commands.json");

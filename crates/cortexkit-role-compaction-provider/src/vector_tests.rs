@@ -817,7 +817,8 @@ fn replies_are_bare_answers_and_refusals_keep_detail_inside() {
     for case in vectors::cases(&file, "refusals") {
         let body = case["body"].as_object().unwrap();
         assert!(
-            body.keys().all(|key| ["code", "message", "detail"].contains(&key.as_str())),
+            body.keys()
+                .all(|key| ["code", "message", "detail"].contains(&key.as_str())),
             "{}",
             name(case)
         );

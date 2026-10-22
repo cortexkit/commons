@@ -2604,7 +2604,7 @@ treats it as a terminal refusal of that one request.
 | `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract`, `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
-| `fetch_unavailable` | a required plan item missed the admission deadline, or a `session.refresh` fetch's (§10.2) | `provider` | **yes** |
+| `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |
 | `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
 | `user_command_collision` | plan providers share a command name | `name`, `providers` (every declaring provider) | no |

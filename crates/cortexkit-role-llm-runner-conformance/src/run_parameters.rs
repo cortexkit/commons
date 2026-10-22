@@ -1,6 +1,8 @@
 //! Independent discovery-gated run limits and tool suppression (§9.3.1).
 
 use cortexkit_role_llm_runner::{capabilities as groups, errors, ops, send::SendReply};
+
+use crate::subject::Capability;
 use serde_json::{json, Value};
 
 use crate::{
@@ -41,6 +43,7 @@ where
 {
     match name {
         "max_steps_seals_pending_calls" => max_steps(case).await,
+        "max_steps_final_step_completes" => final_step(case).await,
         "max_output_tokens_caps_response" => output_cap(case).await,
         "no_tools_offered_to_model" => no_tools(case).await,
         "no_tools_later_plan_send_refused" => later_tools(case).await,
@@ -120,6 +123,82 @@ where
             .collect();
         if results.len() != 1 || results[0].executed {
             return Err(format!("terminal max_steps exposed without exactly one never-executed result for {}: {results:?}", tool.tool_call_id));
+        }
+    }
+    Ok(Ending::Passed)
+}
+
+/// A step that reaches the limit without asking for a tool call ends the
+/// run `completed`, with its final message (and its directives, where the
+/// runner declares `turn_directives`): the limit cut nothing off.
+async fn final_step<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let answer = case.mint.next("limit-answer");
+    // Not the 90-second wake the directive cases use, so a runner failing
+    // one of those fails only that case.
+    let wake = "<wake in=\"2m\"/>";
+    let directives = case.declared.contains(&Capability::TurnDirectives);
+    let mut parts = vec![ScriptedPart::Text(format!("{answer} "))];
+    if directives {
+        parts.push(ScriptedPart::Text(wake.into()));
+    }
+    let mut session = case
+        .open(
+            "max-steps-final",
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(parts),
+                    ScriptedTurn::new(vec![ScriptedPart::Text("must not start".into())]),
+                ],
+            },
+        )
+        .await?;
+    crate::tags::require_declared(&session.route, groups::MAX_STEPS, ops::SESSION_SEND).await?;
+    let mut params = case.params(
+        &session,
+        "answer in one step",
+        &case.mint.next("steps-final"),
+        None,
+    );
+    params["stop_when"]["max_steps"] = json!(1);
+    if directives {
+        params["directives"] = json!(["wake"]);
+    }
+    let end = send(case, &mut session, params).await?;
+    let result = run_result(&session.route, &end.run_id).await?;
+    if result.state != "completed" {
+        return Err(format!(
+            "a step that reached max_steps: 1 with no tool call must end the run completed, \
+             got {}: {result:?}",
+            result.state
+        ));
+    }
+    let expected = if directives {
+        format!("{answer} {wake}")
+    } else {
+        format!("{answer} ")
+    };
+    if result
+        .final_message
+        .as_ref()
+        .is_none_or(|message| message.text != expected)
+    {
+        return Err(format!(
+            "the completed run's final_message is not the limiting step's text {expected:?}: \
+             {:?}",
+            result.final_message
+        ));
+    }
+    if directives {
+        let reported = serde_json::to_value(&result.directives).unwrap();
+        let wanted = json!([{"name":"wake","in_ms":120000}]);
+        if reported != wanted {
+            return Err(format!(
+                "the completed run reports directives {reported}, not {wanted}"
+            ));
         }
     }
     Ok(Ending::Passed)

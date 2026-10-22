@@ -49,7 +49,10 @@ pub enum Capability {
     /// The `tag_checkpoint` group: the runner honours a compaction
     /// provider's Setup checkpoint `{tag_checkpoint, cut}`.
     TagCheckpoint,
-    /// The `session_change` group. Conformance cases do not require it.
+    /// The `session_change` group: `session.refresh`,
+    /// `session.refresh_policy` and `session.flush_prefix`. Its cases need
+    /// [`LlmRunnerSubject::refresh_plan`] and
+    /// [`LlmRunnerSubject::model_requests`].
     SessionChange,
     /// Whole-session retention with limits from `role.describe.retention`.
     Retention,
@@ -416,6 +419,40 @@ impl PlanSenderIdentity {
     }
 }
 
+/// Which plan [`LlmRunnerSubject::refresh_plan`] builds for a
+/// `session.refresh`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RefreshVariant {
+    /// A plan the runner accepts for the session whose model-facing tool
+    /// set differs from the session's first plan's, every tool of it inside
+    /// any tool set the host fixed at start.
+    ChangedTools,
+    /// A plan naming a tool outside the tool set the host fixed at start.
+    OutsideHostSet,
+    /// A plan keeping a tool's name but changing its description or input
+    /// schema from the definition the host fixed at start.
+    ChangedDefinition,
+}
+
+/// A plan for `session.refresh` and what the cases expect of it.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RefreshPlan {
+    /// The full fetch plan, as the request's `plan` carries it.
+    pub plan: Map<String, Value>,
+    /// For [`RefreshVariant::ChangedTools`], the model-facing tool names a
+    /// model request offers once the plan applies. For the other variants,
+    /// the names a `tool_outside_host_set` refusal must list.
+    pub tools: Vec<String>,
+}
+
+impl RefreshPlan {
+    pub fn new(plan: Map<String, Value>, tools: Vec<String>) -> Self {
+        Self { plan, tools }
+    }
+}
+
 /// The native-record fixture for the unknown-origin attribution rule.
 /// Its ordinal and marker come from fixture construction, never from a read reply.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -574,6 +611,17 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "host-started sessions are not implemented",
         ))
+    }
+
+    /// A plan for a `session.refresh` of `session`, a session admitted with
+    /// [`Self::send_fields`]' first plan. Return `None` when the runner
+    /// cannot be asked the question: no plan with another tool set it would
+    /// accept, or, for [`RefreshVariant::OutsideHostSet`] and
+    /// [`RefreshVariant::ChangedDefinition`], a host that does not fix its
+    /// tool set at start. The case is then inapplicable, by name. Required
+    /// with [`Capability::SessionChange`].
+    fn refresh_plan(&self, _session: &str, _variant: RefreshVariant) -> Option<RefreshPlan> {
+        None
     }
 
     /// Like [`Self::send_fields`], but with `members` added to the first
