@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::{
+    cache_ttl::{self, CacheTtl},
     ceiling::{CeilingDecision, CeilingPolicy, WaitEnd},
     digest::{content_digest, sha256_hex},
     lineage::MessageRef,
@@ -171,6 +172,7 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     .with_window(max)
     .with_last_usage(LastUsage::new(max, max, max, max))
     .with_applied_view_version(max)
+    .with_first_ordinal(max)
     .with_descends_from(NoticeDescent::new("p".repeat(256), max, "b".repeat(64)))
     .with_events(events);
     let encoded = notice.to_headers();
@@ -180,8 +182,8 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     // 256, and the rest at their widest encodings.
     let names: usize = notice::headers::NOTICE.iter().map(|n| n.len()).sum();
     let descent = 256 + 1 + 20 + 1 + 64;
-    let widest = names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 5 * 20 + 256 + descent;
-    assert_eq!(widest, 2280);
+    let widest = names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 6 * 20 + 256 + descent;
+    assert_eq!(widest, 2313);
     assert!(widest <= notice::MAX_NOTICE_HEADER_BYTES);
     assert!(notice::header_bytes(&encoded) <= widest);
 }
@@ -323,6 +325,7 @@ fn check_dispositions(outcomes: &[&str]) -> usize {
             &ready,
             case["current_version"].as_u64(),
             case["lineage_id"].as_str().unwrap(),
+            case["first_ordinal"].as_u64().unwrap(),
             |ordinal| held.iter().find(|m| m.ordinal == ordinal).cloned(),
         );
         assert_eq!(disposition.name(), outcome, "{name}");
@@ -334,6 +337,7 @@ fn check_dispositions(outcomes: &[&str]) -> usize {
 const APPLY_OR_STALE: &[&str] = &["apply", "stale"];
 const DISCARD: &[&str] = &["discard"];
 const UNKNOWN_PART: &[&str] = &["refused:unknown_part"];
+const RANGES_START: &[&str] = &["refused:ranges_start"];
 const DIGEST: &[&str] = &["rejected:digest_mismatch"];
 const OTHER_REJECTIONS: &[&str] = &[
     "rejected:not_requested",
@@ -350,6 +354,7 @@ fn every_disposition_vector_is_checked_by_one_test() {
             APPLY_OR_STALE,
             DISCARD,
             UNKNOWN_PART,
+            RANGES_START,
             DIGEST,
             OTHER_REJECTIONS,
         ];
@@ -360,7 +365,9 @@ fn every_disposition_vector_is_checked_by_one_test() {
 
 #[test]
 fn fetched_view_applies_or_is_stale() {
-    assert_eq!(check_dispositions(APPLY_OR_STALE), 3);
+    // Three over the lineage starting at 0, and one over a lineage a cut
+    // started, tiled from its first ordinal.
+    assert_eq!(check_dispositions(APPLY_OR_STALE), 4);
 }
 
 #[test]
@@ -371,6 +378,20 @@ fn view_whose_coverage_is_no_longer_a_prefix_is_discarded() {
 #[test]
 fn view_editing_an_unknown_part_is_refused() {
     assert_eq!(check_dispositions(UNKNOWN_PART), 1);
+}
+
+/// A view tiles only the runner's current lineage: one tiling from 0 on a
+/// lineage a cut started, or from above the lineage's first ordinal, is
+/// refused by name; the same coverage tiled from the first ordinal applies.
+#[test]
+fn view_whose_ranges_do_not_start_at_the_lineage_start_is_refused() {
+    assert_eq!(check_dispositions(RANGES_START), 3);
+    let file = file();
+    let applies = vectors::cases(&file, "dispositions")
+        .iter()
+        .filter(|case| case["outcome"] == "apply" && case["first_ordinal"] != 0)
+        .count();
+    assert_eq!(applies, 1);
 }
 
 #[test]
@@ -443,7 +464,7 @@ fn ride_vectors() {
         .iter()
         .map(|case| vectors::round_trip::<RideAnswer>(name(case), &case["answer"]))
         .collect();
-    assert!(matches!(&answers[0], RideAnswer::View { view } if view.check().is_ok()));
+    assert!(matches!(&answers[0], RideAnswer::View { view, .. } if view.check().is_ok()));
     assert_eq!(answers[1], RideAnswer::nothing());
     for case in vectors::cases(ride, "undecodable_answers") {
         vectors::refused::<RideAnswer>(name(case), &case["answer"]);
@@ -592,7 +613,9 @@ fn check_descent(outcomes: &[&str]) -> usize {
 
 #[test]
 fn fork_descent_with_matching_digest_keeps_state() {
-    assert_eq!(check_descent(&["keep_through"]), 2);
+    // A fork's descent, one through an id containing ':', and a cut
+    // lineage's descent at the cut.
+    assert_eq!(check_descent(&["keep_through"]), 3);
 }
 
 #[test]
@@ -909,5 +932,129 @@ fn replies_are_bare_answers_and_refusals_keep_detail_inside() {
             name(case)
         );
         vectors::round_trip::<crate::errors::ErrorBody>(name(case), &case["body"]);
+    }
+}
+
+/// A runner's cache-lifetime decision: the request's model, the entries
+/// received oldest first, and the observed lifetime.
+type LifetimeRule = fn(&str, &[CacheTtl], Option<u64>) -> Option<u64>;
+
+/// The names of the `cache_ttl` decision vectors `rule` gets wrong.
+fn failed_decisions(rule: LifetimeRule) -> Vec<String> {
+    let file = file();
+    vectors::cases(&file["cache_ttl"], "decisions")
+        .iter()
+        .filter(|case| {
+            let entries: Vec<CacheTtl> = serde_json::from_value(case["entries"].clone()).unwrap();
+            let decided = rule(
+                case["model"].as_str().unwrap(),
+                &entries,
+                case["observed_ms"].as_u64(),
+            );
+            decided != case["lifetime"].as_u64()
+        })
+        .map(|case| name(case).to_owned())
+        .collect()
+}
+
+#[test]
+fn cache_ttl_entries_answers_and_views_round_trip() {
+    let file = file();
+    let section = &file["cache_ttl"];
+    for case in vectors::cases(section, "entries") {
+        vectors::round_trip::<CacheTtl>(name(case), &case["entry"]);
+    }
+    for case in vectors::cases(section, "setup_answers") {
+        let answer = vectors::round_trip::<SetupAnswer>(name(case), &case["answer"]);
+        assert!(
+            matches!(
+                answer,
+                SetupAnswer::Ready {
+                    cache_ttl: Some(_),
+                    ..
+                }
+            ),
+            "{}",
+            name(case)
+        );
+    }
+    let views: Vec<CompactionView> = vectors::cases(section, "views")
+        .iter()
+        .map(|case| vectors::round_trip::<CompactionView>(name(case), &case["view"]))
+        .collect();
+    for view in &views {
+        assert_eq!(view.check(), Ok(()));
+    }
+    assert!(views[0].cache_ttl.is_some() && views[1].cache_ttl.is_none());
+    assert_ne!(views[0].digest, views[1].digest);
+    let rebuilt = views[1]
+        .clone()
+        .with_cache_ttl(views[0].cache_ttl.clone().unwrap());
+    assert_eq!(rebuilt, views[0]);
+    let ride = &file["ride"];
+    let answers: Vec<RideAnswer> = vectors::cases(ride, "answers")
+        .iter()
+        .map(|case| vectors::round_trip::<RideAnswer>(name(case), &case["answer"]))
+        .collect();
+    assert!(answers[2].cache_ttl().is_some() && matches!(answers[2], RideAnswer::Nothing { .. }));
+    assert!(answers[3].cache_ttl().is_some() && matches!(answers[3], RideAnswer::View { .. }));
+    assert_eq!(
+        RideAnswer::nothing().with_cache_ttl(answers[2].cache_ttl().unwrap().clone()),
+        answers[2]
+    );
+}
+
+#[test]
+fn cache_ttl_decisions_follow_the_precedence() {
+    assert_eq!(failed_decisions(cache_ttl::lifetime), Vec::<String>::new());
+}
+
+/// Faulty rules, each failing its named vector: one that uses the newest
+/// entry whatever its model, one that reads a configured `null` as no entry,
+/// and one that keeps the previous model's entry when the new model has none.
+#[test]
+fn faulty_cache_ttl_rules_fail_their_named_vectors() {
+    fn any_model(_: &str, entries: &[CacheTtl], observed: Option<u64>) -> Option<u64> {
+        match entries.last() {
+            Some(entry) if entry.configured => entry.ms,
+            newest => observed.or_else(|| newest.and_then(|e| e.ms)),
+        }
+    }
+    fn null_as_absent(model: &str, entries: &[CacheTtl], observed: Option<u64>) -> Option<u64> {
+        let kept: Vec<CacheTtl> = entries
+            .iter()
+            .filter(|e| !(e.configured && e.ms.is_none()))
+            .cloned()
+            .collect();
+        cache_ttl::lifetime(model, &kept, observed)
+    }
+    fn keeps_previous_model(
+        model: &str,
+        entries: &[CacheTtl],
+        observed: Option<u64>,
+    ) -> Option<u64> {
+        if entries.iter().any(|e| e.model == model) {
+            cache_ttl::lifetime(model, entries, observed)
+        } else {
+            entries
+                .last()
+                .filter(|e| e.configured)
+                .map_or(observed, |e| e.ms)
+        }
+    }
+    let cases: [(LifetimeRule, &str); 3] = [
+        (any_model, "an entry for another model is ignored"),
+        (
+            null_as_absent,
+            "configured never to expire wins over an observed lifetime",
+        ),
+        (
+            keeps_previous_model,
+            "a missed model_change ride falls through to the observed lifetime, never the old model's entry",
+        ),
+    ];
+    for (rule, named) in cases {
+        let failed = failed_decisions(rule);
+        assert!(failed.iter().any(|f| f == named), "{named}: {failed:?}");
     }
 }

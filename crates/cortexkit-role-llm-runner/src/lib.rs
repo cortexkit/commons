@@ -28,6 +28,7 @@ pub mod delivery_order;
 pub mod describe;
 pub mod directives;
 pub mod errors;
+pub mod history;
 pub mod points;
 pub mod read;
 pub mod retract;
@@ -89,6 +90,10 @@ pub mod ops {
     /// The transcript's head metadata, without message bodies. In
     /// `transcript_reads`.
     pub const SESSION_HEAD: &str = "session.head";
+    /// The session's whole surviving history, paged by opaque cursors,
+    /// including what lies before the current lineage. On demand only. In
+    /// `host_history`.
+    pub const SESSION_HISTORY: &str = "session.history";
     /// A run's terminal state and final message. In `run_ops`.
     pub const RUN_RESULT: &str = "run.result";
     /// A run's current state without reading its transcript. In `run_status`.
@@ -139,6 +144,12 @@ pub mod capabilities {
     /// Tail, range and after-message reads, head metadata and `lineage_id`
     /// on every page.
     pub const TRANSCRIPT_READS: &str = "transcript_reads";
+    /// `session.history`: the session's surviving history from its first
+    /// message, before the current lineage included, paged by opaque
+    /// cursors and served on demand (an app's reader, raw recovery). A
+    /// runner that is its own host declares it; a runner on a host may, and
+    /// then serves history from the host's own storage.
+    pub const HOST_HISTORY: &str = "host_history";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -248,6 +259,7 @@ pub mod capabilities {
             &[ops::SESSION_USER_COMMAND, ops::SESSION_USER_COMMAND_STATUS],
         ),
         (TRANSCRIPT_READS, &[ops::SESSION_READ, ops::SESSION_HEAD]),
+        (HOST_HISTORY, &[ops::SESSION_HISTORY]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (RUN_CANCEL, &[ops::RUN_CANCEL]),
@@ -375,6 +387,7 @@ mod tests {
             ops::SESSION_USER_COMMAND_STATUS,
             ops::SESSION_READ,
             ops::SESSION_HEAD,
+            ops::SESSION_HISTORY,
             ops::RUN_RESULT,
             ops::RUN_STATUS,
             ops::RUN_CANCEL,

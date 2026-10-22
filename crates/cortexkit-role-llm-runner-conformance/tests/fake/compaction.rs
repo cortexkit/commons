@@ -47,12 +47,18 @@ pub(super) struct State {
     /// The Setup checkpoint `(tag_checkpoint, cut)` the provider answered,
     /// if any.
     pub checkpoint: Option<(u64, String)>,
+    /// The lineage the recorded Setup answer belongs to.
+    pub setup_lineage: Option<String>,
+    /// The view the runner renders now, once one applied on this lineage.
+    pub applied: Option<history::Applied>,
+    /// Every view version the runner fetched and disposed of.
+    pub disposed: BTreeSet<u64>,
 }
 
 #[derive(Default)]
 pub(super) struct Providers {
     pub seal_setup_crash: bool,
-    sessions: BTreeMap<String, Provider>,
+    pub(super) sessions: BTreeMap<String, Provider>,
 }
 
 impl Providers {
@@ -64,11 +70,15 @@ impl Providers {
     }
 }
 
-struct Provider {
+pub(super) struct Provider {
     handoffs: usize,
     setup: CompactionSetup,
     calls: Vec<CompactionCall>,
     models: Vec<ModelCall>,
+    /// Every view published, by version.
+    pub views: Vec<cortexkit_role_compaction_provider::view::CompactionView>,
+    /// Every advance notice received, as its bus headers.
+    pub notices: Vec<BTreeMap<String, String>>,
 }
 struct ModelCall {
     turn: usize,
@@ -103,6 +113,7 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
         }
         "compaction_message" => {
             let m = decode_message(&record["message"]);
+            state.setup_lineage = record["lineage"].as_str().map(str::to_owned);
             state.setup = Some(m.clone());
             state.fold = Some(m);
             if let (Some(n), Some(cut)) = (
@@ -148,7 +159,10 @@ pub(super) fn apply(state: &mut State, record: &Value, defect: CompactionDefect)
     }
 }
 
-fn canonical(sess: &Sess) -> Vec<ModelEntry> {
+pub(super) fn canonical(sess: &Sess) -> Vec<ModelEntry> {
+    if let Some(applied) = &sess.compaction.applied {
+        return history::render_view(sess, applied);
+    }
     let mut entries = Vec::new();
     let mut from = 0;
     if let Some(m) = &sess.compaction.view {
@@ -165,6 +179,7 @@ fn canonical(sess: &Sess) -> Vec<ModelEntry> {
             ));
         }
     }
+    let from = from.max(sess.first_ordinal);
     entries.extend(sess.messages.iter().filter(|m| m.ordinal >= from).map(|m| {
         ModelEntry::new(
             EntrySource::Message {
@@ -255,6 +270,7 @@ impl Module {
             .calls
             .push(CompactionCall {
                 request_id: id.clone(),
+                lineage_id: Some(sess.lineage.clone()),
                 setup_identity: CompactionSetupIdentity {
                     harness: "broca".into(),
                     session: session.to_owned(),
@@ -310,11 +326,28 @@ impl Module {
             CompactionSetup::Ready(m) => {
                 self.commit(
                     session,
-                    json!({"kind":"compaction_message","setup":true,"message":encode(&m)}),
+                    json!({"kind":"compaction_message","setup":true,"message":encode(&m),
+                           "lineage":sess.lineage}),
                 )?;
                 self.commit(
                     session,
                     json!({"kind":"compaction_fold","message":encode(&m)}),
+                )
+            }
+            // A checkpoint on a Setup that descends from another lineage
+            // (a cut's) fails that Setup: such a lineage continues the old
+            // lineage's numbering.
+            CompactionSetup::ReadyWithCheckpoint { .. }
+                if sess.pending_descent.is_some()
+                    && self.world.defects.lineage
+                        != history::LineageDefect::CheckpointOnDescentApplied =>
+            {
+                self.compaction_error(
+                    session,
+                    run_id,
+                    "compaction_unavailable",
+                    cortexkit_role_compaction_provider::setup::CHECKPOINT_ON_DESCENT,
+                    None,
                 )
             }
             CompactionSetup::ReadyWithCheckpoint {
@@ -331,7 +364,8 @@ impl Module {
                 self.commit(
                     session,
                     json!({"kind":"compaction_message","setup":true,"message":encode(&m),
-                           "checkpoint":{"tag_checkpoint":tag_checkpoint,"cut":cut}}),
+                           "checkpoint":{"tag_checkpoint":tag_checkpoint,"cut":cut},
+                           "lineage":sess.lineage}),
                 )?;
                 self.commit(
                     session,
@@ -372,6 +406,18 @@ impl Module {
         {
             return Ok(true);
         }
+        {
+            // A step whose model request was already captured is past its
+            // boundary: nothing applies or is set up again for it.
+            let providers = self.world.compaction.lock().unwrap();
+            let p = &providers.sessions[session];
+            if let Some(call) = p.models.iter().find(|m| m.turn == step && m.run == run_id) {
+                return Ok(call.released);
+            }
+        }
+        // The step boundary: a fetched view applies now, and a view with a
+        // cut starts a new lineage.
+        self.dispose_views(session)?;
         let state = self.sessions.lock().unwrap()[session].compaction.clone();
         if let Some(m) = state.fold {
             self.commit(
@@ -379,7 +425,13 @@ impl Module {
                 json!({"kind":"compaction_fold","message":encode(&m)}),
             )?;
         }
-        if state.setup.is_none() {
+        let lineage = self.sessions.lock().unwrap()[session].lineage.clone();
+        let other_lineage = state.setup_lineage.as_ref().is_some_and(|l| *l != lineage)
+            && self.world.defects.lineage != history::LineageDefect::SetupOncePerSession;
+        if state.setup.is_none() || other_lineage {
+            if history::setup_held(&self.world, session) {
+                return Ok(false);
+            }
             self.issue_setup(session, run_id)?;
         }
         if self.sessions.lock().unwrap()[session].standalone_handed_off {
@@ -395,11 +447,9 @@ impl Module {
         }
         // Capture at the model boundary, independently of session.read.
         let sess = self.sessions.lock().unwrap()[session].clone();
+        self.publish_notice(session, &sess)?;
         let mut providers = self.world.compaction.lock().unwrap();
         let p = providers.sessions.get_mut(session).unwrap();
-        if let Some(call) = p.models.iter().find(|m| m.turn == step && m.run == run_id) {
-            return Ok(call.released);
-        }
         p.models.push(ModelCall {
             turn: step,
             run: run_id.into(),
@@ -472,7 +522,12 @@ impl Module {
             messages.insert(0, last);
         }
         let mut page = ModelPage::new(&sess.lineage, messages);
-        if let Some(view) = &sess.compaction.view {
+        if let Some(applied) = &sess.compaction.applied {
+            page = page.with_compaction(
+                history::view_compaction_id(applied.version),
+                applied.version,
+            );
+        } else if let Some(view) = &sess.compaction.view {
             page = page.with_compaction(&view.compaction_id, view.version);
         }
         if let Some(next) = next {
@@ -504,6 +559,8 @@ impl FakeSubject {
                     setup,
                     calls: Vec::new(),
                     models: Vec::new(),
+                    views: Vec::new(),
+                    notices: Vec::new(),
                 },
             );
         }
@@ -516,6 +573,7 @@ impl FakeSubject {
             standalone_handoffs: p.handoffs,
             calls: p.calls.clone(),
             model_inputs: p.models.iter().map(|m| m.entries.clone()).collect(),
+            notices: p.notices.clone(),
         }
     }
     fn compaction_modules(&self, session: &str) -> Vec<Arc<Module>> {
@@ -529,7 +587,7 @@ impl FakeSubject {
             .cloned()
             .collect()
     }
-    fn drive_compaction_modules(&self, session: &str) -> Result<(), HarnessError> {
+    pub(super) fn drive_compaction_modules(&self, session: &str) -> Result<(), HarnessError> {
         for m in self.compaction_modules(session) {
             let run = m.sessions.lock().unwrap()[session]
                 .runs

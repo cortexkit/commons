@@ -20,6 +20,9 @@ use serde_json::{Map, Value};
 pub enum Capability {
     /// The `transcript_reads` group: `session.read` and `session.head`.
     TranscriptReads,
+    /// The `host_history` group: `session.history`, the session's whole
+    /// surviving history paged by opaque cursors.
+    HostHistory,
     /// The `run_ops` group: `run.result` and run attribution.
     RunOps,
     /// Poll run.status, without transcript reads.
@@ -119,6 +122,7 @@ impl Capability {
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
         Self::TranscriptReads,
+        Self::HostHistory,
         Self::RunOps,
         Self::RunStatus,
         Self::RunCancel,
@@ -171,6 +175,7 @@ impl Capability {
         Some(match self {
             Self::UserCommands => groups::USER_COMMANDS,
             Self::TranscriptReads => groups::TRANSCRIPT_READS,
+            Self::HostHistory => groups::HOST_HISTORY,
             Self::RunOps => groups::RUN_OPS,
             Self::RunStatus => groups::RUN_STATUS,
             Self::RunCancel => groups::RUN_CANCEL,
@@ -926,6 +931,106 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "compaction observation is not implemented",
         ))
+    }
+
+    /// Publish `view` from the scripted compaction provider of `session`, as
+    /// a provider publishes one: durably, then announced with `view_ready`.
+    /// Translate replacement text to the runner's message schema, compute
+    /// the view digest, and keep ranges, ordinals, `mid`s and the cut
+    /// verbatim. Return the view's version: one above every version the
+    /// provider published for the session. The runner fetches, checks and
+    /// applies it at its next step boundary, as it would any view. Return an
+    /// error when the adapter cannot publish views: the cases that need one
+    /// are then inapplicable, by name.
+    async fn publish_compaction_view(
+        &self,
+        _session: &str,
+        _view: crate::ScriptedView,
+    ) -> Result<u64, HarnessError> {
+        Err(HarnessError::new(
+            "publishing compaction views is not implemented",
+        ))
+    }
+
+    /// Write `messages` finished messages into `session`'s history through
+    /// the runner's own store, then a cut, so the session's current lineage
+    /// holds only the newest `window` of them, as a session that ran for
+    /// months and compacted along the way would. `session` already has a
+    /// run behind it; the seeded messages follow it. The runner must treat
+    /// them exactly as messages it wrote itself. Return an error when the
+    /// adapter cannot seed: the cost case is then inapplicable, never
+    /// passed.
+    async fn seed_session_history(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _messages: u64,
+        _window: u64,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "seeding session history is not implemented",
+        ))
+    }
+
+    /// Give `session` `count` messages of history in the host before the
+    /// runner numbers anything, as when the runner adopts a session its host
+    /// already holds: the runner has no ordinals for them, its window starts
+    /// at ordinal 0 after them, and `session.history` serves them from the
+    /// host's own storage. With `cut`, the host's history ends in a cut the
+    /// host made before the runner adopted the session, folding the newest
+    /// of those messages: the runner's first lineage carries that cut, with
+    /// `first_ordinal` 0, and the runner has no lineage at it. Called before
+    /// the session's first send. Return an error when the adapter cannot:
+    /// the cases that need it are then inapplicable, by name.
+    async fn seed_host_history(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _count: u64,
+        _cut: bool,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("seeding host history is not implemented"))
+    }
+
+    /// Revert `session` the way its host reverts (an undo), removing the
+    /// message `mid` and every later message, while no run is active. The
+    /// runner moves the session to a new lineage. Return an error when the
+    /// adapter cannot revert: the cases that need one are then inapplicable,
+    /// by name.
+    async fn revert_session(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _mid: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("reverting a session is not implemented"))
+    }
+
+    /// Hold the next Setup call the runner makes for `session` at the
+    /// scripted provider, unanswered, until
+    /// [`Self::release_compaction_setup`]. Return an error when the adapter
+    /// cannot: the case that needs it is then inapplicable, by name.
+    async fn hold_next_compaction_setup(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("holding a Setup call is not implemented"))
+    }
+
+    /// Resolve once the scripted provider holds the Setup call
+    /// [`Self::hold_next_compaction_setup`] asked it to hold.
+    async fn await_compaction_setup_held(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("holding a Setup call is not implemented"))
+    }
+
+    /// Answer the held Setup call with the session's installed answer.
+    async fn release_compaction_setup(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("holding a Setup call is not implemented"))
+    }
+
+    /// Whether the runner refuses reads `transient` while a tag-rendering
+    /// run waits for a Setup answer without `descends_from`, as the contract
+    /// lets it. Only such a runner could hold reads during a cut's Setup, so
+    /// the case checking it never does is inapplicable to any other.
+    fn holds_reads_during_setup(&self) -> bool {
+        false
     }
 
     /// Advance the session's retention clock by `milliseconds`, completing

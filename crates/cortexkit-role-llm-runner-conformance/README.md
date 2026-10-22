@@ -88,9 +88,27 @@ vocabulary section and identifies the governing contract sections.
    every model answer until `release_compaction_model`.
    `durable_compaction_setup` must read the initial answer from persistent
    runner storage while a model call is held, never from an in-memory cache,
-   the configured provider answer or a `session.read` model page. The runner
-   half of compaction-provider 0.3.3 §3 (advance notices, views, rides, the
-   ceiling, native markers) still has no live case.
+   the configured provider answer or a `session.read` model page. Each Setup
+   call also records the `lineage_id` its body carried
+   (`CompactionCall::lineage_id`): Setup runs once per lineage.
+   `publish_compaction_view(session, ScriptedView)` publishes a view from the
+   scripted provider (ranges, ordinals, `mid`s and cut kept verbatim, the
+   replacement text translated to the runner's schema, the digest computed by
+   the adapter) and returns its version; `compaction_observation` also
+   returns every advance notice the runner published, as the header set the
+   bus carried (`CompactionObservation::notices`). Without the view hook the
+   cut cases are inapplicable by name. Rides, the ceiling and native markers
+   still have no live case.
+- For `host_history`, nothing beyond the route, plus three optional hooks:
+  `revert_session(handle, session, mid)` reverts a session as its host does;
+  `seed_host_history(handle, session, count)` gives a session `count`
+  messages of host history before the runner numbers anything, as a runner
+  over a host that adopted a session with history; each case needing one is
+  inapplicable by name without it.
+- For the opt-in cost case, `seed_session_history(handle, session, messages,
+  window)` writes finished messages through the runner's own store and a
+  cut leaving `window` of them in the lineage. Without it the case is
+  inapplicable, never passed.
 - Retention time can be controlled separately. A subject opts in by declaring
   `Capability::RetentionClock` and implementing
   `LlmRunnerSubject::advance_retention_clock`; the adapter must advance the
@@ -117,6 +135,12 @@ from `session.baseline` has no admission reply to compare.
 
 | Case | Requires |
 |---|---|
+| `cut_starts_a_new_lineage`, `old_lineage_reads_refused_after_a_cut`, `read_below_first_ordinal_refused`, `ordinals_never_renumber_across_a_cut`, `setup_once_per_lineage`, `view_ranges_start_at_first_ordinal`, `cut_lineage_notice_descends_from` | `compaction`, `queue`, `transcript_reads`, `run_ops`, and the view hook |
+| `history_pages_back_to_the_first_message`, `history_mid_matches_read`, `history_never_serves_a_reverted_branch`, `history_cursor_expired_after_a_revert_past_it`, `history_boundary_order`, `history_before_mid_continues_below_the_window` | `host_history`, `queue`, `transcript_reads`; the revert cases need the revert hook, the last two the host-history hook |
+| `head_names_the_cut`, `notice_carries_first_ordinal`, `revert_below_the_cut_restarts_at_the_previous_cut`, `revert_below_a_cut_before_adoption_has_no_descent`, `checkpoint_on_descending_setup_refused`, `cut_setup_leaves_reads_alone`, `cut_numbering_continues_from_the_old_lineage` | as the cut cases; the revert cases need the revert hook, the adoption case `seed_host_history` with `cut`, the checkpoint case `tag_checkpoint`, the reads case the Setup-hold hooks and `holds_reads_during_setup`, the numbering case `tags` |
+| `history_version_unchanged_by_a_cut`, `history_version_rises_at_a_revert`, `history_from_ordinal_and_before_ordinal`, `history_unknown_ordinal_refused`, `history_before_lowest_ordinal_reaches_unnumbered_entries` | `host_history`, `queue`, `transcript_reads`; the cut case the cut requirements, the revert case the revert hook, the last the host-history hook |
+| `history_no_tags_below_first_ordinal`, `history_ordinal_kept_below_the_cut`, `history_cursor_survives_a_cut` | `host_history`, `compaction`, `queue`, `transcript_reads`, `run_ops`, and the view hook |
+| `per_step_cost_scales_with_new_messages` | `queue`, `transcript_reads` or `run_ops`, and the seeding hook (opt-in) |
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
@@ -251,6 +275,14 @@ are not evidence of production conformance: a runner's own CI must run the
 suite against its real process and unpaused clock.
 
 ## Not yet implemented
+
+- The prompt cache's lifetime (compaction-provider §8.1): `cache_ttl`'s
+  precedence and its model scoping are checked only at unit level, in
+  `cortexkit-role-compaction-provider`, against `cache_ttl::lifetime` and
+  the named `cache_ttl` decision vectors, each of three faulty rules failing
+  its named vector. Live cases would need adapter hooks this kit does not
+  have yet: a prompt-cache clock, a model switch, and observation of the
+  lifetime the runner saw in its own final request options.
 
 These cases, planned in §15 of the role contract, belong to a later
 subset:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Depends on `cortexkit-role-llm-runner` 0.5.0. This crate only reads the
+  runner role's code names internally and re-exports none of its types, so
+  nothing in its own API or wire changes.
+
 ## 0.3.1
 
 - This release moves the complete `step-transform-provider-v1` vector set

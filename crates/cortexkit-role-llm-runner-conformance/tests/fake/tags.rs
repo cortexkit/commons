@@ -264,6 +264,7 @@ pub fn settle(sess: &mut Sess, defects: &Defects, honour_checkpoint: bool) {
         .any(|(key, number)| fresh.get(key).is_some_and(|now| now != number));
     if renumbered && !defects.tags_renumber_without_new_lineage {
         sess.lineage = format!("{}-t", sess.lineage);
+        sess.history_version += 1;
     }
     // A part behind the anchor's cut keeps the number it showed.
     let mut merged = fresh;

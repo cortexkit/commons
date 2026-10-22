@@ -9,6 +9,18 @@
 //!   that message. Refused by name as `lineage_changed` or `unknown_mid`,
 //!   never answered from the tail instead.
 //!
+//! Every read stays within the session's current lineage: the readable
+//! history from its latest cut. Ordinals are session-wide and never
+//! renumbered, so a lineage a cut started begins at the cut's first
+//! retained ordinal, `first_ordinal` on [`HeadMeta`]. A range or
+//! after-message read naming a position below it is refused
+//! `before_lineage_start` with `detail.first_ordinal`
+//! (`errors::BeforeLineageStartDetail`), and the tail is the newest page
+//! within the lineage. Raw messages before the lineage are served by
+//! `session.history` (the `host_history` group, [`crate::history`]), never
+//! by this op; the model view (`view: "model"`) carries that earlier
+//! history only as the compaction view's head.
+//!
 //! A page stops at `limit` messages or at the byte cap, whichever comes
 //! first, and carries `next_from_ordinal` whenever it stops before the end
 //! of the transcript. Every page carries the session's `lineage_id`; a read
@@ -32,10 +44,18 @@ pub mod descriptors;
 pub use descriptors::MediaMode;
 
 /// The `field` an `invalid_params` refusal names when a read combines
-/// `after_mid` with `from_ordinal`, or names `after_mid` without
+/// fields that exclude each other, or names `after_mid` without
 /// `lineage_id`.
 pub mod fields {
     pub const MEDIA: &str = "media";
+    /// `session.history`'s opaque page cursor.
+    pub const CURSOR: &str = "cursor";
+    /// `session.history`'s forward start, inclusive.
+    pub const FROM_MID: &str = "from_mid";
+    /// `session.history`'s backward end, exclusive.
+    pub const BEFORE_MID: &str = "before_mid";
+    /// `session.history`'s backward seek by ordinal, exclusive.
+    pub const BEFORE_ORDINAL: &str = "before_ordinal";
     pub const FROM_ORDINAL: &str = "from_ordinal";
     pub const LINEAGE_ID: &str = "lineage_id";
     pub const VIEW: &str = "view";
@@ -796,6 +816,27 @@ pub struct HeadMeta {
     /// The newest message's ordinal. Absent on an empty transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ordinal: Option<u64>,
+    /// The current lineage's first ordinal: the lowest position a range
+    /// read, an after-message read or `session.resolve` may name. Ordinals
+    /// are session-wide, so after a cut it is the cut's first retained
+    /// ordinal, not 0. Present whenever `lineage_id` is, and at most one above
+    /// `last_ordinal` (a cut that retained nothing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_ordinal: Option<u64>,
+    /// The cut that started the current lineage's readable history,
+    /// described without its content. Absent on a lineage with no cut, whose
+    /// `first_ordinal` is then 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<HeadCut>,
+    /// The version of the session's visible history. It rises when the
+    /// lineage changes because of a revert, a recovery that rewrites
+    /// written messages, or a restart after the runner lost its state. It
+    /// does not change at a cut or on an append, and it never decreases. A reader holding a
+    /// position in the visible history keys on it, so a compaction does not
+    /// invalidate the position while a rewrite does. Present whenever
+    /// `lineage_id` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_version: Option<u64>,
     /// The same opaque position a page's `head` carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<Map<String, Value>>,
@@ -809,11 +850,18 @@ pub struct HeadMeta {
 }
 
 impl HeadMeta {
-    /// The head of a session whose lineage is `lineage_id`.
-    pub fn new(lineage_id: impl Into<String>, updated_at: u64) -> Self {
+    /// The head of a session whose lineage is `lineage_id` and starts at
+    /// `first_ordinal`. Add the history version with
+    /// [`HeadMeta::with_history_version`] and, when `first_ordinal` is above
+    /// 0, the lineage's cut with [`HeadMeta::with_cut`]: a head without them
+    /// is not [`HeadMeta::lineage_consistent`].
+    pub fn new(lineage_id: impl Into<String>, first_ordinal: u64, updated_at: u64) -> Self {
         Self {
             lineage_id: Some(lineage_id.into()),
             last_ordinal: None,
+            first_ordinal: Some(first_ordinal),
+            cut: None,
+            history_version: None,
             head: None,
             last_run_state: None,
             updated_at: Some(updated_at),
@@ -825,6 +873,9 @@ impl HeadMeta {
         Self {
             lineage_id: None,
             last_ordinal: None,
+            first_ordinal: None,
+            cut: None,
+            history_version: None,
             head: None,
             last_run_state: None,
             updated_at: None,
@@ -841,26 +892,75 @@ impl HeadMeta {
         self
     }
 
+    pub fn with_cut(mut self, cut: HeadCut) -> Self {
+        self.cut = Some(cut);
+        self
+    }
+
+    pub fn with_history_version(mut self, history_version: u64) -> Self {
+        self.history_version = Some(history_version);
+        self
+    }
+
     pub fn with_last_run_state(mut self, last_run_state: LastRunState) -> Self {
         self.last_run_state = Some(last_run_state);
         self
     }
 
     /// Whether the answer is consistent with its lineage. Without a
-    /// `lineage_id`, none of `last_ordinal`, `head`, `last_run_state` or
-    /// `updated_at` may be present, because a session with any of them has a
-    /// lineage. With one, `updated_at` must be present; the other three may
-    /// be absent (an empty transcript, no events, no run yet). A consumer
+    /// `lineage_id`, none of `last_ordinal`, `first_ordinal`, `cut`,
+    /// `history_version`, `head`, `last_run_state` or `updated_at` may be
+    /// present, because a session with any of them has a lineage. With one,
+    /// `updated_at`, `first_ordinal` and `history_version` must be present, `first_ordinal` is at most one above
+    /// `last_ordinal` when that is present, and a lineage without `cut` has
+    /// `first_ordinal` 0; the other members may be absent (an empty
+    /// transcript, no events, no run yet). A consumer
     /// treats an inconsistent answer as malformed; it is not a refusal.
     pub fn lineage_consistent(&self) -> bool {
         match self.lineage_id {
             None => {
                 self.last_ordinal.is_none()
+                    && self.first_ordinal.is_none()
+                    && self.cut.is_none()
+                    && self.history_version.is_none()
                     && self.head.is_none()
                     && self.last_run_state.is_none()
                     && self.updated_at.is_none()
             }
-            Some(_) => self.updated_at.is_some(),
+            Some(_) => {
+                let bounded = match (self.first_ordinal, self.last_ordinal) {
+                    (Some(first), Some(last)) => first <= last.saturating_add(1),
+                    (first, None) => first.is_some(),
+                    (None, Some(_)) => false,
+                };
+                let cut_named = self.cut.is_some() || self.first_ordinal == Some(0);
+                self.updated_at.is_some() && self.history_version.is_some() && bounded && cut_named
+            }
+        }
+    }
+}
+
+/// The cut that started a lineage, on `session.head`: the message the cut
+/// folds last, the one at its `through_ordinal`, described by identity and
+/// never by content. `digest` is that message's content digest
+/// ([`crate::content_digest::content_digest`]), the digest a cut lineage's
+/// `descends_from` names. A cut made before the runner numbered anything
+/// (in a host's history before adoption) names the host's message.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HeadCut {
+    pub mid: String,
+    pub digest: String,
+    /// When the message was created, in milliseconds since the Unix epoch.
+    pub written_at: u64,
+}
+
+impl HeadCut {
+    pub fn new(mid: impl Into<String>, digest: impl Into<String>, written_at: u64) -> Self {
+        Self {
+            mid: mid.into(),
+            digest: digest.into(),
+            written_at,
         }
     }
 }

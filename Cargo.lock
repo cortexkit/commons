@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-compaction-provider"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "cortexkit-role-tool-provider",
  "serde",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-step-transform-provider"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",

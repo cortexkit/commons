@@ -28,7 +28,7 @@ pub const EVENT_VERSION: u32 = 1;
 /// Upper bound on a notice's headers: the sum over every header this contract
 /// defines of the name's and the value's length in bytes, the way the bus
 /// counts a message's header size. The per-value bounds below keep every
-/// well-formed notice under it (at most 2,280 bytes); a runner with more
+/// well-formed notice under it (at most 2,313 bytes); a runner with more
 /// events than fit in `events` splits them across consecutive notices.
 pub const MAX_NOTICE_HEADER_BYTES: usize = 4096;
 /// Upper bound on one header value, in bytes.
@@ -91,6 +91,9 @@ pub mod headers {
     /// first view. This is the runner's durable acknowledgement: every notice
     /// repeats it, so a lost notice loses no acknowledgement.
     pub const APPLIED_VIEW_VERSION: &str = "applied_view_version";
+    /// The current lineage's first ordinal (`llm-runner/v1`'s
+    /// `session.head.first_ordinal`); optional.
+    pub const FIRST_ORDINAL: &str = "first_ordinal";
     /// A view's version.
     pub const VIEW_VERSION: &str = "view_version";
     /// The last ordinal a view covers.
@@ -105,6 +108,7 @@ pub mod headers {
         DESCENDS_FROM,
         EST_TOKENS,
         EVENTS,
+        FIRST_ORDINAL,
         LAST_USAGE,
         LINEAGE_ID,
         MODEL,
@@ -179,6 +183,12 @@ pub mod refusal_reasons {
     /// The view carries an `apply` mark the runner did not list in Setup's
     /// `view_apply` for the session.
     pub const UNSUPPORTED_APPLY: &str = "unsupported_apply";
+    /// The view's ranges do not start at the current lineage's first
+    /// ordinal (`llm-runner/v1`'s `session.head.first_ordinal`), or, on a
+    /// lineage whose first ordinal is above 0, do not start with a replace
+    /// range: a view tiles only the lineage, and everything before it rides
+    /// in the view's head.
+    pub const RANGES_START: &str = "ranges_start";
 }
 
 /// Reasons a runner gives in `view_deferred`. Open, like the refusal
@@ -484,6 +494,12 @@ pub fn is_header_lineage_id(value: &str) -> bool {
 /// The fork descent a notice declares in its `descends_from` header: the old
 /// lineage, the last ordinal whose entry is byte-identical in both lineages,
 /// and that entry's content digest ([`crate::digest::content_digest`]).
+///
+/// The first notice of a lineage a cut started carries one naming the
+/// previous lineage at the cut: `through_ordinal` is the cut's
+/// `through_ordinal`, one below the new lineage's first ordinal, so a
+/// provider that keeps its state reads the new lineage from its first
+/// ordinal and nothing before it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NoticeDescent {
@@ -591,6 +607,8 @@ pub struct AdvanceNotice {
     pub last_usage: Option<LastUsage>,
     pub applied_view_version: Option<u64>,
     pub descends_from: Option<NoticeDescent>,
+    /// The lineage's first ordinal, at most one above `through_ordinal`.
+    pub first_ordinal: Option<u64>,
 }
 
 impl AdvanceNotice {
@@ -616,7 +634,13 @@ impl AdvanceNotice {
             last_usage: None,
             applied_view_version: None,
             descends_from: None,
+            first_ordinal: None,
         }
+    }
+
+    pub fn with_first_ordinal(mut self, first_ordinal: u64) -> Self {
+        self.first_ordinal = Some(first_ordinal);
+        self
     }
 
     pub fn with_descends_from(mut self, descent: NoticeDescent) -> Self {
@@ -683,6 +707,9 @@ impl AdvanceNotice {
         if let Some(version) = self.applied_view_version {
             map.insert(headers::APPLIED_VIEW_VERSION.into(), version.to_string());
         }
+        if let Some(first) = self.first_ordinal {
+            map.insert(headers::FIRST_ORDINAL.into(), first.to_string());
+        }
         map
     }
 
@@ -725,6 +752,9 @@ impl AdvanceNotice {
             applied_view_version: optional(map, headers::APPLIED_VIEW_VERSION)?
                 .map(|value| decimal(value, headers::APPLIED_VIEW_VERSION))
                 .transpose()?,
+            first_ordinal: optional(map, headers::FIRST_ORDINAL)?
+                .map(|value| decimal(value, headers::FIRST_ORDINAL))
+                .transpose()?,
         };
         notice.check()?;
         Ok(notice)
@@ -749,6 +779,14 @@ impl AdvanceNotice {
         }
         if !is_sha256_hex(&self.through_digest) {
             return Err(NoticeProblem::Malformed(headers::THROUGH_DIGEST));
+        }
+        // A lineage starts at most one past its newest message (a cut that
+        // retained nothing).
+        if self
+            .first_ordinal
+            .is_some_and(|first| first > self.through_ordinal.saturating_add(1))
+        {
+            return Err(NoticeProblem::Malformed(headers::FIRST_ORDINAL));
         }
         if !is_model(&self.model) {
             return Err(NoticeProblem::Malformed(headers::MODEL));

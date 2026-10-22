@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.5.0
+
+A breaking release. A runner never does per-step work, or holds memory, in
+proportion to a session's whole length; reads stay within the current
+lineage, and the whole history moves to an on-demand op.
+
+- Breaking: CONTRACT §14.2 (new) states the cost rule. Per step, a runner's
+  work scales with the messages added since its previous step, plus a
+  constant; it never re-reads, re-checks or re-renders the window. Writing
+  the model request is excluded. Resident memory scales with the window
+  since the latest cut. Acceptance is each runner's own benchmark: 150,000
+  seeded messages against 1,000, median step time within 2× and memory
+  flat.
+- Breaking: a lineage is the readable history from the latest cut, and a
+  cut starts a new lineage (§4.5). `lineage_id` changes at a cut, a revert
+  and a recovery that drops or rewrites written messages, and at nothing
+  else. Read stability holds within one lineage. Ordinals stay
+  session-wide and never renumber.
+- Breaking: `session.head` gains `first_ordinal`, the current lineage's first
+  ordinal (`HeadMeta::first_ordinal`). It is present whenever `lineage_id`
+  is, and `HeadMeta::lineage_consistent` now requires it and checks it is at
+  most one above `last_ordinal`. `HeadMeta::new` takes it as a parameter.
+- Breaking: `session.head` gains `cut: {mid, digest, written_at}`
+  (`read::HeadCut`, `HeadMeta::cut`, `with_cut`): the message the latest
+  cut folds last, by identity, never content. A lineage without a cut
+  carries none and starts at ordinal 0; `lineage_consistent` requires a cut
+  whenever `first_ordinal` is above 0. A cut the host made before the runner
+  adopted the session may come with `first_ordinal` 0.
+- Breaking: a revert that removes the latest cut's message undoes that cut.
+  The new lineage starts at the newest cut whose message survives, and its
+  first notice descends from the lineage the runner was on at that cut,
+  only when the runner had one there; below every cut it starts at
+  ordinal 0 with no cut and no descent. Setup runs again either way.
+- Breaking: range and after-message reads, and `session.resolve`, refuse a
+  position below `first_ordinal` with the new code `before_lineage_start`
+  and `detail.first_ordinal` (`errors::BEFORE_LINEAGE_START`,
+  `errors::BeforeLineageStartDetail`). The tail reads the newest page
+  within the lineage. Resolve no longer answers numbers inside summarized
+  history.
+- Breaking: Setup runs once per lineage, before the lineage's first model
+  call, for every new lineage, a cut's included; a runner may run a cut's
+  Setup as soon as it prepares the view carrying the cut. Each tag
+  checkpoint belongs to exactly one lineage (§9.6, §11.1). A checkpoint
+  comes only on a Setup without `descends_from`; a cut lineage's Setup
+  carries `descends_from` and its numbering continues from the old
+  lineage's highest number, so a cut renumbers no part. A checkpoint on a
+  descending Setup is a failed Setup with reason `checkpoint_on_descent`.
+  A runner may refuse reads `transient` while a tag-rendering run waits for
+  a Setup without descent, never during a cut's Setup.
+- Breaking: `session.head` and every `session.history` page carry
+  `history_version` (`HeadMeta::history_version`,
+  `HistoryPage::history_version`): it rises at every lineage change but a
+  cut (a revert, a rewriting recovery, a restart after lost state), never
+  at a cut or an append, and never decreases. `lineage_consistent` and
+  `HistoryPage::check` require it with a lineage.
+- `session.history` gains ordinal seeks, `from_ordinal` and
+  `before_ordinal` (`HistoryMode::FromOrdinal`, `BeforeOrdinal`,
+  `read::fields::BEFORE_ORDINAL`), for ordinals the runner assigned; any
+  other is refused with the new code `unknown_ordinal`
+  (`errors::UNKNOWN_ORDINAL`).
+- New group `host_history` with the op `session.history`
+  (`ops::SESSION_HISTORY`, `capabilities::HOST_HISTORY`, the new `history`
+  module): the session's whole surviving history, paged oldest first by
+  opaque `older` and `newer` cursors, from the newest page, `from_mid` or
+  `before_mid`. Entries carry `mid` and `written_at` always and `ordinal`
+  only where the runner has one; window entries are exactly what
+  `session.read` serves, and entries below `first_ordinal` carry no tags.
+  A cursor survives a cut; one a revert invalidated is refused with the new
+  code `cursor_expired`. A runner that is its own host must declare the
+  group; a runner on a host may. The compaction lane never syncs from it.
+- `read::fields` gains `CURSOR`, `FROM_MID` and `BEFORE_MID`.
+- Vectors: `head.json` regenerated (every answer with a lineage now carries
+  `first_ordinal`, and every one above 0 its `cut`; new consistent and
+  inconsistent answers, a host cut with `first_ordinal` 0 among them); `errors.json`
+  adds the two codes; new `history.json`. `SHA256SUMS` refreshed.
+
 ## 0.4.3
 
 Contract text only; no code, wire or vector changes.

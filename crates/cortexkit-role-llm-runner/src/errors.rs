@@ -49,8 +49,45 @@ pub const BUDGET_EXHAUSTED: &str = "budget_exhausted";
 /// re-reads from the tail; it never retries the same cursor.
 pub const LINEAGE_CHANGED: &str = "lineage_changed";
 
-/// A read's `after_mid` names no message in the lineage the read named.
+/// A read's `after_mid` names no message in the lineage the read named, or
+/// a `session.history` request's `from_mid` or `before_mid` names no
+/// message of the session's history.
 pub const UNKNOWN_MID: &str = "unknown_mid";
+
+/// A range read, an after-message read or a `session.resolve` names a
+/// position below the current lineage's first ordinal: history before the
+/// session's latest cut, which `session.read` and `session.resolve` never
+/// serve. `detail` is [`BeforeLineageStartDetail`]. Terminal: the reader
+/// reads from `first_ordinal`, or reads the earlier history with
+/// `session.history` on a runner that declares `host_history`.
+pub const BEFORE_LINEAGE_START: &str = "before_lineage_start";
+
+/// The detail of a `before_lineage_start` refusal: the current lineage's
+/// first ordinal, as `session.head` reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct BeforeLineageStartDetail {
+    pub first_ordinal: u64,
+}
+
+impl BeforeLineageStartDetail {
+    pub fn new(first_ordinal: u64) -> Self {
+        Self { first_ordinal }
+    }
+}
+
+/// A `session.history` cursor no longer names a place in the session's
+/// history: a revert or a rewrite removed or changed the entry it was
+/// minted next to, or an entry older than it, or the cursor was minted for
+/// another session. Never answered with an empty page instead. Terminal:
+/// the reader pages again from the newest page or from a `mid` it holds. A
+/// cursor that does not parse is `invalid_params` naming `cursor` instead.
+pub const CURSOR_EXPIRED: &str = "cursor_expired";
+
+/// A `session.history` `from_ordinal` or `before_ordinal` names an ordinal
+/// the runner never assigned, or one a revert removed. Terminal: the reader
+/// seeks to an ordinal it read, or pages by cursor.
+pub const UNKNOWN_ORDINAL: &str = "unknown_ordinal";
 
 /// The complete encoded `session.read` reply exceeds the transport frame
 /// limit. Terminal: retrying with a smaller `max_bytes` cannot shrink a
@@ -416,6 +453,9 @@ pub const CODES: &[&str] = &[
     INVALID_PARAMS,
     LINEAGE_CHANGED,
     UNKNOWN_MID,
+    BEFORE_LINEAGE_START,
+    CURSOR_EXPIRED,
+    UNKNOWN_ORDINAL,
     REPLY_TOO_LARGE,
     UNKNOWN_RUN,
     UNKNOWN_TAG,
@@ -639,6 +679,23 @@ mod tests {
                 case["name"]
             );
         }
+    }
+
+    #[test]
+    fn lineage_bound_and_cursor_refusals_are_named_and_terminal() {
+        for code in [BEFORE_LINEAGE_START, CURSOR_EXPIRED, UNKNOWN_ORDINAL] {
+            assert!(CODES.contains(&code), "{code}");
+            assert!(!is_retryable(code), "{code}");
+        }
+        let file = vectors::load("errors.json");
+        let case = vectors::cases(&file, "codes")
+            .iter()
+            .find(|case| case["code"] == BEFORE_LINEAGE_START)
+            .unwrap();
+        let detail: BeforeLineageStartDetail =
+            serde_json::from_value(case["detail"].clone()).unwrap();
+        assert_eq!(detail, BeforeLineageStartDetail::new(42));
+        assert_eq!(serde_json::to_value(detail).unwrap(), case["detail"]);
     }
 
     #[test]

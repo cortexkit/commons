@@ -5,10 +5,14 @@
 //! Section references name the `CONTRACT.md` in `cortexkit-role-llm-runner`
 //! or `cortexkit-role-compaction-provider`, as indicated below.
 //!
-//! - **Setup** is the compaction provider's initial session call. Its initial
-//!   CompactionMessage must be durable before the first model request, and a
-//!   recorded initial CompactionMessage prevents another Setup call
-//!   (runner §11.1; compaction-provider §4).
+//! - **Setup** is the compaction provider's call at the start of each
+//!   lineage. Its initial CompactionMessage must be durable before the
+//!   lineage's first model request, and a recorded initial CompactionMessage
+//!   prevents another Setup call within the lineage (runner §11.1;
+//!   compaction-provider §4).
+//! - A **lineage** is the readable history from the session's latest cut; a
+//!   cut, a revert or a recovery that drops or rewrites messages starts a new
+//!   one (runner §4.5).
 //! - A **fold** applies a recorded CompactionMessage to the canonical model
 //!   view before the affected model request is sent (runner §§8, 14).
 //! - A **role code** is the compaction refusal's `code` (`RefuseCode`), which
@@ -73,13 +77,16 @@ mod cancel;
 mod cases;
 mod ceiling;
 mod compaction;
+mod cost;
 mod crash;
 mod delivery_order;
 mod directives;
 mod drive;
 mod follow;
+mod host_history;
 mod input_token_cap;
 mod interrupt_reason;
+mod lineage;
 mod media;
 mod report;
 mod retention;
@@ -96,7 +103,7 @@ mod user_commands;
 
 pub use compaction::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
-    CompactionSetup, CompactionSetupIdentity,
+    CompactionSetup, CompactionSetupIdentity, ScriptedRange, ScriptedView,
 };
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;

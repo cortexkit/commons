@@ -159,14 +159,15 @@ pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
     Ok(head)
 }
 
-/// Every message of the transcript, read forward from ordinal 0 by
-/// following `next_from_ordinal`, with every page read.
+/// Every message of the current lineage, read forward from its
+/// `first_ordinal` (as `session.head` states it; 0 for a session without a
+/// lineage) by following `next_from_ordinal`, with every page read.
 pub async fn read_all<R: RunnerRoute>(
     route: &R,
 ) -> Result<(Vec<ReadPage>, Vec<ReadMessage>), String> {
     let mut pages = Vec::new();
     let mut messages: Vec<ReadMessage> = Vec::new();
-    let mut from = 0;
+    let mut from = head(route).await?.first_ordinal.unwrap_or(0);
     for _ in 0..MAX_PAGES {
         let page = read(route, &ReadRequest::range(from)).await?;
         messages.extend(page.messages.iter().cloned());

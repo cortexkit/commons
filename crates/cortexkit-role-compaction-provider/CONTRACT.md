@@ -162,6 +162,14 @@ the session and freezes that plan for use.
   `provider` is a module id, `preset` a string, and `params` an opaque
   object.
 - [pinned] New messages are read with `llm-runner/v1`'s `session.read`.
+- [pinned] A provider's sync and view building read only through
+  `session.read` (and `session.resolve`), within the runner's current
+  lineage: never through `session.history`, and never below the lineage's
+  `first_ordinal` (`llm-runner/v1` §4.5). Raw recovery of folded content,
+  such as a model asking to expand a folded range, reads on demand through
+  `session.history` (`llm-runner/v1` §4.6, on a runner that declares
+  `host_history`) or the host's own reader; it never feeds the provider's
+  sync state.
 - [pinned] A compaction provider MUST request `media: "descriptors"` on
   `session.read` and `session.resolve`. It uses the runner's message `digest`,
   `part_digests`, refs' `sha256` and notices' `through_digest` as given, and
@@ -172,11 +180,22 @@ the session and freezes that plan for use.
 
 ## 4. `compaction.setup`
 
-- [pinned] Called once per session, before its first model call. Its answer
-  is recorded before the first model call, and Setup does not run again
-  while the runner holds that record. A runner that no longer holds it
-  (after a restore of its store, say) calls Setup again before its next
-  model call, as after a failed Setup below.
+- [pinned] Called once per lineage, before the lineage's first model call
+  (`llm-runner/v1` §11.1), for every new lineage, one a cut starts
+  included. A runner may call a cut's Setup as soon as it prepares the view
+  that carries the cut, off the step, so the first step after a cut never
+  waits on the provider; no model call is made without a `ready` answer,
+  and a refusal means no model call. A lineage is the runner's
+  readable history from the session's latest cut; a cut, a revert, or a
+  recovery that drops or rewrites written messages starts a new one
+  (`llm-runner/v1` §4.5), and the runner calls Setup again for it. The
+  provider keeps its state for the session across those calls: a Setup for
+  a new lineage of a session it holds is a repeat, answered from that
+  state. The answer is recorded before the lineage's first model call, and
+  Setup does not run again within the lineage while the runner holds that
+  record. A runner that no longer holds it (after a restore of its store,
+  say) calls Setup again before its next model call, as after a failed
+  Setup below.
 - [pinned] If Setup fails or times out with no answer, no model call is
   made and the run ends `error` with `provider_code`
   `compaction_unavailable`, `llm-runner/v1`'s code, which this crate
@@ -233,21 +252,42 @@ the session and freezes that plan for use.
   unchanged. The reference check is `lineage::DescentLink`; providers still
   validate and persist their own retained history and link. A Setup without
   `descends_from` makes the session's first lineage a root.
-- [pinned] A runner sends `descends_from` only when the provider's
-  `role.describe.setup_descends_from` is true (§2). Setup decodes leniently
+- [pinned] **A cut's Setup.** The Setup of a lineage a cut started, or a
+  revert restarted at a cut the runner had a lineage at, carries
+  `descends_from: {lineage_id, through_ordinal}` naming the old lineage at
+  that cut, whatever `setup_descends_from` says: the provider published that
+  cut. A Setup whose `descends_from` names a cut the provider never
+  published (which can happen only when a runner cuts on its own) is
+  refused `unknown_cut` (`errors::UNKNOWN_CUT`), never answered with a
+  guess; it decodes through the open code path, as `RefuseCode::Unknown`,
+  and is terminal for that lineage.
+- [pinned] **`checkpoint` only without `descends_from`.** A provider sends
+  `checkpoint` only on a Setup without `descends_from`: a session moved in
+  from standalone Magic Context, a Claude Code conversation coming off the
+  full-array route, a runner that lost its state, and a revert below a cut
+  made before the runner adopted the session. On a lineage a cut starts,
+  tag numbering continues from the old lineage's highest number. A runner
+  that receives `checkpoint` on a Setup with `descends_from` treats the
+  answer as a failed Setup, no model call, naming the reason
+  `checkpoint_on_descent` (`setup::CHECKPOINT_ON_DESCENT`,
+  `SetupAnswer::check_for`).
+- [pinned] A runner sends `descends_from` on any other Setup only when the
+  provider's `role.describe.setup_descends_from` is true (§2). Setup decodes leniently
   (§14), so a provider without that support would ignore the member; decoding
   is not a declaration of support. Later forks within the session are
   announced on advance notices instead (§5).
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, ceiling?, checkpoint?}` or `{answer: "refuse", request_id, code,
+  initial, ceiling?, checkpoint?, cache_ttl?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§10).
   - `initial` is a CompactionMessage (`message::CompactionMessage`,
     `{compaction_id, version, range: {from, to}, replacement}`): the
     provider's finished messages, in the runner's message schema, standing
     for the half-open ordinal range `[from, to)`. Usually the range is empty
-    at the start of the lineage, `{from: 0, to: 0}`: the provider's head is
-    inserted before every message, and the model view shows it as the
-    insertion `[0, 0)` (§11). A provider with no head returns an empty
+    at the start of the lineage, `{from: f, to: f}` with `f` the lineage's
+    `first_ordinal` (0 before the session's first cut): the provider's head
+    is inserted before every message of the lineage, and the model view
+    shows it as the insertion `[f, f)` (§11). On a lineage a cut started,
+    the head carries what the cut folded. A provider with no head returns an empty
     replacement. Only `from > to` is malformed (`range_inverted`); a runner
     treats an answer whose `initial` is malformed as a failed Setup.
   - The runner renders `initial` until it applies the session's first view
@@ -258,8 +298,9 @@ the session and freezes that plan for use.
     `tags::SetupCheckpoint`) is `{tag_checkpoint, cut}`: for a session the
     provider moved from standalone Magic Context, the highest tag number
     standalone ever allocated for it, and `cut` the message the standalone
-    marker cuts at. The provider MUST send it on every Setup answer for a
-    moved session, permanently and unchanged; it is absent for a session
+    marker cuts at. The provider MUST send it on every Setup answer
+    without `descends_from` for a moved session, permanently and unchanged,
+    and never on one with `descends_from`; it is absent for a session
     that was never moved. The runner anchors its numbering at `cut` only
     when no in-effect marker carries a checkpoint for the session, so the
     numbers are the same with or without the marker's key, and numbers from
@@ -328,6 +369,7 @@ provider.
 | `window` | no | the current model's context window in tokens; omitted when unknown |
 | `model` | yes | the current model id: 1 to 256 bytes, printable ASCII, no space |
 | `last_usage` | no | the last response's measured usage, `<input>:<cache_read>:<cache_write>:<output>`; omitted before the first response |
+| `first_ordinal` | no | the current lineage's first ordinal (`llm-runner/v1`'s `session.head.first_ordinal`), at most one above `through_ordinal` |
 
 - [pinned] Event tokens (`notice::Event`). Every token follows one grammar:
   a name `[a-z][a-z0-9_]*`, then zero or more `:<argument>` segments of
@@ -342,7 +384,7 @@ provider.
 | `revert_below:<ordinal>` | the transcript was truncated; every message at `ordinal` or above is gone |
 | `marker_outcome:<applied\|deferred\|unknown>:<cut_id>` | the host's native compaction marker for the cut of the view named by `applied_view_version` in the same notice (§9). `cut_id` is 1 to 64 bytes of `[A-Za-z0-9._-]` |
 | `view_discarded:<view_version>` | the runner discarded that view because its coverage is no longer a prefix of the transcript; always with `revert_below` in the same notice |
-| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§7). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, `unsupported_apply`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
+| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§7). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, `unsupported_apply`, `ranges_start`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
 | `view_deferred:<view_version>:<reason>` | the runner holds that view until a step boundary where applying it is safe for the current model provider, and keeps rendering its current one meanwhile (§7). `reason` has the same form: `signed_reasoning`, or another (`notice::defer_reasons`) |
 | `view_companion:<view_version>:<edit>` | the runner applied that view together with a companion edit the model provider requires, and nothing more (§7). `edit` has the same form: `strip_signed_reasoning`, or another (`notice::companion_edits`) |
 
@@ -354,9 +396,13 @@ provider.
   acknowledgement, and there is no separate `view_applied` event. The
   provider builds its next view against the view the runner renders now.
 - [pinned] `ttl_expired` may be declared, as an event or a ride cause,
-  **only** by a runner that knows the cache lifetime it actually sent. A host
-  whose model SDK places its own cache markers declares `model_change` and
-  `surface_change` only.
+  only against a lifetime the runner holds for the request's model under
+  the precedence of §8.1: a configured `cache_ttl` entry, then the lifetime
+  the runner saw in its own final request options, then the provider's
+  default entry. With none of them, or with a configured entry whose `ms`
+  is `null`, it never declares `ttl_expired`. A host whose model SDK places
+  its own cache markers, and that receives no `cache_ttl`, declares
+  `model_change` and `surface_change` only.
 - [pinned] A notice is refused (`AdvanceNotice::from_headers`,
   `NoticeProblem`) when a required header is missing (`missing:<header>`), a
   value breaks its encoding (`malformed:<header>`: `seq` or
@@ -372,7 +418,7 @@ provider.
 - [pinned] Size bound: the headers this contract defines total at most
   4,096 bytes (`MAX_NOTICE_HEADER_BYTES`), counting every name's and value's
   length as the bus counts a message's headers. The per-value bounds keep
-  every well-formed notice at or under 2,280 bytes; a runner with more events
+  every well-formed notice at or under 2,313 bytes; a runner with more events
   than fit splits them across consecutive notices.
 - [pinned] Notice digest (`AdvanceNotice::digest`, `notice::notice_digest`):
   lowercase hexadecimal SHA-256 over a sequence of frames, each an 8-byte
@@ -403,6 +449,26 @@ provider.
 - [pinned] The runner claims only entries that are byte-identical in both
   lineages. A wrong claim is a runner defect, and the provider's digest
   check below catches it.
+- [pinned] **A revert below a cut.** A revert that undoes the latest cut
+  starts a lineage at the newest cut still at or below the revert point
+  (`llm-runner/v1` §4.5). Its first notice carries `descends_from` naming,
+  at that cut, the lineage the runner was on when it made the cut: the same
+  value that cut's own lineage first declared. A cut the runner has no
+  lineage at (one its host made before the runner adopted the session)
+  gives no `descends_from`, nor does a revert below every cut, whose lineage
+  starts at the session's first message. Setup runs again either way: Setup
+  runs once per lineage, before the lineage's first model call (§4), for
+  every new lineage, one a cut starts included, whether or not it carries
+  `descends_from`.
+- [pinned] **A cut's lineage.** The first advance notice of a lineage a
+  cut started carries `descends_from` naming the previous lineage at the
+  cut: `<old lineage_id>:<cut.through_ordinal>:<digest>`, where
+  `cut.through_ordinal` is the cut of the view whose application started
+  the lineage, one below the new lineage's `first_ordinal`, and `<digest>`
+  is the content digest of the old lineage's entry at that ordinal, as the
+  provider read it. A cut renumbers nothing (`llm-runner/v1` §4.5), so the
+  provider keeps its state across the cut, as the next rule says, and reads
+  nothing before the new lineage: its next read starts at `first_ordinal`.
 - [pinned] When a notice moves the session to a new lineage, the provider
   keeps state derived from entries through the declared `through_ordinal`
   (tags, queues, folds, coverage) only if `descends_from` names the lineage
@@ -447,7 +513,8 @@ provider.
      to none. Derived state (summaries, say) may be kept only if its sources
      re-validate by content digest after the re-read, as §5.3 states for
      work anchored on message ids and part keys.
-  3. It re-reads the whole current lineage from its first message, through
+  3. It re-reads the whole current lineage from its first message (the
+     lineage's `first_ordinal`, never ordinal 0 of the session), through
      at least the newest `through_ordinal` it has seen.
   4. It publishes a new view, at a higher version, built only from re-read
      content.
@@ -498,15 +565,23 @@ provider.
 
 - [pinned] A view (`view::CompactionView`) is `{session_ref, view_version,
   lineage_id, covers_through: {ordinal, mid}, ranges, cut?, apply?,
-  digest}`. It is the provider's preferred shape for the prefix of the
+  cache_ttl?, digest}`. It is the provider's preferred shape for the prefix of the
   transcript through message `covers_through`. Every message after it goes
   out unchanged. A view never replaces or rewrites the runner's transcript
   or the records in its write-ahead log, so a session can later switch to
   another compaction provider, or to none, with its history intact.
 - [pinned] `ranges` (`view::ViewRange`) are half-open over ordinals of
   `lineage_id`, `from` included and `to` excluded, the convention of a
-  CompactionMessage (§4). Together they tile `[0, covers_through.ordinal +
-  1)` in order, with no gap and no overlap:
+  CompactionMessage (§4). Together they tile `[first_ordinal,
+  covers_through.ordinal + 1)` in order, with no gap and no overlap, where
+  `first_ordinal` is the lineage's first ordinal (`llm-runner/v1`'s
+  `session.head.first_ordinal`): 0 before the session's first cut, the
+  cut's first retained ordinal after it. Everything before `first_ordinal`
+  is carried only by the view's head. When `first_ordinal` is above 0, the
+  first range is a `replace` carrying that head; it may be zero-length
+  (`from == to == first_ordinal`). A runner refuses a view whose ranges
+  start anywhere else, or that leads with a `keep` range on such a lineage
+  (§7):
   - `{kind: "keep", from, to, edits?}` sends the transcript's messages in the
     range as written, except for the parts `edits` changes. Never empty.
   - `edits: [{ordinal, mid, part, bytes?, drop?}]` (`view::PartEdit`) edits
@@ -568,7 +643,8 @@ provider.
   this order: `session_ref` is a session reference (`session_ref`);
   `view_version` is not 0 (`version_zero`); `digest` is lowercase hexadecimal
   (`digest_malformed`); `ranges` is not empty (`no_ranges`); each range starts
-  where the previous ended, the first at 0 (`gap`); no range is inverted and
+  where the previous ended (`gap`), the first wherever it starts, because
+  only the runner knows the lineage's `first_ordinal` (§7); no range is inverted and
   no keep range is empty (`inverted`); the last range ends at
   `covers_through.ordinal + 1` (`coverage_end`); every replace range's bytes
   are a JSON array (`replacement_not_array`); every keep range's edits lie
@@ -618,11 +694,16 @@ provider.
      runner's message at `covers_through.ordinal` has id
      `covers_through.mid`, and the message at each edit's `ordinal` has the
      edit's `mid`. If not, it is `discard`ed;
-  6. every edited part key exists in its message, or the view is
+  6. its ranges start at the lineage's `first_ordinal`, with a `replace`
+     range first when `first_ordinal` is above 0, or the view is
+     `refused:ranges_start` and the runner reports
+     `view_refused:<version>:ranges_start`, keeping its current view;
+  7. every edited part key exists in its message, or the view is
      `refused:unknown_part` and the runner reports
      `view_refused:<version>:unknown_part`;
-  7. each message's edits follow its part order, or it is
+  8. each message's edits follow its part order, or it is
      `rejected:edit_order`.
+  `view::dispose_fetched` takes the lineage's `first_ordinal` for step 6.
   Only then does it `apply`. A rejected view is not persisted, not applied
   and not reported; the runner keeps its current view and may fetch again.
 - [pinned] **A view applies only at a step boundary.** The runner writes it
@@ -696,8 +777,15 @@ provider.
   `view_refused:<version>:<reason>` on its next notice and keeping its
   current view, when applying it would separate a tool call from its result
   (`tool_pair_split`), including through a dropped part, or break role order
-  for the current model provider (`role_order`), and when an edit names a
-  part key the message does not have (`unknown_part`, step 6 above).
+  for the current model provider (`role_order`), when its ranges do not
+  start at the lineage's `first_ordinal` (`ranges_start`, step 6 above),
+  and when an edit names a part key the message does not have
+  (`unknown_part`, step 7 above).
+- [pinned] A view with a cut starts a new lineage once it applies
+  (`llm-runner/v1` §4.5). The view stays the runner's record of what it
+  rendered on the old lineage; on the new one the runner renders the new
+  lineage's Setup `initial` (§4) until a view for the new lineage, tiling
+  from its `first_ordinal`, applies.
 - [pinned] A view whose coverage is no longer a prefix of the transcript,
   because a revert truncated below `covers_through`, is discarded, whether
   just fetched or currently applied. The runner reports
@@ -738,7 +826,9 @@ provider.
   a `ceiling` ride can end in the run being refused (`context_ceiling`,
   below).
 - [pinned] The answer (`ride::RideAnswer`, strict on `answer`) is
-  `{answer: "view", view}` or `{answer: "nothing"}`. A view is checked as in
+  `{answer: "view", view, cache_ttl?}` or `{answer: "nothing",
+  cache_ttl?}`; an answer to a `model_change` ride carries `cache_ttl` for
+  the new model when the provider has one (§8.1). A view is checked as in
   §7, against its own digest, and applies at this step: the ride happens
   at the step boundary before the step. A missed deadline, an `ERROR`, or an
   answer that does not decode is treated as `nothing`, and the runner
@@ -774,6 +864,37 @@ provider.
 - [pinned] Without `ceiling` the runner never pauses for the provider, and
   still never sends over the window: such a request is refused
   `context_ceiling` with `cause: "over_window"`.
+
+### 8.1 The prompt cache's lifetime
+
+- [pinned] `cache_ttl: {model, ms, configured}` (`cache_ttl::CacheTtl`)
+  states the prompt cache's lifetime for one model, in milliseconds. `ms`
+  is a `u64` or `null`, always encoded; `configured` is `true` when the
+  session's configuration sets the lifetime and `false` when it is the
+  provider's default for the model.
+- [pinned] It is optional, and rides on: Setup's `ready` answer, for
+  Setup's model (§4); every answer to a `compaction.ride` whose cause is
+  `model_change`, `{answer: "nothing"}` included, for the new model (§8);
+  and every view, resolved for the model of the notice the view answers
+  (§6). It is omitted when absent, so an answer or view without it keeps
+  its bytes. A view's digest frames it after `apply`, only when present
+  (`CompactionView::compute_digest`).
+- [pinned] A runner uses an entry only when its `model` equals the model of
+  the request it is about to send. The newest such entry wins. A runner
+  never keeps a previous model's value: after a switch it uses only entries
+  naming the new model.
+- [pinned] The lifetime a runner judges `ttl_expired` by is, in this order
+  (`cache_ttl::lifetime`):
+  1. a `configured: true` entry's `ms`, where `null` means never declare
+     `ttl_expired`;
+  2. the lifetime the runner saw in its own final request options;
+  3. a `configured: false` entry's `ms`, the provider's default;
+  4. otherwise nothing, so no `ttl_expired`.
+  So a `model_change` ride the runner missed, or answered late, falls
+  through to the observed lifetime and never to the old model's entry.
+- Informative, not a rule: a runner written in Rust is best served by
+  resolving the lifetime with `cache_ttl::lifetime` (and `cache_ttl::expired`)
+  rather than its own copy, so the precedence lives in one place.
 
 ## 9. Native compaction marker
 
@@ -828,6 +949,11 @@ provider.
 | `tag_checkpoint_unsupported` | the session was moved from standalone Magic Context and the runner does not declare `llm-runner/v1`'s `tag_checkpoint` group (§4) | no |
 | `setup_identity_mismatch` | the incoming route is bound to one non-empty session that differs from Setup's session; ends the current run as `error` | no |
 
+`unknown_cut` (`errors::UNKNOWN_CUT`) is not one of the seven typed codes:
+a Setup whose `descends_from` names a cut the provider never published is
+refused with it (§4), and a runner decodes it as `RefuseCode::Unknown`,
+terminal for that lineage.
+
 ## 11. The model view
 
 The model view is `llm-runner/v1`'s; this section only says where this
@@ -849,7 +975,7 @@ view (§6) appears in the model view is the runner role's to define.
   `EntrySource`). A malformed CompactionMessage has no source.
 - [pinned] An empty range is an insertion: `from_ordinal == to_ordinal`,
   placed before that ordinal and covering no transcript message. Setup's
-  usual head is `[0, 0)`. There is no separate source kind for inserted
+  usual head is `[f, f)`, with `f` the lineage's `first_ordinal`. There is no separate source kind for inserted
   messages.
 
 ## 12. Purity and identity
@@ -950,8 +1076,10 @@ terminal behavior per message.
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
-- [pinned] Setup's `descends_from` and `view_apply`, a view's `apply`, and
-  the answer's `ceiling` default to absent and are omitted when absent. A
+- [pinned] Setup's `descends_from` and `view_apply`, a view's `apply`, the
+  answer's `ceiling`, and `cache_ttl` on a Setup answer, a ride answer or a
+  view default to absent and are omitted when absent; inside an entry, `ms`
+  is always encoded, `null` included. A
   present `descends_from` requires string `lineage_id` and `u64`
   `through_ordinal`.
 
@@ -1008,6 +1136,7 @@ views and sends rides. It will check:
 | `view_immutable`, `view_version_rises`, `view_get_never_another_version` | §6 |
 | `part_edits_well_formed` | §6: a provider's part edits are sorted, one per part, inside their keep range, and name part keys the runner's `session.read` returned |
 | `ride_answers_within_deadline`, `ride_unknown_cause_nothing`, `ride_overflow_ignored_off_ceiling` | §8 |
+| `sync_reads_only_the_lineage`, `cut_lineage_keeps_state` | §3, §5.1: sync and view building never call `session.history` or read below `first_ordinal`; after a cut lineage's first notice descends at the cut, the provider keeps its state and its next read starts at `first_ordinal` |
 | `lineage_reset_drops_runner_copy` | §5.3: a new lineage without descent drops the tag index, cursor and rendered-view record, re-reads, and keeps only derived work whose message or part re-validates by digest |
 | `crash_at_<point>` for each point in §15 | §15 |
 

@@ -188,18 +188,54 @@ impl RideRequest {
 #[non_exhaustive]
 pub enum RideAnswer {
     /// A view to apply at this step. The runner checks it exactly as a view
-    /// fetched with `view.get`, against its own `digest`.
-    View { view: CompactionView },
-    /// No view now. The runner proceeds with its current view.
-    Nothing,
+    /// fetched with `view.get`, against its own `digest`. `cache_ttl` is the
+    /// prompt cache's lifetime for the ride's model, on every answer to a
+    /// `model_change` ride (CONTRACT.md §8.1); omitted when absent.
+    View {
+        /// Boxed: a view is far larger than the `nothing` answer.
+        view: Box<CompactionView>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_ttl: Option<crate::cache_ttl::CacheTtl>,
+    },
+    /// No view now. The runner proceeds with its current view. `cache_ttl`
+    /// as on `View`: an answer to a `model_change` ride carries it even
+    /// when it brings no view.
+    Nothing {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_ttl: Option<crate::cache_ttl::CacheTtl>,
+    },
 }
 
 impl RideAnswer {
     pub fn view(view: CompactionView) -> Self {
-        Self::View { view }
+        Self::View {
+            view: Box::new(view),
+            cache_ttl: None,
+        }
     }
 
     pub fn nothing() -> Self {
-        Self::Nothing
+        Self::Nothing { cache_ttl: None }
+    }
+
+    /// The answer with `cache_ttl` set, as every answer to a `model_change`
+    /// ride carries it.
+    pub fn with_cache_ttl(self, entry: crate::cache_ttl::CacheTtl) -> Self {
+        match self {
+            Self::View { view, .. } => Self::View {
+                view,
+                cache_ttl: Some(entry),
+            },
+            Self::Nothing { .. } => Self::Nothing {
+                cache_ttl: Some(entry),
+            },
+        }
+    }
+
+    /// The `cache_ttl` the answer carries, if any.
+    pub fn cache_ttl(&self) -> Option<&crate::cache_ttl::CacheTtl> {
+        match self {
+            Self::View { cache_ttl, .. } | Self::Nothing { cache_ttl } => cache_ttl.as_ref(),
+        }
     }
 }

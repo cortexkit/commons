@@ -138,6 +138,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/head.json"),
     ),
     (
+        "history.json",
+        include_str!("../test-vectors/llm-runner-v1/history.json"),
+    ),
+    (
         "input-token-cap-describe.json",
         include_str!("../test-vectors/llm-runner-v1/input-token-cap-describe.json"),
     ),

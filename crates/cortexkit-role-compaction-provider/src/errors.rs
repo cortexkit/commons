@@ -248,6 +248,13 @@ impl<'de> Deserialize<'de> for RefuseCode {
     }
 }
 
+/// A Setup whose `descends_from` names a cut this provider never published
+/// is refused with this code, never answered with a guess. It can happen
+/// only when a runner cuts on its own. It is not one of the typed
+/// [`RefuseCode`]s: it decodes as [`RefuseCode::Unknown`], which a runner
+/// never retries, so it is terminal for that lineage.
+pub const UNKNOWN_CUT: &str = "unknown_cut";
+
 /// The spellings of the seven typed [`RefuseCode`]s. On any of them the
 /// runner ends the current run as `error` after Setup, but for the one
 /// hand-off of `standalone_session_not_migrated` (CONTRACT.md §4).

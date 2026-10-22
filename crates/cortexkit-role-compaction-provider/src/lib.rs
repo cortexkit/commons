@@ -31,6 +31,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cache_ttl;
 pub mod ceiling;
 pub mod describe;
 pub mod digest;
@@ -78,8 +79,8 @@ pub const PROVIDES: &str = "compaction-provider/v1";
 pub mod ops {
     /// Discovery before use: the role's majors, ops and capabilities.
     pub const ROLE_DESCRIBE: &str = "role.describe";
-    /// Called once per session before its first model call. Returns the
-    /// initial CompactionMessage and the ceiling policy.
+    /// Called once per lineage, before the lineage's first model call.
+    /// Returns the initial CompactionMessage and the ceiling policy.
     pub const COMPACTION_SETUP: &str = "compaction.setup";
     /// Fetch one published view by version.
     pub const VIEW_GET: &str = "view.get";

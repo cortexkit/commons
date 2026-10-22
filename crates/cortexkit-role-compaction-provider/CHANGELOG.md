@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.5.0
+
+Requires `cortexkit-role-llm-runner` 0.5.0, whose lineage rules this release
+follows: a lineage is the readable history from the latest cut, and a cut
+starts a new lineage without renumbering anything.
+
+- Breaking: a view's `ranges` tile from the lineage's `first_ordinal` through
+  `covers_through.ordinal`, not from 0. Everything before `first_ordinal`
+  rides only in the view's head. `CompactionView::check` no longer requires
+  the first range to start at 0 (it still checks the ranges are contiguous),
+  and `view::dispose_fetched` takes the lineage's `first_ordinal`: a view
+  whose ranges start anywhere else is refused with the new reason
+  `ranges_start` (`notice::refusal_reasons::RANGES_START`), reported as
+  `view_refused:<version>:ranges_start`. New `CompactionView::ranges_start`.
+- Breaking: Setup runs once per lineage, before the lineage's first model
+  call, instead of once per session, a cut's lineage included; a runner may
+  call a cut's Setup as soon as it prepares the view carrying the cut. The
+  provider keeps its state across the call. A cut lineage's Setup carries
+  `descends_from` naming the old lineage at the cut; one naming a cut the
+  provider never published is refused `unknown_cut` (`errors::UNKNOWN_CUT`,
+  decoded through `RefuseCode::Unknown`, terminal for that lineage). A
+  provider sends `checkpoint` only on a Setup without `descends_from`; a
+  runner fails a Setup answering one with a checkpoint
+  (`setup::CHECKPOINT_ON_DESCENT`, `SetupAnswer::check_for`). The initial
+  CompactionMessage's range is usually `{first_ordinal, first_ordinal}`.
+- Breaking: the first advance notice of a lineage a cut started carries
+  `descends_from` naming the previous lineage at the cut (the cut's
+  `through_ordinal`, one below the new `first_ordinal`). The provider keeps
+  its state across the cut and reads nothing before the new lineage.
+- Breaking: a provider's sync and view building read only through
+  `session.read` within the current lineage, never through
+  `session.history`. Raw recovery of folded content reads on demand through
+  `session.history` or the host's reader.
+- Breaking: a view on a lineage whose `first_ordinal` is above 0 leads with
+  a `replace` range carrying the history head (it may be zero-length);
+  `dispose_fetched` refuses one leading with `keep` as `ranges_start`.
+- Advance notices gain an optional `first_ordinal` header
+  (`AdvanceNotice::first_ordinal`, `with_first_ordinal`), at most one above
+  `through_ordinal`. The widest well-formed notice grows from 2,280 to
+  2,313 bytes, still under the 4,096-byte bound.
+- A revert that undoes the latest cut restarts at the newest cut at or below
+  the revert point; its first notice descends from the lineage at that cut
+  only when the runner had one there, and Setup runs again (§5.1).
+- New `cache_ttl` module and optional `cache_ttl: {model, ms, configured}`
+  (§8.1) on Setup's `ready` answer, on every `model_change` ride answer and
+  on every view; a view's digest frames it only when present, so existing
+  answers and views keep their bytes. `cache_ttl::lifetime` is the runner's
+  precedence for declaring `ttl_expired`: a configured entry (`null` means
+  never), then the lifetime observed in the request, then the provider's
+  default, else nothing; only entries for the request's model count.
+  Breaking: `RideAnswer::Nothing` and `RideAnswer::View` gain the member,
+  and `RideAnswer::View` now holds its view boxed
+  (build them with `nothing()`, `view()` and `with_cache_ttl`), and
+  `SetupAnswer::Ready` gains it.
+- Vectors: `async.json` regenerated. The view refused as "first range does
+  not start at 0" (`gap`) is gone, because that view is now well formed;
+  every disposition names its lineage's `first_ordinal`; new cases: a view
+  on a cut lineage tiling from its first ordinal (accepted, assembled, and
+  applied), views tiling from 0 on a cut lineage and from 1 on a lineage
+  starting at 0 (`refused:ranges_start`), a cut lineage's first notice with
+  its descent, a notice refusing a view `ranges_start`, a cut lineage's
+  fork descent kept through the cut, a cut lineage's view leading with
+  `keep` (`refused:ranges_start`), notices carrying `first_ordinal` and
+  refused for a malformed one, revert notices with and without descent,
+  ride answers and a Setup answer carrying `cache_ttl`, views with and
+  without it, and the `cache_ttl` precedence decisions. `ASYNC_SHA256SUMS` and `SHA256SUMS`
+  refreshed.
+
 ## 0.4.2
 
 - CONTRACT §7 states when a deferral ends: at the latest at the first step

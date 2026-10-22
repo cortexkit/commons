@@ -198,6 +198,24 @@ where
                     .map(|()| Ending::Passed)
             }
             name if name.starts_with("retention_") => self.retention_case(name).await,
+            "cut_starts_a_new_lineage"
+            | "old_lineage_reads_refused_after_a_cut"
+            | "read_below_first_ordinal_refused"
+            | "ordinals_never_renumber_across_a_cut"
+            | "setup_once_per_lineage"
+            | "view_ranges_start_at_first_ordinal"
+            | "cut_lineage_notice_descends_from"
+            | "head_names_the_cut"
+            | "notice_carries_first_ordinal"
+            | "revert_below_the_cut_restarts_at_the_previous_cut"
+            | "revert_below_a_cut_before_adoption_has_no_descent"
+            | "checkpoint_on_descending_setup_refused"
+            | "cut_setup_leaves_reads_alone"
+            | "cut_numbering_continues_from_the_old_lineage" => {
+                crate::lineage::run(self, name).await
+            }
+            name if name.starts_with("history_") => crate::host_history::run(self, name).await,
+            "per_step_cost_scales_with_new_messages" => crate::cost::run(self).await,
             name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
                 crate::compaction::run(self, name)
                     .await
@@ -314,7 +332,7 @@ where
 
     /// Send `prompt` with a fresh `send_id` and wait for the run it starts
     /// to end. Returns the send's reply and how the run ended.
-    async fn run_prompt(
+    pub(crate) async fn run_prompt(
         &self,
         session: &mut Session<S::Route>,
         prompt: &str,

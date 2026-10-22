@@ -15,7 +15,8 @@ use serde_json::Value;
 /// Messages before `from` are not sent. The replacement stands in for the
 /// messages in `[from, to)`. Messages from `to` onward are sent as written.
 /// `from == to` is an empty range: nothing is replaced, and the replacement
-/// is inserted before `to`. `{from: 0, to: 0}` therefore puts the
+/// is inserted before `to`. `{from: f, to: f}`, with `f` the lineage's
+/// first ordinal (0 before the session's first cut), therefore puts the
 /// replacement before every message of the lineage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Range {

@@ -139,6 +139,7 @@ shipping runner with this document.
 | Group | Ops (`capabilities::GROUPS`) | Section |
 |---|---|---|
 | `transcript_reads` | `session.read`, `session.head` | §4 |
+| `host_history` | `session.history` | §4.6 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `run_cancel` | `run.cancel` | §6.2 |
@@ -171,6 +172,14 @@ shipping runner with this document.
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
+- [pinned] `host_history` is declared on its own (§4.6). A runner with no
+  host under it, one that is its own host and keeps the session's whole
+  history itself, must declare it. A runner on a host (one that runs its
+  sessions inside another program's store, such as OpenCode's) may declare
+  it, and then serves the history from the host's own storage on demand,
+  never from a copy of its own. `check_describe` checks the group for its
+  op; whether a runner is its own host is not visible in the answer, so a
+  consumer that needs the history checks for the group.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
   `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage`,
   `delivery_order`, `send_status`, `max_steps`, `max_output_tokens` and
@@ -263,14 +272,18 @@ shipping runner with this document.
 `{from_ordinal?, after_mid?, lineage_id?, limit?, max_bytes?,
 include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 
-- [pinned] **Tail.** With no cursor, the newest page. This is a contract, not
-  a default a runner may change; the suite checks it on a session longer than
-  one page.
-- [pinned] **Range.** `from_ordinal` reads forward from that ordinal.
+- [pinned] **Tail.** With no cursor, the newest page within the current
+  lineage (§4.5). This is a contract, not a default a runner may change; the
+  suite checks it on a session longer than one page.
+- [pinned] **Range.** `from_ordinal` reads forward from that ordinal. An
+  ordinal below the lineage's `first_ordinal` is refused
+  `before_lineage_start` with `detail.first_ordinal`
+  (`errors::BeforeLineageStartDetail`, §4.5).
 - [pinned] **After a message.** `{after_mid, lineage_id}` reads strictly after
   that message. It is refused by name as `lineage_changed` (the session's
-  lineage is not `lineage_id`) or `unknown_mid` (the lineage has no such
-  message), and never silently answered from the tail.
+  lineage is not `lineage_id`), `unknown_mid` (the lineage has no such
+  message) or `before_lineage_start` (the message lies below the lineage's
+  `first_ordinal`), and never silently answered from the tail.
 - [pinned] `mid` is opaque to consumers: they only pass back a value a page
   returned.
 - [pinned] A read carrying a `lineage_id` that is not the session's current
@@ -322,7 +335,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   until it completes. This is stricter than, and contains, the final-values
   rule above; streaming progress reaches a consumer through the stream
   (§7), never through a partial entry.
-- [pinned] **Read stability.** Once `session.read` has returned an entry
+- [pinned] **Read stability.** Read stability is scoped to the lineage
+  (§4.5). Once `session.read` has returned an entry
   under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
   `written_at`, `delivered_as`, and its part keys and tags never change
   under that lineage. Envelope members that report later state move forward
@@ -407,7 +421,9 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   in the kit. Ref shapes decode strictly. A compaction provider uses these
   served identities and ref hashes as given, never rehashing a descriptor.
 - [pinned] Ordinals and `mid`s are never reused or renumbered within a
-  lineage, across any crash.
+  lineage, across any crash. Ordinals are session-wide: a cut starts a new
+  lineage but renumbers nothing, so a message keeps its ordinal and `mid`
+  on every lineage that still holds it (§4.5).
 - [pinned] With `include_originals`, a hooked message carries `originals:
   [{field, value, provider}]` (`Original`), oldest first.
 - [pinned] `head` is the last durable event covered by the same snapshot as
@@ -418,8 +434,31 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 
 ### 4.3 Head metadata
 
-- [pinned] Head metadata without bodies: `{lineage_id, last_ordinal, head,
-  last_run_state, updated_at}` (`HeadMeta`).
+- [pinned] Head metadata without bodies: `{lineage_id, last_ordinal,
+  first_ordinal, cut?, history_version, head, last_run_state, updated_at}`
+  (`HeadMeta`).
+- [pinned] `history_version` is a `u64`, on `session.head` and on every
+  `session.history` page. It rises at every lineage change except a cut: a
+  revert, a recovery that rewrites written messages, or a restart after the
+  runner lost its state. It never changes at a cut or when messages are
+  appended. It never decreases, a store restore included: a runner keeps a
+  floor outside the store it restores, so a restored store cannot hand out
+  a lower value. Readers that hold a position in the visible history (an
+  app's claim on a message, say) key on it, so a compaction does not
+  invalidate the position while a rewrite of the visible history does.
+- [pinned] `cut: {mid, digest, written_at}` (`read::HeadCut`) describes the
+  cut that started the lineage's readable history, never its content: the
+  message the cut folds last (the one at the view cut's `through_ordinal`,
+  one below `first_ordinal` for a cut the runner made), its content digest
+  (the digest a cut lineage's `descends_from` names, compaction-provider
+  §5.1) and its creation time. A cut made before the runner numbered
+  anything, in a host's history before the runner adopted the session,
+  names the host's message, and its lineage's `first_ordinal` may be 0. A
+  lineage with no cut carries no `cut`, and its `first_ordinal` is 0.
+- [pinned] `first_ordinal` is the current lineage's first ordinal (§4.5):
+  0 for a lineage no cut started, the cut's first retained ordinal for one a
+  cut started. It is present whenever `lineage_id` is, and is at most one
+  above `last_ordinal` (a cut that retained no message).
 - [pinned] It is its own op, `session.head`, taking no fields
   (`HeadRequest`); `last_ordinal` is absent on an empty transcript;
   `last_run_state` is `{run_id, state, reason?}` (`LastRunState`) and
@@ -428,10 +467,12 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   summary; a page's `lineage_state` is a runner member, not pinned.
 - [pinned] It follows the read rule (§4.2): an absent `lineage_id` means the
   session has no lineage yet. For a session never written, `lineage_id`,
-  `last_ordinal`, `head`, `last_run_state` and `updated_at` are all absent.
-- [pinned] An answer without `lineage_id` carries none of the other four
-  members, and an answer with `lineage_id` carries `updated_at`
-  (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
+  `last_ordinal`, `first_ordinal`, `head`, `last_run_state` and
+  `updated_at` are all absent.
+- [pinned] An answer without `lineage_id` carries none of the other six
+  members, and an answer with `lineage_id` carries `updated_at` and
+  `first_ordinal` and `history_version`, with `cut` whenever
+  `first_ordinal` is above 0 (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
   malformed; it is not a refusal.
 
 ### 4.4 Serializer profiles
@@ -456,6 +497,158 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   into a one-block array, or back) does not change the entry.
 - [pinned] For such a session, a compaction view's `replace` and edit
   `bytes` (compaction-provider 0.3.0) are in this profile's message format.
+
+### 4.5 Lineage and the read bound
+
+A lineage is the readable history from the session's latest cut: the
+messages `session.read` and `session.resolve` serve. What lies before the
+cut is carried to the model only by the compaction view's head (compaction
+provider 0.5.0 §6) and to readers only by `session.history` (§4.6).
+
+- [pinned] A cut starts a new lineage. A cut is the point through which an
+  applied compaction view's replacements stand for the whole transcript
+  (the view's `cut`, compaction-provider §6, §9); the new lineage's first
+  ordinal is the cut's first retained ordinal, `cut.through_ordinal + 1`.
+- [pinned] `lineage_id` changes at a cut, at a revert, and at a recovery
+  that drops or rewrites written messages (§14, property 4, shape (a)), and
+  at nothing else. A runner may derive the id from its own storage identity
+  plus the cut, as long as every lineage of the session gets an id of its
+  own.
+- [pinned] A read naming an older lineage, `after_mid` included, is
+  refused `lineage_changed` (§4.1). Read stability (§4.2) holds within one
+  lineage: frozen bytes from the runner's own journal, never the host's
+  live history.
+- [pinned] Ordinals stay session-wide and never renumber. A message keeps
+  its ordinal across every cut. A revert removes messages, and a later
+  message may then take a removed message's ordinal, on the new lineage.
+- [pinned] **A revert below the latest cut.** A revert that removes the
+  latest cut's message (the one the cut folds last, which
+  `session.head.cut` names), or anything before it, undoes that cut. A cut
+  is at or below the revert point while its message survives the revert. The new lineage starts at the newest cut still at or below the
+  revert point: its `first_ordinal` is that cut's first retained ordinal
+  and `session.head.cut` describes that cut. Its first advance notice
+  carries `descends_from` naming, at that cut, the lineage the runner was
+  on when it made the cut (`<lineage>:<cut through_ordinal>:<digest>`, as
+  that cut's own lineage first declared it), only when the runner has such
+  a lineage: a cut made before the runner adopted the session has none, and
+  the notice then carries no `descends_from`. With no cut left, the
+  lineage starts at the session's first message, `first_ordinal` 0 and no
+  `cut`, without `descends_from`. Either way Setup runs again for the new
+  lineage: that is §11.1's rule that Setup runs once per lineage, before
+  the lineage's first model call, which covers every new lineage, one a cut
+  starts included, whether or not it carries `descends_from`; it is not an
+  exception.
+- [pinned] `session.head` states the current lineage's `first_ordinal`
+  (§4.3). A range read, an after-message read and `session.resolve` that
+  name a position below it are refused `before_lineage_start` with
+  `detail.first_ordinal` (§12.1). Nothing is ever served from before the
+  lineage, or from anywhere else, in their place. For `session.resolve`, the
+  position is the part the tag names: a tag at or below the lineage's
+  numbering anchor (the checkpoint the latest cut's marker or the lineage's
+  Setup answer carries, §9.6) names a part before the cut.
+- [pinned] The tail reads the newest page within the lineage.
+- [pinned] `before_lineage_start`, `cursor_expired` and `unknown_ordinal`
+  (§4.6) are new codes. Codes are open strings (§12), so a consumer that predates them
+  treats them as terminal refusals of the one request; no public enum of
+  this crate gains a variant for them.
+
+### 4.6 `host_history`: `session.history`
+
+`session.read` serves the lineage. `session.history` pages through the
+session's whole surviving history, from its first message through the
+current lineage's ancestry: the surviving prefix, never a branch a revert
+left. It is on demand only, for an app's reader and for raw recovery (a
+model asking to expand a folded range). It runs per page, never per step,
+and sits outside the cost rule (§14.2). It is paged by opaque cursors,
+never by ordinal: a runner on a host that adopted an existing session has
+no ordinals for the history before the adoption, and numbering it would
+need the whole-session walk the cost rule removes.
+
+- [pinned] The request is `{cursor?, from_mid?, before_mid?, from_ordinal?,
+  before_ordinal?, limit?, max_bytes?, media?, include_originals?, view?}`
+  (`history::HistoryRequest`),
+  strict like `session.read`'s (§13): an unknown field is refused
+  `invalid_params` naming it.
+  - With none of `cursor`, `from_mid` and `before_mid`, it reads the newest
+    page. `from_mid` reads forward from that message, inclusive.
+    `before_mid` reads the page that ends directly before that message,
+    exclusive. `cursor` reads the page a previous page's `older` or `newer`
+    named.
+  - `from_ordinal` reads forward from the entry with that ordinal,
+    inclusive; `before_ordinal` reads the page that ends directly before it,
+    exclusive. They are valid only for an ordinal the runner assigned and
+    still holds: one never assigned, or one a revert removed, is refused
+    `unknown_ordinal`. `before_ordinal` at the lowest assigned ordinal
+    returns the newest entries without an ordinal (an adopted session's
+    history before adoption), by the boundary rule below. Paging onward
+    from a seek uses the returned cursors, as from any other position.
+  - At most one of `cursor`, `from_mid`, `before_mid`, `from_ordinal` and
+    `before_ordinal` is given; a second one is refused `invalid_params`
+    naming it, in that order (`HistoryRequest::mode`). An unknown `from_mid` or `before_mid` is
+    refused `unknown_mid`. A cursor that does not parse is refused
+    `invalid_params {field: "cursor"}`.
+  - `view: "model"` is refused `invalid_params {field: "view"}`: history
+    serves raw entries only. `limit`, `max_bytes` (with the byte caps of
+    `role.describe.max_bytes`), `media` and `include_originals` are those of
+    `session.read`, with the same oversize and `reply_too_large` rules.
+- [pinned] The page is `{messages, lineage_id, history_version, older?,
+  newer?}` (`history::HistoryPage`), entries oldest to newest. `lineage_id`
+  is the session's current lineage and `history_version` its history
+  version (§4.3), as `session.head` states them; a never-written session
+  answers an empty page without either.
+- [pinned] **Order.** Entries run oldest first within a page. Following
+  `older` or `newer` never overlaps or skips an entry.
+- [pinned] **Explicit end.** `older` is absent exactly when nothing older
+  exists. `newer` is absent exactly when nothing newer existed when the
+  page was read. A reader never infers either end from an empty page.
+- [pinned] **Cursors.** `older` and `newer` are opaque. A cursor stays
+  valid while the entry it was minted next to, and every entry older than
+  it, are unchanged in the session's current history. A cut changes
+  neither, so cursors survive cuts. A revert or a rewrite that removes or
+  changes that entry, or anything older, makes the runner refuse the cursor
+  `cursor_expired`, never answer it with an empty page. A cursor minted for
+  another session is refused `cursor_expired` too.
+- [pinned] **Entries** (`history::HistoryEntry`) are `session.read`'s entry
+  envelope (§4.2) with two differences: every entry carries `mid` and
+  `written_at`, and `ordinal` appears only where the runner has one. A
+  runner never numbers history on demand.
+  - `written_at` is the message's creation time; for a host-served entry,
+    the host's own.
+  - An entry's `mid` never changes for the life of the session. Where
+    `session.read` and `session.history` both serve a message, the `mid` is
+    the same; on a runner over a host, a host-served entry's `mid` is the
+    host's own message id.
+  - An entry served with an ordinal carries that same ordinal in every
+    later read, below a cut included. An entry served without one never
+    gains one.
+  - **Boundary order.** The newest entry without an ordinal comes directly
+    before the entry with the lowest ordinal, with nothing between them.
+  - **Window entries.** An entry at or after `first_ordinal` is served
+    exactly as `session.read` serves it: its bytes, its ordinal and its
+    `tags` (`HistoryEntry::matches_read`). An entry below `first_ordinal`
+    carries no `tags`: tag numbers belong to the lineage that shows them.
+  - Frozen bytes: an entry the runner wrote or ingested keeps the bytes it
+    first served, as read stability (§4.2) keeps them.
+- [pinned] **Before the window.** A reader holding the `session.read`
+  window continues into older history with `{before_mid: <mid of the
+  window's first message>}` on a runner that declares `host_history`. It
+  never infers the session's start from `first_ordinal`: an adopted
+  session's window can start at ordinal 0 with host history before it.
+- [pinned] **Edits outside the runner.** Below the window, a runner on a
+  host serves what the host holds at the time of the read. Changes a client
+  makes to the host's stored history outside the runner (deleting or
+  editing an old message through the host's own API) are outside this
+  contract: they are not lineage changes, and a runner need not detect
+  them. A revert is in scope: history never serves a branch a revert left.
+- [pinned] **The lane.** A compaction provider's sync and view building
+  read only through `session.read`, within the current lineage, never
+  through `session.history` (compaction-provider 0.5.0 §5.2). Raw recovery
+  of folded content reads on demand through `session.history` or the
+  host's own reader.
+- Informative, not pinned: a runner on a host typically keeps a durable
+  index from `mid` to ordinal, written once at ingest, kept on disk and
+  never resident. That satisfies the cost rule (§14.2), which bounds
+  per-step work and resident memory, not disk.
 
 ## 5. `dispatch_attribution`
 
@@ -1711,9 +1904,12 @@ part's key and its content digest, never a number.
 - [pinned] A runner never walks the whole session to number it. It keeps
   the tail's numbers and the next number in memory, and what it holds
   always equals a fresh computation from the anchor: a revert or a reorder
-  recomputes from the cut, never just keeps counting upward. Resolving a
-  number inside summarized history finds the marker interval that holds it
-  and walks only that interval.
+  recomputes from the cut, never just keeps counting upward.
+  `session.resolve` never answers a number inside summarized history: a
+  number that names a part before the lineage's first ordinal is refused
+  `before_lineage_start` (§4.5), which the runner decides from the anchor's
+  checkpoint without walking anything. Raw recovery of such a part reads
+  `session.history` (§4.6).
 
 **Lineage.**
 
@@ -1723,7 +1919,12 @@ part's key and its content digest, never a number.
   a detected restore, and the fallback to the session start above. A switch
   from a stored ledger (below) renumbers nothing and keeps the lineage.
   Within one lineage a number names one part, and a re-read answers the
-  same numbers. Numbers may repeat across lineages; a number reused after a
+  same numbers.
+- [pinned] A cut starts a new lineage too (§4.5), though it renumbers
+  nothing: the new lineage numbers from the cut's checkpoint, as the
+  numbering rules above say, so every part the new lineage still shows
+  keeps the number it showed before the cut, and tags count from the cut as
+  0.4.x specified. Numbers may repeat across lineages; a number reused after a
   revert is fine. Undo, revert and rewind stay within the session as
   lineage changes.
 - [pinned] A renumbering the runner detects during a step takes effect at
@@ -1747,6 +1948,29 @@ part's key and its content digest, never a number.
   the session start with that number, on a new lineage. The checkpoint is
   permanent for the session, needs no report back, and survives a lost
   marker key and runner restarts.
+- [pinned] Setup runs once per lineage, before the lineage's first model
+  call (§11.1), so each Setup checkpoint the runner records belongs to
+  exactly one lineage: a lineage's numbering is anchored only by the
+  checkpoint its own Setup answered, never by one recorded for another
+  lineage.
+- [pinned] A Setup checkpoint comes only on a Setup without
+  `descends_from` (compaction-provider §4): a session moved in from
+  standalone Magic Context, a Claude Code conversation coming off the
+  full-array route, a runner that lost its state, and a revert below a cut
+  made before the runner adopted the session. On a lineage a cut starts,
+  whose Setup carries `descends_from`, numbering continues from the old
+  lineage's highest number: the parts the cut retained keep their numbers,
+  and the next counted part takes the number after the old lineage's
+  highest. A runner that receives `checkpoint` on a Setup with
+  `descends_from` treats the answer as a failed Setup: no model call, and
+  the run ends `error` with `provider_code` `compaction_unavailable` and
+  `reason` `checkpoint_on_descent` (compaction-provider
+  `setup::CHECKPOINT_ON_DESCENT`).
+- [pinned] While a tag-rendering run waits for the answer to a Setup
+  without `descends_from`, whose checkpoint may move the numbering anchor,
+  a runner may refuse `session.read` and `session.resolve` `transient`.
+  It never does so while a Setup with `descends_from` (a cut's) is pending:
+  a cut's Setup never interrupts readers.
 - [pinned] A compaction provider refuses Setup for a session it moved from
   standalone Magic Context, on a runner without `tag_checkpoint`, with the
   terminal `tag_checkpoint_unsupported` (compaction-provider §10).
@@ -1872,7 +2096,9 @@ part's key and its content digest, never a number.
   validated and applied to exposed text before describing that text.
 - [pinned] `session.resolve` answers about the session's current lineage:
   the part that shows the number now, with its current `ordinal` and
-  `mid`.
+  `mid`. A number that names a part below the lineage's `first_ordinal` is
+  refused `before_lineage_start` with `detail.first_ordinal` (§4.5), never
+  answered.
 - [pinned] A malformed tag is refused `invalid_params {field: "tag"}`. A
   well-formed tag that no part of the current lineage carries is refused
   `unknown_tag`, terminal (§12.1). Resolve never answers a left lineage's
@@ -2509,20 +2735,41 @@ owes.
   compaction provider.
 - [pinned] It implements the runner half of compaction-provider 0.3.0 §3,
   which that contract defines (its §4 to §10) and this one does not restate:
-  - Setup (`compaction.setup`), called once when a session starts. Its
-    initial CompactionMessage is recorded before the first model call, and
-    Setup does not run again while the runner holds that record. A runner
-    that no longer holds it, as when a detected restore starts a new
-    lineage whose recorded Setup answer did not survive or that the runner
-    discards with the lost lineage (§9.6), calls Setup again before its
-    next model call, as after a failed Setup (compaction-provider §4);
+  - Setup (`compaction.setup`), called once per lineage, before the
+    lineage's first model call, for every new lineage, one a cut starts
+    included, so each Setup answer, and each tag checkpoint it carries,
+    belongs to exactly one lineage (§4.5, §9.6). A runner may run a cut's
+    Setup as soon as it prepares the view that carries the cut, off the
+    step, so the first step after a cut never waits on the provider; no
+    model call is made without a `ready` answer, and a refusal means no
+    model call. A lineage a cut, a revert or a recovery started calls Setup
+    again before its first model call. The Setup of a lineage a cut
+    started, or a revert restarted at a cut the runner had a lineage at,
+    carries `descends_from: {lineage_id, through_ordinal}` naming the old
+    lineage at that cut, whatever the provider's `setup_descends_from`
+    says, because the provider published that cut;
+    the provider keeps its state across the call (compaction-provider
+    §4). The initial CompactionMessage is recorded before that model call,
+    and Setup does not run again within the lineage while the runner holds
+    that record. A runner that no longer holds it, as when a detected
+    restore starts a new lineage whose recorded Setup answer did not
+    survive or that the runner discards with the lost lineage (§9.6),
+    calls Setup again before its next model call, as after a failed Setup
+    (compaction-provider §4);
   - advance notices on ck-bus after every committed transcript change the
     provider should see, from which the provider reads with `session.read`
-    (§4) and `session.resolve` (§9.6);
+    (§4) and `session.resolve` (§9.6), within the current lineage, never
+    with `session.history`. The first notice of a lineage a cut started
+    carries `descends_from` naming the previous lineage at the cut
+    (compaction-provider §5.1);
   - views: fetched with `view.get` on `view_ready`, checked, written durably
     to the runner's write-ahead log and applied only at a step boundary,
     then rendered for every request until a newer view applies, including
-    across restarts and while the provider is down;
+    across restarts and while the provider is down. A view's ranges tile
+    from the lineage's `first_ordinal`; the runner refuses a view whose
+    ranges start anywhere else (`view_refused:<version>:ranges_start`,
+    compaction-provider §7). A view with a cut starts a new lineage once it
+    applies (§4.5);
   - rides (`compaction.ride`) when the runner's prefix is being rewritten
     anyway, and at the ceiling;
   - the ceiling Setup sets, with the `context_ceiling` refusal and run state
@@ -2594,9 +2841,12 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls` | `field` | no |
+| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
-| `unknown_mid` | `after_mid` names no message in the lineage | — | no |
+| `unknown_mid` | `after_mid` names no message in the lineage; a `session.history` `from_mid` or `before_mid` names no message of the session's history (§4.6) | — | no |
+| `before_lineage_start` | a range read, an after-message read or a `session.resolve` names a position below the current lineage's `first_ordinal` (§4.5) | `{first_ordinal}` (`errors::BeforeLineageStartDetail`) | no: read from `first_ordinal`, or read older history with `session.history` |
+| `unknown_ordinal` | a `session.history` `from_ordinal` or `before_ordinal` names an ordinal the runner never assigned, or one a revert removed (§4.6) | — | no |
+| `cursor_expired` | a `session.history` cursor whose entry, or an entry older than it, a revert or rewrite removed or changed, or one minted for another session (§4.6) | — | no: page again from the newest page or a held `mid` |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit (`TRANSPORT_FRAME_LIMIT`), including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
 | `unknown_tag` | `session.resolve` names a well-formed tag that no part of the session's current lineage carries: one no part shows in this lineage, including one that named a part only under a lineage it has left (§9.6) | — | no |
@@ -2718,7 +2968,7 @@ above.
 - [pinned] Every field is declared required or optional.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
   strings): `role.describe`, every reply and event a consumer decodes
-  (`ReadPage`, `ModelPage`, `HeadMeta`, `RunResult`, `SubscribeEvent`,
+  (`ReadPage`, `ModelPage`, `HeadMeta`, `HistoryPage`, `RunResult`, `SubscribeEvent`,
   `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
   `ToolCallsPage`, `RefreshReply`, `RefreshPolicyReply`,
   `FlushPrefixReply`, and the `run.status`, `run.cancel` and
@@ -2727,7 +2977,7 @@ above.
   `cause` and a read entry's `delivered_as.mode` are open strings. One
   exception: a model-view entry's `source` kind is strict (§8).
 - [pinned] **Strict on unknown fields** wherever absence changes the
-  question: `session.read`, `session.head`, `run.result`, `run.status`,
+  question: `session.read`, `session.head`, `session.history`, `run.result`, `run.status`,
   `run.tool_calls`, `session.subscribe`, `session.baseline`,
   `session.adopt`, `session.resolve`, `session.refresh`,
   `session.refresh_policy` and `session.flush_prefix` requests. A
@@ -2765,7 +3015,7 @@ state root (`cortexkit-role-harness`):
    reused or renumbered across a kill. Pages read before and after a kill
    agree on every message both contain.
 2. [pinned] **A lineage change is visible.** A read naming the old lineage
-   after a lineage change is refused `lineage_changed`.
+   after a lineage change, a cut's included, is refused `lineage_changed`.
 3. [pinned] **One terminal per run.** Every run reaches exactly one terminal
    state. A run cut by a kill ends `interrupted`, never `cancelled`, and
    never gets a second terminal.
@@ -2869,6 +3119,31 @@ real process kill.
   direct caller chooses its own bind fields. Authorization still rests on
   the daemon-stamped principal and scope.
 
+## 14.2 Per-step cost and memory
+
+A session can run for months: a seven-month session holds 150,000 or more
+messages. A runner never does per-step work, or holds memory, in proportion
+to the session's whole length.
+
+- [pinned] **Work.** Per step, a runner's work scales with the messages
+  added since its previous step, plus a constant. It never re-reads,
+  re-checks or re-renders the window each step: what it derived for earlier
+  messages (rendered bytes, tags, sizes, digests) it keeps and extends.
+  Writing the model request itself is excluded, because the model needs
+  the whole window.
+- [pinned] **Memory.** A runner's resident memory for a session scales
+  with the window since the latest cut, never with the session's length.
+  History before the cut stays on disk, read on demand only
+  (`session.history`, §4.6, which sits outside this rule).
+- [pinned] **Acceptance.** Each runner proves it with its own benchmark: a
+  session seeded with 150,000 messages against one seeded with 1,000, the
+  same window since the latest cut in both, with the median step time
+  within 2× and resident memory flat. This is the acceptance rule, and the
+  runner's own CI runs it. The conformance kit offers the timing half as
+  the opt-in case `per_step_cost_scales_with_new_messages` (§15); it does
+  not measure memory and does not enforce the rule on a runner that does
+  not opt in.
+
 ## 15. Conformance suite (planned)
 
 A separate `cortexkit-role-llm-runner-conformance` crate, run by each runner
@@ -2935,6 +3210,12 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `media_descriptors_inline_unchanged`, `media_descriptors_full_content_digests`, `media_descriptors_pairing`, `media_descriptors_part_keys` | inline compatibility, full-inline identities, pairing preservation and strict digest-row keys |
 | `media_descriptors_stable_across_pages` | multipart fixture; fixed-budget fallback is independent of page position and byte cap |
 | `media_descriptors_model_view_refused` | `model_view`; descriptors are refused before read work, naming `media` |
+| `head_names_the_cut`, `notice_carries_first_ordinal`, `revert_below_the_cut_restarts_at_the_previous_cut`, `revert_below_a_cut_before_adoption_has_no_descent` | the cut cases' requirements; the revert cases also need the adapter's revert hook, and the last the hook that gives a session a host cut before adoption; inapplicable by name without them: `session.head.cut` names the cut message by `mid`, digest and time, and a lineage without a cut has none; every notice on a cut lineage carries `first_ordinal`; a revert below the latest cut restarts at the previous cut with `descends_from` naming the lineage at that cut, or at the first message with no cut and no descent, and Setup runs again; a cut that predates the runner's first lineage gives no `descends_from` |
+| `cut_starts_a_new_lineage`, `old_lineage_reads_refused_after_a_cut`, `read_below_first_ordinal_refused`, `ordinals_never_renumber_across_a_cut`, `setup_once_per_lineage`, `view_ranges_start_at_first_ordinal`, `cut_lineage_notice_descends_from` | `compaction`, `queue`, `transcript_reads`, and the adapter's view-publishing hook and notice observation; inapplicable by name without the hook: after a view with a cut applies, `lineage_id` changes and `first_ordinal` is the cut's first retained ordinal; reads naming the old lineage (`after_mid` included) are refused `lineage_changed`; range and after-message reads below `first_ordinal` are refused `before_lineage_start` with `detail.first_ordinal`; retained messages keep their ordinals and `mid`s; Setup runs exactly once in each lineage; a view tiling from 0 on the cut lineage is refused `view_refused:<version>:ranges_start`; the cut lineage's first notice descends from the old lineage at the cut |
+| `checkpoint_on_descending_setup_refused`, `cut_setup_leaves_reads_alone`, `cut_numbering_continues_from_the_old_lineage` | the cut cases' requirements, with `tag_checkpoint` for the first, the adapter's Setup-hold hooks and a runner that ever holds reads for the second, and `tags` with a tag-rendering plan for the third: a checkpoint on a cut lineage's Setup fails it `checkpoint_on_descent` with no model request; reads of the new lineage are served while a cut's Setup is pending; retained parts keep their numbers and the next part numbers one above the old lineage's highest |
+| `history_version_unchanged_by_a_cut`, `history_version_rises_at_a_revert`, `history_from_ordinal_and_before_ordinal`, `history_unknown_ordinal_refused`, `history_before_lowest_ordinal_reaches_unnumbered_entries` | `host_history`, `queue`, `transcript_reads`; the cut case also `compaction`, `run_ops` and the view hook, the revert case the revert hook, the last a session with host history before the runner's first numbered message: `history_version` is unchanged on `session.head` and history pages by a cut and rises at a revert; ordinal seeks page from and before an assigned ordinal; an unassigned or reverted ordinal is refused `unknown_ordinal`; `before_ordinal` at the lowest ordinal reaches the unnumbered entries |
+| `history_pages_back_to_the_first_message`, `history_mid_matches_read`, `history_no_tags_below_first_ordinal`, `history_ordinal_kept_below_the_cut`, `history_cursor_survives_a_cut`, `history_never_serves_a_reverted_branch`, `history_cursor_expired_after_a_revert_past_it`, `history_boundary_order`, `history_before_mid_continues_below_the_window` | `host_history`, `queue`, `transcript_reads`; the cut cases need the view-publishing hook, the revert cases the adapter's revert hook, and the last two a session with host history before the runner's first numbered message; each inapplicable by name without its hook |
+| `per_step_cost_scales_with_new_messages` | `queue`, `transcript_reads` or `run_ops`, and the adapter's seeding hook, which writes finished messages through the runner's own store behind a cut; inapplicable without it, never passed: the median step time with 150,000 seeded messages is at most 2.0 times the median with 1,000 |
 | `tags_fork_of_a_managed_session_refused` | `tags`, `compaction`, `queue`, `transcript_reads`, and the adapter's fork hook; a send into, and an adoption of, a fork of a managed session is refused `fork_unsupported`, writing nothing; inapplicable when the adapter cannot create a fork the runner can detect, since a runner refuses only forks it can know about |
 | `tags_resolve_answers_the_current_lineage` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, and `StepRecorded`; reads the `crash_at_StepRecorded` scenario: after a seal that moves the session to a new lineage (§14, shape (a)), every number the new lineage shows (up to 64) resolves to the part showing it there, never to a part of the lineage left, a number above its highest is refused `unknown_tag`, and the cut run's prompt carries a number; inapplicable when the runner resumes the run or keeps the call on its lineage (shape (b)); reported as a named skip without `tags` |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` or `steer` |

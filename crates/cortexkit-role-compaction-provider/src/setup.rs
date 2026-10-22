@@ -1,13 +1,17 @@
-//! `compaction.setup`: called once per session, before its first model
-//! call. The provider takes `project_root` from the incoming route; together
+//! `compaction.setup`: called once per lineage, before the lineage's first
+//! model call; a runner may call a cut's Setup as soon as it prepares the
+//! view that carries the cut. A cut, a revert or a recovery that
+//! starts a new lineage calls it again, and the provider keeps its state for
+//! the session across those calls. The provider takes `project_root` from the incoming route; together
 //! with Setup's `harness` and `session`, it uses these values as the identity
 //! for later reverse calls.
 //!
 //! Setup returns the initial CompactionMessage, which the runner renders
 //! until it applies the session's first view (a provider with no head
 //! returns an empty replacement), and optionally the ceiling policy. The
-//! runner records the answer before the first model call, and Setup does not
-//! run again while the runner holds that record; a runner that no longer
+//! runner records the answer before the lineage's first model call, and
+//! Setup does not run again within the lineage while the runner holds that
+//! record; a runner that no longer
 //! holds it (after a restore of its store, say) calls Setup again before its
 //! next model call.
 
@@ -151,6 +155,13 @@ impl SetupRequest {
     }
 }
 
+/// The reason a runner records when a Setup answer carries `checkpoint` for
+/// a request with `descends_from`: it treats the answer as a failed Setup
+/// (no model call, run error `compaction_unavailable` with this `reason`),
+/// because a lineage that descends from another continues that lineage's
+/// numbering and never takes a checkpoint.
+pub const CHECKPOINT_ON_DESCENT: &str = "checkpoint_on_descent";
+
 /// The `compaction.setup` answer. Strict on `answer`: a runner treats an
 /// answer it cannot decode as a failed Setup.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -160,8 +171,9 @@ pub enum SetupAnswer {
     Ready {
         request_id: String,
         /// The initial CompactionMessage. Its range is usually empty at the
-        /// start of the lineage (`{from: 0, to: 0}`): the head goes before
-        /// every message. The runner renders it until it applies the
+        /// start of the lineage, `{from: f, to: f}` with `f` the lineage's
+        /// first ordinal: the head goes before every message of the lineage,
+        /// and on a lineage a cut started it carries what the cut folded. The runner renders it until it applies the
         /// session's first view.
         initial: CompactionMessage,
         /// When the runner pauses for a view and, failing one, refuses the
@@ -178,6 +190,10 @@ pub enum SetupAnswer {
         /// session that was never moved.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint: Option<SetupCheckpoint>,
+        /// The prompt cache's lifetime for Setup's model (CONTRACT.md
+        /// §8.1). Omitted when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_ttl: Option<crate::cache_ttl::CacheTtl>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own
@@ -208,6 +224,18 @@ impl SetupAnswer {
         }
     }
 
+    /// The runner's check of a `ready` answer against the request it
+    /// answers: a `checkpoint` on a Setup with `descends_from` is refused
+    /// [`CHECKPOINT_ON_DESCENT`]. A `refuse` passes, as it ends the run on
+    /// its own.
+    pub fn check_for(&self, request: &SetupRequest) -> Result<(), &'static str> {
+        if request.descends_from.is_some() && self.checkpoint().is_some() {
+            Err(CHECKPOINT_ON_DESCENT)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Whether a `refuse` may be retried; `None` for `ready`. Its
     /// retryability is fixed by the code: `true` means the runner may
     /// retry without the user acting.
@@ -223,6 +251,26 @@ impl SetupAnswer {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn a_checkpoint_on_a_descending_setup_is_a_failed_setup() {
+        let file = vectors::load("setup.json");
+        let moved = vectors::cases(&file, "answers")
+            .iter()
+            .map(|case| serde_json::from_value::<SetupAnswer>(case["answer"].clone()).unwrap())
+            .find(|answer| answer.checkpoint().is_some())
+            .expect("a moved session's answer carries a checkpoint");
+        let plain = SetupRequest::new("s", "opencode", "setup", Map::new(), "m", 1);
+        assert_eq!(moved.check_for(&plain), Ok(()));
+        let descending = plain
+            .clone()
+            .with_lineage("lin-2")
+            .with_descends_from(DescendsFrom::new("lin-1", 1));
+        assert_eq!(moved.check_for(&descending), Err(CHECKPOINT_ON_DESCENT));
+        let refused: crate::errors::RefuseCode =
+            serde_json::from_value(serde_json::json!(crate::errors::UNKNOWN_CUT)).unwrap();
+        assert!(!refused.retryable());
+    }
 
     #[test]
     fn setup_descent_round_trips_without_dropping_the_field() {

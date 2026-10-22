@@ -15,10 +15,17 @@
   ],
   "answers": [
     {
-      "name": "session with a completed last run",
+      "name": "session with a completed last run, after a cut retaining from ordinal 120",
       "answer": {
         "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         "last_ordinal": 499,
+        "first_ordinal": 120,
+        "cut": {
+          "mid": "msg_0119",
+          "digest": "4f6c2a7e0f5a1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
+          "written_at": 1789990000000
+        },
+        "history_version": 3,
         "head": {
           "wal_seq": 1203,
           "sub_index": 0
@@ -35,6 +42,8 @@
       "answer": {
         "lineage_id": "L2",
         "last_ordinal": 12,
+        "first_ordinal": 0,
+        "history_version": 1,
         "head": {
           "wal_seq": 40,
           "sub_index": 1
@@ -51,12 +60,44 @@
       "name": "empty session",
       "answer": {
         "lineage_id": "L3",
+        "first_ordinal": 0,
+        "history_version": 1,
         "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "a cut that retained nothing: the lineage starts one past the last ordinal",
+      "answer": {
+        "lineage_id": "L4",
+        "last_ordinal": 12,
+        "first_ordinal": 13,
+        "cut": {
+          "mid": "m12",
+          "digest": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a",
+          "written_at": 1790000000800
+        },
+        "history_version": 1,
+        "updated_at": 1790000000900
       }
     },
     {
       "name": "session never written: every member absent",
       "answer": {}
+    },
+    {
+      "name": "a lineage whose cut predates the runner's numbering: a cut with first_ordinal 0",
+      "answer": {
+        "lineage_id": "L5",
+        "last_ordinal": 4,
+        "first_ordinal": 0,
+        "cut": {
+          "mid": "host_msg_77",
+          "digest": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
+          "written_at": 1780000000000
+        },
+        "history_version": 1,
+        "updated_at": 1790000001000
+      }
     }
   ],
   "inconsistent": [
@@ -94,7 +135,67 @@
       "name": "a lineage without its update time",
       "answer": {
         "lineage_id": "L1",
-        "last_ordinal": 3
+        "last_ordinal": 3,
+        "first_ordinal": 0
+      }
+    },
+    {
+      "name": "no lineage but a first ordinal",
+      "answer": {
+        "first_ordinal": 0
+      }
+    },
+    {
+      "name": "a lineage without its first ordinal",
+      "answer": {
+        "lineage_id": "L1",
+        "last_ordinal": 3,
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "a first ordinal more than one past the last",
+      "answer": {
+        "lineage_id": "L1",
+        "last_ordinal": 3,
+        "first_ordinal": 5,
+        "history_version": 1,
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "a first ordinal above 0 without its cut",
+      "answer": {
+        "lineage_id": "L1",
+        "last_ordinal": 9,
+        "first_ordinal": 4,
+        "history_version": 1,
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "no lineage but a cut",
+      "answer": {
+        "cut": {
+          "mid": "msg_0119",
+          "digest": "4f6c2a7e0f5a1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
+          "written_at": 1789990000000
+        }
+      }
+    },
+    {
+      "name": "a lineage without its history version",
+      "answer": {
+        "lineage_id": "L1",
+        "last_ordinal": 3,
+        "first_ordinal": 0,
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "no lineage but a history version",
+      "answer": {
+        "history_version": 2
       }
     }
   ]

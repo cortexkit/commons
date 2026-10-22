@@ -18,6 +18,21 @@
       "retryable": false
     },
     {
+      "code": "before_lineage_start",
+      "retryable": false,
+      "detail": {
+        "first_ordinal": 42
+      }
+    },
+    {
+      "code": "cursor_expired",
+      "retryable": false
+    },
+    {
+      "code": "unknown_ordinal",
+      "retryable": false
+    },
+    {
       "code": "reply_too_large",
       "retryable": false
     },

@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.10.0
+
+Requires `cortexkit-role-llm-runner` 0.5.0 and
+`cortexkit-role-compaction-provider` 0.5.0. A breaking release.
+
+- Breaking: `session.head` answers must carry `first_ordinal` (the role's
+  `HeadMeta::lineage_consistent` now requires it), and the shared full read
+  starts at the lineage's `first_ordinal` instead of ordinal 0.
+- Breaking: `CompactionCall` gains `lineage_id`, the lineage the Setup body
+  named, and `CompactionObservation` gains `notices`, every advance notice
+  the runner published as its bus headers. Adapters that build them with
+  struct literals add the fields.
+- New `Capability::HostHistory` for the role's `host_history` group.
+- New subject hooks, each defaulting to an error that makes the cases
+  needing it inapplicable by name: `publish_compaction_view` (with the new
+  `ScriptedView` and `ScriptedRange`), `revert_session`,
+  `seed_host_history` and `seed_session_history`.
+- Cut cases, gated on `compaction`: `cut_starts_a_new_lineage`,
+  `old_lineage_reads_refused_after_a_cut` (`after_mid` included),
+  `read_below_first_ordinal_refused` (with `detail.first_ordinal`),
+  `ordinals_never_renumber_across_a_cut`, `setup_once_per_lineage`,
+  `view_ranges_start_at_first_ordinal` (a view tiling from 0 refused
+  `ranges_start`) and `cut_lineage_notice_descends_from`.
+- Cut cases on the head, the notices and reverts: `head_names_the_cut`,
+  `notice_carries_first_ordinal` (`AdvanceNotice::first_ordinal`),
+  `revert_below_the_cut_restarts_at_the_previous_cut` (with two cuts, and
+  below every cut) and `revert_below_a_cut_before_adoption_has_no_descent`.
+  `view_ranges_start_at_first_ordinal` also refuses a cut lineage's view
+  that leads with a keep range. `seed_host_history` takes `cut`: the host's
+  history ends in a cut made before adoption.
+- `checkpoint_on_descending_setup_refused` (gated on `tag_checkpoint`),
+  `cut_setup_leaves_reads_alone` (inapplicable unless
+  `holds_reads_during_setup` says the runner ever holds reads, and needing
+  the new `hold_next_compaction_setup`, `await_compaction_setup_held` and
+  `release_compaction_setup` hooks) and
+  `cut_numbering_continues_from_the_old_lineage` (gated on `tags`).
+- `history_version_unchanged_by_a_cut`, `history_version_rises_at_a_revert`,
+  `history_from_ordinal_and_before_ordinal`,
+  `history_unknown_ordinal_refused` and
+  `history_before_lowest_ordinal_reaches_unnumbered_entries`.
+- History cases, gated on `host_history`:
+  `history_pages_back_to_the_first_message`, `history_mid_matches_read`
+  (bytes, ordinal and tags too), `history_no_tags_below_first_ordinal`,
+  `history_ordinal_kept_below_the_cut`, `history_cursor_survives_a_cut`,
+  `history_never_serves_a_reverted_branch`,
+  `history_cursor_expired_after_a_revert_past_it`, `history_boundary_order`
+  and `history_before_mid_continues_below_the_window`.
+- `per_step_cost_scales_with_new_messages`, opt-in through
+  `seed_session_history`: with 1,000 and 150,000 seeded messages behind a
+  cut that leaves the same window, the median of nine timed exchanges on
+  the large session is at most 2.0 times the small one's (medians under
+  5 ms count as 5 ms). Without the hook it is inapplicable, never passed.
+- The suite's own reference fake implements every new rule, including a
+  variant whose every session holds host history without ordinals, and a
+  faulty fake fails each new case by name.
+
 ## 0.9.2
 
 Requires `cortexkit-role-llm-runner` 0.4.1.

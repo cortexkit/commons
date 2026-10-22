@@ -94,6 +94,9 @@ pub struct CompactionRouteIdentity {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompactionCall {
     pub request_id: String,
+    /// The `lineage_id` the Setup request body carried, absent when it
+    /// carried none.
+    pub lineage_id: Option<String>,
     /// The `harness` and `session` that arrived in the Setup request body.
     pub setup_identity: CompactionSetupIdentity,
     /// The runner-to-provider route's actual bind identity.
@@ -112,9 +115,48 @@ pub struct CompactionObservation {
     /// each request to ModelEntry, preserving its content and sources; it must
     /// not substitute `session.read` responses or configured replacements.
     pub model_inputs: Vec<Vec<crate::wire::read::ModelEntry>>,
+    /// Every advance notice the runner published for the session, in order,
+    /// as the header set the bus carried (CONTRACT §5 of
+    /// compaction-provider). Captured at the bus, never rebuilt from runner
+    /// state.
+    pub notices: Vec<std::collections::BTreeMap<String, String>>,
 }
 
-fn initial(marker: &str) -> CompactionMessage {
+/// One range of a [`ScriptedView`], in schema-neutral form: half-open over
+/// ordinals of the view's lineage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ScriptedRange {
+    /// Send the transcript's messages in `[from, to)` as written.
+    Keep { from: u64, to: u64 },
+    /// Send `replacement`, one message per string, in place of `[from,
+    /// to)`; `from == to` inserts before `to`. The adapter translates each
+    /// string to a message in the runner's schema that holds it.
+    Replace {
+        from: u64,
+        to: u64,
+        replacement: Vec<String>,
+    },
+}
+
+/// A view the scripted compaction provider publishes
+/// ([`crate::LlmRunnerSubject::publish_compaction_view`]), in schema-neutral
+/// form. The adapter computes the digest and assigns the version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScriptedView {
+    /// The lineage whose ordinals the ranges use.
+    pub lineage_id: String,
+    /// The ordinal and `mid` of the last message the view covers.
+    pub covers_through: u64,
+    pub covers_through_mid: String,
+    pub ranges: Vec<ScriptedRange>,
+    /// The view's cut: the last ordinal its replacements stand for. Its
+    /// `cut_id` is the adapter's to choose.
+    pub cut: Option<u64>,
+}
+
+pub(crate) fn initial(marker: &str) -> CompactionMessage {
     CompactionMessage {
         compaction_id: marker.into(),
         version: 1,
@@ -124,11 +166,11 @@ fn initial(marker: &str) -> CompactionMessage {
     }
 }
 
-fn text(value: &str) -> ScriptedTurn {
+pub(crate) fn text(value: &str) -> ScriptedTurn {
     ScriptedTurn::new(vec![ScriptedPart::Text(value.into())])
 }
 
-async fn observation<S: LlmRunnerSubject>(
+pub(crate) async fn observation<S: LlmRunnerSubject>(
     subject: &S,
     session: &str,
 ) -> Result<CompactionObservation, String> {
@@ -195,7 +237,7 @@ fn expect_message(page: &ModelPage, expected: &CompactionMessage) -> Result<(), 
     Ok(())
 }
 
-async fn install<S>(
+pub(crate) async fn install<S>(
     case: &Case<'_, S>,
     label: &str,
     setup: CompactionSetup,
@@ -213,7 +255,7 @@ where
     Ok(session)
 }
 
-async fn send<S>(
+pub(crate) async fn send<S>(
     case: &Case<'_, S>,
     session: &mut Session<S::Route>,
     prompt: &str,
@@ -241,7 +283,10 @@ where
     Ok(reply)
 }
 
-async fn release_model<S: LlmRunnerSubject>(subject: &S, session: &str) -> Result<(), String> {
+pub(crate) async fn release_model<S: LlmRunnerSubject>(
+    subject: &S,
+    session: &str,
+) -> Result<(), String> {
     subject
         .release_compaction_model(session)
         .await
@@ -268,7 +313,7 @@ async fn send_run_id<R: RunnerRoute>(
 
 /// The result of the run a send started, once that run has ended. A run that
 /// has not ended yet answers its current state (`active`), so this polls.
-async fn result<S>(
+pub(crate) async fn result<S>(
     case: &Case<'_, S>,
     session: &Session<S::Route>,
     reply: &SendReply,

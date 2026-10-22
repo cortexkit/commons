@@ -59,7 +59,7 @@ M = {
     6: ("m6", ["prt_6a"], {"role": "assistant", "content": [text("Added three tests.")]}),
 }
 
-NOTICE_ORDER = ["applied_view_version", "descends_from", "est_tokens", "events", "last_usage", "lineage_id",
+NOTICE_ORDER = ["applied_view_version", "descends_from", "est_tokens", "events", "first_ordinal", "last_usage", "lineage_id",
                 "model", "seq", "session_ref", "through_digest", "through_ordinal", "window"]
 
 
@@ -76,7 +76,7 @@ def digest_of(o):
 
 
 def notice(name, seq, through, events=None, applied=None, usage=None, window="200000", est="1200", model=MODEL,
-           lineage="lin_a", descends_from=None):
+           lineage="lin_a", descends_from=None, first_ordinal=None):
     h = {"session_ref": SR, "seq": str(seq), "lineage_id": lineage, "through_ordinal": str(through),
          "through_digest": sha(jcs(M[through][2])), "est_tokens": est, "model": model}
     if window is not None:
@@ -89,6 +89,8 @@ def notice(name, seq, through, events=None, applied=None, usage=None, window="20
         h["applied_view_version"] = str(applied)
     if descends_from is not None:
         h["descends_from"] = descends_from
+    if first_ordinal is not None:
+        h["first_ordinal"] = str(first_ordinal)
     return {
         "name": name,
         "subject": f"ck.{ACCT}.event.{RUNNER}.compaction.advanced.v1",
@@ -115,16 +117,22 @@ def view_digest(v):
         parts += ["cut", v["cut"]["cut_id"], str(v["cut"]["through_ordinal"])]
     if "apply" in v:
         parts += ["apply", v["apply"]]
+    if "cache_ttl" in v:
+        t = v["cache_ttl"]
+        parts += ["cache_ttl", t["model"], "null" if t["ms"] is None else str(t["ms"]),
+                  "true" if t["configured"] else "false"]
     return framed(parts)
 
 
-def view(version, through, ranges, cut=None, lineage="lin_a", digest=None, apply=None):
+def view(version, through, ranges, cut=None, lineage="lin_a", digest=None, apply=None, cache_ttl=None):
     v = {"session_ref": SR, "view_version": version, "lineage_id": lineage,
          "covers_through": {"ordinal": through, "mid": M[through][0]}, "ranges": ranges}
     if cut:
         v["cut"] = cut
     if apply is not None:
         v["apply"] = apply
+    if cache_ttl is not None:
+        v["cache_ttl"] = cache_ttl
     v["digest"] = digest or view_digest(v)
     return v
 
@@ -195,6 +203,18 @@ V4 = view(4, 5, [replace(0, 2, HEAD), keep(2, 6, [edit(4, "prt_4a", part=COMPRES
 V5 = view(5, 4, [replace(0, 2, HEAD), keep(2, 3), replace(3, 4, FOLD), keep(4, 5)],
           cut={"cut_id": "cut-3", "through_ordinal": 1})
 
+# After V3 applies, its cut through ordinal 1 starts lineage lin_c, whose
+# first ordinal is 2. A view there tiles from 2: the head that stands for
+# everything the cut folded is inserted at 2, and nothing tiles below it.
+V8 = view(8, 5, [replace(2, 2, HEAD), keep(2, 6, [edit(4, "prt_4a", part=COMPRESSED_PART)])], lineage="lin_c")
+# The same lineage, tiled from 0 as before the cut: refused ranges_start.
+V9 = view(9, 4, [replace(0, 2, HEAD), keep(2, 5)], lineage="lin_c")
+# A lineage starting at 0, tiled from 1: refused ranges_start as well.
+V10 = view(10, 4, [replace(1, 2, HEAD), keep(2, 5)])
+# A cut lineage tiled from 2 with a keep range first: nothing carries the
+# history before the cut, so refused ranges_start.
+V11 = view(11, 4, [keep(2, 5)], lineage="lin_c")
+
 transcript = [message_row(o) for o in sorted(M)]
 
 views = [
@@ -202,6 +222,7 @@ views = [
     {"name": "part edits inside a keep range: a dropped tool output and a stripped image", "view": V3},
     {"name": "compressed text inside a kept message", "view": V4},
     {"name": "whole-message fold between kept ranges", "view": V5},
+    {"name": "after a cut: ranges tile from the lineage's first ordinal, the head inserted there", "view": V8},
 ]
 for case in views:
     case["assembled"] = assemble(case["view"], transcript)
@@ -225,7 +246,6 @@ views_refused = [
     bad("session_ref is not a session reference", "session_ref", session_ref="ses_1"),
     bad("version zero", "version_zero", view_version=0),
     bad("digest in uppercase", "digest_malformed", digest=V3["digest"].upper(), keep_digest=True),
-    bad("first range does not start at 0", "gap", ranges=[replace(1, 2, HEAD), keep(2, 5)]),
     bad("a hole between ranges", "gap", ranges=[replace(0, 2, HEAD), keep(3, 5)]),
     bad("an empty keep range", "inverted", ranges=[replace(0, 2, HEAD), keep(2, 2), keep(2, 5)]),
     bad("an inverted replace range", "inverted", ranges=[replace(0, 2, HEAD), {"kind": "replace", "from": 2, "to": 1, "bytes": "[]"}]),
@@ -292,6 +312,7 @@ full = rows(sorted(M))
 m3_rewritten = rows((1, 2)) + [{**message_row(3), "mid": "m3b"}] + rows((4, 5, 6))
 m4_rewritten = rows((1, 2, 3)) + [{**message_row(4), "mid": "m4b"}]
 
+HOLE = next(c["view"] for c in views_refused if c["name"] == "a hole between ranges")
 UNKNOWN_PART = view(6, 4, [replace(0, 2, HEAD), keep(2, 5, [edit(3, "prt_3z", drop=True)])])
 PART_ORDER = view(6, 4, [replace(0, 2, HEAD), keep(2, 5, [edit(3, "prt_3b", drop=True),
                                                          edit(3, "prt_3a", part=PLACEHOLDER_PART)])])
@@ -320,12 +341,27 @@ dispositions = [
      "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:digest_mismatch"},
     {"name": "fetched view is not the announced version", "view": V3, "ready": ready_headers(V3, version=4),
      "current_version": 1, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:not_requested"},
-    {"name": "malformed view is rejected before any prefix check", "view": views_refused[5]["view"],
-     "ready": ready_headers(views_refused[5]["view"]),
+    {"name": "malformed view is rejected before any prefix check", "view": HOLE,
+     "ready": ready_headers(HOLE),
      "current_version": 1, "lineage_id": "lin_a", "transcript": after_revert, "outcome": "rejected:gap"},
     {"name": "edits of one message out of its part order", "view": PART_ORDER, "ready": ready_headers(PART_ORDER),
      "current_version": 4, "lineage_id": "lin_a", "transcript": full, "outcome": "rejected:edit_order"},
+    {"name": "on a lineage a cut started at 2, a view tiling from 2 applies", "view": V8, "ready": ready_headers(V8),
+     "current_version": 3, "lineage_id": "lin_c", "first_ordinal": 2, "transcript": full, "outcome": "apply"},
+    {"name": "on a lineage a cut started at 2, a view tiling from 0 is refused", "view": V9, "ready": ready_headers(V9),
+     "current_version": 3, "lineage_id": "lin_c", "first_ordinal": 2, "transcript": full,
+     "outcome": "refused:ranges_start"},
+    {"name": "on a lineage starting at 0, a view tiling from 1 is refused", "view": V10, "ready": ready_headers(V10),
+     "current_version": 3, "lineage_id": "lin_a", "first_ordinal": 0, "transcript": full,
+     "outcome": "refused:ranges_start"},
+    {"name": "on a lineage a cut started at 2, a view without a head range first is refused", "view": V11,
+     "ready": ready_headers(V11), "current_version": 3, "lineage_id": "lin_c", "first_ordinal": 2,
+     "transcript": full, "outcome": "refused:ranges_start"},
 ]
+# Every disposition names the lineage's first ordinal; before a cut it is 0.
+for case in dispositions:
+    case.setdefault("first_ordinal", 0)
+    case.update({k: case.pop(k) for k in ("transcript", "outcome")})
 
 notices = [
     notice("first notice after a user message", 1, 1),
@@ -347,6 +383,14 @@ notices = [
     notice("window unknown", 2, 2, window=None, est="1500"),
     notice("a fork moves the session to a new lineage, declaring its descent", 13, 4, lineage="lin_b",
            descends_from=f"lin_a:3:{digest_of(3)}", est="65000"),
+    notice("the first notice of a lineage a cut started descends from the old lineage at the cut", 14, 4,
+           lineage="lin_c", descends_from=f"lin_a:1:{digest_of(1)}", est="30000", first_ordinal=2),
+    notice("a view tiling from 0 on a cut lineage is refused", 15, 5, lineage="lin_c",
+           events=["view_refused:9:ranges_start"], est="31000", first_ordinal=2),
+    notice("a revert below the latest cut restarts at the previous cut, descending from the lineage at that cut",
+           16, 3, lineage="lin_d", descends_from=f"lin_a:1:{digest_of(1)}", est="20000", first_ordinal=2),
+    notice("a revert below every cut restarts at the first message, without descent", 17, 1, lineage="lin_e",
+           est="9000", first_ordinal=0),
 ]
 
 
@@ -411,6 +455,8 @@ notices_refused = [
     mutate(N1, "marker_outcome without applied_view_version", "marker_outcome_without_applied_view_version",
            events="marker_outcome:applied:cut-1"),
     mutate(N1, "applied_view_version zero", "malformed:applied_view_version", applied_view_version="0"),
+    mutate(N1, "first_ordinal more than one past through_ordinal", "malformed:first_ordinal", first_ordinal="3"),
+    mutate(N1, "first_ordinal with a leading zero", "malformed:first_ordinal", first_ordinal="01"),
     mutate(N1, "last_usage with three parts", "malformed:last_usage", last_usage="1:2:3"),
     mutate(N1, "no lineage_id", "missing:lineage_id", drop=["lineage_id"]),
     mutate(N1, "lineage_id with a space", "malformed:lineage_id", lineage_id="lin a"),
@@ -486,6 +532,10 @@ ride = {
     "answers": [
         {"name": "a view", "answer": {"answer": "view", "view": V4}},
         {"name": "nothing", "answer": {"answer": "nothing"}},
+        {"name": "nothing to a model_change ride, with the new model's cache lifetime",
+         "answer": {"answer": "nothing", "cache_ttl": {"model": "openai/gpt-5", "ms": 300000, "configured": False}}},
+        {"name": "a view to a model_change ride, with a configured lifetime",
+         "answer": {"answer": "view", "view": V4, "cache_ttl": {"model": "openai/gpt-5", "ms": 3600000, "configured": True}}},
     ],
     "undecodable_answers": [
         {"name": "unknown answer", "answer": {"answer": "later"}},
@@ -538,6 +588,8 @@ EDITED_M3 = sha(jcs({**M[3][2], "content": [M[3][2]["content"][0]]}))
 descent = [
     fork_case("descent from the held lineage with a matching digest keeps state through the cut",
               "keep_through:3", f"lin_a:3:{digest_of(3)}"),
+    fork_case("a lineage a cut started keeps state through the cut and reads from its first ordinal",
+              "keep_through:1", f"lin_a:1:{digest_of(1)}", lineage="lin_c"),
     fork_case("an old lineage id containing ':' parses from the right", "keep_through:2",
               f"run:fork:1:2:{digest_of(2)}", held="run:fork:1", lineage="run:fork:2"),
     fork_case("a digest that differs from the recorded one resyncs", "resync", f"lin_a:3:{EDITED_M3}"),
@@ -594,6 +646,55 @@ view_apply = {
     }],
 }
 
+# The prompt cache's lifetime. Each decision names the model of the request,
+# the cache_ttl entries the runner received (oldest first), the lifetime it
+# observed in its own final request options (or null), and the lifetime it
+# judges ttl_expired by (null: never declare ttl_expired).
+A, B = "acme/model-1", "openai/gpt-5"
+def ttl(model, ms, configured):
+    return {"model": model, "ms": ms, "configured": configured}
+V12 = view(12, 5, [replace(0, 2, HEAD), keep(2, 6)], cache_ttl=ttl(A, 300000, False))
+V12_PLAIN = view(12, 5, [replace(0, 2, HEAD), keep(2, 6)])
+assert V12["digest"] != V12_PLAIN["digest"]
+cache_ttl = {
+    "entries": [
+        {"name": "a configured lifetime", "entry": ttl(A, 300000, True)},
+        {"name": "configured never to expire", "entry": ttl(A, None, True)},
+        {"name": "the provider's default for the model", "entry": ttl(A, 3600000, False)},
+    ],
+    "setup_answers": [{
+        "name": "ready with the cache lifetime for Setup's model",
+        "answer": {"answer": "ready", "request_id": "req-setup-3",
+                   "initial": {"compaction_id": "cmp-1", "version": 1, "range": {"from": 0, "to": 0}, "replacement": []},
+                   "cache_ttl": ttl(A, 300000, False)},
+    }],
+    "views": [
+        {"name": "a view carrying the lifetime for its notice's model", "view": V12},
+        {"name": "the same view without it, whose digest differs", "view": V12_PLAIN},
+    ],
+    "decisions": [
+        {"name": "an entry for another model is ignored", "model": B,
+         "entries": [ttl(A, 300000, True)], "observed_ms": 60000, "lifetime": 60000},
+        {"name": "configured never to expire wins over an observed lifetime", "model": A,
+         "entries": [ttl(A, None, True)], "observed_ms": 300000, "lifetime": None},
+        {"name": "a missed model_change ride falls through to the observed lifetime, never the old model's entry",
+         "model": B, "entries": [ttl(A, 3600000, True)], "observed_ms": 300000, "lifetime": 300000},
+        {"name": "a configured lifetime wins over the observed one", "model": A,
+         "entries": [ttl(A, 60000, True)], "observed_ms": 300000, "lifetime": 60000},
+        {"name": "the observed lifetime wins over the provider's default", "model": A,
+         "entries": [ttl(A, 3600000, False)], "observed_ms": 300000, "lifetime": 300000},
+        {"name": "the provider's default when nothing was observed", "model": A,
+         "entries": [ttl(A, 3600000, False)], "observed_ms": None, "lifetime": 3600000},
+        {"name": "nothing known: no ttl_expired", "model": A,
+         "entries": [], "observed_ms": None, "lifetime": None},
+        {"name": "the newest entry for the model wins", "model": A,
+         "entries": [ttl(A, 60000, True), ttl(B, 1000, True), ttl(A, 120000, True)], "observed_ms": None,
+         "lifetime": 120000},
+        {"name": "a previous model's entry is never kept after a switch back without one", "model": A,
+         "entries": [ttl(B, 1000, True)], "observed_ms": None, "lifetime": None},
+    ],
+}
+
 doc = {
     "session": {"harness": "opencode", "project_root": "/work/demo", "session": "ses_1", "session_ref": SR,
                 "account": ACCT, "runner_module_id": RUNNER, "provider_module_id": PROVIDER},
@@ -615,6 +716,7 @@ doc = {
     "id_collision": id_collision,
     "state_loss": state_loss,
     "view_apply": view_apply,
+    "cache_ttl": cache_ttl,
 }
 
 with open(OUT, "w") as f:

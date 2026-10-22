@@ -186,8 +186,12 @@ pub struct CompactionView {
     pub view_version: u64,
     /// The lineage whose ordinals the ranges use.
     pub lineage_id: String,
-    /// The last message the view covers. The ranges tile `[0,
-    /// covers_through.ordinal + 1)`.
+    /// The last message the view covers. The ranges tile `[first_ordinal,
+    /// covers_through.ordinal + 1)`, where `first_ordinal` is the lineage's
+    /// first ordinal (`llm-runner/v1`'s `session.head.first_ordinal`): 0
+    /// before the session's first cut, the cut's first retained ordinal
+    /// after it. Everything before `first_ordinal` is carried only by the
+    /// view's head, a replace range inserted at `first_ordinal`.
     pub covers_through: MessageRef,
     pub ranges: Vec<ViewRange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,6 +202,10 @@ pub struct CompactionView {
     /// it with companion edits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply: Option<String>,
+    /// The prompt cache's lifetime, resolved for the model of the notice the
+    /// view answers (CONTRACT.md §8.1). Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_ttl: Option<crate::cache_ttl::CacheTtl>,
     /// [`CompactionView::compute_digest`], lowercase hexadecimal.
     pub digest: String,
 }
@@ -212,8 +220,9 @@ pub enum ViewProblem {
     VersionZero,
     /// `ranges` is empty.
     NoRanges,
-    /// The first range does not start at 0, or a range does not start where
-    /// the previous one ended.
+    /// A range does not start where the previous one ended. Where the first
+    /// range starts is checked against the lineage instead
+    /// ([`dispose_fetched`], [`crate::notice::refusal_reasons::RANGES_START`]).
     Gap,
     /// A range's `from` is above its `to`, or a keep range is empty.
     Inverted,
@@ -297,6 +306,7 @@ impl CompactionView {
             ranges,
             cut: None,
             apply: None,
+            cache_ttl: None,
             digest: String::new(),
         };
         view.digest = view.compute_digest();
@@ -318,6 +328,13 @@ impl CompactionView {
         self
     }
 
+    /// Set the `cache_ttl` entry and recompute the digest.
+    pub fn with_cache_ttl(mut self, entry: crate::cache_ttl::CacheTtl) -> Self {
+        self.cache_ttl = Some(entry);
+        self.digest = self.compute_digest();
+        self
+    }
+
     /// The view's digest. The input is a sequence of frames, each an 8-byte
     /// big-endian length followed by that many bytes: [`VIEW_DIGEST_DOMAIN`],
     /// `session_ref`, `view_version` in decimal, `lineage_id`,
@@ -328,9 +345,11 @@ impl CompactionView {
     /// `ordinal` in decimal, its `mid`, its `part`, and either `bytes` and the
     /// bytes or `drop`; then, only when a cut is present, `cut`, its `cut_id`
     /// and its `through_ordinal` in decimal; then, only when an `apply` mark
-    /// is present, `apply` and the mark. Lowercase hexadecimal SHA-256.
-    /// `digest` itself is not an input. A view without a mark therefore has
-    /// the digest it had before the mark existed.
+    /// is present, `apply` and the mark; then, only when `cache_ttl` is
+    /// present, `cache_ttl`, its `model`, its `ms` in decimal or `null`, and
+    /// `true` or `false` for `configured`. Lowercase hexadecimal SHA-256.
+    /// `digest` itself is not an input. A view without a mark or a
+    /// `cache_ttl` therefore has the digest it had before they existed.
     pub fn compute_digest(&self) -> String {
         let mut hasher = Sha256::new();
         frame(&mut hasher, VIEW_DIGEST_DOMAIN.as_bytes());
@@ -380,13 +399,24 @@ impl CompactionView {
             frame(&mut hasher, b"apply");
             frame(&mut hasher, apply.as_bytes());
         }
+        if let Some(ttl) = &self.cache_ttl {
+            frame(&mut hasher, b"cache_ttl");
+            frame(&mut hasher, ttl.model.as_bytes());
+            let ms = ttl
+                .ms
+                .map_or_else(|| "null".to_owned(), |ms| ms.to_string());
+            frame(&mut hasher, ms.as_bytes());
+            frame(&mut hasher, if ttl.configured { b"true" } else { b"false" });
+        }
         finish(hasher)
     }
 
     /// Check the view on its own, in a fixed order: session reference,
     /// version, digest form, the ranges' tiling, each range's replacement or
     /// part edits, the cut, the size, and last the digest against the
-    /// content.
+    /// content. The tiling is checked from wherever the first range starts:
+    /// whether that is the lineage's first ordinal needs the runner's
+    /// lineage, so [`dispose_fetched`] checks it.
     pub fn check(&self) -> Result<(), ViewProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(ViewProblem::SessionRef);
@@ -400,7 +430,7 @@ impl CompactionView {
         if self.ranges.is_empty() {
             return Err(ViewProblem::NoRanges);
         }
-        let mut next = 0u64;
+        let mut next = self.ranges[0].from();
         for range in &self.ranges {
             if range.from() != next {
                 return Err(ViewProblem::Gap);
@@ -470,6 +500,12 @@ impl CompactionView {
             ViewRange::Keep { edits, .. } => edits.as_slice(),
             ViewRange::Replace { .. } => &[],
         })
+    }
+
+    /// The ordinal the view's ranges start at: its first range's `from`, or
+    /// `None` for a view without ranges.
+    pub fn ranges_start(&self) -> Option<u64> {
+        self.ranges.first().map(ViewRange::from)
     }
 
     /// Whether the view's coverage is still a prefix of the runner's
@@ -666,7 +702,8 @@ pub enum ViewDisposition {
     /// report `view_discarded:<version>` with `revert_below` on the next
     /// notice.
     Discard,
-    /// It edits a part key the message does not have: refuse it, report
+    /// It edits a part key the message does not have, or its ranges do not
+    /// start at the lineage's first ordinal: refuse it, report
     /// `view_refused:<version>:<reason>` with this reason (one of
     /// [`crate::notice::refusal_reasons`]) on the next notice, and keep the
     /// current view.
@@ -692,7 +729,9 @@ impl ViewDisposition {
 /// ([`CompactionView::check`]); its digest is the one `ready` announced; its
 /// version is above `current_version`, the version of the view the runner
 /// currently applies (`None` before any); its coverage and part edits are a
-/// prefix of the transcript ([`CompactionView::check_prefix`]); every edited
+/// prefix of the transcript ([`CompactionView::check_prefix`]); its ranges
+/// start at `first_ordinal`, the current lineage's first ordinal, or it is
+/// refused [`crate::notice::refusal_reasons::RANGES_START`]; every edited
 /// part key exists, in its message's part order
 /// ([`CompactionView::check_parts`]). The first that fails decides.
 /// `message_at(ordinal)` is the message the runner holds at that ordinal of
@@ -702,6 +741,7 @@ pub fn dispose_fetched(
     ready: &ViewReady,
     current_version: Option<u64>,
     lineage_id: &str,
+    first_ordinal: u64,
     message_at: impl Fn(u64) -> Option<TranscriptMessage>,
 ) -> ViewDisposition {
     if view.session_ref != ready.session_ref || view.view_version != ready.view_version {
@@ -721,6 +761,13 @@ pub fn dispose_fetched(
         .is_err()
     {
         return ViewDisposition::Discard;
+    }
+    // The ranges tile from the lineage's first ordinal, and on a lineage a
+    // cut started the first range is a replace carrying the history head.
+    let head_first =
+        first_ordinal == 0 || matches!(view.ranges.first(), Some(ViewRange::Replace { .. }));
+    if view.ranges_start() != Some(first_ordinal) || !head_first {
+        return ViewDisposition::Refuse(crate::notice::refusal_reasons::RANGES_START);
     }
     match view.check_parts(|ordinal| message_at(ordinal).map(|m| m.parts)) {
         Ok(()) => ViewDisposition::Apply,

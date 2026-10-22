@@ -9,8 +9,8 @@ use cortexkit_role_llm_runner_conformance::{
     SuiteVerdict, CASES,
 };
 use fake::{
-    CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject, RetentionDefect,
-    StepRecovery,
+    CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject, LineageDefect,
+    RetentionDefect, StepRecovery,
 };
 use std::time::{Duration, Instant};
 
@@ -49,9 +49,28 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::Retract,
     Capability::SendStatus,
     Capability::SessionChange,
+    Capability::HostHistory,
 ];
 
+/// The opt-in cost case: a subject without the seeding hook cannot run it.
+const COST_CASE: &str = "per_step_cost_scales_with_new_messages";
+
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case == "cut_setup_leaves_reads_alone"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("never refuses reads"))
+    {
+        return;
+    }
+    if case == HOST_CUT_CASE
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("host cut"))
+    {
+        return;
+    }
+    if case == COST_CASE
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("cannot seed"))
+    {
+        return;
+    }
     if case.starts_with("media_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("byte-backed image"))
     {
@@ -233,6 +252,8 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
+    subject.capabilities.insert(Capability::HostHistory);
+    subject.host_prefix_hook = true;
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
@@ -525,6 +546,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
             assert_eq!(
                 skipped,
                 &vec![
+                    Capability::HostHistory,
                     Capability::Streaming,
                     Capability::SessionChange,
                     Capability::Retention,
@@ -885,6 +907,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
             assert_eq!(
                 skipped,
                 &vec![
+                    Capability::HostHistory,
                     Capability::RunOps,
                     Capability::SessionChange,
                     Capability::Retention,
@@ -1133,6 +1156,8 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
+    subject.capabilities.insert(Capability::HostHistory);
+    subject.host_prefix_hook = true;
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
@@ -1161,6 +1186,8 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
+    subject.capabilities.insert(Capability::HostHistory);
+    subject.host_prefix_hook = true;
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
@@ -3558,4 +3585,472 @@ async fn a_host_set_checked_by_name_only_fails_the_host_set_case() {
         "a kept name with a changed definition",
     )
     .await;
+}
+
+/// The cut cases.
+const CUT_CASES: &[&str] = &[
+    "cut_starts_a_new_lineage",
+    "old_lineage_reads_refused_after_a_cut",
+    "read_below_first_ordinal_refused",
+    "ordinals_never_renumber_across_a_cut",
+    "setup_once_per_lineage",
+    "view_ranges_start_at_first_ordinal",
+    "cut_lineage_notice_descends_from",
+    "head_names_the_cut",
+    "notice_carries_first_ordinal",
+    "revert_below_the_cut_restarts_at_the_previous_cut",
+    "revert_below_a_cut_before_adoption_has_no_descent",
+    "checkpoint_on_descending_setup_refused",
+    "cut_setup_leaves_reads_alone",
+    "cut_numbering_continues_from_the_old_lineage",
+];
+
+/// The cut case that needs a host cut before adoption, which the fake
+/// gives only with its host-history hook.
+const HOST_CUT_CASE: &str = "revert_below_a_cut_before_adoption_has_no_descent";
+
+/// The `host_history` cases.
+const HISTORY_CASES: &[&str] = &[
+    "history_pages_back_to_the_first_message",
+    "history_mid_matches_read",
+    "history_no_tags_below_first_ordinal",
+    "history_ordinal_kept_below_the_cut",
+    "history_cursor_survives_a_cut",
+    "history_never_serves_a_reverted_branch",
+    "history_cursor_expired_after_a_revert_past_it",
+    "history_boundary_order",
+    "history_before_mid_continues_below_the_window",
+    "history_version_unchanged_by_a_cut",
+    "history_version_rises_at_a_revert",
+    "history_from_ordinal_and_before_ordinal",
+    "history_unknown_ordinal_refused",
+    "history_before_lowest_ordinal_reaches_unnumbered_entries",
+];
+
+/// A fake that declares `host_history` and can seed host history; with
+/// `prefix`, every session also holds that many host entries before the
+/// runner's first numbered message.
+fn history_subject(defect: LineageDefect, prefix: u64) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        lineage: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::HostHistory);
+    subject.host_prefix_hook = true;
+    subject.host_prefix_everywhere = prefix;
+    subject.holds_reads_during_setup = true;
+    subject
+}
+
+/// The reference fake, with and without a host-served prefix that has no
+/// ordinals, passes every cut and history case, and every other case too.
+#[tokio::test]
+async fn lineage_and_history_reference_fakes_pass_every_case() {
+    for prefix in [0, 3] {
+        let report = run(&history_subject(LineageDefect::None, prefix)).await;
+        for name in CUT_CASES.iter().chain(HISTORY_CASES) {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} with a host prefix of {prefix}\n{}",
+                report.render()
+            );
+        }
+        assert_others_passed(&report, &[]);
+    }
+}
+
+/// Without the hooks a history case needs, it is inapplicable by name,
+/// never passed.
+#[tokio::test]
+async fn history_cases_without_their_hooks_are_inapplicable() {
+    let mut subject = history_subject(LineageDefect::None, 0);
+    subject.host_prefix_hook = false;
+    let report = run(&subject).await;
+    for name in [
+        "history_boundary_order",
+        "history_before_mid_continues_below_the_window",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("host history")),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+    assert!(matches!(
+        report.outcome(COST_CASE),
+        Some(CaseOutcome::Inapplicable { reason }) if reason.contains("cannot seed")
+    ));
+}
+
+/// `defect` fails `case` by name. Other failures are allowed only among
+/// `family`, the cases sharing the broken fixture; every case outside it
+/// passes.
+async fn lineage_break(subject: FakeSubject, case: &str, family: &[&str]) -> String {
+    let report = run(&subject).await;
+    let reason = failed(&report, case);
+    for outcome in &report.cases {
+        if matches!(outcome.outcome, CaseOutcome::Failed { .. }) {
+            assert!(
+                family.contains(&outcome.case),
+                "{} also failed\n{}",
+                outcome.case,
+                report.render()
+            );
+        }
+    }
+    let outside: Vec<&str> = CASES
+        .iter()
+        .map(|spec| spec.name)
+        .filter(|name| !family.contains(name))
+        .collect();
+    for name in outside {
+        assert_passed(&report, name);
+    }
+    reason
+}
+
+fn family() -> Vec<&'static str> {
+    CUT_CASES.iter().chain(HISTORY_CASES).copied().collect()
+}
+
+#[tokio::test]
+async fn a_cut_that_keeps_the_lineage_fails_the_new_lineage_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::CutKeepsLineage, 0),
+        "cut_starts_a_new_lineage",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("kept lineage"), "{reason}");
+}
+
+#[tokio::test]
+async fn old_lineage_reads_served_after_a_cut_fail_the_old_lineage_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::OldLineageServedAfterCut, 0),
+        "old_lineage_reads_refused_after_a_cut",
+        &family(),
+    )
+    .await;
+    assert!(
+        reason.contains("not refused") || reason.contains("answered"),
+        "{reason}"
+    );
+}
+
+#[tokio::test]
+async fn reads_below_first_ordinal_served_fail_the_read_bound_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::BelowFirstOrdinalServed, 0),
+        "read_below_first_ordinal_refused",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("below first_ordinal"), "{reason}");
+}
+
+#[tokio::test]
+async fn ordinals_renumbered_at_a_cut_fail_the_renumbering_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::CutRenumbersOrdinals, 0),
+        "ordinals_never_renumber_across_a_cut",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("before the cut"), "{reason}");
+}
+
+#[tokio::test]
+async fn setup_once_per_session_fails_the_setup_per_lineage_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::SetupOncePerSession, 0),
+        "setup_once_per_lineage",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("Setup calls"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_view_tiling_from_zero_accepted_fails_the_ranges_start_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::ViewFromZeroAccepted, 0),
+        "view_ranges_start_at_first_ordinal",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("ranges_start"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_cut_notice_without_descent_fails_the_descent_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::CutNoticeWithoutDescent, 0),
+        "cut_lineage_notice_descends_from",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("descend"), "{reason}");
+}
+
+#[tokio::test]
+async fn an_older_cursor_skipping_a_page_fails_the_paging_case() {
+    lineage_break(
+        history_subject(LineageDefect::HistoryOlderSkipsPage, 0),
+        "history_pages_back_to_the_first_message",
+        HISTORY_CASES,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn history_minting_its_own_ids_fails_the_mid_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryMintsOwnIds, 0),
+        "history_mid_matches_read",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.contains("never serves under that mid"), "{reason}");
+}
+
+#[tokio::test]
+async fn window_entries_served_from_the_host_fail_the_mid_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryWindowFromHost, 0),
+        "history_mid_matches_read",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.contains("served differently"), "{reason}");
+}
+
+#[tokio::test]
+async fn tags_below_first_ordinal_fail_the_no_tags_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryTagsBelowFirst, 0),
+        "history_no_tags_below_first_ordinal",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.to_lowercase().contains("tags"), "{reason}");
+}
+
+#[tokio::test]
+async fn ordinals_dropped_below_the_cut_fail_the_ordinal_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryDropsOrdinalsBelowCut, 0),
+        "history_ordinal_kept_below_the_cut",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.contains("with ordinal None"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_cursor_refused_after_a_cut_fails_the_cursor_survival_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryCursorLineageChanged, 0),
+        "history_cursor_survives_a_cut",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.contains("lineage_changed"), "{reason}");
+}
+
+#[tokio::test]
+async fn history_serving_a_reverted_branch_fails_the_revert_case() {
+    lineage_break(
+        history_subject(LineageDefect::HistoryServesRevertedBranch, 0),
+        "history_never_serves_a_reverted_branch",
+        HISTORY_CASES,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_expired_cursor_answered_empty_fails_the_expiry_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryExpiredAsEmptyPage, 0),
+        "history_cursor_expired_after_a_revert_past_it",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.contains("not refused"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_host_prefix_after_the_numbered_entries_fails_the_boundary_case() {
+    lineage_break(
+        history_subject(LineageDefect::HistoryPrefixAfterNumbered, 0),
+        "history_boundary_order",
+        HISTORY_CASES,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn before_mid_answered_empty_fails_the_below_window_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryBeforeMidEmpty, 0),
+        "history_before_mid_continues_below_the_window",
+        HISTORY_CASES,
+    )
+    .await;
+    assert!(reason.contains("answered 0 entries"), "{reason}");
+}
+
+/// The cost case passes a runner whose step work does not grow with the
+/// seeded history, and fails one whose every step walks it.
+#[tokio::test]
+async fn per_step_cost_passes_a_flat_runner_and_fails_one_that_walks_history() {
+    let mut flat = FakeSubject::new(Defects::default());
+    flat.seed_hook = true;
+    let report = run(&flat).await;
+    assert_eq!(
+        report.outcome(COST_CASE),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    let mut walking = FakeSubject::new(Defects {
+        lineage: LineageDefect::CostWalksHistory,
+        ..Defects::default()
+    });
+    walking.seed_hook = true;
+    let reason = lineage_break(walking, COST_CASE, &[COST_CASE]).await;
+    assert!(reason.contains("ratio"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_head_naming_the_first_retained_message_fails_the_head_cut_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HeadCutNamesFirstRetained, 0),
+        "head_names_the_cut",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("folds"), "{reason}");
+}
+
+#[tokio::test]
+async fn notices_without_first_ordinal_fail_the_notice_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::NoticeWithoutFirstOrdinal, 0),
+        "notice_carries_first_ordinal",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("first_ordinal None"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_revert_that_keeps_the_undone_cut_fails_the_revert_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::RevertKeepsTheCut, 0),
+        "revert_below_the_cut_restarts_at_the_previous_cut",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("first_ordinal is"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_descent_invented_for_a_host_cut_fails_the_adoption_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::RevertInventsDescent, 0),
+        HOST_CUT_CASE,
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("descends from Some"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_history_version_raised_at_a_cut_fails_the_cut_version_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryVersionBumpsAtCut, 0),
+        "history_version_unchanged_by_a_cut",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("moved history_version"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_history_version_kept_at_a_revert_fails_the_revert_version_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryVersionStaticAtRevert, 0),
+        "history_version_rises_at_a_revert",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("left history_version"), "{reason}");
+}
+
+#[tokio::test]
+async fn an_ordinal_seek_off_by_one_fails_the_seek_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryOrdinalSeekOffByOne, 0),
+        "history_from_ordinal_and_before_ordinal",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("from_ordinal 2 served"), "{reason}");
+}
+
+#[tokio::test]
+async fn an_unknown_ordinal_answered_empty_fails_the_unknown_ordinal_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryUnknownOrdinalEmpty, 0),
+        "history_unknown_ordinal_refused",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("not refused"), "{reason}");
+}
+
+#[tokio::test]
+async fn before_the_lowest_ordinal_answered_empty_fails_the_unnumbered_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::HistoryBeforeLowestOrdinalEmpty, 0),
+        "history_before_lowest_ordinal_reaches_unnumbered_entries",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("before_ordinal 0 served"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_checkpoint_applied_on_a_descending_setup_fails_the_checkpoint_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::CheckpointOnDescentApplied, 0),
+        "checkpoint_on_descending_setup_refused",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("checkpoint_on_descent"), "{reason}");
+}
+
+#[tokio::test]
+async fn reads_held_during_a_cut_setup_fail_the_reads_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::ReadsHeldDuringCutSetup, 0),
+        "cut_setup_leaves_reads_alone",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("transient"), "{reason}");
+}
+
+#[tokio::test]
+async fn numbering_restarted_at_a_cut_fails_the_numbering_case() {
+    let reason = lineage_break(
+        history_subject(LineageDefect::CutRestartsNumbering, 0),
+        "cut_numbering_continues_from_the_old_lineage",
+        &family(),
+    )
+    .await;
+    assert!(reason.contains("renumbers nothing"), "{reason}");
 }

@@ -65,11 +65,13 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 mod compaction;
+mod history;
 mod media;
 mod session_change;
 mod tags;
 mod user_commands;
 pub use compaction::{CompactionDefect, CompactionRouteMode};
+pub use history::LineageDefect;
 
 pub const TOOL_MODULE: &str = "fake.tools";
 /// The module id (and route principal) of the sender the delivery-order
@@ -149,6 +151,8 @@ pub struct Defects {
     pub media: Option<&'static str>,
     pub user_command: Option<&'static str>,
     pub compaction: CompactionDefect,
+    /// The lineage, read-bound, view-start, history and cost breaks.
+    pub lineage: LineageDefect,
     /// Continue to a new model step after a boundary cancellation.
     pub cancel_starts_next_step: bool,
     /// Accept an unlisted cancellation point instead of refusing it.
@@ -413,6 +417,20 @@ pub enum StepRecovery {
 /// its kills.
 struct World {
     standalone_in_process: bool,
+    /// Host entries every session holds before the runner numbered
+    /// anything, unless the hook seeded another count for it.
+    host_prefix_everywhere: u64,
+    /// Each session's history in the host before the runner numbered
+    /// anything: the host's own storage, outside the runner's log.
+    host_prefixes: Mutex<BTreeMap<String, Vec<history::HostEntry>>>,
+    /// Sessions whose host history ends in a cut the host made before the
+    /// runner adopted them.
+    host_cuts: Mutex<BTreeSet<String>>,
+    /// The runner refuses reads `transient` while a tag-rendering run waits
+    /// for a Setup without descent.
+    holds_reads_during_setup: bool,
+    /// Sessions whose next Setup call the scripted provider holds.
+    setup_holds: Mutex<BTreeMap<String, history::SetupHold>>,
     user_commands: Mutex<user_commands::Commands>,
     retention_defect: RetentionDefect,
     retention_delete_ms: u64,
@@ -547,6 +565,8 @@ struct Msg {
     /// For an entry written by a delivered `delivery_order` send: the mode
     /// it went out in, as the entry's `delivered_as`.
     delivered_as: Option<Value>,
+    /// When the record that wrote the message was committed.
+    written_at: u64,
 }
 
 /// A `session.send` carrying a `delivery_order` list that the fake
@@ -692,6 +712,26 @@ struct Sess {
     ceiling_wait: Option<(String, u64)>,
     /// What the `session_change` group's records built.
     change: session_change::ChangeState,
+    /// The current lineage's first ordinal: the latest cut's first retained
+    /// ordinal, or 0.
+    first_ordinal: u64,
+    /// Every cut still in the ancestry, oldest first.
+    cuts: Vec<history::CutRec>,
+    /// The ordinal of `messages[0]`: above 0 only after seeding moved the
+    /// history behind a cut into `archive`.
+    base: u64,
+    /// Seeded messages behind the latest cut, kept out of `messages` so a
+    /// step never touches them; only `session.history` reads them.
+    archive: Arc<Vec<Msg>>,
+    /// Lineages the session has left, newest last.
+    previous_lineages: Vec<String>,
+    /// The descent the next notice declares: the lineage a cut left, the
+    /// cut's through ordinal and the digest of the message there.
+    pending_descent: Option<(String, u64, String)>,
+    /// Event tokens the next notice carries.
+    notice_events: Vec<String>,
+    /// The history version: raised at every lineage change but a cut.
+    history_version: u64,
 }
 
 impl Sess {
@@ -703,8 +743,16 @@ impl Sess {
         self.runs.iter_mut().find(|run| run.run_id == run_id)
     }
 
+    /// The message at `ordinal`.
+    fn at_mut(&mut self, ordinal: u64) -> &mut Msg {
+        self.messages
+            .iter_mut()
+            .find(|m| m.ordinal == ordinal)
+            .expect("a pushed message is held")
+    }
+
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
-        let ordinal = self.messages.len() as u64;
+        let ordinal = self.base + self.messages.len() as u64;
         let writer = if self
             .run(run_id)
             .is_some_and(|run| run.structured_output.is_some())
@@ -727,6 +775,7 @@ impl Sess {
             marker_cut: None,
             marker_key: None,
             delivered_as: None,
+            written_at: 0,
         });
         ordinal
     }
@@ -1116,6 +1165,11 @@ impl Module {
         let kind = text("kind");
         let mut sessions = self.sessions.lock().unwrap();
         if kind == "start" {
+            // A session started again over an expired one keeps raising its
+            // history version: it never decreases.
+            let history_version = sessions
+                .get(&session)
+                .map_or(0, |old| old.history_version + 1);
             sessions.insert(
                 session.clone(),
                 Sess {
@@ -1126,9 +1180,15 @@ impl Module {
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
                     render_tags: record["render_tags"] == json!(true),
                     name: session.clone(),
+                    history_version,
                     ..Sess::default()
                 },
             );
+        }
+        if kind == "start" {
+            if let Some(sess) = sessions.get_mut(&session) {
+                history::adopt_host_cut(sess, &self.world);
+            }
         }
         if kind == "fork" {
             // The host copied the parent's history into the fork, as
@@ -1174,7 +1234,7 @@ impl Module {
                     "",
                     Vec::new(),
                 );
-                let marker = &mut sess.messages[ordinal as usize];
+                let marker = sess.at_mut(ordinal);
                 marker.marker_cut = Some(cut);
                 marker.marker_key = Some(key);
                 sess.push(
@@ -1238,7 +1298,7 @@ impl Module {
                 };
                 let body = json!({ "role": role, "text": queued.text });
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
-                let message = &mut sess.messages[ordinal as usize];
+                let message = sess.at_mut(ordinal);
                 message.delivered_as = Some(record["delivered_as"].clone());
                 let row = message.mid.clone();
                 if let Some(queued) = sess.ordered.get_mut(&id) {
@@ -1327,6 +1387,7 @@ impl Module {
                 {
                     // Renumbers at once, while the step's call is running.
                     sess.lineage = format!("{}-t", sess.lineage);
+                    sess.history_version += 1;
                     sess.numbering.clear();
                 }
                 let ordinal = sess.push(
@@ -1335,15 +1396,16 @@ impl Module {
                     Vec::new(),
                 );
                 if let Some(delivered) = record.get("delivered_as").filter(|d| !d.is_null()) {
-                    sess.messages[ordinal as usize].delivered_as = Some(delivered.clone());
+                    sess.at_mut(ordinal).delivered_as = Some(delivered.clone());
                 }
+                let row_id = sess.at_mut(ordinal).mid.clone();
                 sess.sends.insert(
                     text("send_id"),
                     SendRec {
                         prompt: text("prompt"),
                         delivery: text("delivery"),
                         run_id: run_id.clone(),
-                        row_id: sess.messages[ordinal as usize].mid.clone(),
+                        row_id,
                         steered_into_running: kind == "steer",
                         admitted: record["admitted"] == json!(true),
                         resend_count: 0,
@@ -1433,6 +1495,7 @@ impl Module {
                 // reader sees changed bytes under the old one.
                 if !self.world.defects.drop_keeps_lineage {
                     sess.lineage = format!("{}-r", sess.lineage);
+                    sess.history_version += 1;
                 }
                 sess.calls.retain(|_, call| call.run_id != run_id);
                 let shown = tags::current(sess);
@@ -1590,7 +1653,14 @@ impl Module {
                     }
                 }
             }
+            "cut" | "revert" | "seed" | "view_applied" | "view_disposed" | "notice" => {
+                history::apply(sess, &kind, record, &self.world.defects)
+            }
             _ => {}
+        }
+        let at = record["at"].as_u64().unwrap_or_default();
+        for message in sess.messages.iter_mut().filter(|m| m.written_at == 0) {
+            message.written_at = at;
         }
         tags::note_write(sess, &self.world.defects, self.world.honours_checkpoint());
     }
@@ -1668,6 +1738,7 @@ impl Module {
             if self.deliver_at_step(session, run_id)? {
                 continue;
             }
+            history::step_cost(&sess, &self.world.defects);
             // The model consumed a turn even if recovery removed it from history.
             if !self.prepare_compaction(session, run_id, turn_index)? {
                 return Ok(());
@@ -2087,6 +2158,13 @@ impl Module {
                 }
             }
         }
+        if matches!(
+            method,
+            ops::SESSION_READ | ops::SESSION_HEAD | ops::SESSION_RESOLVE
+        ) && history::reads_held(self, session)
+        {
+            return Ok(refuse(errors::TRANSIENT, None));
+        }
         let reply = match method {
             "session.list" | "session.export" => Ok(self.listing(session)),
             "run.status" if self.world.advertise_status => Ok(self.run_status(session, params)),
@@ -2110,6 +2188,9 @@ impl Module {
                 } else {
                     Ok(self.head(session, &params))
                 }
+            }
+            ops::SESSION_HISTORY if self.world.serves(groups::HOST_HISTORY) => {
+                Ok(self.history(session, &params))
             }
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
@@ -3036,9 +3117,12 @@ impl Module {
         if request
             .lineage_id
             .as_ref()
-            .is_some_and(|lineage| lineage != &sess.lineage)
+            .is_some_and(|lineage| !history::lineage_served(sess, lineage, &self.world.defects))
         {
             return refuse(errors::LINEAGE_CHANGED, None);
+        }
+        if let Some(refusal) = history::read_bound(sess, &mode, &self.world.defects) {
+            return refusal;
         }
         let limit = request.limit.unwrap_or(DEFAULT_LIMIT).min(MAXIMUM_LIMIT) as usize;
         if request.view == Some(ReadView::Model) {
@@ -3052,6 +3136,7 @@ impl Module {
         let all: Vec<_> = sess
             .messages
             .iter()
+            .filter(|message| history::in_window(sess, message, &self.world.defects))
             .filter(|message| {
                 !self.world.defects.run_tool_calls_embedded_results
                     || message.calls.iter().all(|key| sess.calls[key].result)
@@ -3098,8 +3183,9 @@ impl Module {
         };
         let messages = all[start..end]
             .iter()
-            .map(|m| self.read_message(sess, m))
+            .map(|m| history::served_ordinal(sess, self.read_message(sess, m), &self.world.defects))
             .collect();
+        let messages = history::served_numbers(self, sess, &all, messages);
         let mut page = ReadPage::new(&sess.lineage, messages).with_head(cursor(sess.events.len()));
         if end < all.len() {
             page = page.with_next_from_ordinal(all[end].ordinal);
@@ -3175,7 +3261,9 @@ impl Module {
         if self.world.defects.read_serves_live_host_metadata && sess.host_meta > 0 {
             body["host_title"] = json!(format!("renamed {}", sess.host_meta));
         }
-        let mut message = ReadMessage::new(m.ordinal, &m.mid, body).with_tool_calls(tool_calls);
+        let mut message = ReadMessage::new(m.ordinal, &m.mid, body)
+            .with_tool_calls(tool_calls)
+            .with_written_at(m.written_at);
         if let Some(role) = m.body["role"].as_str() {
             message = message.with_role(role);
         }
@@ -3233,8 +3321,12 @@ impl Module {
         if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
             return respond(HeadMeta::no_lineage());
         }
-        let mut head =
-            HeadMeta::new(&sess.lineage, sess.last_activity).with_head(cursor(sess.events.len()));
+        let mut head = HeadMeta::new(&sess.lineage, sess.first_ordinal, sess.last_activity)
+            .with_head(cursor(sess.events.len()))
+            .with_history_version(sess.history_version);
+        if let Some(cut) = history::head_cut(sess, &self.world.defects) {
+            head = head.with_cut(cut);
+        }
         if let Some(last) = sess.messages.last() {
             head = head.with_last_ordinal(last.ordinal);
         }
@@ -3525,6 +3617,16 @@ impl Module {
         let Some((sess, (message, part))) = found else {
             return refuse(errors::UNKNOWN_TAG, None);
         };
+        // A tag naming a part below the lineage's first ordinal names
+        // history before the latest cut, which resolve never answers.
+        if message.ordinal < sess.first_ordinal
+            && sess.messages.iter().any(|m| m.mid == message.mid)
+        {
+            return refuse(
+                errors::BEFORE_LINEAGE_START,
+                Some(json!({ "first_ordinal": sess.first_ordinal })),
+            );
+        }
         let content = Self::part_content(sess, message, &part, &self.world.defects);
         let sliced = match cortexkit_role_llm_runner::tags::slice(&content, request.range.as_ref())
         {
@@ -3978,6 +4080,19 @@ pub struct FakeSubject {
     pub turn_system: bool,
     /// This adapter cannot create fetch-plan sessions.
     pub without_plans: bool,
+    /// The adapter can give a session host history before its first send
+    /// (`seed_host_history`), as a runner over a host that adopted it.
+    pub host_prefix_hook: bool,
+    /// The adapter can seed finished messages behind a cut
+    /// (`seed_session_history`), for the cost case.
+    pub seed_hook: bool,
+    /// Every session holds this many host entries before the runner's first
+    /// numbered message, as on a runner over a host that adopted each
+    /// session with history.
+    pub host_prefix_everywhere: u64,
+    /// Refuse reads `transient` while a tag-rendering run waits for a Setup
+    /// without descent, as the contract lets a runner.
+    pub holds_reads_during_setup: bool,
     world: Mutex<Option<Arc<World>>>,
     /// Every module started, so a released call reaches the one holding it.
     modules: Mutex<Vec<Arc<Module>>>,
@@ -4050,6 +4165,10 @@ impl FakeSubject {
             early_held_steer_receipt: None,
             pause_for: None,
             turn_system: true,
+            host_prefix_hook: false,
+            seed_hook: false,
+            host_prefix_everywhere: 0,
+            holds_reads_during_setup: false,
             world: Mutex::new(None),
             modules: Mutex::new(Vec::new()),
         }
@@ -4064,6 +4183,11 @@ impl FakeSubject {
             .get_or_insert_with(|| {
                 Arc::new(World {
                     standalone_in_process: self.standalone_in_process,
+                    host_prefix_everywhere: self.host_prefix_everywhere,
+                    host_prefixes: Mutex::new(BTreeMap::new()),
+                    host_cuts: Mutex::new(BTreeSet::new()),
+                    holds_reads_during_setup: self.holds_reads_during_setup,
+                    setup_holds: Mutex::new(BTreeMap::new()),
                     retention_defect: if RETENTION_DEFECTS_ENABLED {
                         self.retention_defect
                     } else {
@@ -4266,6 +4390,100 @@ impl LlmRunnerSubject for FakeSubject {
             .commit(session, json!({"kind":"require_setup"}))
             .map_err(|Killed| HarnessError::new("killed"))
     }
+    async fn publish_compaction_view(
+        &self,
+        session: &str,
+        view: cortexkit_role_llm_runner_conformance::ScriptedView,
+    ) -> Result<u64, HarnessError> {
+        Ok(self.publish_view(session, view))
+    }
+
+    async fn seed_session_history(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        messages: u64,
+        window: u64,
+    ) -> Result<(), HarnessError> {
+        if !self.seed_hook {
+            return Err(HarnessError::new("this fake is configured without seeding"));
+        }
+        handle
+            .0
+            .commit(
+                session,
+                json!({"kind":"seed", "count": messages, "window": window}),
+            )
+            .map_err(|Killed| HarnessError::new("killed seeding"))
+    }
+
+    async fn seed_host_history(
+        &self,
+        _handle: &FakeHandle,
+        session: &str,
+        count: u64,
+        cut: bool,
+    ) -> Result<(), HarnessError> {
+        if !self.host_prefix_hook {
+            return Err(HarnessError::new(
+                "this fake is configured without host history",
+            ));
+        }
+        let world = self.world();
+        world
+            .host_prefixes
+            .lock()
+            .unwrap()
+            .insert(session.into(), history::host_entries(session, count));
+        if cut {
+            world.host_cuts.lock().unwrap().insert(session.into());
+        }
+        Ok(())
+    }
+
+    async fn hold_next_compaction_setup(&self, session: &str) -> Result<(), HarnessError> {
+        self.world()
+            .setup_holds
+            .lock()
+            .unwrap()
+            .insert(session.into(), history::SetupHold::Armed);
+        Ok(())
+    }
+
+    async fn await_compaction_setup_held(&self, session: &str) -> Result<(), HarnessError> {
+        match self.world().setup_holds.lock().unwrap().get(session) {
+            Some(history::SetupHold::Held) => Ok(()),
+            other => Err(HarnessError::new(format!(
+                "the runner made no Setup call to hold: {other:?}"
+            ))),
+        }
+    }
+
+    async fn release_compaction_setup(&self, session: &str) -> Result<(), HarnessError> {
+        self.world()
+            .setup_holds
+            .lock()
+            .unwrap()
+            .insert(session.into(), history::SetupHold::Released);
+        self.drive_compaction_modules(session)
+    }
+
+    fn holds_reads_during_setup(&self) -> bool {
+        self.holds_reads_during_setup
+    }
+
+    async fn revert_session(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        mid: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({"kind":"revert", "mid": mid}))
+            .map_err(|Killed| HarnessError::new("killed reverting"))
+    }
+
     async fn prepare_user_commands(
         &self,
         session: &str,
@@ -4544,7 +4762,10 @@ impl LlmRunnerSubject for FakeSubject {
         if self.defects.attribution_cannot_hold_unattributable {
             return Ok(AttributionFixture::CannotHoldUnattributable);
         }
-        let ordinal = handle.0.sessions.lock().unwrap()[session].messages.len() as u64;
+        let ordinal = {
+            let sessions = handle.0.sessions.lock().unwrap();
+            sessions[session].base + sessions[session].messages.len() as u64
+        };
         let marker = format!("{session}-legacy-unknown-origin");
         handle
             .0

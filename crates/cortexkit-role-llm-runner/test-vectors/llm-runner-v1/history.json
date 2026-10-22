@@ -1,0 +1,681 @@
+{
+  "requests": [
+    {
+      "name": "no position: the newest page",
+      "request": {},
+      "mode": "newest"
+    },
+    {
+      "name": "newest page with caps and descriptors",
+      "request": {
+        "limit": 50,
+        "max_bytes": 65536,
+        "media": "descriptors"
+      },
+      "mode": "newest"
+    },
+    {
+      "name": "a page's cursor passed back",
+      "request": {
+        "cursor": "h1.lin-2.older.4"
+      },
+      "mode": "cursor"
+    },
+    {
+      "name": "forward from a message, inclusive",
+      "request": {
+        "from_mid": "msg_01HOST0",
+        "limit": 2
+      },
+      "mode": "from_mid"
+    },
+    {
+      "name": "the page ending directly before the read window's first message",
+      "request": {
+        "before_mid": "msg_01RUN2"
+      },
+      "mode": "before_mid"
+    },
+    {
+      "name": "the raw view, named",
+      "request": {
+        "view": "raw",
+        "include_originals": true
+      },
+      "mode": "newest"
+    },
+    {
+      "name": "forward from an ordinal, inclusive",
+      "request": {
+        "from_ordinal": 2,
+        "limit": 2
+      },
+      "mode": "from_ordinal"
+    },
+    {
+      "name": "the page ending directly before an ordinal",
+      "request": {
+        "before_ordinal": 0
+      },
+      "mode": "before_ordinal"
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "cursor with from_mid names from_mid",
+      "request": {
+        "cursor": "c",
+        "from_mid": "m"
+      },
+      "field": "from_mid",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "from_mid"
+        }
+      }
+    },
+    {
+      "name": "cursor with before_mid names before_mid",
+      "request": {
+        "cursor": "c",
+        "before_mid": "m"
+      },
+      "field": "before_mid",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "before_mid"
+        }
+      }
+    },
+    {
+      "name": "from_mid with before_mid names before_mid",
+      "request": {
+        "from_mid": "m",
+        "before_mid": "n"
+      },
+      "field": "before_mid",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "before_mid"
+        }
+      }
+    },
+    {
+      "name": "the model view names view",
+      "request": {
+        "view": "model"
+      },
+      "field": "view",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "view"
+        }
+      }
+    },
+    {
+      "name": "a read cursor is an unknown field",
+      "request": {
+        "after_mid": "m1"
+      },
+      "field": "after_mid",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "after_mid"
+        }
+      }
+    },
+    {
+      "name": "a lineage is not a history field",
+      "request": {
+        "lineage_id": "lin-1"
+      },
+      "field": "lineage_id",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "lineage_id"
+        }
+      }
+    },
+    {
+      "name": "an unknown view value names view",
+      "request": {
+        "view": "summary"
+      },
+      "field": "view",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "view"
+        }
+      }
+    },
+    {
+      "name": "from_mid with from_ordinal names from_ordinal",
+      "request": {
+        "from_mid": "m",
+        "from_ordinal": 1
+      },
+      "field": "from_ordinal",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "from_ordinal"
+        }
+      }
+    },
+    {
+      "name": "from_ordinal with before_ordinal names before_ordinal",
+      "request": {
+        "from_ordinal": 1,
+        "before_ordinal": 3
+      },
+      "field": "before_ordinal",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "before_ordinal"
+        }
+      }
+    },
+    {
+      "name": "cursor with before_ordinal names before_ordinal",
+      "request": {
+        "cursor": "c",
+        "before_ordinal": 3
+      },
+      "field": "before_ordinal",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "before_ordinal"
+        }
+      }
+    }
+  ],
+  "pages": [
+    {
+      "name": "newest page: the window, with tags, and a cursor to older history",
+      "first_ordinal": 2,
+      "page": {
+        "messages": [
+          {
+            "ordinal": 2,
+            "mid": "msg_01RUN2",
+            "written_at": 1790000002000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The window's first message."
+                }
+              ]
+            },
+            "tags": [
+              {
+                "part": "0",
+                "tag": "§7§"
+              }
+            ],
+            "role": "user"
+          },
+          {
+            "ordinal": 3,
+            "mid": "msg_01RUN3",
+            "written_at": 1790000003000,
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The newest message."
+                }
+              ]
+            },
+            "tags": [
+              {
+                "part": "0",
+                "tag": "§8§"
+              }
+            ],
+            "role": "assistant"
+          }
+        ],
+        "lineage_id": "lin-2",
+        "older": "h1.lin-2.older.4",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "below the window: numbered entries keep their ordinals and carry no tags",
+      "first_ordinal": 2,
+      "page": {
+        "messages": [
+          {
+            "ordinal": 0,
+            "mid": "msg_01RUN0",
+            "written_at": 1790000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Folded by the latest cut."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "ordinal": 1,
+            "mid": "msg_01RUN1",
+            "written_at": 1790000001000,
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Also folded."
+                }
+              ]
+            },
+            "role": "assistant"
+          }
+        ],
+        "lineage_id": "lin-2",
+        "older": "h1.lin-2.older.2",
+        "newer": "h1.lin-2.newer.4",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "the first page: host entries without ordinals come directly before the lowest ordinal, and nothing is older",
+      "first_ordinal": 2,
+      "page": {
+        "messages": [
+          {
+            "mid": "msg_01HOST0",
+            "written_at": 1780000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Before the runner adopted the session."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "mid": "msg_01HOST1",
+            "written_at": 1780000001000,
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The host's own reply."
+                }
+              ]
+            },
+            "role": "assistant"
+          },
+          {
+            "ordinal": 0,
+            "mid": "msg_01RUN0",
+            "written_at": 1790000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Folded by the latest cut."
+                }
+              ]
+            },
+            "role": "user"
+          }
+        ],
+        "lineage_id": "lin-2",
+        "newer": "h1.lin-2.newer.3",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "a session never written",
+      "page": {
+        "messages": []
+      }
+    }
+  ],
+  "pages_refused": [
+    {
+      "name": "tags below first_ordinal",
+      "first_ordinal": 2,
+      "problem": "tags_below_first_ordinal",
+      "page": {
+        "messages": [
+          {
+            "ordinal": 0,
+            "mid": "msg_01RUN0",
+            "written_at": 1790000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Folded by the latest cut."
+                }
+              ]
+            },
+            "role": "user",
+            "tags": [
+              {
+                "part": "0",
+                "tag": "§5§"
+              }
+            ]
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "tags on an entry without an ordinal",
+      "first_ordinal": 2,
+      "problem": "tags_below_first_ordinal",
+      "page": {
+        "messages": [
+          {
+            "mid": "msg_01HOST0",
+            "written_at": 1780000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Before the runner adopted the session."
+                }
+              ]
+            },
+            "role": "user",
+            "tags": [
+              {
+                "part": "0",
+                "tag": "§1§"
+              }
+            ]
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "a host entry after a numbered one",
+      "first_ordinal": 2,
+      "problem": "unnumbered_after_numbered",
+      "page": {
+        "messages": [
+          {
+            "ordinal": 0,
+            "mid": "msg_01RUN0",
+            "written_at": 1790000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Folded by the latest cut."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "mid": "msg_01HOST0",
+            "written_at": 1780000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Before the runner adopted the session."
+                }
+              ]
+            },
+            "role": "user"
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "ordinals that do not rise",
+      "first_ordinal": 2,
+      "problem": "ordinals_not_rising",
+      "page": {
+        "messages": [
+          {
+            "ordinal": 1,
+            "mid": "msg_01RUN1",
+            "written_at": 1790000001000,
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Also folded."
+                }
+              ]
+            },
+            "role": "assistant"
+          },
+          {
+            "ordinal": 0,
+            "mid": "msg_01RUN0",
+            "written_at": 1790000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Folded by the latest cut."
+                }
+              ]
+            },
+            "role": "user"
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "one mid twice",
+      "first_ordinal": 2,
+      "problem": "duplicate_mid",
+      "page": {
+        "messages": [
+          {
+            "mid": "msg_01HOST0",
+            "written_at": 1780000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Before the runner adopted the session."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "mid": "msg_01HOST0",
+            "written_at": 1780000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Before the runner adopted the session."
+                }
+              ]
+            },
+            "role": "user"
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "entries without a lineage",
+      "problem": "without_lineage",
+      "page": {
+        "messages": [
+          {
+            "mid": "msg_01HOST0",
+            "written_at": 1780000000000,
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Before the runner adopted the session."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "mid": "msg_01HOST1",
+            "written_at": 1780000001000,
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The host's own reply."
+                }
+              ]
+            },
+            "role": "assistant"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a page with a lineage but no history version",
+      "first_ordinal": 2,
+      "problem": "without_history_version",
+      "page": {
+        "messages": [],
+        "lineage_id": "lin-2"
+      }
+    },
+    {
+      "name": "a history version without a lineage",
+      "problem": "without_lineage",
+      "page": {
+        "messages": [],
+        "history_version": 4
+      }
+    }
+  ],
+  "pages_undecodable": [
+    {
+      "name": "an entry without written_at",
+      "page": {
+        "messages": [
+          {
+            "mid": "m0",
+            "message": {}
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    },
+    {
+      "name": "an entry without mid",
+      "page": {
+        "messages": [
+          {
+            "written_at": 1,
+            "message": {}
+          }
+        ],
+        "lineage_id": "lin-2",
+        "history_version": 4
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "an unknown from_mid",
+      "refusal": {
+        "code": "unknown_mid",
+        "message": "no such message"
+      }
+    },
+    {
+      "name": "an unknown before_mid",
+      "refusal": {
+        "code": "unknown_mid",
+        "message": "no such message"
+      }
+    },
+    {
+      "name": "a cursor whose entry a revert removed",
+      "refusal": {
+        "code": "cursor_expired",
+        "message": "the history the cursor named was reverted"
+      }
+    },
+    {
+      "name": "a cursor minted for another session",
+      "refusal": {
+        "code": "cursor_expired",
+        "message": "the cursor names another session"
+      }
+    },
+    {
+      "name": "a cursor that does not parse",
+      "refusal": {
+        "code": "invalid_params",
+        "message": "refused",
+        "detail": {
+          "field": "cursor"
+        }
+      }
+    },
+    {
+      "name": "an ordinal the runner never assigned, or one a revert removed",
+      "refusal": {
+        "code": "unknown_ordinal",
+        "message": "no such ordinal"
+      }
+    }
+  ]
+}
