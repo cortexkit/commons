@@ -1,0 +1,49 @@
+# cortexkit-role-extractor — the wire contract of the `extractor/v1` role:
+# role.describe, the extract.run request with its typed fields, admission
+# rules, the Clairic request mapping, batch identity, and CONTRACT.md, which
+# says what is pinned. The batch rules it shares with classifier/v1 come
+# from cortexkit-model-batch. Pure serde plus small checks; no transport, no
+# runtime.
+#
+# The conformance suite lives in the sibling `-conformance` crate, so a
+# runner's production build never pulls in the suite.
+[package]
+name = "cortexkit-role-extractor"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit extractor/v1 role: role.describe, extract.run requests and typed fields, admission rules, the Clairic request mapping."
+# Not published yet: the request side is pinned, but the answer side (the
+# time, datetime, duration and forecast answer shapes, span offsets, the
+# provider's reply envelope) is not yet measured. It publishes once it is.
+publish = false
+# Ship the vector files with the crate so the optional `vectors` module works
+# for consumers who install this package without a repository checkout.
+include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
+
+[features]
+# Compiles the shared vectors into the public `vectors` module.
+test-vectors = []
+
+[dependencies]
+cortexkit-model-batch = { version = "0.1.0", path = "../cortexkit-model-batch" }
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+# `raw_value` keeps the provider's number text. Never enable
+# `arbitrary_precision` or `float_roundtrip`: features unify across the
+# workspace and change number parsing for every crate.
+serde_json = { version = "1", features = ["raw_value"] }
+
+[dev-dependencies]
+sha2 = "0.10"
+subc-protocol = "0.32"
+
+[[test]]
+name = "vectors"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

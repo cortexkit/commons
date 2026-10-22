@@ -12,6 +12,9 @@ pub const ADMISSION_REFUSALS_JSON: &str =
     include_str!("../test-vectors/classifier-v1/admission-refusals.json");
 /// The `field-paths.json` vector cases.
 pub const FIELD_PATHS_JSON: &str = include_str!("../test-vectors/classifier-v1/field-paths.json");
+/// The `image-identity.json` vector cases.
+pub const IMAGE_IDENTITY_JSON: &str =
+    include_str!("../test-vectors/classifier-v1/image-identity.json");
 /// The `item-errors.json` vector cases.
 pub const ITEM_ERRORS_JSON: &str = include_str!("../test-vectors/classifier-v1/item-errors.json");
 /// The `provider-examples.json` vector cases.
@@ -39,10 +42,15 @@ pub const STATE_ARRAY_JSON: &str = include_str!("../test-vectors/classifier-v1/s
 /// The `state-object.json` vector cases.
 pub const STATE_OBJECT_JSON: &str = include_str!("../test-vectors/classifier-v1/state-object.json");
 
+/// The `workers-ai-codes.json` vector cases.
+pub const WORKERS_AI_CODES_JSON: &str =
+    include_str!("../test-vectors/classifier-v1/workers-ai-codes.json");
+
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
     ("admission-refusals.json", ADMISSION_REFUSALS_JSON),
     ("field-paths.json", FIELD_PATHS_JSON),
+    ("image-identity.json", IMAGE_IDENTITY_JSON),
     ("item-errors.json", ITEM_ERRORS_JSON),
     ("provider-examples.json", PROVIDER_EXAMPLES_JSON),
     ("question-choice.json", QUESTION_CHOICE_JSON),
@@ -53,6 +61,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("role-describe.json", ROLE_DESCRIBE_JSON),
     ("state-array.json", STATE_ARRAY_JSON),
     ("state-object.json", STATE_OBJECT_JSON),
+    ("workers-ai-codes.json", WORKERS_AI_CODES_JSON),
 ];
 
 /// `sha256sum` output for every file in [`FILES`].

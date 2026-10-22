@@ -1,0 +1,137 @@
+{
+  "about": "Provider errors mapped to per-item codes once a runner's own retries are spent. workers_ai rows are Cloudflare Workers AI replies: the HTTP status and the first errors[].code of the reply, when it gave one. A code the table lists decides; any other code, or none, keeps the status mapping, and a runner puts the unlisted code into the item error's message. status_only rows are for a provider that documents no error codes, and are the fallback the Workers AI rows use. Each item code's class, storage and stop follow vocabulary.json.",
+  "workers_ai": [
+    {
+      "status": 401,
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 403,
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 400,
+      "code": 5004,
+      "item_code": "invalid_item"
+    },
+    {
+      "status": 400,
+      "code": 3003,
+      "item_code": "invalid_item"
+    },
+    {
+      "status": 400,
+      "code": 5007,
+      "item_code": "model_unavailable"
+    },
+    {
+      "status": 404,
+      "code": 3042,
+      "item_code": "model_unavailable"
+    },
+    {
+      "status": 403,
+      "code": 5035,
+      "item_code": "account_not_entitled"
+    },
+    {
+      "status": 403,
+      "code": 5016,
+      "item_code": "account_not_entitled"
+    },
+    {
+      "status": 403,
+      "code": 3023,
+      "item_code": "account_not_entitled"
+    },
+    {
+      "status": 413,
+      "code": 3006,
+      "item_code": "invalid_item"
+    },
+    {
+      "status": 408,
+      "code": 3007,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 408,
+      "code": 3008,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 429,
+      "code": 3036,
+      "item_code": "account_limit_exhausted"
+    },
+    {
+      "status": 429,
+      "code": 3040,
+      "item_code": "rate_limited"
+    },
+    {
+      "status": 429,
+      "item_code": "rate_limited"
+    },
+    {
+      "status": 500,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 503,
+      "code": 9999,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 400,
+      "code": 9999,
+      "item_code": "invalid_item"
+    }
+  ],
+  "status_only": [
+    {
+      "status": 401,
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 403,
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 404,
+      "item_code": "model_unavailable"
+    },
+    {
+      "status": 429,
+      "item_code": "rate_limited"
+    },
+    {
+      "status": 529,
+      "item_code": "rate_limited"
+    },
+    {
+      "status": 408,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 500,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 503,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 400,
+      "item_code": "invalid_item"
+    },
+    {
+      "status": 413,
+      "item_code": "invalid_item"
+    },
+    {
+      "status": 422,
+      "item_code": "invalid_item"
+    }
+  ]
+}

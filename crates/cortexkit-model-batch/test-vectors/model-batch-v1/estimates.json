@@ -1,0 +1,122 @@
+{
+  "about": "The conservative estimate of one item's input cost: (state + schema + images x image_tokens_each + overhead) x passes x rate, with passes = ceil(schema / (pass_tokens - state)), at least 1, and one pass when the provider states no pass budget. A count is exact (the provider's tokenizer) or a bound (UTF-8 bytes). Every pass is assumed to bill the whole request again. Rates are the catalog's nanodollars per million tokens; a cost rounds up to a whole nanodollar.",
+  "cases": [
+    {
+      "name": "one_pass",
+      "state": {
+        "bound": 1200
+      },
+      "schema": {
+        "bound": 300
+      },
+      "images": 0,
+      "image_tokens_each": 1000,
+      "overhead_tokens": 200,
+      "rate_nanos_per_mtok": 110000000,
+      "expected": {
+        "bounded": {
+          "passes": 1,
+          "input_tokens": 1700,
+          "cost_nanos": 187000
+        }
+      }
+    },
+    {
+      "name": "second_pass_bills_the_state_again",
+      "state": {
+        "bound": 1000
+      },
+      "schema": {
+        "bound": 9000
+      },
+      "images": 2,
+      "image_tokens_each": 300,
+      "overhead_tokens": 50,
+      "pass_tokens": 8192,
+      "rate_nanos_per_mtok": 110000000,
+      "expected": {
+        "bounded": {
+          "passes": 2,
+          "input_tokens": 21300,
+          "cost_nanos": 2343000
+        }
+      }
+    },
+    {
+      "name": "byte_bound_reaching_the_pass_is_unbounded",
+      "state": {
+        "bound": 8192
+      },
+      "schema": {
+        "bound": 100
+      },
+      "images": 0,
+      "image_tokens_each": 300,
+      "overhead_tokens": 50,
+      "pass_tokens": 8192,
+      "rate_nanos_per_mtok": 110000000,
+      "expected": "unbounded"
+    },
+    {
+      "name": "exact_state_reaching_the_pass_does_not_fit",
+      "state": {
+        "exact": 9000
+      },
+      "schema": {
+        "exact": 100
+      },
+      "images": 0,
+      "image_tokens_each": 300,
+      "overhead_tokens": 50,
+      "pass_tokens": 8192,
+      "rate_nanos_per_mtok": 110000000,
+      "expected": {
+        "does_not_fit": {
+          "state_tokens": 9000,
+          "pass_tokens": 8192
+        }
+      }
+    },
+    {
+      "name": "stated_free_rate_costs_nothing",
+      "state": {
+        "exact": 10
+      },
+      "schema": {
+        "exact": 10
+      },
+      "images": 0,
+      "image_tokens_each": 300,
+      "overhead_tokens": 5,
+      "pass_tokens": 8192,
+      "rate_nanos_per_mtok": 0,
+      "expected": {
+        "bounded": {
+          "passes": 1,
+          "input_tokens": 25,
+          "cost_nanos": 0
+        }
+      }
+    },
+    {
+      "name": "cost_rounds_up_to_a_nanodollar",
+      "state": {
+        "exact": 1
+      },
+      "schema": {
+        "exact": 0
+      },
+      "images": 0,
+      "image_tokens_each": 300,
+      "overhead_tokens": 0,
+      "rate_nanos_per_mtok": 1,
+      "expected": {
+        "bounded": {
+          "passes": 1,
+          "input_tokens": 1,
+          "cost_nanos": 1
+        }
+      }
+    }
+  ]
+}

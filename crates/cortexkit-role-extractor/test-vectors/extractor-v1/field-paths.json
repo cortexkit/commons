@@ -1,0 +1,996 @@
+{
+  "about": "invalid_params refusals, each naming the narrowest path that applies, in the order admission checks them: every object of the request is closed, a field's type is checked before the rest of the field, its options in the order written (the requests here are written with sorted keys), then the options its type requires, then the options together. Date bounds and month or year steps on an estimate are refused until a date estimate is measured. The words after the colon of malformed_base64 are the base64 decoder's own.",
+  "catalog": [
+    {
+      "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+      "kind": "extraction"
+    },
+    {
+      "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+      "kind": "classifier"
+    },
+    {
+      "model": "acme/untyped-1",
+      "kind": null
+    }
+  ],
+  "refusals": [
+    {
+      "name": "bad_batch_id",
+      "request": {
+        "batch_id": "tab\there",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "batch_id is 1-128 printable ASCII characters",
+        "detail": {
+          "class": "permanent",
+          "field": "batch_id"
+        }
+      }
+    },
+    {
+      "name": "unknown_request_member",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "max_cost": 1,
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "max_cost is not a member of an extract.run request",
+        "detail": {
+          "class": "permanent",
+          "field": "max_cost"
+        }
+      }
+    },
+    {
+      "name": "unknown_option_member",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "options": {
+          "quantile": true
+        }
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "options has quantiles and state_text only",
+        "detail": {
+          "class": "permanent",
+          "field": "options.quantile"
+        }
+      }
+    },
+    {
+      "name": "no_fields",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {},
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "0 fields; at least 1",
+        "detail": {
+          "class": "permanent",
+          "field": "fields",
+          "limit": 1
+        }
+      }
+    },
+    {
+      "name": "too_many_fields",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "f00": {
+            "type": "text"
+          },
+          "f01": {
+            "type": "text"
+          },
+          "f02": {
+            "type": "text"
+          },
+          "f03": {
+            "type": "text"
+          },
+          "f04": {
+            "type": "text"
+          },
+          "f05": {
+            "type": "text"
+          },
+          "f06": {
+            "type": "text"
+          },
+          "f07": {
+            "type": "text"
+          },
+          "f08": {
+            "type": "text"
+          },
+          "f09": {
+            "type": "text"
+          },
+          "f10": {
+            "type": "text"
+          },
+          "f11": {
+            "type": "text"
+          },
+          "f12": {
+            "type": "text"
+          },
+          "f13": {
+            "type": "text"
+          },
+          "f14": {
+            "type": "text"
+          },
+          "f15": {
+            "type": "text"
+          },
+          "f16": {
+            "type": "text"
+          },
+          "f17": {
+            "type": "text"
+          },
+          "f18": {
+            "type": "text"
+          },
+          "f19": {
+            "type": "text"
+          },
+          "f20": {
+            "type": "text"
+          },
+          "f21": {
+            "type": "text"
+          },
+          "f22": {
+            "type": "text"
+          },
+          "f23": {
+            "type": "text"
+          },
+          "f24": {
+            "type": "text"
+          },
+          "f25": {
+            "type": "text"
+          },
+          "f26": {
+            "type": "text"
+          },
+          "f27": {
+            "type": "text"
+          },
+          "f28": {
+            "type": "text"
+          },
+          "f29": {
+            "type": "text"
+          },
+          "f30": {
+            "type": "text"
+          },
+          "f31": {
+            "type": "text"
+          },
+          "f32": {
+            "type": "text"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "33 fields; at most 32",
+        "detail": {
+          "class": "permanent",
+          "field": "fields",
+          "limit": 32
+        }
+      }
+    },
+    {
+      "name": "field_id_with_a_dot",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "due.date": {
+            "type": "date"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a field id is a letter or _, then up to 63 letters, digits, _ or -",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.date"
+        }
+      }
+    },
+    {
+      "name": "unknown_type_before_its_options",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "decimal": 2,
+            "type": "rank"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "unknown field type rank; expected one of text, number, date, time, datetime, duration, list, estimate, forecast",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.total.type"
+        }
+      }
+    },
+    {
+      "name": "empty_instructions",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "vendor": {
+            "instructions": "",
+            "type": "text"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "instructions, when present, is a non-empty string",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.vendor.instructions"
+        }
+      }
+    },
+    {
+      "name": "instructions_over_the_module_bound",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "vendor": {
+            "instructions": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "type": "text"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "instructions is 2049 bytes; at most 2048",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.vendor.instructions",
+          "limit": 2048
+        }
+      }
+    },
+    {
+      "name": "misspelt_option",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "decimal": 2,
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "decimal is not an option of any field type",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.total.decimal"
+        }
+      }
+    },
+    {
+      "name": "option_on_the_wrong_type",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "vendor": {
+            "integer": true,
+            "type": "text"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "integer is not an option of a text field",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.vendor.integer"
+        }
+      }
+    },
+    {
+      "name": "list_without_items",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "lines": {
+            "type": "list"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a list field requires items",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.lines.items"
+        }
+      }
+    },
+    {
+      "name": "forecast_without_horizon",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "demand": {
+            "interval": "month",
+            "max": 100,
+            "min": 0,
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a forecast field requires horizon",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.demand.horizon"
+        }
+      }
+    },
+    {
+      "name": "decimals_over_six",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "decimals": 7,
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "decimals is an integer from 0 to 6",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.total.decimals"
+        }
+      }
+    },
+    {
+      "name": "duration_unit_outside_the_list",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "lead": {
+            "type": "duration",
+            "unit": "fortnights"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a duration's unit is one of seconds, minutes, hours, days, weeks, months, years",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.lead.unit"
+        }
+      }
+    },
+    {
+      "name": "null_threshold_zero",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "vendor": {
+            "null_threshold": 0,
+            "type": "text"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "null_threshold is a number above 0, at most 1",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.vendor.null_threshold"
+        }
+      }
+    },
+    {
+      "name": "horizon_over_64",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "demand": {
+            "horizon": 65,
+            "interval": "month",
+            "max": 100,
+            "min": 0,
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "horizon is an integer from 1 to 64",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.demand.horizon"
+        }
+      }
+    },
+    {
+      "name": "interval_outside_the_list",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "demand": {
+            "horizon": 12,
+            "interval": "fortnight",
+            "max": 100,
+            "min": 0,
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "interval is one of step, minute, hour, day, week, month, quarter, year",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.demand.interval"
+        }
+      }
+    },
+    {
+      "name": "min_not_below_max",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "price": {
+            "max": 5,
+            "min": 5,
+            "type": "estimate"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "max is above min",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.price.max"
+        }
+      }
+    },
+    {
+      "name": "log_scale_from_zero",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "price": {
+            "max": 10,
+            "min": 0,
+            "scale": "log",
+            "type": "estimate"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a log scale needs min above 0",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.price.scale"
+        }
+      }
+    },
+    {
+      "name": "date_bounds_not_yet_measured",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "due": {
+            "max": "2026-12-31",
+            "min": "2026-01-01",
+            "type": "estimate"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "max is a number",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.max"
+        }
+      }
+    },
+    {
+      "name": "month_step_not_yet_measured",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "price": {
+            "max": 9,
+            "min": 1,
+            "step": "month",
+            "type": "estimate"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "step is a positive number",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.price.step"
+        }
+      }
+    },
+    {
+      "name": "decimals_on_a_text_list",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "lines": {
+            "decimals": 2,
+            "items": "text",
+            "type": "list"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "decimals on a list needs items: number",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.lines.decimals"
+        }
+      }
+    },
+    {
+      "name": "no_items",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "0 items; at least 1",
+        "detail": {
+          "class": "permanent",
+          "field": "items",
+          "limit": 1
+        }
+      }
+    },
+    {
+      "name": "state_not_a_string",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "ok"
+          },
+          {
+            "state": 12
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "state is a string",
+        "detail": {
+          "class": "permanent",
+          "field": "items[1].state"
+        }
+      }
+    },
+    {
+      "name": "empty_state_without_images",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": ""
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "state is non-empty unless the item carries images",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].state"
+        }
+      }
+    },
+    {
+      "name": "unknown_item_member",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "reference": "2026-01-01",
+            "state": "s"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "an item has state, images and reference_date only",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].reference"
+        }
+      }
+    },
+    {
+      "name": "reference_date_not_a_calendar_date",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "reference_date": "2026-02-30",
+            "state": "s"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "2026-02-30 is not a YYYY-MM-DD calendar date",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].reference_date"
+        }
+      }
+    },
+    {
+      "name": "empty_image_list",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "images": [],
+            "state": "s"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "images, when present, holds at least one image",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].images",
+          "limit": 1
+        }
+      }
+    },
+    {
+      "name": "too_many_images",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "images": [
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            ],
+            "state": "s"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "5 images; at most 4",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].images",
+          "limit": 4
+        }
+      }
+    },
+    {
+      "name": "remote_image",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "images": [
+              "https://example.com/screenshot.png"
+            ],
+            "state": "s"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "an image string must be a data: URL; remote URLs are refused",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].images[0]"
+        }
+      }
+    },
+    {
+      "name": "malformed_base64",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "images": [
+              {
+                "base64": "not base64!",
+                "content_type": "image/png"
+              }
+            ],
+            "state": "s"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "the image's base64 does not decode: Invalid symbol 32, offset 3.",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].images[0]"
+        }
+      }
+    },
+    {
+      "name": "negative_max_cost_usd",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "max_cost_usd": -1,
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "max_cost_usd is a number of USD, zero or more",
+        "detail": {
+          "class": "permanent",
+          "field": "max_cost_usd"
+        }
+      }
+    }
+  ]
+}

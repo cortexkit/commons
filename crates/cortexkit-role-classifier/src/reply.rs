@@ -134,11 +134,8 @@ impl Usage {
 /// The batch's usage: each count summed over the items that reported it,
 /// and absent when none did.
 pub fn sum_usage<'a>(items: impl IntoIterator<Item = &'a ItemResult>) -> Usage {
-    let add = |total: Option<u64>, count: Option<u64>| match (total, count) {
-        (Some(total), Some(count)) => Some(total + count),
-        (total, None) => total,
-        (None, count) => count,
-    };
+    // Absent is not zero (`cortexkit-model-batch`, its `RULES.md` §10).
+    let add = cortexkit_model_batch::absent::add_reported;
     items
         .into_iter()
         .filter_map(|item| item.usage)

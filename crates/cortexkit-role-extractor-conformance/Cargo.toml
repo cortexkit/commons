@@ -1,0 +1,29 @@
+# cortexkit-role-extractor-conformance — the `extractor/v1` conformance
+# suite for the request side. It drives a LIVE extractor module over its
+# real management route, with a stand-in provider the module's own CI wires
+# in: the suite sends requests the contract refuses and checks each refusal,
+# its code and its field, and that the stand-in was never called; and it
+# checks what the module sends the stand-in for a request it admits. A
+# module adds this crate as a dev-dependency; it is a separate crate so a
+# module's production build never compiles the suite.
+[package]
+name = "cortexkit-role-extractor-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Conformance suite for the CortexKit extractor/v1 role (request side): drives a live extractor module against a call-counting stand-in provider and checks its admission refusals and provider requests."
+# Not published yet, with the role crate: it publishes once the answer side
+# is measured.
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+cortexkit-role-extractor = { version = "0.1.0", path = "../cortexkit-role-extractor" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+subc-protocol = "0.32"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "time"] }

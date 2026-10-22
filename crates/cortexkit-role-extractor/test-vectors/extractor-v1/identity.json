@@ -1,0 +1,479 @@
+{
+  "about": "Body identity decides whether a re-send under a recorded batch_id is a replay or batch_id_reuse. It is the model, the fields, the options in force and each item, each hashed as canonical JSON with images in canonical form; difference is the first differing part batch_id_reuse names, in the order model, fields, options, items, items[i], and is absent for a replay. Fields are hashed as canonical JSON, so the order fields are written in is not part of the identity, though the role forwards them in the caller's order.",
+  "cases": [
+    {
+      "name": "image_in_two_spellings",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "",
+            "images": [
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            ]
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "",
+            "images": [
+              {
+                "content_type": "image/png",
+                "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "absent_options_are_false",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ],
+        "options": {
+          "quantiles": false,
+          "state_text": false
+        }
+      }
+    },
+    {
+      "name": "max_cost_usd_is_not_identity",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ],
+        "max_cost_usd": 0.25
+      }
+    },
+    {
+      "name": "field_order_is_not_identity",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number",
+            "decimals": 2
+          },
+          "vendor": {
+            "type": "text"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "other_model",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "difference": "model"
+    },
+    {
+      "name": "field_added",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          },
+          "due": {
+            "type": "date"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "difference": "fields"
+    },
+    {
+      "name": "quantiles_asked",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ],
+        "options": {
+          "quantiles": true
+        }
+      },
+      "difference": "options"
+    },
+    {
+      "name": "item_added",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          },
+          {
+            "state": "Invoice 9"
+          }
+        ]
+      },
+      "difference": "items"
+    },
+    {
+      "name": "item_changed",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8b"
+          }
+        ]
+      },
+      "difference": "items[1]"
+    },
+    {
+      "name": "reference_date_added",
+      "recorded": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "sent": {
+        "batch_id": "same-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text"
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7",
+            "reference_date": "2026-03-10"
+          },
+          {
+            "state": "Invoice 8"
+          }
+        ]
+      },
+      "difference": "items[0]"
+    }
+  ]
+}

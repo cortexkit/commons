@@ -1,0 +1,142 @@
+{
+  "about": "clef is a Cloudflare Workers AI model, so from 0.2.0 its errors map by the Workers AI code in the reply first, and by HTTP status only for a code the shared table does not list. Each clef row shows the code, its class, whether it is stored, and whether it stops the call; was is the code the 0.1.0 status-only mapping gave the same reply, where it differs. account_limit_exhausted and account_not_entitled are batch-level: never stored, they stop the call, and on the call's first provider call they refuse the whole call at admission (first_call_refusals). TypeSafe documents no error codes, and its mapping is unchanged.",
+  "clef": [
+    {
+      "status": 429,
+      "code": 3036,
+      "item_code": "account_limit_exhausted",
+      "class": "transient",
+      "stored": false,
+      "stops_the_call": true,
+      "was": "rate_limited"
+    },
+    {
+      "status": 403,
+      "code": 5035,
+      "item_code": "account_not_entitled",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true,
+      "was": "auth_failed"
+    },
+    {
+      "status": 403,
+      "code": 5016,
+      "item_code": "account_not_entitled",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true,
+      "was": "auth_failed"
+    },
+    {
+      "status": 403,
+      "code": 3023,
+      "item_code": "account_not_entitled",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true,
+      "was": "auth_failed"
+    },
+    {
+      "status": 400,
+      "code": 5007,
+      "item_code": "model_unavailable",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true,
+      "was": "invalid_item"
+    },
+    {
+      "status": 404,
+      "code": 3042,
+      "item_code": "model_unavailable",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true
+    },
+    {
+      "status": 429,
+      "code": 3040,
+      "item_code": "rate_limited",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": true
+    },
+    {
+      "status": 413,
+      "code": 3006,
+      "item_code": "invalid_item",
+      "class": "permanent",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "status": 408,
+      "code": 3007,
+      "item_code": "provider_error",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "status": 403,
+      "item_code": "auth_failed",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true
+    }
+  ],
+  "typesafe": [
+    {
+      "status": 401,
+      "item_code": "auth_failed",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true
+    },
+    {
+      "status": 422,
+      "item_code": "invalid_item",
+      "class": "permanent",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "status": 429,
+      "item_code": "rate_limited",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": true
+    },
+    {
+      "status": 529,
+      "item_code": "rate_limited",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": true
+    },
+    {
+      "status": 500,
+      "item_code": "provider_error",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": false
+    }
+  ],
+  "first_call_refusals": [
+    {
+      "code": "account_limit_exhausted",
+      "message": "the provider account used up its daily allocation",
+      "detail": {
+        "class": "transient"
+      }
+    },
+    {
+      "code": "account_not_entitled",
+      "message": "the provider account may not use this model",
+      "detail": {
+        "class": "permanent"
+      }
+    }
+  ]
+}

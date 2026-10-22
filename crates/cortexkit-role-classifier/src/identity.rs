@@ -2,15 +2,20 @@
 //! replay or `batch_id_reuse`.
 //!
 //! The identity is the model, the questions, and each item, the questions
-//! and every item hashed as RFC 8785 (JCS) canonical JSON. Canonicalizing
-//! first means the key order of an object `state`, whitespace, and number
-//! spellings JSON treats as equal (`1.0` and `1`, `1e30` and `1E+30`) can't
-//! turn a retry into a reuse. `max_cost_usd` is not part of it: a re-send
-//! may carry another ceiling (see
-//! [`effective_ceiling`](crate::request::effective_ceiling)).
+//! and every item hashed as RFC 8785 (JCS) canonical JSON, with an item's
+//! images in their canonical form. These are the shared model-batch rules
+//! (`cortexkit-model-batch`, its `RULES.md` §2); this module names the
+//! parts `classifier/v1` hashes. Canonicalizing first means the key order
+//! of an object `state`, whitespace, number spellings JSON treats as equal
+//! (`1.0` and `1`, `1e30` and `1E+30`), and the spelling of an image (a
+//! `data:` URL or `{content_type, base64}`) can't turn a retry into a
+//! reuse. `max_cost_usd` is not part of it: a re-send may carry another
+//! ceiling (see [`effective_ceiling`](crate::request::effective_ceiling)).
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+
+pub use cortexkit_model_batch::identity::{canonical_json, digest, IdentityError};
+use cortexkit_model_batch::identity::{first_difference, item_digest};
 
 use crate::request::ClassifyRequest;
 
@@ -22,41 +27,23 @@ pub struct BatchIdentity {
     pub model: String,
     /// SHA-256 of the JCS of `questions`, lowercase hex.
     pub questions: String,
-    /// SHA-256 of the JCS of each item, lowercase hex, in request order.
+    /// SHA-256 of the JCS of each item, its images in canonical form,
+    /// lowercase hex, in request order.
     pub items: Vec<String>,
 }
 
-/// Why an identity could not be computed: the request holds a value JCS
-/// cannot encode.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IdentityError(pub String);
-
-impl std::fmt::Display for IdentityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "request cannot be canonicalized: {}", self.0)
-    }
-}
-
-impl std::error::Error for IdentityError {}
-
-/// The RFC 8785 (JCS) canonical JSON bytes of `value`.
-pub fn canonical_json<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, IdentityError> {
-    serde_jcs::to_vec(value).map_err(|e| IdentityError(e.to_string()))
-}
-
-/// SHA-256 of the canonical JSON of `value`, as 64 lowercase hex characters.
-pub fn digest<T: Serialize + ?Sized>(value: &T) -> Result<String, IdentityError> {
-    let digest = Sha256::digest(canonical_json(value)?);
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
 impl BatchIdentity {
-    /// The identity of `request`.
+    /// The identity of `request`. Fails only for an image that does not
+    /// decode, which validation refuses first.
     pub fn of(request: &ClassifyRequest) -> Result<Self, IdentityError> {
         Ok(Self {
             model: request.model.clone(),
             questions: digest(&request.questions)?,
-            items: request.items.iter().map(digest).collect::<Result<_, _>>()?,
+            items: request
+                .items
+                .iter()
+                .map(|item| item_digest(item, item.images.as_deref()))
+                .collect::<Result<_, _>>()?,
         })
     }
 
@@ -65,20 +52,14 @@ impl BatchIdentity {
     /// different item count) or `items[i]`. `None` when they are the same
     /// body, which makes the re-send a replay.
     pub fn first_difference(&self, sent: &Self) -> Option<String> {
-        if self.model != sent.model {
-            return Some("model".into());
-        }
-        if self.questions != sent.questions {
-            return Some("questions".into());
-        }
-        if self.items.len() != sent.items.len() {
-            return Some("items".into());
-        }
-        self.items
-            .iter()
-            .zip(&sent.items)
-            .position(|(recorded, sent)| recorded != sent)
-            .map(|i| format!("items[{i}]"))
+        first_difference(
+            &[
+                ("model", &self.model, &sent.model),
+                ("questions", &self.questions, &sent.questions),
+            ],
+            &self.items,
+            &sent.items,
+        )
     }
 }
 
@@ -158,6 +139,21 @@ mod tests {
             recorded.first_difference(&BatchIdentity::of(&other_model).unwrap()),
             Some("model".into())
         );
+    }
+
+    #[test]
+    fn one_image_in_either_spelling_is_one_identity() {
+        use crate::question::{Image, InlineImage};
+        let with = |image: Image| {
+            let mut request = request(vec![json!("s")]);
+            request.items[0] = Item::new("s").with_images(vec![image]);
+            BatchIdentity::of(&request).unwrap()
+        };
+        let url = with(Image::DataUrl("data:image/png;base64,AAECAw".into()));
+        let inline = with(Image::Inline(InlineImage::new("image/png", "AAECAw==")));
+        assert_eq!(url.first_difference(&inline), None);
+        let other = with(Image::Inline(InlineImage::new("image/png", "AAECBA==")));
+        assert_eq!(url.first_difference(&other), Some("items[0]".into()));
     }
 
     #[test]

@@ -1,14 +1,15 @@
 # cortexkit-role-classifier — the wire contract of the `classifier/v1` role:
 # role.describe, classify.run, the providers' shared question and answer
 # shapes, the batch body identity, error codes and their classes, request
-# validators, and CONTRACT.md, which says what is pinned. Pure serde plus
-# small checks; no transport, no runtime.
+# validators, and CONTRACT.md, which says what is pinned. The batch rules it
+# shares with the other model-batch roles come from cortexkit-model-batch.
+# Pure serde plus small checks; no transport, no runtime.
 #
 # The conformance suite lives in the sibling `-conformance` crate, so a
 # runner's production build never pulls in the suite.
 [package]
 name = "cortexkit-role-classifier"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -24,13 +25,15 @@ include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "
 test-vectors = []
 
 [dependencies]
+# The batch rules classifier/v1 shares with the other model-batch roles; its
+# items are re-exported at their classifier paths.
+cortexkit-model-batch = { version = "0.1.0", path = "../cortexkit-model-batch" }
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
-serde_jcs = "0.2"
 serde_json = "1"
-sha2 = "0.10"
 
 [dev-dependencies]
+sha2 = "0.10"
 subc-protocol = "0.32"
 
 [[test]]

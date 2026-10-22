@@ -1,0 +1,46 @@
+{
+  "about": "One model, Clairic. pass_tokens and the image byte limits are Cloudflare's documented figures; the image count, max_fields, max_answer_bytes, the module limits and the input price are illustrative. Output is stated free, so output_per_mtok_usd is 0, not absent. Clairic states no total context, so context_tokens is absent.",
+  "describe": {
+    "role": "extractor/v1",
+    "limits": {
+      "max_items": 50,
+      "max_request_bytes": 33554432,
+      "max_instruction_bytes": 2048
+    },
+    "models": [
+      {
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "max_items": 50,
+        "max_fields": 32,
+        "field_types": [
+          "text",
+          "number",
+          "date",
+          "time",
+          "datetime",
+          "duration",
+          "list",
+          "estimate",
+          "forecast"
+        ],
+        "pass_tokens": 8192,
+        "max_answer_bytes": 65480,
+        "images": {
+          "max": 4,
+          "max_bytes_each": 4194304,
+          "max_bytes_total": 8388608,
+          "formats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "price": {
+          "input_per_mtok_usd": 0.11,
+          "output_per_mtok_usd": 0
+        },
+        "egress_host": "api.cloudflare.com"
+      }
+    ]
+  }
+}

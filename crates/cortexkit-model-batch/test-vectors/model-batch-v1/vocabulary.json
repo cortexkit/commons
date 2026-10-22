@@ -1,0 +1,125 @@
+{
+  "about": "Every code of the shared error vocabulary with its class. Admission codes refuse a whole call and write nothing. Item codes stand in an item's place in a reply; stored says whether a runner records the error as the item's outcome, and stops_the_call whether no further item is sent in that call. The four codes that say nothing about the item (auth_failed, model_unavailable, account_limit_exhausted, account_not_entitled) are never stored and stop the call; when the call's first provider call meets one, the whole call is refused at admission with the same code.",
+  "admission": [
+    {
+      "code": "invalid_params",
+      "class": "permanent"
+    },
+    {
+      "code": "batch_id_reuse",
+      "class": "permanent"
+    },
+    {
+      "code": "model_unknown",
+      "class": "permanent"
+    },
+    {
+      "code": "model_not_classifier",
+      "class": "permanent"
+    },
+    {
+      "code": "model_not_extractor",
+      "class": "permanent"
+    },
+    {
+      "code": "cost_exceeded",
+      "class": "permanent"
+    },
+    {
+      "code": "account_walled",
+      "class": "transient"
+    },
+    {
+      "code": "batch_in_progress",
+      "class": "transient"
+    },
+    {
+      "code": "auth_failed",
+      "class": "permanent"
+    },
+    {
+      "code": "model_unavailable",
+      "class": "permanent"
+    },
+    {
+      "code": "account_limit_exhausted",
+      "class": "transient"
+    },
+    {
+      "code": "account_not_entitled",
+      "class": "permanent"
+    }
+  ],
+  "item": [
+    {
+      "code": "rate_limited",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": true
+    },
+    {
+      "code": "provider_error",
+      "class": "transient",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "code": "provider_refused",
+      "class": "permanent",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "code": "invalid_item",
+      "class": "permanent",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "code": "cost_exceeded",
+      "class": "permanent",
+      "stored": true,
+      "stops_the_call": false
+    },
+    {
+      "code": "auth_failed",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true
+    },
+    {
+      "code": "model_unavailable",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true
+    },
+    {
+      "code": "account_limit_exhausted",
+      "class": "transient",
+      "stored": false,
+      "stops_the_call": true
+    },
+    {
+      "code": "account_not_entitled",
+      "class": "permanent",
+      "stored": false,
+      "stops_the_call": true
+    },
+    {
+      "code": "answer_too_large",
+      "class": "permanent",
+      "stored": true,
+      "stops_the_call": false
+    }
+  ],
+  "answer_too_large": {
+    "code": "answer_too_large",
+    "class": "permanent",
+    "message": "the answer to fields.summary is 70000 bytes; at most 65536",
+    "detail": {
+      "field": "fields.summary",
+      "limit": 65536,
+      "size": 70000
+    }
+  }
+}

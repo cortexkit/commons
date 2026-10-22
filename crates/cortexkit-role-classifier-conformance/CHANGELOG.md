@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Depends on `cortexkit-role-classifier` 0.2.0, which it re-exports as
+  `wire`. The checks are unchanged: they script errors by HTTP status only,
+  so a module's mapping of Workers AI codes is checked by the role crate's
+  vectors, not by this suite.
+
 ## 0.1.0
 
 - First published release of the `classifier/v1` conformance suite. It drives

@@ -1,0 +1,73 @@
+{
+  "about": "Batch identity hashes an item's images in canonical form: the content type and the decoded bytes. The first request sends a one-pixel PNG as a data: URL; the re-send carries the same batch_id and the same PNG as {content_type, base64} without padding. Both have one identity, so the re-send is a replay, not batch_id_reuse. The malformed request's image is not base64, so validation refuses it before any provider call, naming the one image; the message after the colon is the decoder's own.",
+  "request": {
+    "batch_id": "screens-7",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+    "questions": {
+      "flagged": {
+        "type": "noul",
+        "instructions": "Does the screenshot show an error dialog?"
+      }
+    },
+    "items": [
+      {
+        "state": "Ticket 4411: the app froze on save.",
+        "images": [
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        ]
+      }
+    ]
+  },
+  "resend": {
+    "batch_id": "screens-7",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+    "questions": {
+      "flagged": {
+        "type": "noul",
+        "instructions": "Does the screenshot show an error dialog?"
+      }
+    },
+    "items": [
+      {
+        "state": "Ticket 4411: the app froze on save.",
+        "images": [
+          {
+            "content_type": "image/png",
+            "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg"
+          }
+        ]
+      }
+    ]
+  },
+  "malformed": {
+    "request": {
+      "batch_id": "screens-8",
+      "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+      "questions": {
+        "flagged": {
+          "type": "noul",
+          "instructions": "Does the screenshot show an error dialog?"
+        }
+      },
+      "items": [
+        {
+          "state": "Ticket 4412: blank screen.",
+          "images": [
+            {
+              "content_type": "image/png",
+              "base64": "not base64!"
+            }
+          ]
+        }
+      ]
+    },
+    "refusal": {
+      "code": "invalid_params",
+      "message": "the image's base64 does not decode: Invalid symbol 32, offset 3.",
+      "detail": {
+        "class": "permanent",
+        "field": "items[0].images[0]"
+      }
+    }
+  }
+}

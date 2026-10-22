@@ -11,7 +11,9 @@ use cortexkit_role_classifier::{
     describe::{check_describe, Price, RoleDescribe},
     errors::{self, ErrorClass, ItemError, Refusal},
     identity::BatchIdentity,
-    provider::{self, item_code_for_status, ProviderRequest, ProviderResponse},
+    provider::{
+        self, item_code_for_status, workers_ai_item_code, ProviderRequest, ProviderResponse,
+    },
     question::{check_question, QuestionType},
     reply::{check_reply, sum_usage, Answer, ClassifyReply, Usage},
     request::{check_request, ClassifyRequest},
@@ -26,6 +28,7 @@ use serde_json::Number;
 const FILES: &[&str] = &[
     "admission-refusals.json",
     "field-paths.json",
+    "image-identity.json",
     "item-errors.json",
     "provider-examples.json",
     "question-choice.json",
@@ -36,6 +39,7 @@ const FILES: &[&str] = &[
     "role-describe.json",
     "state-array.json",
     "state-object.json",
+    "workers-ai-codes.json",
 ];
 
 /// Decode `name` as `T` and check that its pretty encoding, with a final
@@ -499,5 +503,124 @@ fn refusals_name_the_narrowest_field_that_applies() {
             other => panic!("unexpected vector {other}"),
         };
         assert_eq!(built.field(), Some(expected), "{name}");
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct ImageIdentity {
+    about: String,
+    request: ClassifyRequest,
+    resend: ClassifyRequest,
+    malformed: AdmissionRefusalCase,
+}
+
+#[derive(Deserialize, Serialize)]
+struct AdmissionRefusalCase {
+    request: ClassifyRequest,
+    refusal: Refusal,
+}
+
+/// One image sent as a `data:` URL and re-sent as `{content_type, base64}`
+/// is one batch; malformed base64 is refused before any provider call with
+/// the code and field any other bad image gets.
+#[test]
+fn one_image_in_both_encodings_is_one_identity_and_bad_base64_is_refused() {
+    let file: ImageIdentity = exact("image-identity.json");
+    let describe = describe();
+    let model = describe.model(&file.request.model).unwrap();
+    check_request(&file.request, model).unwrap();
+    check_request(&file.resend, model).unwrap();
+    assert_eq!(file.resend.batch_id, file.request.batch_id);
+    assert_ne!(file.resend.items, file.request.items, "two spellings");
+    let recorded = BatchIdentity::of(&file.request).unwrap();
+    assert_eq!(
+        recorded.first_difference(&BatchIdentity::of(&file.resend).unwrap()),
+        None
+    );
+    let model = describe.model(&file.malformed.request.model).unwrap();
+    let built = check_request(&file.malformed.request, model).unwrap_err();
+    let pinned = &file.malformed.refusal;
+    assert_eq!(built.code, pinned.code);
+    assert_eq!(built.detail, pinned.detail);
+    assert_eq!(built.code, errors::INVALID_PARAMS);
+    assert_eq!(built.field(), Some("items[0].images[0]"));
+    // The words after the colon are the base64 decoder's own.
+    let prefix = "the image's base64 does not decode: ";
+    assert!(built.message.starts_with(prefix), "{}", built.message);
+    assert!(pinned.message.starts_with(prefix), "{}", pinned.message);
+}
+
+#[derive(Deserialize, Serialize)]
+struct WorkersAiCodes {
+    about: String,
+    clef: Vec<CodeRow>,
+    typesafe: Vec<CodeRow>,
+    first_call_refusals: Vec<Refusal>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct CodeRow {
+    status: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    code: Option<u64>,
+    item_code: String,
+    class: ErrorClass,
+    stored: bool,
+    stops_the_call: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    was: Option<String>,
+}
+
+fn check_row(provider: &str, row: &CodeRow, mapped: Option<&str>) {
+    let name = format!("{provider} {} {:?}", row.status, row.code);
+    assert_eq!(mapped, Some(row.item_code.as_str()), "{name}");
+    assert_eq!(
+        errors::item_class(&row.item_code),
+        Some(row.class.clone()),
+        "{name}"
+    );
+    let error = ItemError::for_code(&row.item_code, "m");
+    assert_eq!(error.is_stored(), row.stored, "{name}: stored");
+    assert_eq!(error.stops_the_call(), row.stops_the_call, "{name}: stops");
+}
+
+/// clef's errors map by Workers AI code first; `was` is what the 0.1.0
+/// status-only mapping gave, where it differs. TypeSafe's are unchanged.
+#[test]
+fn clef_errors_map_by_workers_ai_code_and_typesafe_by_status() {
+    let file: WorkersAiCodes = exact("workers-ai-codes.json");
+    for row in &file.clef {
+        check_row("clef", row, workers_ai_item_code(row.status, row.code));
+        let before = item_code_for_status(row.status);
+        match &row.was {
+            Some(was) => {
+                assert_eq!(before, Some(was.as_str()));
+                assert_ne!(was, &row.item_code);
+            }
+            None => assert_eq!(before, Some(row.item_code.as_str())),
+        }
+    }
+    for code in [3036, 5035, 5016, 3023, 5007, 3042] {
+        assert!(
+            file.clef.iter().any(|row| row.code == Some(code)),
+            "clef code {code} has no vector"
+        );
+    }
+    for row in &file.typesafe {
+        assert_eq!(row.code, None);
+        assert_eq!(row.was, None);
+        check_row("typesafe", row, item_code_for_status(row.status));
+    }
+    let built = [
+        Refusal::account_limit_exhausted(),
+        Refusal::account_not_entitled(),
+    ];
+    assert_eq!(file.first_call_refusals, built);
+    for refusal in &file.first_call_refusals {
+        assert!(errors::BATCH_LEVEL_CODES.contains(&refusal.code.as_str()));
+        assert_eq!(
+            Some(refusal.detail.class.clone()),
+            errors::admission_class(&refusal.code)
+        );
     }
 }

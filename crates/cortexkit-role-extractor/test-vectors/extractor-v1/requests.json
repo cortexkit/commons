@@ -1,0 +1,222 @@
+{
+  "about": "Admitted requests and the Clairic request each item maps to: one provider call per item, carrying the item's state, images and reference_date as written, every field of the batch key by key in the caller's order, and the batch options under the provider's names, both always sent. The first request uses each of the nine field types once; the second sends an image with an empty state, which is allowed only because the item carries an image.",
+  "requests": [
+    {
+      "name": "every_field_type",
+      "request": {
+        "batch_id": "invoices-2026-03",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "vendor": {
+            "type": "text",
+            "instructions": "The company that issued the invoice."
+          },
+          "total": {
+            "type": "number",
+            "decimals": 2,
+            "unit": "EUR"
+          },
+          "issued": {
+            "type": "date"
+          },
+          "pickup": {
+            "type": "time"
+          },
+          "delivered": {
+            "type": "datetime"
+          },
+          "lead_time": {
+            "type": "duration",
+            "unit": "days",
+            "integer": true
+          },
+          "lines": {
+            "type": "list",
+            "items": "number",
+            "decimals": 2
+          },
+          "next_price": {
+            "type": "estimate",
+            "min": 1,
+            "max": 1000,
+            "scale": "log",
+            "step": 0.5
+          },
+          "demand": {
+            "type": "forecast",
+            "min": 0,
+            "max": 500,
+            "horizon": 6,
+            "interval": "month",
+            "null_threshold": 0.4
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7 from ACME GmbH, issued 3 March: 2 x 12.50 EUR, total 25.00 EUR. Pickup 09:30, delivered 5 March 14:00.",
+            "reference_date": "2026-03-10"
+          },
+          {
+            "state": "Invoice 8 from ACME GmbH: total 40.00 EUR."
+          }
+        ],
+        "options": {
+          "quantiles": true
+        }
+      },
+      "provider_requests": [
+        {
+          "model": "@cf/cloudflare/clairic",
+          "state": "Invoice 7 from ACME GmbH, issued 3 March: 2 x 12.50 EUR, total 25.00 EUR. Pickup 09:30, delivered 5 March 14:00.",
+          "reference_date": "2026-03-10",
+          "fields": {
+            "vendor": {
+              "type": "text",
+              "instructions": "The company that issued the invoice."
+            },
+            "total": {
+              "type": "number",
+              "decimals": 2,
+              "unit": "EUR"
+            },
+            "issued": {
+              "type": "date"
+            },
+            "pickup": {
+              "type": "time"
+            },
+            "delivered": {
+              "type": "datetime"
+            },
+            "lead_time": {
+              "type": "duration",
+              "unit": "days",
+              "integer": true
+            },
+            "lines": {
+              "type": "list",
+              "items": "number",
+              "decimals": 2
+            },
+            "next_price": {
+              "type": "estimate",
+              "min": 1,
+              "max": 1000,
+              "scale": "log",
+              "step": 0.5
+            },
+            "demand": {
+              "type": "forecast",
+              "min": 0,
+              "max": 500,
+              "horizon": 6,
+              "interval": "month",
+              "null_threshold": 0.4
+            }
+          },
+          "options": {
+            "include_quantiles": true,
+            "return_state_text": false
+          }
+        },
+        {
+          "model": "@cf/cloudflare/clairic",
+          "state": "Invoice 8 from ACME GmbH: total 40.00 EUR.",
+          "fields": {
+            "vendor": {
+              "type": "text",
+              "instructions": "The company that issued the invoice."
+            },
+            "total": {
+              "type": "number",
+              "decimals": 2,
+              "unit": "EUR"
+            },
+            "issued": {
+              "type": "date"
+            },
+            "pickup": {
+              "type": "time"
+            },
+            "delivered": {
+              "type": "datetime"
+            },
+            "lead_time": {
+              "type": "duration",
+              "unit": "days",
+              "integer": true
+            },
+            "lines": {
+              "type": "list",
+              "items": "number",
+              "decimals": 2
+            },
+            "next_price": {
+              "type": "estimate",
+              "min": 1,
+              "max": 1000,
+              "scale": "log",
+              "step": 0.5
+            },
+            "demand": {
+              "type": "forecast",
+              "min": 0,
+              "max": 500,
+              "horizon": 6,
+              "interval": "month",
+              "null_threshold": 0.4
+            }
+          },
+          "options": {
+            "include_quantiles": true,
+            "return_state_text": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "image_with_empty_state",
+      "request": {
+        "batch_id": "screens-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "error_code": {
+            "type": "text",
+            "instructions": "The error code shown in the dialog."
+          }
+        },
+        "items": [
+          {
+            "state": "",
+            "images": [
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            ]
+          }
+        ],
+        "options": {
+          "state_text": true
+        },
+        "max_cost_usd": 0.5
+      },
+      "provider_requests": [
+        {
+          "model": "@cf/cloudflare/clairic",
+          "state": "",
+          "images": [
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+          ],
+          "fields": {
+            "error_code": {
+              "type": "text",
+              "instructions": "The error code shown in the dialog."
+            }
+          },
+          "options": {
+            "include_quantiles": false,
+            "return_state_text": true
+          }
+        }
+      ]
+    }
+  ]
+}

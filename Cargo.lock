@@ -473,6 +473,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexkit-model-batch"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "cortexkit-model-catalog",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "cortexkit-model-catalog"
 version = "0.2.0"
 dependencies = [
@@ -558,11 +570,11 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "cortexkit-model-batch",
  "indexmap",
  "serde",
- "serde_jcs",
  "serde_json",
  "sha2 0.10.9",
  "subc-protocol",
@@ -570,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -591,6 +603,30 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "cortexkit-role-extractor"
+version = "0.1.0"
+dependencies = [
+ "cortexkit-model-batch",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subc-protocol",
+]
+
+[[package]]
+name = "cortexkit-role-extractor-conformance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cortexkit-role-extractor",
+ "serde",
+ "serde_json",
+ "subc-protocol",
+ "tokio",
 ]
 
 [[package]]

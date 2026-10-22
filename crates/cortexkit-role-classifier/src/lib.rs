@@ -22,6 +22,11 @@
 //! - `vectors` (with the `test-vectors` feature): the role's vector files,
 //!   compiled in, so a module's tests can use the same bytes.
 //!
+//! The batch rules this role shares with the other model-batch roles (the
+//! error vocabulary, batch identity hashing, the image shape, the status
+//! mapping) are `cortexkit-model-batch`'s; the modules above re-export them
+//! at their `classifier/v1` paths.
+//!
 //! Maps whose key order is part of what a provider documents (questions,
 //! choice options, probabilities) are [`IndexMap`]s, so a decoded and
 //! re-encoded object keeps its order. Every enumeration a consumer decodes

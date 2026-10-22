@@ -1,0 +1,293 @@
+{
+  "about": "One refusal per admission code, plus the kindless catalog row: a row with no kind is model_not_extractor without detail.kind, never model_unknown and never an invented kind. Each refusal writes nothing. invalid_params and the catalog codes come from admission's own checks against catalog; the rest come from state the request alone does not show: batch_id_reuse from a recorded batch whose fields differ, account_walled from the module's own spend guard, batch_in_progress from a call holding the batch, and the last four from the call's first provider call (a 401, a 404 or Workers AI 3042, Workers AI 3036, and 5035, 5016 or 3023).",
+  "catalog": [
+    {
+      "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+      "kind": "extraction"
+    },
+    {
+      "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+      "kind": "classifier"
+    },
+    {
+      "model": "acme/untyped-1",
+      "kind": null
+    }
+  ],
+  "refusals": [
+    {
+      "name": "invalid_params",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "rank"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "unknown field type rank; expected one of text, number, date, time, datetime, duration, list, estimate, forecast",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.total.type"
+        }
+      }
+    },
+    {
+      "name": "batch_id_reuse",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "batch_id_reuse",
+        "message": "batch_id names a recorded batch whose fields differs",
+        "detail": {
+          "class": "permanent",
+          "field": "fields"
+        }
+      }
+    },
+    {
+      "name": "model_unknown",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "acme/nope"
+      },
+      "refusal": {
+        "code": "model_unknown",
+        "message": "acme/nope is not in the catalog",
+        "detail": {
+          "class": "permanent",
+          "model": "acme/nope"
+        }
+      }
+    },
+    {
+      "name": "model_not_extractor",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef"
+      },
+      "refusal": {
+        "code": "model_not_extractor",
+        "message": "cloudflare-workers-ai/@cf/cloudflare/clef is a classifier, not an extraction model",
+        "detail": {
+          "class": "permanent",
+          "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+          "kind": "classifier"
+        }
+      }
+    },
+    {
+      "name": "model_not_extractor_kindless",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "acme/untyped-1"
+      },
+      "refusal": {
+        "code": "model_not_extractor",
+        "message": "acme/untyped-1 states no kind in the catalog, so it is not an extraction model",
+        "detail": {
+          "class": "permanent",
+          "model": "acme/untyped-1"
+        }
+      }
+    },
+    {
+      "name": "account_walled",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "account_walled",
+        "message": "the provider account is at its limit",
+        "detail": {
+          "class": "transient",
+          "resets_at_ms": 1798761600000
+        }
+      }
+    },
+    {
+      "name": "batch_in_progress",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "batch_in_progress",
+        "message": "another call holds this batch_id",
+        "detail": {
+          "class": "transient",
+          "retry_after_ms": 1000
+        }
+      }
+    },
+    {
+      "name": "auth_failed",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "auth_failed",
+        "message": "the provider refused the module's credentials",
+        "detail": {
+          "class": "permanent",
+          "credential": "apikey:cloudflare"
+        }
+      }
+    },
+    {
+      "name": "model_unavailable",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "model_unavailable",
+        "message": "the provider does not serve cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "detail": {
+          "class": "permanent",
+          "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+        }
+      }
+    },
+    {
+      "name": "account_limit_exhausted",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "account_limit_exhausted",
+        "message": "the provider account used up its daily allocation",
+        "detail": {
+          "class": "transient"
+        }
+      }
+    },
+    {
+      "name": "account_not_entitled",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "account_not_entitled",
+        "message": "the provider account may not use this model",
+        "detail": {
+          "class": "permanent"
+        }
+      }
+    }
+  ]
+}

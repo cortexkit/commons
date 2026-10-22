@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    errors::{AUTH_FAILED, INVALID_ITEM, MODEL_UNAVAILABLE, PROVIDER_ERROR, RATE_LIMITED},
     question::{Image, Question},
     reply::{Answer, Usage},
 };
@@ -123,38 +122,23 @@ impl ProviderResponse {
     }
 }
 
-/// The per-item error code for a provider's HTTP status, once the runner's
-/// own retries are spent. Neither provider documents an error body, so the
-/// status is all the mapping reads:
-///
-/// - 401 and 403 (TypeSafe's 401, clef's 403): `auth_failed`;
-/// - 404 (clef's 404): `model_unavailable`;
-/// - 429 (clef's 3036 account-limited and 3040 out-of-capacity, TypeSafe's
-///   rate limit) and 529 (TypeSafe's Overloaded): `rate_limited`;
-/// - 408 (clef's timeout) and every 5xx: `provider_error`;
-/// - every other 4xx (clef's 400 and 413; TypeSafe's 422): `invalid_item`.
-///
-/// 401, 403 and 404 say nothing about the item, so they are never
-/// `invalid_item`, which a caller reads as "drop this item". `auth_failed`,
-/// `model_unavailable` and `rate_limited` stop the call (see
-/// [`ItemError::stops_the_call`](crate::errors::ItemError::stops_the_call)).
-///
-/// `None` for a status that is not an error. Neither provider documents a
-/// content-refusal status, so nothing here maps to `provider_refused`.
-pub fn item_code_for_status(status: u16) -> Option<&'static str> {
-    match status {
-        401 | 403 => Some(AUTH_FAILED),
-        404 => Some(MODEL_UNAVAILABLE),
-        429 | 529 => Some(RATE_LIMITED),
-        408 | 500..=599 => Some(PROVIDER_ERROR),
-        400..=499 => Some(INVALID_ITEM),
-        _ => None,
-    }
-}
+// The mapping from a provider's error to a per-item code is the shared
+// model-batch rules (`cortexkit-model-batch`, its `RULES.md` §15),
+// re-exported here. TypeSafe documents no error codes, so its errors map by
+// status (`item_code_for_status`). clef is a Cloudflare Workers AI model, so
+// its errors map by Workers AI code first (`workers_ai_item_code`), and a
+// code that table does not list falls back to the status.
+pub use cortexkit_model_batch::status::{
+    item_code_for_status, workers_ai_codes, workers_ai_item_code,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::{
+        ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, AUTH_FAILED, INVALID_ITEM,
+        MODEL_UNAVAILABLE, PROVIDER_ERROR, RATE_LIMITED,
+    };
 
     #[test]
     fn documented_statuses_map_to_item_codes() {
@@ -172,5 +156,25 @@ mod tests {
         }
         assert_eq!(item_code_for_status(404), Some(MODEL_UNAVAILABLE));
         assert_eq!(item_code_for_status(200), None);
+    }
+
+    #[test]
+    fn clef_errors_map_by_workers_ai_code_first() {
+        assert_eq!(
+            workers_ai_item_code(429, Some(3036)),
+            Some(ACCOUNT_LIMIT_EXHAUSTED)
+        );
+        for code in [5035, 5016, 3023] {
+            assert_eq!(
+                workers_ai_item_code(403, Some(code)),
+                Some(ACCOUNT_NOT_ENTITLED)
+            );
+        }
+        assert_eq!(
+            workers_ai_item_code(400, Some(5007)),
+            Some(MODEL_UNAVAILABLE)
+        );
+        assert_eq!(workers_ai_item_code(429, Some(3040)), Some(RATE_LIMITED));
+        assert_eq!(workers_ai_item_code(403, None), Some(AUTH_FAILED));
     }
 }

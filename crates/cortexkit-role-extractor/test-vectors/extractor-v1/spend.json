@@ -1,0 +1,121 @@
+{
+  "about": "The check before each item's provider call, with the shared conservative estimate: state, fields (as the byte length of their canonical JSON) and the module's bounds (illustrative), at role-describe.json's input price and pass_tokens (8192). A state counted exactly at or past a pass's budget cannot fit and is invalid_item, with or without a ceiling. A state whose byte bound reaches the budget is not refused for it: the estimate is unbounded, so under a ceiling the item is cost_exceeded, and with no ceiling it is sent. A bounded estimate is sent while recorded spend plus the estimate stays within the ceiling.",
+  "bounds": {
+    "image_tokens_each": 1500,
+    "overhead_tokens": 10000
+  },
+  "cases": [
+    {
+      "name": "exact_state_past_the_pass_does_not_fit",
+      "request": {
+        "batch_id": "spend-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          }
+        ]
+      },
+      "exact_state_tokens": 9000,
+      "outcome": {
+        "error": {
+          "code": "invalid_item",
+          "class": "permanent",
+          "message": "the state is 9000 tokens; one pass holds 8192, so the item cannot fit"
+        }
+      }
+    },
+    {
+      "name": "byte_bound_past_the_pass_under_a_ceiling",
+      "request": {
+        "batch_id": "spend-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, tota"
+          }
+        ],
+        "max_cost_usd": 1
+      },
+      "outcome": {
+        "error": {
+          "code": "cost_exceeded",
+          "class": "permanent",
+          "message": "the cost estimate is unbounded because the state's byte bound reaches a pass's token budget; raise or remove max_cost_usd, or use a module that counts tokens exactly"
+        }
+      }
+    },
+    {
+      "name": "byte_bound_past_the_pass_without_a_ceiling",
+      "request": {
+        "batch_id": "spend-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, tota"
+          }
+        ]
+      },
+      "outcome": "sent"
+    },
+    {
+      "name": "bounded_within_the_ceiling",
+      "request": {
+        "batch_id": "spend-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          }
+        ],
+        "max_cost_usd": 0.00110396
+      },
+      "outcome": "sent"
+    },
+    {
+      "name": "bounded_over_the_ceiling",
+      "request": {
+        "batch_id": "spend-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          }
+        ],
+        "max_cost_usd": 0.00110395
+      },
+      "outcome": {
+        "error": {
+          "code": "cost_exceeded",
+          "class": "permanent",
+          "message": "answering this item could cost 0.00110396 USD, crossing max_cost_usd 0.00110395 after 0 USD spent"
+        }
+      }
+    }
+  ]
+}

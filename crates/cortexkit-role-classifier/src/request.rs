@@ -11,14 +11,21 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
+use cortexkit_model_batch::{
+    admission::{
+        check_batch_id, check_catalog_row as check_row, check_max_cost_usd, check_request_size,
+        CatalogRow,
+    },
+    image::{check_images, ImageLimits},
+};
+
+pub use cortexkit_model_batch::admission::{effective_ceiling, is_batch_id, BATCH_ID_MAX_LEN};
+
 use crate::{
     describe::{Limits, ModelEntry},
     errors::Refusal,
-    question::{bounded, check_image, check_question, Image, Question, IMAGES_MAX_TOTAL_BYTES},
+    question::{bounded, check_question, Image, Question},
 };
-
-/// Longest `batch_id`, in bytes.
-pub const BATCH_ID_MAX_LEN: usize = 128;
 
 /// The catalog `kind` of a classifier model.
 pub const CLASSIFIER_KIND: &str = "classifier";
@@ -93,14 +100,6 @@ impl Item {
         self.images = Some(images);
         self
     }
-}
-
-/// Whether `batch_id` is 1 to [`BATCH_ID_MAX_LEN`] printable ASCII
-/// characters (space through tilde).
-pub fn is_batch_id(batch_id: &str) -> bool {
-    !batch_id.is_empty()
-        && batch_id.len() <= BATCH_ID_MAX_LEN
-        && batch_id.bytes().all(|b| (0x20..=0x7e).contains(&b))
 }
 
 /// Whether `state` is a kind the role forwards: a string, an object or an
@@ -212,42 +211,28 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
 /// names `params` and the limit: the size belongs to the request as a
 /// whole, so no narrower path applies.
 pub fn check_request_bytes(len: usize, limits: &Limits) -> Result<(), Refusal> {
-    if len as u64 > limits.max_request_bytes {
-        Err(Refusal::over_limit(
-            "params",
-            limits.max_request_bytes,
-            format!(
-                "the request is {len} bytes; at most {}",
-                limits.max_request_bytes
-            ),
-        ))
-    } else {
-        Ok(())
-    }
+    check_request_size(len, limits.max_request_bytes)
 }
 
 /// Check the model's catalog row: `None` when the model is not in the
 /// catalog (`model_unknown`), else its `kind`, which must be
 /// [`CLASSIFIER_KIND`] (`model_not_classifier`). The model is never
 /// substituted.
+///
+/// A catalog row that states no kind is not modelled here yet: `None` means
+/// no row (the contract's open readings, §12).
 pub fn check_catalog_row(model: &str, kind: Option<&str>) -> Result<(), Refusal> {
-    match kind {
-        None => Err(Refusal::model_unknown(model)),
-        Some(CLASSIFIER_KIND) => Ok(()),
-        Some(kind) => Err(Refusal::model_not_classifier(model, kind)),
-    }
+    let row = kind.map_or(CatalogRow::Absent, CatalogRow::Kind);
+    check_row(model, row, CLASSIFIER_KIND, |model, kind| {
+        Refusal::model_not_classifier(model, kind.unwrap_or_default())
+    })
 }
 
 /// Check every limit of `request` against the model's `role.describe` entry:
 /// the batch id, question count and each question, item count, each item's
 /// state and images, and `max_cost_usd`. Returns the first refusal.
 pub fn check_request(request: &ClassifyRequest, model: &ModelEntry) -> Result<(), Refusal> {
-    if !is_batch_id(&request.batch_id) {
-        return Err(Refusal::invalid_params(
-            "batch_id",
-            "batch_id is 1-128 printable ASCII characters",
-        ));
-    }
+    check_batch_id(&request.batch_id)?;
     bounded(
         request.questions.len(),
         1,
@@ -272,61 +257,20 @@ pub fn check_request(request: &ClassifyRequest, model: &ModelEntry) -> Result<()
                 "state is a string, an object or an array",
             ));
         }
-        let Some(images) = &item.images else {
-            continue;
-        };
-        let field = format!("items[{i}].images");
-        let max = model.images.map_or(0, |support| support.max);
-        if images.len() as u64 > max {
-            return Err(Refusal::over_limit(
-                field,
-                max,
-                if model.images.is_none() {
-                    format!("{} takes no images", model.model)
-                } else {
-                    format!("{} images; at most {max}", images.len())
-                },
-            ));
-        }
-        for (j, image) in images.iter().enumerate() {
-            check_image(image)
-                .map_err(|why| Refusal::invalid_params(format!("{field}[{j}]"), why))?;
-        }
-        let total: usize = images.iter().map(Image::approx_bytes).sum();
-        if total > IMAGES_MAX_TOTAL_BYTES {
-            return Err(Refusal::over_limit(
-                field,
-                IMAGES_MAX_TOTAL_BYTES as u64,
-                format!("{total} image bytes; at most {IMAGES_MAX_TOTAL_BYTES}"),
-            ));
+        if let Some(images) = &item.images {
+            let limits = model
+                .images
+                .map(|support| ImageLimits::workers_ai(support.max));
+            check_images(
+                &model.model,
+                &format!("items[{i}].images"),
+                images,
+                limits.as_ref(),
+            )?;
         }
     }
-    if let Some(max_cost_usd) = &request.max_cost_usd {
-        if max_cost_usd.as_f64().is_none_or(|usd| usd < 0.0) {
-            return Err(Refusal::invalid_params(
-                "max_cost_usd",
-                "max_cost_usd is a number of USD, zero or more",
-            ));
-        }
-    }
+    check_max_cost_usd(request.max_cost_usd.as_ref())?;
     Ok(())
-}
-
-/// The ceiling a call works under, and the batch's recorded ceiling from
-/// then on: the lower of the ceiling recorded so far and the one this call
-/// carries. `None` when neither names one.
-///
-/// The recorded ceiling is not fixed at first admission. A runner records
-/// this value durably before the call sends anything, so after any call the
-/// recorded ceiling is `effective_ceiling(recorded, sent)`. That is what
-/// makes a tightening stick: a later re-send carrying the original, higher
-/// value works under the lower one, and a caller can tighten a batch's
-/// ceiling but never loosen it.
-pub fn effective_ceiling(recorded: Option<f64>, sent: Option<f64>) -> Option<f64> {
-    match (recorded, sent) {
-        (Some(recorded), Some(sent)) => Some(recorded.min(sent)),
-        (one, None) | (None, one) => one,
-    }
 }
 
 #[cfg(test)]
@@ -417,6 +361,16 @@ mod tests {
         assert_eq!(refusal.field(), Some("items[0].images"));
         assert_eq!(refusal.detail.limit, Some(0));
         let item = Item::new("s").with_images(vec![Image::DataUrl("https://x/y.png".into())]);
+        assert_eq!(
+            field(check_request(&request(vec![item]), &model())),
+            "items[0].images[0]"
+        );
+        // Malformed base64 is refused before any provider call, naming the
+        // one image.
+        let item = Item::new("s").with_images(vec![Image::Inline(InlineImage::new(
+            "image/png",
+            "not base64!",
+        ))]);
         assert_eq!(
             field(check_request(&request(vec![item]), &model())),
             "items[0].images[0]"

@@ -1,0 +1,238 @@
+{
+  "about": "Admission refuses a batch whose estimated reply would not fit the daemon's 4 MiB (4194304-byte) reply frame, before any provider call, naming items with the frame size as the limit. The estimate is 512 + the JSON-escaped batch_id and model + per item 1024 + the JSON-escaped state when options.state_text is set + per field the JSON-escaped id + 1 + the model's max_answer_bytes. With role-describe.json's max_answer_bytes, 32 one-letter fields and two items, the first batch's estimate is exactly the frame and is admitted; the second's last state is one byte longer, and it is refused.",
+  "at_the_frame": {
+    "batch_id": "reply-a",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+    "fields": {
+      "a": {
+        "type": "text"
+      },
+      "b": {
+        "type": "text"
+      },
+      "c": {
+        "type": "text"
+      },
+      "d": {
+        "type": "text"
+      },
+      "e": {
+        "type": "text"
+      },
+      "f": {
+        "type": "text"
+      },
+      "g": {
+        "type": "text"
+      },
+      "h": {
+        "type": "text"
+      },
+      "i": {
+        "type": "text"
+      },
+      "j": {
+        "type": "text"
+      },
+      "k": {
+        "type": "text"
+      },
+      "l": {
+        "type": "text"
+      },
+      "m": {
+        "type": "text"
+      },
+      "n": {
+        "type": "text"
+      },
+      "o": {
+        "type": "text"
+      },
+      "p": {
+        "type": "text"
+      },
+      "q": {
+        "type": "text"
+      },
+      "r": {
+        "type": "text"
+      },
+      "s": {
+        "type": "text"
+      },
+      "t": {
+        "type": "text"
+      },
+      "u": {
+        "type": "text"
+      },
+      "v": {
+        "type": "text"
+      },
+      "w": {
+        "type": "text"
+      },
+      "x": {
+        "type": "text"
+      },
+      "y": {
+        "type": "text"
+      },
+      "z": {
+        "type": "text"
+      },
+      "A": {
+        "type": "text"
+      },
+      "B": {
+        "type": "text"
+      },
+      "C": {
+        "type": "text"
+      },
+      "D": {
+        "type": "text"
+      },
+      "E": {
+        "type": "text"
+      },
+      "F": {
+        "type": "text"
+      }
+    },
+    "items": [
+      {
+        "state": "Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 fro"
+      },
+      {
+        "state": "Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice "
+      }
+    ],
+    "options": {
+      "state_text": true
+    }
+  },
+  "over_the_frame": {
+    "batch_id": "reply-b",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+    "fields": {
+      "a": {
+        "type": "text"
+      },
+      "b": {
+        "type": "text"
+      },
+      "c": {
+        "type": "text"
+      },
+      "d": {
+        "type": "text"
+      },
+      "e": {
+        "type": "text"
+      },
+      "f": {
+        "type": "text"
+      },
+      "g": {
+        "type": "text"
+      },
+      "h": {
+        "type": "text"
+      },
+      "i": {
+        "type": "text"
+      },
+      "j": {
+        "type": "text"
+      },
+      "k": {
+        "type": "text"
+      },
+      "l": {
+        "type": "text"
+      },
+      "m": {
+        "type": "text"
+      },
+      "n": {
+        "type": "text"
+      },
+      "o": {
+        "type": "text"
+      },
+      "p": {
+        "type": "text"
+      },
+      "q": {
+        "type": "text"
+      },
+      "r": {
+        "type": "text"
+      },
+      "s": {
+        "type": "text"
+      },
+      "t": {
+        "type": "text"
+      },
+      "u": {
+        "type": "text"
+      },
+      "v": {
+        "type": "text"
+      },
+      "w": {
+        "type": "text"
+      },
+      "x": {
+        "type": "text"
+      },
+      "y": {
+        "type": "text"
+      },
+      "z": {
+        "type": "text"
+      },
+      "A": {
+        "type": "text"
+      },
+      "B": {
+        "type": "text"
+      },
+      "C": {
+        "type": "text"
+      },
+      "D": {
+        "type": "text"
+      },
+      "E": {
+        "type": "text"
+      },
+      "F": {
+        "type": "text"
+      }
+    },
+    "items": [
+      {
+        "state": "Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 fro"
+      },
+      {
+        "state": "Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7 from ACME GmbH, total 25.00 EUR. Invoice 7"
+      }
+    ],
+    "options": {
+      "state_text": true
+    }
+  },
+  "refusal": {
+    "code": "invalid_params",
+    "message": "the reply is estimated at 4194305 bytes; a reply frame holds at most 4194304",
+    "detail": {
+      "class": "permanent",
+      "field": "items",
+      "limit": 4194304
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "about": "One one-pixel PNG in three spellings: a data: URL, the object form, and the object form without base64 padding. All three decode to the same bytes and have one canonical form, so batch identity hashes them alike. The refused images each fail validation for the reason given, before any provider call; a reason ending in a colon is followed by the decoder's own words.",
+  "same_image": [
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    {
+      "content_type": "image/png",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    },
+    {
+      "content_type": "image/png",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg"
+    }
+  ],
+  "canonical": {
+    "content_type": "image/png",
+    "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+  },
+  "refused": [
+    {
+      "image": "https://example.com/screenshot.png",
+      "because": "an image string must be a data: URL; remote URLs are refused"
+    },
+    {
+      "image": "data:image/png,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "because": "a data: URL is data:<content type>;base64,<payload>"
+    },
+    {
+      "image": {
+        "content_type": "image/png",
+        "base64": "not base64!"
+      },
+      "because": "the image's base64 does not decode:"
+    },
+    {
+      "image": {
+        "content_type": "image/png",
+        "base64": ""
+      },
+      "because": "an image has no bytes"
+    },
+    {
+      "image": {
+        "content_type": "image/gif",
+        "base64": "R0lGODlhAQABAAAAACw="
+      },
+      "because": "unsupported image content type image/gif"
+    }
+  ]
+}

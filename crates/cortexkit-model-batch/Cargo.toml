@@ -1,0 +1,42 @@
+# cortexkit-model-batch — the batch rules every model-batch role shares
+# (classifier/v1, extractor/v1): the error vocabulary with the Workers AI
+# code table, batch identity and its canonical hashing, the item image
+# shape and its validation, the conservative cost estimator, and the
+# absent-is-not-zero and number-text helpers. RULES.md states each rule
+# once; the role contracts point to it. Pure serde plus small checks; no
+# transport, no runtime.
+[package]
+name = "cortexkit-model-batch"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Batch rules shared by the CortexKit model-batch roles: error vocabulary and Workers AI code table, batch identity, item images, conservative cost estimate."
+publish = true
+# Ship the vector files with the crate so the optional `vectors` module works
+# for consumers who install this package without a repository checkout.
+include = ["Cargo.toml", "RULES.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
+
+[features]
+# Compiles the shared vectors into the public `vectors` module.
+test-vectors = []
+
+[dependencies]
+base64 = "0.22"
+cortexkit-model-catalog = { version = "0.2.0", path = "../cortexkit-model-catalog" }
+serde = { version = "1", features = ["derive"] }
+serde_jcs = "0.2"
+# `raw_value` keeps a provider's number text as written. Never enable
+# `arbitrary_precision` or `float_roundtrip` here: features unify across the
+# workspace and change number parsing for every crate.
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+
+[[test]]
+name = "vectors"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

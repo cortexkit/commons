@@ -1,0 +1,60 @@
+{
+  "about": "A module never forwards an answer larger than the model's max_answer_bytes (role-describe.json), so the reply-size estimate is a real upper bound. Item 1's summary answer was larger: the item gets answer_too_large, permanent and stored, naming the field, the bound and the answer's size. Item 0's answers are illustrative, not a provider capture; they show answer members kept as the provider's own text.",
+  "request": {
+    "batch_id": "invoices-9",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+    "fields": {
+      "vendor": {
+        "type": "text"
+      },
+      "summary": {
+        "type": "text"
+      }
+    },
+    "items": [
+      {
+        "state": "Invoice 9 from ACME GmbH."
+      },
+      {
+        "state": "A very long contract."
+      }
+    ]
+  },
+  "reply": {
+    "batch_id": "invoices-9",
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+    "items": [
+      {
+        "index": 0,
+        "answers": {
+          "vendor": {
+            "type": "text",
+            "value": "ACME GmbH",
+            "p_null": 0.010,
+            "span": [15,24]
+          },
+          "summary": {
+            "type": "text",
+            "value": null,
+            "p_null": 0.97
+          }
+        },
+        "truncated": false
+      },
+      {
+        "index": 1,
+        "error": {
+          "code": "answer_too_large",
+          "class": "permanent",
+          "message": "the answer to fields.summary is 66057 bytes; at most 65480",
+          "detail": {
+            "field": "fields.summary",
+            "limit": 65480,
+            "size": 66057
+          }
+        }
+      }
+    ],
+    "usage": {}
+  }
+}

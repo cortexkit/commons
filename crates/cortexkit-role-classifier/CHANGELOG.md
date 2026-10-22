@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.2.0
+
+Breaking, in behaviour: two validation and identity changes, and four clef
+error mappings. No wire shape changes, and every 0.1.0 vector passes byte
+for byte.
+
+- The batch rules this role shares with `extractor/v1` moved to the new
+  crate `cortexkit-model-batch`, whose `RULES.md` states them once;
+  `CONTRACT.md` points to it. Every moved item keeps its old path through a
+  `pub use`: `errors::{INVALID_PARAMS, BATCH_ID_REUSE, MODEL_UNKNOWN,
+  MODEL_NOT_CLASSIFIER, COST_EXCEEDED, ACCOUNT_WALLED, BATCH_IN_PROGRESS,
+  AUTH_FAILED, MODEL_UNAVAILABLE, RATE_LIMITED, PROVIDER_ERROR,
+  PROVIDER_REFUSED, INVALID_ITEM, admission_class, item_class, classes,
+  ErrorClass, ItemError, RefusalDetail, Refusal}`,
+  `identity::{canonical_json, digest, IdentityError}`,
+  `question::{Image, InlineImage, content_types, IMAGE_MAX_BYTES,
+  IMAGES_MAX_TOTAL_BYTES, IMAGE_MAX_PIXELS, check_image}`,
+  `request::{BATCH_ID_MAX_LEN, is_batch_id, effective_ceiling}` and
+  `provider::item_code_for_status`. `ADMISSION_CODES`, `ITEM_CODES`,
+  `BatchIdentity` and the rest stay this crate's own.
+- **Image validation decodes the base64.** 0.1.0 read only the base64's
+  length, so malformed base64 reached the provider, against §6.7. Now
+  malformed base64, a `data:` URL without `;base64`, and an image of no
+  bytes are refused `invalid_params` naming `items[i].images[j]`, and image
+  sizes are decoded bytes.
+- **Batch identity hashes images in canonical form** (content type and
+  decoded bytes). 0.1.0 hashed an image as written, so one image sent as a
+  `data:` URL and re-sent as `{content_type, base64}` was a false
+  `batch_id_reuse`. Migration cost: a batch recorded under 0.1.0 with image
+  items, re-sent after the upgrade, is refused `batch_id_reuse`; re-send it
+  under a new `batch_id`. Batches without images keep their identity.
+- **clef's errors map by Workers AI code first**
+  (`provider::workers_ai_item_code`), so they say what the account or model
+  did rather than what the HTTP status suggests. Changed, old to new:
+  - 429 `3036` (daily free allocation used): `rate_limited` to
+    `account_limit_exhausted`. 0.1.0 stored `rate_limited` on the item when
+    the whole account hit its limit, so a re-send after the reset got the
+    stored error back instead of an answer. The new code is batch-level:
+    never stored, it stops the call, and on the call's first provider call
+    it refuses the call at admission.
+  - 403 `5035` (needs a paid plan), `5016` (model agreement), `3023`
+    (account blocked): `auth_failed` to `account_not_entitled`, permanent
+    and batch-level. The credentials were fine; the account may not use the
+    model.
+  - 400 `5007` (no such model): `invalid_item` to `model_unavailable`.
+    0.1.0 stored a permanent `invalid_item`, which tells a caller to drop a
+    good item, for a model-level failure.
+  - Unchanged: 404 `3042` stays `model_unavailable`, 429 `3040`
+    `rate_limited`, 413 `3006` `invalid_item`, 408 `3007` and `3008`
+    `provider_error`. TypeSafe's status mapping is unchanged.
+- New in the vocabulary, re-exported: `ACCOUNT_LIMIT_EXHAUSTED`,
+  `ACCOUNT_NOT_ENTITLED`, `BATCH_LEVEL_CODES`, `is_batch_level`,
+  `ANSWER_TOO_LARGE` (never answered by this role, which states no answer
+  bound) and `ItemErrorDetail`; `ItemError` has an optional `detail`,
+  absent on every code this role answers with.
+- New vectors: `image-identity.json` and `workers-ai-codes.json`.
+- `CONTRACT.md` §12 lists two open readings: a catalog row that states no
+  kind, and adopting the shared cost estimate.
+
 ## 0.1.0
 
 - First published release of the `classifier/v1` role contract: the
