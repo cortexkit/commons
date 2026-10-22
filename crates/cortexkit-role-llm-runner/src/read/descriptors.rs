@@ -454,6 +454,32 @@ mod tests {
     }
 
     #[test]
+    fn resolve_vector_counts_the_resolved_part() {
+        let file = crate::vectors::load("read-descriptors.json");
+        let part = &file["resolve"]["reply"]["content"];
+        let kind = match part["type"].as_str() {
+            Some("tool_result") => {
+                let content = part["content"].as_array().expect("tool-result content");
+                assert!(!content.is_empty(), "tool result must contain a part");
+                if content
+                    .iter()
+                    .all(|block| block["type"] == "media_ref" && block["kind"] == "image")
+                {
+                    crate::tags::PartKind::ToolResultImageOnly
+                } else {
+                    crate::tags::PartKind::ToolResultText
+                }
+            }
+            Some("media_ref") if part["kind"] == "image" => crate::tags::PartKind::UserAttachment,
+            _ => panic!("resolve vector must describe a recognizable transcript part"),
+        };
+        assert!(
+            crate::tags::counts(kind),
+            "resolve vector part kind {kind:?} is not counted by §9.6"
+        );
+    }
+
+    #[test]
     fn reference_decoding_is_strict_and_digest_keys_must_match_the_parts() {
         let file = crate::vectors::load("read-descriptors.json");
         let request: crate::tags::ResolveRequest =
@@ -461,7 +487,12 @@ mod tests {
         assert_eq!(request.media, Some(MediaMode::Descriptors));
         let reply: crate::tags::ResolveReply =
             serde_json::from_value(file["resolve"]["reply"].clone()).unwrap();
-        assert_eq!(reply.content["type"], "media_ref");
+        assert_eq!(reply.content["type"], "tool_result");
+        assert_eq!(reply.content["tool_use_id"], "c1");
+        assert_eq!(reply.content["is_error"], true);
+        assert_eq!(reply.content["content"][0]["type"], "media_ref");
+        assert!(reply.content["content"][0].get("part").is_none());
+        assert_eq!(reply.content, file["cases"][1]["expected"]["content"][0]);
         let refused: super::super::ReadRequest =
             serde_json::from_value(file["refused"]["request"].clone()).unwrap();
         assert_eq!(

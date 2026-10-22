@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- Correct the descriptor-mode resolve vector: it previously resolved a
+  user-message image, which this contract never numbers. It now resolves an
+  image-only tool result with its image ref nested in place; a test checks that
+  the tool-result part gets a tag number.
+
 ## 0.4.1
 
 Additive for 0.4.0 callers: no published signature changes.

@@ -5,7 +5,10 @@ and arguments. The shared descriptor tests expand them before checking the
 Anthropic top-level image, nested tool-result image, PDF/document, URL image,
 text-sourced document, file/audio and paired described call/result layouts.
 Recorded message/part hashes are over full inline content, not descriptors.
-It also pins the twenty-part below-threshold fallback and a resolve ref.
+It also pins the twenty-part fallback: each 250-KiB payload is below
+`PART_INLINE_MAX`, and the message budget selects descriptors for the first
+eight parts. The resolve case verifies that the image-only tool-result part
+gets one tag number while its image ref remains nested in place.
 The mixed-size fallback records the exact described part set `[1, 3]`: part 3
 is largest, and part 1 wins the tie with part 5 at the cut. Smallest-first and
 plain part order produce different sets.

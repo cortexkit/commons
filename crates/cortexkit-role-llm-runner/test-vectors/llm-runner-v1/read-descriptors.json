@@ -590,12 +590,18 @@
       "mid": "m0",
       "part": "0",
       "content": {
-        "type": "media_ref",
-        "part": "0",
-        "kind": "image",
-        "mime": "image/png",
-        "byte_size": 3,
-        "sha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+        "type": "tool_result",
+        "tool_use_id": "c1",
+        "is_error": true,
+        "content": [
+          {
+            "type": "media_ref",
+            "kind": "image",
+            "mime": "image/png",
+            "byte_size": 3,
+            "sha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+          }
+        ]
       }
     }
   },
