@@ -1184,9 +1184,11 @@ pub fn parse_bytes(source: &[u8], mode: Mode) -> Document {
 }
 
 /// Collects a streamed source and parses it once, when `finish` is called.
-/// Bytes beyond the mode's size limit (plus a three-byte margin) are counted
-/// but not kept, and `finish` then marks the document shortened. No partial
-/// parse is offered while bytes are still arriving.
+/// Bytes beyond the mode's size limit, plus a three-byte margin for a split
+/// UTF-8 character, are counted but not kept. `finish` then marks the
+/// document shortened, and in program mode also refuses it
+/// (`E_SOURCE_TOO_LARGE`, no nodes), so a program is never run from a cut-off
+/// prefix. No partial parse is offered while bytes are still arriving.
 pub struct StreamParser {
     mode: Mode,
     bytes: Vec<u8>,

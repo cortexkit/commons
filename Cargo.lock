@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-rich-ui-syntax"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "pulldown-cmark",
  "serde_json",
