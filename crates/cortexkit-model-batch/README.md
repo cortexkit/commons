@@ -12,14 +12,14 @@ module depends on its role crate and rarely on this one directly.
 
 ```toml
 [dependencies]
-cortexkit-model-batch = "0.1.0"
+cortexkit-model-batch = "0.2.0"
 ```
 
 To include the vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-model-batch = { version = "0.1.0", features = ["test-vectors"] }
+cortexkit-model-batch = { version = "0.2.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_model_batch::vectors::FILES` and a constant

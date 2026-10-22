@@ -97,15 +97,31 @@ pub const CHECKS: &[CheckSpec] = &[
         "zero_ceiling_sends_nothing",
         "on a priced model, a batch with max_cost_usd 0 is answered with cost_exceeded, class permanent, on every item, and the stand-in is never called",
     ),
+    check(
+        "provider_answers_forwarded",
+        "with the stand-in replaying Clairic's reply to a request of all nine field types (probe 01, sent again with quantiles and state_text), the item's answers equal what provider::read_reply reads from that reply: every answer, of every type, with every member's text as the provider wrote it, and truncated and usage as given",
+    ),
+    check(
+        "spans_forwarded_unconverted",
+        "with the stand-in replaying Clairic's reply to probe 02 (a state with an accented letter, an emoji and CJK characters before the target), the answer's span is [53,61], in Unicode scalar values as the provider wrote it, never converted to bytes or UTF-16 units, and state_text is the state byte for byte",
+    ),
+    check(
+        "provider_errors_mapped",
+        "with the stand-in replaying Clairic's three error replies (HTTP 400 code 5006, and HTTP 422 code 3030 twice, each with errors first and result {}), each item gets invalid_item, class permanent, with the Workers AI code in its message, no answers and no reported input_tokens",
+    ),
+    check(
+        "cost_usd_from_reported_tokens",
+        "on a priced model that takes list fields, with the stand-in replaying Clairic's reply to probe 03, the reply's cost_usd is the reported input_tokens (304) at the model's input price, never the pre-call estimate",
+    ),
 ];
 
 /// Where the suite checks less than the contract says, and why. Every
 /// report prints these.
 pub const NARROWINGS: &[&str] = &[
-    "The suite checks the request side only: the stand-in answers every call 500, so answers, answer_too_large, usage and cost_usd are not checked until the answer side is measured.",
+    "The reply side is checked with the captured Clairic replies of probes 01, 02, 03, 08, 09 and 11 only, each replayed byte for byte; answer_too_large is not checked, and cost_usd only for a batch of one answered item.",
     "Only the first served model listed is driven; the other served models are checked in role.describe only.",
     "The pre-call spend check is checked with a zero ceiling only; the estimate's exact figure depends on the module's own bounds (image tokens and overhead), which the suite does not know.",
-    "Batch-level provider errors (auth_failed, model_unavailable, account_limit_exhausted, account_not_entitled on the first provider call) are not checked: the stand-in answers 500 only, and the reply envelope a Workers AI error carries is not yet measured.",
+    "Batch-level provider errors (auth_failed, model_unavailable, account_limit_exhausted, account_not_entitled on the first provider call) are not checked: the live probe captured none of them.",
     "Single flight and stored outcomes on a re-send are not checked here.",
     "The provider body limit is not checked: reaching it needs a request larger than most modules' max_request_bytes.",
 ];

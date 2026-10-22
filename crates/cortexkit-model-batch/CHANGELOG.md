@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.0
+
+Breaking: the cost estimate follows the billing measured on Cloudflare's
+Clairic (a live probe of 2026-10-22), not a pass count derived from
+the per-pass token budget.
+
+- `estimate::estimate_item` now bills `schema + max_passes x (state +
+  images x image_tokens_each + overhead)` at the input rate: the schema
+  once, the state on every pass, images and overhead on every pass (an
+  overstatement; per-pass image billing is not measured). 0.1.0 billed
+  `(state + schema + images + overhead) x passes` with `passes = ceil(schema
+  / (pass_tokens - state))`, which underestimates whenever the provider
+  makes more passes than the budget predicts: probe 05's 40 small fields
+  ran in 40 passes, where the budget predicts 4.
+- New `ItemCostInput::max_passes` and `with_max_passes`: the module's upper
+  bound on the provider's passes, default 1 (right for a one-pass
+  provider). Zero is refused with the new `EstimateError::NoPasses`.
+- `pass_tokens` is used only for the fit check: an exact state at or past
+  it is still `EstimateError::DoesNotFit`.
+- Removed `estimate::passes` and `Estimate::Unbounded`. A byte-bound state
+  at or past `pass_tokens` is estimated like any other state. `Estimate` is
+  now a struct, `{max_passes, input_tokens, cost_nanos}`, with
+  `Estimate::new`; `crosses_ceiling` takes it as before.
+- `RULES.md` §5 states the measured model and where each term comes from;
+  `estimates.json` carries probe 05's figures (exact counts estimate
+  exactly the 29,888 input tokens billed; byte bounds at least that).
+
 ## 0.1.0
 
 - First release: the batch rules `classifier/v1` and `extractor/v1` share,

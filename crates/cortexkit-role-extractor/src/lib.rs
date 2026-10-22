@@ -1,4 +1,4 @@
-//! Wire contract of the `extractor/v1` role: the request side.
+//! Wire contract of the `extractor/v1` role.
 //!
 //! An extractor module takes a batch of items and a set of typed fields,
 //! calls one hosted extraction model for each item with every field, and
@@ -17,9 +17,10 @@
 //!   check, and [`request::admit`], every admission step in order;
 //! - [`identity`]: the batch body identity;
 //! - [`spend`]: the pre-call spend check with the shared estimate;
-//! - [`provider`]: the Clairic request mapping and reply envelope;
-//! - [`reply`]: the reply and the provider's answer objects, as far as they
-//!   are measured;
+//! - [`provider`]: the Clairic request mapping, the reply envelope, and
+//!   [`provider::read_reply`], which reads one provider reply into an item;
+//! - [`reply`]: the reply and the provider's answer objects, and
+//!   [`reply::span_byte_range`];
 //! - [`errors`]: the codes this role answers with;
 //! - [`image`]: the shared item image shape;
 //! - `vectors` (with the `test-vectors` feature): the role's vector files.

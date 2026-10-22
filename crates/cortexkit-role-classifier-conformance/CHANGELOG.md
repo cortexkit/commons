@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Depends on `cortexkit-role-classifier` 0.3.0, which it re-exports as
+  `wire`; that crate moved to `cortexkit-model-batch` 0.2.0. The checks are
+  unchanged.
+
 ## 0.2.0
 
 - Depends on `cortexkit-role-classifier` 0.2.0, which it re-exports as

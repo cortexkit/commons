@@ -6,13 +6,13 @@
 use cortexkit_role_extractor::{
     describe::{check_describe, RoleDescribe},
     errors::{self, ErrorClass, ItemError, Refusal},
-    field::{types, FieldType},
+    field::{types, Field, FieldType},
     identity::BatchIdentity,
-    provider::{clairic_limits, models, ProviderRequest},
-    reply::ExtractReply,
+    provider::{clairic_limits, models, read_reply, ProviderRequest},
+    reply::{span_byte_range, Answer, ExtractReply, ItemResult},
     request::{admit, estimated_reply_bytes, CatalogRow, ExtractRequest, REPLY_FRAME_BYTES},
     spend::{check_before_call, item_cost_input, usd_to_nanos, ModuleBounds, Rounding},
-    vectors,
+    vectors, IndexMap,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
@@ -22,6 +22,7 @@ const FILES: &[&str] = &[
     "answer-too-large.json",
     "field-paths.json",
     "identity.json",
+    "provider-replies.json",
     "reply-size.json",
     "requests.json",
     "role-describe.json",
@@ -353,6 +354,9 @@ struct SpendCase {
     request: ExtractRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     exact_state_tokens: Option<u64>,
+    /// The estimate's input tokens, for an item that is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    estimated_input_tokens: Option<u64>,
     outcome: Outcome,
 }
 
@@ -396,7 +400,18 @@ fn the_pre_call_check_sends_or_refuses_each_item() {
             .map(|usd| usd_to_nanos(usd, Rounding::Down).unwrap());
         let decided = check_before_call(&input, rate, 0, ceiling);
         match &case.outcome {
-            Outcome::Sent => assert!(decided.is_ok(), "{}: {decided:?}", case.name),
+            Outcome::Sent => {
+                let estimate = decided
+                    .unwrap_or_else(|e| panic!("{}: {e:?}", case.name))
+                    .unwrap_or_else(|| panic!("{}: no estimate", case.name));
+                assert_eq!(
+                    Some(estimate.input_tokens),
+                    case.estimated_input_tokens,
+                    "{}",
+                    case.name
+                );
+                assert_eq!(estimate.max_passes, case.request.fields.len() as u64);
+            }
             Outcome::Error(error) => {
                 assert_eq!(decided.as_ref().err(), Some(error), "{}", case.name);
                 assert_eq!(error.class, ErrorClass::Permanent);
@@ -440,4 +455,267 @@ fn an_answer_over_the_bound_is_a_stored_item_error() {
         assert!(item.answers.is_some() != item.error.is_some());
     }
     assert_eq!(file.reply.items.len(), file.request.items.len());
+}
+
+#[derive(Deserialize, Serialize)]
+struct ProviderReplies {
+    about: String,
+    replies: Vec<ReplyCase>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ReplyCase {
+    name: String,
+    status: u16,
+    /// How many fields the probe's request sent.
+    fields: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sent: Option<Sent>,
+    body: String,
+    item: ItemResult,
+}
+
+/// The probe's request, as role fields and a state.
+#[derive(Deserialize, Serialize)]
+struct Sent {
+    state: String,
+    fields: IndexMap<String, Field>,
+}
+
+fn replies() -> ProviderReplies {
+    exact("provider-replies.json")
+}
+
+fn reply<'a>(file: &'a ProviderReplies, name: &str) -> &'a ReplyCase {
+    file.replies
+        .iter()
+        .find(|case| case.name == name)
+        .unwrap_or_else(|| panic!("no reply {name}"))
+}
+
+fn answers(case: &ReplyCase) -> &IndexMap<String, Answer> {
+    case.item.answers.as_ref().expect("an answered item")
+}
+
+fn text(raw: Option<&RawValue>) -> &str {
+    raw.map(RawValue::get).unwrap_or("<absent>")
+}
+
+#[test]
+fn every_provider_reply_reads_as_its_item() {
+    let file = replies();
+    assert_eq!(file.replies.len(), 12, "every probe request has its reply");
+    for case in &file.replies {
+        let read = match read_reply(case.status, &case.body) {
+            Ok(result) => result.into_item(0),
+            Err(error) => ItemResult::failed(0, error),
+        };
+        assert_eq!(read, case.item, "{}", case.name);
+        // `IndexMap` equality ignores order, so compare the text too.
+        assert_eq!(
+            serde_json::to_string(&read).unwrap(),
+            serde_json::to_string(&case.item).unwrap(),
+            "{}",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn every_success_bills_the_schema_once_and_the_state_per_pass() {
+    let file = replies();
+    for case in file.replies.iter().filter(|case| case.status == 200) {
+        let usage = case.item.usage.as_ref().expect("a success reports usage");
+        let count =
+            |n: Option<u64>| n.unwrap_or_else(|| panic!("{}: a count is absent", case.name));
+        let passes = count(usage.passes);
+        assert_eq!(
+            count(usage.input_tokens),
+            count(usage.schema_tokens)
+                + passes * count(usage.state_tokens)
+                + count(usage.image_tokens),
+            "{}",
+            case.name
+        );
+        assert!(
+            passes >= 1 && passes <= case.fields,
+            "{}: {passes} passes",
+            case.name
+        );
+        assert_eq!(usage.output_tokens, Some(0), "{}", case.name);
+    }
+    // 40 fields ran in 40 passes, whichever order they were sent in.
+    let forward = reply(&file, "05-multi-pass");
+    let reversed = reply(&file, "07-multi-pass-reversed");
+    assert_eq!(forward.item.usage, reversed.item.usage);
+    assert_eq!(forward.item.usage.as_ref().unwrap().passes, Some(40));
+    assert_eq!(answers(forward), answers(reversed));
+    assert_eq!(
+        reply(&file, "01-all-types")
+            .item
+            .usage
+            .as_ref()
+            .unwrap()
+            .passes,
+        Some(2)
+    );
+    // One 64x64 PNG on probe 06's request: 64 image tokens, 41 schema tokens.
+    let plain = reply(&file, "06-one-pass-control")
+        .item
+        .usage
+        .as_ref()
+        .unwrap();
+    let image = reply(&file, "12-one-image").item.usage.as_ref().unwrap();
+    assert_eq!(image.image_tokens, Some(64));
+    assert_eq!(
+        image.schema_tokens.unwrap() - plain.schema_tokens.unwrap(),
+        41
+    );
+}
+
+#[test]
+fn every_answer_type_has_its_measured_shape() {
+    let file = replies();
+    let all = answers(reply(&file, "01-all-types"));
+    let kinds: Vec<&str> = all.values().map(|answer| answer.kind.as_str()).collect();
+    assert_eq!(kinds, types::ALL, "probe 01 answers every type, in order");
+    for answer in all.values() {
+        assert!(answer.extra.is_empty(), "{}: unnamed members", answer.kind);
+    }
+    assert_eq!(
+        text(all["inspection_start"].value.as_deref()),
+        r#""09:15:00""#
+    );
+    assert_eq!(
+        text(all["restarted_at"].value.as_deref()),
+        r#""2026-03-06T16:40:00""#
+    );
+    assert_eq!(text(all["downtime"].unit.as_deref()), r#""minutes""#);
+    assert_eq!(text(all["technician"].span.as_deref()), "[60,71]");
+    for name in [
+        "flow_rate",
+        "inspection_date",
+        "inspection_start",
+        "restarted_at",
+        "downtime",
+    ] {
+        assert!(all[name].span.is_none(), "{name} has no span");
+        assert!(
+            all[name].p_null.is_some() && all[name].confidence.is_some(),
+            "{name}"
+        );
+    }
+    let estimate = &all["seal_life_months"];
+    assert!(estimate.p_null.is_none() && estimate.confidence.is_none());
+    let quantiles: Vec<Value> = serde_json::from_str(text(estimate.quantiles.as_deref())).unwrap();
+    assert_eq!(quantiles.len(), 99);
+    let forecast = &all["throughput_forecast"];
+    let steps: Vec<IndexMap<String, Value>> =
+        serde_json::from_str(text(forecast.steps.as_deref())).unwrap();
+    assert_eq!(steps.len(), 3, "horizon 3");
+    for step in &steps {
+        let members: Vec<&str> = step.keys().map(String::as_str).collect();
+        assert_eq!(
+            members,
+            [
+                "value",
+                "mean",
+                "median",
+                "p10",
+                "p90",
+                "quantiles",
+                "p_below",
+                "p_above"
+            ]
+        );
+        assert_eq!(step["quantiles"].as_array().unwrap().len(), 99);
+    }
+    for parallel in [
+        &forecast.value,
+        &forecast.median,
+        &forecast.p10,
+        &forecast.p90,
+    ] {
+        let values: Vec<Value> = serde_json::from_str(text(parallel.as_deref())).unwrap();
+        assert_eq!(values.len(), 3);
+    }
+    // `decimals: 1` on a list of numbers is applied, with a confidence per
+    // element.
+    let rainfall = &answers(reply(&file, "03-list-decimals"))["rainfall_mm"];
+    assert_eq!(text(rainfall.value.as_deref()), "[2.3,0.1,11.8,4.5,7.2]");
+    assert!(rainfall.confidences.is_some());
+    // A date estimate with the month step answers ISO dates throughout.
+    let date = &answers(reply(&file, "04-date-estimate"))["completion_date"];
+    assert_eq!(text(date.value.as_deref()), r#""2026-05-01""#);
+    let dates: Vec<String> = serde_json::from_str(text(date.quantiles.as_deref())).unwrap();
+    assert_eq!(dates.len(), 99);
+    assert!(dates
+        .iter()
+        .all(|d| cortexkit_role_extractor::request::is_calendar_date(d)));
+}
+
+#[test]
+fn spans_count_scalar_values_and_state_text_is_the_state() {
+    let file = replies();
+    for name in ["01-all-types", "02-span-offsets"] {
+        let case = reply(&file, name);
+        let sent = case.sent.as_ref().unwrap();
+        assert_eq!(
+            case.item.state_text.as_deref(),
+            Some(sent.state.as_str()),
+            "{name}"
+        );
+    }
+    let case = reply(&file, "02-span-offsets");
+    let state = &case.sent.as_ref().unwrap().state;
+    // Read the body again rather than trusting the stored item, so this
+    // checks what `read_reply` and `into_item` forward.
+    let item = read_reply(case.status, &case.body).unwrap().into_item(0);
+    let answer = &item.answers.as_ref().unwrap()["tracking_code"];
+    let span = answer.span.as_deref().unwrap();
+    assert_eq!(span.get(), "[53,61]", "forwarded as the provider wrote it");
+    assert_eq!(item.state_text.as_deref(), Some(state.as_str()));
+    let range = span_byte_range(state, span).unwrap();
+    assert_eq!(range, 65..73);
+    assert_eq!(&state[range], "QK-58213");
+}
+
+#[test]
+fn what_clairic_refuses_is_refused_at_admission_and_maps_to_invalid_item() {
+    let file = replies();
+    let describe = describe();
+    let catalog = [CatalogEntry {
+        model: describe.models[0].model.clone(),
+        kind: Some("extraction".into()),
+    }];
+    for (name, status, code, path) in [
+        ("08-unknown-type", 400, 5006, "fields.desk_colour.type"),
+        ("09-unknown-option", 422, 3030, "fields.desk_price.decimalz"),
+        ("11-empty-state", 422, 3030, "items[0].state"),
+    ] {
+        let case = reply(&file, name);
+        assert_eq!(case.status, status);
+        let sent = case.sent.as_ref().unwrap();
+        let request = serde_json::json!({
+            "batch_id": "probe",
+            "model": describe.models[0].model,
+            "fields": sent.fields,
+            "items": [{"state": sent.state}],
+        });
+        let refusal = admitted(&describe, &catalog, &request).unwrap_err();
+        assert_eq!(refusal.code, errors::INVALID_PARAMS, "{name}");
+        assert_eq!(refusal.field(), Some(path), "{name}");
+        let error = case.item.error.as_ref().unwrap();
+        assert_eq!(error.code, errors::INVALID_ITEM, "{name}");
+        assert_eq!(error.class, ErrorClass::Permanent, "{name}");
+        assert!(
+            error.message.contains(&format!("Workers AI code {code}")),
+            "{name}"
+        );
+        assert!(
+            case.item.usage.is_none(),
+            "{name}: an error reports no usage"
+        );
+        assert!(case.body.contains(r#""result":{}"#), "{name}");
+    }
 }

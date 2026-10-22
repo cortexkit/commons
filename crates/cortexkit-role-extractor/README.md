@@ -1,13 +1,16 @@
 # cortexkit-role-extractor
 
-Wire types, validation, and vectors for the request side of `extractor/v1`:
-`role.describe`, the `extract.run` request and its nine field types,
-admission (field options, items, images, reply size, the pre-call spend
-check), batch identity, and the Cloudflare Workers AI Clairic request
-mapping. The answer types decode open and keep the provider's number text.
+Wire types, validation, and vectors for `extractor/v1`: `role.describe`,
+the `extract.run` request and its nine field types, admission (field
+options, items, images, reply size, the pre-call spend check), batch
+identity, the Cloudflare Workers AI Clairic request mapping, and the reply
+side: the Workers AI envelope, every answer shape, spans, and reading a
+provider reply into an item. The answer types decode open and keep the
+provider's number text. The reply side is pinned from a live probe
+of Clairic, whose reply bodies ship as `provider-replies.json`.
 
-Not published yet: it publishes once the answer side is measured (the
-contract's §12 lists what is open). Use it as a path dependency until then.
+The contract's §12 lists what is still open; requests that depend on it
+are refused.
 
 To include the vector bytes in your build, enable `test-vectors`. The
 vectors live in `test-vectors/extractor-v1/` and ship inside the crate

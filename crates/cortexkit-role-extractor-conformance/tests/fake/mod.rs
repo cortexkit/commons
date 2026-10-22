@@ -7,8 +7,11 @@
 //! > A module that admits a batch only after every admission check of the
 //! > role crate (`request::admit`), records its body identity and refuses a
 //! > re-send with another body `batch_id_reuse`, checks each item against
-//! > the batch ceiling before its provider call, and sends each admitted
-//! > item to the provider as the role maps it.
+//! > the batch ceiling before its provider call, sends each admitted item
+//! > to the provider as the role maps it, reads each provider reply with
+//! > the role crate's `provider::read_reply`, forwards the answers
+//! > untouched, and prices the batch by the input tokens the provider
+//! > reported.
 //!
 //! Each `Defects` field breaks one rule. Most do it the way a real module
 //! would get it wrong, by skipping one admission check: the fake drops any
@@ -27,14 +30,17 @@ use cortexkit_role_extractor_conformance::{
         field::{types, FieldType},
         identity::{digest, BatchIdentity},
         ops,
-        provider::ProviderRequest,
-        reply::{ExtractReply, ItemResult},
+        provider::{read_reply, ProviderRequest},
+        reply::{span_byte_range, ExtractReply, ItemResult},
         request::{admit, parse_request, CatalogRow, ExtractRequest, REPLY_FRAME_BYTES},
-        spend::{check_before_call, item_cost_input, usd_to_nanos, ModuleBounds, Rounding},
+        spend::{
+            check_before_call, input_cost_nanos, item_cost_input, nanos_to_usd, usd_to_nanos,
+            ModuleBounds, Rounding,
+        },
     },
-    ExtractorRoute, ExtractorSubject, Reply, RouteFailure, ServedModel,
+    ExtractorRoute, ExtractorSubject, Reply, RouteFailure, Scripted, ServedModel,
 };
-use serde_json::Number;
+use serde_json::{value::RawValue, Number};
 use subc_protocol::ErrorBody;
 
 pub const SERVED: &str = "fake/clairic";
@@ -102,6 +108,16 @@ pub struct Defects {
     pub images_hashed_as_written: bool,
     /// The batch ceiling is not checked before a provider call.
     pub ceiling_ignored: bool,
+    /// Answers of the types the role once left unmeasured (time, datetime,
+    /// duration, forecast) are dropped from the reply.
+    pub late_types_dropped: bool,
+    /// Spans are rewritten as UTF-8 byte offsets of the state.
+    pub spans_converted_to_bytes: bool,
+    /// An error reply whose `result` is `{}` is taken as undecodable, so
+    /// the item gets provider_error instead of the mapped code.
+    pub empty_result_refused: bool,
+    /// cost_usd is the pre-call estimate, not the reported input tokens.
+    pub cost_from_estimate: bool,
 }
 
 impl Defects {
@@ -138,11 +154,41 @@ impl Defects {
     }
 }
 
-/// The stand-in provider: every request body it received, by state. It
-/// answers every call 500.
+/// The stand-in provider: every request body it received, by state, and
+/// what the suite scripted it to answer for a state. An unscripted state
+/// answers 500 with no body.
 #[derive(Default)]
 pub struct StandIn {
     received: Mutex<BTreeMap<String, Vec<String>>>,
+    scripts: Mutex<BTreeMap<String, Scripted>>,
+}
+
+impl StandIn {
+    /// Record `body`, sent for `state`, and answer it.
+    fn call(&self, state: &str, body: String) -> Scripted {
+        self.received
+            .lock()
+            .unwrap()
+            .entry(state.to_owned())
+            .or_default()
+            .push(body);
+        self.scripts
+            .lock()
+            .unwrap()
+            .get(state)
+            .cloned()
+            .unwrap_or(Scripted {
+                status: 500,
+                body: String::new(),
+            })
+    }
+}
+
+/// `span` as UTF-8 byte offsets of `state`, which is what a module that
+/// converts spans would forward.
+fn to_bytes(state: &str, span: &RawValue) -> Option<Box<RawValue>> {
+    let range = span_byte_range(state, span)?;
+    RawValue::from_string(format!("[{},{}]", range.start, range.end)).ok()
 }
 
 pub struct FakeModule {
@@ -252,31 +298,81 @@ impl FakeModule {
             .as_ref()
             .and_then(|usd| usd_to_nanos(usd, Rounding::Down));
         let mut items = Vec::new();
+        let mut estimated_nanos = 0;
         for (index, item) in request.items.iter().enumerate() {
-            if !self.defects.ceiling_ignored {
-                let input = item_cost_input(&request, index, &model, BOUNDS, None, None)
-                    .expect("the item exists");
-                if let Err(error) = check_before_call(&input, rate, 0, ceiling) {
+            // `None` only for a batch with no fields, which a skipped count
+            // check let through.
+            let input = item_cost_input(&request, index, &model, BOUNDS, None, None).ok();
+            if let (false, Some(input)) = (self.defects.ceiling_ignored, &input) {
+                if let Err(error) = check_before_call(input, rate, 0, ceiling) {
                     items.push(ItemResult::failed(index as u64, error));
                     continue;
                 }
             }
+            estimated_nanos += input
+                .and_then(|input| check_before_call(&input, rate, 0, None).ok().flatten())
+                .map_or(0, |estimate| estimate.cost_nanos);
             let body = ProviderRequest::for_item(&request, index, PROVIDER_MODEL)
                 .expect("the item exists");
-            self.stand_in
-                .received
-                .lock()
-                .unwrap()
-                .entry(item.state.clone())
-                .or_default()
-                .push(serde_json::to_string(&body).expect("a provider request encodes"));
-            items.push(ItemResult::failed(
-                index as u64,
-                ItemError::for_code(PROVIDER_ERROR, "the provider answered 500"),
-            ));
+            let answered = self.stand_in.call(
+                &item.state,
+                serde_json::to_string(&body).expect("a provider request encodes"),
+            );
+            items.push(self.read(index as u64, &item.state, &answered));
         }
-        let reply = ExtractReply::new(&request.batch_id, &request.model, items);
+        let answered_tokens = items
+            .iter()
+            .filter(|item| item.answers.is_some())
+            .map(|item| item.usage.as_ref().and_then(|usage| usage.input_tokens));
+        let cost = if self.defects.cost_from_estimate {
+            Some(estimated_nanos)
+        } else {
+            input_cost_nanos(answered_tokens, rate).ok().flatten()
+        };
+        let mut reply = ExtractReply::new(&request.batch_id, &request.model, items);
+        if let Some(nanos) = cost {
+            reply = reply.with_cost_usd(nanos_to_usd(nanos));
+        }
         Reply::Response(serde_json::to_string(&reply).expect("a reply encodes"))
+    }
+
+    /// Item `index`'s outcome from what the stand-in answered for `state`.
+    fn read(&self, index: u64, state: &str, answered: &Scripted) -> ItemResult {
+        if self.defects.empty_result_refused && answered.body.contains(r#""result":{}"#) {
+            return ItemResult::failed(
+                index,
+                ItemError::for_code(PROVIDER_ERROR, "the provider's reply does not decode"),
+            );
+        }
+        let mut item = match read_reply(answered.status, &answered.body) {
+            Ok(result) => result.into_item(index),
+            Err(error) => ItemResult::failed(index, error),
+        };
+        if let Some(answers) = item.answers.as_mut() {
+            if self.defects.late_types_dropped {
+                answers.retain(|_, answer| {
+                    !matches!(
+                        answer.kind,
+                        FieldType::Time
+                            | FieldType::Datetime
+                            | FieldType::Duration
+                            | FieldType::Forecast
+                    )
+                });
+            }
+            if self.defects.spans_converted_to_bytes {
+                for answer in answers.values_mut() {
+                    if let Some(bytes) = answer
+                        .span
+                        .as_deref()
+                        .and_then(|span| to_bytes(state, span))
+                    {
+                        answer.span = Some(bytes);
+                    }
+                }
+            }
+        }
+        item
     }
 
     /// `admit`, except that a refusal the defects skip lets the request
@@ -389,5 +485,14 @@ impl ExtractorSubject for FakeSubject {
             .get(state)
             .cloned()
             .unwrap_or_default()
+    }
+
+    async fn script(&self, state: &str, scripted: Scripted) {
+        self.module
+            .stand_in
+            .scripts
+            .lock()
+            .unwrap()
+            .insert(state.to_owned(), scripted);
     }
 }

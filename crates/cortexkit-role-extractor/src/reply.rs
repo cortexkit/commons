@@ -1,11 +1,18 @@
-//! `extract.run` replies and the provider's answer objects: only what is
-//! known before the answer side is measured.
+//! `extract.run` replies and the provider's answer objects.
 //!
 //! An answer keeps the provider's own text for every member this crate
 //! names ([`NumberText`], serde_json's `RawValue`), and keeps every other
 //! member as it came, so a number never passes through binary floating
-//! point and a member the provider adds passes through. Which members each
-//! type's answer carries is partly unmeasured (`CONTRACT.md` §5, §12).
+//! point and a member the provider adds passes through. `CONTRACT.md` §5
+//! states the members each type's answer carries, as Cloudflare's Clairic
+//! returned them in a live probe of 2026-10-22.
+//!
+//! Spans are forwarded as the provider wrote them. They count Unicode
+//! scalar values (Rust `char`s) of the state, end exclusive;
+//! [`span_byte_range`] turns one into a byte range of the state for a
+//! caller that wants to slice it.
+
+use std::ops::Range;
 
 use indexmap::IndexMap;
 use serde::{de::Error as _, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
@@ -20,9 +27,11 @@ use crate::{errors::ItemError, field::FieldType};
 /// after `type`.
 pub const ANSWER_MEMBERS: &[&str] = &[
     "value",
+    "unit",
     "guess",
     "p_null",
     "confidence",
+    "confidences",
     "span",
     "spans",
     "mean",
@@ -50,9 +59,13 @@ pub const ANSWER_MEMBERS: &[&str] = &[
 pub struct Answer {
     pub kind: FieldType,
     pub value: Option<NumberText>,
+    /// A duration's unit, such as `"minutes"`.
+    pub unit: Option<NumberText>,
     pub guess: Option<NumberText>,
     pub p_null: Option<NumberText>,
     pub confidence: Option<NumberText>,
+    /// A number list's per-element confidences.
+    pub confidences: Option<NumberText>,
     pub span: Option<NumberText>,
     pub spans: Option<NumberText>,
     pub mean: Option<NumberText>,
@@ -73,9 +86,11 @@ impl Answer {
         Self {
             kind,
             value: None,
+            unit: None,
             guess: None,
             p_null: None,
             confidence: None,
+            confidences: None,
             span: None,
             spans: None,
             mean: None,
@@ -93,9 +108,11 @@ impl Answer {
     fn slot(&mut self, name: &str) -> Option<&mut Option<NumberText>> {
         Some(match name {
             "value" => &mut self.value,
+            "unit" => &mut self.unit,
             "guess" => &mut self.guess,
             "p_null" => &mut self.p_null,
             "confidence" => &mut self.confidence,
+            "confidences" => &mut self.confidences,
             "span" => &mut self.span,
             "spans" => &mut self.spans,
             "mean" => &mut self.mean,
@@ -114,9 +131,11 @@ impl Answer {
     pub fn member(&self, name: &str) -> Option<&RawValue> {
         let raw = match name {
             "value" => &self.value,
+            "unit" => &self.unit,
             "guess" => &self.guess,
             "p_null" => &self.p_null,
             "confidence" => &self.confidence,
+            "confidences" => &self.confidences,
             "span" => &self.span,
             "spans" => &self.spans,
             "mean" => &self.mean,
@@ -192,6 +211,35 @@ impl<'de> Deserialize<'de> for Answer {
         answer.kind = kind.ok_or_else(|| D::Error::missing_field("type"))?;
         Ok(answer)
     }
+}
+
+/// The UTF-8 byte range of `state` that one provider span covers, for a
+/// caller that wants to slice the state. The role itself never converts a
+/// span: it forwards spans as the provider wrote them.
+///
+/// A span is `[start, end]`: offsets in Unicode scalar values (Rust
+/// `char`s) of the state the provider read, `end` exclusive (`CONTRACT.md`
+/// §5). Clairic's `state_text` is the caller's `state` byte for byte, so
+/// `state` is the caller's own text. `None` when `span` is not an array of
+/// two whole numbers, when `start` is past `end`, or when `end` is past the
+/// state's last scalar value. Every scalar offset falls on a `char`
+/// boundary, so a returned range always slices `state`.
+pub fn span_byte_range(state: &str, span: &RawValue) -> Option<Range<usize>> {
+    let [start, end]: [u64; 2] = serde_json::from_str(span.get()).ok()?;
+    if start > end {
+        return None;
+    }
+    // The byte offset of scalar `n`; the state's length for one past the
+    // last scalar.
+    let byte_at = |n: u64| -> Option<usize> {
+        let n = usize::try_from(n).ok()?;
+        state
+            .char_indices()
+            .map(|(at, _)| at)
+            .chain(std::iter::once(state.len()))
+            .nth(n)
+    };
+    Some(byte_at(start)?..byte_at(end)?)
 }
 
 /// An item's token usage, as the provider reported it. A count it did not
@@ -351,6 +399,72 @@ mod tests {
         assert_eq!(answer.value.as_deref().map(RawValue::get), Some("null"));
         assert_eq!(serde_json::to_string(&answer).unwrap(), text);
         assert!(serde_json::from_str::<Answer>(r#"{"value":1}"#).is_err());
+    }
+
+    /// The state live probe 02 sent Clairic: a precomposed é, an
+    /// emoji outside the Basic Multilingual Plane and four CJK characters
+    /// before the tracking code.
+    const PROBE_02_STATE: &str = "Note from the café 😀 東京支社 team: the tracking code is QK-58213, and the parcel shipped on Monday.";
+
+    fn raw(text: &str) -> NumberText {
+        RawValue::from_string(text.to_owned()).unwrap()
+    }
+
+    #[test]
+    fn a_span_counts_scalar_values_with_an_exclusive_end() {
+        // Clairic answered `span: [53,61]` for `QK-58213`: 65..73 in UTF-8
+        // bytes, 54..62 in UTF-16 units.
+        let range = span_byte_range(PROBE_02_STATE, &raw("[53,61]")).unwrap();
+        assert_eq!(range, 65..73);
+        assert_eq!(&PROBE_02_STATE[range], "QK-58213");
+        let scalars = PROBE_02_STATE.chars().count() as u64;
+        let whole = span_byte_range(PROBE_02_STATE, &raw(&format!("[0,{scalars}]"))).unwrap();
+        assert_eq!(&PROBE_02_STATE[whole], PROBE_02_STATE);
+        assert_eq!(
+            span_byte_range(PROBE_02_STATE, &raw("[19,20]")).map(|r| &PROBE_02_STATE[r]),
+            Some("😀")
+        );
+    }
+
+    #[test]
+    fn a_span_out_of_range_or_malformed_has_no_byte_range() {
+        let scalars = PROBE_02_STATE.chars().count();
+        for bad in [
+            format!("[0,{}]", scalars + 1),
+            "[61,53]".to_owned(),
+            "[53.5,61]".to_owned(),
+            "[-1,3]".to_owned(),
+            "[53]".to_owned(),
+            "null".to_owned(),
+        ] {
+            assert_eq!(span_byte_range(PROBE_02_STATE, &raw(&bad)), None, "{bad}");
+        }
+        assert_eq!(span_byte_range("", &raw("[0,0]")), Some(0..0));
+    }
+
+    #[test]
+    fn a_duration_unit_and_list_confidences_are_named_members() {
+        // Clairic's own answers, from probes 01 and 03.
+        let duration = r#"{"type":"duration","p_null":5.235667686065426e-7,"unit":"minutes","guess":445,"confidence":0.9987765309792793,"value":445}"#;
+        let answer: Answer = serde_json::from_str(duration).unwrap();
+        assert_eq!(answer.kind, FieldType::Duration);
+        assert_eq!(
+            answer.unit.as_deref().map(RawValue::get),
+            Some(r#""minutes""#)
+        );
+        assert!(answer.extra.is_empty());
+        let list = r#"{"type":"list","value":[2.3,0.1,11.8,4.5,7.2],"confidences":[0.9986772934005607,0.999997615820007,0.9999840261592093,0.9999405170603807,0.9994769646306935],"confidence":0.9975896220014346}"#;
+        let answer: Answer = serde_json::from_str(list).unwrap();
+        assert_eq!(
+            answer.confidences.as_deref().map(RawValue::get),
+            Some("[0.9986772934005607,0.999997615820007,0.9999840261592093,0.9999405170603807,0.9994769646306935]")
+        );
+        assert!(answer.extra.is_empty());
+        // Encoding writes the named members in `ANSWER_MEMBERS` order.
+        assert_eq!(
+            serde_json::to_string(&answer).unwrap(),
+            r#"{"type":"list","value":[2.3,0.1,11.8,4.5,7.2],"confidence":0.9975896220014346,"confidences":[0.9986772934005607,0.999997615820007,0.9999840261592093,0.9999405170603807,0.9994769646306935]}"#
+        );
     }
 
     #[test]

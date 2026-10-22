@@ -1,5 +1,5 @@
 {
-  "about": "The check before each item's provider call, with the shared conservative estimate: state, fields (as the byte length of their canonical JSON) and the module's bounds (illustrative), at role-describe.json's input price and pass_tokens (8192). A state counted exactly at or past a pass's budget cannot fit and is invalid_item, with or without a ceiling. A state whose byte bound reaches the budget is not refused for it: the estimate is unbounded, so under a ceiling the item is cost_exceeded, and with no ceiling it is sent. A bounded estimate is sent while recorded spend plus the estimate stays within the ceiling.",
+  "about": "The check before each item's provider call, with the shared conservative estimate: input tokens = fields + field count x (state + images x image_tokens_each + overhead), the fields as the byte length of their canonical JSON, the state as its byte length, and the module's bounds (illustrative), at role-describe.json's input price. The field count bounds the provider's passes, and the state bills on every pass, so a batch of three fields bills the state three times. A state counted exactly at or past a pass's budget (pass_tokens, 8192) cannot fit and is invalid_item, with or without a ceiling. A state whose byte bound reaches the budget is not refused for it: it is estimated like any other, so under a ceiling it is sent while the estimate fits, and with no ceiling it is sent. An item is sent while recorded spend plus the estimate stays within the ceiling; estimated_input_tokens is the estimate of each item that is sent.",
   "bounds": {
     "image_tokens_each": 1500,
     "overhead_tokens": 10000
@@ -47,13 +47,8 @@
         ],
         "max_cost_usd": 1
       },
-      "outcome": {
-        "error": {
-          "code": "cost_exceeded",
-          "class": "permanent",
-          "message": "the cost estimate is unbounded because the state's byte bound reaches a pass's token budget; raise or remove max_cost_usd, or use a module that counts tokens exactly"
-        }
-      }
+      "estimated_input_tokens": 18227,
+      "outcome": "sent"
     },
     {
       "name": "byte_bound_past_the_pass_without_a_ceiling",
@@ -71,6 +66,7 @@
           }
         ]
       },
+      "estimated_input_tokens": 18227,
       "outcome": "sent"
     },
     {
@@ -90,6 +86,7 @@
         ],
         "max_cost_usd": 0.00110396
       },
+      "estimated_input_tokens": 10036,
       "outcome": "sent"
     },
     {
@@ -114,6 +111,37 @@
           "code": "cost_exceeded",
           "class": "permanent",
           "message": "answering this item could cost 0.00110396 USD, crossing max_cost_usd 0.00110395 after 0 USD spent"
+        }
+      }
+    },
+    {
+      "name": "every_field_may_bill_the_state_again",
+      "request": {
+        "batch_id": "spend-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "total": {
+            "type": "number"
+          },
+          "vendor": {
+            "type": "text"
+          },
+          "issued": {
+            "type": "date"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7"
+          }
+        ],
+        "max_cost_usd": 0.0011
+      },
+      "outcome": {
+        "error": {
+          "code": "cost_exceeded",
+          "class": "permanent",
+          "message": "answering this item could cost 0.00331144 USD, crossing max_cost_usd 0.0011 after 0 USD spent"
         }
       }
     }

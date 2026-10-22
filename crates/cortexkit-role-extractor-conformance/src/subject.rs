@@ -29,13 +29,23 @@ pub struct ServedModel {
     pub egress_host: String,
 }
 
+/// What the stand-in answers a call with: an HTTP status and a body, sent
+/// byte for byte. The suite scripts Clairic's own replies from the role
+/// crate's `provider-replies.json`, so a module reads the bytes the real
+/// provider sends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scripted {
+    pub status: u16,
+    pub body: String,
+}
+
 /// An extractor module under test.
 ///
 /// Every model it serves must route to a stand-in provider this subject
-/// controls. The stand-in answers every call with HTTP 500 and no body: the
-/// suite checks the request side, so it never needs an answer. For each call
-/// it records the request body it received, exactly, under the `state` the
-/// body carries.
+/// controls. For each call the stand-in records the request body it
+/// received, exactly, under the `state` the body carries, and answers with
+/// what the suite last scripted for that state ([`ExtractorSubject::script`]).
+/// A state never scripted answers HTTP 500 with no body.
 #[async_trait]
 pub trait ExtractorSubject: Send + Sync {
     type Route: ExtractorRoute;
@@ -56,4 +66,7 @@ pub trait ExtractorSubject: Send + Sync {
     /// The request bodies the stand-in received for items whose `state`
     /// was `state`, in the order received, as exact text.
     async fn received(&self, state: &str) -> Vec<String>;
+
+    /// Answer every later call whose `state` is `state` with `scripted`.
+    async fn script(&self, state: &str, scripted: Scripted);
 }

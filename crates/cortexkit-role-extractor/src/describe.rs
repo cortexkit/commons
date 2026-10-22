@@ -46,8 +46,8 @@ pub struct Limits {
     pub max_items: u64,
     /// Largest `extract.run` request body, in bytes.
     pub max_request_bytes: u64,
-    /// Longest field `instructions`, in bytes. The provider's own bound is
-    /// not yet measured.
+    /// Longest field `instructions`, in bytes. Clairic accepted 20,000
+    /// characters; its own bound above that is not measured.
     pub max_instruction_bytes: u64,
 }
 

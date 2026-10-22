@@ -17,6 +17,11 @@ pub const ANSWER_TOO_LARGE_JSON: &str =
 pub const FIELD_PATHS_JSON: &str = include_str!("../test-vectors/extractor-v1/field-paths.json");
 /// The `identity.json` vector cases.
 pub const IDENTITY_JSON: &str = include_str!("../test-vectors/extractor-v1/identity.json");
+/// The `provider-replies.json` vector cases: Clairic's reply bodies from
+/// a live probe of 2026-10-22, byte for byte, each with the item a
+/// module answers with.
+pub const PROVIDER_REPLIES_JSON: &str =
+    include_str!("../test-vectors/extractor-v1/provider-replies.json");
 /// The `reply-size.json` vector cases.
 pub const REPLY_SIZE_JSON: &str = include_str!("../test-vectors/extractor-v1/reply-size.json");
 /// The `requests.json` vector cases.
@@ -33,6 +38,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("answer-too-large.json", ANSWER_TOO_LARGE_JSON),
     ("field-paths.json", FIELD_PATHS_JSON),
     ("identity.json", IDENTITY_JSON),
+    ("provider-replies.json", PROVIDER_REPLIES_JSON),
     ("reply-size.json", REPLY_SIZE_JSON),
     ("requests.json", REQUESTS_JSON),
     ("role-describe.json", ROLE_DESCRIBE_JSON),

@@ -1,5 +1,5 @@
 {
-  "about": "The conservative estimate of one item's input cost: (state + schema + images x image_tokens_each + overhead) x passes x rate, with passes = ceil(schema / (pass_tokens - state)), at least 1, and one pass when the provider states no pass budget. A count is exact (the provider's tokenizer) or a bound (UTF-8 bytes). Every pass is assumed to bill the whole request again. Rates are the catalog's nanodollars per million tokens; a cost rounds up to a whole nanodollar.",
+  "about": "The conservative estimate of one item's input cost: input tokens = schema + max_passes x (state + images x image_tokens_each + overhead), cost = input tokens x rate. The schema bills once and the state on every pass, as Cloudflare's Clairic billed in a live probe of 2026-10-22; images and overhead are charged on every pass too. max_passes is the module's upper bound on the provider's passes, 1 for a one-pass provider. pass_tokens only decides whether an exactly counted state fits: a state counted exactly at or past it does not fit, and a byte-bound state of any size is estimated. A count is exact (the provider's tokenizer) or a bound (UTF-8 bytes). The clairic_probe_05 cases are probe 05's figures: 40 text fields in 40 passes, schema_tokens 26488 (51089 bytes of fields), state_tokens 85 (231 bytes), input_tokens 29888; with no images and no overhead the exact counts give exactly what was billed, and the byte bounds give at least that. Rates are the catalog's nanodollars per million tokens; a cost rounds up to a whole nanodollar.",
   "cases": [
     {
       "name": "one_pass",
@@ -12,17 +12,60 @@
       "images": 0,
       "image_tokens_each": 1000,
       "overhead_tokens": 200,
+      "max_passes": 1,
       "rate_nanos_per_mtok": 110000000,
       "expected": {
-        "bounded": {
-          "passes": 1,
+        "estimate": {
+          "max_passes": 1,
           "input_tokens": 1700,
           "cost_nanos": 187000
         }
       }
     },
     {
-      "name": "second_pass_bills_the_state_again",
+      "name": "clairic_probe_05_exact_counts",
+      "state": {
+        "exact": 85
+      },
+      "schema": {
+        "exact": 26488
+      },
+      "images": 0,
+      "image_tokens_each": 0,
+      "overhead_tokens": 0,
+      "max_passes": 40,
+      "pass_tokens": 8192,
+      "rate_nanos_per_mtok": 110000000,
+      "expected": {
+        "estimate": {
+          "max_passes": 40,
+          "input_tokens": 29888,
+          "cost_nanos": 3287680
+        }
+      }
+    },
+    {
+      "name": "clairic_probe_05_byte_bounds",
+      "state": {
+        "bound": 231
+      },
+      "schema": {
+        "bound": 51089
+      },
+      "images": 0,
+      "image_tokens_each": 0,
+      "overhead_tokens": 0,
+      "max_passes": 40,
+      "pass_tokens": 8192,
+      "rate_nanos_per_mtok": 110000000,
+      "expected": {
+        "at_least": {
+          "input_tokens": 29888
+        }
+      }
+    },
+    {
+      "name": "images_and_overhead_bill_on_every_pass",
       "state": {
         "bound": 1000
       },
@@ -32,18 +75,19 @@
       "images": 2,
       "image_tokens_each": 300,
       "overhead_tokens": 50,
+      "max_passes": 2,
       "pass_tokens": 8192,
       "rate_nanos_per_mtok": 110000000,
       "expected": {
-        "bounded": {
-          "passes": 2,
-          "input_tokens": 21300,
-          "cost_nanos": 2343000
+        "estimate": {
+          "max_passes": 2,
+          "input_tokens": 12300,
+          "cost_nanos": 1353000
         }
       }
     },
     {
-      "name": "byte_bound_reaching_the_pass_is_unbounded",
+      "name": "byte_bound_reaching_the_pass_is_estimated",
       "state": {
         "bound": 8192
       },
@@ -53,9 +97,16 @@
       "images": 0,
       "image_tokens_each": 300,
       "overhead_tokens": 50,
+      "max_passes": 2,
       "pass_tokens": 8192,
       "rate_nanos_per_mtok": 110000000,
-      "expected": "unbounded"
+      "expected": {
+        "estimate": {
+          "max_passes": 2,
+          "input_tokens": 16584,
+          "cost_nanos": 1824240
+        }
+      }
     },
     {
       "name": "exact_state_reaching_the_pass_does_not_fit",
@@ -68,6 +119,7 @@
       "images": 0,
       "image_tokens_each": 300,
       "overhead_tokens": 50,
+      "max_passes": 1,
       "pass_tokens": 8192,
       "rate_nanos_per_mtok": 110000000,
       "expected": {
@@ -88,11 +140,12 @@
       "images": 0,
       "image_tokens_each": 300,
       "overhead_tokens": 5,
+      "max_passes": 1,
       "pass_tokens": 8192,
       "rate_nanos_per_mtok": 0,
       "expected": {
-        "bounded": {
-          "passes": 1,
+        "estimate": {
+          "max_passes": 1,
           "input_tokens": 25,
           "cost_nanos": 0
         }
@@ -109,10 +162,11 @@
       "images": 0,
       "image_tokens_each": 300,
       "overhead_tokens": 0,
+      "max_passes": 1,
       "rate_nanos_per_mtok": 1,
       "expected": {
-        "bounded": {
-          "passes": 1,
+        "estimate": {
+          "max_passes": 1,
           "input_tokens": 1,
           "cost_nanos": 1
         }

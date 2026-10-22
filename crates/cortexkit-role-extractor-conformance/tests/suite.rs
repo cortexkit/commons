@@ -193,6 +193,30 @@ break_test!(
     "zero_ceiling_sends_nothing",
     "expected cost_exceeded"
 );
+break_test!(
+    dropped_late_types_fail,
+    late_types_dropped,
+    "provider_answers_forwarded",
+    "is missing"
+);
+break_test!(
+    spans_converted_to_bytes_fail,
+    spans_converted_to_bytes,
+    "spans_forwarded_unconverted",
+    "expected [53,61]"
+);
+break_test!(
+    a_refused_empty_result_fails,
+    empty_result_refused,
+    "provider_errors_mapped",
+    "expected invalid_item"
+);
+break_test!(
+    cost_from_the_estimate_fails,
+    cost_from_estimate,
+    "cost_usd_from_reported_tokens",
+    "the reported input_tokens 304"
+);
 
 #[test]
 fn every_check_has_a_break() {

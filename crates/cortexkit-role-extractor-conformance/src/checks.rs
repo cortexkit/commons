@@ -9,18 +9,21 @@ use std::{
 use cortexkit_role_extractor::{
     describe::{check_describe, ModelEntry, RoleDescribe},
     errors::{self, ErrorClass, Refusal},
-    field::{types, FieldType},
+    field::{types, Field, FieldType},
     ops,
-    provider::ProviderRequest,
-    reply::ExtractReply,
+    provider::{read_reply, ProviderRequest},
+    reply::{ExtractReply, ItemResult},
     request::{estimated_reply_bytes, ExtractRequest, REPLY_FRAME_BYTES},
-    PROVIDES,
+    spend::{cost_nanos, nanos_to_usd_text, usd_to_nanos, Rounding},
+    vectors::PROVIDER_REPLIES_JSON,
+    IndexMap, PROVIDES,
 };
-use serde_json::{json, Map, Value};
+use serde::Deserialize;
+use serde_json::{json, value::RawValue, Map, Value};
 
 use crate::{
     route::{ExtractorRoute, Reply},
-    subject::{ExtractorSubject, ServedModel},
+    subject::{ExtractorSubject, Scripted, ServedModel},
 };
 
 /// How a check that did not fail ended.
@@ -43,6 +46,50 @@ const OVERSIZE_CAP: u64 = 64 * 1024 * 1024;
 
 fn pixel_url() -> String {
     format!("data:image/png;base64,{PIXEL_BASE64}")
+}
+
+/// One of Clairic's captured replies from the role crate's
+/// `provider-replies.json`: the status and the body the stand-in replays,
+/// and, where the suite sends the same request again, its state and its
+/// fields as written in the file.
+#[derive(Deserialize)]
+struct Probe {
+    name: String,
+    status: u16,
+    #[serde(default)]
+    sent: Option<Sent>,
+    body: String,
+}
+
+#[derive(Deserialize)]
+struct Sent {
+    state: String,
+    fields: Box<RawValue>,
+}
+
+#[derive(Deserialize)]
+struct Probes {
+    replies: Vec<Probe>,
+}
+
+/// The captured reply `name`, such as `02-span-offsets`.
+fn probe(name: &str) -> Result<Probe, String> {
+    let probes: Probes = serde_json::from_str(PROVIDER_REPLIES_JSON)
+        .map_err(|e| format!("provider-replies.json does not decode: {e}"))?;
+    probes
+        .replies
+        .into_iter()
+        .find(|probe| probe.name == name)
+        .ok_or_else(|| format!("provider-replies.json has no reply {name}"))
+}
+
+/// What the role crate reads `probe`'s reply as: the item a module answers
+/// with.
+fn expected_item(probe: &Probe) -> ItemResult {
+    match read_reply(probe.status, &probe.body) {
+        Ok(result) => result.into_item(0),
+        Err(error) => ItemResult::failed(0, error),
+    }
 }
 
 /// The suite's state for one run: the route, the decoded `role.describe`,
@@ -114,6 +161,10 @@ where
             "reuse_refused_naming_part" => self.reuse().await,
             "image_spellings_are_one_batch" => self.image_spellings().await,
             "zero_ceiling_sends_nothing" => self.zero_ceiling().await,
+            "provider_answers_forwarded" => self.answers_forwarded().await,
+            "spans_forwarded_unconverted" => self.spans_unconverted().await,
+            "provider_errors_mapped" => self.errors_mapped().await,
+            "cost_usd_from_reported_tokens" => self.cost_from_usage().await,
             other => Err(format!("the suite has no check named {other}")),
         }
     }
@@ -1053,6 +1104,291 @@ where
                     "the stand-in was called {calls} times under a zero ceiling"
                 ));
             }
+        }
+        Ok(Ending::Passed)
+    }
+
+    // ---- replies ----------------------------------------------------------
+
+    /// Send the request probe `name` captured, on `model`, with `options`
+    /// (JSON text), after scripting the stand-in to answer its state with
+    /// the captured reply. Returns the probe and the module's reply, which
+    /// has exactly one item, or why the check does not apply to this
+    /// model.
+    async fn replay(
+        &self,
+        name: &str,
+        model: &ModelEntry,
+        options: &str,
+    ) -> Result<Result<(Probe, ExtractReply), String>, String> {
+        let probe = probe(name)?;
+        let sent = probe
+            .sent
+            .as_ref()
+            .ok_or_else(|| format!("{name} carries no request to send"))?;
+        let fields: IndexMap<String, Field> = serde_json::from_str(sent.fields.get())
+            .map_err(|e| format!("{name}: its fields do not decode: {e}"))?;
+        if let Some(kind) = fields
+            .values()
+            .map(|field| &field.kind)
+            .find(|kind| !model.field_types.contains(kind))
+        {
+            return Ok(Err(format!("the model serves no {kind} fields")));
+        }
+        if fields.len() as u64 > model.max_fields {
+            return Ok(Err(format!(
+                "the model takes {} fields, {name} sends {}",
+                model.max_fields,
+                fields.len()
+            )));
+        }
+        let expected = expected_item(&probe);
+        if let Some((id, size)) = expected
+            .answers
+            .iter()
+            .flatten()
+            .map(|(id, answer)| (id, serde_json::to_string(answer).map_or(0, |a| a.len())))
+            .find(|(_, size)| *size as u64 > model.max_answer_bytes)
+        {
+            return Ok(Err(format!(
+                "{name}'s answer {id} is {size} bytes, over max_answer_bytes {}",
+                model.max_answer_bytes
+            )));
+        }
+        let text = format!(
+            r#"{{"batch_id":{},"model":{},"fields":{},"items":[{{"state":{}}}],"options":{options}}}"#,
+            json!(self.mint(name)),
+            json!(model.model),
+            sent.fields.get(),
+            json!(sent.state),
+        );
+        if text.len() as u64 > self.describe.limits.max_request_bytes {
+            return Ok(Err(format!("{name}'s request is over max_request_bytes")));
+        }
+        self.subject
+            .script(
+                &sent.state,
+                Scripted {
+                    status: probe.status,
+                    body: probe.body.clone(),
+                },
+            )
+            .await;
+        let reply = Self::reply_of(name, self.send_text(&text).await?)?;
+        if reply.items.len() != 1 {
+            return Err(format!("{name}: {} items answer 1", reply.items.len()));
+        }
+        if self.calls(&sent.state).await == 0 {
+            return Err(format!("{name}: the item never reached the stand-in"));
+        }
+        Ok(Ok((probe, reply)))
+    }
+
+    async fn answers_forwarded(&self) -> Check {
+        let model = self.model()?;
+        let name = "01-all-types";
+        let (probe, reply) = match self
+            .replay(name, model, r#"{"quantiles":true,"state_text":true}"#)
+            .await?
+        {
+            Ok(replayed) => replayed,
+            Err(why) => return Ok(Ending::NotApplicable(why)),
+        };
+        let item = &reply.items[0];
+        let expected = expected_item(&probe);
+        let want = expected.answers.as_ref().expect("probe 01 is answered");
+        let got = item
+            .answers
+            .as_ref()
+            .ok_or_else(|| format!("{name}: the item was not answered: {:?}", item.error))?;
+        for (id, answer) in want {
+            match got.get(id) {
+                None => {
+                    return Err(format!(
+                        "{name}: the {} answer {id} is missing",
+                        answer.kind
+                    ))
+                }
+                Some(forwarded) if forwarded != answer => {
+                    return Err(format!(
+                        "{name}: the {} answer {id} is {}, the provider answered {}",
+                        answer.kind,
+                        serde_json::to_string(forwarded).unwrap_or_default(),
+                        serde_json::to_string(answer).unwrap_or_default(),
+                    ))
+                }
+                Some(_) => {}
+            }
+        }
+        if got.len() != want.len() {
+            return Err(format!(
+                "{name}: {} answers, the provider gave {}",
+                got.len(),
+                want.len()
+            ));
+        }
+        if item.truncated != expected.truncated {
+            return Err(format!(
+                "{name}: truncated is {:?}, the provider said {:?}",
+                item.truncated, expected.truncated
+            ));
+        }
+        if item.usage != expected.usage {
+            return Err(format!(
+                "{name}: usage is {:?}, the provider reported {:?}",
+                item.usage, expected.usage
+            ));
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn spans_unconverted(&self) -> Check {
+        let model = self.model()?;
+        let name = "02-span-offsets";
+        let (probe, reply) = match self.replay(name, model, r#"{"state_text":true}"#).await? {
+            Ok(replayed) => replayed,
+            Err(why) => return Ok(Ending::NotApplicable(why)),
+        };
+        let item = &reply.items[0];
+        let state = &probe.sent.as_ref().expect("replayed with its state").state;
+        let answer = item
+            .answers
+            .as_ref()
+            .and_then(|answers| answers.get("tracking_code"))
+            .ok_or_else(|| format!("{name}: no tracking_code answer: {:?}", item.error))?;
+        let span = answer
+            .span
+            .as_deref()
+            .ok_or_else(|| format!("{name}: the tracking_code answer has no span"))?;
+        let offsets: Option<[u64; 2]> = serde_json::from_str(span.get()).ok();
+        if offsets != Some([53, 61]) {
+            return Err(format!(
+                "{name}: the span is {}, expected [53,61] as the provider wrote it, in Unicode scalar values",
+                span.get()
+            ));
+        }
+        if item.state_text.as_deref() != Some(state.as_str()) {
+            return Err(format!(
+                "{name}: state_text is {:?}, expected the state byte for byte",
+                item.state_text
+            ));
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn errors_mapped(&self) -> Check {
+        let model = self.model()?;
+        let cases = [
+            ("08-unknown-type", 5006),
+            ("09-unknown-option", 3030),
+            ("11-empty-state", 3030),
+        ];
+        let states: Vec<String> = cases.iter().map(|_| self.mint("error")).collect();
+        for ((name, _), state) in cases.iter().zip(&states) {
+            let probe = probe(name)?;
+            self.subject
+                .script(
+                    state,
+                    Scripted {
+                        status: probe.status,
+                        body: probe.body,
+                    },
+                )
+                .await;
+        }
+        let states_ref: Vec<&str> = states.iter().map(String::as_str).collect();
+        let request = Self::base(model, &self.mint("error"), &states_ref);
+        let reply = Self::reply_of(
+            "a batch whose items the provider refuses",
+            self.send(&request).await?,
+        )?;
+        if reply.items.len() != cases.len() {
+            return Err(format!(
+                "{} items answer {}",
+                reply.items.len(),
+                cases.len()
+            ));
+        }
+        for ((index, item), (name, code)) in reply.items.iter().enumerate().zip(cases) {
+            let error = item
+                .error
+                .as_ref()
+                .ok_or_else(|| format!("item {index} ({name}) has no error"))?;
+            if error.code != errors::INVALID_ITEM || error.class != ErrorClass::Permanent {
+                return Err(format!(
+                    "item {index} ({name}) failed {} ({}), expected invalid_item, permanent",
+                    error.code, error.class
+                ));
+            }
+            if !error.message.contains(&code.to_string()) {
+                return Err(format!(
+                    "item {index} ({name}): the message does not carry Workers AI code {code}: {}",
+                    error.message
+                ));
+            }
+            if item.answers.is_some() {
+                return Err(format!("item {index} ({name}) has answers and an error"));
+            }
+            if item
+                .usage
+                .as_ref()
+                .is_some_and(|usage| usage.input_tokens.is_some())
+            {
+                return Err(format!(
+                    "item {index} ({name}) reports input_tokens the provider never sent"
+                ));
+            }
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn cost_from_usage(&self) -> Check {
+        let served = self.served();
+        let Some(model) = self.describe.models.iter().find(|entry| {
+            entry.is_priced()
+                && Self::serves(entry, types::LIST)
+                && served.iter().any(|served| served.model == entry.model)
+        }) else {
+            return Ok(Ending::NotApplicable(
+                "the module serves no priced model that takes list fields".into(),
+            ));
+        };
+        let rate = model
+            .price
+            .as_ref()
+            .and_then(|price| price.input_per_mtok_usd.as_ref())
+            .and_then(|usd| usd_to_nanos(usd, Rounding::Up))
+            .and_then(|nanos| i64::try_from(nanos).ok())
+            .ok_or("the model's input price is not a number of USD")?;
+        let name = "03-list-decimals";
+        let (probe, reply) = match self.replay(name, model, "{}").await? {
+            Ok(replayed) => replayed,
+            Err(why) => return Ok(Ending::NotApplicable(why)),
+        };
+        let item = &reply.items[0];
+        let reported = expected_item(&probe)
+            .usage
+            .and_then(|usage| usage.input_tokens)
+            .expect("probe 03 reports input_tokens");
+        if item.usage.as_ref().and_then(|usage| usage.input_tokens) != Some(reported) {
+            return Err(format!(
+                "{name}: usage is {:?}, the provider reported input_tokens {reported}",
+                item.usage
+            ));
+        }
+        let expected = cost_nanos(reported, rate).map_err(|e| e.to_string())?;
+        // The batch has one item, answered, so its cost is that item's.
+        let cost = reply
+            .cost_usd
+            .as_ref()
+            .ok_or_else(|| format!("{name}: the reply has no cost_usd"))?;
+        let nanos = usd_to_nanos(cost, Rounding::Up)
+            .ok_or_else(|| format!("{name}: cost_usd {cost} is not a number of USD"))?;
+        if nanos != expected {
+            return Err(format!(
+                "{name}: cost_usd is {cost}, expected {} USD: the reported input_tokens {reported} at the input price",
+                nanos_to_usd_text(expected)
+            ));
         }
         Ok(Ending::Passed)
     }

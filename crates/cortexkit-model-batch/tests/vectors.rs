@@ -220,6 +220,7 @@ struct EstimateCase {
     images: u64,
     image_tokens_each: u64,
     overhead_tokens: u64,
+    max_passes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pass_tokens: Option<u64>,
     rate_nanos_per_mtok: i64,
@@ -229,15 +230,19 @@ struct EstimateCase {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Expected {
-    Bounded {
-        passes: u64,
+    Estimate {
+        max_passes: u64,
         input_tokens: u64,
         cost_nanos: u64,
     },
-    Unbounded,
     DoesNotFit {
         state_tokens: u64,
         pass_tokens: u64,
+    },
+    /// At least this many input tokens: a byte-bound case checked against
+    /// what the provider was measured to bill for the same request.
+    AtLeast {
+        input_tokens: u64,
     },
 }
 
@@ -251,34 +256,44 @@ fn estimates_bound_each_item_and_say_when_they_cannot() {
             case.image_tokens_each,
             case.overhead_tokens,
         )
-        .with_images(case.images);
+        .with_images(case.images)
+        .with_max_passes(case.max_passes);
         if let Some(pass_tokens) = case.pass_tokens {
             input = input.with_pass_tokens(pass_tokens);
         }
-        let expected = match case.expected {
-            Expected::Bounded {
-                passes,
+        let estimated = estimate_item(&input, case.rate_nanos_per_mtok);
+        match case.expected {
+            Expected::Estimate {
+                max_passes,
                 input_tokens,
                 cost_nanos,
-            } => Ok(Estimate::Bounded {
-                passes,
-                input_tokens,
-                cost_nanos,
-            }),
-            Expected::Unbounded => Ok(Estimate::Unbounded),
+            } => assert_eq!(
+                estimated,
+                Ok(Estimate::new(max_passes, input_tokens, cost_nanos)),
+                "{}",
+                case.name
+            ),
             Expected::DoesNotFit {
                 state_tokens,
                 pass_tokens,
-            } => Err(EstimateError::DoesNotFit {
-                state_tokens,
-                pass_tokens,
-            }),
-        };
-        assert_eq!(
-            estimate_item(&input, case.rate_nanos_per_mtok),
-            expected,
-            "{}",
-            case.name
-        );
+            } => assert_eq!(
+                estimated,
+                Err(EstimateError::DoesNotFit {
+                    state_tokens,
+                    pass_tokens,
+                }),
+                "{}",
+                case.name
+            ),
+            Expected::AtLeast { input_tokens } => {
+                let estimate = estimated.unwrap_or_else(|e| panic!("{}: {e}", case.name));
+                assert!(
+                    estimate.input_tokens >= input_tokens,
+                    "{}: {} < {input_tokens}",
+                    case.name,
+                    estimate.input_tokens
+                );
+            }
+        }
     }
 }

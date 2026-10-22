@@ -65,9 +65,10 @@ impl Tokens {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ItemCostInput {
-    /// The item's state.
+    /// The item's state, billed on every pass.
     pub state: Tokens,
-    /// The schema sent with every item (fields or questions).
+    /// The schema sent with every item (fields or questions), billed once
+    /// across all passes.
     pub schema: Tokens,
     /// How many images the item carries.
     pub images: u64,
@@ -77,8 +78,12 @@ pub struct ItemCostInput {
     /// The module's bound on its per-request overhead (prompt template,
     /// system text). Required; never defaulted to zero.
     pub overhead_tokens: u64,
-    /// The provider's per-pass token budget, when it splits a schema into
-    /// passes; `None` for a provider that answers in one pass.
+    /// The module's upper bound on how many passes the provider makes for
+    /// the item, at least 1. 1 for a provider that answers in one pass.
+    pub max_passes: u64,
+    /// The provider's per-pass token budget, when it states one. Used only
+    /// to check that an exactly counted state fits in a pass; it does not
+    /// decide how many passes are billed.
     pub pass_tokens: Option<u64>,
 }
 
@@ -95,6 +100,7 @@ impl ItemCostInput {
             images: 0,
             image_tokens_each,
             overhead_tokens,
+            max_passes: 1,
             pass_tokens: None,
         }
     }
@@ -104,28 +110,39 @@ impl ItemCostInput {
         self
     }
 
+    /// The module's upper bound on the passes the provider makes. Zero is
+    /// refused when the item is estimated ([`EstimateError::NoPasses`]).
+    pub fn with_max_passes(mut self, max_passes: u64) -> Self {
+        self.max_passes = max_passes;
+        self
+    }
+
     pub fn with_pass_tokens(mut self, pass_tokens: u64) -> Self {
         self.pass_tokens = Some(pass_tokens);
         self
     }
 }
 
-/// An item's estimate.
+/// An item's estimate: an upper bound on its input cost.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Estimate {
-    /// An upper bound on the item's input cost.
-    Bounded {
-        /// Passes the provider is assumed to make, at least 1.
-        passes: u64,
-        /// Input tokens billed over every pass.
-        input_tokens: u64,
-        /// Their cost, rounded up to a whole nanodollar.
-        cost_nanos: u64,
-    },
-    /// The state's byte bound reaches a pass's token budget, so the number
-    /// of passes, and with it the cost, has no upper bound. Against a
-    /// ceiling the item is `cost_exceeded`; with no ceiling it is sent.
-    Unbounded,
+#[non_exhaustive]
+pub struct Estimate {
+    /// The passes the estimate bills: the input's `max_passes`.
+    pub max_passes: u64,
+    /// Input tokens billed over every pass.
+    pub input_tokens: u64,
+    /// Their cost, rounded up to a whole nanodollar.
+    pub cost_nanos: u64,
+}
+
+impl Estimate {
+    pub fn new(max_passes: u64, input_tokens: u64, cost_nanos: u64) -> Self {
+        Self {
+            max_passes,
+            input_tokens,
+            cost_nanos,
+        }
+    }
 }
 
 /// Why an item could not be estimated.
@@ -134,6 +151,9 @@ pub enum EstimateError {
     /// The state's exact count reaches the pass budget: the item cannot fit
     /// in a pass, and is refused `invalid_item` before any call.
     DoesNotFit { state_tokens: u64, pass_tokens: u64 },
+    /// `max_passes` is zero: every provider call makes at least one pass,
+    /// so the module's bound is wrong, not the item.
+    NoPasses,
     /// The arithmetic overflowed. The item is refused; a runner never wraps.
     Overflow,
     /// The catalog rate is negative, which no catalog publishes.
@@ -150,6 +170,9 @@ impl std::fmt::Display for EstimateError {
                 f,
                 "the state is {state_tokens} tokens; a pass holds {pass_tokens}"
             ),
+            Self::NoPasses => {
+                f.write_str("max_passes is zero; a provider call makes at least one pass")
+            }
             Self::Overflow => f.write_str("the cost estimate overflows"),
             Self::NegativeRate => f.write_str("the catalog rate is negative"),
         }
@@ -157,15 +180,6 @@ impl std::fmt::Display for EstimateError {
 }
 
 impl std::error::Error for EstimateError {}
-
-/// How many passes the provider makes for a schema of `schema` tokens with a
-/// state of `state` tokens, at `pass_tokens` per pass:
-/// `ceil(schema / (pass_tokens - state))`, at least 1. `None` when the state
-/// leaves no room in a pass (`state >= pass_tokens`).
-pub fn passes(schema: u64, state: u64, pass_tokens: u64) -> Option<u64> {
-    let room = pass_tokens.checked_sub(state).filter(|room| *room > 0)?;
-    Some(schema.div_ceil(room).max(1))
-}
 
 /// The cost of `tokens` input tokens at `rate` nanodollars per million,
 /// rounded up to a whole nanodollar.
@@ -176,57 +190,63 @@ pub fn cost_nanos(tokens: u64, rate: RateNanosPerMtok) -> Result<u64, EstimateEr
     u64::try_from(nanos).map_err(|_| EstimateError::Overflow)
 }
 
-/// Estimate one item's input cost: `(state + schema + image tokens +
-/// overhead) x passes x input rate`. Each pass is assumed to bill the whole
-/// request again, which is the conservative reading while the provider's
-/// own billing of later passes is not yet measured.
+/// Estimate one item's input cost (`RULES.md` §5):
+///
+/// ```text
+/// input tokens = schema + max_passes x (state + images x image_tokens_each + overhead)
+/// cost         = input tokens x input rate
+/// ```
+///
+/// The schema bills once across all passes and the state bills on every
+/// pass, as Cloudflare's Clairic was measured to bill. Images and overhead
+/// are charged on every pass too, which can only overstate the cost.
+///
+/// `pass_tokens` decides nothing here but the fit check: a state counted
+/// exactly at or past it is [`EstimateError::DoesNotFit`]. A byte-bound
+/// state is estimated whatever its size, since the formula bounds its cost
+/// whether the provider refuses the state or truncates it.
 pub fn estimate_item(
     input: &ItemCostInput,
     input_rate: RateNanosPerMtok,
 ) -> Result<Estimate, EstimateError> {
     let state = input.state.count();
-    let schema = input.schema.count();
-    let passes = match input.pass_tokens {
-        None => 1,
-        Some(pass_tokens) => match passes(schema, state, pass_tokens) {
-            Some(passes) => passes,
-            None if input.state.is_exact() => {
-                return Err(EstimateError::DoesNotFit {
-                    state_tokens: state,
-                    pass_tokens,
-                })
-            }
-            None => return Ok(Estimate::Unbounded),
-        },
-    };
+    if let (Some(pass_tokens), true) = (input.pass_tokens, input.state.is_exact()) {
+        if state >= pass_tokens {
+            return Err(EstimateError::DoesNotFit {
+                state_tokens: state,
+                pass_tokens,
+            });
+        }
+    }
+    if input.max_passes == 0 {
+        return Err(EstimateError::NoPasses);
+    }
     let image_tokens = input
         .images
         .checked_mul(input.image_tokens_each)
         .ok_or(EstimateError::Overflow)?;
-    let per_pass = [schema, image_tokens, input.overhead_tokens]
+    let per_pass = [image_tokens, input.overhead_tokens]
         .into_iter()
         .try_fold(state, u64::checked_add)
         .ok_or(EstimateError::Overflow)?;
     let input_tokens = per_pass
-        .checked_mul(passes)
+        .checked_mul(input.max_passes)
+        .and_then(|passes| passes.checked_add(input.schema.count()))
         .ok_or(EstimateError::Overflow)?;
-    Ok(Estimate::Bounded {
-        passes,
+    Ok(Estimate {
+        max_passes: input.max_passes,
         input_tokens,
         cost_nanos: cost_nanos(input_tokens, input_rate)?,
     })
 }
 
 /// Whether an item estimated at `estimate` would cross `ceiling_nanos` after
-/// `spent_nanos` already recorded for the batch. An unbounded estimate, or a
-/// sum that overflows, crosses any ceiling.
+/// `spent_nanos` already recorded for the batch. A sum that overflows
+/// crosses any ceiling.
 pub fn crosses_ceiling(spent_nanos: u64, estimate: &Estimate, ceiling_nanos: u64) -> bool {
-    match estimate {
-        Estimate::Unbounded => true,
-        Estimate::Bounded { cost_nanos, .. } => spent_nanos
-            .checked_add(*cost_nanos)
-            .is_none_or(|total| total > ceiling_nanos),
-    }
+    spent_nanos
+        .checked_add(estimate.cost_nanos)
+        .is_none_or(|total| total > ceiling_nanos)
 }
 
 /// Which way [`usd_to_nanos`] rounds a value finer than a nanodollar.
@@ -322,22 +342,77 @@ mod tests {
         serde_json::from_str(text).unwrap()
     }
 
-    #[test]
-    fn passes_are_at_least_one_and_never_divide_by_zero() {
-        assert_eq!(passes(0, 10, 100), Some(1));
-        assert_eq!(passes(90, 10, 100), Some(1));
-        assert_eq!(passes(91, 10, 100), Some(2));
-        assert_eq!(passes(180, 10, 100), Some(2));
-        assert_eq!(passes(181, 10, 100), Some(3));
-        assert_eq!(passes(1, 100, 100), None);
-        assert_eq!(passes(1, 200, 100), None);
+    /// Cloudflare's Clairic, measured live on 2026-10-22 (probe 05): 40
+    /// text fields ran in 40 passes and billed `input_tokens` 29,888 for a
+    /// schema of 26,488 tokens and a state of 85, with no images.
+    fn probe_05(state: Tokens, schema: Tokens) -> ItemCostInput {
+        ItemCostInput::new(state, schema, 0, 0)
+            .with_max_passes(40)
+            .with_pass_tokens(8192)
     }
 
     #[test]
-    fn a_byte_bound_past_the_pass_is_unbounded_and_an_exact_count_does_not_fit() {
-        let bound =
-            ItemCostInput::new(Tokens::Bound(9000), Tokens::Bound(10), 0, 0).with_pass_tokens(8192);
-        assert_eq!(estimate_item(&bound, 1000), Ok(Estimate::Unbounded));
+    fn exact_counts_estimate_what_clairic_billed_for_probe_05() {
+        let input = probe_05(Tokens::Exact(85), Tokens::Exact(26_488));
+        // 26,488 + 40 x 85: the schema once, the state on every pass.
+        assert_eq!(
+            estimate_item(&input, 110_000_000),
+            Ok(Estimate::new(40, 29_888, 3_287_680))
+        );
+    }
+
+    #[test]
+    fn byte_bounds_never_underestimate_probe_05() {
+        // The UTF-8 byte lengths of probe 05's fields (as sent, and as
+        // canonical JSON: the same 51,089 bytes) and of its state.
+        let input = probe_05(Tokens::Bound(231), Tokens::Bound(51_089));
+        let estimate = estimate_item(&input, 110_000_000).unwrap();
+        assert_eq!(estimate.input_tokens, 51_089 + 40 * 231);
+        assert!(estimate.input_tokens >= 29_888);
+    }
+
+    #[test]
+    fn a_large_state_over_many_passes_bills_on_every_pass() {
+        // 40 small fields and a large state. Deriving passes from the pass
+        // budget gives ceil(400 / (8192 - 4000)) = 1 pass and bills
+        // (4000 + 400) x 1 = 4,400 tokens, while a provider that runs each
+        // field in its own pass bills the state 40 times.
+        let input = ItemCostInput::new(Tokens::Bound(4000), Tokens::Bound(400), 0, 0)
+            .with_max_passes(40)
+            .with_pass_tokens(8192);
+        let estimate = estimate_item(&input, 1_000).unwrap();
+        assert_eq!(estimate.input_tokens, 400 + 40 * 4000);
+        assert!(estimate.input_tokens > 4_400);
+    }
+
+    #[test]
+    fn images_and_overhead_bill_on_every_pass() {
+        let input = ItemCostInput::new(Tokens::Bound(1000), Tokens::Bound(9000), 300, 50)
+            .with_images(2)
+            .with_max_passes(2)
+            .with_pass_tokens(8192);
+        // 9000 + 2 x (1000 + 2 x 300 + 50).
+        assert_eq!(
+            estimate_item(&input, 110_000_000),
+            Ok(Estimate::new(2, 12_300, 1_353_000))
+        );
+        let one_pass = ItemCostInput::new(Tokens::Bound(1000), Tokens::Bound(9000), 300, 50);
+        assert_eq!(
+            one_pass.max_passes, 1,
+            "one pass unless the module says more"
+        );
+        assert_eq!(estimate_item(&one_pass, 0).unwrap().input_tokens, 10_050);
+    }
+
+    #[test]
+    fn a_byte_bound_past_the_pass_is_estimated_and_an_exact_count_does_not_fit() {
+        let bound = ItemCostInput::new(Tokens::Bound(9000), Tokens::Bound(10), 0, 0)
+            .with_max_passes(3)
+            .with_pass_tokens(8192);
+        assert_eq!(
+            estimate_item(&bound, 1000),
+            Ok(Estimate::new(3, 27_010, 28))
+        );
         let exact =
             ItemCostInput::new(Tokens::Exact(9000), Tokens::Bound(10), 0, 0).with_pass_tokens(8192);
         assert_eq!(
@@ -347,39 +422,29 @@ mod tests {
                 pass_tokens: 8192
             })
         );
-        assert!(crosses_ceiling(0, &Estimate::Unbounded, u64::MAX));
+        let at_the_budget =
+            ItemCostInput::new(Tokens::Exact(8192), Tokens::Bound(10), 0, 0).with_pass_tokens(8192);
+        assert!(matches!(
+            estimate_item(&at_the_budget, 1000),
+            Err(EstimateError::DoesNotFit { .. })
+        ));
     }
 
     #[test]
-    fn every_pass_bills_the_whole_request() {
-        let input = ItemCostInput::new(Tokens::Bound(1000), Tokens::Bound(9000), 300, 50)
-            .with_images(2)
-            .with_pass_tokens(8192);
-        // passes = ceil(9000 / 7192) = 2; per pass 1000 + 9000 + 600 + 50.
-        assert_eq!(
-            estimate_item(&input, 110_000_000),
-            Ok(Estimate::Bounded {
-                passes: 2,
-                input_tokens: 21_300,
-                cost_nanos: 2_343_000,
-            })
-        );
+    fn zero_passes_are_refused() {
+        let input = ItemCostInput::new(Tokens::Exact(1), Tokens::Exact(1), 0, 0).with_max_passes(0);
+        assert_eq!(estimate_item(&input, 1), Err(EstimateError::NoPasses));
     }
 
     #[test]
     fn overflow_refuses() {
         let input = ItemCostInput::new(Tokens::Exact(u64::MAX), Tokens::Exact(1), 0, 0);
         assert_eq!(estimate_item(&input, 1), Err(EstimateError::Overflow));
+        let passes =
+            ItemCostInput::new(Tokens::Exact(2), Tokens::Exact(1), 0, 0).with_max_passes(u64::MAX);
+        assert_eq!(estimate_item(&passes, 1), Err(EstimateError::Overflow));
         assert_eq!(cost_nanos(1, -1), Err(EstimateError::NegativeRate));
-        assert!(crosses_ceiling(
-            u64::MAX,
-            &Estimate::Bounded {
-                passes: 1,
-                input_tokens: 1,
-                cost_nanos: 1
-            },
-            u64::MAX
-        ));
+        assert!(crosses_ceiling(u64::MAX, &Estimate::new(1, 1, 1), u64::MAX));
     }
 
     #[test]

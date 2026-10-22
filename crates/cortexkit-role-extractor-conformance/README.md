@@ -1,13 +1,11 @@
 # cortexkit-role-extractor-conformance
 
-The conformance suite for the request side of the `extractor/v1` role
-(`crates/cortexkit-role-extractor/CONTRACT.md`). An extractor module adds it
+The conformance suite for the `extractor/v1` role
+(`crates/cortexkit-role-extractor/CONTRACT.md`): its request side, and its
+reply side against Clairic's own replies. An extractor module adds it
 as a dev-dependency and runs it in its own CI against its real module over
 its real management route. It is never run against a double; the in-process
 fake under `tests/fake/` exists only to test the suite itself.
-
-Not published yet, with the role crate: it publishes once the answer side is
-measured, and gains answer-side checks then.
 
 ## What a module supplies
 
@@ -22,8 +20,13 @@ measured, and gains answer-side checks then.
   - a catalog id whose row is not an extraction model, and one whose row
     states no kind, if it has them;
   - a view of a **stand-in provider** every served model routes to. The
-    stand-in answers every call with HTTP 500 and no body, and records each
-    request body it receives, exactly, under the `state` the body carries.
+    stand-in records each request body it receives, exactly, under the
+    `state` the body carries, and answers with what the suite scripted for
+    that state (`ExtractorSubject::script`, a `Scripted` HTTP status and
+    body, sent byte for byte); a state never scripted answers HTTP 500 with
+    no body. The suite scripts Clairic's replies from the role crate's
+    `provider-replies.json`, captured in a live probe of
+    2026-10-22.
 
 ## Verdict
 
@@ -57,6 +60,10 @@ ran and passed is "passed".
 | `reuse_refused_naming_part` | — |
 | `image_spellings_are_one_batch` | the model takes no images |
 | `zero_ceiling_sends_nothing` | no served model is priced |
+| `provider_answers_forwarded` | the model does not serve all nine types, takes fewer than nine fields, or bounds an answer below the probe's |
+| `spans_forwarded_unconverted` | the model serves no text fields |
+| `provider_errors_mapped` | — |
+| `cost_usd_from_reported_tokens` | no priced served model takes list fields |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.

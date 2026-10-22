@@ -1,13 +1,22 @@
 //! The pre-call spend check for one item (`CONTRACT.md` §6.9): the shared
 //! conservative estimate (`cortexkit-model-batch`, its `RULES.md` §5) with
 //! this role's inputs, and the item error an item gets when it is not sent.
+//!
+//! The provider runs a batch's fields in one or more passes and bills the
+//! item's state on every pass. The role bounds the passes by the number of
+//! fields: Clairic ran 40 fields in 40 passes (live probe 05 of
+//! 2026-10-22) and nine fields in two (probe 01), and never more passes
+//! than fields.
 
 use cortexkit_model_batch::estimate::{
     crosses_ceiling, estimate_item, Estimate, EstimateError, ItemCostInput, RateNanosPerMtok,
     Tokens,
 };
-pub use cortexkit_model_batch::estimate::{
-    nanos_to_usd, nanos_to_usd_text, usd_to_nanos, Rounding, Tokens as TokenCount,
+pub use cortexkit_model_batch::{
+    absent::input_cost_nanos,
+    estimate::{
+        cost_nanos, nanos_to_usd, nanos_to_usd_text, usd_to_nanos, Rounding, Tokens as TokenCount,
+    },
 };
 
 use crate::{
@@ -21,7 +30,9 @@ use crate::{
 /// required; neither defaults to zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ModuleBounds {
-    /// The tokens one image costs at most. Not yet measured for Clairic.
+    /// The tokens one image costs at most, billed per pass. Measured for
+    /// Clairic at one point only: a 64x64 PNG reported `image_tokens` 64
+    /// and raised `schema_tokens` by 41 (probe 12).
     pub image_tokens_each: u64,
     /// The module's per-request overhead: its prompt template and any
     /// system text, in tokens.
@@ -30,7 +41,10 @@ pub struct ModuleBounds {
 
 /// The estimate input for item `index` of `request` on `model`: the
 /// state's and the fields' byte bounds, unless the module passes exact
-/// counts (`exact_state`, `exact_schema`) from the provider's tokenizer.
+/// counts (`exact_state`, `exact_schema`) from the provider's tokenizer,
+/// and at most one pass per field (`max_passes` is the request's field
+/// count). An error when there is no such item, or the request has no
+/// fields (admission refuses that before any estimate).
 pub fn item_cost_input(
     request: &ExtractRequest,
     index: usize,
@@ -48,6 +62,9 @@ pub fn item_cost_input(
         Some(count) => Tokens::Exact(count),
         None => Tokens::bound_of_json(&request.fields)?,
     };
+    if request.fields.is_empty() {
+        return Err(IdentityError("a batch has at least one field".into()));
+    }
     let images = item.images.as_ref().map_or(0, |images| images.len() as u64);
     Ok(ItemCostInput::new(
         state,
@@ -56,6 +73,7 @@ pub fn item_cost_input(
         bounds.overhead_tokens,
     )
     .with_images(images)
+    .with_max_passes(request.fields.len() as u64)
     .with_pass_tokens(model.pass_tokens))
 }
 
@@ -65,8 +83,9 @@ pub fn item_cost_input(
 ///   a pass, `invalid_item`.
 /// - With a ceiling (`ceiling_nanos`) and a priced model (`input_rate`): an
 ///   item whose estimate would cross the ceiling after `spent_nanos` is
-///   `cost_exceeded`. An unbounded estimate (the state's byte bound reaches
-///   a pass's budget) or an overflowing one crosses any ceiling.
+///   `cost_exceeded`. An estimate that overflows, or one the module's
+///   bounds make impossible (zero passes), crosses any ceiling. A state
+///   whose byte bound reaches `pass_tokens` is estimated like any other.
 /// - Otherwise the item is sent, and the estimate is returned when there
 ///   is one.
 // The error is the item's own outcome, returned by value so a runner can
@@ -95,27 +114,21 @@ pub fn check_before_call(
         return Ok(estimate.ok());
     };
     match estimate {
-        Ok(Estimate::Unbounded) => Err(ItemError::for_code(
-            COST_EXCEEDED,
-            "the cost estimate is unbounded because the state's byte bound reaches a pass's token budget; raise or remove max_cost_usd, or use a module that counts tokens exactly",
-        )),
-        Ok(bounded @ Estimate::Bounded { cost_nanos, .. })
-            if crosses_ceiling(spent_nanos, &bounded, ceiling) =>
-        {
+        Ok(estimate) if crosses_ceiling(spent_nanos, &estimate, ceiling) => {
             Err(ItemError::for_code(
                 COST_EXCEEDED,
                 format!(
                     "answering this item could cost {} USD, crossing max_cost_usd {} after {} USD spent",
-                    nanos_to_usd_text(cost_nanos),
+                    nanos_to_usd_text(estimate.cost_nanos),
                     nanos_to_usd_text(ceiling),
                     nanos_to_usd_text(spent_nanos),
                 ),
             ))
         }
-        Ok(bounded) => Ok(Some(bounded)),
-        Err(_) => Err(ItemError::for_code(
+        Ok(estimate) => Ok(Some(estimate)),
+        Err(error) => Err(ItemError::for_code(
             COST_EXCEEDED,
-            "the cost estimate overflows, so it crosses any ceiling",
+            format!("the item cannot be estimated ({error}), so it crosses any ceiling"),
         )),
     }
 }
@@ -124,6 +137,7 @@ pub fn check_before_call(
 mod tests {
     use super::*;
     use crate::errors::ErrorClass;
+    use indexmap::IndexMap;
 
     fn input(state: TokenCount) -> ItemCostInput {
         ItemCostInput::new(state, Tokens::Bound(100), 0, 50).with_pass_tokens(8192)
@@ -141,17 +155,46 @@ mod tests {
     }
 
     #[test]
-    fn a_byte_bound_past_the_pass_is_cost_exceeded_only_under_a_ceiling() {
+    fn a_byte_bound_past_the_pass_is_estimated_like_any_state() {
         let long = input(Tokens::Bound(10_000));
-        assert_eq!(
-            check_before_call(&long, Some(110_000_000), 0, None),
-            Ok(Some(Estimate::Unbounded))
-        );
-        let error = check_before_call(&long, Some(110_000_000), 0, Some(u64::MAX)).unwrap_err();
+        // 100 + 1 x (10,000 + 50) tokens at 0.11 USD per million.
+        let estimate = check_before_call(&long, Some(110_000_000), 0, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(estimate.input_tokens, 10_150);
+        assert_eq!(estimate.cost_nanos, 1_116_500);
+        assert!(check_before_call(&long, Some(110_000_000), 0, Some(1_116_500)).is_ok());
+        let error = check_before_call(&long, Some(110_000_000), 0, Some(1_116_499)).unwrap_err();
         assert_eq!(error.code, COST_EXCEEDED);
         assert_eq!(error.class, ErrorClass::Permanent);
-        assert!(error.message.contains("unbounded"), "{}", error.message);
         assert!(error.message.contains("max_cost_usd"), "{}", error.message);
+    }
+
+    #[test]
+    fn every_field_may_bill_the_state_again() {
+        use crate::{
+            describe::ModelEntry,
+            field::{Field, FieldType},
+            request::Item,
+        };
+        let fields = (0..40)
+            .map(|n| (format!("f{n:02}"), Field::new(FieldType::Text)))
+            .collect();
+        let request = ExtractRequest::new("b", "m", fields, vec![Item::new("x".repeat(231))]);
+        let model = ModelEntry::new("m", 1, 64, vec![FieldType::Text], 8192, 1000, "h");
+        let bounds = ModuleBounds {
+            image_tokens_each: 0,
+            overhead_tokens: 0,
+        };
+        let input = item_cost_input(&request, 0, &model, bounds, Some(85), Some(26_488)).unwrap();
+        assert_eq!(input.max_passes, 40);
+        // Clairic's probe 05: 40 fields, 40 passes, input_tokens 29,888.
+        let estimate = check_before_call(&input, Some(110_000_000), 0, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(estimate.input_tokens, 29_888);
+        let empty = ExtractRequest::new("b", "m", IndexMap::new(), vec![Item::new("s")]);
+        assert!(item_cost_input(&empty, 0, &model, bounds, None, None).is_err());
     }
 
     #[test]

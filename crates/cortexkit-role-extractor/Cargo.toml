@@ -14,11 +14,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Wire contract of the CortexKit extractor/v1 role: role.describe, extract.run requests and typed fields, admission rules, the Clairic request mapping."
-# Not published yet: the request side is pinned, but the answer side (the
-# time, datetime, duration and forecast answer shapes, span offsets, the
-# provider's reply envelope) is not yet measured. It publishes once it is.
-publish = false
+description = "Wire contract of the CortexKit extractor/v1 role: role.describe, extract.run requests and typed fields, admission rules, and the Clairic request and reply mapping."
+# The request side is pinned from Cloudflare's documentation and the reply
+# side from a live Clairic probe of 2026-10-22; CONTRACT.md §12 lists
+# what that probe left unmeasured.
+publish = true
 # Ship the vector files with the crate so the optional `vectors` module works
 # for consumers who install this package without a repository checkout.
 include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
@@ -28,7 +28,7 @@ include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "
 test-vectors = []
 
 [dependencies]
-cortexkit-model-batch = { version = "0.1.0", path = "../cortexkit-model-batch" }
+cortexkit-model-batch = { version = "0.2.0", path = "../cortexkit-model-batch" }
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 # `raw_value` keeps the provider's number text. Never enable

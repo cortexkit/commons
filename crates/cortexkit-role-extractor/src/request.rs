@@ -447,8 +447,8 @@ fn json_len(text: &str) -> u64 {
 ///
 /// `json(s)` is the JSON-escaped length of `s`, quotes included; the `1`
 /// is the colon after an answer's key. The echoed state text is counted
-/// as the caller's `state`; whether the provider's can differ is not yet
-/// measured (`CONTRACT.md` §12). Saturates rather than wrapping.
+/// as the caller's `state`: Clairic echoes it byte for byte (`CONTRACT.md`
+/// §5). Saturates rather than wrapping.
 pub fn estimated_reply_bytes(request: &ExtractRequest, model: &ModelEntry) -> u64 {
     let per_answers: u64 = request
         .fields
@@ -557,6 +557,48 @@ mod tests {
         let refusal = result.unwrap_err();
         assert_eq!(refusal.code, INVALID_PARAMS);
         refusal.detail.field.unwrap()
+    }
+
+    /// The fields and states of the three requests Clairic refused in
+    /// a live probe of 2026-10-22 (probes 08, 09 and 11), as role
+    /// requests: each is refused at admission, before any provider call.
+    #[test]
+    fn what_clairic_refuses_is_refused_at_admission() {
+        let po = "Purchase order PO-7731 from Brightwell Interiors, dated 2026-05-04. Three standing desks at $419.95 each and two task chairs at $189.50 each, delivered to the Leeds office on 2026-05-18. Payment terms: net 45. Contact: Imogen Hart.";
+        let describe = RoleDescribe::new(Limits::new(10, 1 << 20, 100), vec![model()]);
+        let admit_one = |fields: &str, state: &str| {
+            let text = format!(
+                r#"{{"batch_id":"b","model":"cloudflare-workers-ai/@cf/cloudflare/clairic","fields":{fields},"items":[{{"state":{}}}]}}"#,
+                serde_json::to_string(state).unwrap()
+            );
+            admit(
+                &text,
+                &describe,
+                |_| CatalogRow::Kind("extraction"),
+                u64::MAX,
+            )
+            .unwrap_err()
+        };
+        // Probe 08: HTTP 400, Workers AI code 5006.
+        let unknown_type = admit_one(
+            r#"{"desk_colour":{"type":"colour","instructions":"Colour of the standing desks"}}"#,
+            po,
+        );
+        assert_eq!(unknown_type.code, INVALID_PARAMS);
+        assert_eq!(unknown_type.field(), Some("fields.desk_colour.type"));
+        // Probe 09: HTTP 422, code 3030; the provider refuses an unknown
+        // option rather than ignoring it.
+        let unknown_option = admit_one(
+            r#"{"desk_price":{"type":"number","decimalz":2,"instructions":"Price of one standing desk in US dollars"}}"#,
+            po,
+        );
+        assert_eq!(unknown_option.field(), Some("fields.desk_price.decimalz"));
+        // Probe 11: HTTP 422, code 3030.
+        let empty_state = admit_one(
+            r#"{"contact_name":{"type":"text","instructions":"Name of the order's contact"}}"#,
+            "",
+        );
+        assert_eq!(empty_state.field(), Some("items[0].state"));
     }
 
     #[test]

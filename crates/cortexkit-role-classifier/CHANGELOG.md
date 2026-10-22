@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- Depends on `cortexkit-model-batch` 0.2.0, whose estimator changed
+  (`RULES.md` §5: the schema bills once, the state on every pass, up to a
+  module's `max_passes`). This crate re-exports `cortexkit-model-batch`
+  items at their `classifier/v1` paths (`ItemError`, `Refusal`, the image
+  shape and the rest), and those are now 0.2.0's types, so the bump is
+  breaking for a consumer that names both crates. Nothing else changed:
+  `classifier/v1` does not use the shared estimate (its spend guard's
+  estimate is the module's own, CONTRACT.md §6.9), and every vector keeps
+  its bytes.
+
 ## 0.2.0
 
 Breaking, in behaviour: two validation and identity changes, and four clef

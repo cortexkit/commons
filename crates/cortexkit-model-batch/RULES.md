@@ -106,10 +106,37 @@ the provider, for one item.
   input cost:
 
   ```
-  (state + schema + images x image_tokens_each + overhead) x passes x input rate
-  passes = ceil(schema / (pass_tokens - state)), at least 1   // 1 when the provider has no pass budget
+  input tokens = schema + max_passes x (state + images x image_tokens_each + overhead)
+  cost         = input tokens x input rate
   ```
 
+  This is the model Cloudflare's Clairic was measured to bill (a live
+  probe of 2026-10-22, against `@cf/cloudflare/clairic`): on every
+  successful reply, `input_tokens = schema_tokens + passes x state_tokens +
+  image_tokens`, with no fixed overhead. Probe 05 sent 40 text fields and a
+  state of 85 tokens: 40 passes, `schema_tokens` 26,488, `input_tokens`
+  29,888 = 26,488 + 40 x 85. Probe 07 sent the same fields in reverse order
+  and was billed the same. Where each term comes from:
+
+  - `schema` bills **once** across all passes: the fields or questions,
+    split between passes by the provider.
+  - `state` bills on **every** pass: the provider billed the whole state
+    again for each pass it made.
+  - `max_passes` is the module's **upper bound** on the passes the provider
+    makes for the item (`ItemCostInput::with_max_passes`), at least 1; a
+    zero is refused (`EstimateError::NoPasses`). It defaults to 1, which is
+    right for a one-pass provider. A role whose provider splits its schema
+    states the bound in its contract. The provider's per-pass token budget
+    does not predict the passes: probe 05's 40 small fields ran in 40
+    passes where a budget of 8,192 tokens would predict 4, and probe 01's
+    nine fields ran in two. Deriving passes from the budget underestimates
+    whenever the provider makes more passes than the budget predicts.
+  - `images x image_tokens_each` and `overhead` are charged on every pass.
+    That overstates them: the measured overhead was zero, and an image was
+    measured only in a one-pass request (probe 12: one 64x64 PNG, reported
+    `image_tokens` 64, and `schema_tokens` 41 above the same request without
+    the image), so whether a provider bills images once or per pass is not
+    known. A module's `image_tokens_each` covers both figures.
   - Text is bounded by its UTF-8 byte length: a byte-level tokenizer never
     makes more tokens than bytes. The state's bound is its byte length, the
     schema's the byte length of its canonical JSON (`Tokens::Bound`). A
@@ -119,20 +146,14 @@ the provider, for one item.
   - `image_tokens_each` (the tokens one image costs) and `overhead` (the
     module's prompt template and any system text) are bounds the module
     supplies. Both are required; neither defaults to zero.
-  - Each pass is assumed to bill the whole request again, state included.
-    That is the conservative reading while a provider's billing of later
-    passes is not measured; a role contract that measures it says so.
-  - When the state reaches the pass budget (`state >= pass_tokens`):
-    - with an **exact** count, the item cannot fit in a pass. It gets
-      `invalid_item` before any call, its message naming the bound;
-    - with a **byte bound**, the bound is not a count, so the module does
-      not refuse the item by it. The estimate has no upper bound
-      (`Estimate::Unbounded`). Under a ceiling, the item gets
-      `cost_exceeded`, its message saying the estimate is unbounded because
-      the state's byte bound reaches a pass's token budget, and naming the
-      remedies: raise or remove `max_cost_usd`, or use a module that counts
-      tokens exactly. With no ceiling, the item is sent, and the provider's
-      own truncation report stands.
+  - The provider's per-pass budget (`pass_tokens`) is used only to check
+    that the state fits in a pass. With an **exact** count at or past it
+    (`state >= pass_tokens`), the item cannot fit: it gets `invalid_item`
+    before any call, its message naming the bound
+    (`EstimateError::DoesNotFit`). A **byte bound** at or past it is not a
+    count, so the module does not refuse the item by it; the item is
+    estimated like any other, since the formula bounds its cost whether the
+    provider refuses the state or truncates it.
   - Money is integer nanodollars, the catalog's unit
     (`RateNanosPerMtok`, nanodollars per million tokens). A cost rounds up
     to a whole nanodollar; a USD ceiling converts by decimal text, rounding
@@ -346,10 +367,18 @@ then checks it against the code:
 - `status-mapping.json`: the Workers AI table and the status mapping;
 - `images.json`: one image in three spellings with one canonical form and
   one identity, and the images validation refuses;
-- `estimates.json`: the estimate, including a second pass, an unbounded
-  estimate, an item that does not fit, and a stated-free rate.
+- `estimates.json`: the estimate, including probe 05's exact counts (which
+  estimate exactly what Clairic billed) and byte bounds (at least that),
+  images and overhead on every pass, a byte-bound state past the pass
+  budget, an item that does not fit, and a stated-free rate.
 
 ## 17. Sources
+
+- A live probe of Cloudflare Workers AI Clairic
+  (`@cf/cloudflare/clairic`), 2026-10-22: twelve requests, each reply
+  captured byte for byte. The estimate's model (§5) rests on probes 05 and
+  07 (40 fields, 40 passes), 06 (the same state with one field), 01 (nine
+  fields in two passes) and 12 (one 64x64 image).
 
 - Cloudflare Workers AI, errors:
   <https://developers.cloudflare.com/workers-ai/platform/errors/>

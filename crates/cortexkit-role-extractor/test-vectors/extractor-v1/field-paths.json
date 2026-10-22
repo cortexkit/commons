@@ -1,5 +1,5 @@
 {
-  "about": "invalid_params refusals, each naming the narrowest path that applies, in the order admission checks them: every object of the request is closed, a field's type is checked before the rest of the field, its options in the order written (the requests here are written with sorted keys), then the options its type requires, then the options together. Date bounds and month or year steps on an estimate are refused until a date estimate is measured. The words after the colon of malformed_base64 are the base64 decoder's own.",
+  "about": "invalid_params refusals, each naming the narrowest path that applies, in the order admission checks them: every object of the request is closed, a field's type is checked before the rest of the field, its options in the order written (the requests here are written with sorted keys), then the options its type requires, then the options together. A date estimate (min and max as dates) takes the month step, the one Clairic was measured with; the year step is refused until it is measured, and the month step needs date bounds. The words after the colon of malformed_base64 are the base64 decoder's own.",
   "catalog": [
     {
       "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
@@ -639,7 +639,7 @@
       }
     },
     {
-      "name": "date_bounds_not_yet_measured",
+      "name": "date_estimate_without_the_month_step",
       "request": {
         "batch_id": "paths-1",
         "fields": {
@@ -658,15 +658,43 @@
       },
       "refusal": {
         "code": "invalid_params",
-        "message": "max is a number",
+        "message": "a date estimate takes step: month",
         "detail": {
           "class": "permanent",
-          "field": "fields.due.max"
+          "field": "fields.due.step"
         }
       }
     },
     {
-      "name": "month_step_not_yet_measured",
+      "name": "year_step_not_yet_measured",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "due": {
+            "max": "2026-12-31",
+            "min": "2026-01-01",
+            "step": "year",
+            "type": "estimate"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "step is a positive number, or month with date bounds",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.step"
+        }
+      }
+    },
+    {
+      "name": "month_step_with_number_bounds",
       "request": {
         "batch_id": "paths-1",
         "fields": {
@@ -686,7 +714,7 @@
       },
       "refusal": {
         "code": "invalid_params",
-        "message": "step is a positive number",
+        "message": "step month needs date bounds",
         "detail": {
           "class": "permanent",
           "field": "fields.price.step"

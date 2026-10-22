@@ -1,25 +1,29 @@
 //! The provider side for Cloudflare Workers AI Clairic: what a runner sends
 //! for one item, the reply envelope it reads, and how provider errors map
-//! to item codes. `CONTRACT.md` §9 cites the documentation each shape comes
-//! from, and §12 lists what it leaves unmeasured.
+//! to item codes. `CONTRACT.md` §8 and §9 state each shape and where it
+//! comes from: Cloudflare's documentation, and a live probe of
+//! Clairic of 2026-10-22 for the reply envelope and the answers.
 //!
 //! One provider call carries one item with every field of the batch, passed
 //! through key by key as the caller wrote them, and the batch options under
 //! the provider's own names.
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::{
+    de::{Error as _, IgnoredAny},
+    Deserialize, Deserializer, Serialize,
+};
+use serde_json::{value::RawValue, Value};
 
 pub use cortexkit_model_batch::status::{
     item_code_for_status, workers_ai_codes, workers_ai_item_code,
 };
 
 use crate::{
-    errors::Refusal,
+    errors::{ItemError, Refusal, PROVIDER_ERROR},
     field::Field,
     image::Image,
-    reply::{Answer, Usage},
+    reply::{Answer, ItemResult, Usage},
     request::ExtractRequest,
 };
 
@@ -147,12 +151,21 @@ pub struct EnvelopeError {
 
 /// The Workers AI REST envelope, `{result, success, errors, messages}`. A
 /// runner reads `result` on success and `errors[].code` on failure, and
-/// never forwards the envelope. Every member decodes leniently: whether
-/// Clairic uses the envelope exactly like this is not yet measured.
+/// never forwards the envelope.
+///
+/// Clairic was measured to answer a success as `{result, success, errors,
+/// messages}`, with `success: true` and `errors: []`, and an error as
+/// `{errors, success, result, messages}`, with `success: false` and
+/// `result: {}`, not `null`. Members decode in any order; an empty `result`
+/// object, or `null`, decodes as no result.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Envelope {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "result_or_empty",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub result: Option<ProviderResult>,
     #[serde(default)]
     pub success: bool,
@@ -162,6 +175,25 @@ pub struct Envelope {
     pub messages: Vec<Value>,
 }
 
+/// `result` as a [`ProviderResult`], with `null` and `{}` (what Clairic
+/// sends with an error) as no result. The member is read as raw text first,
+/// so the answers keep the provider's number spelling.
+fn result_or_empty<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ProviderResult>, D::Error> {
+    let Some(raw) = Option::<Box<RawValue>>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    let members: IndexMap<String, IgnoredAny> =
+        serde_json::from_str(raw.get()).map_err(D::Error::custom)?;
+    if members.is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(raw.get())
+        .map(Some)
+        .map_err(D::Error::custom)
+}
+
 impl Envelope {
     /// The first error code, which [`workers_ai_item_code`] reads.
     pub fn first_error_code(&self) -> Option<u64> {
@@ -169,18 +201,115 @@ impl Envelope {
     }
 }
 
-/// Clairic's `result`: `{answers, truncated, state_text?, usage}`. Members
-/// this crate does not name are not forwarded.
+/// Clairic's `result`: `{model, answers, truncated, usage, state_text?}`.
+/// `state_text` is present when the request asked for it
+/// (`return_state_text`), and is then the request's `state` byte for byte.
+/// Members this crate does not name are not forwarded.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ProviderResult {
+    /// The provider's own model name (Clairic answers `"clairic"`). Not
+    /// forwarded: the reply names the catalog id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub answers: IndexMap<String, Answer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_text: Option<String>,
+}
+
+impl ProviderResult {
+    /// Item `index` of the reply, answered with this result: its answers,
+    /// truncation flag, state text and usage, each as the provider gave
+    /// it. Spans and number text pass through untouched.
+    pub fn into_item(self, index: u64) -> ItemResult {
+        let mut item = ItemResult::answered(index, self.answers);
+        item.truncated = self.truncated;
+        item.state_text = self.state_text;
+        item.usage = self.usage;
+        item
+    }
+}
+
+/// Read one provider call's reply, once the runner's own retries are spent:
+/// its HTTP `status` and its `body` as received.
+///
+/// - A 2xx status whose envelope decodes with `success: true` and a
+///   `result` is that result.
+/// - Any other status is an item error, by Workers AI code first, then by
+///   status ([`workers_ai_item_code`], `RULES.md` §15). The message names
+///   the status, the first Workers AI code and that error's message, so a
+///   code the table does not list can still be read. A body that does not
+///   decode leaves only the status to map by.
+/// - A 2xx status without a usable result (a body that does not decode,
+///   `success: false`, or no `result`) is `provider_error`.
+///
+/// Clairic refuses a field of unknown type with 400 and code 5006, and an
+/// unknown option or an empty state without images with 422 and code
+/// 3030. Neither code is in the table, so each maps by its status to
+/// `invalid_item`, permanent. Admission refuses all three before any call,
+/// so these are backstops. A `Retry-After` header is the runner's to add
+/// (`ItemError::with_retry_after_ms`); this reads the body only.
+// The error is the item's own outcome, returned by value so a runner can
+// store it as is; it is built once per item, so its size does not matter.
+#[allow(clippy::result_large_err)]
+pub fn read_reply(status: u16, body: &str) -> Result<ProviderResult, ItemError> {
+    let envelope = serde_json::from_str::<Envelope>(body);
+    if (200..=299).contains(&status) {
+        let problem = match envelope {
+            Ok(Envelope {
+                success: true,
+                result: Some(result),
+                ..
+            }) => return Ok(result),
+            Ok(envelope) if !envelope.success => describe_errors(status, &envelope),
+            Ok(_) => format!("HTTP {status} with no result"),
+            Err(error) => format!("HTTP {status} with a reply that does not decode: {error}"),
+        };
+        return Err(ItemError::for_code(PROVIDER_ERROR, problem));
+    }
+    // An error reply whose `result` is not a result still carries its
+    // `errors`: read them alone when the whole envelope does not decode.
+    let envelope = envelope.or_else(|_| {
+        serde_json::from_str::<ErrorsOnly>(body).map(|only| Envelope {
+            result: None,
+            success: false,
+            errors: only.errors,
+            messages: Vec::new(),
+        })
+    });
+    let (code, message) = match &envelope {
+        Ok(envelope) => (
+            envelope.first_error_code(),
+            describe_errors(status, envelope),
+        ),
+        Err(_) => (None, format!("HTTP {status}")),
+    };
+    let item_code = workers_ai_item_code(status, code).unwrap_or(PROVIDER_ERROR);
+    Err(ItemError::for_code(item_code, message))
+}
+
+/// An error reply's `errors`, every other member ignored.
+#[derive(Deserialize)]
+struct ErrorsOnly {
+    #[serde(default)]
+    errors: Vec<EnvelopeError>,
+}
+
+/// `HTTP <status>`, then the first error's Workers AI code and message.
+fn describe_errors(status: u16, envelope: &Envelope) -> String {
+    let mut text = format!("HTTP {status}");
+    if let Some(code) = envelope.first_error_code() {
+        text.push_str(&format!(", Workers AI code {code}"));
+    }
+    if let Some(first) = envelope.errors.first().filter(|e| !e.message.is_empty()) {
+        text.push_str(": ");
+        text.push_str(&first.message);
+    }
+    text
 }
 
 #[cfg(test)]
@@ -189,6 +318,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        errors::{ErrorClass, INVALID_ITEM},
         field::FieldType,
         request::{Item, Options},
     };
@@ -257,5 +387,84 @@ mod tests {
         );
         let bare: Envelope = serde_json::from_str("{}").unwrap();
         assert_eq!(bare.first_error_code(), None);
+    }
+
+    /// Clairic's reply to a field of unknown type (live probe 08),
+    /// byte for byte: `errors` first, and `result` an empty object.
+    const PROBE_08: &str = r#"{"errors":[{"message":"AiError: Bad input: Error: enum colour not in text,number,date,time,datetime,duration,list,estimate,forecast at '/desk_colour/type' (663a528d-0faf-46d6-bbdc-728e4d418eff)","code":5006}],"success":false,"result":{},"messages":[]}"#;
+
+    #[test]
+    fn an_error_envelope_with_an_empty_result_decodes_in_either_order() {
+        let errors_first: Envelope = serde_json::from_str(PROBE_08).unwrap();
+        assert!(errors_first.result.is_none());
+        assert!(!errors_first.success);
+        assert_eq!(errors_first.first_error_code(), Some(5006));
+        let result_first: Envelope = serde_json::from_str(
+            r#"{"result":{},"success":false,"errors":[{"message":"m","code":3030}],"messages":[]}"#,
+        )
+        .unwrap();
+        assert!(result_first.result.is_none());
+        assert_eq!(result_first.first_error_code(), Some(3030));
+    }
+
+    #[test]
+    fn clairic_refusal_codes_map_by_status_to_invalid_item() {
+        // 5006 (unknown field type, HTTP 400) and 3030 (unknown option or
+        // empty state, HTTP 422) are not in the Workers AI table, so the
+        // status decides: invalid_item, permanent, never retried.
+        assert_eq!(workers_ai_item_code(400, Some(5006)), Some(INVALID_ITEM));
+        assert_eq!(workers_ai_item_code(422, Some(3030)), Some(INVALID_ITEM));
+        let error = read_reply(400, PROBE_08).unwrap_err();
+        assert_eq!(error.code, INVALID_ITEM);
+        assert_eq!(error.class, ErrorClass::Permanent);
+        assert!(
+            error
+                .message
+                .starts_with("HTTP 400, Workers AI code 5006: AiError: Bad input"),
+            "{}",
+            error.message
+        );
+        // A `result` that is no result does not hide the errors.
+        let odd = r#"{"errors":[{"message":"m","code":3030}],"success":false,"result":{"answers":7},"messages":[]}"#;
+        assert_eq!(
+            read_reply(422, odd).unwrap_err().message,
+            "HTTP 422, Workers AI code 3030: m"
+        );
+    }
+
+    #[test]
+    fn a_success_is_its_result_and_anything_else_an_item_error() {
+        let body = r#"{"result":{"model":"clairic","answers":{"code":{"type":"text","p_null":0.000014924099559721071,"span":[53,61],"guess":"QK-58213","confidence":0.9999951124191284,"value":"QK-58213"}},"truncated":false,"usage":{"state_tokens":31,"image_tokens":0,"schema_tokens":122,"input_tokens":153,"output_tokens":0,"passes":1}},"success":true,"errors":[],"messages":[]}"#;
+        let item = read_reply(200, body).unwrap().into_item(3);
+        assert_eq!(item.index, 3);
+        let answer = &item.answers.as_ref().unwrap()["code"];
+        assert_eq!(answer.span.as_deref().map(RawValue::get), Some("[53,61]"));
+        assert_eq!(
+            answer.p_null.as_deref().map(RawValue::get),
+            Some("0.000014924099559721071")
+        );
+        assert_eq!(item.truncated, Some(false));
+        assert_eq!(item.usage.as_ref().unwrap().input_tokens, Some(153));
+        for (status, body) in [
+            (
+                200,
+                r#"{"result":{},"success":true,"errors":[],"messages":[]}"#,
+            ),
+            (200, "not json"),
+            (
+                200,
+                r#"{"result":{},"success":false,"errors":[{"code":5004,"message":"m"}],"messages":[]}"#,
+            ),
+            (500, ""),
+        ] {
+            let error = read_reply(status, body).unwrap_err();
+            assert_eq!(error.code, PROVIDER_ERROR, "{status} {body}");
+        }
+        assert_eq!(
+            read_reply(429, r#"{"errors":[{"code":3036,"message":"m"}],"success":false,"result":{},"messages":[]}"#)
+                .unwrap_err()
+                .code,
+            crate::errors::ACCOUNT_LIMIT_EXHAUSTED
+        );
     }
 }
