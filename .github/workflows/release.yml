@@ -20,16 +20,52 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # A successful master push run proves this exact commit already passed CI, so
+  # release tags do not need to repeat the same cross-platform checks.
+  check_ci:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      green: ${{ steps.check.outputs.green }}
+    steps:
+      - name: Check for successful master CI run
+        id: check
+        run: |
+          green=false
+          # There is no checkout here, so gh takes the repository from GH_REPO.
+          # If gh cannot answer, say so: the full verify then runs, which is safe
+          # but slow, and a silent fallback would hide a broken check.
+          if ! runs=$(gh run list \
+            --workflow CI \
+            --commit "$GITHUB_SHA" \
+            --branch master \
+            --event push \
+            --json conclusion,event,headBranch 2>&1); then
+            echo "::warning::could not read CI runs for $GITHUB_SHA, so the full verify runs: $runs"
+            runs='[]'
+          fi
+          if jq -e 'any(.[]; .event == "push" and .headBranch == "master" and .conclusion == "success")' <<<"$runs" >/dev/null; then
+            green=true
+          fi
+          echo "green=$green" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+
   # Same 3-OS fmt/clippy/test matrix as PR-time CI. Reused (not copied) so a
   # release can never ship code that wouldn't pass CI — including the
   # Windows-only cfg(windows) canonicalization vectors.
   verify:
+    if: needs.check_ci.outputs.green != 'true'
+    needs: check_ci
     uses: ./.github/workflows/ci.yml
 
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: verify
+    needs: [check_ci, verify]
+    if: ${{ !cancelled() && (needs.check_ci.outputs.green == 'true' || needs.verify.result == 'success') }}
     steps:
       - uses: actions/checkout@v5
 
