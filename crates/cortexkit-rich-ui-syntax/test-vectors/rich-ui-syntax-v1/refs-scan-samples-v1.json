@@ -1,0 +1,311 @@
+{
+  "dialect": "refs-scan/v1",
+  "spanUnit": "UTF-8 bytes, start inclusive, end exclusive",
+  "rules": {
+    "token": "A reference token is `$$tc(` + a decimal N with no leading zeros (0 itself allowed) + `)`.",
+    "reply": [
+      "Markdown text counts, including the content of tags, block quotes, lists and table cells.",
+      "Fenced code (3 or more backticks or tildes; an unclosed fence runs to the end) never counts.",
+      "Code spans never count.",
+      "A backslash-escaped `\\$` breaks the token, so `\\$$tc(N)` is text.",
+      "Inside a tag's open tag, only a `{...}` prop value counts, and inside it only outside string literals (double or single quoted, with the spec's escapes). A quoted prop value never counts."
+    ],
+    "program": [
+      "The body follows the reply rules.",
+      "A declaration (`export const` or `export let` at column 1, outside fenced code) counts in its expression, outside string literals."
+    ],
+    "token_slot": [
+      "A tool argument declared as a token slot counts only when its whole value is exactly one token, with nothing before or after it."
+    ],
+    "unsettled": [
+      "A tag candidate that fails to parse (for example one with a blank line inside its open tag) is left out of v1's samples. The language crate's scanner settles it, and runners adopt that scanner."
+    ]
+  },
+  "cases": [
+    {
+      "name": "plain-text",
+      "mode": "reply",
+      "source": "See $$tc(3) for the log.",
+      "references": [
+        {
+          "n": 3,
+          "start": 4,
+          "end": 11
+        }
+      ]
+    },
+    {
+      "name": "two-in-a-line",
+      "mode": "reply",
+      "source": "Compare $$tc(1) with $$tc(22).",
+      "references": [
+        {
+          "n": 1,
+          "start": 8,
+          "end": 15
+        },
+        {
+          "n": 22,
+          "start": 21,
+          "end": 29
+        }
+      ]
+    },
+    {
+      "name": "zero",
+      "mode": "reply",
+      "source": "The first output is $$tc(0).",
+      "references": [
+        {
+          "n": 0,
+          "start": 20,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "name": "leading-zero-is-text",
+      "mode": "reply",
+      "source": "Not a reference: $$tc(007).",
+      "references": []
+    },
+    {
+      "name": "malformed-is-text",
+      "mode": "reply",
+      "source": "None of $$tc() or $$tc(-1) or $$tc(1a) or $$tc(12 counts.",
+      "references": []
+    },
+    {
+      "name": "code-span",
+      "mode": "reply",
+      "source": "Write `$$tc(4)` to refer; here is one: $$tc(5)",
+      "references": [
+        {
+          "n": 5,
+          "start": 39,
+          "end": 46
+        }
+      ]
+    },
+    {
+      "name": "double-backtick-span",
+      "mode": "reply",
+      "source": "``a `$$tc(6)` inside`` then $$tc(7)",
+      "references": [
+        {
+          "n": 7,
+          "start": 28,
+          "end": 35
+        }
+      ]
+    },
+    {
+      "name": "fenced-backticks",
+      "mode": "reply",
+      "source": "```\nexample $$tc(8)\n```\nAfter the fence: $$tc(9)",
+      "references": [
+        {
+          "n": 9,
+          "start": 41,
+          "end": 48
+        }
+      ]
+    },
+    {
+      "name": "fenced-tildes",
+      "mode": "reply",
+      "source": "~~~md\n$$tc(10)\n~~~\n$$tc(11)",
+      "references": [
+        {
+          "n": 11,
+          "start": 19,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "name": "unclosed-fence",
+      "mode": "reply",
+      "source": "Before $$tc(12)\n```\n$$tc(13)\nnever closed",
+      "references": [
+        {
+          "n": 12,
+          "start": 7,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "name": "backslash-escape",
+      "mode": "reply",
+      "source": "\\$$tc(14) is text, $$tc(15) is not",
+      "references": [
+        {
+          "n": 15,
+          "start": 19,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "name": "quoted-prop",
+      "mode": "reply",
+      "source": "<Callout title=\"see $$tc(16)\">Body text $$tc(17)</Callout>",
+      "references": [
+        {
+          "n": 17,
+          "start": 40,
+          "end": 48
+        }
+      ]
+    },
+    {
+      "name": "single-quoted-prop",
+      "mode": "reply",
+      "source": "<Badge text='$$tc(26)' />",
+      "references": []
+    },
+    {
+      "name": "expression-prop",
+      "mode": "reply",
+      "source": "Closest cafe.<Citation source={$$tc(18)} />",
+      "references": [
+        {
+          "n": 18,
+          "start": 31,
+          "end": 39
+        }
+      ]
+    },
+    {
+      "name": "parse-call",
+      "mode": "reply",
+      "source": "<Chart kind=\"bar\" data={Parse($$tc(19), \"csv\")} x=\"suite\" y=\"seconds\" />",
+      "references": [
+        {
+          "n": 19,
+          "start": 30,
+          "end": 38
+        }
+      ]
+    },
+    {
+      "name": "string-inside-braces",
+      "mode": "reply",
+      "source": "<Chart kind=\"bar\" data={Parse($$tc(20), \"csv\", {columns: {\"$$tc(21)\": \"number\"}})} x=\"a\" y=\"b\" />",
+      "references": [
+        {
+          "n": 20,
+          "start": 30,
+          "end": 38
+        }
+      ]
+    },
+    {
+      "name": "single-quoted-string-inside-braces",
+      "mode": "reply",
+      "source": "<Citation source={'$$tc(22)'} />",
+      "references": []
+    },
+    {
+      "name": "list-and-table",
+      "mode": "reply",
+      "source": "- item $$tc(23)\n\n| col |\n|---|\n| $$tc(24) |",
+      "references": [
+        {
+          "n": 23,
+          "start": 7,
+          "end": 15
+        },
+        {
+          "n": 24,
+          "start": 33,
+          "end": 41
+        }
+      ]
+    },
+    {
+      "name": "multibyte-offsets",
+      "mode": "reply",
+      "source": "**Kahve Durağı** is closest.<Citation source={$$tc(25)} />",
+      "references": [
+        {
+          "n": 25,
+          "start": 48,
+          "end": 56
+        }
+      ]
+    },
+    {
+      "name": "program-declaration",
+      "mode": "program",
+      "source": "export const rows = Parse($$tc(30), \"csv\")\n\n<Table data={rows} />",
+      "references": [
+        {
+          "n": 30,
+          "start": 26,
+          "end": 34
+        }
+      ]
+    },
+    {
+      "name": "program-string-literal",
+      "mode": "program",
+      "source": "export const label = \"$$tc(31)\"\nexport let $note = '$$tc(32)'\n\n{label}",
+      "references": []
+    },
+    {
+      "name": "program-body-text",
+      "mode": "program",
+      "source": "Totals for $$tc(33):\n\n<Chart kind=\"line\" data={Parse($$tc(34), \"json\")} x=\"m\" y=\"v\" />",
+      "references": [
+        {
+          "n": 33,
+          "start": 11,
+          "end": 19
+        },
+        {
+          "n": 34,
+          "start": 53,
+          "end": 61
+        }
+      ]
+    },
+    {
+      "name": "program-fenced-declaration",
+      "mode": "program",
+      "source": "```\nexport const x = $$tc(35)\n```\n\nDone.",
+      "references": []
+    },
+    {
+      "name": "token-slot-exact",
+      "mode": "token_slot",
+      "source": "$$tc(494)",
+      "references": [
+        {
+          "n": 494,
+          "start": 0,
+          "end": 9
+        }
+      ]
+    },
+    {
+      "name": "token-slot-leading-space",
+      "mode": "token_slot",
+      "source": " $$tc(494)",
+      "references": []
+    },
+    {
+      "name": "token-slot-two-tokens",
+      "mode": "token_slot",
+      "source": "$$tc(1) $$tc(2)",
+      "references": []
+    },
+    {
+      "name": "token-slot-with-text",
+      "mode": "token_slot",
+      "source": "see $$tc(3)",
+      "references": []
+    }
+  ]
+}

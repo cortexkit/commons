@@ -24,6 +24,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-provider-usage](crates/cortexkit-provider-usage/README.md) | Provider usage, quota windows, and reset metadata wire types. | [Published](https://crates.io/crates/cortexkit-provider-usage) |
 | [cortexkit-push-seal](crates/cortexkit-push-seal/README.md) | HPKE encryption of push-notification payloads for a recipient device. | Not published |
 | [cortexkit-resource-busy](crates/cortexkit-resource-busy/README.md) | Shared refusal detail for exclusive resources held by another caller. | Not published |
+| [cortexkit-rich-ui-syntax](crates/cortexkit-rich-ui-syntax/README.md) | Bounded rich UI parser and reference scanner for `$$tc(N)` tokens. | Not published |
 | [cortexkit-role-agent-data](crates/cortexkit-role-agent-data/README.md) | Wire contract and vectors for the `agent-data/v1` capability. | [Published](https://crates.io/crates/cortexkit-role-agent-data) |
 | [cortexkit-role-agent-inbox](crates/cortexkit-role-agent-inbox/README.md) | Wire contract, neutralization and vectors for `agent-inbox/v1`. | [Published](https://crates.io/crates/cortexkit-role-agent-inbox) |
 | [cortexkit-role-agent-inbox-conformance](crates/cortexkit-role-agent-inbox-conformance/README.md) | Conformance runner for a live agent inbox implementation. | [Published](https://crates.io/crates/cortexkit-role-agent-inbox-conformance) |
