@@ -183,6 +183,10 @@ impl RideRequest {
 
 /// The `compaction.ride` answer. Strict on `answer`: a runner treats an
 /// answer it cannot decode as `nothing`.
+///
+/// The enum and both variants are non-exhaustive, so a later optional
+/// member is not a breaking change. Build an answer with
+/// [`RideAnswer::view`] or [`RideAnswer::nothing`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -191,6 +195,7 @@ pub enum RideAnswer {
     /// fetched with `view.get`, against its own `digest`. `cache_ttl` is the
     /// prompt cache's lifetime for the ride's model, on every answer to a
     /// `model_change` ride (CONTRACT.md §8.1); omitted when absent.
+    #[non_exhaustive]
     View {
         /// Boxed: a view is far larger than the `nothing` answer.
         view: Box<CompactionView>,
@@ -200,6 +205,7 @@ pub enum RideAnswer {
     /// No view now. The runner proceeds with its current view. `cache_ttl`
     /// as on `View`: an answer to a `model_change` ride carries it even
     /// when it brings no view.
+    #[non_exhaustive]
     Nothing {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cache_ttl: Option<crate::cache_ttl::CacheTtl>,

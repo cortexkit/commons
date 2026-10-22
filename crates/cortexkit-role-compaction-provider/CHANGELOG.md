@@ -36,6 +36,15 @@ starts a new lineage without renumbering anything.
 - Breaking: a view on a lineage whose `first_ordinal` is above 0 leads with
   a `replace` range carrying the history head (it may be zero-length);
   `dispose_fetched` refuses one leading with `keep` as `ranges_start`.
+- Breaking: `SetupAnswer` and its `Ready` and `Refuse` variants, and
+  `RideAnswer`'s `View` and `Nothing` variants, are `#[non_exhaustive]`, so
+  a later optional member is not a breaking change. Build a Setup answer
+  with `SetupAnswer::ready` or `SetupAnswer::refuse` and the `with_ceiling`,
+  `with_checkpoint`, `with_cache_ttl` and `with_provider_code` setters, and
+  read it with `is_ready`, `initial`, `ceiling`, `checkpoint`, `cache_ttl`,
+  `refuse_code`, `refuse_reason` and `provider_code`. A `match` outside
+  this crate keeps a `_` arm, and a variant pattern keeps `..`. The wire
+  bytes don't change.
 - Advance notices gain an optional `first_ordinal` header
   (`AdvanceNotice::first_ordinal`, `with_first_ordinal`), at most one above
   `through_ordinal`. The widest well-formed notice grows from 2,280 to

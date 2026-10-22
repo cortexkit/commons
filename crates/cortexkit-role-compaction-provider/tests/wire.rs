@@ -106,13 +106,13 @@ fn setup_refuse_carries_provider_code_and_no_retryable() {
     let setup: SetupAnswer = serde_json::from_value(wire.clone()).unwrap();
     assert_eq!(
         setup,
-        SetupAnswer::Refuse {
-            request_id: "r1".into(),
-            code: RefuseCode::ProviderBusy,
-            reason: "busy".into(),
-            provider_code: Some("mc:historian_running".into()),
-        }
+        SetupAnswer::refuse("r1", RefuseCode::ProviderBusy, "busy")
+            .with_provider_code("mc:historian_running")
     );
+    assert_eq!(setup.refuse_code(), Some(&RefuseCode::ProviderBusy));
+    assert_eq!(setup.refuse_reason(), Some("busy"));
+    assert_eq!(setup.provider_code(), Some("mc:historian_running"));
+    assert!(!setup.is_ready() && setup.initial().is_none());
     exact(&setup, wire);
     assert_eq!(setup.retryable(), Some(true));
 }

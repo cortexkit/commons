@@ -164,10 +164,18 @@ pub const CHECKPOINT_ON_DESCENT: &str = "checkpoint_on_descent";
 
 /// The `compaction.setup` answer. Strict on `answer`: a runner treats an
 /// answer it cannot decode as a failed Setup.
+///
+/// The enum and both variants are non-exhaustive, so a later optional
+/// member is not a breaking change. Build an answer with
+/// [`SetupAnswer::ready`] or [`SetupAnswer::refuse`] and the `with_*`
+/// setters, and read it with the accessors; outside this crate a `match`
+/// keeps a `_` arm and a variant pattern keeps `..`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum SetupAnswer {
     /// The session's initial view and ceiling policy.
+    #[non_exhaustive]
     Ready {
         request_id: String,
         /// The initial CompactionMessage. Its range is usually empty at the
@@ -200,6 +208,7 @@ pub enum SetupAnswer {
     /// `provider_code` beside it. The next send runs Setup again. A
     /// `retryable` member an older provider still sends is ignored: `code`
     /// fixes retryability.
+    #[non_exhaustive]
     Refuse {
         request_id: String,
         code: RefuseCode,
@@ -210,9 +219,124 @@ pub enum SetupAnswer {
 }
 
 impl SetupAnswer {
+    /// A `ready` answer with the session's initial CompactionMessage and no
+    /// optional members.
+    pub fn ready(request_id: impl Into<String>, initial: CompactionMessage) -> Self {
+        Self::Ready {
+            request_id: request_id.into(),
+            initial,
+            ceiling: None,
+            checkpoint: None,
+            cache_ttl: None,
+        }
+    }
+
+    /// A `refuse` answer with no `provider_code`.
+    pub fn refuse(
+        request_id: impl Into<String>,
+        code: RefuseCode,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::Refuse {
+            request_id: request_id.into(),
+            code,
+            reason: reason.into(),
+            provider_code: None,
+        }
+    }
+
+    /// A `ready` answer with `ceiling` set. A `refuse` has no ceiling and
+    /// is returned unchanged.
+    pub fn with_ceiling(mut self, policy: CeilingPolicy) -> Self {
+        if let Self::Ready { ceiling, .. } = &mut self {
+            *ceiling = Some(policy);
+        }
+        self
+    }
+
+    /// A `ready` answer with `checkpoint` set. A `refuse` has no checkpoint
+    /// and is returned unchanged.
+    pub fn with_checkpoint(mut self, value: SetupCheckpoint) -> Self {
+        if let Self::Ready { checkpoint, .. } = &mut self {
+            *checkpoint = Some(value);
+        }
+        self
+    }
+
+    /// A `ready` answer with `cache_ttl` set. A `refuse` has no cache
+    /// lifetime and is returned unchanged.
+    pub fn with_cache_ttl(mut self, entry: crate::cache_ttl::CacheTtl) -> Self {
+        if let Self::Ready { cache_ttl, .. } = &mut self {
+            *cache_ttl = Some(entry);
+        }
+        self
+    }
+
+    /// A `refuse` answer with the provider's own `provider_code` set. A
+    /// `ready` answer has none and is returned unchanged.
+    pub fn with_provider_code(mut self, value: impl Into<String>) -> Self {
+        if let Self::Refuse { provider_code, .. } = &mut self {
+            *provider_code = Some(value.into());
+        }
+        self
+    }
+
     pub fn request_id(&self) -> &str {
         match self {
             Self::Ready { request_id, .. } | Self::Refuse { request_id, .. } => request_id,
+        }
+    }
+
+    /// Whether this is a `ready` answer.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready { .. })
+    }
+
+    /// The initial CompactionMessage of a `ready` answer.
+    pub fn initial(&self) -> Option<&CompactionMessage> {
+        match self {
+            Self::Ready { initial, .. } => Some(initial),
+            Self::Refuse { .. } => None,
+        }
+    }
+
+    /// The ceiling policy a `ready` answer carries, if any.
+    pub fn ceiling(&self) -> Option<&CeilingPolicy> {
+        match self {
+            Self::Ready { ceiling, .. } => ceiling.as_ref(),
+            Self::Refuse { .. } => None,
+        }
+    }
+
+    /// The prompt cache's lifetime a `ready` answer carries, if any.
+    pub fn cache_ttl(&self) -> Option<&crate::cache_ttl::CacheTtl> {
+        match self {
+            Self::Ready { cache_ttl, .. } => cache_ttl.as_ref(),
+            Self::Refuse { .. } => None,
+        }
+    }
+
+    /// The role code of a `refuse` answer.
+    pub fn refuse_code(&self) -> Option<&RefuseCode> {
+        match self {
+            Self::Refuse { code, .. } => Some(code),
+            Self::Ready { .. } => None,
+        }
+    }
+
+    /// The user-facing reason of a `refuse` answer.
+    pub fn refuse_reason(&self) -> Option<&str> {
+        match self {
+            Self::Refuse { reason, .. } => Some(reason),
+            Self::Ready { .. } => None,
+        }
+    }
+
+    /// The provider's own finer code on a `refuse` answer, if any.
+    pub fn provider_code(&self) -> Option<&str> {
+        match self {
+            Self::Refuse { provider_code, .. } => provider_code.as_deref(),
+            Self::Ready { .. } => None,
         }
     }
 
@@ -251,6 +375,52 @@ impl SetupAnswer {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    /// The constructors, setters and accessors are the only way to build or
+    /// read an answer outside this crate, so each vector answer must come
+    /// back equal when rebuilt through them.
+    #[test]
+    fn the_builders_rebuild_every_vector_answer() {
+        let setup = vectors::load("setup.json");
+        let with_cache_ttl = vectors::load("async.json");
+        let cases = vectors::cases(&setup, "answers")
+            .iter()
+            .chain(vectors::cases(
+                &with_cache_ttl["cache_ttl"],
+                "setup_answers",
+            ));
+        let mut cache_ttl_seen = false;
+        for case in cases {
+            let answer: SetupAnswer = serde_json::from_value(case["answer"].clone()).unwrap();
+            cache_ttl_seen |= answer.cache_ttl().is_some();
+            let rebuilt = if answer.is_ready() {
+                let mut built =
+                    SetupAnswer::ready(answer.request_id(), answer.initial().unwrap().clone());
+                if let Some(policy) = answer.ceiling() {
+                    built = built.with_ceiling(policy.clone());
+                }
+                if let Some(checkpoint) = answer.checkpoint() {
+                    built = built.with_checkpoint(checkpoint.clone());
+                }
+                if let Some(entry) = answer.cache_ttl() {
+                    built = built.with_cache_ttl(entry.clone());
+                }
+                built
+            } else {
+                let mut built = SetupAnswer::refuse(
+                    answer.request_id(),
+                    answer.refuse_code().unwrap().clone(),
+                    answer.refuse_reason().unwrap(),
+                );
+                if let Some(code) = answer.provider_code() {
+                    built = built.with_provider_code(code);
+                }
+                built
+            };
+            assert_eq!(rebuilt, answer, "{}", case["name"]);
+        }
+        assert!(cache_ttl_seen, "no vector answer carries cache_ttl");
+    }
 
     #[test]
     fn a_checkpoint_on_a_descending_setup_is_a_failed_setup() {
