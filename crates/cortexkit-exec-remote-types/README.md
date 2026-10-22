@@ -59,8 +59,9 @@ the caller must not automatically rerun it after an unknown outcome.
 
 ### Execution platform
 
-`RunRequest::with_platform` requests `Platform::Linux` (`"linux"`) or
-`Platform::Windows` (`"windows"`). An absent platform means Linux and is omitted
+`RunRequest::with_platform` requests `Platform::Linux` (`"linux"`),
+`Platform::Windows` (`"windows"`) or `Platform::Macos` (`"macos"`). An absent
+platform means Linux and is omitted
 from the request, preserving bytes for existing callers. Unknown platform strings
 round-trip as `Platform::Unknown`.
 
@@ -232,8 +233,9 @@ Thirty-six **crate-local additions** were written in this crate, rather than cop
   `Unknown`, with a before-start refusal rather than an offline downgrade.
 - `outcomes/crate-local-network-unsupported`: the known `network_unsupported`
   refusal reason for a runner that cannot grant the requested access.
-- `outcomes/crate-local-platform-linux` and `outcomes/crate-local-platform-windows`:
-  explicit platform requests and acknowledgements.
+- `outcomes/crate-local-platform-linux`, `outcomes/crate-local-platform-windows`
+  and `outcomes/crate-local-platform-macos`: explicit platform requests and
+  acknowledgements.
 - `outcomes/crate-local-platform-unsupported`: a Windows request refused before
   start, with its wire name in `refusal_detail`.
 - `outcomes/crate-local-unknown-platform`: an unrecognised platform retained on
@@ -276,7 +278,7 @@ Thirty-six **crate-local additions** were written in this crate, rather than cop
   rejection, and runner authentication refusals, with human-only detail codes
   where reported. An older reader retains their reason strings as `Unknown`.
 
-Totals: **53 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
+Totals: **54 outcome pairs and 17 reply pairs**. Runner `frames/` and pretty
 `.json` copies are intentionally excluded. The vector README documents their
 encoding. Tests enumerate the entire corpus, hash each `.jcs` file's actual
 bytes, and round-trip every case through typed values to the same independent

@@ -48,6 +48,7 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-network-unsupported",
     "crate-local-platform-linux",
     "crate-local-platform-windows",
+    "crate-local-platform-macos",
     "crate-local-platform-unsupported",
     "crate-local-unknown-platform",
     "crate-local-lost-to-restart",
@@ -257,9 +258,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 33);
+    assert_eq!(LOCAL_OUTCOMES.len(), 34);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 70);
+    assert_eq!(cases().len(), 71);
 }
 
 #[test]
@@ -1781,6 +1782,7 @@ fn platform_variants_round_trip_in_requests_and_acknowledgements() {
     for (wire_name, platform) in [
         ("linux", Platform::Linux),
         ("windows", Platform::Windows),
+        ("macos", Platform::Macos),
         (
             "future_platform",
             Platform::Unknown("future_platform".into()),

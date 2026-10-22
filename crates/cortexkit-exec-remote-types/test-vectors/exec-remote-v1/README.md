@@ -54,9 +54,9 @@ Status has `queue_depth`, `running_jobs: [{job_id, workspace_key, weight}]`
 
 ## Crate-local additions
 
-These thirty-three outcome cases (66 files: one `.jcs`/`.sha256` pair each) and
+These thirty-four outcome cases (68 files: one `.jcs`/`.sha256` pair each) and
 three reply cases (six files) extend the caller corpus described above. The
-resulting corpus contains 53 outcome cases and 17 reply cases:
+resulting corpus contains 54 outcome cases and 17 reply cases:
 
 - `outcomes/crate-local-network-outbound`: a request with `network: "outbound"`
   and an `accepted` record acknowledging `network: "outbound"`. The runner must
@@ -69,8 +69,9 @@ resulting corpus contains 53 outcome cases and 17 reply cases:
   must refuse unrecognised network requests rather than downgrade or upgrade them.
 - `outcomes/crate-local-network-unsupported`: an outbound request refused before
   start with the known, non-transient `RefusalReason::NetworkUnsupported`.
-- `outcomes/crate-local-platform-linux` and `outcomes/crate-local-platform-windows`:
-  explicit platform requests and acknowledgements. Runners report the platform
+- `outcomes/crate-local-platform-linux`, `outcomes/crate-local-platform-windows`
+  and `outcomes/crate-local-platform-macos`: explicit platform requests and
+  acknowledgements. Runners report the platform
   they actually use; callers requesting a non-Linux platform must require an exact
   acknowledgement or cancel without trusting the result.
 - `outcomes/crate-local-platform-unsupported`: a Windows request refused before

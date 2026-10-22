@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.11
+
+- Add `Platform::Macos`, wire `"macos"`, for runners that run jobs on macOS.
+  Older decoders read `"macos"` as `Platform::Unknown("macos")`, so an older
+  runner refuses such a request before start with `platform_unsupported`, as for
+  any platform it doesn't recognise. New `crate-local-platform-macos` outcome
+  vector.
+
 ## 0.2.10
 
 - Add chunked returned files, so a runner can return up to 10 MiB of files when

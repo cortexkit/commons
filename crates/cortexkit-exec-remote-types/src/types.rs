@@ -71,6 +71,8 @@ pub enum Platform {
     Linux,
     /// Run on Windows.
     Windows,
+    /// Run on macOS.
+    Macos,
     /// A platform string this version does not recognise.
     Unknown(String),
 }
@@ -80,6 +82,7 @@ impl From<String> for Platform {
         match platform.as_str() {
             "linux" => Self::Linux,
             "windows" => Self::Windows,
+            "macos" => Self::Macos,
             _ => Self::Unknown(platform),
         }
     }
@@ -90,6 +93,7 @@ impl From<Platform> for String {
         match platform {
             Platform::Linux => "linux".into(),
             Platform::Windows => "windows".into(),
+            Platform::Macos => "macos".into(),
             Platform::Unknown(platform) => platform,
         }
     }
