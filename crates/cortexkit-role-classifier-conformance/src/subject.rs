@@ -85,6 +85,12 @@ pub trait ClassifierSubject: Send + Sync {
     /// has one. Without it, the suite cannot ask for `model_not_classifier`.
     fn non_classifier_model(&self) -> Option<String>;
 
+    /// A catalog id for a row that states no `kind`, if the catalog contains
+    /// such a row. Without it, the suite cannot check the kindless-row refusal.
+    fn kindless_model(&self) -> Option<String> {
+        None
+    }
+
     /// Script what the stand-in answers for `key` from now on.
     async fn script(&self, key: &str, scripted: Scripted);
 

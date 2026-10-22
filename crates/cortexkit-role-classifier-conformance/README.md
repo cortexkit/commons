@@ -16,6 +16,7 @@ fake under `tests/fake/` exists only to test the suite itself.
   - the models its catalog serves (`ServedModel`: priced or not, image
     limit, context, egress host), which `role.describe` must match;
   - a catalog id whose row is not a classifier, if it has one;
+  - a catalog id whose row states no `kind`, if the catalog contains such a row;
   - control of a **stand-in provider** every served model routes to. For
     each provider call the stand-in computes `state_key` of the request's
     `state` (its JCS canonical JSON), counts the call under it, and answers
@@ -27,7 +28,8 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 A check the module gives the suite no way to ask is **not applicable**,
 never passed: the cost and ceiling checks on a module that serves no priced
-model, and the concurrent-call check on a stand-in that cannot hold a call.
+model; the concurrent-call check on a stand-in that cannot hold a call; and
+the kindless-row check when the catalog has no row without a kind.
 A run with no failure and some not-applicable checks is "passed for what the
 module does", naming them; only a run where every check ran and passed is
 "passed".
@@ -47,6 +49,7 @@ module does", naming them; only a run where every check ran and passed is
 | `reuse_refused_naming_field` | — |
 | `reordered_object_state_is_replay` | — |
 | `validation_refusals_reach_no_provider` | — |
+| `kindless_catalog_row_refused_not_classifier` | the catalog has no row that states no `kind` |
 | `null_state_refused_naming_field` | — |
 | `unknown_question_type_refused_naming_field` | — |
 | `answers_in_request_order` | — |

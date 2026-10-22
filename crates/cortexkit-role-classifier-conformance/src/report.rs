@@ -58,6 +58,10 @@ pub const CHECKS: &[CheckSpec] = &[
         "a bad batch_id, an unknown model, a non-classifier model, too many questions, a bad question id, a one-option choice, an eleven-level score, too many items, a number state, unsupported images and an oversize request are refused with their code and detail.field before any stand-in call, and write nothing: a valid body with the same batch_id is then admitted",
     ),
     check(
+        "kindless_catalog_row_refused_not_classifier",
+        "when the module's catalog has a row that states no kind, classify.run refuses it model_not_classifier with detail.model and no detail.kind before any stand-in call, and a valid request can then use the same batch_id; not applicable when the catalog has no kindless row",
+    ),
+    check(
         "null_state_refused_naming_field",
         "an item with a null state is refused invalid_params naming items[1].state, calls nothing, and writes nothing",
     ),

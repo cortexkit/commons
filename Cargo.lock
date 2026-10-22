@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",

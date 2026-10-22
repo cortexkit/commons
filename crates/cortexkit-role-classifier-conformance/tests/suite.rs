@@ -334,6 +334,19 @@ async fn validating_after_dispatch_fails_the_validation_check() {
 }
 
 #[tokio::test]
+async fn returning_model_unknown_for_a_kindless_row_fails_the_named_check() {
+    breaks(
+        Defects {
+            kindless_model_as_unknown: true,
+            ..Defects::default()
+        },
+        &["kindless_catalog_row_refused_not_classifier"],
+        "a catalog row that states no kind",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn forwarding_a_null_state_fails_the_null_state_check() {
     breaks(
         Defects {

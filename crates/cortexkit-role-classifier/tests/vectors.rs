@@ -16,7 +16,7 @@ use cortexkit_role_classifier::{
     },
     question::{check_question, QuestionType},
     reply::{check_reply, sum_usage, Answer, ClassifyReply, Usage},
-    request::{check_request, ClassifyRequest},
+    request::{check_request, CatalogRow, ClassifyRequest},
     vectors, IndexMap,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -323,12 +323,26 @@ fn object_and_array_states_are_forwarded_verbatim() {
 #[test]
 fn one_admission_refusal_per_code_as_the_crate_builds_it() {
     let file: AdmissionRefusals = exact("admission-refusals.json");
-    let names: Vec<&str> = file.refusals.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, errors::ADMISSION_CODES);
+    for code in errors::ADMISSION_CODES {
+        assert!(
+            file.refusals
+                .iter()
+                .any(|vector| vector.refusal.code == *code),
+            "{code} has no admission refusal vector"
+        );
+    }
+    assert!(file
+        .refusals
+        .iter()
+        .any(|vector| vector.name == "model_not_classifier_kindless"));
     let describe = describe();
     for vector in &file.refusals {
         let refusal = &vector.refusal;
-        assert_eq!(refusal.code, vector.name);
+        assert!(
+            errors::ADMISSION_CODES.contains(&refusal.code.as_str()),
+            "{}",
+            vector.name
+        );
         assert_eq!(
             Some(refusal.detail.class.clone()),
             errors::admission_class(&refusal.code),
@@ -343,14 +357,24 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
             errors::BATCH_ID_REUSE => Refusal::batch_id_reuse("items[0]"),
             errors::MODEL_UNKNOWN => {
                 assert!(describe.model(&vector.request.model).is_none());
-                cortexkit_role_classifier::request::check_catalog_row(&vector.request.model, None)
-                    .unwrap_err()
+                cortexkit_role_classifier::request::check_catalog_row(
+                    &vector.request.model,
+                    CatalogRow::Absent,
+                )
+                .unwrap_err()
             }
-            errors::MODEL_NOT_CLASSIFIER => cortexkit_role_classifier::request::check_catalog_row(
+            "model_not_classifier" => cortexkit_role_classifier::request::check_catalog_row(
                 &vector.request.model,
-                Some("chat"),
+                CatalogRow::Kind("chat"),
             )
             .unwrap_err(),
+            "model_not_classifier_kindless" => {
+                cortexkit_role_classifier::request::check_catalog_row(
+                    &vector.request.model,
+                    CatalogRow::Kindless,
+                )
+                .unwrap_err()
+            }
             errors::COST_EXCEEDED => {
                 assert_eq!(vector.request.max_cost_usd, Some(num(0.25)));
                 Refusal::cost_exceeded(num(0.42), num(0.25))

@@ -178,6 +178,7 @@ where
             "reuse_refused_naming_field" => self.reuse().await,
             "reordered_object_state_is_replay" => self.reordered_state().await,
             "validation_refusals_reach_no_provider" => self.validation().await,
+            "kindless_catalog_row_refused_not_classifier" => self.kindless_catalog_row().await,
             "null_state_refused_naming_field" => self.null_state().await,
             "unknown_question_type_refused_naming_field" => self.unknown_type().await,
             "answers_in_request_order" => self.request_order().await,
@@ -1146,6 +1147,41 @@ where
                 .map_err(|e| format!("{e}: the refused request was recorded"))?;
             }
         }
+        Ok(Ending::Passed)
+    }
+
+    async fn kindless_catalog_row(&self) -> Check {
+        let Some(model) = self.subject.kindless_model() else {
+            return Ok(Ending::NotApplicable(
+                "the catalog has no row that states no kind".into(),
+            ));
+        };
+        let main = self.main_model()?;
+        let (state, key) = self.marker("kindless-row");
+        let batch = self.mint("kindless-row");
+        let question = noul_question();
+        let body = params(&batch, &model, &question, items(&[&state]), None);
+        self.script_answer(&key, noul_body("0.5", None)).await;
+        let what = "a catalog row that states no kind";
+        let refusal = Self::refusal_of(what, self.send(&body).await?)?;
+        Self::expect_refusal(what, &refusal, errors::MODEL_NOT_CLASSIFIER, None)?;
+        if refusal.detail.model.as_deref() != Some(model.as_str()) || refusal.detail.kind.is_some()
+        {
+            return Err(format!(
+                "{what}: model_not_classifier names the row and omits detail.kind, got model {:?} and kind {:?}",
+                refusal.detail.model, refusal.detail.kind
+            ));
+        }
+        self.expect_calls(what, &key, 0).await?;
+
+        let (next_state, next_key) = self.marker("kindless-row-follow-up");
+        self.script_answer(&next_key, noul_body("0.5", None)).await;
+        let follow_up = params(&batch, &main.model, &question, items(&[&next_state]), None);
+        Self::reply_of(
+            "a valid body reusing the batch id after the kindless refusal",
+            self.send(&follow_up).await?,
+        )
+        .map_err(|e| format!("{e}: the refused request was recorded"))?;
         Ok(Ending::Passed)
     }
 

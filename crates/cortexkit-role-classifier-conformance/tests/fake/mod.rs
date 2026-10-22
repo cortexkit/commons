@@ -36,7 +36,7 @@ use cortexkit_role_classifier_conformance::{
         reply::{Answer, Usage},
         request::{
             check_catalog_row, check_request, check_request_bytes, effective_ceiling,
-            parse_request, ClassifyRequest, CLASSIFIER_KIND,
+            parse_request, CatalogRow, ClassifyRequest, CLASSIFIER_KIND,
         },
         IndexMap,
     },
@@ -49,6 +49,7 @@ use subc_protocol::ErrorBody;
 pub const PRICED: &str = "fake/priced";
 pub const TEXT_ONLY: &str = "fake/text";
 pub const CHAT: &str = "fake/chat";
+pub const KINDLESS: &str = "fake/kindless";
 const EGRESS: &str = "stand-in.invalid";
 const MAX_ITEMS: u64 = 20;
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
@@ -122,6 +123,9 @@ pub struct Defects {
     /// A request question of an unknown type is forwarded as if it were a
     /// noul question instead of being refused.
     pub unknown_question_type_forwarded: bool,
+    /// A catalog row with no kind is refused as `model_unknown` instead of
+    /// `model_not_classifier`.
+    pub kindless_model_as_unknown: bool,
     /// A re-send's lower ceiling applies to that call only: the batch keeps
     /// the ceiling recorded at first admission.
     pub tightened_ceiling_not_recorded: bool,
@@ -260,11 +264,12 @@ impl FakeModule {
         RoleDescribe::new(Limits::new(MAX_ITEMS, MAX_REQUEST_BYTES), models)
     }
 
-    fn kind(&self, model: &str) -> Option<&'static str> {
+    fn catalog_row(&self, model: &str) -> CatalogRow<'static> {
         match model {
-            PRICED | TEXT_ONLY => Some(CLASSIFIER_KIND),
-            CHAT => Some("chat"),
-            _ => None,
+            PRICED | TEXT_ONLY => CatalogRow::Kind(CLASSIFIER_KIND),
+            CHAT => CatalogRow::Kind("chat"),
+            KINDLESS => CatalogRow::Kindless,
+            _ => CatalogRow::Absent,
         }
     }
 
@@ -300,7 +305,10 @@ impl FakeModule {
                 Err(refusal) => return refused(refusal),
             }
         };
-        if let Err(refusal) = check_catalog_row(&request.model, self.kind(&request.model)) {
+        if self.defects.kindless_model_as_unknown && request.model == KINDLESS {
+            return refused(Refusal::model_unknown(&request.model));
+        }
+        if let Err(refusal) = check_catalog_row(&request.model, self.catalog_row(&request.model)) {
             return refused(refusal);
         }
         let catalog = self.catalog();
@@ -766,6 +774,10 @@ impl ClassifierSubject for FakeSubject {
 
     fn non_classifier_model(&self) -> Option<String> {
         Some(CHAT.into())
+    }
+
+    fn kindless_model(&self) -> Option<String> {
+        Some(KINDLESS.into())
     }
 
     async fn script(&self, key: &str, scripted: Scripted) {

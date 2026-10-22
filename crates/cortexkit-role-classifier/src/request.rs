@@ -14,12 +14,13 @@ use serde_json::{Number, Value};
 use cortexkit_model_batch::{
     admission::{
         check_batch_id, check_catalog_row as check_row, check_max_cost_usd, check_request_size,
-        CatalogRow,
     },
     image::{check_images, ImageLimits},
 };
 
-pub use cortexkit_model_batch::admission::{effective_ceiling, is_batch_id, BATCH_ID_MAX_LEN};
+pub use cortexkit_model_batch::admission::{
+    effective_ceiling, is_batch_id, CatalogRow, BATCH_ID_MAX_LEN,
+};
 
 use crate::{
     describe::{Limits, ModelEntry},
@@ -214,17 +215,18 @@ pub fn check_request_bytes(len: usize, limits: &Limits) -> Result<(), Refusal> {
     check_request_size(len, limits.max_request_bytes)
 }
 
-/// Check the model's catalog row: `None` when the model is not in the
-/// catalog (`model_unknown`), else its `kind`, which must be
-/// [`CLASSIFIER_KIND`] (`model_not_classifier`). The model is never
-/// substituted.
-///
-/// A catalog row that states no kind is not modelled here yet: `None` means
-/// no row (the contract's open readings, §12).
-pub fn check_catalog_row(model: &str, kind: Option<&str>) -> Result<(), Refusal> {
-    let row = kind.map_or(CatalogRow::Absent, CatalogRow::Kind);
-    check_row(model, row, CLASSIFIER_KIND, |model, kind| {
-        Refusal::model_not_classifier(model, kind.unwrap_or_default())
+/// Check the model's catalog row: [`CatalogRow::Absent`] is `model_unknown`;
+/// a row with another kind or no kind is `model_not_classifier`. A kindless
+/// refusal names the model without inventing a kind.
+pub fn check_catalog_row(model: &str, row: CatalogRow<'_>) -> Result<(), Refusal> {
+    check_row(model, row, CLASSIFIER_KIND, |model, kind| match kind {
+        Some(kind) => Refusal::model_not_classifier(model, kind),
+        None => {
+            let mut refusal = Refusal::model_not_classifier(model, "");
+            refusal.message = format!("{model} is not a classifier");
+            refusal.detail.kind = None;
+            refusal
+        }
     })
 }
 
@@ -407,14 +409,19 @@ mod tests {
 
     #[test]
     fn catalog_rows_are_pinned() {
-        assert!(check_catalog_row("m", Some("classifier")).is_ok());
+        assert!(check_catalog_row("m", CatalogRow::Kind("classifier")).is_ok());
         assert_eq!(
-            check_catalog_row("m", None).unwrap_err().code,
+            check_catalog_row("m", CatalogRow::Absent).unwrap_err().code,
             MODEL_UNKNOWN
         );
-        let refusal = check_catalog_row("m", Some("chat")).unwrap_err();
-        assert_eq!(refusal.code, MODEL_NOT_CLASSIFIER);
-        assert_eq!(refusal.detail.kind.as_deref(), Some("chat"));
+        let kindless = check_catalog_row("m", CatalogRow::Kindless).unwrap_err();
+        assert_eq!(kindless.code, MODEL_NOT_CLASSIFIER);
+        assert_eq!(kindless.detail.model.as_deref(), Some("m"));
+        assert_eq!(kindless.detail.kind, None);
+        let other_kind = check_catalog_row("m", CatalogRow::Kind("chat")).unwrap_err();
+        assert_eq!(other_kind.code, MODEL_NOT_CLASSIFIER);
+        assert_eq!(other_kind.detail.model.as_deref(), Some("m"));
+        assert_eq!(other_kind.detail.kind.as_deref(), Some("chat"));
     }
 
     #[test]

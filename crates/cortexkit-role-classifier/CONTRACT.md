@@ -218,10 +218,10 @@ keep their numbers, and say what is this role's own.
 
 ### 6.8 Model pinned
 
-- [pinned] As RULES §9: refused `model_unknown` if absent from the
-  catalog, and `model_not_classifier` if the row's `kind` isn't
-  `classifier` (`check_catalog_row`). A row that states no kind is §12's
-  first open reading.
+- [pinned] As RULES §9: a missing row is `model_unknown`; a row whose
+  `kind` is not `classifier` is `model_not_classifier`, with `detail.model`
+  and `detail.kind`; a row that states no `kind` is that same code with
+  `detail.model` only, never an invented kind (`check_catalog_row`).
 
 ### 6.9 Spend guard
 
@@ -324,7 +324,8 @@ examples verbatim.
     per question type, per provider, the provider request and response and
     the `classify.run` request and reply that wrap them;
   - `state-object.json`, `state-array.json`: structured `state`;
-  - `admission-refusals.json`: one refusal per admission code;
+  - `admission-refusals.json`: one refusal per admission code, plus a
+    kindless catalog row refused as `model_not_classifier`;
   - `item-errors.json`: one per-item error per code, with `auth_failed`
     and `model_unavailable` showing the item the stop left unsent;
   - `field-paths.json`: an unknown question type refused naming
@@ -348,10 +349,6 @@ examples verbatim.
 
 ## 12. Open readings
 
-- A catalog row that states no `kind`. `check_catalog_row` takes the
-  row's kind as an `Option`, where `None` means no row, so a kindless row
-  cannot be told apart from a missing one; a later version pins it with the
-  `model.kind` gate (RULES §9 states the shared rule).
 - The spend guard's estimate (§6.9) is the module's own. This role may
   adopt the shared conservative estimate (RULES §5) in a later version.
 

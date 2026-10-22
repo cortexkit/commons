@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Depends on `cortexkit-role-classifier` 0.4.0, which it re-exports as
+  `wire`; that release changes `request::check_catalog_row`'s signature.
+- The named kindless-row check rejects a catalog row with no `kind` as
+  `model_not_classifier` and requires the refusal to omit `detail.kind`. A
+  faulty module that answers `model_unknown` for that row fails that check.
+
 ## 0.3.0
 
 - Depends on `cortexkit-role-classifier` 0.3.0, which it re-exports as

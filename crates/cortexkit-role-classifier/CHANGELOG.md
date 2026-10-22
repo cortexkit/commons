@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Breaking: `request::check_catalog_row` takes the shared `CatalogRow`
+  (re-exported from `request`) instead of `Option<&str>`, because an
+  `Option` could not tell a missing row from a row that states no kind. No
+  catalog row is `model_unknown`; a row with no `kind` is
+  `model_not_classifier` with `detail.model` and no invented kind, as the
+  shared batch rules already said. Added a matching test vector.
+
 ## 0.3.0
 
 - Depends on `cortexkit-model-batch` 0.2.0, whose estimator changed
