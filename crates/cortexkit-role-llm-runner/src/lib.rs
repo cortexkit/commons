@@ -277,6 +277,8 @@ pub mod capabilities {
     pub const RUN_USAGE: &str = "run_usage";
     /// Durable, incrementally maintained session spend on `session.head`.
     pub const SESSION_USAGE: &str = "session_usage";
+    /// The caller's effective grant on `session.head`; absence means no grant.
+    pub const HEAD_SENDER: &str = "head_sender";
     /// `session.send` with `delivery_order`: an ordered list of delivery
     /// modes, plan-named senders and plan templates for system-authority
     /// text.
@@ -347,6 +349,7 @@ pub mod capabilities {
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
         (SESSION_USAGE, &[ops::SESSION_HEAD]),
+        (HEAD_SENDER, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
         (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),

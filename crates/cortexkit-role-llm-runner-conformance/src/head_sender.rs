@@ -1,6 +1,7 @@
 //! The next-send delivery grant must be scoped to the route's attested caller.
 
 use cortexkit_role_llm_runner::{
+    capabilities as groups,
     delivery_order::{Mode, PlanSender},
     read::HeadSender,
 };
@@ -36,6 +37,12 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    let describe = case.checked_describe().await?;
+    if !describe.declares(groups::HEAD_SENDER) {
+        return Ok(Ending::Inapplicable(
+            "runner does not declare head_sender".into(),
+        ));
+    }
     let Some([a, b]) = case.subject.head_sender_identities() else {
         return Ok(Ending::Inapplicable(
             "adapter supplies no two-identity head.sender fixture".into(),
@@ -44,7 +51,6 @@ where
     if a.module == b.module || a.stamp == b.stamp {
         return Err("head.sender fixture identities must be distinct".into());
     }
-    let describe = case.checked_describe().await?;
     let supported: Vec<String> = [
         Mode::ToolResult,
         Mode::TurnSystem,

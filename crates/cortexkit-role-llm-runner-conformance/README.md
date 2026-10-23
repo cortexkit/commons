@@ -18,6 +18,13 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+New in 0.11.2, for llm-runner 0.6.2: `head_sender` is discovered directly
+from `role.describe` (no new `Capability` enum variant). Without that group,
+`head_sender_is_callers_effective_grant` is inapplicable with a reason naming
+`head_sender`, even when the adapter supplies its two-identity fixture.
+The reference fake declares the group; a faulty runner that declares it but
+omits every `sender` fails the case by name.
+
 New in 0.11.1, for llm-runner 0.6.1: declare `Capability::SessionUsage`
 when serving the `session_usage` group, and opt into the scripted fixtures
 with `session_usage_fixtures() -> true`. The three `session_usage_*` cases
@@ -35,7 +42,9 @@ A and B. The kit installs a plan naming A without flags and B with both
 `idle_start` and `interrupt`. `head_sender_is_callers_effective_grant` compares
 their grants to supported modes from checked describe, also checking an
 unnamed caller and the owner. Existing adapters return `None` and remain
-inapplicable; opted-in adapters run regardless of their supported-mode set.
+inapplicable; adapters with the group and hook run regardless of their
+supported-mode set. Declaring runners must report `sender` for both named
+callers and the owner (with `owner: true`).
 `cut_incarnation_log` and `recreate_incarnation_log` optionally exercise a
 reported log identity through a real cut and creation of a new log at the
 same key. Defaults are inapplicable; both lifetime faults have named tests.
@@ -252,6 +261,7 @@ is unchanged and prints nothing.
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
+| `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
 | `baseline_owner_only`, `baseline_matches_admission_reply` | `queue` |
 | `tail_read_is_newest_page`, `range_read_stops_by_count`, `range_read_stops_by_bytes`, `oversize_message_alone_on_its_page`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `head_has_no_bodies` | `transcript_reads`, `queue` |
 | `unknown_read_field_refused`, `never_written_session_empty_page`, `never_written_session_empty_head` | `transcript_reads` |

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.2
+
+- Require llm-runner 0.6.2. Gate `head_sender_is_callers_effective_grant`
+  on the live `head_sender` describe group as well as the adapter-provided
+  fixture for two caller identities. An absent group is inapplicable with a
+  named reason.
+- Make the reference fake declare `head_sender`; add a faulty runner that
+  declares it but omits every `sender`, failing the case by name. Existing
+  caller, owner and mode-grant faulty runners remain covered by name.
+
 ## 0.11.1
 
 - Add an incarnation lifetime case with defaulted cut/re-create hooks and

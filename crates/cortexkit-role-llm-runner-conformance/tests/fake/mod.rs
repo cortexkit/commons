@@ -171,6 +171,7 @@ pub struct Defects {
     pub head_sender_ignores_caller: bool,
     pub head_sender_grant_for_unnamed_caller: bool,
     pub head_sender_owner_absent: bool,
+    pub head_sender_omitted: bool,
     pub head_sender_a_idle_start: bool,
     pub session_usage_sum_wrong: bool,
     pub session_usage_since_wrong: bool,
@@ -3772,6 +3773,9 @@ impl Module {
                     FAKE_MODEL,
                 ));
             }
+            if self.world.defects.head_sender_omitted {
+                head.sender = None;
+            }
             return respond(head);
         };
         if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
@@ -3887,6 +3891,9 @@ impl Module {
                     })
                     .or_else(|| run.reason.clone()),
             });
+        }
+        if self.world.defects.head_sender_omitted {
+            head.sender = None;
         }
         respond(head)
     }
@@ -4617,6 +4624,7 @@ impl RunnerRoute for FakeRoute {
 pub struct FakeSubject {
     pub incarnation_fixtures: bool,
     pub head_sender_fixtures: bool,
+    pub head_sender_group: bool,
     pub output_refs_group: bool,
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
@@ -4733,6 +4741,7 @@ impl FakeSubject {
         Self {
             held_calls_group: false,
             head_sender_fixtures: false,
+            head_sender_group: true,
             incarnation_fixtures: false,
             output_refs_group: false,
             descriptor_case: None,
@@ -4812,6 +4821,10 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
+                        .chain(
+                            self.head_sender_group
+                                .then(|| groups::HEAD_SENDER.to_owned()),
+                        )
                         .chain(
                             self.output_refs_group
                                 .then(|| groups::OUTPUT_REFS.to_owned()),

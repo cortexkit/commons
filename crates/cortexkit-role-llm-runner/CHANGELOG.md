@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2
+
+- Add the `head_sender` describe group for `session.head.sender`. With the
+  group, absence means no grant for the caller; without it, absence means
+  unknown, including on older runners. Declaring runners must report the
+  owner's grant and every plan-named caller's grant.
+- Add `HeadMeta::sender_grant` and non-exhaustive `read::SenderGrant` with
+  `Granted`, `NoGrant` and `Unknown` outcomes. Model, usage and incarnation
+  semantics and all existing vector bytes are unchanged.
+
 ## 0.6.1
 
 - Add ungated `session.head.incarnation`, an optional opaque 1–128-byte log

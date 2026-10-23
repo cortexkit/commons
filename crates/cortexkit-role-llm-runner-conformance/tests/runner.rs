@@ -2255,6 +2255,7 @@ async fn head_sender_defect(defects: Defects, expected: Option<&str>) {
             "{}",
             report.render()
         );
+        assert_none_failed_but(&report, &[name]);
     } else {
         assert_eq!(
             report.outcome(name),
@@ -2262,12 +2263,39 @@ async fn head_sender_defect(defects: Defects, expected: Option<&str>) {
             "{}",
             report.render()
         );
+        assert_none_failed_but(&report, &[]);
     }
 }
 
 #[tokio::test]
 async fn head_sender_correct_runner_passes() {
     head_sender_defect(Defects::default(), None).await;
+}
+
+#[tokio::test]
+async fn head_sender_omitted_everywhere_fails_by_name() {
+    head_sender_defect(
+        Defects {
+            head_sender_omitted: true,
+            ..Defects::default()
+        },
+        Some("A head.sender None"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_sender_undeclared_group_is_inapplicable_by_name() {
+    let mut subject = declaring(Capability::DeliveryOrder, Defects::default());
+    subject.head_sender_fixtures = true;
+    subject.head_sender_group = false;
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome("head_sender_is_callers_effective_grant"), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare head_sender"),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
 }
 
 #[tokio::test]

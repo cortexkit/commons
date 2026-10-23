@@ -620,6 +620,27 @@ mod tests {
     }
 
     #[test]
+    fn head_sender_group_requires_session_head() {
+        let mut major = Major::new(
+            crate::PROVIDES,
+            crate::REQUIRED_OPS.iter().map(|s| s.to_string()).collect(),
+            "alpha",
+        );
+        let mut describe = RoleDescribe::new(vec![major.clone()], "0.6.2")
+            .with_capabilities(vec![capabilities::HEAD_SENDER.into()])
+            .with_session_capabilities_from("baseline");
+        let problems = check_describe(&serde_json::to_value(&describe).unwrap()).unwrap_err();
+        assert!(problems.iter().any(|problem| matches!(
+            problem,
+            DescribeProblem::GroupIncomplete { capability, op }
+                if *capability == capabilities::HEAD_SENDER && *op == ops::SESSION_HEAD
+        )));
+        major.ops.push(ops::SESSION_HEAD.into());
+        describe.majors = vec![major];
+        assert!(check_describe(&serde_json::to_value(describe).unwrap()).is_ok());
+    }
+
+    #[test]
     fn new_management_groups_are_independent_and_never_partial() {
         for (group, op) in [
             (capabilities::RUN_STATUS, crate::ops::RUN_STATUS),

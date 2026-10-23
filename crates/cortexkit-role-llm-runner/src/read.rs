@@ -859,7 +859,8 @@ pub struct HeadMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::usage::SessionUsage>,
     /// The attested caller's grant under the plan checked on its next send.
-    /// Absent means no grant for this caller, not an unknown selection.
+    /// With the `head_sender` group, absent means no grant for this caller;
+    /// without the group, absent means unknown. Use [`Self::sender_grant`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<HeadSender>,
     /// Opaque identity of this key's log, stable across its entire lifetime.
@@ -878,6 +879,18 @@ pub struct HeadSender {
     /// Encoded only for the owner, as `owner: true`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub owner: bool,
+}
+
+/// The caller's delivery grant, interpreted using the runner's describe groups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SenderGrant {
+    /// The runner reported the caller's effective grant.
+    Granted(HeadSender),
+    /// The runner declares `head_sender` and reported no grant for this caller.
+    NoGrant,
+    /// No sender was reported and the runner does not declare `head_sender`.
+    Unknown,
 }
 
 impl HeadSender {
@@ -1074,6 +1087,16 @@ impl HeadMeta {
         self
     }
 
+    /// Interpret the caller's grant without mistaking an older runner's
+    /// omitted field for a known lack of permission.
+    pub fn sender_grant(&self, describe: &crate::describe::RoleDescribe) -> SenderGrant {
+        match &self.sender {
+            Some(sender) => SenderGrant::Granted(sender.clone()),
+            None if describe.declares(crate::capabilities::HEAD_SENDER) => SenderGrant::NoGrant,
+            None => SenderGrant::Unknown,
+        }
+    }
+
     pub fn with_incarnation(mut self, incarnation: impl Into<String>) -> Self {
         self.incarnation = Some(incarnation.into());
         self
@@ -1180,6 +1203,38 @@ mod tests {
                     .with_incarnation(value)
                     .incarnation_valid(),
                 valid
+            );
+        }
+    }
+
+    #[test]
+    fn absent_sender_without_head_sender_group_is_unknown() {
+        let describe = crate::describe::RoleDescribe::default();
+        assert_eq!(
+            HeadMeta::no_lineage().sender_grant(&describe),
+            SenderGrant::Unknown
+        );
+    }
+
+    #[test]
+    fn absent_sender_with_head_sender_group_is_no_grant() {
+        let describe = crate::describe::RoleDescribe::default()
+            .with_capabilities(vec![crate::capabilities::HEAD_SENDER.into()]);
+        assert_eq!(
+            HeadMeta::no_lineage().sender_grant(&describe),
+            SenderGrant::NoGrant
+        );
+    }
+
+    #[test]
+    fn present_sender_is_granted_with_or_without_head_sender_group() {
+        let sender = HeadSender::for_owner(vec!["idle_start".into()]);
+        let head = HeadMeta::no_lineage().with_sender(sender.clone());
+        for capabilities in [vec![], vec![crate::capabilities::HEAD_SENDER.into()]] {
+            let describe = crate::describe::RoleDescribe::default().with_capabilities(capabilities);
+            assert_eq!(
+                head.sender_grant(&describe),
+                SenderGrant::Granted(sender.clone())
             );
         }
     }

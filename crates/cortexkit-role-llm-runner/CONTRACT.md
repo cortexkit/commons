@@ -174,6 +174,7 @@ shipping runner with this document.
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
 | `session_usage` | `session.head` with durable, incremental session spend in `usage` | §4.3 |
+| `head_sender` | `session.head` with the attested caller's effective delivery grant in `sender`; absence means no grant | §4.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 | `send_status` | `send.status` | §9.8 |
 | `user_commands` | `session.user_command`, `session.user_command_status` | §9.10 |
@@ -529,16 +530,22 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   `idle_start` included for a named caller only when its plan entry has
   `idle_start: true`; `interrupt` is that entry's flag. This is derived from
   the same rule that send admission (`delivery_order::admit`) uses, so they
-  cannot disagree. It needs no describe group; a
-  runner that knows its plan reports the caller's grant. Absent means only
-  "no grant for you": the caller is neither the owner nor named by the plan,
-  not that the grant is unknown. It is independent of lineage.
+  cannot disagree. A runner declares the `head_sender` describe group (added
+  in 0.6.2) when its `session.head` serves `sender`. Under that group, absent
+  means "no grant for you": the caller is neither the owner nor named by the
+  plan. Without the group, readers treat an absent `sender` as unknown, even
+  if the runner reports `sender` for some callers. A present `sender` reports
+  a grant with or without the group. Readers can use
+  `HeadMeta::sender_grant` (`read::SenderGrant`: `Granted`, `NoGrant`,
+  `Unknown`) to make this distinction. It is independent of lineage.
 - [pinned] `sender` uses the plan the runner would check on that caller's
   next send. After an accepted `session.refresh` takes effect, this is the
   effective plan, not the original frozen bytes: `sender` never disagrees
-  with the next send's grant check. The owner receives `owner: true`, every
-  mode the runner would accept from the owner on its next send, and
-  `interrupt: true`. A session with no plan reports `sender` only to its owner.
+  with the next send's grant check. A runner declaring `head_sender` must
+  report `sender` to the owner and every caller named by the plan. The owner
+  receives `owner: true`, every mode the runner would accept from the owner
+  on its next send, and `interrupt: true`. A session with no plan reports
+  `sender` only to its owner.
 - [pinned] `incarnation?` (added in 0.6.1) is an opaque string of 1–128
   bytes, compared by equality only. It needs no group. It is minted when
   the key's log is first created and changes only when that key's log is
@@ -3861,7 +3868,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `session_usage_rewind_never_decreases` | same groups; a rewind of visible history does not reduce or reset spend |
 | `session_usage_unknown_fields_absent` | same groups; reasoning usage no scripted step reported stays absent, never zero |
 | `head_model_reflects_recorded_switch` | `queue`, `transcript_reads`; when the runner reports a model and the adapter can record a switch, the head follows that switch, not the frozen plan |
-| `head_sender_is_callers_effective_grant` | `queue`, `transcript_reads`; a plan names A with neither flag and B with both; A gets supported modes minus `idle_start`, B gets all supported modes and interrupt, an unnamed caller gets no grant, and the owner gets all supported modes, interrupt and `owner: true`; defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
+| `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; a plan names A with neither flag and B with both; A gets supported modes minus `idle_start`, B gets all supported modes and interrupt, an unnamed caller gets no grant, and the owner gets all supported modes, interrupt and `owner: true`; an undeclared `head_sender` group or defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
 | `head_incarnation_survives_cut_and_changes_on_recreation` | `queue`, `transcript_reads`; a reported incarnation stays equal across a real cut and differs after creation of a new log at the same key; defaulted cut/re-create hooks are inapplicable |
 | `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
 | `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a model whose one step is text ends `completed` with its final message, and with its directives where `turn_directives` is declared, never `max_steps` |

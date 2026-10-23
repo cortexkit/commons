@@ -120,7 +120,7 @@ pub const CASES: &[CaseSpec] = &[
     case("head_incarnation_survives_cut_and_changes_on_recreation", &[Queue, TranscriptReads],
         "a reported log identity holds across a real cut but changes when the same key's log is created again"),
     case("head_sender_is_callers_effective_grant", &[Queue, TranscriptReads],
-        "A gets supported modes minus idle_start, B gets every supported mode and interrupt, the unnamed caller gets no grant, and the owner gets owner=true"),
+        "when role.describe declares head_sender, A gets supported modes minus idle_start, B gets every supported mode and interrupt, the unnamed caller gets no grant, and the owner gets owner=true"),
     case("session_usage_sums_runs_since_first", SESSION_USAGE,
         "two runs' reported totals add up to durable session spend; since names the first counted run"),
     case("session_usage_rewind_never_decreases", SESSION_USAGE,
