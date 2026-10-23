@@ -191,14 +191,19 @@ fn broad_baseline_sharing_separates_deadlines_in_either_order() {
                 );
                 if timeout == 1 {
                     assert_eq!(row["timed_out_phase"], "test");
-                    assert!(row["reason"].as_str().unwrap().contains("own"), "{row}");
+                    let timed_out = row["baseline_targets"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|target| target["outcome"] == "TIMED_OUT")
+                        .collect::<Vec<_>>();
+                    assert_eq!(timed_out.len(), 1, "{row}");
+                    let target = timed_out[0]["target"].as_str().unwrap();
                     assert!(
-                        row["baseline_targets"]
-                            .as_array()
+                        row["reason"]
+                            .as_str()
                             .unwrap()
-                            .iter()
-                            .any(|target| target["outcome"] == "TIMED_OUT"
-                                && target["target"].as_str().unwrap().contains("own")),
+                            .contains(&format!("target {target} timed out")),
                         "{row}"
                     );
                     assert!(

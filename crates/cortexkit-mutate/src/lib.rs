@@ -2563,12 +2563,16 @@ fn short_command(command: &str) -> String {
 }
 
 /// What a command was doing when its deadline expired, appended to a
-/// timeout reason: for a Cargo test run, the test target it started last;
+/// timeout reason: the timed-out broad target, or for a focused Cargo test
+/// run, the test target Cargo started last;
 /// for any command, the processes under it that were still running (at most
 /// eight). Empty when neither is known.
-fn deadline_note(output: &Output, cargo_test_run: bool) -> String {
+fn deadline_note(output: &Output, cargo_test_run: bool, targets: &[broad::TargetReport]) -> String {
     let mut parts = vec![];
-    if cargo_test_run {
+    if let Some(target) = targets.iter().find(|target| target.outcome == "TIMED_OUT") {
+        // A broad target can time out during launch, before Cargo prints `Running`.
+        parts.push(format!("target {} timed out", target.target));
+    } else if cargo_test_run {
         // Cargo prints `Running <target> (<binary>)` before each test binary.
         if let Some(target) = output
             .text
@@ -2593,6 +2597,80 @@ fn deadline_note(output: &Output, cargo_test_run: bool) -> String {
         format!(" ({})", parts.join("; "))
     }
 }
+
+#[cfg(test)]
+mod deadline_note_tests {
+    use super::*;
+
+    fn output(text: &str) -> Output {
+        Output {
+            argv: vec![],
+            success: false,
+            code: None,
+            signal: None,
+            timeout: true,
+            timeout_s: 1,
+            interrupted: false,
+            running_at_deadline: vec!["cargo test (pid 4242)".into()],
+            text: text.into(),
+            stdout: text.into(),
+            stderr: None,
+            ms: 1000,
+            cargo_metadata: None,
+        }
+    }
+
+    #[test]
+    fn broad_timeout_names_recorded_target_before_cargo_running_line() {
+        let targets = [
+            broad::TargetReport {
+                target: "previous".into(),
+                outcome: "PASSED".into(),
+                red: vec![],
+                green: vec![],
+                ms: 10,
+            },
+            broad::TargetReport {
+                target: "lib".into(),
+                outcome: "TIMED_OUT".into(),
+                red: vec![],
+                green: vec![],
+                ms: 1000,
+            },
+        ];
+        // A freshness check may emit only artifact JSON, or follow a previous
+        // target's header, without ever reaching the timed-out target's header.
+        for text in [
+            "{\"reason\":\"compiler-artifact\",\"fresh\":true}\n",
+            "Running tests/previous.rs (target/debug/deps/previous-1234)\n",
+        ] {
+            for cargo_test_run in [true, false] {
+                assert_eq!(
+                    deadline_note(&output(text), cargo_test_run, &targets),
+                    " (target lib timed out; still running: cargo test (pid 4242))"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn focused_timeout_keeps_cargo_running_line_and_process_details() {
+        let output = output(
+            "Running unittests src/lib.rs (target/debug/deps/lib-1234)\n\
+             Running tests/own.rs (target/debug/deps/own-5678)\n",
+        );
+        assert_eq!(
+            deadline_note(&output, true, &[]),
+            " (last test target started: tests/own.rs (target/debug/deps/own-5678); \
+             still running: cargo test (pid 4242))"
+        );
+        assert_eq!(
+            deadline_note(&output, false, &[]),
+            " (still running: cargo test (pid 4242))"
+        );
+    }
+}
+
 fn tail(text: &str) -> String {
     let start = text.char_indices().rev().nth(7999).map_or(0, |(i, _)| i);
     text[start..].to_owned()
@@ -2737,7 +2815,7 @@ fn command_tests(
             return Err(error(format!(
                 "test command exceeded timeout_s = {}{}",
                 c.timeout_s,
-                deadline_note(&output, false)
+                deadline_note(&output, false, &[])
             )));
         }
         let code = match output.code {
@@ -2832,7 +2910,7 @@ fn command_breadth(
             return Err(format!(
                 "broad command exceeded timeout_s = {}{}",
                 c.timeout_s,
-                deadline_note(&output, false)
+                deadline_note(&output, false, &[])
             ));
         }
         if output.interrupted {
@@ -3476,7 +3554,7 @@ fn output_tests(
             return Err(format!(
                 "test command exceeded timeout_s = {}{}",
                 c.timeout_s,
-                deadline_note(&output, false)
+                deadline_note(&output, false, &[])
             ));
         }
         let code = output.code.ok_or_else(|| {
@@ -3543,7 +3621,7 @@ fn cargo_baseline(
         report.reason = Some(format!(
             "baseline build exceeded build_timeout_s = {}{}",
             c.build_timeout_s,
-            deadline_note(&build, false)
+            deadline_note(&build, false, &[])
         ));
         return Ok(());
     }
@@ -3568,7 +3646,11 @@ fn cargo_baseline(
         report.reason = Some(format!(
             "baseline test run exceeded timeout_s = {}{}",
             c.timeout_s,
-            deadline_note(&tests, c.runner == "cargo" || scope == Scope::Broad)
+            deadline_note(
+                &tests,
+                c.runner == "cargo" || scope == Scope::Broad,
+                &report.baseline_targets,
+            )
         ));
         return Ok(());
     }
@@ -4764,7 +4846,7 @@ fn run_prebuild(
             return Err(format!(
                 "{label}: exceeded timeout_s = {}{}",
                 step.timeout_s,
-                deadline_note(&output, false)
+                deadline_note(&output, false, &[])
             ));
         }
         if !output.success || output.interrupted {
@@ -4944,7 +5026,7 @@ fn replay(
             report.reason = Some(format!(
                 "build exceeded build_timeout_s = {}{}",
                 c.build_timeout_s,
-                deadline_note(&build, false)
+                deadline_note(&build, false, &[])
             ));
             return Ok(());
         }
@@ -4973,7 +5055,11 @@ fn replay(
             report.reason = Some(format!(
                 "test run exceeded timeout_s = {}{}",
                 c.timeout_s,
-                deadline_note(&tests, c.runner == "cargo" || scope == Scope::Broad)
+                deadline_note(
+                    &tests,
+                    c.runner == "cargo" || scope == Scope::Broad,
+                    &report.targets,
+                )
             ));
             return Ok(());
         }

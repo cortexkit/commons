@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.11
+
+- Broad baseline and mutant timeout reasons name the target from the runner's
+  own records, even when its launch times out before Cargo prints `Running`.
+  Focused Cargo timeout reasons and still-running process details are unchanged.
+
 ## 0.12.10
 
 - Broad Cargo and nextest audits build the full selected target set once per

@@ -218,10 +218,7 @@ fn hung_broad_collateral_target_times_out_and_leaves_no_process() {
         "{reason}"
     );
     // The reason names the target that hung and what was still running.
-    assert!(
-        reason.contains("last test target started: tests/collateral.rs"),
-        "{reason}"
-    );
+    assert!(reason.contains("target collateral timed out"), "{reason}");
     assert!(
         reason.contains("still running: collateral-") && reason.contains("sleep 60 (pid "),
         "{reason}"

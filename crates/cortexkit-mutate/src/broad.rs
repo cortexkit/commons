@@ -304,16 +304,9 @@ pub(super) fn run(
             );
             cmd
         };
-        let mut output = execute(root, cmd, c.timeout_s, stop)?;
+        let output = execute(root, cmd, c.timeout_s, stop)?;
         if c.runner == "cargo" {
             check_freshness(&target.id, &output.text)?;
-        }
-        // The header also identifies a nextest timeout, whose output need not
-        // contain a Cargo-style `Running` line.
-        if output.timeout && c.runner != "cargo" {
-            output
-                .text
-                .push_str(&format!("\nRunning {} ({})\n", target.id, target.id));
         }
         let results = if output.timeout || output.interrupted {
             None
