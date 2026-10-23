@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+No behaviour change. The bump follows `cortexkit-role-llm-runner` 0.6.0:
+this crate's public API re-exports `SetupCheckpoint`
+(`cortexkit_role_llm_runner::tags`) and returns `EntrySource`
+(`cortexkit_role_llm_runner::read`) from
+`CompactionMessage::model_view_source`, and those types now come from
+llm-runner 0.6, which a downstream crate sees as different types from
+llm-runner 0.5's.
+
 ## 0.5.1
 
 An additive release: the compaction provider sets how long a rewrite ride

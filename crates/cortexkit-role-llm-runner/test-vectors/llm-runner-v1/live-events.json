@@ -60,6 +60,26 @@
       }
     },
     {
+      "name": "tool started, replayed from history stored without times",
+      "event": {
+        "type": "tool_started",
+        "mid": "m2",
+        "tool_call_id": "toolu_0",
+        "name": "echo",
+        "arguments": "{\"q\":\"y\"}"
+      }
+    },
+    {
+      "name": "tool finished, replayed from history stored without times",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m2",
+        "tool_call_id": "toolu_0",
+        "outcome": "ok",
+        "output_bytes": 3
+      }
+    },
+    {
       "name": "run started",
       "event": {
         "type": "run_started",
@@ -299,6 +319,22 @@
         "run_id": "run_5"
       },
       "send_id": null
+    }
+  ],
+  "tool_times": [
+    {
+      "name": "a call the runner ran carries the times it recorded",
+      "started": "tool started",
+      "finished": "tool finished",
+      "started_at": 1790000000000,
+      "finished_at": 1790000000500
+    },
+    {
+      "name": "a call replayed from history stored without times leaves both out",
+      "started": "tool started, replayed from history stored without times",
+      "finished": "tool finished, replayed from history stored without times",
+      "started_at": null,
+      "finished_at": null
     }
   ]
 }

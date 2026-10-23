@@ -88,7 +88,7 @@ pub(super) fn live_events(
     defects: &Defects,
 ) {
     let index = sess.events.len() - 1;
-    let at = record["at"].as_u64().unwrap_or_default();
+    let at = record["at"].as_u64();
     let mut out: Vec<Value> = Vec::new();
     let event = |e: LiveEvent| serde_json::to_value(e).expect("events serialize");
     match kind {
@@ -131,6 +131,34 @@ pub(super) fn live_events(
                     result_text(&record["content"]).len() as u64,
                     at,
                 ))));
+            }
+        }
+        "legacy_call" => {
+            // The stored call has no recorded times, so its events carry
+            // none, unless the defect stamps the replay's own time on both.
+            let invented = at.filter(|_| defects.live_tool_time_invented);
+            let key = record["call_key"].as_str().unwrap_or_default();
+            if let Some(call) = sess.calls.get(key) {
+                let (mid, name) = call_holder(sess, key);
+                let mut started = event(LiveEvent::ToolStarted(ToolStarted::new(
+                    &mid,
+                    &call.tool_call_id,
+                    name,
+                    &call.arguments,
+                    None,
+                    invented,
+                )));
+                started["arguments_value"] = call.arguments.clone();
+                out.push(started);
+                if !defects.live_tool_finished_missing {
+                    out.push(event(LiveEvent::ToolFinished(ToolFinished::new(
+                        mid,
+                        &call.tool_call_id,
+                        live::tool_outcomes::OK,
+                        result_text(&record["content"]).len() as u64,
+                        invented,
+                    ))));
+                }
             }
         }
         _ => {}
@@ -377,7 +405,7 @@ impl Module {
                         event["name"].as_str().unwrap_or_default(),
                         &arguments,
                         request.limits.as_ref(),
-                        event["started_at"].as_u64().unwrap_or_default(),
+                        event["started_at"].as_u64(),
                     );
                     event = serde_json::to_value(LiveEvent::ToolStarted(started)).unwrap();
                 }

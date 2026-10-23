@@ -1180,6 +1180,25 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("seeding host history is not implemented"))
     }
 
+    /// Put into `session`'s stored history, after its newest message, a
+    /// finished call of [`crate::SCRIPTED_TOOL`] with `call`'s id and
+    /// arguments and a short text result, the way history stored before the
+    /// runner kept tool-call times holds it: nothing records when the call
+    /// started or finished. `session` has a finished run behind it and no
+    /// run active. The runner must serve the call as one it replays from
+    /// that history. Return an error when the adapter cannot: the case that
+    /// needs it is then inapplicable, by name.
+    async fn seed_untimed_tool_call(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _call: &ScriptedToolCall,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "seeding a tool call without times is not implemented",
+        ))
+    }
+
     /// Revert `session` the way its host reverts (an undo), removing the
     /// message `mid` and every later message, while no run is active. The
     /// runner moves the session to a new lineage. Return an error when the

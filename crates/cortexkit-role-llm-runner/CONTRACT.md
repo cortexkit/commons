@@ -1294,11 +1294,11 @@ new members.
     carries the stored message's unit, so a consumer gets the re-read signal
     and the unit together.
   - `tool_started {mid, tool_call_id, name, arguments,
-    arguments_truncated?, started_at}`: `mid` is the message holding the
+    arguments_truncated?, started_at?}`: `mid` is the message holding the
     call, `tool_call_id` the model's id as the stored row carries it, and
     `arguments` the arguments as JSON text.
   - `tool_finished {mid, tool_call_id, outcome, output_bytes,
-    finished_at}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
+    finished_at?}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
     `error`, `cancelled` when a caller asked, `interrupted` when a restart
     cut the call and it was never sent again, `denied` when an approval or a
     hook refused it); `output_bytes` is the byte length of the result's
@@ -1326,6 +1326,18 @@ new members.
     not declare the group. On a runner without it, `send_id` may be absent
     for any run, and its absence says nothing.
   - Times are milliseconds since the Unix epoch.
+  - `started_at` and `finished_at` (optional since 0.6.0; required in
+    0.5.1 to 0.5.5) are the times the runner recorded when the tool call
+    started and when it finished. A runner leaves a member out only when it
+    recorded no time for that moment, for example a call replayed from
+    history stored before the runner kept times. It never invents,
+    estimates or substitutes a time: not the current time, not zero, not
+    the time of the message holding the call. A present time keeps its
+    exact bytes. A call the runner sends to its tool itself has both times
+    recorded, so its events carry both. A reader accepts an event without
+    either member and shows
+    the call without that time; it never reconstructs one
+    (`live::ToolStarted::started_at`, `live::ToolFinished::finished_at`).
 - [pinned] **Display events** are best-effort and never replayed, in
   Broca's deployed shape `{kind: "display", event: {type, ...}}`:
   `text_delta {message_id, delta, tool_call_id?}`, `reasoning_delta

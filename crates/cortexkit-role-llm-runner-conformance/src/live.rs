@@ -36,6 +36,7 @@ where
         "live_run_events" => runs(case).await.map(|()| Ending::Passed),
         "live_attach_replays_the_current_step" => attach(case).await,
         "live_seq_rises_across_lanes" => seq(case).await,
+        "live_untimed_history_call_leaves_times_out" => untimed(case).await,
         "run_cause_queued_start_names_its_send" => {
             queued_cause(case).await.map(|()| Ending::Passed)
         }
@@ -230,15 +231,23 @@ where
             tool.tool_call_id
         ));
     };
-    if finish_at < start_at
-        || finished.mid != holder
-        || finished.outcome != "ok"
-        || finished.finished_at < started.started_at
-    {
+    if finish_at < start_at || finished.mid != holder || finished.outcome != "ok" {
         return Err(format!(
             "tool_finished is {finished:?} after tool_started {started:?}: it follows the start, \
-             names the same message, the outcome ok, and finishes no earlier than it started"
+             names the same message and the outcome ok"
         ));
+    }
+    // The runner sent this call to its tool itself, so it recorded when the
+    // call started and finished, and reports both.
+    match (started.started_at, finished.finished_at) {
+        (Some(start), Some(finish)) if start <= finish => {}
+        (start, finish) => {
+            return Err(format!(
+                "tool_started carries started_at {start:?} and tool_finished finished_at \
+                 {finish:?} for a call the runner ran itself: it reports both times it \
+                 recorded, the finish no earlier than the start"
+            ))
+        }
     }
     let again = control(&stream(route, SubscribeFrom::Start).await?);
     if again != replay {
@@ -495,6 +504,70 @@ where
         .map_err(|e| format!("releasing the held model stream: {e}"))?;
     outcome?;
     wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    Ok(Ending::Passed)
+}
+
+/// A call replayed from history stored before the runner kept tool-call
+/// times. After one run, the adapter seeds a finished call with no stored
+/// times; a replay from start carries its `tool_started` and
+/// `tool_finished`, both without a time, because the runner recorded none
+/// and never invents one (not now, not zero, not the message's time).
+async fn untimed<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut session = case
+        .open(
+            "live-untimed",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![
+                    case.mint.text("live-untimed-answer").0,
+                ])],
+            },
+        )
+        .await?;
+    case.run_prompt(&mut session, &case.mint.next("live-untimed-prompt"))
+        .await?;
+    let call = case.mint.call("live-untimed-call");
+    if let Err(e) = case
+        .subject
+        .seed_untimed_tool_call(case.handle.inner(), &session.name, &call)
+        .await
+    {
+        return Ok(Ending::Inapplicable(format!(
+            "the adapter cannot seed a tool call stored without times: {e}"
+        )));
+    }
+    let replay = control(&stream(&session.route, SubscribeFrom::Start).await?);
+    let mut started = None;
+    let mut finished = None;
+    for (_, event) in replay {
+        match event {
+            Some(LiveEvent::ToolStarted(t)) if t.tool_call_id == call.tool_call_id => {
+                started = Some(t)
+            }
+            Some(LiveEvent::ToolFinished(t)) if t.tool_call_id == call.tool_call_id => {
+                finished = Some(t)
+            }
+            _ => {}
+        }
+    }
+    let (Some(started), Some(finished)) = (started, finished) else {
+        return Err(format!(
+            "a replay from start carries no tool_started or no tool_finished for the call {} \
+             seeded from history stored without times: every stored call has both",
+            call.tool_call_id
+        ));
+    };
+    if started.started_at.is_some() || finished.finished_at.is_some() {
+        return Err(format!(
+            "the call {} replayed from history stored without times has started_at {:?} and \
+             finished_at {:?}: a runner that recorded no time leaves the member out, and never \
+             invents one (not now, not zero, not the message's time)",
+            call.tool_call_id, started.started_at, finished.finished_at
+        ));
+    }
     Ok(Ending::Passed)
 }
 

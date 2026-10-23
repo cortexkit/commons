@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.0
+
+A breaking release for `cortexkit-role-llm-runner` 0.6.0 and
+`cortexkit-role-compaction-provider` 0.6.0, whose types this kit's public
+API uses. Existing test subjects compile unchanged: the new hook has a
+default.
+
+- New subject hook `seed_untimed_tool_call`: put a finished call into a
+  session's stored history the way history stored before the runner kept
+  tool-call times holds it. Its default makes the new case inapplicable by
+  name.
+- New case `live_untimed_history_call_leaves_times_out`: after one run, the
+  seeded call is replayed from start, and its `tool_started` and
+  `tool_finished` must carry no `started_at` and no `finished_at`. A runner
+  that invents a time fails it by name.
+- `live_message_and_tool_events_durable` requires both times on the call the
+  runner ran itself, the finish no earlier than the start, as the
+  required fields did before.
+
 ## 0.10.6
 
 - Exercise immutable output references, scanner samples, slot opt-in, snapshot

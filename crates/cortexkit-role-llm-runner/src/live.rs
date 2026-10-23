@@ -138,6 +138,12 @@ impl MessageEvent {
 /// `tool_started`: a call of message `mid` went to its tool. `arguments` is
 /// the call's arguments as JSON text, cut by the subscription's `limits`
 /// like a display row's.
+///
+/// `started_at` is the time the runner recorded when the call started. It is
+/// `None`, and left out of the event, only when the runner recorded no time
+/// for the call, such as a call replayed from history stored before the
+/// runner kept times. A runner never puts an invented time there (now, zero,
+/// or the message's time), and a reader never makes one up for it.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolStarted {
@@ -148,18 +154,21 @@ pub struct ToolStarted {
     pub arguments: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub arguments_truncated: bool,
-    /// Milliseconds since the Unix epoch.
-    pub started_at: u64,
+    /// Milliseconds since the Unix epoch; `None` when no time was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
 }
 
 impl ToolStarted {
+    /// `started_at` is the recorded start time, or `None` when the runner
+    /// recorded none; never a substitute.
     pub fn new(
         mid: impl Into<String>,
         tool_call_id: impl Into<String>,
         name: impl Into<String>,
         arguments: &Value,
         limits: Option<&Limits>,
-        started_at: u64,
+        started_at: Option<u64>,
     ) -> Self {
         let text = serde_json::to_string(arguments).expect("JSON values serialize");
         let (arguments, arguments_truncated) = match limits {
@@ -180,6 +189,9 @@ impl ToolStarted {
 /// `tool_finished`: the call of message `mid` ended with `outcome`
 /// ([`tool_outcomes`]). `output_bytes` is the byte length of its result's
 /// content uncut, as a display row's `tool_result.content` holds it.
+///
+/// `finished_at` follows [`ToolStarted::started_at`]'s rule: the recorded
+/// time, or `None` and left out when the runner recorded none.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolFinished {
@@ -187,17 +199,20 @@ pub struct ToolFinished {
     pub tool_call_id: String,
     pub outcome: String,
     pub output_bytes: u64,
-    /// Milliseconds since the Unix epoch.
-    pub finished_at: u64,
+    /// Milliseconds since the Unix epoch; `None` when no time was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
 }
 
 impl ToolFinished {
+    /// `finished_at` is the recorded finish time, or `None` when the runner
+    /// recorded none; never a substitute.
     pub fn new(
         mid: impl Into<String>,
         tool_call_id: impl Into<String>,
         outcome: impl Into<String>,
         output_bytes: u64,
-        finished_at: u64,
+        finished_at: Option<u64>,
     ) -> Self {
         Self {
             mid: mid.into(),
@@ -514,6 +529,53 @@ mod tests {
         }
     }
 
+    /// Each `tool_times` case names a `tool_started` and a `tool_finished`
+    /// vector and the times a reader gets from them: the recorded number, or
+    /// `None` when the event leaves the member out. The bytes themselves are
+    /// pinned by the `events` round trip above.
+    #[test]
+    fn tool_times_are_recorded_or_left_out() {
+        let file = vectors::load("live-events.json");
+        let events = vectors::cases(&file, "events");
+        let event = |name: &str| {
+            let case = events
+                .iter()
+                .find(|c| c["name"] == name)
+                .unwrap_or_else(|| panic!("no event vector named {name}"));
+            LiveEvent::decode_strict(&case["event"]).unwrap_or_else(|e| panic!("{name}: {e}"))
+        };
+        for case in vectors::cases(&file, "tool_times") {
+            let name = case["name"].as_str().unwrap();
+            let LiveEvent::ToolStarted(started) = event(case["started"].as_str().unwrap()) else {
+                panic!("{name}: not a tool_started event");
+            };
+            let LiveEvent::ToolFinished(finished) = event(case["finished"].as_str().unwrap())
+            else {
+                panic!("{name}: not a tool_finished event");
+            };
+            assert_eq!(started.started_at, case["started_at"].as_u64(), "{name}");
+            assert_eq!(finished.finished_at, case["finished_at"].as_u64(), "{name}");
+            let arguments: Value = serde_json::from_str(&started.arguments).unwrap();
+            let built = ToolStarted::new(
+                &started.mid,
+                &started.tool_call_id,
+                &started.name,
+                &arguments,
+                None,
+                case["started_at"].as_u64(),
+            );
+            assert_eq!(built, started, "{name}");
+            let built = ToolFinished::new(
+                &finished.mid,
+                &finished.tool_call_id,
+                &finished.outcome,
+                finished.output_bytes,
+                case["finished_at"].as_u64(),
+            );
+            assert_eq!(built, finished, "{name}");
+        }
+    }
+
     #[test]
     fn an_unknown_or_malformed_event_reads_as_display_reset() {
         let file = vectors::load("live-events.json");
@@ -569,7 +631,7 @@ mod tests {
             "echo",
             &serde_json::json!({"t": "ééé"}),
             Some(&Limits::new(9, 0, 0)),
-            5,
+            Some(5),
         );
         assert_eq!(
             (cut.arguments.as_str(), cut.arguments_truncated),

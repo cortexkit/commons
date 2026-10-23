@@ -4387,6 +4387,7 @@ const DISPLAY_AND_LIVE_CASES: &[&str] = &[
     "live_run_events",
     "live_attach_replays_the_current_step",
     "live_seq_rises_across_lanes",
+    "live_untimed_history_call_leaves_times_out",
 ];
 
 /// The live `cache_ttl` cases.
@@ -4537,10 +4538,28 @@ async fn a_missing_tool_finished_fails_the_lifecycle_case() {
         ..Defects::default()
     }))
     .await;
+    // The call replayed from untimed history has no tool_finished either.
     fails_only(
         &report,
-        &["live_message_and_tool_events_durable"],
+        &[
+            "live_message_and_tool_events_durable",
+            "live_untimed_history_call_leaves_times_out",
+        ],
         "tool_finished",
+    );
+}
+
+#[tokio::test]
+async fn an_invented_time_for_an_untimed_call_fails_the_untimed_case() {
+    let report = run(&displaying(Defects {
+        live_tool_time_invented: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_untimed_history_call_leaves_times_out"],
+        "never invents one",
     );
 }
 

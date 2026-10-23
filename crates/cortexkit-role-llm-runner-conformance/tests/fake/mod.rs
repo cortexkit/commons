@@ -59,7 +59,7 @@ use cortexkit_role_llm_runner_conformance::{
         PROVIDES,
     },
     Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity, Reply, RouteFailure,
-    RunnerRoute, Script, ScriptedPart, SubscribeOutcome, SCRIPTED_TOOL,
+    RunnerRoute, Script, ScriptedPart, ScriptedToolCall, SubscribeOutcome, SCRIPTED_TOOL,
 };
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
@@ -439,6 +439,10 @@ pub struct Defects {
     pub live_tool_finished_missing: bool,
     /// No `run_finished` event is written.
     pub live_run_finished_missing: bool,
+    /// A call replayed from history stored without times gets the time its
+    /// record was replayed at as `started_at` and `finished_at`, instead of
+    /// leaving both out.
+    pub live_tool_time_invented: bool,
     /// A newly attached stream gets no replay of the step in flight.
     pub live_attach_skips_replay: bool,
     /// Display frames carry a `seq` of their own, apart from control frames.
@@ -1830,6 +1834,39 @@ impl Module {
             }
             "cut" | "revert" | "seed" | "view_applied" | "view_disposed" | "notice" => {
                 history::apply(sess, &kind, record, &self.world.defects)
+            }
+            "legacy_call" => {
+                // A finished call from history stored before the runner kept
+                // tool-call times: the call and its result, with nothing
+                // recording when either happened.
+                let key = text("call_key");
+                let id = record["tool_call_id"].as_str().unwrap_or_default();
+                let parts = json!([{ "type": "tool_call", "id": id, "tool": record["tool"],
+                                     "arguments": record["arguments"] }]);
+                sess.calls.insert(
+                    key.clone(),
+                    CallRec {
+                        tool_call_id: id.into(),
+                        arguments: record["arguments"].clone(),
+                        run_id: String::new(),
+                        intent: true,
+                        result: true,
+                    },
+                );
+                let (call, result) = if profiled(&session) {
+                    (
+                        anthropic_assistant(&parts),
+                        json!({ "role": "user", "content": [{ "type": "tool_result",
+                                "tool_use_id": id, "content": result_text(&record["content"]) }] }),
+                    )
+                } else {
+                    (
+                        json!({ "role": "assistant", "parts": parts }),
+                        json!({ "role": "tool", "call_key": key, "content": record["content"] }),
+                    )
+                };
+                sess.push(call, "", vec![key]);
+                sess.push(result, "", Vec::new());
             }
             _ => {}
         }
@@ -4982,6 +5019,23 @@ impl LlmRunnerSubject for FakeSubject {
             world.host_cuts.lock().unwrap().insert(session.into());
         }
         Ok(())
+    }
+
+    async fn seed_untimed_tool_call(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        call: &ScriptedToolCall,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(
+                session,
+                json!({"kind":"legacy_call", "call_key": format!("legacy-{}", call.tool_call_id),
+                       "tool_call_id": call.tool_call_id, "tool": call.tool,
+                       "arguments": call.arguments, "content": call.result}),
+            )
+            .map_err(|Killed| HarnessError::new("killed seeding a call"))
     }
 
     async fn hold_next_compaction_setup(&self, session: &str) -> Result<(), HarnessError> {

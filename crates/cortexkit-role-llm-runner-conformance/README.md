@@ -18,6 +18,18 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+New in 0.11.0, for `cortexkit-role-llm-runner` 0.6.0, whose `started_at`
+and `finished_at` on `tool_started` and `tool_finished` are now optional:
+`seed_untimed_tool_call` puts into a session's stored history a finished
+call the way history stored before the runner kept tool-call times holds
+it. The new case `live_untimed_history_call_leaves_times_out` replays it
+and requires both events without a time; a runner that invents one (now,
+zero, the message's time) fails it by name. The hook has a default that
+makes the case inapplicable by name, so existing adapters build
+unchanged. `live_message_and_tool_events_durable` now also requires both
+times on a call the runner ran itself, the finish no earlier than the
+start.
+
 New in 0.10.4: `held_calls` is discovered directly by its open string on
 `role.describe` (no new `Capability` enum variant). Its four cases require
 `run_status`, `queue`, `transcript_reads` and `run_ops`; continuation cases
@@ -206,6 +218,7 @@ is unchanged and prints nothing.
 | `client_message_id_on_display_rows_never_in_read` | `client_message_id`, `history_display`, `host_history`, `queue`, `transcript_reads` |
 | `client_message_id_resend_with_another_id_refused` | `client_message_id`, `queue` |
 | `live_message_and_tool_events_durable`, `live_run_events`, `live_attach_replays_the_current_step`, `live_seq_rises_across_lanes` | `live_events`, `streaming`, `queue`, `transcript_reads`; the attach and order cases need `hold_next_model_stream` |
+| `live_untimed_history_call_leaves_times_out` | as the other `live_` cases; inapplicable without `seed_untimed_tool_call` |
 | `run_cause_queued_start_names_its_send`, `run_cause_send_started_runs_never_omit_send_id` | `run_cause`, `live_events`, `streaming`, `queue`, `transcript_reads` |
 | `run_cause_interrupt_names_the_new_send` | as the other `run_cause` cases; inapplicable without `interrupt` or `hold_next_model_step` |
 | `display_row_names_the_sender_never_in_read` | `history_display`, `host_history`, `delivery_order`, `queue`, `transcript_reads`, and a plan sender; inapplicable when `idle_start` is not a declared list mode |

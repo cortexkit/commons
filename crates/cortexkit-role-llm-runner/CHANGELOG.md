@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0
+
+A breaking release. A runner could not always report a tool call's start
+or finish time honestly: a call replayed from history stored before the
+runner kept times has none, and the only choices were inventing one or
+failing.
+
+- `live::ToolStarted::started_at` and `live::ToolFinished::finished_at` are
+  now `Option<u64>`, left out of the event when `None`. A present time keeps
+  its exact bytes. `ToolStarted::new` and `ToolFinished::new` take the time
+  as `Option<u64>`.
+- CONTRACT §7.1: a runner reports the time it recorded, and leaves the
+  member out only when it recorded none; it never invents, estimates or
+  substitutes one (not now, not zero, not the message's time). A call the
+  runner sends to its tool itself carries both. Readers accept a missing
+  time and never reconstruct one.
+- `live-events.json` adds a `tool_started` and a `tool_finished` replayed
+  from history stored without times, and a `tool_times` section naming the
+  times a reader gets from them (`tool_times_are_recorded_or_left_out`).
+  Existing vectors keep their bytes; `SHA256SUMS` is refreshed.
+
 ## 0.5.5
 
 - `output_refs`, requiring `tags`: immutable writing-request records, snapshots,
