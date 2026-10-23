@@ -241,6 +241,13 @@ pub struct CatalogAnswer {
     /// Commands for the person, never tools offered to a model.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_commands: Vec<crate::user_command::UserCommand>,
+    /// The names of the presets this provider serves. Listed only in the
+    /// answer to a request without a preset, and omitted when the provider
+    /// serves none, so catalogs without presets keep their bytes and digests.
+    /// A caller sends a preset only to a provider that lists it. Checked by
+    /// [`check_presets`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<String>,
 }
 
 impl CatalogAnswer {
@@ -286,6 +293,94 @@ impl CatalogAnswer {
     pub fn declares(&self, name: &str) -> bool {
         self.capabilities.get(name) == Some(&Value::Bool(true))
     }
+
+    /// List the presets the provider serves. Set this only on the answer to
+    /// a request without a preset; an empty list encodes as absence.
+    pub fn with_presets<I, S>(mut self, presets: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.presets = presets.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Whether this answer lists `preset` among the presets the provider
+    /// serves. A caller sends `preset`, on `tool.catalog` or on a tool call,
+    /// only when the provider's preset-less answer says so.
+    pub fn lists_preset(&self, preset: &str) -> bool {
+        self.presets.iter().any(|listed| listed == preset)
+    }
+}
+
+/// The most presets one catalog answer may list.
+pub const MAX_PRESETS: usize = 16;
+
+/// The longest preset name a catalog answer may list, in bytes.
+pub const MAX_PRESET_NAME_BYTES: usize = 32;
+
+/// The catalog answer member listing the presets a provider serves.
+pub const PRESETS_FIELD: &str = "presets";
+
+/// Whether `name` may be listed in `presets`: 1 to 32 bytes matching
+/// `^[a-z][a-z0-9_-]*$`. Every such name also passes subc-protocol's
+/// `validate_preset`, so a listed name can be sent on a tool call as is.
+pub fn valid_preset_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=MAX_PRESET_NAME_BYTES).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_' || *b == b'-')
+}
+
+/// Check `answer.presets` against the request it answers. `request_preset`
+/// is the `preset` that request carried.
+///
+/// A list may appear only in the answer to a request without a preset, so a
+/// list in an answer to a preset request is refused naming `presets`. A list
+/// of more than [`MAX_PRESETS`] entries is refused naming `presets`. An entry
+/// failing [`valid_preset_name`], or repeating an earlier entry, is refused
+/// naming `presets[]`, with the entry in `detail.preset`.
+pub fn check_presets(
+    answer: &CatalogAnswer,
+    request_preset: Option<&str>,
+) -> Result<(), ErrorBody> {
+    if answer.presets.is_empty() {
+        return Ok(());
+    }
+    if request_preset.is_some() {
+        return Err(errors::invalid_request(
+            PRESETS_FIELD,
+            "presets are listed only in the answer to a request without a preset",
+        ));
+    }
+    if answer.presets.len() > MAX_PRESETS {
+        return Err(errors::invalid_request(
+            PRESETS_FIELD,
+            format!("at most {MAX_PRESETS} presets may be listed"),
+        ));
+    }
+    let entry_error = |preset: &str, message: &str| {
+        let field = format!("{PRESETS_FIELD}[]");
+        errors::invalid_request(&field, message).with_detail(serde_json::json!({
+            "field": field,
+            "preset": preset,
+        }))
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    for preset in &answer.presets {
+        if !valid_preset_name(preset) {
+            return Err(entry_error(
+                preset,
+                "a preset name is 1-32 bytes matching ^[a-z][a-z0-9_-]*$",
+            ));
+        }
+        if !seen.insert(preset.as_str()) {
+            return Err(entry_error(preset, "a preset is listed twice"));
+        }
+    }
+    Ok(())
 }
 
 /// One tool in a catalog answer.

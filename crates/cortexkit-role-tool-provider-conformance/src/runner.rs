@@ -12,8 +12,9 @@ use cortexkit_role_harness::{
 use cortexkit_role_tool_provider::{
     call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
-        check_flat_schema, check_modes, check_reply, is_schema_digest, params_for_capabilities,
-        schema_digest, session_capabilities, system_text_digest, CatalogAnswer,
+        check_flat_schema, check_modes, check_presets, check_reply, is_schema_digest,
+        params_for_capabilities, schema_digest, session_capabilities, system_text_digest,
+        CatalogAnswer,
     },
     check_capability_tag,
     describe::{check_describe, select_tool_capabilities},
@@ -199,6 +200,31 @@ where
         }
     }
 
+    // The provider's own preset-less catalog answer, not a subject flag,
+    // decides whether the served-presets case applies. A catalog error runs
+    // the case, so it fails instead of hiding as a skip.
+    capabilities.remove(&Capability::Presets);
+    if let Ok(handle) = &main {
+        let case = Case {
+            subject,
+            driver: &driver,
+            handle,
+            work_dir,
+            capabilities: &capabilities,
+        };
+        let listed = match case.plain_route().await {
+            Ok(route) => case
+                .preset_less_catalog(&route)
+                .await
+                .map(|answer| !answer.presets.is_empty())
+                .unwrap_or(true),
+            Err(_) => true,
+        };
+        if listed {
+            capabilities.insert(Capability::Presets);
+        }
+    }
+
     let mut cases = Vec::with_capacity(CASES.len());
     for spec in CASES {
         let missing: Vec<Capability> = spec
@@ -323,6 +349,7 @@ where
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,
             "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
+            "catalog_listed_presets_served" => self.catalog_listed_presets_served().await,
             "catalog_capability_filter_matches_describe" => {
                 self.catalog_capability_filter_matches_describe().await
             }
@@ -967,6 +994,51 @@ where
             request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
         )?;
         expect_invalid_field(&error, PRESET_FIELD)
+    }
+
+    /// The subject's catalog arguments without `preset`, `digest_only` or
+    /// `system_text`: the request whose answer lists the served presets.
+    fn preset_less_arguments(&self) -> Value {
+        let mut arguments = self.subject.catalog_arguments();
+        self.remove_unadvertised_catalog_filter(&mut arguments);
+        if let Some(members) = arguments.as_object_mut() {
+            for member in [PRESET_FIELD, "digest_only", "system_text"] {
+                members.remove(member);
+            }
+        }
+        arguments
+    }
+
+    async fn preset_less_catalog(&self, route: &S::Route) -> Result<CatalogAnswer, String> {
+        self.catalog_for(route, self.preset_less_arguments()).await
+    }
+
+    async fn catalog_listed_presets_served(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let listing = self.preset_less_catalog(&route).await?;
+        check_presets(&listing, None).map_err(|error| {
+            format!(
+                "the preset-less catalog's presets list is malformed: {} {:?}",
+                error.message, error.detail
+            )
+        })?;
+        if listing.presets.is_empty() {
+            return Err("the preset-less catalog no longer lists presets".into());
+        }
+        for preset in &listing.presets {
+            let mut arguments = self.preset_less_arguments();
+            arguments[PRESET_FIELD] = json!(preset);
+            let what = format!("tool.catalog with listed preset {preset:?}");
+            let body = expect_response(
+                &what,
+                request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
+            )?;
+            let answer: CatalogAnswer = serde_json::from_value(body)
+                .map_err(|e| format!("{what}: the answer does not decode: {e}"))?;
+            check_presets(&answer, Some(preset))
+                .map_err(|error| format!("{what}: {}", error.message))?;
+        }
+        Ok(())
     }
 
     fn system_text_arguments(&self) -> Result<Value, String> {

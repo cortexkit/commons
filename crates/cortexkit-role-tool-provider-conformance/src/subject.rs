@@ -62,6 +62,9 @@ pub enum Capability {
     /// The provider advertises `tool-catalog-capability-filter/v1` in
     /// `role.describe`. Inferred from the live answer, not a subject flag.
     CatalogCapabilityFilter,
+    /// The provider's catalog answer to a request without a preset lists the
+    /// presets it serves. Inferred from the live catalog, not a subject flag.
+    Presets,
 }
 
 impl Capability {
@@ -82,6 +85,7 @@ impl Capability {
             Self::ContentV1 => "content/v1",
             Self::HeldReplyV1 => "held-reply/v1",
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
+            Self::Presets => "presets",
         }
     }
 }
@@ -195,6 +199,9 @@ pub trait ToolProviderSubject: Harness {
     /// this provider serves and, optionally, a preset it defines. The
     /// `catalog_unknown_preset_refused` case sends these arguments with the
     /// preset replaced by one no provider defines, and expects a refusal.
+    /// The `catalog_listed_presets_served` case sends them without the
+    /// preset to read the provider's `presets` list, then once per listed
+    /// preset.
     fn catalog_arguments(&self) -> Value;
 
     /// The arguments of a full `tool.catalog` request for system text, including

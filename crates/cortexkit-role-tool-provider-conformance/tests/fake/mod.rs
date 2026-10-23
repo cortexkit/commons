@@ -65,8 +65,12 @@ pub const SLOW: &str = "sleep";
 pub const HELD: &str = "effect";
 pub const DISABLED: &str = "danger";
 const GENERATION: &str = "fake-gen-1";
-/// The only preset the fake defines: its default variant.
+/// The fake's default variant, which its catalog arguments name.
 const DEFAULT_PRESET: &str = "default";
+/// Every preset the fake serves, as its preset-less catalog answer lists them.
+const SERVED_PRESETS: &[&str] = &[DEFAULT_PRESET, "lean"];
+/// The preset `Defects::list_refused_preset` lists but the fake refuses.
+pub const REFUSED_LISTED_PRESET: &str = "ghost";
 const FILTER_TOOL_CAPABILITIES: &[&str] = &[
     "code.edit/v1",
     "code.outline/v1",
@@ -145,6 +149,10 @@ pub struct Defects {
     /// `tool.catalog` answers with its default variant for any preset,
     /// including one it does not define.
     pub accept_any_preset: bool,
+    /// The preset-less catalog answer lists a preset the fake refuses.
+    pub list_refused_preset: bool,
+    /// The preset-less catalog answer lists no presets.
+    pub list_no_presets: bool,
     /// The held tool carries an unprefixed capability tag the role document
     /// does not define.
     pub undefined_unprefixed_tag: bool,
@@ -481,7 +489,7 @@ impl Module {
         // An absent preset means the default variant; any other name is
         // refused rather than mapped to the closest variant.
         if let Some(preset) = request.preset.as_deref() {
-            if preset != DEFAULT_PRESET && !self.defects.accept_any_preset {
+            if !SERVED_PRESETS.contains(&preset) && !self.defects.accept_any_preset {
                 return Err(errors::invalid_request(
                     "preset",
                     format!("no preset named {preset}"),
@@ -536,6 +544,14 @@ impl Module {
         });
         if self.defects.user_command == Some("catalog") {
             answer["user_commands"][0]["name"] = json!("Bad-Name");
+        }
+        // Only the answer to a request without a preset lists the presets.
+        if request.preset.is_none() && !self.defects.list_no_presets {
+            let mut presets = SERVED_PRESETS.to_vec();
+            if self.defects.list_refused_preset {
+                presets.push(REFUSED_LISTED_PRESET);
+            }
+            answer["presets"] = json!(presets);
         }
         if request.system_text.is_some()
             && !matches!(

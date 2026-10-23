@@ -58,6 +58,9 @@ pub const REPLY_SHAPE_JSON: &str =
 /// Person-only command declarations, calls, replies, scope table and late entries.
 pub const USER_COMMANDS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/user-commands.json");
+/// Served-preset lists in catalog answers: absent and present catalogs with
+/// their bytes and digests, valid lists, and lists `check_presets` refuses.
+pub const PRESETS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/presets.json");
 /// The vectors' `README.md`.
 pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.md");
 
@@ -85,6 +88,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("withdraw-answers.json", WITHDRAW_ANSWERS_JSON),
     ("user-commands.json", USER_COMMANDS_JSON),
     ("reply-shape.json", REPLY_SHAPE_JSON),
+    ("presets.json", PRESETS_JSON),
     ("README.md", README),
 ];
 

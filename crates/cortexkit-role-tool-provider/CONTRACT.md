@@ -100,13 +100,16 @@ to them. Nothing here names a particular implementation.
     rather than sending `null`. A preset the provider does not define is
     refused as `invalid_request {field: "preset"}`, never guessed, like an
     unknown `params` value (`test-vectors/tool-provider-v1/catalog-requests.json`).
+    A caller sends `preset` only to a provider whose preset-less answer lists
+    it in `presets` (§4.3).
   - `composition` is the session's composition, carried verbatim as an opaque
     JSON object. Providers never interpret it beyond resolving their own text
     against it. Absent on a preflight call.
   - `system_text` is `{preset, params}` when the plan has a system-prompt item
     for this provider.
 - Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
-  tools: [...], system_text?, capabilities?}`.
+  tools: [...], system_text?, capabilities?, user_commands?, presets?}`.
+  `user_commands` is §4.2; `presets` is §4.3.
   - `generation` is an opaque string that changes whenever the full advertised
     definitions change, independent of a capability filter.
   - `catalog_digest` is an opaque digest of the answer's content, including
@@ -563,6 +566,42 @@ person waits.
   never model history. Older consumers record and ack unknown kinds without
   retrying, so the added `progress` kind is safe for them.
 
+## 4.3. Served presets
+
+- `CatalogAnswer.presets` lists the names of the presets the provider
+  serves. It appears only in the answer to a `tool.catalog` request without
+  a `preset`, and is omitted when the provider serves none. Empty lists are
+  omitted: old catalogs keep their bytes and digests. A present list is
+  catalog content covered by `catalog_digest`, so a `digest_only` request
+  without a preset detects a change to it. A `digest_only` answer still
+  carries only `generation` and `catalog_digest`.
+- Names are unique within the list, 1–32 bytes matching
+  `^[a-z][a-z0-9_-]*$`, and the list has at most 16 entries. Every such name
+  also passes subc-protocol's `validate_preset`, so it can be sent on a tool
+  call unchanged. A list in the answer to a request that named a preset is
+  malformed. `catalog::check_presets` refuses a malformed list as
+  `invalid_request`: `presets` for too many entries or a list in a preset
+  answer, and `presets[]` with `detail.preset` for a bad or repeated name. A
+  consumer refuses such an answer as `invalid_answer`, as for any other
+  malformed member.
+- A caller sends `preset`, on `tool.catalog` or on a tool call
+  (`ToolCallRequest.preset`), only to a provider whose preset-less catalog
+  answer lists that preset (`CatalogAnswer::lists_preset`).
+- An absent list means the provider serves no presets, so callers send it
+  none.
+- A provider must serve every listed preset, on `tool.catalog` and on tool
+  calls, for as long as it lists it. It keeps refusing any other preset as
+  `invalid_request {field: "preset"}`, as today.
+- `test-vectors/tool-provider-v1/presets.json` pins catalogs with and without
+  a list (the absent one is the `user-commands.json` catalog, byte for byte),
+  valid lists, and malformed ones: a bad name, a duplicate, 17 entries, and a
+  list in a preset answer.
+
+Adoption. Providers declare first. A caller relying on the list, and so
+sending no preset to a provider that lists none, needs every provider that
+serves presets to declare its list. Until then, a caller may keep its
+existing behaviour for a provider whose preset-less answer lists no presets.
+
 ## 5. `tool.withdraw`
 
 Served by a provider that can hold a call past its reply.
@@ -714,6 +753,7 @@ CI against its real module over a real route; never against a double.
 | `role_describe_shape`, `role_describe_cacheable` | — |
 | `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
 | `catalog_capability_filter_matches_describe` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
+| `catalog_listed_presets_served` | `presets` listed in the live preset-less catalog answer |
 | `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
@@ -769,6 +809,14 @@ matches exactly. It also checks that missing and empty lists select no tools,
 filtering leaves `generation` unchanged, and a changed selection changes
 `catalog_digest`. A provider that does not advertise the capability skips this
 case by name.
+
+The `catalog_listed_presets_served` case is gated by the live catalog, never
+a subject flag: it runs when the answer to the subject's catalog request,
+sent without `preset`, `digest_only` or `system_text`, lists `presets`. The
+case checks that list with `check_presets`, then requests the catalog once
+per listed preset. Each must be answered, not refused, and must carry no
+`presets` list of its own; a refused preset fails the case by name. A
+provider that lists no presets skips the case with missing `presets`.
 
 Caller-side rules that no live provider can be made to exercise (an unknown
 withdraw `answer`, an unknown late-result `kind`, the withdraw caller policy)

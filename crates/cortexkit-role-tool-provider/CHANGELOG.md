@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.4
+
+- `CatalogAnswer.presets` declares the presets a provider serves, in the
+  answer to a `tool.catalog` request without a preset (contract §4.3). A
+  caller sends `preset`, on `tool.catalog` or on a tool call, only to a
+  provider that lists it; no list means the provider serves none. A provider
+  serves every listed preset for as long as it lists it. Callers may keep
+  their existing behaviour for providers that do not list presets until
+  every provider serving presets declares them.
+- Add `CatalogAnswer::with_presets`, `CatalogAnswer::lists_preset`,
+  `catalog::check_presets` and `catalog::valid_preset_name`: names are
+  1–32 bytes matching `^[a-z][a-z0-9_-]*$`, unique, at most 16 entries, and
+  a list in the answer to a preset request is malformed.
+- Additive: an empty list is omitted, so existing catalogs keep their bytes
+  and digests; a present list is covered by `catalog_digest`. New
+  `presets.json` vector; existing vectors are unchanged.
+
 ## 0.10.3
 
 - Optional per-tool `reference_slots` with named validation, token/source

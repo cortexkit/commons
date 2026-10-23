@@ -688,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "serde",
  "serde_jcs",
@@ -699,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",

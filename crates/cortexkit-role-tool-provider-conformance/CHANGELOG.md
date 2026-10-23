@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1
+
+- Require cortexkit-role-tool-provider 0.10.4. Add
+  `catalog_listed_presets_served`: when the provider's preset-less catalog
+  answer lists `presets`, the list must pass `check_presets` and every listed
+  preset's catalog must be served, not refused. A refused preset fails the
+  case by name. `Capability::Presets` is inferred from the live catalog, so a
+  provider listing no presets skips the case with missing `presets`.
+- The fake provider lists the presets it serves, with faults for a listed
+  preset it refuses and for listing none.
+
 ## 0.10.0
 
 - Breaking: exhaustive matches on `subject::Capability` need a wildcard arm.

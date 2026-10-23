@@ -1,0 +1,287 @@
+{
+  "_about": "Catalog digests use the example provider scheme of user-commands.json: SHA-256 of the JCS encoding without catalog_digest. The absent catalog is the user-commands.json absent catalog, byte for byte, so listing no presets keeps old bytes and digests. Each invalid list is refused by check_presets with field; request_preset is the preset the answered request carried (null for none).",
+  "catalogs": [
+    {
+      "name": "absent",
+      "catalog": {
+        "generation": "g-2026-09-30.4",
+        "composition_digest": "sha256:c0",
+        "capabilities": {
+          "late_results": true
+        },
+        "tools": [
+          {
+            "name": "read",
+            "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
+            "semantics": 1,
+            "result_ops": [
+              "prepend",
+              "append"
+            ],
+            "capabilities": [
+              "code.read/v1",
+              "acme:code.read-lines/v1"
+            ],
+            "description": "Read a file.",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          {
+            "name": "grep",
+            "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+            "semantics": 3,
+            "capabilities": [],
+            "input_schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "catalog_digest": "sha256:cat4"
+      },
+      "encoded_jcs": "{\"capabilities\":{\"late_results\":true},\"catalog_digest\":\"sha256:cat4\",\"composition_digest\":\"sha256:c0\",\"generation\":\"g-2026-09-30.4\",\"tools\":[{\"capabilities\":[\"code.read/v1\",\"acme:code.read-lines/v1\"],\"description\":\"Read a file.\",\"input_schema\":{\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"read\",\"result_ops\":[\"prepend\",\"append\"],\"schema_digest\":\"923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b\",\"semantics\":1},{\"capabilities\":[],\"input_schema\":{\"type\":\"object\"},\"name\":\"grep\",\"schema_digest\":\"a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0\",\"semantics\":3}]}",
+      "content_digest": "c4c7292016bf1ee24942b7ee601958ddd51fcd43b0ef1d722220ade52541b2da"
+    },
+    {
+      "name": "present",
+      "catalog": {
+        "generation": "g-2026-09-30.4",
+        "composition_digest": "sha256:c0",
+        "capabilities": {
+          "late_results": true
+        },
+        "tools": [
+          {
+            "name": "read",
+            "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
+            "semantics": 1,
+            "result_ops": [
+              "prepend",
+              "append"
+            ],
+            "capabilities": [
+              "code.read/v1",
+              "acme:code.read-lines/v1"
+            ],
+            "description": "Read a file.",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          {
+            "name": "grep",
+            "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+            "semantics": 3,
+            "capabilities": [],
+            "input_schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "catalog_digest": "sha256:cat4",
+        "presets": [
+          "default",
+          "review",
+          "read_only"
+        ]
+      },
+      "encoded_jcs": "{\"capabilities\":{\"late_results\":true},\"catalog_digest\":\"sha256:cat4\",\"composition_digest\":\"sha256:c0\",\"generation\":\"g-2026-09-30.4\",\"presets\":[\"default\",\"review\",\"read_only\"],\"tools\":[{\"capabilities\":[\"code.read/v1\",\"acme:code.read-lines/v1\"],\"description\":\"Read a file.\",\"input_schema\":{\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"read\",\"result_ops\":[\"prepend\",\"append\"],\"schema_digest\":\"923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b\",\"semantics\":1},{\"capabilities\":[],\"input_schema\":{\"type\":\"object\"},\"name\":\"grep\",\"schema_digest\":\"a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0\",\"semantics\":3}]}",
+      "content_digest": "ec48601e5e2a653dab8cfb633d107eac5d5506d81841317d454cc985965784ee"
+    }
+  ],
+  "valid": [
+    {
+      "presets": [
+        "default"
+      ]
+    },
+    {
+      "presets": [
+        "default",
+        "review",
+        "read_only",
+        "deep-dive2"
+      ]
+    },
+    {
+      "presets": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    },
+    {
+      "presets": [
+        "p0",
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+        "p5",
+        "p6",
+        "p7",
+        "p8",
+        "p9",
+        "p10",
+        "p11",
+        "p12",
+        "p13",
+        "p14",
+        "p15"
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "case": "uppercase name",
+      "presets": [
+        "default",
+        "Review"
+      ],
+      "request_preset": null,
+      "field": "presets[]",
+      "preset": "Review"
+    },
+    {
+      "case": "leading digit",
+      "presets": [
+        "2fast"
+      ],
+      "request_preset": null,
+      "field": "presets[]",
+      "preset": "2fast"
+    },
+    {
+      "case": "empty name",
+      "presets": [
+        ""
+      ],
+      "request_preset": null,
+      "field": "presets[]",
+      "preset": ""
+    },
+    {
+      "case": "33-byte name",
+      "presets": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "request_preset": null,
+      "field": "presets[]",
+      "preset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "case": "duplicate",
+      "presets": [
+        "default",
+        "review",
+        "default"
+      ],
+      "request_preset": null,
+      "field": "presets[]",
+      "preset": "default"
+    },
+    {
+      "case": "17 entries",
+      "presets": [
+        "p0",
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+        "p5",
+        "p6",
+        "p7",
+        "p8",
+        "p9",
+        "p10",
+        "p11",
+        "p12",
+        "p13",
+        "p14",
+        "p15",
+        "p16"
+      ],
+      "request_preset": null,
+      "field": "presets"
+    },
+    {
+      "case": "listed in a preset answer",
+      "presets": [
+        "default",
+        "review"
+      ],
+      "request_preset": "review",
+      "field": "presets"
+    }
+  ],
+  "preset_answer": {
+    "request": {
+      "params": {},
+      "preset": "review"
+    },
+    "answer": {
+      "generation": "g-2026-09-30.4",
+      "composition_digest": "sha256:c0",
+      "capabilities": {
+        "late_results": true
+      },
+      "tools": [
+        {
+          "name": "read",
+          "schema_digest": "923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b",
+          "semantics": 1,
+          "result_ops": [
+            "prepend",
+            "append"
+          ],
+          "capabilities": [
+            "code.read/v1",
+            "acme:code.read-lines/v1"
+          ],
+          "description": "Read a file.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "grep",
+          "schema_digest": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "semantics": 3,
+          "capabilities": [],
+          "input_schema": {
+            "type": "object"
+          }
+        }
+      ],
+      "catalog_digest": "sha256:cat4",
+      "presets": [
+        "default",
+        "review",
+        "read_only"
+      ]
+    },
+    "field": "presets"
+  }
+}

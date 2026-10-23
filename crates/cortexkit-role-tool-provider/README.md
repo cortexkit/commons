@@ -6,14 +6,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = "0.9.3"
+cortexkit-role-tool-provider = "0.10.4"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = { version = "0.9.3", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.10.4", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_tool_provider::vectors::FILES` and a
@@ -27,3 +27,9 @@ replies additionally requires `held-reply/v1`; providers use
 `consumer_reads_held_reply_v1` to check both declarations. `ToolResult::held()`
 exposes the interim marker: the answer arrives later through `late_results`.
 `result::is_person_wait` says whether the held reason means a person must act.
+
+A provider lists the presets it serves in `CatalogAnswer.presets`
+(`with_presets`), only in the answer to a catalog request without a preset;
+`catalog::check_presets` validates the list. A caller sends a preset, on
+`tool.catalog` or a tool call, only to a provider whose preset-less answer
+lists it (`lists_preset`).

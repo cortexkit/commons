@@ -7,7 +7,7 @@ use cortexkit_role_tool_provider_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject, SystemTextDefect};
+use fake::{Defects, FakeSubject, SystemTextDefect, REFUSED_LISTED_PRESET};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -362,6 +362,42 @@ async fn guessing_a_variant_for_an_undefined_preset_fails_the_unknown_preset_cas
     let reason = failed(&report, "catalog_unknown_preset_refused");
     assert!(reason.contains("not an error frame"), "{reason}");
     assert_passed(&report, "catalog_digest_only");
+}
+
+#[tokio::test]
+async fn refusing_a_listed_preset_fails_the_listed_presets_case_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        list_refused_preset: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_listed_presets_served");
+    assert!(
+        reason.contains(&format!("{REFUSED_LISTED_PRESET:?}")),
+        "{reason}"
+    );
+    assert!(reason.contains("not a response"), "{reason}");
+    assert_passed(&report, "catalog_unknown_preset_refused");
+    assert_passed(&report, "catalog_digest_only");
+}
+
+#[tokio::test]
+async fn a_provider_listing_no_presets_skips_the_listed_presets_case() {
+    let report = run(&FakeSubject::new(Defects {
+        list_no_presets: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("catalog_listed_presets_served"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::Presets],
+        })
+    );
+    assert!(report
+        .render()
+        .contains("SKIP catalog_listed_presets_served (requires presets; missing presets)"));
+    assert_passed(&report, "catalog_unknown_preset_refused");
 }
 
 #[tokio::test]

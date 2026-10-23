@@ -44,3 +44,12 @@ copies or repository checkout.
 catalog bytes and digests with and without commands, request/reply bounds, the
 route-scope admission table and late progress/result shapes. The absent catalog
 is the existing call-modes baseline. Catalog digests remain provider-defined.
+
+`presets.json` pins `CatalogAnswer.presets`, the list of presets a provider
+serves. Its absent catalog is the `user-commands.json` absent catalog byte for
+byte, so a provider listing no presets keeps its bytes and digest; the present
+catalog adds a list, which changes the content digest. It also pins valid
+lists (up to 16 names of up to 32 bytes) and lists `check_presets` refuses: a
+bad name, a duplicate, 17 entries, and a list in the answer to a request that
+named a preset. The conformance runner's `catalog_listed_presets_served`
+requests every listed preset from a live provider.

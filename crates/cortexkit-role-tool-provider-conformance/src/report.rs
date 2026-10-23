@@ -93,6 +93,11 @@ pub const CASES: &[CaseSpec] = &[
         checks: "a tool.catalog request naming a preset the provider does not define is refused as invalid_request {field: \"preset\"}, never answered with a guessed variant",
     },
     CaseSpec {
+        name: "catalog_listed_presets_served",
+        requires: &[Capability::Presets],
+        checks: "when the preset-less catalog answer lists presets, the list passes check_presets and tool.catalog answers each listed preset, without a presets list of its own, rather than refusing it",
+    },
+    CaseSpec {
         name: "catalog_capability_filter_matches_describe",
         requires: &[CatalogCapabilityFilter],
         checks: "when role.describe advertises tool-catalog-capability-filter/v1, selecting all its tool_capabilities returns a catalog whose capability-tag union matches that list; filtering leaves generation unchanged, changes the catalog digest, and absent or empty lists select no tools",
