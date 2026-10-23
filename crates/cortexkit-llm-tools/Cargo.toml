@@ -14,8 +14,8 @@ test-vectors = []
 
 [dependencies]
 cortexkit-model-batch = { version = "0.2.1", path = "../cortexkit-model-batch" }
-cortexkit-role-classifier = { version = "0.4.2", path = "../cortexkit-role-classifier" }
-cortexkit-role-extractor = { version = "0.1.1", path = "../cortexkit-role-extractor" }
+cortexkit-role-classifier = { version = "0.4.3", path = "../cortexkit-role-classifier" }
+cortexkit-role-extractor = { version = "0.1.2", path = "../cortexkit-role-extractor" }
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }

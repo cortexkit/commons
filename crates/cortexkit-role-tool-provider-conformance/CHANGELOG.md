@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0
+
+- Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.
+- Breaking dependency update: `ObservedFrame::Error` contains subc-protocol
+  0.33's `ErrorBody`. The public `wire` re-export moves to
+  cortexkit-role-tool-provider 0.11, including its protocol-bound types.
+- No behaviour changes; existing test-vector bytes are unchanged.
+
 ## 0.10.1
 
 - Require cortexkit-role-tool-provider 0.10.4. Add

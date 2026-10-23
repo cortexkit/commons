@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0
+
+- Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.
+- Breaking dependency update: the public `ToolCallRequest`, `CallKeyError`,
+  `OpaqueFieldError` and `CallMode` re-exports, `ErrorBody` in public signatures,
+  and `ScopeStamp` in
+  `user_command::admitted` now come from subc-protocol 0.33.
+- No behaviour changes; existing test-vector bytes are unchanged.
+
 ## 0.10.6
 
 - Define the `llm.classify/v1`, `llm.extract/v1` and `llm.complete/v1`

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0
+
+- Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.
+- Breaking dependency update: `Reply::Error` and `SubscribeOutcome::Refused`
+  contain subc-protocol 0.33's `ErrorBody`.
+- No behaviour changes; existing test-vector bytes are unchanged.
+
 ## 0.11.2
 
 - Require llm-runner 0.6.2. Gate `head_sender_is_callers_effective_grant`

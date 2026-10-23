@@ -351,6 +351,7 @@ mod tests {
             schema_pin: Some(wire_pin.clone()),
             preset: None,
             origin: None,
+            output_refs: None,
         };
 
         let encoded = serde_json::to_vec(&call).unwrap();

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.
+- Breaking dependency update: `Reply::Error` contains subc-protocol 0.33's
+  `ErrorBody`. The `wire` re-export moves to cortexkit-role-classifier 0.4.3.
+- No behaviour changes; existing test-vector bytes are unchanged.
+
 ## 0.4.1
 
 - `README.md` explains that the adapter behind `ClassifierRoute` opens its

@@ -9,7 +9,7 @@
 # runner's production build never pulls in the suite.
 [package]
 name = "cortexkit-role-extractor"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -38,7 +38,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 
 [dev-dependencies]
 sha2 = "0.10"
-subc-protocol = "0.32"
+subc-protocol = "0.33"
 
 [[test]]
 name = "vectors"

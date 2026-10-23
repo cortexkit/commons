@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor-conformance"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-extractor",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-step-transform-provider"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.10.6"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_jcs",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
@@ -2528,9 +2528,9 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.32.0"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8865fc83b0efc03597f37d5bc75e497322eb7e71cc85814d7b44c4a4a6144b15"
+checksum = "587cff68a0d5b98eb85a7231ce00e3a117e3e50314ad6823d42b802afa5461a3"
 dependencies = [
  "serde",
  "serde_json",

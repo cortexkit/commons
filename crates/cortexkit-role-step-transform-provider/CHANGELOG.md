@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+
+- Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.
+- Patch release: subc-protocol is used only by the capability-identifier parity
+  test, not the public API.
+- No behaviour changes; existing test-vector bytes are unchanged.
+
 ## 0.3.3
 
 - Depends on `cortexkit-role-llm-runner` 0.6.0. This crate only reads the
