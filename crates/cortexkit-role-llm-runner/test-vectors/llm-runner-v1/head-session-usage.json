@@ -1,0 +1,21 @@
+{
+  "answers": [
+    {"name": "neither optional member", "answer": {}},
+    {"name": "model only, no variant", "answer": {"model": {"provider": "p", "model": "next"}}},
+    {"name": "usage only", "answer": {
+      "lineage_id": "L1", "first_ordinal": 0, "history_version": 1, "updated_at": 1790000000000,
+      "usage": {"since": "run-1", "steps": 0, "unreported_steps": 0, "by_model": []}
+    }},
+    {"name": "recorded switch and spend across two selections", "answer": {
+      "lineage_id": "L1", "first_ordinal": 0, "history_version": 1, "updated_at": 1790000000001,
+      "model": {"provider": "p", "model": "next", "variant": "fast"},
+      "usage": {
+        "since": "run-1", "steps": 2, "unreported_steps": 0, "input_tokens": 28, "output_tokens": 32,
+        "by_model": [
+          {"provider": "p", "model": "original", "steps": 1, "unreported_steps": 0, "input_tokens": 11, "output_tokens": 13},
+          {"provider": "p", "model": "next", "variant": "fast", "steps": 1, "unreported_steps": 0, "input_tokens": 17, "output_tokens": 19}
+        ]
+      }
+    }}
+  ]
+}

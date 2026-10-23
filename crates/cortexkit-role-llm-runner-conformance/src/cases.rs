@@ -121,6 +121,10 @@ where
             "never_written_session_empty_page" => passed(self.never_written_page().await),
             "never_written_session_empty_head" => passed(self.never_written_head().await),
             "head_has_no_bodies" => passed(self.head_has_no_bodies().await),
+            "head_sender_is_callers_effective_grant" => crate::head_sender::run(self).await,
+            "head_incarnation_survives_cut_and_changes_on_recreation" => {
+                crate::incarnation::run(self).await
+            }
             "run_result_completed_final_text" => passed(self.run_result_final_text().await),
             "run_result_text_parts_joined_unchanged" => passed(self.run_result_joined().await),
             "run_result_completed_no_text_is_empty" => passed(self.run_result_no_text().await),
@@ -155,6 +159,11 @@ where
             name if name.starts_with("run_usage_") => crate::run_usage::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
+            name if name.starts_with("session_usage_")
+                || name == "head_model_reflects_recorded_switch" =>
+            {
+                crate::session_usage::run(self, name).await
+            }
             name if name.starts_with("turn_directives_") => {
                 crate::directives::run(self, name).await
             }
@@ -928,10 +937,15 @@ where
 
     async fn never_written_head(&self) -> Check {
         let session = self.open("unwritten", Script::default()).await?;
-        let head = head(&session.route).await?;
+        let mut head = head(&session.route).await?;
+        // Next-send metadata and log identity need no transcript lineage.
+        head.input = None;
+        head.model = None;
+        head.sender = None;
+        head.incarnation = None;
         if head != HeadMeta::no_lineage() {
             return Err(format!(
-                "session.head of a session never written answered {head:?}, not every member absent"
+                "session.head of a session never written answered lineage or spend metadata: {head:?}"
             ));
         }
         Ok(())

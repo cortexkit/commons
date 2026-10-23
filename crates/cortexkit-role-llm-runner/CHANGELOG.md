@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.1
+
+- Add ungated `session.head.incarnation`, an optional opaque 1–128-byte log
+  identity. Pin OS randomness/non-reuse and preservation across cuts, reverts,
+  restarts, restores and exported moves; unknown means readers fall back to
+  lineage-scoped claims. Add a vector and byte-length validation.
+
+- Add optional `session.head.model` (`read::HeadModel`) for the runner's
+  recorded next-send selection, independent of frozen plan bytes and with no
+  describe gate. An absent model means unknown.
+- Add the `session_usage` describe group and optional `session.head.usage`
+  (`usage::SessionUsage`): flattened run-usage totals with required `since`
+  run ID. Pin incremental, durable spend across runs, restarts, adopted turns,
+  history versions and compactions; rewinds never subtract spend.
+- Add head vectors for both optional members, including two `by_model`
+  selections with and without a variant. Existing vector bytes are unchanged.
+- Bound every session usage count, including `by_model`, to the exact JSON
+  integer range 0 through 2^53 − 1; add accepted/rejected boundary vectors.
+- Add ungated `session.head.sender` (`read::HeadSender`), the attested
+  caller's delivery grant under the effective next-send plan, including the
+  owner form. Absence means no grant, not unknown.
+- Clarify `compaction_item.preset` is optional: only name catalog-listed
+  presets, and preserve omission on provider calls. Plan items remain generic
+  JSON; add a preset-less plan vector and admission/round-trip regression.
+
 ## 0.6.0
 
 A breaking release. A runner could not always report a tool call's start

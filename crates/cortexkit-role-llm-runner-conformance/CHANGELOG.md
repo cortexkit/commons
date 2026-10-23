@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.1
+
+- Add an incarnation lifetime case with defaulted cut/re-create hooks and
+  faulty runners that change identity at a cut or reuse it on re-creation.
+
+- Require llm-runner 0.6.1. Add `Capability::SessionUsage` and cases for
+  two-run sums and the first counted run, monotonic spend after a rewind,
+  and unknown token fields remaining absent. Add a recorded model-switch
+  case when the runner reports `head.model`.
+- Add defaulted subject hooks for session-usage fixtures, host rewinds and
+  recorded model switches; existing adapters compile unchanged and report
+  unsupported observations as inapplicable. Faulty reference runners prove
+  each case fails by name, including a wrong `since` and plan-derived model.
+- Add `head_sender_is_callers_effective_grant`, with defaulted two-identity
+  fixtures. Compare named A/B, unnamed and owner routes against the modes
+  admitted from checked describe and the plan's flags. Faulty runners cover
+  caller-independent grants, omitted owners and an ungranted `idle_start`.
+
 ## 0.11.0
 
 A breaking release for `cortexkit-role-llm-runner` 0.6.0 and

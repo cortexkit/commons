@@ -106,6 +106,66 @@ pub struct RunUsage {
     pub by_model: Vec<ModelUsage>,
 }
 
+/// Durable session spend on `session.head`, across runs, rewinds and cuts.
+/// The runner updates it atomically with each step's usage, never by scanning
+/// history. Imported history that was never counted is excluded explicitly by
+/// `since`; restarts retain both the totals and their starting run.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionUsage {
+    /// The first counted run's `run_id`, or the first run after adoption when
+    /// the runner did not count the imported history.
+    pub since: String,
+    /// The same fields and absence rules as `run_usage`, flattened on the wire.
+    #[serde(flatten)]
+    pub totals: RunUsage,
+}
+
+/// Largest usage count exactly representable by readers using JSON doubles.
+pub const MAX_EXACT_USAGE_COUNT: u64 = (1 << 53) - 1;
+
+impl SessionUsage {
+    pub fn new(since: impl Into<String>) -> Self {
+        Self {
+            since: since.into(),
+            totals: RunUsage::new(),
+        }
+    }
+
+    /// Count a step in the same durable commit that stores its run usage.
+    pub fn record_step(
+        &mut self,
+        provider: &str,
+        model: &str,
+        variant: Option<&str>,
+        step: StepUsage,
+    ) {
+        self.totals.record_step(provider, model, variant, step);
+    }
+
+    pub fn consistent(&self) -> bool {
+        let bounded = |steps, unreported_steps, tokens: [Option<u64>; 5]| {
+            steps <= MAX_EXACT_USAGE_COUNT
+                && unreported_steps <= MAX_EXACT_USAGE_COUNT
+                && tokens
+                    .into_iter()
+                    .flatten()
+                    .all(|n| n <= MAX_EXACT_USAGE_COUNT)
+        };
+        self.totals.consistent()
+            && bounded(
+                self.totals.steps,
+                self.totals.unreported_steps,
+                self.totals.totals(),
+            )
+            && self
+                .totals
+                .by_model
+                .iter()
+                .all(|m| bounded(m.steps, m.unreported_steps, m.totals()))
+    }
+}
+
 /// One `by_model` entry: the steps and totals of one (provider, model,
 /// variant) selection within the run.
 ///
@@ -281,6 +341,115 @@ mod tests {
 
     use super::*;
     use crate::{run::RunStatus, vectors};
+
+    #[test]
+    fn session_usage_counts_must_be_exact_json_integers() {
+        let vector: Value =
+            serde_json::from_str(vectors::file("head-session-usage-bounds.json").unwrap()).unwrap();
+        for (name, valid) in [("at_limit", true), ("above_limit", false)] {
+            let head: crate::read::HeadMeta = serde_json::from_value(vector[name].clone()).unwrap();
+            let usage = head.usage.unwrap();
+            assert!(
+                usage.totals.consistent(),
+                "bound vectors isolate the numeric limit"
+            );
+            assert_eq!(usage.consistent(), valid, "{name}");
+            assert_eq!(serde_json::to_value(&usage).unwrap(), vector[name]["usage"]);
+        }
+        for field in [
+            "steps",
+            "unreported_steps",
+            "input_tokens",
+            "cached_input_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+            "reasoning_tokens",
+        ] {
+            for count in [MAX_EXACT_USAGE_COUNT, MAX_EXACT_USAGE_COUNT + 1] {
+                let mut usage = serde_json::json!({
+                    "since": "run-first", "steps": 1, "unreported_steps": 0,
+                    "by_model": [{"provider": "p", "model": "m", "steps": 1, "unreported_steps": 0}]
+                });
+                usage[field] = serde_json::json!(count);
+                usage["by_model"][0][field] = serde_json::json!(count);
+                if field == "unreported_steps" {
+                    usage["steps"] = serde_json::json!(count);
+                    usage["by_model"][0]["steps"] = serde_json::json!(count);
+                }
+                let usage: SessionUsage = serde_json::from_value(usage).unwrap();
+                assert!(usage.totals.consistent());
+                assert_eq!(
+                    usage.consistent(),
+                    count == MAX_EXACT_USAGE_COUNT,
+                    "{field}: {count}"
+                );
+            }
+            for value in [serde_json::json!(-1), serde_json::json!(1.5)] {
+                let mut usage = serde_json::to_value(SessionUsage::new("run-first")).unwrap();
+                usage[field] = value.clone();
+                assert!(
+                    serde_json::from_value::<SessionUsage>(usage).is_err(),
+                    "{field}: {value}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn session_usage_group_extends_head() {
+        assert_eq!(
+            crate::capabilities::group_ops(crate::capabilities::SESSION_USAGE),
+            Some(&[crate::ops::SESSION_HEAD][..])
+        );
+    }
+
+    #[test]
+    fn session_head_optional_members_round_trip() {
+        let cases: Value =
+            serde_json::from_str(vectors::file("head-session-usage.json").unwrap()).unwrap();
+        for case in cases["answers"].as_array().unwrap() {
+            let head: crate::read::HeadMeta =
+                serde_json::from_value(case["answer"].clone()).unwrap();
+            assert!(head.lineage_consistent(), "{}", case["name"]);
+            assert_eq!(
+                serde_json::to_value(&head).unwrap(),
+                case["answer"],
+                "{}",
+                case["name"]
+            );
+            if let Some(usage) = head.usage {
+                assert!(usage.consistent());
+            }
+        }
+    }
+
+    #[test]
+    fn session_usage_unknown_fields_stay_absent() {
+        let mut usage = SessionUsage::new("run-first");
+        usage.record_step("p", "m", None, StepUsage::unreported().with_input_tokens(4));
+        let wire = serde_json::to_value(&usage).unwrap();
+        for field in [
+            "cached_input_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+            "reasoning_tokens",
+        ] {
+            assert!(
+                wire.get(field).is_none(),
+                "unknown {field} must be absent: {wire}"
+            );
+        }
+        assert_eq!(wire["since"], "run-first");
+        assert!(usage.consistent());
+    }
+
+    #[test]
+    fn session_usage_requires_since() {
+        let missing = serde_json::json!({"steps": 0, "unreported_steps": 0, "by_model": []});
+        assert!(serde_json::from_value::<SessionUsage>(missing).is_err());
+        let wire = serde_json::to_value(SessionUsage::new("run-first")).unwrap();
+        assert_eq!(wire["since"], "run-first");
+    }
 
     /// The `run.status` vector `name`: its text, and the byte
     /// range of its `usage` object.

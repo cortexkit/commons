@@ -145,6 +145,12 @@ const FAKE_MODEL: &str = "scripted-model";
 const MAXIMUM_MAX_BYTES: u64 = 1024 * 1024;
 const DEFAULT_LIMIT: u64 = 100;
 const MAXIMUM_LIMIT: u64 = 1000;
+
+fn new_incarnation() -> String {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("OS entropy for the fake's durable log identity");
+    format!("{:032x}", u128::from_be_bytes(bytes))
+}
 const READ_FIELDS: &[&str] = &[
     "media",
     "from_ordinal",
@@ -160,6 +166,17 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub incarnation_changes_on_cut: bool,
+    pub incarnation_reused_on_recreation: bool,
+    pub head_sender_ignores_caller: bool,
+    pub head_sender_grant_for_unnamed_caller: bool,
+    pub head_sender_owner_absent: bool,
+    pub head_sender_a_idle_start: bool,
+    pub session_usage_sum_wrong: bool,
+    pub session_usage_since_wrong: bool,
+    pub session_usage_reset_on_rewind: bool,
+    pub session_usage_unknown_zero: bool,
+    pub head_model_from_plan: bool,
     pub output_refs: Option<&'static str>,
     pub held_calls_never_listed: bool,
     pub held_calls_stale: bool,
@@ -782,6 +799,9 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    incarnation: Option<String>,
+    session_usage: Option<cortexkit_role_llm_runner::usage::SessionUsage>,
+    head_model: Option<cortexkit_role_llm_runner::read::HeadModel>,
     output_refs: output_refs::State,
     output_refs_enabled: bool,
     attachment_accepts: Option<bool>,
@@ -1273,6 +1293,14 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
         }
+        if matches!(record["kind"].as_str(), Some("start" | "fork"))
+            && record.get("incarnation").is_none()
+        {
+            record["incarnation"] = json!(new_incarnation());
+        }
+        if record["kind"] == "cut" && self.world.defects.incarnation_changes_on_cut {
+            record["incarnation_after_cut"] = json!(new_incarnation());
+        }
         if record["kind"] == "step" && self.world.serves(groups::OUTPUT_REFS) {
             if let Some(sess) = self.sessions.lock().unwrap().get(session) {
                 record["output_sets"] = output_refs::capture(sess, &record, &self.world.defects);
@@ -1318,6 +1346,7 @@ impl Module {
             sessions.insert(
                 session.clone(),
                 Sess {
+                    incarnation: record["incarnation"].as_str().map(str::to_owned),
                     owner: text("owner"),
                     lineage: text("lineage"),
                     plan_digest: record["plan_digest"].as_str().map(str::to_owned),
@@ -1344,6 +1373,7 @@ impl Module {
                     session.clone(),
                     Sess {
                         forked_from: Some(text("parent")),
+                        incarnation: record["incarnation"].as_str().map(str::to_owned),
                         ..parent
                     },
                 );
@@ -1364,6 +1394,22 @@ impl Module {
             sess.last_activity = record["at"].as_u64().unwrap_or_default();
         }
         match kind.as_str() {
+            "head-model-switch" => {
+                sess.head_model = Some(serde_json::from_value(record["model"].clone()).unwrap());
+            }
+            "usage-rewind" => {
+                if let Some(last) = sess.runs.last() {
+                    let id = last.run_id.clone();
+                    sess.messages.retain(|message| message.run_id != id);
+                }
+                sess.history_version += 1;
+                sess.lineage = format!("{}-rewound", sess.lineage);
+                if self.world.defects.session_usage_reset_on_rewind {
+                    if let Some(usage) = &mut sess.session_usage {
+                        usage.totals = RunUsage::new();
+                    }
+                }
+            }
             "host_meta" => sess.host_meta += 1,
             "host_compact" => {
                 // The host compacts natively, keeping the last exchange: its
@@ -1577,6 +1623,9 @@ impl Module {
                     },
                 );
                 if kind == "send" && record["no_run"] != json!(true) {
+                    sess.session_usage.get_or_insert_with(|| {
+                        cortexkit_role_llm_runner::usage::SessionUsage::new(&run_id)
+                    });
                     sess.runs.push(RunRec {
                         directives: serde_json::from_value(record["directives"].clone())
                             .unwrap_or_default(),
@@ -1628,6 +1677,9 @@ impl Module {
                 }
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.usage.record_step(FAKE_PROVIDER, FAKE_MODEL, None, step);
+                }
+                if let Some(usage) = &mut sess.session_usage {
+                    usage.record_step(FAKE_PROVIDER, FAKE_MODEL, None, step);
                 }
                 let mut keys = Vec::new();
                 for call in record["calls"].as_array().into_iter().flatten() {
@@ -1833,7 +1885,10 @@ impl Module {
                 }
             }
             "cut" | "revert" | "seed" | "view_applied" | "view_disposed" | "notice" => {
-                history::apply(sess, &kind, record, &self.world.defects)
+                history::apply(sess, &kind, record, &self.world.defects);
+                if let Some(value) = record["incarnation_after_cut"].as_str() {
+                    sess.incarnation = Some(value.into());
+                }
             }
             "legacy_call" => {
                 // A finished call from history stored before the runner kept
@@ -2467,7 +2522,7 @@ impl Module {
                 } else if method == ops::SESSION_READ {
                     Ok(self.read(session, &params))
                 } else {
-                    Ok(self.head(session, &params))
+                    Ok(self.head(stamp, session, &params))
                 }
             }
             ops::SESSION_HISTORY if self.world.serves(groups::HOST_HISTORY) => {
@@ -3699,13 +3754,25 @@ impl Module {
         message
     }
 
-    fn head(&self, session: &str, params: &Value) -> Reply {
+    fn head(&self, stamp: &RouteStamp, session: &str, params: &Value) -> Reply {
         if let Some(field) = unknown_field(params, &[]) {
             return invalid(&field);
         }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
-            return respond(HeadMeta::no_lineage());
+            let mut head = HeadMeta::no_lineage();
+            if stamp.principal == "reserved:owner" && !self.world.defects.head_sender_owner_absent {
+                head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::for_owner(
+                    self.head_supported_modes(),
+                ));
+            }
+            if self.world.serves(groups::SESSION_USAGE) {
+                head = head.with_model(cortexkit_role_llm_runner::read::HeadModel::new(
+                    FAKE_PROVIDER,
+                    FAKE_MODEL,
+                ));
+            }
+            return respond(head);
         };
         if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
             return respond(HeadMeta::no_lineage());
@@ -3713,6 +3780,65 @@ impl Module {
         let mut head = HeadMeta::new(&sess.lineage, sess.first_ordinal, sess.last_activity)
             .with_head(cursor(sess.events.len()))
             .with_history_version(sess.history_version);
+        if let Some(incarnation) = &sess.incarnation {
+            head = head.with_incarnation(incarnation);
+        }
+        let caller = if self.world.defects.head_sender_ignores_caller {
+            sess.senders
+                .first()
+                .map(|s| s.module.as_str())
+                .unwrap_or(&stamp.principal)
+        } else {
+            &stamp.principal
+        };
+        let supported = self.head_supported_modes();
+        if caller == sess.owner {
+            if !self.world.defects.head_sender_owner_absent {
+                head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::for_owner(
+                    supported,
+                ));
+            }
+        } else if let Some(sender) = sess.senders.iter().find(|s| s.module == caller) {
+            head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::new(
+                supported
+                    .into_iter()
+                    .filter(|m| {
+                        m != "idle_start"
+                            || sender.idle_start
+                            || self.world.defects.head_sender_a_idle_start
+                    })
+                    .collect(),
+                sender.interrupt,
+            ));
+        } else if self.world.defects.head_sender_grant_for_unnamed_caller {
+            head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::for_owner(
+                supported,
+            ));
+        }
+        if self.world.serves(groups::SESSION_USAGE) {
+            let original =
+                cortexkit_role_llm_runner::read::HeadModel::new(FAKE_PROVIDER, FAKE_MODEL);
+            head = head.with_model(if self.world.defects.head_model_from_plan {
+                original
+            } else {
+                sess.head_model.clone().unwrap_or(original)
+            });
+            if let Some(mut usage) = sess.session_usage.clone() {
+                if self.world.defects.session_usage_sum_wrong {
+                    usage.totals = sess.runs.last().unwrap().usage.clone();
+                }
+                if self.world.defects.session_usage_since_wrong {
+                    usage.since = "not-the-first-run".into();
+                }
+                if self.world.defects.session_usage_unknown_zero {
+                    usage.totals.reasoning_tokens = Some(0);
+                    for model in &mut usage.totals.by_model {
+                        model.reasoning_tokens = Some(0);
+                    }
+                }
+                head = head.with_usage(usage);
+            }
+        }
         if self.world.serves(groups::ATTACHMENTS) {
             let accepts = sess.attachment_accepts.unwrap_or(true);
             head = head.with_input(
@@ -3763,6 +3889,23 @@ impl Module {
             });
         }
         respond(head)
+    }
+
+    fn head_supported_modes(&self) -> Vec<String> {
+        let Reply::Response(value) = self.describe() else {
+            unreachable!()
+        };
+        let describe: RoleDescribe = serde_json::from_value(value).unwrap();
+        [
+            Mode::ToolResult,
+            Mode::TurnSystem,
+            Mode::Steer,
+            Mode::IdleStart,
+        ]
+        .into_iter()
+        .filter(|mode| mode.is_declared_by(&describe))
+        .map(|mode| mode.as_str().to_owned())
+        .collect()
     }
 
     fn run_result(&self, session: &str, params: Value) -> Reply {
@@ -4472,6 +4615,8 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub incarnation_fixtures: bool,
+    pub head_sender_fixtures: bool,
     pub output_refs_group: bool,
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
@@ -4587,6 +4732,8 @@ impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
             held_calls_group: false,
+            head_sender_fixtures: false,
+            incarnation_fixtures: false,
             output_refs_group: false,
             descriptor_case: None,
             descriptor_fixtures: false,
@@ -4811,6 +4958,119 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn cut_incarnation_log(&self, session: &str) -> Result<bool, HarnessError> {
+        if !self.incarnation_fixtures {
+            return Ok(false);
+        }
+        for module in self.modules.lock().unwrap().clone() {
+            if !module.alive.load(Ordering::SeqCst) {
+                continue;
+            }
+            let sess = module.sessions.lock().unwrap()[session].clone();
+            let message = sess
+                .messages
+                .first()
+                .ok_or_else(|| HarnessError::new("no message to cut"))?;
+            let digest = cortexkit_role_llm_runner::content_digest::content_digest(
+                &module.read_message(&sess, message).message,
+            );
+            module.commit(session, json!({"kind":"cut", "first_ordinal":message.ordinal + 1,
+                "through_digest":digest, "through_mid":message.mid, "through_written_at":message.written_at}))
+                .map_err(|_| HarnessError::new("killed while cutting the log"))?;
+        }
+        Ok(true)
+    }
+
+    async fn recreate_incarnation_log(&self, session: &str) -> Result<bool, HarnessError> {
+        if !self.incarnation_fixtures {
+            return Ok(false);
+        }
+        for module in self.modules.lock().unwrap().clone() {
+            if !module.alive.load(Ordering::SeqCst) {
+                continue;
+            }
+            let sess = module.sessions.lock().unwrap()[session].clone();
+            // The fake shares one file across keys, so replace only this key's
+            // records; replay must see a new log, not an old log plus a new ID.
+            let original = std::fs::read_to_string(&module.log)
+                .map_err(|e| HarnessError::new(e.to_string()))?;
+            let kept: Vec<&str> = original
+                .lines()
+                .filter(|line| {
+                    let record: Value = serde_json::from_str(line).unwrap();
+                    record["session"] != json!(session)
+                })
+                .collect();
+            let mut remaining = kept.join("\n");
+            if !remaining.is_empty() {
+                remaining.push('\n');
+            }
+            std::fs::write(&module.log, remaining).map_err(|e| HarnessError::new(e.to_string()))?;
+            module.sessions.lock().unwrap().remove(session);
+            let mut start = json!({"kind":"start", "owner":sess.owner,
+                "lineage":format!("recreated-{}", new_incarnation()), "tools":[]});
+            if self.defects.incarnation_reused_on_recreation {
+                start["incarnation"] = json!(sess.incarnation);
+            }
+            module
+                .commit(session, start)
+                .map_err(|_| HarnessError::new("killed while recreating log"))?;
+        }
+        Ok(true)
+    }
+
+    fn head_sender_identities(&self) -> Option<[PlanSenderIdentity; 2]> {
+        self.head_sender_fixtures.then(|| {
+            [
+                PlanSenderIdentity::new(
+                    RouteStamp {
+                        principal: SENDER_MODULE.into(),
+                        scope: None,
+                    },
+                    SENDER_MODULE,
+                ),
+                PlanSenderIdentity::new(
+                    RouteStamp {
+                        principal: "fake.sender-b".into(),
+                        scope: None,
+                    },
+                    "fake.sender-b",
+                ),
+            ]
+        })
+    }
+    fn session_usage_fixtures(&self) -> bool {
+        true
+    }
+
+    async fn rewind_session_usage(&self, session: &str) -> Result<bool, HarnessError> {
+        for module in self.modules.lock().unwrap().clone() {
+            if module.alive.load(Ordering::SeqCst) {
+                module
+                    .commit(session, json!({"kind":"usage-rewind"}))
+                    .map_err(|_| HarnessError::new("killed while rewinding"))?;
+            }
+        }
+        Ok(true)
+    }
+
+    async fn switch_head_model(
+        &self,
+        session: &str,
+    ) -> Result<Option<cortexkit_role_llm_runner::read::HeadModel>, HarnessError> {
+        let model =
+            cortexkit_role_llm_runner::read::HeadModel::new(FAKE_PROVIDER, "recorded-next-model")
+                .with_variant("fast");
+        for module in self.modules.lock().unwrap().clone() {
+            if module.alive.load(Ordering::SeqCst) {
+                module
+                    .commit(session, json!({"kind":"head-model-switch", "model":model}))
+                    .map_err(|_| HarnessError::new("killed while switching model"))?;
+            }
+        }
+        Ok(Some(model))
+    }
+
     async fn hold_send_staging(&self, session: &str) -> Result<bool, HarnessError> {
         self.world()
             .staging_holds

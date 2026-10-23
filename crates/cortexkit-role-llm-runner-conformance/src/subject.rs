@@ -84,6 +84,8 @@ pub enum Capability {
     RunToolCalls,
     /// Per-run token usage (`usage`) on `run.result` and `run.status`.
     RunUsage,
+    /// Durable session spend on `session.head`.
+    SessionUsage,
     /// `session.send` with `delivery_order`, plan-named senders and plan
     /// templates.
     DeliveryOrder,
@@ -165,6 +167,7 @@ impl Capability {
         Self::Tags,
         Self::RunToolCalls,
         Self::RunUsage,
+        Self::SessionUsage,
         Self::DeliveryOrder,
         Self::SendStatus,
         Self::UserCommands,
@@ -223,6 +226,7 @@ impl Capability {
             Self::Tags => groups::TAGS,
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::RunUsage => groups::RUN_USAGE,
+            Self::SessionUsage => groups::SESSION_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
@@ -549,6 +553,47 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Apply a real compaction cut to the key's existing log, without replacing
+    /// the log. False means the adapter cannot provide this observation.
+    async fn cut_incarnation_log(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Delete and create the key's log again, retaining the key but not its
+    /// identity. False means the adapter cannot provide this observation.
+    async fn recreate_incarnation_log(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Two distinct, attested non-owner identities for the caller-grant case.
+    /// The kit names A without flags and B with both flags in a real plan.
+    /// None keeps existing adapters inapplicable until they supply routes.
+    fn head_sender_identities(&self) -> Option<[PlanSenderIdentity; 2]> {
+        None
+    }
+
+    /// Whether the adapter can run the session-usage fixtures. Defaults keep
+    /// existing adapters inapplicable until they opt into these observations.
+    fn session_usage_fixtures(&self) -> bool {
+        false
+    }
+
+    /// Rewind visible history to before the latest run, without undoing spend.
+    /// Return false when the host cannot produce a rewind.
+    async fn rewind_session_usage(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Record a model switch through the host's normal switch path, without
+    /// rewriting the frozen plan, and return the selection that was recorded.
+    /// None means the adapter cannot produce that observation.
+    async fn switch_head_model(
+        &self,
+        _session: &str,
+    ) -> Result<Option<cortexkit_role_llm_runner::read::HeadModel>, HarnessError> {
+        Ok(None)
+    }
+
     /// Wait until the request-rendering component holds an accepted send.
     /// A runner owning its loop may return at once. This observes staging,
     /// not delivery, and must not render a boundary just to satisfy the hook.

@@ -275,6 +275,8 @@ pub mod capabilities {
     /// Per-run token usage (`usage`) on `run.result`, and on `run.status`
     /// where the runner serves it. Adds no op of its own.
     pub const RUN_USAGE: &str = "run_usage";
+    /// Durable, incrementally maintained session spend on `session.head`.
+    pub const SESSION_USAGE: &str = "session_usage";
     /// `session.send` with `delivery_order`: an ordered list of delivery
     /// modes, plan-named senders and plan templates for system-authority
     /// text.
@@ -344,6 +346,7 @@ pub mod capabilities {
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
+        (SESSION_USAGE, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
         (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),

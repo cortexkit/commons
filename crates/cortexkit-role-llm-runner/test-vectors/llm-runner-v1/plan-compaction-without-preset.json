@@ -1,0 +1,11 @@
+{
+  "prompt": "continue",
+  "send_id": "send-presetless",
+  "delivery": "queue",
+  "plan": {
+    "compaction_item": {
+      "provider": "magic-context",
+      "params": {"budget": 4096}
+    }
+  }
+}

@@ -111,6 +111,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::Tags,
     Capability::RunToolCalls,
     Capability::RunUsage,
+    Capability::SessionUsage,
     Capability::DeliveryOrder,
     Capability::Retract,
     Capability::SendStatus,
@@ -137,6 +138,21 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case == "head_incarnation_survives_cut_and_changes_on_recreation"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
+    {
+        return;
+    }
+    if case == "head_sender_is_callers_effective_grant"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter supplies no two-identity head.sender fixture")
+    {
+        return;
+    }
+    if case == "head_model_reflects_recorded_switch"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not report head.model")
+    {
+        return;
+    }
     if case.starts_with("output_refs_")
         && matches!(report.outcome(case),Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare output_refs" || reason == "the runner declares output_refs")
     {
@@ -364,6 +380,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
+    subject.capabilities.insert(Capability::SessionUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
@@ -694,6 +711,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::Adopt,
                     Capability::RunToolCalls,
                     Capability::RunUsage,
+                    Capability::SessionUsage,
                     Capability::DeliveryOrder,
                     Capability::SendStatus,
                     Capability::UserCommands,
@@ -1061,6 +1079,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::Adopt,
                     Capability::RunToolCalls,
                     Capability::RunUsage,
+                    Capability::SessionUsage,
                     Capability::DeliveryOrder,
                     Capability::SendStatus,
                     Capability::UserCommands,
@@ -1443,6 +1462,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
+    subject.capabilities.insert(Capability::SessionUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
@@ -1480,6 +1500,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
+    subject.capabilities.insert(Capability::SessionUsage);
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.capabilities.insert(Capability::SendStatus);
     subject.capabilities.insert(Capability::UserCommands);
@@ -2216,6 +2237,251 @@ const TAG_PREFIXES: &[&str] = &["tags_"];
 const TOOL_CALL_PREFIXES: &[&str] = &["run_tool_calls_"];
 const ORDER_PREFIXES: &[&str] = &["delivery_order_"];
 const USAGE_PREFIXES: &[&str] = &["run_usage_"];
+const SESSION_USAGE_CASES: &[&str] = &[
+    "session_usage_sums_runs_since_first",
+    "session_usage_rewind_never_decreases",
+    "session_usage_unknown_fields_absent",
+    "head_model_reflects_recorded_switch",
+];
+
+async fn head_sender_defect(defects: Defects, expected: Option<&str>) {
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.head_sender_fixtures = true;
+    let report = run(&subject).await;
+    let name = "head_sender_is_callers_effective_grant";
+    if let Some(reason) = expected {
+        assert!(
+            failed(&report, name).contains(reason),
+            "{}",
+            report.render()
+        );
+    } else {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn head_sender_correct_runner_passes() {
+    head_sender_defect(Defects::default(), None).await;
+}
+
+#[tokio::test]
+async fn head_sender_ignoring_caller_fails_by_name() {
+    head_sender_defect(
+        Defects {
+            head_sender_ignores_caller: true,
+            ..Defects::default()
+        },
+        Some("B head.sender"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_sender_absent_owner_fails_by_name() {
+    head_sender_defect(
+        Defects {
+            head_sender_owner_absent: true,
+            ..Defects::default()
+        },
+        Some("owner head.sender"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_sender_grant_for_unnamed_caller_fails_by_name() {
+    head_sender_defect(
+        Defects {
+            head_sender_grant_for_unnamed_caller: true,
+            ..Defects::default()
+        },
+        Some("unnamed caller head.sender"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_sender_ungranted_idle_start_fails_by_name() {
+    head_sender_defect(
+        Defects {
+            head_sender_a_idle_start: true,
+            ..Defects::default()
+        },
+        Some("A head.sender"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_sender_default_hook_is_inapplicable() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert!(
+        matches!(report.outcome("head_sender_is_callers_effective_grant"), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("two-identity"))
+    );
+}
+
+#[tokio::test]
+async fn head_sender_respects_supported_mode_narrowing() {
+    for modes in [vec!["idle_start".into()], vec!["steer".into()]] {
+        let mut subject = declaring(Capability::DeliveryOrder, Defects::default());
+        subject.head_sender_fixtures = true;
+        subject.delivery_order_modes = Some(modes);
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome("head_sender_is_callers_effective_grant"),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+async fn incarnation_defect(defects: Defects, expected: Option<&str>) {
+    let mut subject = FakeSubject::new(defects);
+    subject.incarnation_fixtures = true;
+    let report = run(&subject).await;
+    let name = "head_incarnation_survives_cut_and_changes_on_recreation";
+    if let Some(reason) = expected {
+        assert!(
+            failed(&report, name).contains(reason),
+            "{}",
+            report.render()
+        );
+    } else {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn incarnation_correct_runner_passes() {
+    incarnation_defect(Defects::default(), None).await;
+}
+
+#[tokio::test]
+async fn incarnation_changed_at_cut_fails_by_name() {
+    incarnation_defect(
+        Defects {
+            incarnation_changes_on_cut: true,
+            ..Defects::default()
+        },
+        Some("cut changed incarnation"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn incarnation_reused_after_recreation_fails_by_name() {
+    incarnation_defect(
+        Defects {
+            incarnation_reused_on_recreation: true,
+            ..Defects::default()
+        },
+        Some("re-created log kept or omitted incarnation"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn incarnation_default_hooks_are_inapplicable() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert!(
+        matches!(report.outcome("head_incarnation_survives_cut_and_changes_on_recreation"), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
+    );
+}
+
+async fn session_usage_defect(defects: Defects, expected: Option<&str>) {
+    let mut subject = declaring(Capability::SessionUsage, defects);
+    subject.capabilities.insert(Capability::RunUsage);
+    let report = run(&subject).await;
+    for name in SESSION_USAGE_CASES {
+        if Some(*name) == expected {
+            failed(&report, name);
+        } else {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name}: {}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn session_usage_correct_runner_passes() {
+    session_usage_defect(Defects::default(), None).await;
+}
+
+#[tokio::test]
+async fn session_usage_wrong_sum_fails_by_name() {
+    session_usage_defect(
+        Defects {
+            session_usage_sum_wrong: true,
+            ..Defects::default()
+        },
+        Some("session_usage_sums_runs_since_first"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn session_usage_wrong_since_fails_by_name() {
+    session_usage_defect(
+        Defects {
+            session_usage_since_wrong: true,
+            ..Defects::default()
+        },
+        Some("session_usage_sums_runs_since_first"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn session_usage_reset_after_rewind_fails_by_name() {
+    session_usage_defect(
+        Defects {
+            session_usage_reset_on_rewind: true,
+            ..Defects::default()
+        },
+        Some("session_usage_rewind_never_decreases"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn session_usage_unknown_zero_fails_by_name() {
+    session_usage_defect(
+        Defects {
+            session_usage_unknown_zero: true,
+            ..Defects::default()
+        },
+        Some("session_usage_unknown_fields_absent"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn session_usage_plan_model_fails_by_name() {
+    session_usage_defect(
+        Defects {
+            head_model_from_plan: true,
+            ..Defects::default()
+        },
+        Some("head_model_reflects_recorded_switch"),
+    )
+    .await;
+}
 const SEND_STATUS_PREFIXES: &[&str] = &["send_status_"];
 
 /// The steer-receipt case that follows a delivered steer by re-sending it.
@@ -2997,10 +3263,11 @@ async fn the_last_possible_mode_winning_fails_the_order_cases() {
 async fn without_the_new_groups_their_cases_skip_by_name() {
     let report = run(&FakeSubject::new(Defects::default())).await;
     // The default fake declares `tags`, which `compaction` requires, so
-    // only the other two groups are left undeclared here.
+    // the optional groups below are left undeclared here.
     for (capability, prefixes) in [
         (Capability::RunToolCalls, TOOL_CALL_PREFIXES),
         (Capability::RunUsage, USAGE_PREFIXES),
+        (Capability::SessionUsage, &["session_usage_"][..]),
         (Capability::DeliveryOrder, ORDER_PREFIXES),
         (Capability::SendStatus, SEND_STATUS_PREFIXES),
     ] {

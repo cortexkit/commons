@@ -151,6 +151,11 @@ pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
         call(route, ops::SESSION_HEAD, json!({})).await?,
     )?;
     let head: HeadMeta = decode("session.head", body.clone())?;
+    if !head.incarnation_valid() {
+        return Err(format!(
+            "session.head incarnation is not an opaque 1–128-byte string: {body}"
+        ));
+    }
     if !head.lineage_consistent() {
         return Err(format!(
             "session.head answered {body}, inconsistent with its lineage"

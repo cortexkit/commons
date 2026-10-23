@@ -1,0 +1,14 @@
+{
+  "at_limit": {
+    "usage": {
+      "since": "run-first", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740991,
+      "by_model": [{"provider": "p", "model": "m", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740991}]
+    }
+  },
+  "above_limit": {
+    "usage": {
+      "since": "run-first", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740992,
+      "by_model": [{"provider": "p", "model": "m", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740992}]
+    }
+  }
+}

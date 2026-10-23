@@ -91,6 +91,7 @@ pub struct PendingRec {
     policy: String,
     digest: String,
     tools: Vec<String>,
+    senders: Vec<super::order::PlanSender>,
 }
 
 /// What a session's `session_change` records built.
@@ -129,6 +130,7 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 policy,
                 digest,
                 tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
+                senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
             });
         }
         "refresh_policy" => {
@@ -156,6 +158,7 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                     pending.digest.clone(),
                 ));
                 sess.tools = pending.tools;
+                sess.senders = pending.senders;
                 sess.plan_digest = Some(pending.digest);
             }
             sess.change.flush = false;
@@ -297,6 +300,7 @@ impl Module {
             session,
             json!({ "kind": "refresh", "generation": request.generation,
                     "policy": request.policy, "digest": digest, "tools": names,
+                    "senders": request.plan.get("senders").cloned().unwrap_or_else(|| json!([])),
                     "answer": answer }),
         )?;
         if running && request.policy == rungs::IMMEDIATELY && defects.refresh_applies_mid_run {

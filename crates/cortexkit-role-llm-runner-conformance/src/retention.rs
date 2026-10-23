@@ -442,8 +442,14 @@ where
                 let unwritten = self
                     .open("retention-never-written", Script::default())
                     .await?;
+                let mut meta = head(&unwritten.route).await?;
+                // Next-send metadata and log identity are not transcript content.
+                meta.input = None;
+                meta.model = None;
+                meta.sender = None;
+                meta.incarnation = None;
                 if read(&unwritten.route, &ReadRequest::tail()).await? != ReadPage::no_lineage()
-                    || head(&unwritten.route).await? != HeadMeta::no_lineage()
+                    || meta != HeadMeta::no_lineage()
                 {
                     return Err("never-written session did not keep its empty success".into());
                 }

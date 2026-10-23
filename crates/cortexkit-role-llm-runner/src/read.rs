@@ -800,7 +800,7 @@ pub struct HeadRequest {}
 /// bodies. Decoded leniently.
 ///
 /// It follows the read rule for a session that was never written: no
-/// `lineage_id`, and then none of the other members either
+/// `lineage_id`, and then none of the lineage-dependent members either
 /// ([`HeadMeta::no_lineage`], checked by [`HeadMeta::lineage_consistent`]).
 ///
 /// Non-exhaustive so later optional members are additive: use
@@ -851,6 +851,78 @@ pub struct HeadMeta {
     /// Outside the lineage rule: a never-written session may state it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<HeadInput>,
+    /// The runner's recorded selection for the next send that names no model,
+    /// not the frozen plan's original selection. Absent means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<HeadModel>,
+    /// Durable session spend, present only with the `session_usage` group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::usage::SessionUsage>,
+    /// The attested caller's grant under the plan checked on its next send.
+    /// Absent means no grant for this caller, not an unknown selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<HeadSender>,
+    /// Opaque identity of this key's log, stable across its entire lifetime.
+    /// Absent means unknown; compare only by equality, not lexical order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incarnation: Option<String>,
+}
+
+/// The caller's own delivery grant on `session.head`, independent of lineage.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HeadSender {
+    /// Delivery-mode names exactly as the effective plan uses them.
+    pub modes: Vec<String>,
+    pub interrupt: bool,
+    /// Encoded only for the owner, as `owner: true`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub owner: bool,
+}
+
+impl HeadSender {
+    pub fn new(modes: Vec<String>, interrupt: bool) -> Self {
+        Self {
+            modes,
+            interrupt,
+            owner: false,
+        }
+    }
+
+    /// Every mode accepted from the owner on its next send, with interruption.
+    pub fn for_owner(modes: Vec<String>) -> Self {
+        Self {
+            modes,
+            interrupt: true,
+            owner: true,
+        }
+    }
+}
+
+/// The next-send selection on `session.head`, independent of its lineage.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HeadModel {
+    pub provider: String,
+    pub model: String,
+    /// Absent when the recorded selection names no variant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+}
+
+impl HeadModel {
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+            variant: None,
+        }
+    }
+
+    pub fn with_variant(mut self, variant: impl Into<String>) -> Self {
+        self.variant = Some(variant.into());
+        self
+    }
 }
 
 /// `session.head.input`: what a send that names no model can carry.
@@ -931,6 +1003,10 @@ impl HeadMeta {
             last_run_state: None,
             updated_at: Some(updated_at),
             input: None,
+            model: None,
+            usage: None,
+            sender: None,
+            incarnation: None,
         }
     }
 
@@ -946,6 +1022,10 @@ impl HeadMeta {
             last_run_state: None,
             updated_at: None,
             input: None,
+            model: None,
+            usage: None,
+            sender: None,
+            incarnation: None,
         }
     }
 
@@ -977,6 +1057,33 @@ impl HeadMeta {
     pub fn with_input(mut self, input: HeadInput) -> Self {
         self.input = Some(input);
         self
+    }
+
+    pub fn with_model(mut self, model: HeadModel) -> Self {
+        self.model = Some(model);
+        self
+    }
+
+    pub fn with_usage(mut self, usage: crate::usage::SessionUsage) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    pub fn with_sender(mut self, sender: HeadSender) -> Self {
+        self.sender = Some(sender);
+        self
+    }
+
+    pub fn with_incarnation(mut self, incarnation: impl Into<String>) -> Self {
+        self.incarnation = Some(incarnation.into());
+        self
+    }
+
+    /// Whether a reported log identity fits the opaque 1–128-byte wire bound.
+    pub fn incarnation_valid(&self) -> bool {
+        self.incarnation
+            .as_ref()
+            .is_none_or(|value| (1..=128).contains(&value.len()))
     }
 
     /// Whether the answer is consistent with its lineage. Without a
@@ -1054,6 +1161,62 @@ mod tests {
     use super::*;
     use crate::{errors, vectors};
 
+    #[test]
+    fn head_incarnation_is_optional_and_bounded_in_bytes() {
+        let wire = vectors::load("head-incarnation.json");
+        let head: HeadMeta = vectors::round_trip("incarnation", &wire);
+        assert!(head.incarnation_valid());
+        assert!(head.lineage_consistent());
+        assert!(HeadMeta::no_lineage().incarnation_valid());
+        for (value, valid) in [
+            ("".into(), false),
+            ("x".repeat(128), true),
+            ("x".repeat(129), false),
+            ("é".repeat(64), true),
+            ("é".repeat(65), false),
+        ] {
+            assert_eq!(
+                HeadMeta::no_lineage()
+                    .with_incarnation(value)
+                    .incarnation_valid(),
+                valid
+            );
+        }
+    }
+
+    #[test]
+    fn head_sender_vectors_round_trip() {
+        let vector: Value =
+            serde_json::from_str(crate::vectors::file("head-sender.json").unwrap()).unwrap();
+        for case in vector["answers"].as_array().unwrap() {
+            let head: HeadMeta = serde_json::from_value(case["answer"].clone()).unwrap();
+            assert!(head.lineage_consistent());
+            assert_eq!(
+                serde_json::to_value(head).unwrap(),
+                case["answer"],
+                "{}",
+                case["name"]
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(HeadSender::new(
+                vec!["tool_result".into(), "turn_system".into(), "steer".into()],
+                false
+            ))
+            .unwrap(),
+            vector["answers"][0]["answer"]["sender"]
+        );
+        assert_eq!(
+            serde_json::to_value(HeadSender::for_owner(vec![
+                "tool_result".into(),
+                "turn_system".into(),
+                "steer".into(),
+                "idle_start".into()
+            ]))
+            .unwrap(),
+            vector["answers"][3]["answer"]["sender"]
+        );
+    }
     #[test]
     fn request_vectors_decode_round_trip_and_select_their_mode() {
         let file = vectors::load("read-requests.json");

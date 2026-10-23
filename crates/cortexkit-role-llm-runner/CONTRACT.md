@@ -173,6 +173,7 @@ shipping runner with this document.
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
+| `session_usage` | `session.head` with durable, incremental session spend in `usage` | §4.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 | `send_status` | `send.status` | §9.8 |
 | `user_commands` | `session.user_command`, `session.user_command_status` | §9.10 |
@@ -469,7 +470,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 ### 4.3 Head metadata
 
 - [pinned] Head metadata without bodies: `{lineage_id, last_ordinal,
-  first_ordinal, cut?, history_version, head, last_run_state, updated_at}`
+  first_ordinal, cut?, history_version, head, last_run_state, updated_at,
+  input?, model?, usage?, sender?, incarnation?}`
   (`HeadMeta`).
 - [pinned] `history_version` is a `u64`, on `session.head` and on every
   `session.history` page. It rises at every lineage change except a cut: a
@@ -510,12 +512,86 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   cannot carry attachments at all. An absent `input` means unknown, so the
   member needs no group. It is outside the lineage rule below: a
   never-written session may state it.
+- [pinned] `model?: {provider, model, variant?}` (`read::HeadModel`, added
+  in 0.6.1) is the selection a send without a named model would use next.
+  It is optional, needs no describe group, and absent means unknown. The
+  `variant` member is absent when the selection names none, exactly as in
+  `by_model` (§6.4). The runner reads its own record of the latest model
+  switch, never the frozen plan's bytes: core does not rewrite a head's plan
+  when the person switches models. This describes the next send, not history;
+  each run's `by_model` already describes what that run used. Like `input`,
+  `model` is independent of the lineage and may be known before the first send.
+- [pinned] `sender?: {modes: [<delivery-mode names>], interrupt: bool,
+  owner?: true}` (`read::HeadSender`, added in 0.6.1) is the attested caller's
+  own delivery grant: the route principal, never anyone else's. The mode
+  names are exactly those used by the plan. `modes` is the runner's supported
+  delivery modes after describe's `delivery_order_modes` narrowing, with
+  `idle_start` included for a named caller only when its plan entry has
+  `idle_start: true`; `interrupt` is that entry's flag. This is derived from
+  the same rule that send admission (`delivery_order::admit`) uses, so they
+  cannot disagree. It needs no describe group; a
+  runner that knows its plan reports the caller's grant. Absent means only
+  "no grant for you": the caller is neither the owner nor named by the plan,
+  not that the grant is unknown. It is independent of lineage.
+- [pinned] `sender` uses the plan the runner would check on that caller's
+  next send. After an accepted `session.refresh` takes effect, this is the
+  effective plan, not the original frozen bytes: `sender` never disagrees
+  with the next send's grant check. The owner receives `owner: true`, every
+  mode the runner would accept from the owner on its next send, and
+  `interrupt: true`. A session with no plan reports `sender` only to its owner.
+- [pinned] `incarnation?` (added in 0.6.1) is an opaque string of 1–128
+  bytes, compared by equality only. It needs no group. It is minted when
+  the key's log is first created and changes only when that key's log is
+  created again, such as after a retained session expires and the key
+  restarts at ordinal 0. A new incarnation must never repeat an earlier one
+  for that key, even across a store restore: at least 122 random bits from
+  the OS random source (a UUID v4 qualifies), or anything else that can't
+  come back for a new incarnation; never a counter a restore could rewind.
+- [pinned] The incarnation stays the same across compaction cuts, reverts,
+  restarts, restores of the same log, and moves. The runner carries it in
+  the session's exported move data, so the destination reports the same
+  value. A runner omits `incarnation` unless it can vouch that the value
+  survives every case in that lifetime list (restart, restore, move, cut,
+  revert). It never mints one per process: a per-process value would silently
+  break readers' claims after a restart. Readers key claims on
+  `(incarnation, mid)` when it is present. Absent means unknown; readers
+  then key claims on `lineage_id`, which is safe but expires claims at cuts.
+- [pinned] `usage?` (`usage::SessionUsage`, added in 0.6.1) is durable session
+  spend, behind the `session_usage` describe group. A runner that does not
+  declare that group leaves `usage` absent. It has exactly §6.4's `run_usage`
+  shape and rules, plus required `since: run_id`: `steps` and
+  `unreported_steps` are required; `input_tokens`, `cached_input_tokens`,
+  `cache_write_tokens`, `output_tokens` and `reasoning_tokens` are absent
+  until a step reports them, never zero for unknown. `by_model` is keyed by
+  exactly the same (provider, model, variant) selection and follows the same
+  ordering, absence and consistency rules.
+- [pinned] Every usage count in the session total and in each `by_model`
+  entry (`steps`, `unreported_steps` and every present token count) is a
+  non-negative integer no greater than 2^53 − 1 (9,007,199,254,740,991).
+  Readers that decode JSON numbers as doubles can therefore read each count
+  exactly. A consumer rejects an out-of-range session usage as malformed
+  (`SessionUsage::consistent` checks the upper bound).
+- [pinned] Session usage counts every step of every run in the session,
+  across compactions, history versions and person-started turns on adopted
+  sessions. It is spend, so it never decreases on a rewind, revert or
+  compaction. Rewinding visible history without completing a new step leaves
+  the total unchanged. The runner maintains the total incrementally, in the
+  same durable commit that stores a step's usage, never by scanning history.
+  Reading it costs the same at 150,000 messages as at 1,000.
+- [pinned] After a restart counting continues from the durable total.
+  Required `since` names the session's first counted run (`run_id`), or, for
+  an adopted or imported session whose history the runner never counted, the
+  first run after adoption. Before there is a first counted run, `usage` may
+  be absent. Readers must display that boundary rather than present a partial
+  total as the whole session's spend. For runs since `since`, their `run_usage`
+  figures add up to session usage field by field, but only for fields every
+  counted step reported. Readers must not add an absent value as zero.
 - [pinned] It follows the read rule (§4.2): an absent `lineage_id` means the
   session has no lineage yet. For a session never written, `lineage_id`,
   `last_ordinal`, `first_ordinal`, `head`, `last_run_state` and
   `updated_at` are all absent.
-- [pinned] An answer without `lineage_id` carries none of the other six
-  members, and an answer with `lineage_id` carries `updated_at` and
+- [pinned] An answer without `lineage_id` carries none of the other
+  lineage-dependent members, and an answer with `lineage_id` carries `updated_at` and
   `first_ordinal` and `history_version`, with `cut` whenever
   `first_ordinal` is above 0 (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
   malformed; it is not a refusal.
@@ -3127,9 +3203,13 @@ its host's file storage, not a second copy of the host's media store.
   "plan.compaction_item"}` and writes nothing
   (`SendRequest::check_compaction_item`).
 - [pinned] The `compaction_item` names the session's compaction provider as
-  `provider`, a module id, inside `compaction_item: {provider, preset,
+  `provider`, a module id, inside `compaction_item: {provider, preset?,
   params}`, frozen with the plan (`plan_compaction_provider`). It is the
   provider the runner calls Setup on and sends notices and rides to (§11.1).
+- [pinned] A plan item names a preset only for a provider whose preset-less
+  catalog answer lists it. When `compaction_item` carries no `preset`, the
+  runner's calls to that compaction provider carry none either: it never
+  invents one and never sends an empty string.
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
@@ -3777,6 +3857,12 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
 | `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
 | `run_usage_counts_reported_steps` | `run_usage`, `queue`, `run_ops`; after a two-step scripted run whose provider reports input, cache-read, cache-write and output counts but no reasoning, `run.result` carries `usage` with `steps: 2`, the scripted totals, `by_model` summing to them, and `reasoning_tokens` absent rather than `0`; `run.status`, where the major lists it, carries the same `usage`; reported as a named skip without `run_usage` |
+| `session_usage_sums_runs_since_first` | `session_usage`, `run_usage`, `queue`, `run_ops`, `transcript_reads`; two runs sum to session spend for reported fields, with `since` naming the first counted run |
+| `session_usage_rewind_never_decreases` | same groups; a rewind of visible history does not reduce or reset spend |
+| `session_usage_unknown_fields_absent` | same groups; reasoning usage no scripted step reported stays absent, never zero |
+| `head_model_reflects_recorded_switch` | `queue`, `transcript_reads`; when the runner reports a model and the adapter can record a switch, the head follows that switch, not the frozen plan |
+| `head_sender_is_callers_effective_grant` | `queue`, `transcript_reads`; a plan names A with neither flag and B with both; A gets supported modes minus `idle_start`, B gets all supported modes and interrupt, an unnamed caller gets no grant, and the owner gets all supported modes, interrupt and `owner: true`; defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
+| `head_incarnation_survives_cut_and_changes_on_recreation` | `queue`, `transcript_reads`; a reported incarnation stays equal across a real cut and differs after creation of a new log at the same key; defaulted cut/re-create hooks are inapplicable |
 | `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
 | `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a model whose one step is text ends `completed` with its final message, and with its directives where `turn_directives` is declared, never `max_steps` |
 | `max_steps_submit_result_completes` | `max_steps`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; with `max_steps: 1`, a step calling `submit_result` ends `completed` with the submitted value and its sibling `skipped_after_submit`, never `max_steps` |

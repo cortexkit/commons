@@ -53,6 +53,13 @@ const ADOPT: &[Capability] = &[Capability::Adopt, TranscriptReads];
 const TAGS: &[Capability] = &[Capability::Tags, Queue, TranscriptReads];
 const TOOL_CALLS: &[Capability] = &[Capability::RunToolCalls, Queue, TranscriptReads];
 const USAGE: &[Capability] = &[Capability::RunUsage, Queue, RunOps];
+const SESSION_USAGE: &[Capability] = &[
+    Capability::SessionUsage,
+    Capability::RunUsage,
+    Queue,
+    RunOps,
+    TranscriptReads,
+];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
 const ORDER_STEER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads, Steer];
 const SESSION_CHANGE: &[Capability] = &[Capability::SessionChange, Queue, RunOps];
@@ -110,6 +117,18 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("head_incarnation_survives_cut_and_changes_on_recreation", &[Queue, TranscriptReads],
+        "a reported log identity holds across a real cut but changes when the same key's log is created again"),
+    case("head_sender_is_callers_effective_grant", &[Queue, TranscriptReads],
+        "A gets supported modes minus idle_start, B gets every supported mode and interrupt, the unnamed caller gets no grant, and the owner gets owner=true"),
+    case("session_usage_sums_runs_since_first", SESSION_USAGE,
+        "two runs' reported totals add up to durable session spend; since names the first counted run"),
+    case("session_usage_rewind_never_decreases", SESSION_USAGE,
+        "rewinding visible history leaves session spend unchanged"),
+    case("session_usage_unknown_fields_absent", SESSION_USAGE,
+        "a token field no step reported stays absent, never zero"),
+    case("head_model_reflects_recorded_switch", &[Queue, TranscriptReads],
+        "a reported next-send selection follows the runner's recorded switch, not the frozen plan"),
     case("output_refs_unsupported_plan", &[], "a non-advertiser refuses output_refs plan members before any send, refresh or adoption write"),
     case("delivery_order_result_before_staging", &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls], "a tool result already sent before staging cannot carry a subsequently staged send"),
     case("output_refs_scanning", &[], "code spans, fences and escaped markers copy no output"),

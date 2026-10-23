@@ -14,6 +14,26 @@ pub const DIR: &str = "llm-runner-v1";
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "head-incarnation.json",
+        include_str!("../test-vectors/llm-runner-v1/head-incarnation.json"),
+    ),
+    (
+        "plan-compaction-without-preset.json",
+        include_str!("../test-vectors/llm-runner-v1/plan-compaction-without-preset.json"),
+    ),
+    (
+        "head-sender.json",
+        include_str!("../test-vectors/llm-runner-v1/head-sender.json"),
+    ),
+    (
+        "head-session-usage-bounds.json",
+        include_str!("../test-vectors/llm-runner-v1/head-session-usage-bounds.json"),
+    ),
+    (
+        "head-session-usage.json",
+        include_str!("../test-vectors/llm-runner-v1/head-session-usage.json"),
+    ),
+    (
         "output-refs.json",
         include_str!("../test-vectors/llm-runner-v1/output-refs.json"),
     ),

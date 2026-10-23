@@ -18,6 +18,28 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+New in 0.11.1, for llm-runner 0.6.1: declare `Capability::SessionUsage`
+when serving the `session_usage` group, and opt into the scripted fixtures
+with `session_usage_fixtures() -> true`. The three `session_usage_*` cases
+also need `RunUsage`, `Queue`, `RunOps` and `TranscriptReads`. They check
+two-run sums and `since`, unchanged spend after a rewind, and unknown
+reasoning tokens remaining absent. Implement `rewind_session_usage` through
+the host's real history-rewind path; return false if that is unavailable.
+`head_model_reflects_recorded_switch` runs when the head reports a model;
+`switch_head_model` records a switch without rewriting the frozen plan and
+returns the recorded selection. Unsupported default hooks make these
+observations inapplicable, so existing subjects compile unchanged. Each
+case has faulty-runner self-tests that must fail it by name.
+`head_sender_identities` optionally supplies two attested non-owner modules
+A and B. The kit installs a plan naming A without flags and B with both
+`idle_start` and `interrupt`. `head_sender_is_callers_effective_grant` compares
+their grants to supported modes from checked describe, also checking an
+unnamed caller and the owner. Existing adapters return `None` and remain
+inapplicable; opted-in adapters run regardless of their supported-mode set.
+`cut_incarnation_log` and `recreate_incarnation_log` optionally exercise a
+reported log identity through a real cut and creation of a new log at the
+same key. Defaults are inapplicable; both lifetime faults have named tests.
+
 New in 0.11.0, for `cortexkit-role-llm-runner` 0.6.0, whose `started_at`
 and `finished_at` on `tool_started` and `tool_finished` are now optional:
 `seed_untimed_tool_call` puts into a session's stored history a finished

@@ -1128,6 +1128,19 @@ mod tests {
     }
 
     #[test]
+    fn a_presetless_compaction_item_is_admitted_without_inventing_a_preset() {
+        let wire = vectors::load("plan-compaction-without-preset.json");
+        let request: SendRequest = vectors::round_trip("presetless compaction item", &wire);
+        assert_eq!(
+            request.check_compaction_item(&[crate::capabilities::COMPACTION]),
+            Ok(())
+        );
+        let encoded = serde_json::to_value(request).unwrap();
+        assert_eq!(encoded["plan"], wire["plan"]);
+        assert!(encoded["plan"]["compaction_item"].get("preset").is_none());
+    }
+
+    #[test]
     fn a_plan_is_refused_without_the_plans_group() {
         let file = vectors::load("plans.json");
         for case in vectors::cases(&file, "admission_checks") {
