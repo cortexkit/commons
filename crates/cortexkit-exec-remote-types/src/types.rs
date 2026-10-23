@@ -1324,15 +1324,19 @@ pub enum ReturnManifestOutcome {
 
 /// One requested path's entry in a [`ReturnManifest`].
 ///
-/// On the wire a returned entry is `{path, size, sha256}` and a failed entry is
-/// `{path, cause, size?}`. Decoding refuses an entry with both `sha256` and
-/// `cause`, with neither, or with `sha256` but no `size`.
+/// On the wire a returned entry is `{path, size, sha256, chunks?}` and a failed
+/// entry is `{path, cause, size?, chunks?}`. Decoding refuses an entry with both
+/// `sha256` and `cause`, with neither, or with `sha256` but no `size`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ReturnManifestEntry {
     /// The requested path, echoed exactly as the caller sent it.
     pub path: String,
     pub outcome: ReturnManifestOutcome,
+    /// Number of chunks originally sent for this path, including any sent before
+    /// a read failure. Preserved on expired replay; omitted by older producers.
+    /// A producer that supplies a count must supply it on every manifest entry.
+    pub chunks: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1344,6 +1348,8 @@ struct ReturnManifestEntryWire {
     sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cause: Option<ReturnPathsFailureCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chunks: Option<u32>,
 }
 
 impl Serialize for ReturnManifestEntry {
@@ -1354,12 +1360,14 @@ impl Serialize for ReturnManifestEntry {
                 size: Some(*size),
                 sha256: Some(sha256.clone()),
                 cause: None,
+                chunks: self.chunks,
             },
             ReturnManifestOutcome::Failed { cause, size } => ReturnManifestEntryWire {
                 path: self.path.clone(),
                 size: *size,
                 sha256: None,
                 cause: Some(cause.clone()),
+                chunks: self.chunks,
             },
         };
         wire.serialize(serializer)
@@ -1391,6 +1399,7 @@ impl<'de> Deserialize<'de> for ReturnManifestEntry {
         Ok(Self {
             path: wire.path,
             outcome,
+            chunks: wire.chunks,
         })
     }
 }
@@ -1404,6 +1413,7 @@ impl ReturnManifestEntry {
                 size,
                 sha256: sha256.into(),
             },
+            chunks: None,
         }
     }
 
@@ -1412,6 +1422,7 @@ impl ReturnManifestEntry {
         Self {
             path: path.into(),
             outcome: ReturnManifestOutcome::Failed { cause, size: None },
+            chunks: None,
         }
     }
 
@@ -1423,6 +1434,18 @@ impl ReturnManifestEntry {
             ReturnManifestOutcome::Failed { size, .. } => *size = Some(new_size),
         }
         self
+    }
+
+    /// Set the number of chunks originally sent for this path. Set this on every
+    /// entry, including zero for a path refused before its first byte.
+    pub fn with_chunks(mut self, chunks: u32) -> Self {
+        self.chunks = Some(chunks);
+        self
+    }
+
+    /// Read the original chunk count, or `None` for an older producer.
+    pub fn chunks(&self) -> Option<u32> {
+        self.chunks
     }
 
     /// Read the requested path as echoed by the runner.

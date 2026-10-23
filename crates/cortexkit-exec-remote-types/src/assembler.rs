@@ -107,6 +107,23 @@ pub enum ReturnStreamError {
         expected: String,
         actual: String,
     },
+    /// Some entries carry chunk counts but this entry does not.
+    PartialChunkCounts { path_index: u32 },
+    /// An entry's chunk count differs from the number received for its path.
+    ChunkCountMismatch {
+        path_index: u32,
+        chunks: u32,
+        received: u64,
+    },
+    /// An expired replay must not contain any chunks.
+    ChunksInExpiredReplay { path_index: u32, received: u64 },
+    /// The expired replay's missing sequence numbers do not match the original
+    /// chunk count, or the manifest does not follow the last output record.
+    ReplayGapMismatch {
+        last_output_seq: u64,
+        manifest_seq: u64,
+        chunks: u64,
+    },
     /// A returned entry's size differs from the bytes received for the path.
     SizeMismatch {
         path_index: u32,
@@ -127,7 +144,7 @@ pub enum ReturnStreamError {
         received: u64,
     },
     /// The manifest's `total_bytes` differs from the sum of its returned sizes.
-    /// This is the only error that concerns no single path.
+    /// Like [`Self::ReplayGapMismatch`], this concerns no single path.
     TotalMismatch {
         total_bytes: u64,
         returned_bytes: u64,
@@ -146,6 +163,10 @@ impl ReturnStreamError {
             Self::OverCap { .. } => "over_cap",
             Self::EntryCountMismatch { .. } => "entry_count_mismatch",
             Self::PathNotEchoed { .. } => "path_not_echoed",
+            Self::PartialChunkCounts { .. } => "partial_chunk_counts",
+            Self::ChunkCountMismatch { .. } => "chunk_count_mismatch",
+            Self::ChunksInExpiredReplay { .. } => "chunks_in_expired_replay",
+            Self::ReplayGapMismatch { .. } => "replay_gap_mismatch",
             Self::SizeMismatch { .. } => "size_mismatch",
             Self::DigestMismatch { .. } => "digest_mismatch",
             Self::ChunksForFailedPath { .. } => "chunks_for_failed_path",
@@ -153,7 +174,7 @@ impl ReturnStreamError {
         }
     }
 
-    /// The path the error concerns; `None` only for [`Self::TotalMismatch`].
+    /// The path the error concerns; `None` for total or replay-gap mismatches.
     pub fn path_index(&self) -> Option<u32> {
         match self {
             Self::PathIndexOutOfRange { path_index, .. }
@@ -164,10 +185,13 @@ impl ReturnStreamError {
             | Self::OverCap { path_index, .. }
             | Self::EntryCountMismatch { path_index, .. }
             | Self::PathNotEchoed { path_index, .. }
+            | Self::PartialChunkCounts { path_index }
+            | Self::ChunkCountMismatch { path_index, .. }
+            | Self::ChunksInExpiredReplay { path_index, .. }
             | Self::SizeMismatch { path_index, .. }
             | Self::DigestMismatch { path_index, .. }
             | Self::ChunksForFailedPath { path_index, .. } => Some(*path_index),
-            Self::TotalMismatch { .. } => None,
+            Self::TotalMismatch { .. } | Self::ReplayGapMismatch { .. } => None,
         }
     }
 
@@ -249,6 +273,30 @@ impl fmt::Display for ReturnStreamError {
                 f,
                 "return_manifest entry {path_index} names {actual:?}, not the requested path {expected:?}"
             ),
+            Self::PartialChunkCounts { path_index } => write!(
+                f,
+                "return_manifest entry {path_index} omits chunks although another entry supplies it"
+            ),
+            Self::ChunkCountMismatch {
+                path_index,
+                chunks,
+                received,
+            } => write!(
+                f,
+                "return_manifest entry {path_index} declares {chunks} chunks, but {received} were received"
+            ),
+            Self::ChunksInExpiredReplay { path_index, received } => write!(
+                f,
+                "expired replay received {received} chunks for path_index {path_index}, expected none"
+            ),
+            Self::ReplayGapMismatch {
+                last_output_seq,
+                manifest_seq,
+                chunks,
+            } => write!(
+                f,
+                "expired replay from output seq {last_output_seq} to manifest seq {manifest_seq} does not skip exactly {chunks} chunks"
+            ),
             Self::SizeMismatch {
                 path_index,
                 size,
@@ -298,6 +346,9 @@ pub struct ReturnAssembler {
     cap_bytes: u64,
     /// Bytes received so far for each requested path.
     received: Vec<u64>,
+    /// Accepted chunk records per path; bounded by received bytes since chunks
+    /// are non-empty, so a u64 also covers counts above the wire's u32 limit.
+    chunks: Vec<u64>,
     /// Running digest for each path; `None` until its first chunk arrives.
     hashers: Vec<Option<Sha256>>,
     /// The path that received the most recent chunk.
@@ -314,6 +365,7 @@ impl ReturnAssembler {
             return_paths: return_paths.to_vec(),
             cap_bytes,
             received: vec![0; return_paths.len()],
+            chunks: vec![0; return_paths.len()],
             hashers: vec![None; return_paths.len()],
             current: None,
             total_bytes: 0,
@@ -376,6 +428,7 @@ impl ReturnAssembler {
         }
         self.current = Some(index);
         self.received[index] = expected_offset + len;
+        self.chunks[index] += 1;
         self.total_bytes = total_bytes;
         self.hashers[index]
             .get_or_insert_with(Sha256::new)
@@ -389,6 +442,27 @@ impl ReturnAssembler {
         self,
         manifest: &ReturnManifest,
     ) -> Result<Vec<VerifiedReturn>, ReturnStreamError> {
+        self.finish_inner(manifest, None)
+    }
+
+    /// Check a replay after returned bytes expired. No chunks may have been
+    /// received. When every entry supplies `chunks`, the gap after the job's
+    /// last output record must equal their sum. Older manifests leave this gap
+    /// unverified. Failed causes, including `read_error`, retain their counts.
+    /// Use [`Self::finish`] for live streams and replays within retention.
+    pub fn finish_expired_replay(
+        self,
+        manifest: &ReturnManifest,
+        last_output_seq: u64,
+    ) -> Result<Vec<VerifiedReturn>, ReturnStreamError> {
+        self.finish_inner(manifest, Some(last_output_seq))
+    }
+
+    fn finish_inner(
+        self,
+        manifest: &ReturnManifest,
+        last_output_seq: Option<u64>,
+    ) -> Result<Vec<VerifiedReturn>, ReturnStreamError> {
         let expected = self.return_paths.len();
         let actual = manifest.files.len();
         if actual != expected {
@@ -397,6 +471,44 @@ impl ReturnAssembler {
                 expected,
                 actual,
             });
+        }
+        let counted = manifest.files.iter().any(|entry| entry.chunks.is_some());
+        if counted {
+            if let Some(index) = manifest
+                .files
+                .iter()
+                .position(|entry| entry.chunks.is_none())
+            {
+                return Err(ReturnStreamError::PartialChunkCounts {
+                    path_index: index_u32(index),
+                });
+            }
+        }
+        if let Some(last_output_seq) = last_output_seq {
+            if let Some(index) = self.chunks.iter().position(|count| *count != 0) {
+                return Err(ReturnStreamError::ChunksInExpiredReplay {
+                    path_index: index_u32(index),
+                    received: self.chunks[index],
+                });
+            }
+            if counted {
+                let chunks = manifest
+                    .files
+                    .iter()
+                    .map(|entry| u64::from(entry.chunks.unwrap()))
+                    .sum();
+                let gap = manifest
+                    .seq
+                    .checked_sub(last_output_seq)
+                    .and_then(|distance| distance.checked_sub(1));
+                if gap != Some(chunks) {
+                    return Err(ReturnStreamError::ReplayGapMismatch {
+                        last_output_seq,
+                        manifest_seq: manifest.seq,
+                        chunks,
+                    });
+                }
+            }
         }
         let mut verified = Vec::with_capacity(expected);
         let mut returned_bytes: u64 = 0;
@@ -412,6 +524,17 @@ impl ReturnAssembler {
                     expected: path,
                     actual: entry.path.clone(),
                 });
+            }
+            if last_output_seq.is_none() {
+                if let Some(chunks) = entry.chunks {
+                    if u64::from(chunks) != self.chunks[index] {
+                        return Err(ReturnStreamError::ChunkCountMismatch {
+                            path_index,
+                            chunks,
+                            received: self.chunks[index],
+                        });
+                    }
+                }
             }
             match &entry.outcome {
                 ReturnManifestOutcome::Returned { size, sha256 } => {

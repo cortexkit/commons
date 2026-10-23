@@ -92,14 +92,22 @@ the file's position in `return_paths`, from 0. `offset` is the position of
 `files` has one entry per requested path, in request order. Each entry echoes
 its requested path exactly as the caller sent it. An entry is either:
 
-- returned: `{path, size, sha256}`, where `sha256` is the lowercase hexadecimal
-  SHA-256 of the file's bytes; or
-- failed: `{path, cause, size?}`, where `size` is the file's size when the
+- returned: `{path, size, sha256, chunks?}`, where `sha256` is the lowercase
+  hexadecimal SHA-256 of the file's bytes; or
+- failed: `{path, cause, size?, chunks?}`, where `size` is the file's size when the
   runner knew it, for example for an over-cap or expired file.
 
 Exactly one of `sha256` and `cause` is present. Decoding refuses an entry with
 both or neither, and a `sha256` without `size`. `total_bytes` is the sum of the
 returned entries' sizes. `cap_bytes` is the effective cap.
+
+`chunks`, when present, is a `u32` count of the `return_chunk` records originally
+sent for that path, regardless of their sizes. A producer that sets it sets it
+on every entry. It is 0 for an empty file or a path refused before its first
+byte, the full count for a returned file, and the count sent before failure for
+`read_error`. Expired replay preserves every entry's original count. Older
+producers omit `chunks`; it is not serialized as null when absent. A manifest
+with counts on only some entries is malformed.
 
 Per-path failures use `ReturnPathsFailureCause`. In chunked mode the causes
 mean:
@@ -142,8 +150,9 @@ cap_bytes)` starts a check. `accept_chunk` checks each chunk's `path_index`
 range, the grouping, contiguity, the 1 to 524,288 byte chunk size and the
 running total against the cap, hashes the bytes, and returns them for the caller
 to write. `finish` checks the manifest's entry count, that each entry echoes
-its path exactly, each returned entry's size and SHA-256, `total_bytes`, and
-that only `read_error` or an unrecognised cause follows chunks. It returns one
+its path exactly, each entry's `chunks` against the received record count when
+present (including `read_error`), each returned entry's size and SHA-256,
+`total_bytes`, and that only `read_error` or an unrecognised cause follows chunks. It returns one
 `VerifiedReturn` per requested path. On any `ReturnStreamError`, which names
 the path index and, for a chunk, its offset, the caller discards every byte
 received for the job's returned files.
@@ -167,6 +176,22 @@ strict gap check cannot stall the replay. The gap can only be where
 `return_chunk` records were, before the manifest; every other gap keeps its
 existing meaning. The resume cursor advances to the manifest's `seq` as for any
 other record.
+
+When every entry carries `chunks`, the number of missing sequence numbers
+between the job's last output record and the replayed manifest must equal the
+sum of `chunks` over **all** entries, whatever the chunk sizes. In other words,
+`manifest.seq - last_output_seq - 1 == sum(chunks)`, including chunks from paths
+that ended `read_error`. This distinguishes expired chunks from lost output.
+Without counts, the older rule still assigns that gap to return chunks, but
+the gap is unverified.
+
+Use `ReturnAssembler::finish_expired_replay(manifest, last_output_seq)` for this
+replay instead of `finish`. It refuses any received chunks, requires counts on
+all entries or none, and checks the gap against their sum when present, returning
+`ReplayGapMismatch` on a mismatch. It still checks paths, outcomes and totals,
+but does not compare historical per-path counts to the replay's zero received
+chunks. Use normal `finish` for live streams and retained replay; it refuses
+`ChunkCountMismatch` for any entry whose count differs from the chunks received.
 
 ### Compatibility
 

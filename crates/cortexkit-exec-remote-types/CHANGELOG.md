@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.12
+
+- Add optional `ReturnManifestEntry.chunks`, with `with_chunks` and `chunks()`:
+  the number of records originally sent for each path, preserved on expiry,
+  including chunks sent before `read_error`. Absent counts stay omitted for
+  compatibility; producers supply counts on every entry or none.
+- `ReturnAssembler::finish` verifies per-path counts when supplied.
+  `finish_expired_replay` verifies the missing sequence count against their sum
+  without expecting expired chunks to arrive. Both refuse partial counts; new
+  non-exhaustive `ReturnStreamError` variants identify count, replay-gap and
+  unexpected replay-chunk problems.
+- Add counted retained/expired replay and partial-read vectors, a chunk-count
+  mismatch vector, and chunked `SHA256SUMS`. All existing vector bytes remain
+  unchanged.
+
 ## 0.2.11
 
 - Add `Platform::Macos`, wire `"macos"`, for runners that run jobs on macOS.

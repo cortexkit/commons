@@ -96,13 +96,19 @@ has one `ReturnManifestEntry` per requested path: returned with its size and
 SHA-256, or failed with a `ReturnPathsFailureCause` (now including `read_error`
 and `expired`).
 
+Since 0.2.12, optional `ReturnManifestEntry::with_chunks` / `chunks()` counts
+the records originally sent per path; producers supply it on every entry or none.
+
 `ReturnAssembler` is a pure checker for this stream. Feed it each chunk with
 `accept_chunk`, which returns the bytes to write, then the manifest with
 `finish`, which returns a `VerifiedReturn` per path. Place a file only when
 `finish` reports it returned; on a `ReturnStreamError`, discard every received
-byte. A replay after the runner's retention window carries no chunks, so its
-`seq` jumps from the record before the chunks to the manifest; a chunked caller
-must accept that one gap. See [`CONTRACT.md`](CONTRACT.md) for the full rules.
+byte. A replay after the runner's retention window carries no chunks, but keeps
+the original counts. Use `finish_expired_replay(manifest, last_output_seq)` to
+verify that its `seq` gap equals their sum; older manifests without counts keep
+the unverified gap rule. Normal `finish` checks each supplied count against the
+received chunks, including paths that ended `read_error`. Mixed manifests are
+refused by either method. See [`CONTRACT.md`](CONTRACT.md) for the full rules.
 
 ### Recovery and request refusals
 
@@ -286,11 +292,12 @@ RFC 8785 canonical bytes. The nested-unknown-fields input re-encodes to the
 separately pinned `all` case, dropping only unknown fields. The vectors and tests
 are included in the package.
 
-`test-vectors/exec-remote-v1/return-chunked/` holds 21 more crate-local cases
+`test-vectors/exec-remote-v1/return-chunked/` holds 25 more crate-local cases
 for chunked returned files, in the same `.jcs`/`.sha256` format. Each is a
 record sequence with the requested paths, the cap, and the result
-`ReturnAssembler` must reach: ten accepted streams and eleven refusals, each
-checked by its own test. The vector README lists them.
+`ReturnAssembler` must reach: thirteen accepted streams and twelve refusals,
+each checked by its own test. `SHA256SUMS` pins the chunked `.jcs` files as well
+as their individual `.sha256` companions. The vector README lists them.
 
 ## Verification
 

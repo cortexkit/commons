@@ -19,6 +19,9 @@ const VECTORS: &[&str] = &[
     "read-error-after-chunks",
     "replay-retained",
     "replay-expired",
+    "replay-retained-counted",
+    "replay-expired-counted",
+    "read-error-after-chunks-counted",
     "unknown-cause-discards-chunks",
     "refuse-offset-gap",
     "refuse-offset-overlap",
@@ -31,6 +34,7 @@ const VECTORS: &[&str] = &[
     "refuse-path-not-echoed",
     "refuse-chunks-before-over-cap",
     "refuse-total-over-cap",
+    "refuse-chunk-count-mismatch",
 ];
 
 fn root() -> PathBuf {
@@ -59,10 +63,11 @@ fn sha256_hex(data: &[u8]) -> String {
 
 #[test]
 fn return_chunked_vector_inventory_is_complete() {
-    let expected: BTreeSet<_> = VECTORS
+    let mut expected: BTreeSet<_> = VECTORS
         .iter()
         .flat_map(|name| [format!("{name}.jcs"), format!("{name}.sha256")])
         .collect();
+    expected.insert("SHA256SUMS".to_owned());
     let actual: BTreeSet<_> = fs::read_dir(root())
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -75,12 +80,24 @@ fn return_chunked_vector_inventory_is_complete() {
 
 #[test]
 fn return_chunked_vector_sha256_matches_jcs_bytes() {
+    let mut sums = Vec::new();
     for name in VECTORS {
         // Hash the pinned file, not a re-encoding that could mask changed bytes.
         let hash = sha256_hex(&bytes(name));
         let expected = fs::read_to_string(root().join(format!("{name}.sha256"))).unwrap();
         assert_eq!(expected, hash, "{name} SHA-256");
+        sums.push((format!("{name}.jcs"), hash));
+        sums.push((format!("{name}.sha256"), sha256_hex(expected.as_bytes())));
     }
+    sums.sort();
+    let expected: String = sums
+        .into_iter()
+        .map(|(path, hash)| format!("{hash}  {path}\n"))
+        .collect();
+    assert_eq!(
+        fs::read_to_string(root().join("SHA256SUMS")).unwrap(),
+        expected
+    );
 }
 
 #[test]
@@ -133,7 +150,11 @@ fn assemble(name: &str) -> Value {
                 Err(error) => return error_value(&error),
             },
             StreamRecord::ReturnManifest(manifest) => {
-                return match assembler.finish(&manifest) {
+                let result = match case.get("last_output_seq").and_then(Value::as_u64) {
+                    Some(seq) => assembler.finish_expired_replay(&manifest, seq),
+                    None => assembler.finish(&manifest),
+                };
+                return match result {
                     Ok(verified) => json!({"files": verified
                         .iter()
                         .map(|file| verified_value(file, &written))
@@ -216,6 +237,9 @@ vector_tests! {
     vector_read_error_after_chunks => "read-error-after-chunks",
     vector_replay_retained => "replay-retained",
     vector_replay_expired => "replay-expired",
+    vector_replay_retained_counted => "replay-retained-counted",
+    vector_replay_expired_counted => "replay-expired-counted",
+    vector_read_error_after_chunks_counted => "read-error-after-chunks-counted",
     vector_unknown_cause_discards_chunks => "unknown-cause-discards-chunks",
     refuses_offset_gap => "refuse-offset-gap",
     refuses_offset_overlap => "refuse-offset-overlap",
@@ -228,6 +252,7 @@ vector_tests! {
     refuses_path_not_echoed => "refuse-path-not-echoed",
     refuses_chunks_before_over_cap => "refuse-chunks-before-over-cap",
     refuses_total_over_cap => "refuse-total-over-cap",
+    refuses_chunk_count_mismatch => "refuse-chunk-count-mismatch",
 }
 
 #[test]
@@ -421,6 +446,92 @@ fn manifest_entry_requires_exactly_one_of_sha256_and_cause() {
 }
 
 #[test]
+fn manifest_chunks_are_omitted_when_absent() {
+    for entry in [
+        ReturnManifestEntry::returned("a", 0, sha256_hex(b"")),
+        ReturnManifestEntry::failed("a", ReturnPathsFailureCause::Missing),
+    ] {
+        assert_eq!(entry.chunks(), None);
+        let wire = serde_json::to_value(&entry).unwrap();
+        assert!(wire.get("chunks").is_none(), "{wire}");
+        assert_eq!(
+            serde_json::from_value::<ReturnManifestEntry>(wire).unwrap(),
+            entry
+        );
+        for count in [0, 3, u32::MAX] {
+            let counted = entry.clone().with_chunks(count);
+            assert_eq!(counted.chunks(), Some(count));
+            let wire = serde_json::to_value(&counted).unwrap();
+            assert_eq!(wire["chunks"], count);
+            assert_eq!(
+                serde_json::from_value::<ReturnManifestEntry>(wire).unwrap(),
+                counted
+            );
+        }
+    }
+    for count in [json!(-1), json!(4294967296u64), json!(1.5), json!("3")] {
+        assert!(serde_json::from_value::<ReturnManifestEntry>(json!({
+            "path": "a", "cause": "missing", "chunks": count
+        }))
+        .is_err());
+    }
+}
+
+#[test]
+fn counted_replay_preserves_original_counts_and_exact_seq_gap() {
+    let retained = records("replay-retained-counted");
+    let expired = records("replay-expired-counted");
+    let get_manifest = |records: &[StreamRecord]| {
+        records
+            .iter()
+            .find_map(|record| match record {
+                StreamRecord::ReturnManifest(manifest) => Some(manifest.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let original = get_manifest(&retained);
+    let replayed = get_manifest(&expired);
+    assert_eq!(original.seq(), 6);
+    assert_eq!(replayed.seq(), original.seq());
+    let counts = |manifest: &ReturnManifest| {
+        manifest
+            .files()
+            .iter()
+            .map(|entry| entry.chunks())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(counts(&original), [Some(3), Some(0)]);
+    assert_eq!(counts(&replayed), counts(&original));
+    let last_output_seq = expired
+        .iter()
+        .find_map(|record| match record {
+            StreamRecord::Output(output) => Some(output.seq),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(last_output_seq, 2);
+    assert_eq!(
+        replayed.seq() - last_output_seq - 1,
+        replayed
+            .files()
+            .iter()
+            .map(|entry| u64::from(entry.chunks().unwrap()))
+            .sum::<u64>()
+    );
+    assert_eq!(
+        retained
+            .iter()
+            .filter(|record| matches!(record, StreamRecord::ReturnChunk(_)))
+            .count(),
+        3
+    );
+    assert!(!expired
+        .iter()
+        .any(|record| matches!(record, StreamRecord::ReturnChunk(_))));
+}
+
+#[test]
 fn constructors_produce_the_vector_records() {
     let raw = vector("two-files-one-empty")["records"].clone();
     let chunk = StreamRecord::ReturnChunk(ReturnChunk::new(
@@ -583,14 +694,144 @@ fn a_refused_chunk_leaves_the_assembler_unchanged() {
             job_id(),
             3,
             vec![
-                ReturnManifestEntry::returned("a", 3, sha256_hex(b"aaa")),
-                ReturnManifestEntry::returned("b", 3, sha256_hex(b"bbb")),
+                ReturnManifestEntry::returned("a", 3, sha256_hex(b"aaa")).with_chunks(1),
+                ReturnManifestEntry::returned("b", 3, sha256_hex(b"bbb")).with_chunks(1),
             ],
             6,
             6,
         ))
         .unwrap();
     assert!(verified.iter().all(VerifiedReturn::is_returned));
+}
+
+#[test]
+fn both_finishes_refuse_partial_chunk_counts() {
+    let paths = vec!["a".into(), "b".into()];
+    let manifest = ReturnManifest::new(
+        job_id(),
+        3,
+        vec![
+            ReturnManifestEntry::failed("a", ReturnPathsFailureCause::Missing).with_chunks(0),
+            ReturnManifestEntry::failed("b", ReturnPathsFailureCause::Missing),
+        ],
+        0,
+        10,
+    );
+    let assembler = ReturnAssembler::new(&paths, 10);
+    for result in [
+        assembler.clone().finish(&manifest),
+        assembler.finish_expired_replay(&manifest, 2),
+    ] {
+        let error = result.unwrap_err();
+        assert_eq!(
+            error,
+            ReturnStreamError::PartialChunkCounts { path_index: 1 }
+        );
+        assert_eq!(error.code(), "partial_chunk_counts");
+        assert_eq!(error.path_index(), Some(1));
+        assert_eq!(error.offset(), None);
+        assert!(error.to_string().contains("entry 1"));
+    }
+}
+
+#[test]
+fn normal_finish_checks_read_error_chunk_counts() {
+    let paths = vec!["a".into()];
+    let mut assembler = ReturnAssembler::new(&paths, 10);
+    assembler.accept_chunk(&chunk(0, 0, b"a")).unwrap();
+    let manifest = ReturnManifest::new(
+        job_id(),
+        3,
+        vec![ReturnManifestEntry::failed("a", ReturnPathsFailureCause::ReadError).with_chunks(2)],
+        0,
+        10,
+    );
+    let error = assembler.finish(&manifest).unwrap_err();
+    assert_eq!(
+        error,
+        ReturnStreamError::ChunkCountMismatch {
+            path_index: 0,
+            chunks: 2,
+            received: 1
+        }
+    );
+    assert_eq!(error.code(), "chunk_count_mismatch");
+    assert_eq!(error.path_index(), Some(0));
+    assert_eq!(error.offset(), None);
+    assert!(error
+        .to_string()
+        .contains("declares 2 chunks, but 1 were received"));
+}
+
+#[test]
+fn expired_replay_refuses_a_wrong_seq_gap() {
+    let paths = vec!["a".into()];
+    for manifest_seq in [6, 2, 1, u64::MAX] {
+        let manifest = ReturnManifest::new(
+            job_id(),
+            manifest_seq,
+            vec![ReturnManifestEntry::failed("a", ReturnPathsFailureCause::Expired).with_chunks(2)],
+            0,
+            10,
+        );
+        let error = ReturnAssembler::new(&paths, 10)
+            .finish_expired_replay(&manifest, 2)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            ReturnStreamError::ReplayGapMismatch {
+                last_output_seq: 2,
+                manifest_seq,
+                chunks: 2
+            }
+        );
+        assert_eq!(error.code(), "replay_gap_mismatch");
+        assert_eq!(error.path_index(), None);
+        assert_eq!(error.offset(), None);
+        assert!(error.to_string().contains("exactly 2 chunks"));
+    }
+}
+
+#[test]
+fn expired_replay_requires_no_chunks_and_preserves_failed_counts() {
+    let paths = vec!["a".into()];
+    let manifest = ReturnManifest::new(
+        job_id(),
+        5,
+        vec![ReturnManifestEntry::failed("a", ReturnPathsFailureCause::ReadError).with_chunks(2)],
+        0,
+        10,
+    );
+    assert!(ReturnAssembler::new(&paths, 10)
+        .finish_expired_replay(&manifest, 2)
+        .is_ok());
+    let mut assembler = ReturnAssembler::new(&paths, 10);
+    assembler.accept_chunk(&chunk(0, 0, b"a")).unwrap();
+    let error = assembler.finish_expired_replay(&manifest, 2).unwrap_err();
+    assert_eq!(
+        error,
+        ReturnStreamError::ChunksInExpiredReplay {
+            path_index: 0,
+            received: 1
+        }
+    );
+    assert_eq!(error.code(), "chunks_in_expired_replay");
+    assert_eq!(error.path_index(), Some(0));
+    assert_eq!(error.offset(), None);
+    assert!(error.to_string().contains("expected none"));
+    let legacy = ReturnManifest::new(
+        job_id(),
+        50,
+        vec![ReturnManifestEntry::failed(
+            "a",
+            ReturnPathsFailureCause::Expired,
+        )],
+        0,
+        10,
+    );
+    assert!(ReturnAssembler::new(&paths, 10)
+        .finish_expired_replay(&legacy, 2)
+        .is_ok());
 }
 
 #[test]

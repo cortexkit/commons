@@ -200,11 +200,13 @@ wire shapes.
 
 ## Chunked returned files
 
-`return-chunked/` holds 21 crate-local cases for `RunRequest.return_chunked`,
+`return-chunked/` holds 25 crate-local cases for `RunRequest.return_chunked`,
 in the same `.jcs`/`.sha256` format. Each case is an object with:
 
 - `return_paths` and `cap_bytes`: the requested paths and the effective cap,
   the arguments to `ReturnAssembler::new`.
+- Optional `last_output_seq`: selects `finish_expired_replay` instead of
+  `finish`, supplying the job's last output sequence for gap verification.
 - `records`: the stream records in order, ending with `terminal`. Every record
   round-trips byte for byte through `StreamRecord`.
 - `expect`: the assembler's result. Either `{files: [...]}`, one entry per
@@ -216,6 +218,8 @@ in the same `.jcs`/`.sha256` format. Each case is an object with:
 
 All records use `job_id` `0192a64a-1234-7000-8000-000000000001`. Chunks are
 smaller than the 524,288-byte maximum except in `refuse-chunk-too-large`.
+`return-chunked/SHA256SUMS` lists each `.jcs` and `.sha256` file's digest with
+paths relative to that directory; tests check its exact inventory and hashes.
 
 Accepted streams:
 
@@ -234,6 +238,12 @@ Accepted streams:
   entry keeps its cause, and `total_bytes` is 0.
 - `unknown-cause-discards-chunks`: chunks followed by a failed entry with the
   unrecognised cause `future_cause`, discarded without an error.
+- `replay-retained-counted` and `replay-expired-counted`: copies of the legacy
+  replay cases with `chunks` 3 and 0 on their entries. The expired replay keeps
+  those original counts; the seq gap from output 2 to manifest 6 skips exactly
+  three records, even though the original chunks were only 4, 4 and 2 bytes.
+- `read-error-after-chunks-counted`: the partial-read case with counts 2 for
+  the failed path and 1 for the returned path. Legacy vectors remain unchanged.
 
 Refusals, each by its error code:
 
@@ -248,3 +258,5 @@ Refusals, each by its error code:
   `dist/app.bin`).
 - `refuse-chunks-before-over-cap`: `chunks_for_failed_path`.
 - `refuse-total-over-cap`: `over_cap`, raised by the chunk that passes the cap.
+- `refuse-chunk-count-mismatch`: `chunk_count_mismatch`, because the manifest
+  declares 3 chunks but only 2 arrived (with the correct bytes and digest).
