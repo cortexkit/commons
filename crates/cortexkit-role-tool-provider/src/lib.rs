@@ -174,6 +174,10 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     // Searches code across public code hosts, outside the session's own
     // workspace.
     "code.search.public/v1",
+    // Has an interface view the apps can render for its calls. The view is
+    // published in the module's `rich_ui` manifest descriptor and keyed by the
+    // tool's schema pin; the tag promises only that such a view exists.
+    "tool.view/v1",
 ];
 
 /// Why a capability tag is not acceptable in a catalog.
@@ -266,6 +270,31 @@ mod capability_tag_tests {
         for tag in DEFINED_CAPABILITY_TAGS {
             assert_eq!(check_capability_tag(tag), Ok(()), "{tag}");
         }
+    }
+
+    /// The contract's table of defined tags and `DEFINED_CAPABILITY_TAGS` must
+    /// list the same tags in the same order, so a tag defined in one place is
+    /// never missing from the other.
+    #[test]
+    fn the_contract_table_lists_exactly_the_defined_tags() {
+        let contract = include_str!("../CONTRACT.md");
+        let table = contract
+            .split_once("| Tag | The tool |")
+            .expect("CONTRACT.md has the defined-tag table")
+            .1;
+        let tags: Vec<&str> = table
+            .lines()
+            .skip(2)
+            .map(str::trim)
+            .take_while(|line| line.starts_with('|'))
+            .map(|line| {
+                line.trim_start_matches("| `")
+                    .split_once('`')
+                    .expect("each row starts with a backquoted tag")
+                    .0
+            })
+            .collect();
+        assert_eq!(tags, DEFINED_CAPABILITY_TAGS);
     }
 
     #[test]

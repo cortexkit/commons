@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.5
+
+- Define the `tool.view/v1` capability tag: the tool has an interface view
+  the apps can render for its calls, published in its module's `rich_ui`
+  manifest descriptor and keyed by the tool's `schema_pin` (contract §3).
+- State the rollout rule for newly defined tags: a reader on an older release
+  refuses an unprefixed tag that release doesn't define, so a provider emits
+  a new tag only once every reader of its catalog runs a release defining it.
+- A test checks that the contract's tag table and `DEFINED_CAPABILITY_TAGS`
+  list the same tags in the same order.
+
 ## 0.10.4
 
 - `CatalogAnswer.presets` declares the presets a provider serves, in the
