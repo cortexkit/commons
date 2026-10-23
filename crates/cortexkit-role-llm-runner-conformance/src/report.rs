@@ -110,6 +110,22 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("output_refs_unsupported_plan", &[], "a non-advertiser refuses output_refs plan members before any send, refresh or adoption write"),
+    case("delivery_order_result_before_staging", &[Capability::DeliveryOrder, Queue, TranscriptReads, HoldToolCalls], "a tool result already sent before staging cannot carry a subsequently staged send"),
+    case("output_refs_scanning", &[], "code spans, fences and escaped markers copy no output"),
+    case("output_refs_shared_samples", &[], "reply, program and token-slot scanning uses the published scanner samples"),
+    case("output_refs_writing_request", &[], "references retain the writing request's meaning after renumbering"),
+    case("output_refs_target_reasons", &[], "user/model text and unknown numbers retain their refusal reasons"),
+    case("output_refs_held_placeholder", &[], "held references keep the placeholder and call key after a late result"),
+    case("output_refs_snapshot_size", &[], "oversized snapshots retain full byte size and SHA-256, without content"),
+    case("output_refs_snapshot_budget", &[], "snapshot bytes across one message are capped at four MiB, including repeated references"),
+    case("output_refs_descriptor_digest", &[], "descriptor digest matches records in canonical encounter order"),
+    case("output_refs_rewind", &[], "rewind removes sets with their message"),
+    case("output_refs_compaction", &[], "compaction preserves stored sets and snapshots"),
+    case("output_refs_session_isolation", &[], "foreign session ids are indistinguishable from unknown ids"),
+    case("output_refs_slots", &[], "only declared slots resolve; token slots reject extra text"),
+    case("output_refs_reference_limit", &[], "occurrences after 64 are too_many_refs across a message"),
+    case("output_refs_read_limits", &[], "metadata, EOF and range refusals obey snapshot bounds"),
     case("held_calls_lists_waiting_call", &[Queue, TranscriptReads, RunOps],
         "when role.describe declares held_calls, a provider's held reply is listed with its call_key, tool, provider, reason and held_at_ms while waiting"),
     case("held_calls_applies_late_result", &[Queue, TranscriptReads, RunOps, Capability::RenderedModelInput],

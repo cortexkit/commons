@@ -73,6 +73,10 @@ where
 }
 
 impl AdoptRequest {
+    /// Check output-reference plan members before any adoption write.
+    pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
+        crate::output_refs::check_plan(&Value::Object(self.plan.clone()), advertised)
+    }
     pub fn new(send_id: impl Into<String>, plan: Map<String, Value>) -> Self {
         Self {
             send_id: send_id.into(),

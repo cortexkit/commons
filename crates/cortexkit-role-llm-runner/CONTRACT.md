@@ -140,6 +140,7 @@ shipping runner with this document.
 
 | Group | Ops (`capabilities::GROUPS`) | Section |
 |---|---|---|
+| `output_refs` | `session.output_refs`, `session.output_ref_read` (requires `tags`) | §9.13 |
 | `transcript_reads` | `session.read`, `session.head` | §4 |
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
@@ -2471,6 +2472,18 @@ say who may send and which texts are system text.
   of `turn_system` alone can wait on such a runner until the send expires. A
   runner that can never land `turn_system` should advertise
   `delivery_order_modes` without it, so such a list is refused at once.
+- [pinned] A send participates only in boundaries rendered after the
+  request-rendering component has staged it. For a runner beside its host, this is when the
+  host-side component has staged the send, which may be later than acceptance;
+  for a runner owning its loop, the two coincide. A tool result sent before the
+  send was staged is not "about to be sent for the first time" for that send.
+  The send waits for the next tool result, or falls through in list order at a
+  later boundary, as when no tool result is coming.
+- [pinned] Staging is not delivery. A staged send still answers `pending`, is
+  retractable until its first delivery, and still expires. A retract racing a
+  render either withdraws the send before it is rendered or reports it
+  delivered, never both.
+- [pinned] Acceptance never promises the next boundary.
 - [pinned] A `delivery_order` send still waiting for its next possible
   boundary is a queued send under §9.2. It answers `pending` with a
   `submission_id` on a runner that declares `retract`, and `session.retract`
@@ -2939,6 +2952,81 @@ its host's file storage, not a second copy of the host's media store.
   (Thalamus renders on demand); runners never store those derived renders.
   Images OpenCode already holds as data URLs in its file parts are served
   by digest like any other media.
+
+### 9.13 `output_refs`: immutable references to tool outputs
+
+- [pinned] The `output_refs` group requires `tags` and applies only to a
+  session whose frozen plan renders tags. It serves `session.output_refs`
+  and `session.output_ref_read`. A plan item may carry `output_refs: bool`,
+  absent meaning false. A runner without the group refuses any plan carrying
+  the member, even false, as `invalid_params {field:
+  "plan.items[].output_refs"}`, before writing anything.
+  This refusal binds non-advertisers on every plan-carrying operation,
+  including `session.send`, `session.refresh` and `session.adopt`, whether the
+  supplied value is true or false. One call to `output_refs::check_plan` or
+  the request's `check_output_refs` before any durable write supplies the
+  check. The kit's unsupported-plan case runs on non-advertisers and is N/A
+  for advertisers; positive reference cases have the opposite applicability.
+- [pinned] Scan only the model's own assistant text parts with
+  `cortexkit-rich-ui-syntax` 0.1.1 `scan_references(source, reply)`. The scanner's
+  `rich-ui/1` dialect, including its code, escaping, display-tag and string
+  rules, is authoritative; runners never implement a second grammar.
+  Record each occurrence in text-part order and scanner encounter order.
+- [pinned] A plan tool's string arguments are scanned only when its provider's
+  plan item has `output_refs: true`, and only in catalog `reference_slots`, in
+  declaration order. A `token` slot must be exactly one token, with no trimming;
+  otherwise it records `unresolved` / `not_a_reference`. A `source:<dialect>`
+  slot is scanned in `program` mode, never as data or reply text. Missing and
+  non-string slots are not scanned. Non-slot arguments, and tools declared on
+  a send (which have no plan item or catalog), get no call set.
+- [pinned] Resolve against the request numbering the writing step saw, as of
+  the durable commit storing the message or call. Persist records in that
+  commit or derive them identically from durably stored inputs at that commit.
+  Never resolve them against later numbering. Tool-result text and nested
+  images resolve to the stored output part, not rendered bytes: no tag prefix
+  or text injected during rendering. User and model text record `unresolved`
+  / `not_a_tool_output`; an absent number records `unresolved` / `unknown_tag`.
+  Running calls have no number. A held result records `held`, its `call_key`
+  and the placeholder the model saw; it never fills in with a late result.
+- [pinned] A record is `{ref_id, tag, part, call_key, tool, provider, format,
+  mime?, bytes, sha256, state, reason?}`. `ref_id` is opaque and unique within
+  the session. `tag` is the scanner's canonical decimal string (no machine
+  integer bound); it is null for `not_a_reference`. Unknown target metadata is
+  null. `part` is the target part key; `call_key` is the referenced call's key;
+  `format` is `text` or `image`; `bytes` and lowercase `sha256` describe the
+  stored output. States and reasons are open strings on decode.
+- [pinned] At most 64 occurrences per message or call can resolve. Later
+  occurrences record `unresolved` / `too_many_refs`. A snapshot over 1,048,576
+  bytes, or one that would exceed 4,194,304 resolved snapshot bytes in that
+  message or call, records `too_large`, full size and SHA-256, without content.
+  Repeated occurrences count toward both budgets. Content is retained once
+  per session by SHA-256; an existing stored part or media store may serve it
+  if it lives as long as every record naming it.
+- [pinned] One message's or call's records form an immutable set with descriptor
+  `{set_id, mid, call_key?, dialect, count, digest}`, at most 4,096 encoded
+  bytes. `call_key` on the descriptor identifies the containing call, not a
+  referenced one. `digest` is lowercase SHA-256 of the RFC 8785 (JCS) encoding
+  of the records array in encounter order, retaining null fields and omitting
+  absent `mime` and `reason`. `test-vectors/llm-runner-v1/output-refs.json`
+  pins the exact canonical bytes and digest. Records survive compaction and
+  lineage changes; rewind removes records with their message, and session
+  retention removes them with the session.
+- [pinned] `session.output_refs {set_id, after?}` returns `{records, next?}`,
+  at most 32 records and 16,384 bytes for the complete encoded page. `after`
+  and `next` are opaque record-id cursors within that set. An unknown cursor
+  is `unknown_ref`. `session.output_ref_read {ref_id, offset, length}` returns
+  `{data, size, format, mime?}` with base64 data, at most 131,072 decoded bytes.
+  Length zero returns metadata only. Offset equal to size returns empty data;
+  offset beyond size or length beyond the cap is `invalid_params` naming
+  `offset` or `length`. A record without retained content answers `unknown_ref`.
+- [pinned] Both operations admit whoever may read the session, and a carrier
+  listed on the session's scope with this runner among its targets. IDs are
+  session-bound: another session's `set_id` or `ref_id` answers `unknown_ref`,
+  exactly like an ID that never existed. This check precedes content lookup.
+- [pinned] A message's display row carries its descriptor as `output_refs`;
+  a tool call's display entry carries its call set's descriptor. Default
+  `session.read` and stored bodies never gain descriptors. A set may be empty
+  when scanning found no references; no snapshot is copied in that case.
 
 ## 10. `session.baseline` and the admission reply
 

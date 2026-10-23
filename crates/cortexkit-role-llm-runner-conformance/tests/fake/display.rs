@@ -275,6 +275,7 @@ impl Module {
                 row = row.with_sender(sender);
             }
         }
+        output_refs::decorate(sess, &entry.mid, &mut row);
         row
     }
 

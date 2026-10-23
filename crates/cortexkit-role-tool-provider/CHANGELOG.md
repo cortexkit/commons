@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.3
+
+- Optional per-tool `reference_slots` with named validation, token/source
+  kinds and an eight-slot bound. Empty lists preserve catalog bytes and digests.
+- Shared slot vectors, including `show_ui` data and program slots.
+- Clarify that a call's late-result custodian is always its carrier, including
+  calls raised inside a scope another principal owns. No wire change.
+
 ## 0.10.2
 
 - A `held` reply now means the call's answer comes later through

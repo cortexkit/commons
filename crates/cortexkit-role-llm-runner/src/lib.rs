@@ -32,6 +32,7 @@ pub mod display;
 pub mod errors;
 pub mod history;
 pub mod live;
+pub mod output_refs;
 pub mod points;
 pub mod read;
 pub mod retract;
@@ -79,6 +80,8 @@ pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
+    pub const SESSION_OUTPUT_REFS: &str = "session.output_refs";
+    pub const SESSION_OUTPUT_REF_READ: &str = "session.output_ref_read";
     pub const SESSION_UPLOAD_BEGIN: &str = "session.upload_begin";
     pub const SESSION_UPLOAD_APPEND: &str = "session.upload_append";
     pub const SESSION_UPLOAD_STATUS: &str = "session.upload_status";
@@ -150,6 +153,10 @@ pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::SESSION_BASELINE];
 /// declares.
 pub mod capabilities {
     use crate::ops;
+
+    /// Immutable output references captured against the writing request.
+    /// Requires tags and applies only where the frozen plan renders tags.
+    pub const OUTPUT_REFS: &str = "output_refs";
 
     /// Session-scoped uploads, upload references on sends and media by digest.
     pub const ATTACHMENTS: &str = "attachments";
@@ -287,6 +294,10 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (
+            OUTPUT_REFS,
+            &[ops::SESSION_OUTPUT_REFS, ops::SESSION_OUTPUT_REF_READ],
+        ),
         (
             ATTACHMENTS,
             &[
@@ -431,6 +442,8 @@ mod tests {
     #[test]
     fn every_group_names_only_role_ops() {
         let role_ops = [
+            ops::SESSION_OUTPUT_REFS,
+            ops::SESSION_OUTPUT_REF_READ,
             ops::SESSION_UPLOAD_BEGIN,
             ops::SESSION_UPLOAD_APPEND,
             ops::SESSION_UPLOAD_STATUS,

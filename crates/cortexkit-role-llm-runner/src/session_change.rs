@@ -45,6 +45,10 @@ pub struct RefreshRequest {
 }
 
 impl RefreshRequest {
+    /// Check output-reference plan members before fetching or storing a change.
+    pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
+        crate::output_refs::check_plan(&Value::Object(self.plan.clone()), advertised)
+    }
     pub fn new(plan: Map<String, Value>, policy: impl Into<String>, generation: u64) -> Self {
         Self {
             plan,

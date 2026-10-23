@@ -57,6 +57,17 @@ to them. Nothing here names a particular implementation.
 
 ## 3. `tool.catalog`
 
+- [pinned] A tool may declare `reference_slots: [{name, kind}]`: at most
+  eight distinct, non-empty literal top-level argument names. Names are not
+  paths. `kind` is `token` or `source:<dialect>` with a non-empty dialect.
+  Providers refuse an oversized list naming `reference_slots`, an empty or
+  duplicate name naming `reference_slots[].name`, and a malformed kind naming
+  `reference_slots[].kind` (`catalog::check_reference_slots`). The latter two
+  identify the offending name. Omit an empty list; catalogs without slots keep
+  their bytes and digest. `show_ui`-style declarations are `data: token` and
+  `program: source:rich-ui/1`; the declarations do not authorize scanning until
+  the runner's frozen plan opts the provider into output references.
+
 - Request: `{params, preset?, composition?, system_text?, digest_only?}`
   (`CatalogRequest`).
   - `params` is the plan item's params, and every key in it is per-provider:
@@ -631,8 +642,10 @@ Authorized, DispatchStarted, Settled.
 ## 7. Late results
 
 A provider that settles calls later declares the `late_results` session
-capability. The custodian (the scope's owner for a direct call, or the
-carrier of an onward call) pulls; the provider never pushes, and serves an
+capability. The custodian is always the carrier, the principal that raised
+the call, including a call raised inside a run whose scope another principal
+owns. For example, Broca collects held results for calls it raises inside a
+worker run that core owns. The custodian pulls; the provider never pushes, and serves an
 entry only to a caller whose verified principal is its custodian.
 For a held first reply (§4.1, `held-reply/v1`), this entry, not the interim
 `content`, is the call's answer, correlated by `(carrier, call_key)`.

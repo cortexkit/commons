@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.5
+
+- `output_refs`, requiring `tags`: immutable writing-request records, snapshots,
+  descriptors, display metadata, paging and byte-range read shapes. Shared
+  vectors pin the canonical JCS record encoding and digest.
+- Use published `cortexkit-rich-ui-syntax` 0.1.1 for reply/program scanning and
+  exact token slots; enforce reference and snapshot budgets across each set.
+- `output_refs::ReferenceSlot` is a runner-owned, non-exhaustive wire type
+  with a constructor and getters. Provider-slot byte compatibility is checked
+  against the shared catalog vectors only in tests; tool-provider is not a
+  runtime dependency.
+- Clarify that delivery boundaries depend on host staging, not acceptance;
+  staging remains pending, retractable and expiring until delivery.
+
 ## 0.5.4
 
 - Add the optional `held_calls` describe group: typed `run::HeldCall` entries

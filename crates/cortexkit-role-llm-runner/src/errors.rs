@@ -19,6 +19,14 @@ use serde_json::Value;
 /// excludes. `detail.field` names it.
 pub const INVALID_PARAMS: &str = "invalid_params";
 
+/// An output-reference id or cursor is unknown on the route's session.
+/// Foreign-session ids are deliberately indistinguishable from missing ones.
+pub const UNKNOWN_REF: &str = "unknown_ref";
+
+pub fn is_unknown_ref(code: &str) -> bool {
+    code == UNKNOWN_REF
+}
+
 macro_rules! attachment_codes {
     ($($name:ident, $predicate:ident, $value:literal;)+) => {
         $(pub const $name: &str = $value;
@@ -481,6 +489,7 @@ pub const SESSION_CHANGE_CODES: &[&str] = &[
 
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
+    UNKNOWN_REF,
     UNKNOWN_SESSION,
     UNKNOWN_UPLOAD,
     UPLOAD_NOT_COMMITTED,
@@ -747,14 +756,19 @@ mod tests {
     #[test]
     fn retryability_matches_the_vectors() {
         let file = vectors::load("errors.json");
-        let listed: Vec<&str> = vectors::cases(&file, "codes")
+        let output_refs = vectors::load("output-refs.json");
+        let cases: Vec<_> = vectors::cases(&file, "codes")
+            .iter()
+            .chain(vectors::cases(&output_refs, "codes"))
+            .collect();
+        let listed: Vec<&str> = cases
             .iter()
             .map(|case| case["code"].as_str().unwrap())
             .collect();
         for code in CODES {
             assert!(listed.contains(code), "{code} has no vector");
         }
-        for case in vectors::cases(&file, "codes") {
+        for case in cases {
             let code = case["code"].as_str().unwrap();
             assert_eq!(
                 is_retryable(code),

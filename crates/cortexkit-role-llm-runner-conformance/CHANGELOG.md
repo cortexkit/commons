@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.6
+
+- Exercise immutable output references, scanner samples, slot opt-in, snapshot
+  limits, canonical digests, compaction/rewind and session isolation through
+  runner routes, with a reference fake and named faulty runners.
+- Use the runner-owned reference-slot type without a direct tool-provider
+  dependency.
+- Positive output-reference cases are N/A when the runner does not declare the group,
+  rather than reporting a missing-capability skip for an undeclared group.
+- The unsupported-plan refusal case binds non-advertisers on send, refresh
+  and adopt, and is N/A for advertisers.
+- Add the default-at-once `send_staged` subject hook and wait for it before
+  releasing the first-possible-mode case's tool result. Check that a result
+  sent before host staging cannot carry a subsequently staged send.
+
 ## 0.10.5
 
 An additive release: per-case progress for runs that can be cut off before

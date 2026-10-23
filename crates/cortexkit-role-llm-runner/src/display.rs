@@ -86,6 +86,9 @@ pub fn client_message_id_valid(id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct DisplayRow {
+    /// References captured when this message was stored, never added to its body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_refs: Option<crate::output_refs::Descriptor>,
     /// Who spoke, as the stored body says: `user`, `assistant`, `tool`,
     /// `system` or another runner value.
     pub role: String,
@@ -112,6 +115,10 @@ pub struct DisplayRow {
 }
 
 impl DisplayRow {
+    pub fn with_output_refs(mut self, descriptor: crate::output_refs::Descriptor) -> Self {
+        self.output_refs = Some(descriptor);
+        self
+    }
     /// A row of `role` with `parts`, its `text` joined from the text parts.
     pub fn new(role: impl Into<String>, parts: Vec<DisplayPart>) -> Self {
         let text = crate::run::join_text_parts(parts.iter().filter_map(|part| match part {
@@ -120,6 +127,7 @@ impl DisplayRow {
         }));
         Self {
             role: role.into(),
+            output_refs: None,
             text,
             parts,
             model: None,
@@ -228,6 +236,9 @@ impl TextPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolCallPart {
+    /// The opted-in plan call's references, separate from model arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_refs: Option<crate::output_refs::Descriptor>,
     pub part: String,
     /// The model's id for the call, as the stored body carries it. Not
     /// unique in a session: a row is found by `mid` plus this id.
@@ -284,6 +295,10 @@ pub struct OtherPart {
 }
 
 impl ToolCallPart {
+    pub fn with_output_refs(mut self, descriptor: crate::output_refs::Descriptor) -> Self {
+        self.output_refs = Some(descriptor);
+        self
+    }
     /// A call whose `arguments` are `arguments` as compact JSON text, cut
     /// by `limits` when given.
     pub fn new(
@@ -422,6 +437,7 @@ fn arguments_part(
         None => (text, false),
     };
     DisplayPart::ToolCall(ToolCallPart {
+        output_refs: None,
         part,
         tool_call_id,
         name,

@@ -1,0 +1,77 @@
+{
+  "canonical_records": "[{\"bytes\":6,\"call_key\":\"call-1\",\"format\":\"text\",\"part\":\"2\",\"provider\":\"provider\",\"ref_id\":\"ref-1\",\"sha256\":\"e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3a\",\"state\":\"resolved\",\"tag\":\"7\",\"tool\":\"read\"},{\"bytes\":10,\"call_key\":\"held-call\",\"format\":\"text\",\"part\":\"2\",\"provider\":\"provider\",\"ref_id\":\"ref-2\",\"sha256\":\"d551582049196e3fd1821909a122ea9d6992f79bd47b0f9b0476abf1ab9b29c9\",\"state\":\"held\",\"tag\":\"8\",\"tool\":\"read\"},{\"bytes\":1048577,\"call_key\":\"call-1\",\"format\":\"text\",\"part\":\"2\",\"provider\":\"provider\",\"ref_id\":\"ref-3\",\"sha256\":\"154b8ed3c2383ce429058768595935faf7851b5c38db2b1732594be1d88bc05a\",\"state\":\"too_large\",\"tag\":\"9\",\"tool\":\"read\"},{\"bytes\":null,\"call_key\":null,\"format\":null,\"part\":null,\"provider\":null,\"reason\":\"unknown_tag\",\"ref_id\":\"ref-4\",\"sha256\":null,\"state\":\"unresolved\",\"tag\":\"99\",\"tool\":null}]",
+  "records": [
+    {
+      "ref_id": "ref-1",
+      "tag": "7",
+      "part": "2",
+      "call_key": "call-1",
+      "tool": "read",
+      "provider": "provider",
+      "format": "text",
+      "bytes": 6,
+      "sha256": "e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3a",
+      "state": "resolved"
+    },
+    {
+      "ref_id": "ref-2",
+      "tag": "8",
+      "part": "2",
+      "call_key": "held-call",
+      "tool": "read",
+      "provider": "provider",
+      "format": "text",
+      "bytes": 10,
+      "sha256": "d551582049196e3fd1821909a122ea9d6992f79bd47b0f9b0476abf1ab9b29c9",
+      "state": "held"
+    },
+    {
+      "ref_id": "ref-3",
+      "tag": "9",
+      "part": "2",
+      "call_key": "call-1",
+      "tool": "read",
+      "provider": "provider",
+      "format": "text",
+      "bytes": 1048577,
+      "sha256": "154b8ed3c2383ce429058768595935faf7851b5c38db2b1732594be1d88bc05a",
+      "state": "too_large"
+    },
+    {
+      "ref_id": "ref-4",
+      "tag": "99",
+      "part": null,
+      "call_key": null,
+      "tool": null,
+      "provider": null,
+      "format": null,
+      "bytes": null,
+      "sha256": null,
+      "state": "unresolved",
+      "reason": "unknown_tag"
+    }
+  ],
+  "descriptor": {
+    "set_id": "set-1",
+    "mid": "mid-1",
+    "dialect": "rich-ui/1",
+    "count": 4,
+    "digest": "29c975b699c864040cacd7797bba4eb53337b30a68a00acbb6efe608249f3a0f"
+  },
+  "read": {
+    "ref_id": "ref-1",
+    "offset": 0,
+    "length": 6
+  },
+  "read_reply": {
+    "data": "b3V0cHV0",
+    "size": 6,
+    "format": "text"
+  },
+  "codes": [
+    {
+      "code": "unknown_ref",
+      "retryable": false
+    }
+  ]
+}

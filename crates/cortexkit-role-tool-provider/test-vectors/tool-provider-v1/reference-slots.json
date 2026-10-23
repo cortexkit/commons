@@ -1,0 +1,15 @@
+{
+  "valid": [
+    [],
+    [{"name":"data","kind":"token"},{"name":"program","kind":"source:rich-ui/1"}],
+    [{"name":"literal.dot","kind":"source:another/2"}]
+  ],
+  "invalid": [
+    {"slots":[{"name":"","kind":"token"}],"field":"reference_slots[].name"},
+    {"slots":[{"name":"data","kind":"token"},{"name":"data","kind":"token"}],"field":"reference_slots[].name"},
+    {"slots":[{"name":"data","kind":"source:"}],"field":"reference_slots[].kind"},
+    {"slots":[{"name":"data","kind":"text"}],"field":"reference_slots[].kind"},
+    {"slots":[{"name":"a","kind":"token"},{"name":"b","kind":"token"},{"name":"c","kind":"token"},{"name":"d","kind":"token"},{"name":"e","kind":"token"},{"name":"f","kind":"token"},{"name":"g","kind":"token"},{"name":"h","kind":"token"},{"name":"i","kind":"token"}],"field":"reference_slots"}
+  ],
+  "show_ui": {"name":"show_ui","schema_digest":"digest","semantics":1,"capabilities":[],"reference_slots":[{"name":"data","kind":"token"},{"name":"program","kind":"source:rich-ui/1"}],"input_schema":{"type":"object"}}
+}

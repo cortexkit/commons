@@ -549,6 +549,61 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Wait until the request-rendering component holds an accepted send.
+    /// A runner owning its loop may return at once. This observes staging,
+    /// not delivery, and must not render a boundary just to satisfy the hook.
+    async fn send_staged(&self, _session: &str, _send_id: &str) -> Result<(), HarnessError> {
+        Ok(())
+    }
+    /// Hold the next send between acceptance and host staging. Return false
+    /// only where those events coincide, making the delayed-staging case
+    /// inapplicable. The subsequent send_staged call releases this hold and
+    /// waits for staging, without delivering the send itself.
+    async fn hold_send_staging(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Build admission fields with a tag-rendering plan whose scripted tool
+    /// provider declares data:token and program:source:rich-ui/1 slots, and
+    /// whose provider item opts into output_refs. Do not synthesize replies.
+    fn output_refs_fields(&self, _session: &str) -> Result<Map<String, Value>, HarnessError> {
+        Err(HarnessError::new(
+            "output reference plan is not implemented",
+        ))
+    }
+
+    /// Install a native held tool-result placeholder, available to the next
+    /// model request. Return its tag as observed at the rendering seam. Later
+    /// replace the native result through complete_output_ref_held; neither
+    /// hook may alter the runner's saved reference records or serve replies.
+    async fn install_output_ref_held(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _placeholder: &str,
+    ) -> Result<String, HarnessError> {
+        Err(HarnessError::new("held output fixture is not implemented"))
+    }
+    async fn complete_output_ref_held(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _answer: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("late output fixture is not implemented"))
+    }
+
+    /// Force a native lineage change that assigns different numbers while
+    /// retaining the reference-bearing message. Never edit saved sets.
+    async fn renumber_output_refs(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "output reference renumbering is not implemented",
+        ))
+    }
     /// Configure the actual scripted provider to answer this call with a
     /// `held-reply/v1` first reply, not an unanswered request. Declare
     /// `late_results` and opt the tool into `content/v1`; the runner must bind

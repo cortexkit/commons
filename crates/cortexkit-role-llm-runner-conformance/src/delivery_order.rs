@@ -62,6 +62,7 @@ where
         "display_row_names_the_sender_never_in_read" => &[Mode::IdleStart],
         "delivery_order_declared_modes_respected" => &[],
         "delivery_order_first_possible_mode" => &[Mode::ToolResult, Mode::IdleStart],
+        "delivery_order_result_before_staging" => &[Mode::ToolResult],
         "delivery_order_retract_pending_tool_result" => &[Mode::ToolResult],
         "delivery_order_undeclared_mode_refused" => &[Mode::IdleStart],
         "delivery_order_never_starts_a_run"
@@ -106,6 +107,7 @@ where
         "delivery_order_declared_modes_respected" => passed(declared_modes_respected(case).await),
         "delivery_order_never_starts_a_run" => passed(never_starts(case).await),
         "delivery_order_first_possible_mode" => passed(first_possible(case).await),
+        "delivery_order_result_before_staging" => result_before_staging(case).await,
         "delivery_order_undeclared_mode_refused" => passed(undeclared_mode_refused(case).await),
         "delivery_order_retract_pending_tool_result" => {
             passed(retract_pending_tool_result(case).await)
@@ -678,21 +680,18 @@ where
         .await
         .map_err(|e| format!("waiting for the held call: {e}"))?;
     let rides = case.mint.next("rides-result");
+    let send_id = case.mint.next("send");
     // Steer is possible at that boundary too; the list's order picks
     // tool_result.
     let order = DeliveryOrder::new(vec![Mode::ToolResult, Mode::Steer, Mode::IdleStart]);
     expect_ok(
         "a tool_result send during a held call",
-        ordered(
-            case,
-            &session,
-            &session.route,
-            &rides,
-            &case.mint.next("send"),
-            &order,
-        )
-        .await?,
+        ordered(case, &session, &session.route, &rides, &send_id, &order).await?,
     )?;
+    case.subject
+        .send_staged(&session.name, &send_id)
+        .await
+        .map_err(|e| format!("waiting for the send to be staged: {e}"))?;
     let running = head(&session.route).await?.last_run_state.map(|l| l.run_id);
     case.subject
         .release_tool_call(&held.arguments)
@@ -1558,5 +1557,115 @@ where
         n => Err(format!(
             "{n} entries hold the message of {what}: it is written exactly once"
         )),
+    }
+}
+
+async fn result_before_staging<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut first = case.mint.call("before-staging");
+    first.hold = true;
+    let mut second = case.mint.call("after-staging");
+    second.hold = true;
+    let (session, _) = ordered_session(
+        case,
+        "order-staging",
+        vec![
+            ScriptedTurn::new(vec![ScriptedPart::ToolCall(first.clone())]),
+            ScriptedTurn::new(vec![ScriptedPart::ToolCall(second.clone())]),
+            ScriptedTurn::new(vec![case.mint.text("after-staged-result").0]),
+        ],
+        false,
+    )
+    .await?;
+    expect_ok(
+        "owner turn",
+        call(
+            &session.route,
+            ops::SESSION_SEND,
+            params(
+                case,
+                &session,
+                None,
+                "start held tools",
+                &case.mint.next("send"),
+                &Map::new(),
+            ),
+        )
+        .await?,
+    )?;
+    case.subject
+        .await_tool_call(&first.arguments)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !case
+        .subject
+        .hold_send_staging(&session.name)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        case.subject
+            .release_tool_call(&first.arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        case.subject
+            .release_tool_call(&second.arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(Ending::Inapplicable(
+            "acceptance and staging coincide on this runner".into(),
+        ));
+    }
+    let send_id = case.mint.next("send");
+    let marker = case.mint.next("staged-send");
+    expect_ok(
+        "accepted unstaged send",
+        ordered(
+            case,
+            &session,
+            &session.route,
+            &marker,
+            &send_id,
+            &DeliveryOrder::new(vec![Mode::ToolResult]),
+        )
+        .await?,
+    )?;
+    case.subject
+        .release_tool_call(&first.arguments)
+        .await
+        .map_err(|e| e.to_string())?;
+    // Receiving the second call proves the model consumed the first result.
+    case.subject
+        .await_tool_call(&second.arguments)
+        .await
+        .map_err(|e| e.to_string())?;
+    case.subject
+        .send_staged(&session.name, &send_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    case.subject
+        .release_tool_call(&second.arguments)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (_, messages) = read_all(&session.route).await?;
+    let key = messages
+        .iter()
+        .flat_map(|m| &m.tool_calls)
+        .find(|c| c.tool_call_id == second.tool_call_id)
+        .and_then(|c| c.call_key.as_deref())
+        .ok_or("second call has no attribution")?;
+    match holding(&messages, &marker).as_slice() {
+        [entry]
+            if entry.delivered_as.as_ref().is_some_and(|d| {
+                d.mode == modes::TOOL_RESULT && d.call_key.as_deref() == Some(key)
+            }) =>
+        {
+            Ok(Ending::Passed)
+        }
+        _ => Err(
+            "send landed on an already-sent result instead of the next result after staging".into(),
+        ),
     }
 }

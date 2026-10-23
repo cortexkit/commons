@@ -137,6 +137,11 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("output_refs_")
+        && matches!(report.outcome(case),Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare output_refs" || reason == "the runner declares output_refs")
+    {
+        return;
+    }
     if case.starts_with("held_calls_")
         && matches!(report.outcome(case),
         Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare held_calls")
@@ -4931,4 +4936,153 @@ async fn attachments_are_inapplicable_without_the_group() {
             report.outcome(spec.name)
         );
     }
+}
+
+fn output_refs_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        output_refs: defect,
+        ..Defects::default()
+    });
+    subject.output_refs_group = true;
+    subject.capabilities.extend([
+        Capability::Tags,
+        Capability::HostHistory,
+        Capability::HistoryDisplay,
+    ]);
+    subject
+}
+
+#[tokio::test]
+async fn output_refs_faithful_runner_passes_all_cases() {
+    let report = run(&output_refs_subject(None)).await;
+    for name in cases_of(&["output_refs_"])
+        .into_iter()
+        .filter(|name| *name != "output_refs_unsupported_plan")
+    {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn output_refs_undeclared_group_is_inapplicable() {
+    let mut subject = output_refs_subject(None);
+    subject.output_refs_group = false;
+    subject
+        .capabilities
+        .extend([Capability::Adopt, Capability::SessionChange]);
+    let report = run(&subject).await;
+    for name in cases_of(&["output_refs_"])
+        .into_iter()
+        .filter(|name| *name != "output_refs_unsupported_plan")
+    {
+        assert!(
+            matches!(report.outcome(name),Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare output_refs"),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        report.outcome("output_refs_unsupported_plan"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+}
+
+macro_rules! output_refs_fault {
+    ($test:ident, $case:literal) => {
+        #[tokio::test]
+        async fn $test() {
+            let report = run(&output_refs_subject(Some($case))).await;
+            println!("{}: {}", $case, failed(&report, $case));
+            assert_none_failed_but(&report, &[$case]);
+        }
+    };
+}
+output_refs_fault!(output_refs_fault_scanning, "output_refs_scanning");
+output_refs_fault!(
+    output_refs_fault_shared_samples,
+    "output_refs_shared_samples"
+);
+output_refs_fault!(
+    output_refs_fault_writing_request,
+    "output_refs_writing_request"
+);
+output_refs_fault!(
+    output_refs_fault_target_reasons,
+    "output_refs_target_reasons"
+);
+output_refs_fault!(
+    output_refs_fault_held_placeholder,
+    "output_refs_held_placeholder"
+);
+output_refs_fault!(output_refs_fault_snapshot_size, "output_refs_snapshot_size");
+output_refs_fault!(
+    output_refs_fault_snapshot_budget,
+    "output_refs_snapshot_budget"
+);
+output_refs_fault!(
+    output_refs_fault_descriptor_digest,
+    "output_refs_descriptor_digest"
+);
+output_refs_fault!(output_refs_fault_rewind, "output_refs_rewind");
+output_refs_fault!(output_refs_fault_compaction, "output_refs_compaction");
+output_refs_fault!(
+    output_refs_fault_session_isolation,
+    "output_refs_session_isolation"
+);
+output_refs_fault!(output_refs_fault_slots, "output_refs_slots");
+output_refs_fault!(
+    output_refs_fault_reference_limit,
+    "output_refs_reference_limit"
+);
+output_refs_fault!(output_refs_fault_read_limits, "output_refs_read_limits");
+
+#[tokio::test]
+async fn delivery_order_result_before_staging_fault_is_detected() {
+    only_these_fail(
+        Capability::DeliveryOrder,
+        ORDER_PREFIXES,
+        Defects {
+            order_before_staging: true,
+            ..Defects::default()
+        },
+        &[(
+            "delivery_order_result_before_staging",
+            "already-sent result",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn output_refs_unsupported_plan_acceptance_is_detected() {
+    let mut subject = output_refs_subject(Some("output_refs_unsupported_plan"));
+    subject.output_refs_group = false;
+    subject
+        .capabilities
+        .extend([Capability::Adopt, Capability::SessionChange]);
+    let report = run(&subject).await;
+    println!(
+        "output_refs_unsupported_plan: {}",
+        failed(&report, "output_refs_unsupported_plan")
+    );
+    assert_none_failed_but(&report, &["output_refs_unsupported_plan"]);
+}
+
+#[tokio::test]
+async fn output_refs_unsupported_plan_write_before_refusal_is_detected() {
+    let mut subject = output_refs_subject(Some("output_refs_unsupported_plan_written"));
+    subject.output_refs_group = false;
+    let report = run(&subject).await;
+    println!(
+        "output_refs_unsupported_plan: {}",
+        failed(&report, "output_refs_unsupported_plan")
+    );
+    assert_none_failed_but(&report, &["output_refs_unsupported_plan"]);
 }

@@ -70,6 +70,7 @@ mod display;
 mod held_calls;
 mod history;
 mod media;
+mod output_refs;
 mod session_change;
 mod tags;
 mod user_commands;
@@ -159,6 +160,7 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub output_refs: Option<&'static str>,
     pub held_calls_never_listed: bool,
     pub held_calls_stale: bool,
     pub attachments: &'static str,
@@ -324,6 +326,7 @@ pub struct Defects {
     pub order_expiry_ignored: bool,
     /// The last possible mode of a list wins instead of the first.
     pub order_last_possible_mode: bool,
+    pub order_before_staging: bool,
     /// A runner without the `delivery_order` group accepts a list in
     /// `delivery`, delivering it as a legacy `queue`.
     pub order_list_accepted_without_group: bool,
@@ -534,6 +537,7 @@ struct World {
     model_requests: Mutex<BTreeMap<String, Vec<ModelRequestObservation>>>,
     pending_model_holds: Mutex<BTreeSet<String>>,
     held_models: Mutex<BTreeMap<String, String>>,
+    staging_holds: Mutex<BTreeSet<String>>,
     compaction: Mutex<compaction::Providers>,
     invocations: Mutex<BTreeMap<String, usize>>,
     held: Mutex<BTreeSet<String>>,
@@ -774,6 +778,8 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    output_refs: output_refs::State,
+    output_refs_enabled: bool,
     attachment_accepts: Option<bool>,
     ever_served: bool,
     standalone_handed_off: bool,
@@ -1263,6 +1269,11 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
         }
+        if record["kind"] == "step" && self.world.serves(groups::OUTPUT_REFS) {
+            if let Some(sess) = self.sessions.lock().unwrap().get(session) {
+                record["output_sets"] = output_refs::capture(sess, &record, &self.world.defects);
+            }
+        }
         if self.world.serves(groups::INTERRUPT_REASON)
             && record["kind"] == "terminal"
             && record["state"] == "interrupted"
@@ -1309,6 +1320,7 @@ impl Module {
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
                     render_tags: record["render_tags"] == json!(true),
+                    output_refs_enabled: record["output_refs_enabled"] == json!(true),
                     name: session.clone(),
                     history_version,
                     ..Sess::default()
@@ -1827,6 +1839,7 @@ impl Module {
         }
         live_events(sess, &kind, record, &messages_before, &self.world.defects);
         tags::note_write(sess, &self.world.defects, self.world.honours_checkpoint());
+        output_refs::apply(sess, &kind, record, &self.world.defects);
     }
 
     /// Continue run `run_id` of `session`: dispatch the calls of its last
@@ -2195,6 +2208,11 @@ impl Module {
     /// queued send whose list has a mode possible there. Answers whether any
     /// was delivered.
     fn deliver_at_step(&self, session: &str, run_id: &str) -> Result<bool, Killed> {
+        if !self.world.defects.order_before_staging
+            && self.world.staging_holds.lock().unwrap().contains(session)
+        {
+            return Ok(false);
+        }
         let sess = self.sessions.lock().unwrap()[session].clone();
         let result_key = sess
             .messages
@@ -2330,6 +2348,26 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(RouteFailure::new("the module is not running"));
         }
+        if matches!(
+            method,
+            ops::SESSION_SEND | ops::SESSION_REFRESH | ops::SESSION_ADOPT
+        ) {
+            if let Some(plan) = params.get("plan") {
+                if self.world.defects.output_refs != Some("output_refs_unsupported_plan") {
+                    if let Err(field) = cortexkit_role_llm_runner::output_refs::check_plan(
+                        plan,
+                        self.world.serves(groups::OUTPUT_REFS),
+                    ) {
+                        if self.world.defects.output_refs
+                            == Some("output_refs_unsupported_plan_written")
+                        {
+                            self.commit(session,json!({"kind":"start","owner":stamp.principal,"lineage":"invalid-plan-written"})).map_err(|Killed|RouteFailure::new("killed before refusing"))?;
+                        }
+                        return Ok(invalid(field));
+                    }
+                }
+            }
+        }
         self.sweep(session)
             .map_err(|Killed| RouteFailure::new("the module was killed"))?;
         self.tick_ride(session)
@@ -2358,6 +2396,11 @@ impl Module {
             return Ok(refuse(errors::TRANSIENT, None));
         }
         let reply = match method {
+            ops::SESSION_OUTPUT_REFS | ops::SESSION_OUTPUT_REF_READ
+                if self.world.serves(groups::OUTPUT_REFS) =>
+            {
+                Ok(output_refs::handle(self, stamp, session, method, &params))
+            }
             ops::SESSION_UPLOAD_BEGIN
             | ops::SESSION_UPLOAD_APPEND
             | ops::SESSION_UPLOAD_STATUS
@@ -3139,6 +3182,7 @@ impl Module {
                 session,
                 json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
                         "tools": tools,
+                        "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "render_tags": request.plan.as_ref().and_then(|plan| plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS)),
                         "plan_digest": request.plan.as_ref().map(plan_digest) }),
@@ -4391,6 +4435,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub output_refs_group: bool,
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
@@ -4505,6 +4550,7 @@ impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
             held_calls_group: false,
+            output_refs_group: false,
             descriptor_case: None,
             descriptor_fixtures: false,
             no_image_results: false,
@@ -4582,6 +4628,10 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
+                        .chain(
+                            self.output_refs_group
+                                .then(|| groups::OUTPUT_REFS.to_owned()),
+                        )
                         .collect(),
                     delivery_order_modes: self.delivery_order_modes.clone(),
                     scripts: Mutex::new(BTreeMap::new()),
@@ -4591,6 +4641,7 @@ impl FakeSubject {
                     user_commands: Mutex::new(user_commands::Commands::default()),
                     pending_model_holds: Mutex::new(BTreeSet::new()),
                     held_models: Mutex::new(BTreeMap::new()),
+                    staging_holds: Mutex::new(BTreeSet::new()),
                     compaction: Mutex::new(compaction::Providers::new(
                         self.seal_compaction_setup_crash,
                     )),
@@ -4723,6 +4774,71 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn hold_send_staging(&self, session: &str) -> Result<bool, HarnessError> {
+        self.world()
+            .staging_holds
+            .lock()
+            .unwrap()
+            .insert(session.into());
+        Ok(true)
+    }
+    async fn send_staged(&self, session: &str, _send_id: &str) -> Result<(), HarnessError> {
+        self.world().staging_holds.lock().unwrap().remove(session);
+        Ok(())
+    }
+    fn output_refs_fields(&self, session: &str) -> Result<Map<String, Value>, HarnessError> {
+        let mut fields = self.send_fields(session, true);
+        fields["plan"]["render_tags"] = json!(true);
+        fields["plan"]["items"] = json!([{"provider":TOOL_MODULE,"output_refs":true}]);
+        Ok(fields)
+    }
+
+    async fn install_output_ref_held(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        placeholder: &str,
+    ) -> Result<String, HarnessError> {
+        handle
+            .0
+            .commit(
+                session,
+                json!({"kind":"refs_held","placeholder":placeholder}),
+            )
+            .map_err(|Killed| HarnessError::new("killed installing held part"))?;
+        let sessions = handle.0.sessions.lock().unwrap();
+        let sess = &sessions[session];
+        let mid = &sess.messages.last().unwrap().mid;
+        Ok(tags::current(sess)
+            .iter()
+            .find(|((m, _), _)| m == mid)
+            .unwrap()
+            .1
+            .to_string())
+    }
+
+    async fn complete_output_ref_held(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        answer: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({"kind":"refs_late","answer":answer}))
+            .map_err(|Killed| HarnessError::new("killed completing held part"))
+    }
+
+    async fn renumber_output_refs(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<(), HarnessError> {
+        handle
+            .0
+            .commit(session, json!({"kind":"refs_renumber"}))
+            .map_err(|Killed| HarnessError::new("killed renumbering"))
+    }
     async fn install_held_reply(
         &self,
         _session: &str,

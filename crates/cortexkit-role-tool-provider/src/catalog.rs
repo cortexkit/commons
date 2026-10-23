@@ -366,11 +366,20 @@ pub struct CatalogTool {
     /// other optional member; any other non-boolean value does not decode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emits_events: Option<bool>,
+    /// Top-level string arguments in which an opted-in runner reads output
+    /// references. Empty lists emit no bytes, preserving existing digests.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reference_slots: Vec<ReferenceSlot>,
     /// The argument schema, which must be flat (see [`check_flat_schema`]).
     pub input_schema: Value,
 }
 
 impl CatalogTool {
+    /// Declare reference arguments. Validate with [`check_reference_slots`].
+    pub fn with_reference_slots(mut self, slots: Vec<ReferenceSlot>) -> Self {
+        self.reference_slots = slots;
+        self
+    }
     /// A tool with its required identity and schema, and no optional content.
     pub fn new(
         name: impl Into<String>,
@@ -439,6 +448,56 @@ impl CatalogTool {
             None => RESULT_OPS_ALL.to_vec(),
         }
     }
+}
+
+/// A top-level argument containing a token or program source. Kinds are open
+/// strings on decode; providers validate them before publishing a catalog.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ReferenceSlot {
+    pub name: String,
+    pub kind: String,
+}
+
+impl ReferenceSlot {
+    pub fn new(name: impl Into<String>, kind: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            kind: kind.into(),
+        }
+    }
+}
+
+/// The named field a provider must refuse when a slot declaration is invalid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReferenceSlotsProblem {
+    pub field: &'static str,
+    pub name: Option<String>,
+}
+
+/// Check the eight-slot bound, distinct non-empty argument names and kinds.
+/// Names are literal top-level keys, never paths into an argument value.
+pub fn check_reference_slots(slots: &[ReferenceSlot]) -> Result<(), ReferenceSlotsProblem> {
+    let fail = |field, name: Option<String>| ReferenceSlotsProblem { field, name };
+    if slots.len() > 8 {
+        return Err(fail("reference_slots", None));
+    }
+    let mut names = std::collections::HashSet::new();
+    for slot in slots {
+        if slot.name.is_empty() || !names.insert(&slot.name) {
+            return Err(fail("reference_slots[].name", Some(slot.name.clone())));
+        }
+        if slot.kind != "token"
+            && !slot
+                .kind
+                .strip_prefix("source:")
+                .is_some_and(|dialect| !dialect.is_empty())
+        {
+            return Err(fail("reference_slots[].kind", Some(slot.name.clone())));
+        }
+    }
+    Ok(())
 }
 
 fn is_default_modes(modes: &Option<Vec<CallMode>>) -> bool {

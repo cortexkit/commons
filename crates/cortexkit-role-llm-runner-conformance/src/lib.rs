@@ -98,6 +98,7 @@ mod interrupt_reason;
 mod lineage;
 mod live;
 mod media;
+mod output_refs;
 pub mod progress;
 mod report;
 mod retention;

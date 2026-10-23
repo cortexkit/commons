@@ -384,6 +384,13 @@ pub struct SendRequest {
 }
 
 impl SendRequest {
+    /// Validate the plan's output-reference opt-in before any durable write.
+    pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
+        match &self.plan {
+            Some(plan) => crate::output_refs::check_plan(&Value::Object(plan.clone()), advertised),
+            None => Ok(()),
+        }
+    }
     pub fn with_content(mut self, content: Vec<crate::attachments::ContentPart>) -> Self {
         self.content = Some(content);
         self

@@ -646,3 +646,32 @@ effect unchecked. The cases check that a
 step of a run that was running when the change arrived offers exactly the
 tools the run started with.
 
+
+## Output references and host staging
+
+The `output_refs_*` positive cases discover the runner's live `output_refs`
+declaration. They are **N/A**, not missing-capability skips, when it is absent.
+The exception is `output_refs_unsupported_plan`: it binds exactly runners that
+**do not** declare the group, and is N/A for advertisers. A non-advertising
+0.5.5 runner satisfies that refusal with one call to `output_refs::check_plan`
+(or the request's `check_output_refs`) before any durable write, on every
+plan-carrying operation: `session.send`, `session.refresh` and `session.adopt`.
+Both explicit true and explicit false must be refused with
+`invalid_params {field: "plan.items[].output_refs"}` and no state change.
+
+Advertising adapters implement `output_refs_fields` with a tag-rendering plan
+and a scripted tool provider whose slots are `data: token` and
+`program: source:rich-ui/1`. The suite uses the published syntax crate's two
+sample sets verbatim and observes sets and snapshots over management routes.
+The held-result and renumbering hooks write native fixtures, never saved
+reference records or synthetic management replies. The runner's real storage
+and resolution path must produce the records. The compaction and rewind cases
+use the existing host-compaction and revert hooks.
+
+`send_staged(session, send_id)` waits until the request-rendering component
+holds an accepted send. Its default returns at once for a runner owning its
+loop. The first-possible-mode case waits for staging before releasing its
+scripted tool result. `hold_send_staging` lets a host-side adapter delay staging
+for the separate already-sent-result case; it returns false only where
+acceptance and staging coincide, making that scenario N/A. Releasing a staging
+hold does not deliver the send or render a boundary.

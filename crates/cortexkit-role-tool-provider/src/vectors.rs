@@ -63,6 +63,10 @@ pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.m
 
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
+    (
+        "reference-slots.json",
+        include_str!("../test-vectors/tool-provider-v1/reference-slots.json"),
+    ),
     ("call-key.json", CALL_KEY_JSON),
     ("call-modes.json", CALL_MODES_JSON),
     ("catalog-answers.json", CATALOG_ANSWERS_JSON),

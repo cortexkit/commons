@@ -324,6 +324,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    if describe.declares(capabilities::OUTPUT_REFS) && !describe.declares(capabilities::TAGS) {
+        problems.push(DescribeProblem::Undecodable(
+            "output_refs requires tags".into(),
+        ));
+    }
     if describe.declares(capabilities::HELD_CALLS) && !describe.declares(capabilities::RUN_STATUS) {
         problems.push(DescribeProblem::Undecodable(
             "held_calls requires run_status".into(),
