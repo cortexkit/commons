@@ -1,0 +1,27 @@
+{
+  "valid_requests": [
+    {"name":"noul","value":{"model":"example/classifier","questions":{"urgent":{"type":"noul","instructions":"Is the invented note urgent?"}},"item":{"state":"A fictional kettle needs a label."},"max_cost_usd":0.01}},
+    {"name":"structured-choice","value":{"model":"example/classifier","questions":{"color":{"type":"choice","instructions":{"ask":"Pick a color"},"criteria":{"blue":"blue","green":"green"}}},"item":{"state":{"color":"green"}},"max_cost_usd":0.01}},
+    {"name":"array-score","value":{"model":"example/classifier","questions":{"size":{"type":"score","instructions":["Rate size"],"criteria":["small","large"]}},"item":{"state":["a tiny invented stone"]},"max_cost_usd":0}}
+  ],
+  "invalid_requests": [
+    {"name":"missing-cost-ceiling-structured-choice","decode_error":"missing field `max_cost_usd`","value":{"model":"example/classifier","questions":{"color":{"type":"choice","instructions":{"ask":"Pick a color"},"criteria":{"blue":"blue","green":"green"}}},"item":{"state":{"color":"green"}}}},
+    {"name":"missing-cost-ceiling-array-score","decode_error":"missing field `max_cost_usd`","value":{"model":"example/classifier","questions":{"size":{"type":"score","instructions":["Rate size"],"criteria":["small","large"]}},"item":{"state":["a tiny invented stone"]}}},
+    {"name":"missing-model","value":{"questions":{"q":{"type":"noul","instructions":"Test"}},"item":{"state":"invented"},"max_cost_usd":0.01}},
+    {"name":"batch-not-single","value":{"model":"example/classifier","questions":{"q":{"type":"noul","instructions":"Test"}},"items":[{"state":"invented"}],"max_cost_usd":0.01}},
+    {"name":"invalid-state","value":{"model":"example/classifier","questions":{"q":{"type":"noul","instructions":"Test"}},"item":{"state":false},"max_cost_usd":0.01}},
+    {"name":"empty-questions","value":{"model":"example/classifier","questions":{},"item":{"state":"invented"},"max_cost_usd":0.01}},
+    {"name":"unknown-question-type","value":{"model":"example/classifier","questions":{"q":{"type":"boolean","instructions":"Test"}},"item":{"state":"invented"},"max_cost_usd":0.01}},
+    {"name":"negative-ceiling","value":{"model":"example/classifier","questions":{"q":{"type":"noul","instructions":"Test"}},"item":{"state":"invented"},"max_cost_usd":-0.01}}
+  ],
+  "valid_results": [
+    {"name":"absent-usage","value":{"answers":{"urgent":{"type":"noul","noul":0.125}},"usage":{},"cost_usd":0.0001}},
+    {"name":"open-answer","value":{"answers":{"future":{"type":"future-kind","provider_extra":{"score":2}}},"usage":{"input_tokens":12},"cost_usd":0.0002}}
+  ],
+  "invalid_results": [
+    {"name":"missing-cost","value":{"answers":{"urgent":{"type":"noul","noul":0.1}},"usage":{}}},
+    {"name":"missing-answer-type","value":{"answers":{"urgent":{"noul":0.1}},"usage":{},"cost_usd":0}},
+    {"name":"negative-cost","value":{"answers":{},"usage":{},"cost_usd":-1}},
+    {"name":"negative-tokens","value":{"answers":{},"usage":{"input_tokens":-1},"cost_usd":0}}
+  ]
+}

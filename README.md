@@ -16,6 +16,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-cow](crates/cortexkit-cow/README.md) | Copy-on-write workspace isolation and change capture. | [Published](https://crates.io/crates/cortexkit-cow) |
 | [cortexkit-exec-remote-types](crates/cortexkit-exec-remote-types/README.md) | Caller-facing types and vectors for `exec-remote/v1`. | [Published](https://crates.io/crates/cortexkit-exec-remote-types) |
 | [cortexkit-lease](crates/cortexkit-lease/README.md) | Durable single-writer leases and owner-only file/directory helpers. | [Published](https://crates.io/crates/cortexkit-lease) |
+| [cortexkit-llm-tools](crates/cortexkit-llm-tools/README.md) | Single-item LLM tool contracts, JSON schemas, validation and vectors for codemode and flows. | [Published](https://crates.io/crates/cortexkit-llm-tools) |
 | [cortexkit-log](crates/cortexkit-log/README.md) | Logging format, filtering, redaction, rotation, and retention. | [Published](https://crates.io/crates/cortexkit-log) |
 | [cortexkit-model-batch](crates/cortexkit-model-batch/README.md) | Batch rules shared by the model-batch roles: errors, batch identity, images, and the cost estimate. | [Published](https://crates.io/crates/cortexkit-model-batch) |
 | [cortexkit-model-catalog](crates/cortexkit-model-catalog/README.md) | Model catalog wire types and exact integer pricing conversion. | Not published |

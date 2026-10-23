@@ -1,0 +1,37 @@
+{
+  "valid_requests": [
+    {"name":"text","value":{"demand":{"iq":25},"prompt":"Invent a name for a paper moon.","max_output_tokens":32,"max_cost_usd":0.001}},
+    {"name":"json","value":{"demand":{"iq":100,"eq":0},"prompt":"Return an invented color.","system":"Respond in the requested shape.","output_schema":{"type":"object","properties":{"color":{"type":"string"}},"required":["color"],"additionalProperties":false},"max_output_tokens":64,"max_cost_usd":0.01}},
+    {"name":"zero-ceiling","value":{"demand":{"iq":0,"eq":100},"prompt":"Name an imaginary pebble.","max_output_tokens":1,"max_cost_usd":0}},
+    {"name":"json-null","value":{"demand":{"iq":50},"prompt":"Return null.","output_schema":{"type":"null"},"max_output_tokens":4,"max_cost_usd":0.01}}
+  ],
+  "invalid_requests": [
+    {"name":"missing-demand","value":{"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"missing-iq","value":{"demand":{"eq":1},"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"iq-over-100","value":{"demand":{"iq":101},"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"negative-eq","value":{"demand":{"iq":1,"eq":-1},"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"fractional-iq","value":{"demand":{"iq":1.5},"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"model-forbidden","value":{"demand":{"iq":1},"model":"example/anything","prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"empty-prompt","value":{"demand":{"iq":1},"prompt":"","max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"schema-not-object","value":{"demand":{"iq":1},"prompt":"Invent a moon.","output_schema":true,"max_output_tokens":32,"max_cost_usd":0.01}},
+    {"name":"missing-token-limit","value":{"demand":{"iq":1},"prompt":"Invent a moon.","max_cost_usd":0.01}},
+    {"name":"zero-token-limit","value":{"demand":{"iq":1},"prompt":"Invent a moon.","max_output_tokens":0,"max_cost_usd":0.01}},
+    {"name":"missing-cost-ceiling","value":{"demand":{"iq":1},"prompt":"Invent a moon.","max_output_tokens":32}},
+    {"name":"negative-cost-ceiling","value":{"demand":{"iq":1},"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":-0.01}},
+    {"name":"string-cost-ceiling","value":{"demand":{"iq":1},"prompt":"Invent a moon.","max_output_tokens":32,"max_cost_usd":"0.01"}}
+  ],
+  "valid_results": [
+    {"name":"priced-absent-usage","request":0,"value":{"text":"Paper Lantern Moon","model":{"provider":"example","model":"small"},"usage":{},"cost_usd":0.0001}},
+    {"name":"priced-reasoning","request":0,"value":{"text":"Quiet Crescent","model":{"provider":"example","model":"small","variant":"careful"},"usage":{"input_tokens":20,"cached_input_tokens":4,"cache_write_tokens":2,"output_tokens":12,"reasoning_tokens":8},"cost_usd":0.0002}},
+    {"name":"json","request":1,"value":{"json":{"color":"blue"},"model":{"provider":"example","model":"small"},"usage":{"input_tokens":20},"cost_usd":0.0001}},
+    {"name":"json-null","request":3,"value":{"json":null,"model":{"provider":"example","model":"small"},"usage":{},"cost_usd":0.0001}}
+  ],
+  "invalid_results": [
+    {"name":"both-outputs","value":{"text":"blue","json":{"color":"blue"},"model":{"provider":"example","model":"small"},"usage":{},"cost_usd":0.0001}},
+    {"name":"neither-output","value":{"model":{"provider":"example","model":"small"},"usage":{},"cost_usd":0.0001}},
+    {"name":"missing-cost","value":{"text":"blue","model":{"provider":"example","model":"small"},"usage":{}}},
+    {"name":"negative-cost","value":{"text":"blue","model":{"provider":"example","model":"small"},"usage":{},"cost_usd":-1}},
+    {"name":"missing-model","value":{"text":"blue","usage":{},"cost_usd":0.0001}},
+    {"name":"missing-usage","value":{"text":"blue","model":{"provider":"example","model":"small"},"cost_usd":0.0001}}
+  ]
+}

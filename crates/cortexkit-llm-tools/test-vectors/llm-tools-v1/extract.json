@@ -1,0 +1,32 @@
+{
+  "valid_requests": [
+    {"name":"text","value":{"model":"example/extractor","fields":{"color":{"type":"text","instructions":"Extract the invented color."}},"item":{"state":"The imaginary wheel is blue."},"max_cost_usd":0.02}},
+    {"name":"number-list","value":{"model":"example/extractor","fields":{"sizes":{"type":"list","items":"number","decimals":1}},"item":{"state":"Fictional sizes: 1.2 and 3.4","reference_date":"2028-02-29"},"options":{"quantiles":true,"state_text":true},"max_cost_usd":0.02}},
+    {"name":"date-estimate","value":{"model":"example/extractor","fields":{"arrival":{"type":"estimate","min":"2028-01-01","max":"2028-12-31","step":"month"}},"item":{"state":"The invented package comes in spring."},"max_cost_usd":0}},
+    {"name":"forecast","value":{"model":"example/extractor","fields":{"count":{"type":"forecast","min":0,"max":10,"horizon":2,"interval":"day"}},"item":{"state":"Fictional counts: 2 then 3."},"max_cost_usd":0.02}}
+  ],
+  "invalid_requests": [
+    {"name":"missing-cost-ceiling-number-list","decode_error":"missing field `max_cost_usd`","value":{"model":"example/extractor","fields":{"sizes":{"type":"list","items":"number","decimals":1}},"item":{"state":"Fictional sizes: 1.2 and 3.4","reference_date":"2028-02-29"},"options":{"quantiles":true,"state_text":true}}},
+    {"name":"missing-cost-ceiling-date-estimate","decode_error":"missing field `max_cost_usd`","value":{"model":"example/extractor","fields":{"arrival":{"type":"estimate","min":"2028-01-01","max":"2028-12-31","step":"month"}},"item":{"state":"The invented package comes in spring."}}},
+    {"name":"missing-cost-ceiling-forecast","decode_error":"missing field `max_cost_usd`","value":{"model":"example/extractor","fields":{"count":{"type":"forecast","min":0,"max":10,"horizon":2,"interval":"day"}},"item":{"state":"Fictional counts: 2 then 3."}}},
+    {"name":"missing-model","value":{"fields":{"x":{"type":"text"}},"item":{"state":"invented"},"max_cost_usd":0.02}},
+    {"name":"batch-not-single","value":{"model":"example/extractor","fields":{"x":{"type":"text"}},"items":[{"state":"invented"}],"max_cost_usd":0.02}},
+    {"name":"empty-state","value":{"model":"example/extractor","fields":{"x":{"type":"text"}},"item":{"state":""},"max_cost_usd":0.02}},
+    {"name":"nonstring-state","value":{"model":"example/extractor","fields":{"x":{"type":"text"}},"item":{"state":{}},"max_cost_usd":0.02}},
+    {"name":"list-missing-items","value":{"model":"example/extractor","fields":{"x":{"type":"list"}},"item":{"state":"invented"},"max_cost_usd":0.02}},
+    {"name":"unknown-field-option","value":{"model":"example/extractor","fields":{"x":{"type":"text","invented_option":true}},"item":{"state":"invented"},"max_cost_usd":0.02}},
+    {"name":"empty-images","value":{"model":"example/extractor","fields":{"x":{"type":"text"}},"item":{"state":"invented","images":[]},"max_cost_usd":0.02}},
+    {"name":"negative-ceiling","value":{"model":"example/extractor","fields":{"x":{"type":"text"}},"item":{"state":"invented"},"max_cost_usd":-1}}
+  ],
+  "valid_results": [
+    {"name":"absent-usage","value":{"answers":{"color":{"type":"text","value":"blue","p_null":0.0}},"usage":{},"cost_usd":0.0001}},
+    {"name":"raw-number-and-extra","value":{"answers":{"size":{"type":"number","value":1.2300e+2,"new_member":0.0100}},"truncated":false,"state_text":"Invented size 123.","usage":{"input_tokens":10,"output_tokens":5},"cost_usd":0.0002}},
+    {"name":"open-answer","value":{"answers":{"future":{"type":"future-kind","value":null,"new_member":[1,2]}},"usage":{"output_tokens":0},"cost_usd":0}}
+  ],
+  "invalid_results": [
+    {"name":"missing-cost","value":{"answers":{},"usage":{}}},
+    {"name":"missing-answer-type","value":{"answers":{"color":{"value":"blue"}},"usage":{},"cost_usd":0}},
+    {"name":"negative-cost","value":{"answers":{},"usage":{},"cost_usd":-1}},
+    {"name":"unknown-usage-field","value":{"answers":{},"usage":{"guessed_tokens":0},"cost_usd":0}}
+  ]
+}
