@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.6
+
+- Define the `llm.classify/v1`, `llm.extract/v1` and `llm.complete/v1`
+  capability tags for single-call model tools (contract §3). Unlike the other
+  defined tags, each also promises the request and result shapes the
+  `cortexkit-llm-tools` crate defines for it.
+
 ## 0.10.5
 
 - Define the `tool.view/v1` capability tag: the tool has an interface view

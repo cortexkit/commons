@@ -178,6 +178,15 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     // published in the module's `rich_ui` manifest descriptor and keyed by the
     // tool's schema pin; the tag promises only that such a view exists.
     "tool.view/v1",
+    // Classifies one item with a model and returns its answers. Unlike the
+    // tags above, the three `llm.*` tags also promise the request and result
+    // shapes the `cortexkit-llm-tools` crate defines for them.
+    "llm.classify/v1",
+    // Extracts typed fields from one item with a model.
+    "llm.extract/v1",
+    // Returns one model completion for a prompt, with no tools, from a model
+    // chosen for an iq/eq demand.
+    "llm.complete/v1",
 ];
 
 /// Why a capability tag is not acceptable in a catalog.

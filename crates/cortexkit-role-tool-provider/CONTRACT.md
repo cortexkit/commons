@@ -219,6 +219,9 @@ to them. Nothing here names a particular implementation.
     | `github.read/v1` | reads GitHub issues, pull requests and repository data, without changing anything on GitHub |
     | `code.search.public/v1` | searches code across public code hosts, outside the session's own workspace |
     | `tool.view/v1` | has an interface view the apps can render for its calls, published in its module's `rich_ui` manifest descriptor and keyed by the tool's `schema_pin` |
+    | `llm.classify/v1` | classifies one item with a model and returns its answers |
+    | `llm.extract/v1` | extracts typed fields from one item with a model |
+    | `llm.complete/v1` | returns one model completion for a prompt, with no tools, from a model chosen for an iq/eq demand |
 
     A defined tag promises only the activity in its row. Everything else is
     the provider's own: its arguments, permission grants, consent flow,
@@ -228,6 +231,10 @@ to them. Nothing here names a particular implementation.
     namespaced tag beside the defined one (for example
     `cerebellum:browser.use/v1`), and a consumer that depends on that contract
     pins the namespaced tag.
+
+    The three `llm.*` tags are the exception: each also promises the request
+    and result shapes that the `cortexkit-llm-tools` crate defines for it, so
+    a consumer can call any provider carrying the tag with those shapes.
 
     A reader checking tags with an older release of this crate refuses an
     unprefixed tag that release doesn't define; `check_describe` does so for
