@@ -450,6 +450,20 @@ pub struct Pool {
     /// only from a value the provider sent.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub expires_at: Option<String>,
+    /// Whether the provider says this pool has no limit, if it says so.
+    ///
+    /// **`true` is a stated fact, not an inference from a missing `total`.** An
+    /// absent `total` means only that no ceiling was stated, and a pool whose
+    /// balance is unstated may still be finite. Some providers state it outright
+    /// (OpenAI's Codex `credits.unlimited` for a workspace on an unlimited plan),
+    /// and a router that reads such a pool as merely "has some credits" will
+    /// ration a workspace it never needed to.
+    ///
+    /// `false` is also a statement: the provider says the pool is finite.
+    /// **Absent means not stated.** A producer sets it only from a value the
+    /// provider sent.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub unlimited: Option<bool>,
 }
 
 /// Account labels and subscription information supplied by a provider or vault.
@@ -1443,6 +1457,7 @@ mod tests {
             spendable: Some(true),
             resets_at: None,
             expires_at: None,
+            unlimited: None,
         };
         let mut entry = ProviderUsage::healthy("deepseek", None, "api", Usage::default());
         entry.spend = Some(vec![pool.clone()]);
@@ -1476,6 +1491,7 @@ mod tests {
             spendable: None,
             resets_at: Some("2026-10-01T00:00:00Z".to_string()),
             expires_at: None,
+            unlimited: None,
         };
         let json = serde_json::to_string(&pool).unwrap();
         assert!(
@@ -1514,6 +1530,7 @@ mod tests {
             spendable: None,
             resets_at: None,
             expires_at: Some("2026-11-06T00:00:00Z".to_string()),
+            unlimited: None,
         };
         let json = serde_json::to_string(&pool).unwrap();
         assert!(
@@ -1528,6 +1545,7 @@ mod tests {
 
         let unstated = Pool {
             expires_at: None,
+            unlimited: None,
             ..pool
         };
         let json = serde_json::to_string(&unstated).unwrap();
@@ -1540,6 +1558,45 @@ mod tests {
     /// payload, has no such key. A required field would fail every such pool,
     /// and the whole entry with it, rate windows included. serde already decodes
     /// a missing `Option` as `None` (dropping `default` alone leaves this green,
+    /// A stated "no limit" round-trips under its own wire name, `false` is kept
+    /// as a statement, and an unstated one is not rendered at all.
+    #[test]
+    fn a_pool_states_unlimited_only_when_the_provider_does() {
+        let pool = Pool {
+            id: "credits".to_string(),
+            label: "Credits".to_string(),
+            funding: PoolFunding::Subscription,
+            remaining: None,
+            total: None,
+            basis: PoolBasis::Unstated,
+            spendable: None,
+            resets_at: None,
+            expires_at: None,
+            unlimited: Some(true),
+        };
+        let json = serde_json::to_string(&pool).unwrap();
+        assert!(json.contains(r#""unlimited":true"#), "{json}");
+        assert_eq!(serde_json::from_str::<Pool>(&json).unwrap(), pool);
+
+        let finite = Pool {
+            unlimited: Some(false),
+            ..pool.clone()
+        };
+        let json = serde_json::to_string(&finite).unwrap();
+        assert!(
+            json.contains(r#""unlimited":false"#),
+            "false is a statement: {json}"
+        );
+
+        let unstated = Pool {
+            unlimited: None,
+            ..pool
+        };
+        let json = serde_json::to_string(&unstated).unwrap();
+        assert!(!json.contains("unlimited"), "{json}");
+        assert_eq!(serde_json::from_str::<Pool>(&json).unwrap().unlimited, None);
+    }
+
     /// measured), so what this pins is that the field stays optional.
     #[test]
     fn a_pool_without_a_reset_key_decodes_to_none() {
@@ -1548,6 +1605,7 @@ mod tests {
         let pool: Pool = serde_json::from_str(json).unwrap();
         assert_eq!(pool.resets_at, None);
         assert_eq!(pool.expires_at, None);
+        assert_eq!(pool.unlimited, None);
     }
 
     /// An unrecognised funding kind must not take the entry down with it.
