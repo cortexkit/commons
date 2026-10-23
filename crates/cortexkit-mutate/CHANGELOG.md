@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.10
+
+- Broad Cargo and nextest audits build the full selected target set once per
+  source state, then run each target under its own `timeout_s`. Their combined
+  runtime can exceed that deadline; a genuinely slow target still produces
+  `TIMED_OUT` with phase and target attribution. Broad reports include
+  `baseline_targets` and `targets` with each target's status, tests and timing.
+- Broad clean baselines share results only when both test and build deadlines
+  match, as well as the existing target, feature and ignored-test selections.
+  Focused replay commands and report fields are unchanged.
+
 ## 0.12.9
 
 - On Windows, stopping a command that has already exited no longer prints

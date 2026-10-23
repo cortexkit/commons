@@ -5545,22 +5545,21 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
         "Saved::new(",
         "saved.restore()",
         "replaced_scoped(root, &edits, c.scope.as_ref())",
-        "command(c, \"build\", scope)",
-        "command(c, \"run\", scope)",
+        "broad::build(root, c, scope, stop)",
+        "broad::run(root, c, scope",
         "parse_test_results(&tests.text",
         "command_tests(root, c, stop, &mut report, true)",
         "command_tests(root, c, stop, &mut report, false)",
     ] {
         // Each needle must appear exactly as often as listed. Clean-tree Cargo
-        // baselines build, run and parse on their own path, and the session also
-        // builds a cargo command line to key the per-selection baseline cache,
-        // which is why some call sites appear twice.
+        // baselines and mutants use the same build/run helpers, which delegate
+        // focused commands unchanged and split broad runs by target.
         let expected = match needle {
             "Saved::new("
             | "saved.restore()"
-            | "command(c, \"run\", scope)"
+            | "broad::build(root, c, scope, stop)"
+            | "broad::run(root, c, scope"
             | "parse_test_results(&tests.text" => 2,
-            "command(c, \"build\", scope)" => 3,
             _ => 1,
         };
         assert_eq!(lib.matches(needle).count(), expected, "{needle} count");
@@ -5570,6 +5569,14 @@ fn explore_and_run_share_one_execution_and_restoration_path() {
             "{needle} must occur once in replay"
         );
         assert!(replay.contains(needle), "{needle} must live in replay");
+    }
+    let broad = include_str!("../src/broad.rs");
+    assert!(broad.contains("execute(root,") && broad.contains("execute_output(root,"));
+    for forbidden in ["Saved::", "replaced_scoped(", ".spawn(", "grade("] {
+        assert!(
+            !broad.contains(forbidden),
+            "target execution must use the shared mutation and child supervisor: {forbidden}"
+        );
     }
     assert!(prepare.contains("clean_prebuild("));
     assert!(clean_prebuild.contains("Saved::new(") && clean_prebuild.contains("saved.restore()"));

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod broad;
+
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1683,6 +1685,11 @@ pub struct Report {
     /// Clean-tree costs, attributed once per shared target selection.
     pub baseline_build_ms: u128,
     pub baseline_test_ms: u128,
+    /// Individually bounded broad test targets; absent on focused replays.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub baseline_targets: Vec<broad::TargetReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<broad::TargetReport>,
     /// Stable target -> baseline-red test names, retained even when now green.
     pub baseline_red: BTreeMap<String, Vec<String>>,
     #[serde(skip)]
@@ -1733,6 +1740,8 @@ impl Report {
             test_ms: 0,
             baseline_build_ms: 0,
             baseline_test_ms: 0,
+            baseline_targets: vec![],
+            targets: vec![],
             baseline_red: BTreeMap::new(),
             baseline_results: None,
             baseline_stdout: None,
@@ -1919,6 +1928,7 @@ mod baseline_tail_tests {
     }
 }
 
+#[derive(Clone)]
 struct Output {
     /// Program and arguments as spawned; never the environment.
     argv: Vec<String>,
@@ -1939,6 +1949,8 @@ struct Output {
     /// streams share `stdout` in the order they were written.
     stderr: Option<String>,
     ms: u128,
+    /// Cargo package metadata prepared with a broad nextest build.
+    cargo_metadata: Option<String>,
 }
 /// Which tests one replay runs and how their per-test results are graded.
 /// Every scope goes through the same `replay` body (tree state, build, test,
@@ -2187,6 +2199,7 @@ fn execute_output(
         stdout: stdout_text,
         stderr: stderr_text,
         ms: start.elapsed().as_millis(),
+        cargo_metadata: None,
     })
 }
 
@@ -3520,7 +3533,7 @@ fn cargo_baseline(
     stop: &AtomicBool,
     report: &mut Report,
 ) -> Result<()> {
-    let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
+    let build = broad::build(root, c, scope, stop)?;
     report.baseline_build_ms += build.ms;
     report.build_tail = tail(&build.text);
     if build.timeout {
@@ -3540,7 +3553,8 @@ fn cargo_baseline(
         }
         return Err(format!("baseline build failed: {}", tail(&build.text)));
     }
-    let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
+    let run = broad::run(root, c, scope, &build, stop, &mut report.baseline_targets)?;
+    let tests = run.output;
     report.baseline_test_ms += tests.ms;
     report.test_tail = tail(&tests.text);
     // A non-green run can still be a usable baseline when only tests outside
@@ -3554,22 +3568,30 @@ fn cargo_baseline(
         report.reason = Some(format!(
             "baseline test run exceeded timeout_s = {}{}",
             c.timeout_s,
-            deadline_note(&tests, c.runner == "cargo")
+            deadline_note(&tests, c.runner == "cargo" || scope == Scope::Broad)
         ));
         return Ok(());
     }
-    let checked = cargo_baseline_results(c, report, &tests);
+    let checked = cargo_baseline_results(c, report, &tests, run.results);
     if checked.is_err() {
         report.baseline_failure = report.baseline_run.clone();
     }
     checked
 }
 
-fn cargo_baseline_results(c: &Control, report: &mut Report, tests: &Output) -> Result<()> {
+fn cargo_baseline_results(
+    c: &Control,
+    report: &mut Report,
+    tests: &Output,
+    results: Option<TestResults>,
+) -> Result<()> {
     if tests.interrupted || tests.code.is_none() {
         return Err(format!("baseline test run failed: {}", tail(&tests.text)));
     }
-    let results = parse_test_results(&tests.text, &c.runner)?;
+    let results = match results {
+        Some(results) => results,
+        None => parse_test_results(&tests.text, &c.runner)?,
+    };
     validate_selected_execution(c, &results)?;
     report.baseline_failures = results.failures();
     if let Some((name, signal)) = results.signals.iter().next() {
@@ -4328,6 +4350,30 @@ pub struct ReplaySession {
     listings: ListingCache,
 }
 
+/// The key under which rows share one clean baseline: the build arguments plus
+/// everything else that changes what the baseline run observes.
+fn baseline_share_key(c: &Control, scope: Scope) -> Result<Vec<String>> {
+    let mut key: Vec<String> = command(c, "build", scope)?
+        .get_args()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+    // The build arguments omit the ignored-test selection, yet a run
+    // that includes ignored tests observes different results.
+    key.push(format!(
+        "ignored={}",
+        c.ignored.map_or("none", IgnoredSelection::as_str)
+    ));
+    if let Some(selection) = &c.select {
+        key.push(selection.key(&c.expect_red));
+    }
+    if scope == Scope::Broad {
+        // A cached timeout or success is valid only for the same deadlines.
+        key.push(format!("timeout_s={}", c.timeout_s));
+        key.push(format!("build_timeout_s={}", c.build_timeout_s));
+    }
+    Ok(key)
+}
+
 impl ReplaySession {
     pub fn prepare(
         root: &Path,
@@ -4431,20 +4477,7 @@ impl ReplaySession {
             let started = Instant::now();
             let active = c.matches_platform() && c.unreachable.is_none() && c.desk_only.is_none();
             let key = if active && c.runner != "command" {
-                let mut key: Vec<String> = command(c, "build", scope)?
-                    .get_args()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .collect();
-                // The build arguments omit the ignored-test selection, yet a run
-                // that includes ignored tests observes different results.
-                key.push(format!(
-                    "ignored={}",
-                    c.ignored.map_or("none", IgnoredSelection::as_str)
-                ));
-                if let Some(selection) = &c.select {
-                    key.push(selection.key(&c.expect_red));
-                }
-                key
+                baseline_share_key(c, scope)?
             } else {
                 vec![c.id.clone()]
             };
@@ -4899,7 +4932,7 @@ fn replay(
             }
             return Ok(());
         }
-        let build = execute(root, command(c, "build", scope)?, c.build_timeout_s, stop)?;
+        let build = broad::build(root, c, scope, stop)?;
         report.build_ms += build.ms;
         report.build_tail = tail(&build.text);
         if build.interrupted {
@@ -4927,7 +4960,8 @@ fn replay(
             &mut report.prebuild_tail,
             &mut report.timed_out_phase,
         )?;
-        let tests = execute(root, command(c, "run", scope)?, c.timeout_s, stop)?;
+        let run = broad::run(root, c, scope, &build, stop, &mut report.targets)?;
+        let tests = run.output;
         report.test_ms += tests.ms;
         report.test_tail = tail(&tests.text);
         if tests.interrupted {
@@ -4939,7 +4973,7 @@ fn replay(
             report.reason = Some(format!(
                 "test run exceeded timeout_s = {}{}",
                 c.timeout_s,
-                deadline_note(&tests, c.runner == "cargo")
+                deadline_note(&tests, c.runner == "cargo" || scope == Scope::Broad)
             ));
             return Ok(());
         }
@@ -4950,7 +4984,10 @@ fn replay(
                 c.expect_red.join(", ")
             ));
         }
-        let mut results = parse_test_results(&tests.text, &c.runner)?;
+        let mut results = match run.results {
+            Some(results) => results,
+            None => parse_test_results(&tests.text, &c.runner)?,
+        };
         validate_selected_execution(c, &results)?;
         report.failures = results.failures();
         // Match baseline-red tests by (test binary, plain test name). A `--broad`
@@ -5078,6 +5115,10 @@ impl ListingKey {
         if let Some(selection @ (TestSelection::Filter(_) | TestSelection::Tests(_))) = &c.select {
             args.push(selection.key(&c.expect_red));
         }
+        if scope == Scope::Broad && c.select.is_none() {
+            // Cached listing failures must not carry another row's build deadline.
+            args.push(format!("build_timeout_s={}", c.build_timeout_s));
+        }
         Ok(Self { args, clean_tree })
     }
 }
@@ -5147,6 +5188,39 @@ expect_red = ["test"]
         ignored.ignored = Some(IgnoredSelection::Include);
         assert_ne!(clean, ListingKey::new(&ignored, Scope::Row, true).unwrap());
         assert_ne!(clean, ListingKey::new(&control, Scope::Row, false).unwrap());
+    }
+
+    #[test]
+    fn broad_baseline_key_separates_both_deadlines_without_changing_focused_keys() {
+        let first = control();
+        let changes: [fn(&mut Control); 2] = [|c| c.timeout_s += 1, |c| c.build_timeout_s += 1];
+        for change in changes {
+            let mut second = first.clone();
+            change(&mut second);
+            assert_ne!(
+                baseline_share_key(&first, Scope::Broad).unwrap(),
+                baseline_share_key(&second, Scope::Broad).unwrap()
+            );
+            assert_eq!(
+                baseline_share_key(&first, Scope::Row).unwrap(),
+                baseline_share_key(&second, Scope::Row).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn broad_listing_key_separates_build_deadlines_without_changing_focused_keys() {
+        let first = control();
+        let mut second = first.clone();
+        second.build_timeout_s += 1;
+        assert_ne!(
+            ListingKey::new(&first, Scope::Broad, true).unwrap(),
+            ListingKey::new(&second, Scope::Broad, true).unwrap()
+        );
+        assert_eq!(
+            ListingKey::new(&first, Scope::Row, true).unwrap(),
+            ListingKey::new(&second, Scope::Row, true).unwrap()
+        );
     }
 
     #[test]

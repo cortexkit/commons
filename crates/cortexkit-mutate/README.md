@@ -166,8 +166,9 @@ expired. `prove` and `explore` take `--timeout-s` and `--build-timeout-s` for th
 same two deadlines.
 
 Each deadline applies to each spawned command on its own: the clean baseline
-run, the mutant run and a `--broad` run each get the full `timeout_s`, not a
-share of one budget for the row. When a deadline expires (or the run is
+and mutant run each get the full `timeout_s`, not a share of one row budget.
+In `--broad` Cargo/nextest audits (0.12.10), each selected test target gets that
+full deadline separately, on both the clean tree and the mutant. When a deadline expires (or the run is
 interrupted), the runner reads the process tree under the command, sends
 SIGTERM to every process and process group in it, sends SIGKILL after a
 2-second grace, and waits for them to exit, so no test outlives its row. That
@@ -1166,6 +1167,16 @@ as well, so selected examples or benches still run. The separate build uses the
 same widened selection. It works with `--all`, `--diff`, `--only`, and sharding.
 Only this opt-in pass grades CAUGHT_BROADLY from cross-target collateral.
 
+The clean tree and each mutant build that full selection once, then run its
+targets serially with a fresh `timeout_s` per target. Cargo launches each built
+target with its normal environment, working directory and configured runner;
+its artifact messages must confirm that no recompilation occurred after the
+union build. nextest reuses its binary metadata without invoking another build.
+Total test time can exceed `timeout_s` when every target fits its own deadline.
+A target timeout is still `TIMED_OUT`, never a catch, with phase and target in
+the report. Broad baselines share results only when selections and both
+`timeout_s` and `build_timeout_s` match. Rows with `select` remain focused.
+
 Normal runs keep the row's original target selection and cost. They still report
 collateral in whichever targets ran, but never grade CAUGHT_BROADLY, even if the
 row itself selects multiple targets. Their report records `breadth_observed: false`
@@ -1340,6 +1351,15 @@ when the baseline was green. Environment variables are never recorded.
 Every row includes `breadth_observed`: true only when an opt-in broad audit
 finished and its complete per-test results were parsed. Normal replays, `prove`,
 `explore`, explicit dispositions, and incomplete audits report false.
+
+Broad Cargo/nextest rows also include `baseline_targets` and `targets` arrays
+(0.12.10). Each entry names the stable target, its `outcome` (`PASSED`, `FAILED`,
+`TIMED_OUT` or `INTERRUPTED`), its `red` and `green` test names, and elapsed `ms`.
+These are target execution statuses, not the row's catch grade. Duplicate test
+names are qualified across targets in the row's combined `red` and `green`.
+Shared baseline entries retain the original observations, while the shared
+row's aggregate baseline timings are zero as before. Focused rows omit these
+arrays, leaving their report layout unchanged.
 
 Every row also includes `collateral: { "count": N, "targets": [...] }`. For proof
 replays, it counts every newly red test not named in `expect_red` and lists their sorted,
