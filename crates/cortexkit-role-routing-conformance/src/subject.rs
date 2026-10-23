@@ -1,0 +1,154 @@
+//! What a provider under test supplies: routes under the caller identities
+//! and scopes the kit names, and hooks that set up the provider's
+//! configuration before each check.
+
+use async_trait::async_trait;
+
+use crate::route::RoutingRoute;
+
+/// The caller identity and scope stamp a route carries.
+///
+/// `principal` is the module the route is opened as: a consumer module for
+/// `route.select` and `route.report`, a runner module for the runner ops.
+/// `project_id`, when present, is the project the route is bound to; a
+/// route without one is unscoped, and the provider attributes its selects
+/// to the calling module itself.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RouteStamp {
+    pub principal: String,
+    pub project_id: Option<String>,
+}
+
+impl RouteStamp {
+    /// A route opened as `principal`, bound to no project.
+    pub fn unscoped(principal: &str) -> Self {
+        Self {
+            principal: principal.to_owned(),
+            project_id: None,
+        }
+    }
+
+    /// A route opened as `principal`, bound to `project_id`.
+    pub fn project(principal: &str, project_id: &str) -> Self {
+        Self {
+            principal: principal.to_owned(),
+            project_id: Some(project_id.to_owned()),
+        }
+    }
+}
+
+/// One consumer in the provider's configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConsumerConfig {
+    pub id: String,
+    /// Answer this consumer only with routes priced per token.
+    pub priced_only: bool,
+}
+
+/// A model in the provider's catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatalogModel {
+    pub provider: String,
+    pub model: String,
+    /// The model's ability on the provider's own 0-100 scale; a request's
+    /// `iq` at or below it is met.
+    pub iq: u8,
+    pub context_window: u64,
+    pub max_output_tokens: u64,
+    /// The model accepts tool calls.
+    pub tool_calls: bool,
+    /// Input modalities the model accepts (`image`, `pdf`, `audio`).
+    pub modalities: Vec<String>,
+    pub structured_output: bool,
+    /// Priced per token. A model that is not is paid from subscription
+    /// quota, through accounts the provider allocates.
+    pub priced_per_token: bool,
+}
+
+impl CatalogModel {
+    /// The route key, `provider/model`.
+    pub fn route_key(&self) -> String {
+        format!("{}/{}", self.provider, self.model)
+    }
+}
+
+/// A tool provider a runner can reach, and the tool capability tags it
+/// serves.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReachableToolProvider {
+    /// The tool provider's module id. Routing never matches on it.
+    pub module: String,
+    /// The tool capability tags it serves, such as `code.read/v1`.
+    pub capabilities: Vec<String>,
+}
+
+/// A runner module in the provider's catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatalogRunner {
+    pub module: String,
+    /// The route keys it runs.
+    pub route_keys: Vec<String>,
+    /// The tool providers it can reach, for every project.
+    pub tool_providers: Vec<ReachableToolProvider>,
+}
+
+/// A subscription account the provider allocates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatalogAccount {
+    pub provider: String,
+    pub account_id: String,
+    pub credential_id: String,
+    pub method: String,
+}
+
+/// The models, runners and accounts the provider knows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Catalog {
+    /// In the order the provider prefers them when nothing else decides.
+    pub models: Vec<CatalogModel>,
+    /// In the order the provider prefers them when nothing else decides.
+    pub runners: Vec<CatalogRunner>,
+    pub accounts: Vec<CatalogAccount>,
+}
+
+/// A routing provider under test.
+///
+/// Before every check the kit calls [`reset`](Self::reset), then
+/// [`configure_consumers`](Self::configure_consumers) and
+/// [`configure_catalog`](Self::configure_catalog) with the kit's fixture
+/// ([`crate::fixture`]); some checks then add a project pin or a cooldown.
+/// The provider's own choice must be stable: the same request against the
+/// same state answers the same route and runner.
+#[async_trait]
+pub trait RoutingSubject: Send + Sync {
+    type Route: RoutingRoute;
+
+    /// Return the provider to a fresh state: no consumers, catalog, pins,
+    /// cooldowns, decisions, affinity, reports, admissions or observations.
+    async fn reset(&self) -> Result<(), String>;
+
+    /// Configure exactly these consumers.
+    async fn configure_consumers(&self, consumers: &[ConsumerConfig]) -> Result<(), String>;
+
+    /// Configure exactly this catalog. Every runner in it is an attested
+    /// runner module (contract section 9: its route carries a principal the
+    /// daemon verified, and the provider knows it as a runner); every other
+    /// principal is not.
+    async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
+
+    /// An operator pin: within `project_id`, `consumer`'s selects that carry
+    /// no `pin` of their own are answered with `pin` (`provider/model`).
+    async fn pin_for_project(
+        &self,
+        project_id: &str,
+        consumer: &str,
+        pin: &str,
+    ) -> Result<(), String>;
+
+    /// Cool the route `route_key` (`provider/model`) down until `until_ms`
+    /// (Unix milliseconds): it serves nothing before then.
+    async fn cool_down(&self, route_key: &str, until_ms: u64) -> Result<(), String>;
+
+    /// Open a route to the provider under `stamp`.
+    async fn route(&self, stamp: &RouteStamp) -> Result<Self::Route, String>;
+}

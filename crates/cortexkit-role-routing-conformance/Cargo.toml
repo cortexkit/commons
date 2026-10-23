@@ -1,0 +1,27 @@
+# cortexkit-role-routing-conformance — the `routing/v1` conformance kit. It
+# drives a LIVE routing provider over real routes, one per caller identity
+# the kit needs (a consumer, a second consumer, two runners, each scoped to a
+# project or unscoped), sets up the provider's consumers, catalog, project
+# pins and cooldowns through hooks the provider's CI supplies, and checks
+# every reply against the role crate's wire types. A provider adds this
+# crate as a dev-dependency; it is a separate crate so a provider's
+# production build never compiles the kit.
+[package]
+name = "cortexkit-role-routing-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Conformance kit for the CortexKit routing/v1 role: drives a live routing provider through every contract rule and checks its wire replies."
+publish = true
+
+[dependencies]
+async-trait = "0.1"
+cortexkit-role-routing = { version = "0.1.0", path = "../cortexkit-role-routing" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subc-protocol = "0.33"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

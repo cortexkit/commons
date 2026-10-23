@@ -1,0 +1,95 @@
+{
+  "about": "Reply bodies. A reply is exactly {\"result\": <answer>}; a bare answer, a body with other top-level keys, and a wrapped answer that does not decode are refused by name (wire::ReplyShapeError::name). answer names the type the reader expects.",
+  "replies": [
+    {
+      "name": "describe_wrapped",
+      "answer": "RoleDescribe",
+      "body": {
+        "result": {
+          "role": "routing",
+          "version": 1,
+          "ops": [
+            "role.describe",
+            "route.select",
+            "route.report",
+            "route.account_for",
+            "route.account_observe"
+          ],
+          "consumers": [],
+          "requirement_fields": [
+            "iq",
+            "eq",
+            "context_window",
+            "max_output_tokens",
+            "tools",
+            "tool_capabilities",
+            "modalities",
+            "structured_output"
+          ],
+          "detail_supported": false
+        }
+      }
+    },
+    {
+      "name": "report_wrapped",
+      "answer": "ReportAnswer",
+      "body": {
+        "result": {
+          "decision_id": "decision-1",
+          "report_id": "report-1",
+          "outcome": "completed"
+        }
+      }
+    },
+    {
+      "name": "observe_wrapped",
+      "answer": "AccountObserveAnswer",
+      "body": {
+        "result": {
+          "observation": {
+            "id": "observation-4",
+            "duplicate": false,
+            "bound": false,
+            "effects": []
+          }
+        }
+      }
+    },
+    {
+      "name": "report_bare",
+      "answer": "ReportAnswer",
+      "body": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "completed"
+      },
+      "refused": "bare_answer"
+    },
+    {
+      "name": "report_with_extra_key",
+      "answer": "ReportAnswer",
+      "body": {
+        "result": {
+          "decision_id": "decision-1",
+          "report_id": "report-1",
+          "outcome": "completed"
+        },
+        "trace_id": "t-1"
+      },
+      "refused": "extra_keys"
+    },
+    {
+      "name": "select_answer_missing_decision_id",
+      "answer": "SelectAnswer",
+      "body": {
+        "result": {
+          "route": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        }
+      },
+      "refused": "bad_answer"
+    }
+  ]
+}

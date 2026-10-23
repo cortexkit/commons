@@ -721,6 +721,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexkit-role-routing"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subc-protocol",
+]
+
+[[package]]
+name = "cortexkit-role-routing-conformance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cortexkit-role-routing",
+ "serde",
+ "serde_json",
+ "subc-protocol",
+ "tokio",
+]
+
+[[package]]
 name = "cortexkit-role-step-transform-provider"
 version = "0.3.4"
 dependencies = [

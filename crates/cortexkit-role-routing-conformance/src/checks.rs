@@ -1,0 +1,873 @@
+//! The checks, each run against the live provider through its routes,
+//! from a freshly reset and configured provider.
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use cortexkit_role_routing::{
+    account::AccountForAnswer,
+    describe::{check_describe, RoleDescribe},
+    errors::{
+        NoRouteDetail, NoRouteReason, PinUnavailableDetail, PinUnavailableReason, Refusal,
+        RefusalCode,
+    },
+    observe::AccountObserveAnswer,
+    ops,
+    report::ReportAnswer,
+    select::{check_answer, parse_select_request, SelectAnswer},
+    wire,
+};
+use serde::de::DeserializeOwned;
+use serde_json::{json, Map, Value};
+
+use crate::{
+    fixture::{self, CONSUMER, IQ, SUMMARY},
+    route::{Reply, RoutingRoute},
+    subject::{RouteStamp, RoutingSubject},
+};
+
+type Check = Result<(), String>;
+
+/// A decision id no provider has made.
+const NEVER_MADE: &str = "decision-never-made";
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+/// The select most checks send: the summary consumer at the fixture's
+/// demand.
+fn base() -> Value {
+    json!({"consumer": SUMMARY, "requirements": {"iq": IQ}})
+}
+
+/// `params` with the top-level member `key` set to `value`.
+fn with(mut params: Value, key: &str, value: Value) -> Value {
+    params[key] = value;
+    params
+}
+
+/// A fixture route key other than `not`.
+fn another_route_key(not: &str) -> Result<String, String> {
+    fixture::catalog()
+        .models
+        .iter()
+        .map(|model| model.route_key())
+        .find(|key| key != not)
+        .ok_or_else(|| "the fixture has a single model".to_owned())
+}
+
+/// The fixture runner other than `not`.
+fn another_runner(not: &str) -> Result<String, String> {
+    match not {
+        fixture::RUNNER_ONE => Ok(fixture::RUNNER_TWO.to_owned()),
+        fixture::RUNNER_TWO => Ok(fixture::RUNNER_ONE.to_owned()),
+        other => Err(format!(
+            "the answer names runner {other:?}, which the catalog does not list"
+        )),
+    }
+}
+
+/// Send `op` with `params` and read the reply: the decoded answer, or the
+/// refusal. A broken route, a reply that is not `{"result": <answer>}`, or a
+/// refusal detail that is not an object fails the check.
+async fn call<R: RoutingRoute, T: DeserializeOwned>(
+    route: &R,
+    op: &str,
+    params: &Value,
+) -> Result<Result<T, Refusal>, String> {
+    let reply = route
+        .request(op, params)
+        .await
+        .map_err(|failure| format!("{op}: the route failed: {}", failure.message))?;
+    match reply {
+        Reply::Response(body) => wire::read_reply::<T>(body.as_bytes())
+            .map(Ok)
+            .map_err(|problem| format!("{op}: {problem}")),
+        Reply::Error(body) => {
+            let detail = match body.detail {
+                None | Some(Value::Null) => Map::new(),
+                Some(Value::Object(detail)) => detail,
+                Some(other) => {
+                    return Err(format!(
+                        "{op}: the {} refusal's detail is not an object: {other}",
+                        body.code
+                    ))
+                }
+            };
+            Ok(Err(Refusal {
+                code: RefusalCode::parse(&body.code),
+                message: body.message,
+                detail,
+            }))
+        }
+    }
+}
+
+/// Send `op` and require an answer.
+async fn answer<R: RoutingRoute, T: DeserializeOwned>(
+    route: &R,
+    op: &str,
+    params: &Value,
+    what: &str,
+) -> Result<T, String> {
+    call(route, op, params)
+        .await?
+        .map_err(|refusal| format!("{what} was refused {}: {}", refusal.code, refusal.message))
+}
+
+/// Send `op` and require a refusal with `code`.
+async fn refused<R: RoutingRoute>(
+    route: &R,
+    op: &str,
+    params: &Value,
+    code: RefusalCode,
+    what: &str,
+) -> Result<Refusal, String> {
+    match call::<R, Value>(route, op, params).await? {
+        Ok(answer) => Err(format!(
+            "{what} was answered ({answer}), not refused {code}"
+        )),
+        Err(refusal) if refusal.code == code => Ok(refusal),
+        Err(refusal) => Err(format!(
+            "{what} was refused {}, not {code}: {}",
+            refusal.code, refusal.message
+        )),
+    }
+}
+
+/// Send `route.select` and require an answer that keeps the rules a caller
+/// can check alone (runners, exclude, explanation length).
+async fn select<R: RoutingRoute>(
+    route: &R,
+    params: &Value,
+    what: &str,
+) -> Result<SelectAnswer, String> {
+    let answer: SelectAnswer = answer(route, ops::ROUTE_SELECT, params, what).await?;
+    let request = parse_select_request(params)
+        .map_err(|refusal| format!("the kit sent an invalid select: {refusal}"))?;
+    check_answer(&request, &answer).map_err(|problem| format!("{what}: {problem}"))?;
+    Ok(answer)
+}
+
+/// Two refusals that must not tell a caller apart a decision it may not see
+/// from one that does not exist.
+fn same_refusal(seen: &Refusal, never_made: &Refusal, what: &str) -> Check {
+    if seen.code != never_made.code || seen.detail != never_made.detail {
+        return Err(format!(
+            "{what} was refused {} {:?}, but a decision that never existed is refused {} {:?}: the refusal reveals that the decision exists",
+            seen.code, seen.detail, never_made.code, never_made.detail
+        ));
+    }
+    Ok(())
+}
+
+/// The kit's state for one run.
+pub struct Suite<'a, S: RoutingSubject> {
+    subject: &'a S,
+}
+
+impl<'a, S: RoutingSubject> Suite<'a, S> {
+    pub fn new(subject: &'a S) -> Self {
+        Self { subject }
+    }
+
+    /// Run the check named `name` from a fresh provider.
+    pub async fn run(&self, name: &str) -> Check {
+        self.fresh().await?;
+        match name {
+            "describe_lists_consumers_and_fields" => {
+                self.describe_lists_consumers_and_fields().await
+            }
+            "unknown_requirement_refused_by_name" => {
+                self.unknown_requirement_refused_by_name().await
+            }
+            "unknown_consumer_refused" => self.unknown_consumer_refused().await,
+            "exclude_honoured" => self.exclude_honoured().await,
+            "runners_honoured" => self.runners_honoured().await,
+            "timed_refusals_carry_reset_at_ms" => self.timed_refusals_carry_reset_at_ms().await,
+            "scope_comes_from_route_stamp" => self.scope_comes_from_route_stamp().await,
+            "report_from_other_principal_unknown_decision" => {
+                self.report_from_other_principal_unknown_decision().await
+            }
+            "repeated_report_returns_first_answer" => {
+                self.repeated_report_returns_first_answer().await
+            }
+            "different_report_is_report_conflict" => {
+                self.different_report_is_report_conflict().await
+            }
+            "affinity_holds_until_failure_report" => {
+                self.affinity_holds_until_failure_report().await
+            }
+            "answer_carries_limits_and_future_expiry" => {
+                self.answer_carries_limits_and_future_expiry().await
+            }
+            "account_for_idempotent_on_admission_id" => {
+                self.account_for_idempotent_on_admission_id().await
+            }
+            "account_for_different_body_admission_conflict" => {
+                self.account_for_different_body_admission_conflict().await
+            }
+            "account_for_foreign_decision_unknown" => {
+                self.account_for_foreign_decision_unknown().await
+            }
+            "account_observe_idempotent_per_event_id" => {
+                self.account_observe_idempotent_per_event_id().await
+            }
+            "tool_capabilities_matched_by_tag" => self.tool_capabilities_matched_by_tag().await,
+            other => Err(format!("the kit has no check named {other}")),
+        }
+    }
+
+    async fn fresh(&self) -> Check {
+        let subject = self.subject;
+        subject.reset().await.map_err(|e| format!("reset: {e}"))?;
+        subject
+            .configure_consumers(&fixture::consumers())
+            .await
+            .map_err(|e| format!("configure_consumers: {e}"))?;
+        subject
+            .configure_catalog(&fixture::catalog())
+            .await
+            .map_err(|e| format!("configure_catalog: {e}"))
+    }
+
+    async fn route(&self, stamp: RouteStamp) -> Result<S::Route, String> {
+        self.subject
+            .route(&stamp)
+            .await
+            .map_err(|e| format!("opening a route as {stamp:?}: {e}"))
+    }
+
+    /// An unscoped route as `principal`.
+    async fn route_as(&self, principal: &str) -> Result<S::Route, String> {
+        self.route(RouteStamp::unscoped(principal)).await
+    }
+
+    async fn describe_lists_consumers_and_fields(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        check_describe(&describe).map_err(|problem| format!("role.describe: {problem}"))?;
+        let configured = fixture::consumers();
+        for consumer in &configured {
+            match describe.consumer(&consumer.id) {
+                None => {
+                    return Err(format!(
+                        "role.describe does not list the configured consumer {}",
+                        consumer.id
+                    ))
+                }
+                Some(entry) if entry.priced_only != consumer.priced_only => {
+                    return Err(format!(
+                        "role.describe states priced_only {} for consumer {}, configured {}",
+                        entry.priced_only, consumer.id, consumer.priced_only
+                    ))
+                }
+                Some(_) => {}
+            }
+        }
+        if let Some(extra) = describe
+            .consumers
+            .iter()
+            .find(|entry| !configured.iter().any(|consumer| consumer.id == entry.id))
+        {
+            return Err(format!(
+                "role.describe lists consumer {}, which is not configured",
+                extra.id
+            ));
+        }
+        Ok(())
+    }
+
+    async fn unknown_requirement_refused_by_name(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let params = json!({"consumer": SUMMARY, "requirements": {"iq": IQ, "gpu_count": 2}});
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &params,
+            RefusalCode::InvalidRequirements,
+            "a select with the unknown requirement gpu_count",
+        )
+        .await?;
+        match refusal.detail.get("field") {
+            Some(field) if field == "gpu_count" => Ok(()),
+            other => Err(format!(
+                "invalid_requirements for gpu_count names detail.field {other:?}, not \"gpu_count\""
+            )),
+        }
+    }
+
+    async fn unknown_consumer_refused(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let params = with(base(), "consumer", json!(fixture::UNCONFIGURED));
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &params,
+            RefusalCode::UnknownConsumer,
+            "a select for an unconfigured consumer",
+        )
+        .await?;
+        match refusal.detail.get("consumer") {
+            Some(consumer) if consumer == fixture::UNCONFIGURED => Ok(()),
+            other => Err(format!(
+                "unknown_consumer names detail.consumer {other:?}, not {:?}",
+                fixture::UNCONFIGURED
+            )),
+        }
+    }
+
+    async fn exclude_honoured(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let natural = select(&route, &base(), "a plain select").await?;
+        let key = natural.route.route_key();
+        let params = with(base(), "exclude", json!([key]));
+        let excluded = select(&route, &params, &format!("a select excluding {key}")).await?;
+        if excluded.route.route_key() == key {
+            return Err(format!("a select excluding {key} was answered with {key}"));
+        }
+        Ok(())
+    }
+
+    async fn runners_honoured(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let natural = select(&route, &base(), "a plain select").await?;
+        let other = another_runner(&natural.runner.module)?;
+        let params = with(base(), "runners", json!([other]));
+        let answer = select(&route, &params, &format!("a select with runners [{other}]")).await?;
+        if answer.runner.module != other {
+            return Err(format!(
+                "a select with runners [{other}] was answered on runner {}",
+                answer.runner.module
+            ));
+        }
+        Ok(())
+    }
+
+    async fn timed_refusals_carry_reset_at_ms(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let now = now_ms();
+        let until = now + 600_000;
+        let catalog = fixture::catalog();
+        let cooled = catalog.models[0].route_key();
+        self.subject
+            .cool_down(&cooled, until)
+            .await
+            .map_err(|e| format!("cool_down: {e}"))?;
+
+        let what = format!("a pin on the cooled-down route {cooled}");
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "pin", json!(cooled)),
+            RefusalCode::PinUnavailable,
+            &what,
+        )
+        .await?;
+        let detail: PinUnavailableDetail = refusal.detail_as().ok_or_else(|| {
+            format!(
+                "{what}: the pin_unavailable detail does not decode: {:?}",
+                refusal.detail
+            )
+        })?;
+        if detail.reason != PinUnavailableReason::Cooldown {
+            return Err(format!(
+                "{what} is pin_unavailable reason {}, not cooldown",
+                detail.reason
+            ));
+        }
+        match detail.reset_at_ms {
+            None => return Err(format!("{what} is pin_unavailable reason cooldown, a timed cause, but carries no reset_at_ms")),
+            Some(reset) if reset <= now => {
+                return Err(format!("{what}: reset_at_ms {reset} is not in the future (now {now})"))
+            }
+            Some(_) => {}
+        }
+
+        let unknown = format!("{}/model-z", fixture::PRICED_PROVIDER);
+        let what = format!("a pin on the unknown model {unknown}");
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "pin", json!(unknown)),
+            RefusalCode::PinUnavailable,
+            &what,
+        )
+        .await?;
+        let detail: PinUnavailableDetail = refusal.detail_as().ok_or_else(|| {
+            format!(
+                "{what}: the pin_unavailable detail does not decode: {:?}",
+                refusal.detail
+            )
+        })?;
+        if detail.reason != PinUnavailableReason::UnknownModel {
+            return Err(format!(
+                "{what} is pin_unavailable reason {}, not unknown_model",
+                detail.reason
+            ));
+        }
+        if let Some(reset) = detail.reset_at_ms {
+            return Err(format!(
+                "{what} is not a timed cause, but carries reset_at_ms {reset}"
+            ));
+        }
+
+        for model in &catalog.models[1..] {
+            self.subject
+                .cool_down(&model.route_key(), until)
+                .await
+                .map_err(|e| format!("cool_down: {e}"))?;
+        }
+        let what = "a select while every route is cooling down";
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &base(),
+            RefusalCode::NoRoute,
+            what,
+        )
+        .await?;
+        let detail: NoRouteDetail = refusal.detail_as().ok_or_else(|| {
+            format!(
+                "{what}: the no_route detail does not decode: {:?}",
+                refusal.detail
+            )
+        })?;
+        if detail.reason != NoRouteReason::QuotaOrCooldown {
+            return Err(format!(
+                "{what} is no_route reason {}, not quota_or_cooldown",
+                detail.reason
+            ));
+        }
+        match detail.reset_at_ms {
+            None => Err(format!("{what} is no_route reason quota_or_cooldown, a timed cause, but carries no reset_at_ms")),
+            Some(reset) if reset <= now => {
+                Err(format!("{what}: reset_at_ms {reset} is not in the future (now {now})"))
+            }
+            Some(_) => Ok(()),
+        }
+    }
+
+    async fn scope_comes_from_route_stamp(&self) -> Check {
+        let unscoped = self.route_as(CONSUMER).await?;
+        let natural = select(&unscoped, &base(), "a plain select").await?;
+        let pinned = another_route_key(&natural.route.route_key())?;
+        self.subject
+            .pin_for_project(fixture::PINNED_PROJECT, SUMMARY, &pinned)
+            .await
+            .map_err(|e| format!("pin_for_project: {e}"))?;
+        let project = fixture::PINNED_PROJECT;
+
+        let bound = self.route(RouteStamp::project(CONSUMER, project)).await?;
+        let answer = select(
+            &bound,
+            &base(),
+            &format!("a select on a route bound to {project}"),
+        )
+        .await?;
+        if answer.route.route_key() != pinned {
+            return Err(format!(
+                "under a route bound to {project}, the project's pin {pinned} was not applied: answered {}",
+                answer.route.route_key()
+            ));
+        }
+
+        let answer = select(&unscoped, &base(), "a select on an unscoped route").await?;
+        if answer.route.route_key() == pinned {
+            return Err(format!(
+                "on an unscoped route, {project}'s pin {pinned} was applied"
+            ));
+        }
+
+        // A body naming the pinned project must not reach its pin: scope
+        // is read from the route only. The provider may ignore or refuse
+        // these members; either keeps the rule.
+        let body = with(
+            with(base(), "project_id", json!(project)),
+            "scope",
+            json!({"project_id": project}),
+        );
+        let other = self
+            .route(RouteStamp::project(CONSUMER, fixture::OTHER_PROJECT))
+            .await?;
+        for (route, label) in [
+            (&unscoped, "an unscoped route".to_owned()),
+            (
+                &other,
+                format!("a route bound to {}", fixture::OTHER_PROJECT),
+            ),
+        ] {
+            if let Ok(answer) = call::<_, SelectAnswer>(route, ops::ROUTE_SELECT, &body).await? {
+                if answer.route.route_key() == pinned {
+                    return Err(format!(
+                        "on {label}, a body naming project {project} got that project's pin {pinned}: scope was read from the body"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn report_from_other_principal_unknown_decision(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        let other = self.route_as(fixture::OTHER_CONSUMER).await?;
+        let decision = select(&consumer, &base(), "a plain select")
+            .await?
+            .decision_id;
+        let report = json!({"decision_id": decision, "outcome": "completed"});
+        let foreign = refused(
+            &other,
+            ops::ROUTE_REPORT,
+            &report,
+            RefusalCode::UnknownDecision,
+            "a report from another principal on its decision",
+        )
+        .await?;
+        let never_made = refused(
+            &other,
+            ops::ROUTE_REPORT,
+            &json!({"decision_id": NEVER_MADE, "outcome": "completed"}),
+            RefusalCode::UnknownDecision,
+            "a report on a decision that never existed",
+        )
+        .await?;
+        same_refusal(&foreign, &never_made, "a report from another principal")?;
+        let own: ReportAnswer = answer(
+            &consumer,
+            ops::ROUTE_REPORT,
+            &report,
+            "the selecting principal's report, after another principal's was refused",
+        )
+        .await?;
+        if own.decision_id != decision {
+            return Err(format!(
+                "the report on {decision} answered decision_id {}",
+                own.decision_id
+            ));
+        }
+        Ok(())
+    }
+
+    async fn repeated_report_returns_first_answer(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let decision = select(&route, &base(), "a plain select").await?.decision_id;
+        let report = json!({
+            "decision_id": decision,
+            "outcome": "completed",
+            "usage": {"input_tokens": 100, "output_tokens": 20}
+        });
+        let first: Value = answer(&route, ops::ROUTE_REPORT, &report, "a report").await?;
+        let _: ReportAnswer = serde_json::from_value(first.clone())
+            .map_err(|e| format!("the report answer does not decode: {e}"))?;
+        let again: Value =
+            answer(&route, ops::ROUTE_REPORT, &report, "the same report again").await?;
+        if again != first {
+            return Err(format!(
+                "the same report sent again answered {again}, but the first answer was {first}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn different_report_is_report_conflict(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let decision = select(&route, &base(), "a plain select").await?.decision_id;
+        let completed = json!({"decision_id": decision, "outcome": "completed"});
+        let _: ReportAnswer = answer(&route, ops::ROUTE_REPORT, &completed, "a report").await?;
+        refused(
+            &route,
+            ops::ROUTE_REPORT,
+            &json!({"decision_id": decision, "outcome": "failed"}),
+            RefusalCode::ReportConflict,
+            "a report with outcome failed after one with completed",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn affinity_holds_until_failure_report(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let natural = select(&route, &base(), "a plain select").await?;
+        let kept = another_route_key(&natural.route.route_key())?;
+        let key = "affinity-check";
+        let keyed = with(base(), "affinity", json!(key));
+
+        let first = select(
+            &route,
+            &with(keyed.clone(), "pin", json!(kept)),
+            &format!("a select pinned to {kept} with affinity {key}"),
+        )
+        .await?;
+        if first.route.route_key() != kept {
+            return Err(format!(
+                "a select pinned to {kept} was answered {}",
+                first.route.route_key()
+            ));
+        }
+        let held = select(&route, &keyed, &format!("a select with affinity {key}")).await?;
+        if held.route.route_key() != kept {
+            return Err(format!(
+                "after a decision on {kept}, a select with affinity {key} was answered {}: affinity did not keep the route",
+                held.route.route_key()
+            ));
+        }
+        let _: ReportAnswer = answer(
+            &route,
+            ops::ROUTE_REPORT,
+            &json!({"decision_id": held.decision_id, "outcome": "failed", "runner_code": "provider_error"}),
+            "a failure report",
+        )
+        .await?;
+        let after = select(
+            &route,
+            &keyed,
+            &format!("a select with affinity {key} after a failure report"),
+        )
+        .await?;
+        if after.route.route_key() == kept {
+            return Err(format!(
+                "after a failure report on {kept}, a select with affinity {key} was still answered {kept}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn answer_carries_limits_and_future_expiry(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let now = now_ms();
+        let answer = select(&route, &base(), "a plain select").await?;
+        if answer.decision_id.is_empty() {
+            return Err("the answer's decision_id is empty".to_owned());
+        }
+        let catalog = fixture::catalog();
+        let key = answer.route.route_key();
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.route_key() == key)
+            .ok_or_else(|| format!("the answered route {key} is not in the catalog"))?;
+        if answer.context_window != model.context_window
+            || answer.max_output_tokens != model.max_output_tokens
+        {
+            return Err(format!(
+                "the answer for {key} carries context_window {} and max_output_tokens {}, the catalog says {} and {}",
+                answer.context_window,
+                answer.max_output_tokens,
+                model.context_window,
+                model.max_output_tokens
+            ));
+        }
+        let runs = catalog.runners.iter().any(|runner| {
+            runner.module == answer.runner.module && runner.route_keys.contains(&key)
+        });
+        if !runs {
+            return Err(format!(
+                "the answer names runner {}, which does not run {key}",
+                answer.runner.module
+            ));
+        }
+        if answer.expires_at_ms <= now {
+            return Err(format!(
+                "expires_at_ms {} is not in the future (now {now})",
+                answer.expires_at_ms
+            ));
+        }
+        if answer.explanation.trim().is_empty() {
+            return Err("the answer's explanation is empty".to_owned());
+        }
+        Ok(())
+    }
+
+    fn account_for(admission: &str, conversation: &str, model: &str) -> Value {
+        json!({
+            "provider": fixture::SUBSCRIPTION_PROVIDER,
+            "model": model,
+            "conversation_key": conversation,
+            "admission_id": admission,
+        })
+    }
+
+    async fn account_for_idempotent_on_admission_id(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let body = Self::account_for("admission-replay", "conversation-replay", "model-c");
+        let first: Value = answer(&runner, ops::ROUTE_ACCOUNT_FOR, &body, "an admission").await?;
+        let decoded: AccountForAnswer = serde_json::from_value(first.clone())
+            .map_err(|e| format!("the account_for answer does not decode: {e}"))?;
+        if decoded.account.provider != fixture::SUBSCRIPTION_PROVIDER {
+            return Err(format!(
+                "an admission for {} was answered with an account of {}",
+                fixture::SUBSCRIPTION_PROVIDER,
+                decoded.account.provider
+            ));
+        }
+        let again: Value = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &body,
+            "the same admission again",
+        )
+        .await?;
+        if again != first {
+            return Err(format!(
+                "the same admission sent again answered {again}, but the first answer was {first}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn account_for_different_body_admission_conflict(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let _: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for("admission-conflict", "conversation-1", "model-c"),
+            "an admission",
+        )
+        .await?;
+        refused(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for("admission-conflict", "conversation-2", "model-c"),
+            RefusalCode::AdmissionConflict,
+            "the same admission_id with another conversation_key",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn account_for_foreign_decision_unknown(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        let pin = format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER);
+        let decision = select(
+            &consumer,
+            &with(base(), "pin", json!(pin)),
+            &format!("a select pinned to {pin}"),
+        )
+        .await?;
+        let named = decision.runner.module.clone();
+        let other = another_runner(&named)?;
+        let named_route = self.route_as(&named).await?;
+        let other_route = self.route_as(&other).await?;
+        let body = |admission: &str, model: &str, decision_id: &str| {
+            with(
+                Self::account_for(admission, "conversation-decision", model),
+                "decision_id",
+                json!(decision_id),
+            )
+        };
+        let id = decision.decision_id.as_str();
+
+        let never_made = refused(
+            &named_route,
+            ops::ROUTE_ACCOUNT_FOR,
+            &body("admission-never-made", "model-c", NEVER_MADE),
+            RefusalCode::UnknownDecision,
+            "an admission naming a decision that never existed",
+        )
+        .await?;
+        let what = format!("an admission from {other} naming a decision for runner {named}");
+        let foreign_runner = refused(
+            &other_route,
+            ops::ROUTE_ACCOUNT_FOR,
+            &body("admission-other-runner", "model-c", id),
+            RefusalCode::UnknownDecision,
+            &what,
+        )
+        .await?;
+        same_refusal(&foreign_runner, &never_made, &what)?;
+        let what = format!("an admission for model-d naming a decision for {pin}");
+        let foreign_model = refused(
+            &named_route,
+            ops::ROUTE_ACCOUNT_FOR,
+            &body("admission-other-model", "model-d", id),
+            RefusalCode::UnknownDecision,
+            &what,
+        )
+        .await?;
+        same_refusal(&foreign_model, &never_made, &what)?;
+
+        let own: AccountForAnswer = answer(
+            &named_route,
+            ops::ROUTE_ACCOUNT_FOR,
+            &body("admission-own", "model-c", id),
+            &format!("an admission from {named} for model-c naming its decision"),
+        )
+        .await?;
+        if own.reason.decision_id != id {
+            return Err(format!(
+                "an admission naming decision {id} answered reason.decision_id {}",
+                own.reason.decision_id
+            ));
+        }
+        Ok(())
+    }
+
+    async fn account_observe_idempotent_per_event_id(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let body =
+            json!({"event_id": "runner-one-log:1", "kind": "attempt", "observed_at_ms": now_ms()});
+        let first: AccountObserveAnswer =
+            answer(&runner, ops::ROUTE_ACCOUNT_OBSERVE, &body, "an observation").await?;
+        if first.observation.duplicate {
+            return Err("the first observation of an event_id answered duplicate true".to_owned());
+        }
+        let again: AccountObserveAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_OBSERVE,
+            &body,
+            "the same observation again",
+        )
+        .await?;
+        if !again.observation.duplicate {
+            return Err("the same event_id sent again answered duplicate false".to_owned());
+        }
+        if again.observation.id != first.observation.id {
+            return Err(format!(
+                "the same event_id sent again answered observation {}, the first was {}",
+                again.observation.id, first.observation.id
+            ));
+        }
+        Ok(())
+    }
+
+    async fn tool_capabilities_matched_by_tag(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let needing = |tag: &str| json!({"consumer": SUMMARY, "requirements": {"iq": IQ, "tool_capabilities": [tag]}});
+        for (tag, runner, tools) in [
+            (fixture::TAG_ONE, fixture::RUNNER_ONE, fixture::TOOLS_ONE),
+            (fixture::TAG_TWO, fixture::RUNNER_TWO, fixture::TOOLS_TWO),
+        ] {
+            let what = format!("a select requiring the tool capability {tag}");
+            let answer =
+                match call::<_, SelectAnswer>(&route, ops::ROUTE_SELECT, &needing(tag)).await? {
+                    Ok(answer) => answer,
+                    Err(refusal) => {
+                        return Err(format!(
+                            "{what} was refused {}; {runner} reaches {tools}, which serves it",
+                            refusal.code
+                        ))
+                    }
+                };
+            if answer.runner.module != runner {
+                return Err(format!(
+                    "{what} was answered on {}; only {runner} reaches a tool provider serving it",
+                    answer.runner.module
+                ));
+            }
+        }
+        let module = fixture::TOOLS_ONE;
+        refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &needing(module),
+            RefusalCode::NoRoute,
+            &format!("a select listing the tool provider module name {module} as a tool capability (tags are matched, never module names)"),
+        )
+        .await?;
+        Ok(())
+    }
+}

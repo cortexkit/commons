@@ -1,0 +1,139 @@
+{
+  "about": "route.report requests, the refusals parse_report_request answers, answers, and pairs of bodies a provider compares to tell a repeat from a conflict: bodies are compared as decoded, so key order and null-versus-absent never make them differ.",
+  "requests": [
+    {
+      "name": "minimal",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "completed"
+      }
+    },
+    {
+      "name": "every_member",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "runner_code": "account_limit_exhausted",
+        "credential_id": "credential-7",
+        "reset_at_ms": 1767229200000,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 300,
+          "cost_usd": 0.0042
+        }
+      }
+    },
+    {
+      "name": "usage_without_cost",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "completed",
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 300
+        }
+      }
+    },
+    {
+      "name": "unknown_outcome_kept",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "paused"
+      }
+    },
+    {
+      "name": "null_members_read_as_absent",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "failed",
+        "runner_code": null,
+        "usage": null
+      },
+      "encodes_as": {
+        "decision_id": "decision-1",
+        "outcome": "failed"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "decision_id_missing",
+      "params": {
+        "outcome": "completed"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "decision_id"
+        }
+      }
+    },
+    {
+      "name": "outcome_missing",
+      "params": {
+        "decision_id": "decision-1"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "outcome"
+        }
+      }
+    },
+    {
+      "name": "usage_without_output_tokens",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "completed",
+        "usage": {
+          "input_tokens": 1200
+        }
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "usage"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "recorded",
+      "answer": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "completed"
+      }
+    }
+  ],
+  "bodies": [
+    {
+      "name": "reordered_and_null_is_a_repeat",
+      "first": {
+        "decision_id": "decision-1",
+        "outcome": "failed",
+        "runner_code": "provider_error"
+      },
+      "second": {
+        "runner_code": "provider_error",
+        "usage": null,
+        "outcome": "failed",
+        "decision_id": "decision-1"
+      },
+      "same": true
+    },
+    {
+      "name": "another_outcome_is_a_conflict",
+      "first": {
+        "decision_id": "decision-1",
+        "outcome": "completed"
+      },
+      "second": {
+        "decision_id": "decision-1",
+        "outcome": "failed"
+      },
+      "same": false
+    }
+  ]
+}

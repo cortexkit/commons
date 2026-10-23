@@ -1,0 +1,97 @@
+{
+  "about": "route.account_observe requests, the refusals parse_account_observe_request answers, and answers: the first observation of an event_id, and the answer to the same event_id again, which says duplicate and applies nothing.",
+  "requests": [
+    {
+      "name": "minimal",
+      "params": {
+        "event_id": "runner-log-3:118",
+        "kind": "attempt"
+      }
+    },
+    {
+      "name": "every_member",
+      "params": {
+        "event_id": "runner-log-3:119",
+        "kind": "account_limit_exhausted",
+        "admission_id": "admission-2",
+        "run_id": "run-8",
+        "served_account_id": "account-1",
+        "credential_id": "credential-1",
+        "view_digest": "view-9",
+        "observed_at_ms": 1767225650000,
+        "upstream_origin": "https://api.example.invalid",
+        "headers": {
+          "retry-after": "3600",
+          "x-example-ratelimit-remaining": "0",
+          "x-example-ratelimit-reset": "2026-01-01T01:00:00Z"
+        },
+        "limit_window": "5h",
+        "resets_at_ms": 1767229200000,
+        "resets_at_source": "header"
+      }
+    },
+    {
+      "name": "unknown_kind_kept_as_advisory",
+      "params": {
+        "event_id": "runner-log-3:120",
+        "kind": "cache_warmed"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "event_id_missing",
+      "params": {
+        "kind": "attempt"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "event_id"
+        }
+      }
+    },
+    {
+      "name": "header_name_not_lowercase",
+      "params": {
+        "event_id": "runner-log-3:121",
+        "kind": "attempt",
+        "headers": {
+          "Retry-After": "60"
+        }
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "headers"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "first_bound",
+      "answer": {
+        "observation": {
+          "id": "observation-4",
+          "duplicate": false,
+          "bound": true,
+          "effects": [
+            "account_fenced"
+          ]
+        }
+      }
+    },
+    {
+      "name": "same_event_again",
+      "answer": {
+        "observation": {
+          "id": "observation-4",
+          "duplicate": true,
+          "bound": true,
+          "effects": []
+        }
+      }
+    }
+  ]
+}

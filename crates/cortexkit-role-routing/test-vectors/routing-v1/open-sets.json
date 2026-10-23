@@ -1,0 +1,82 @@
+{
+  "about": "Decoding unknown values of every open set: each case decodes as its type, keeps the unknown value exactly, and re-encodes to the same JSON. at names the member holding the unknown value, as a JSON pointer.",
+  "cases": [
+    {
+      "name": "refusal_code",
+      "type": "Refusal",
+      "at": "/code",
+      "value": {
+        "code": "region_paused",
+        "message": "a code from a later version",
+        "detail": {}
+      }
+    },
+    {
+      "name": "report_outcome",
+      "type": "ReportRequest",
+      "at": "/outcome",
+      "value": {
+        "decision_id": "decision-1",
+        "outcome": "paused"
+      }
+    },
+    {
+      "name": "pin_unavailable_reason",
+      "type": "PinUnavailableDetail",
+      "at": "/reason",
+      "value": {
+        "pin": "example-provider/model-a",
+        "reason": "retired"
+      }
+    },
+    {
+      "name": "no_route_reason",
+      "type": "NoRouteDetail",
+      "at": "/reason",
+      "value": {
+        "reason": "region_closed",
+        "reset_at_ms": 1767226200000
+      }
+    },
+    {
+      "name": "account_observe_kind",
+      "type": "AccountObserveRequest",
+      "at": "/kind",
+      "value": {
+        "event_id": "runner-log-3:120",
+        "kind": "cache_warmed"
+      }
+    },
+    {
+      "name": "account_reason_code",
+      "type": "AccountForAnswer",
+      "at": "/reason/code",
+      "value": {
+        "admission": {
+          "id": "admission-1",
+          "state": "admitted"
+        },
+        "account": {
+          "provider": "example-subscription",
+          "account_id": "account-1",
+          "credential_id": "credential-1",
+          "method": "oauth"
+        },
+        "pin": {
+          "id": "pin-1",
+          "generation": 1,
+          "affinity_expires_at_ms": 1767229200000,
+          "admission_valid_until_ms": 1767226200000,
+          "lease_valid_until_ms": 1767225900000,
+          "mode": "admit"
+        },
+        "reason": {
+          "code": "warm_spare",
+          "decision_id": "allocation-5",
+          "policy_version": "2026-01-01",
+          "quota_age_band": "fresh"
+        }
+      }
+    }
+  ]
+}

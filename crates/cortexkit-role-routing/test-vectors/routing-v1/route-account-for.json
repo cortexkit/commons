@@ -1,0 +1,224 @@
+{
+  "about": "route.account_for requests, the refusals parse_account_for_request answers, answers, and pairs of bodies a provider compares under one admission_id: bodies are compared with defaults applied, so leaving a member out and sending its default are the same body.",
+  "requests": [
+    {
+      "name": "minimal_admit",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-1"
+      }
+    },
+    {
+      "name": "admit_with_decision",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-2",
+        "decision_id": "decision-3"
+      }
+    },
+    {
+      "name": "every_member",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "affinity_model": "model-d",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-3",
+        "mode": "reassign",
+        "expected_pin": {
+          "id": "pin-1",
+          "generation": 2
+        },
+        "initial_input_bytes": 48000,
+        "initial_input_estimated": true,
+        "candidates": {
+          "view_digest": "view-9",
+          "accounts": [
+            {
+              "account_id": "account-1",
+              "credential_id": "credential-1"
+            },
+            {
+              "account_id": "account-2",
+              "credential_id": "credential-2"
+            }
+          ]
+        },
+        "requested_account": {
+          "account_id": "account-2",
+          "credential_id": "credential-2"
+        },
+        "hold_wait_max_s": 120,
+        "decision_id": "decision-3"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "renew_without_expected_pin",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-4",
+        "mode": "renew"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "expected_pin"
+        }
+      }
+    },
+    {
+      "name": "unknown_mode",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-4",
+        "mode": "borrow"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "mode"
+        }
+      }
+    },
+    {
+      "name": "empty_conversation_key",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "",
+        "admission_id": "admission-4"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "conversation_key"
+        }
+      }
+    },
+    {
+      "name": "admission_id_missing",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "admission_id"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "admitted",
+      "answer": {
+        "admission": {
+          "id": "admission-2",
+          "state": "admitted"
+        },
+        "account": {
+          "provider": "example-subscription",
+          "account_id": "account-1",
+          "credential_id": "credential-1",
+          "method": "oauth"
+        },
+        "pin": {
+          "id": "pin-1",
+          "generation": 1,
+          "affinity_expires_at_ms": 1767229200000,
+          "admission_valid_until_ms": 1767226200000,
+          "lease_valid_until_ms": 1767225900000,
+          "mode": "admit"
+        },
+        "reason": {
+          "code": "decision",
+          "decision_id": "decision-3",
+          "policy_version": "2026-01-01",
+          "quota_fetched_at_ms": 1767225500000,
+          "quota_age_band": "fresh"
+        }
+      }
+    },
+    {
+      "name": "quota_never_fetched",
+      "answer": {
+        "admission": {
+          "id": "admission-1",
+          "state": "admitted"
+        },
+        "account": {
+          "provider": "example-subscription",
+          "account_id": "account-2",
+          "credential_id": "credential-2",
+          "method": "oauth"
+        },
+        "pin": {
+          "id": "pin-2",
+          "generation": 1,
+          "affinity_expires_at_ms": 1767229200000,
+          "admission_valid_until_ms": 1767226200000,
+          "lease_valid_until_ms": 1767225900000,
+          "mode": "admit"
+        },
+        "reason": {
+          "code": "headroom",
+          "decision_id": "allocation-5",
+          "policy_version": "2026-01-01",
+          "quota_age_band": "unknown"
+        }
+      }
+    }
+  ],
+  "bodies": [
+    {
+      "name": "defaults_spelled_out_are_the_same_body",
+      "first": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-1"
+      },
+      "second": {
+        "admission_id": "admission-1",
+        "conversation_key": "conversation-41",
+        "model": "model-c",
+        "provider": "example-subscription",
+        "affinity_model": "model-c",
+        "mode": "admit",
+        "initial_input_bytes": 0,
+        "initial_input_estimated": false,
+        "hold_wait_max_s": 900,
+        "decision_id": null
+      },
+      "same": true
+    },
+    {
+      "name": "another_conversation_is_a_conflict",
+      "first": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-41",
+        "admission_id": "admission-1"
+      },
+      "second": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-42",
+        "admission_id": "admission-1"
+      },
+      "same": false
+    }
+  ]
+}

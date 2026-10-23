@@ -1,0 +1,40 @@
+{
+  "about": "role.describe takes empty params and answers the provider's ops, its configured consumers with priced_only, every requirement member it reads, and whether it answers the detail object.",
+  "request": {},
+  "answer": {
+    "role": "routing",
+    "version": 1,
+    "ops": [
+      "role.describe",
+      "route.select",
+      "route.report",
+      "route.account_for",
+      "route.account_observe"
+    ],
+    "consumers": [
+      {
+        "id": "codemode",
+        "priced_only": true
+      },
+      {
+        "id": "flow",
+        "priced_only": true
+      },
+      {
+        "id": "example_summary",
+        "priced_only": false
+      }
+    ],
+    "requirement_fields": [
+      "iq",
+      "eq",
+      "context_window",
+      "max_output_tokens",
+      "tools",
+      "tool_capabilities",
+      "modalities",
+      "structured_output"
+    ],
+    "detail_supported": true
+  }
+}

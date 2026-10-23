@@ -1,0 +1,42 @@
+# cortexkit-role-routing — the wire contract of the `routing/v1` role:
+# role.describe, route.select, route.report, and the runner ops
+# route.account_for and route.account_observe; their request and answer
+# types, refusal codes, request validators, the reply envelope, and
+# CONTRACT.md, which says what is pinned. Pure serde plus small checks; no
+# transport, no runtime.
+#
+# The conformance kit lives in the sibling `-conformance` crate, so a
+# provider's production build never pulls in the kit.
+[package]
+name = "cortexkit-role-routing"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract of the CortexKit routing/v1 role: role.describe, route.select, route.report, route.account_for and route.account_observe, with refusal codes and vectors."
+publish = true
+# Ship the vector files with the crate so the optional `vectors` module works
+# for consumers who install this package without a repository checkout.
+include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
+
+[features]
+# Compiles the vectors in `test-vectors/routing-v1/` into the crate as the
+# public `vectors` module.
+test-vectors = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+sha2 = "0.10"
+subc-protocol = "0.33"
+
+[[test]]
+name = "vectors"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "vectors_feature"
+required-features = ["test-vectors"]

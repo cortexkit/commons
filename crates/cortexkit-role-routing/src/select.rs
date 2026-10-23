@@ -1,0 +1,540 @@
+//! `route.select`: the request, its validator, and the answer.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::{
+    errors::{PinUnavailableReason, Refusal},
+    members::Members,
+};
+
+/// Every requirement member this version defines, in contract order. A
+/// `routing/v1` provider reads every one of them; `role.describe` lists them
+/// in `requirement_fields`.
+pub const REQUIREMENT_FIELDS: &[&str] = &[
+    "iq",
+    "eq",
+    "context_window",
+    "max_output_tokens",
+    "tools",
+    "tool_capabilities",
+    "modalities",
+    "structured_output",
+];
+
+/// The highest `iq` or `eq` a request may state.
+pub const DEMAND_MAX: u8 = 100;
+/// The longest `affinity` key, in characters.
+pub const AFFINITY_MAX_CHARS: usize = 128;
+/// The longest `correlation_id`, in characters.
+pub const CORRELATION_ID_MAX_CHARS: usize = 128;
+/// The longest `explanation`, in characters.
+pub const EXPLANATION_MAX_CHARS: usize = 200;
+
+open_set! {
+    /// The `tools` requirement.
+    pub enum ToolsRequirement {
+        /// Only runner and model pairs that run with no tools offered.
+        None => "none",
+        /// Only routes that accept tool calls.
+        Required => "required",
+    }
+}
+
+open_set! {
+    /// An input modality the work sends.
+    pub enum Modality {
+        Image => "image",
+        Pdf => "pdf",
+        Audio => "audio",
+    }
+}
+
+/// What the work demands of a route.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Requirements {
+    /// Task demand, 0 to 100, mapped by the provider onto its own model
+    /// facts.
+    pub iq: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eq: Option<u8>,
+    /// Floor, in tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    /// Floor, in tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    /// Absent means no constraint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<ToolsRequirement>,
+    /// Tool capability tags (such as `code.read/v1`) the work's plan lists.
+    /// Only runners that can reach a tool provider serving every one of
+    /// these tags for the scoped project are answered. Tags, never module
+    /// names: any provider serving the same tags can stand in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_capabilities: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modalities: Option<Vec<Modality>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<bool>,
+    /// Members this version does not define, kept so a provider can refuse
+    /// them by name instead of losing them in a decode.
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unknown: BTreeMap<String, Value>,
+}
+
+impl Requirements {
+    /// Requirements demanding only `iq`.
+    pub fn iq(iq: u8) -> Self {
+        Self {
+            iq,
+            ..Self::default()
+        }
+    }
+}
+
+/// A one-slot concurrency hint.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConcurrencySlot {
+    pub key: String,
+    pub running: u64,
+    pub limit: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<u64>,
+}
+
+/// The `route.select` request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectRequest {
+    /// A consumer id the provider knows from its configuration.
+    pub consumer: String,
+    pub requirements: Requirements,
+    /// `provider/model[:variant]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
+    /// Route keys (`provider/model`) the caller will not take; each
+    /// excludes every variant of that key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<Vec<String>>,
+    /// Runner module ids the caller can send to. Absent: any runner the
+    /// provider knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runners: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affinity: Option<String>,
+    /// Echoed in logs only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency_slots: Option<Vec<ConcurrencySlot>>,
+    /// Asks for the provider's explanation object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<bool>,
+}
+
+impl SelectRequest {
+    /// A request for `consumer` with `requirements` and nothing else.
+    pub fn new(consumer: impl Into<String>, requirements: Requirements) -> Self {
+        Self {
+            consumer: consumer.into(),
+            requirements,
+            pin: None,
+            exclude: None,
+            runners: None,
+            affinity: None,
+            correlation_id: None,
+            concurrency_slots: None,
+            detail: None,
+        }
+    }
+}
+
+/// A model on a provider, with an optional variant.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct RouteRef {
+    pub provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+}
+
+impl RouteRef {
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+            variant: None,
+        }
+    }
+
+    /// The route key: `provider/model`, without the variant.
+    pub fn route_key(&self) -> String {
+        format!("{}/{}", self.provider, self.model)
+    }
+
+    /// The pin text: `provider/model[:variant]`.
+    pub fn pin(&self) -> String {
+        match &self.variant {
+            Some(variant) => format!("{}/{}:{variant}", self.provider, self.model),
+            None => self.route_key(),
+        }
+    }
+
+    /// Parse a pin, `provider/model[:variant]`. The provider is everything
+    /// before the first `/`; a variant is what follows the last `:` after
+    /// it. `None` when any part is empty.
+    pub fn parse_pin(pin: &str) -> Option<Self> {
+        let (provider, rest) = pin.split_once('/')?;
+        let (model, variant) = match rest.rsplit_once(':') {
+            Some((model, variant)) => (model, Some(variant)),
+            None => (rest, None),
+        };
+        if provider.is_empty() || model.is_empty() || variant.is_some_and(str::is_empty) {
+            return None;
+        }
+        Some(Self {
+            provider: provider.to_owned(),
+            model: model.to_owned(),
+            variant: variant.map(str::to_owned),
+        })
+    }
+}
+
+/// Whether `key` has the shape of a route key: `provider/model`, both
+/// non-empty.
+pub fn is_route_key(key: &str) -> bool {
+    matches!(key.split_once('/'), Some((provider, model)) if !provider.is_empty() && !model.is_empty())
+}
+
+/// The key a runner sends with, named by public id only.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunnerAuth {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id: Option<String>,
+}
+
+/// Where the work runs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunnerRef {
+    /// The runner module id; one of the request's `runners` when it sent
+    /// them.
+    pub module: String,
+    /// The model as the runner names it.
+    pub model: RouteRef,
+    /// Present only for providers whose policy names a key pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<RunnerAuth>,
+}
+
+/// The `route.select` answer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectAnswer {
+    pub decision_id: String,
+    pub route: RouteRef,
+    pub runner: RunnerRef,
+    /// From the provider's own catalog read, in tokens.
+    pub context_window: u64,
+    /// From the provider's own catalog read, in tokens.
+    pub max_output_tokens: u64,
+    pub expires_at_ms: u64,
+    /// One sentence, at most [`EXPLANATION_MAX_CHARS`] characters.
+    pub explanation: String,
+    /// The provider's non-normative explanation object, when asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
+}
+
+/// Validate and decode `route.select` params.
+///
+/// A malformed requirement is refused `invalid_requirements` naming it, and
+/// so is a requirement this version does not define: it is never ignored.
+/// A malformed pin is `pin_unavailable` with reason `invalid`. Any other
+/// bad member is `invalid_request` naming it. Whether the consumer is
+/// configured, and whether anything can serve, is the provider's to answer
+/// after this.
+pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
+    let members = Members::of(params)?;
+    let consumer = members.text("consumer", None)?;
+    let requirements = parse_requirements(members.object.get("requirements"))?;
+    let pin = members.optional_text("pin", None)?;
+    if let Some(pin) = &pin {
+        if RouteRef::parse_pin(pin).is_none() {
+            return Err(Refusal::pin_unavailable(
+                pin.clone(),
+                PinUnavailableReason::Invalid,
+                None,
+            ));
+        }
+    }
+    let exclude: Option<Vec<String>> = members.optional("exclude")?;
+    if let Some(exclude) = &exclude {
+        if let Some(bad) = exclude.iter().find(|key| !is_route_key(key)) {
+            return Err(members.refuse(
+                "exclude",
+                format!("{bad:?} is not a route key provider/model"),
+            ));
+        }
+    }
+    let runners: Option<Vec<String>> = members.optional("runners")?;
+    if runners
+        .as_ref()
+        .is_some_and(|runners| runners.iter().any(String::is_empty))
+    {
+        return Err(members.refuse("runners", "a runner id must not be empty"));
+    }
+    Ok(SelectRequest {
+        consumer,
+        requirements,
+        pin,
+        exclude,
+        runners,
+        affinity: members.optional_text("affinity", Some(AFFINITY_MAX_CHARS))?,
+        correlation_id: members.optional_text("correlation_id", Some(CORRELATION_ID_MAX_CHARS))?,
+        concurrency_slots: members.optional("concurrency_slots")?,
+        detail: members.optional("detail")?,
+    })
+}
+
+fn parse_requirements(value: Option<&Value>) -> Result<Requirements, Refusal> {
+    let Some(Value::Object(object)) = value else {
+        return Err(Refusal::invalid_requirements(
+            "requirements",
+            "requirements must be an object",
+        ));
+    };
+    if let Some(unknown) = object
+        .keys()
+        .find(|key| !REQUIREMENT_FIELDS.contains(&key.as_str()))
+    {
+        return Err(Refusal::invalid_requirements(
+            unknown.clone(),
+            format!("{unknown} is not a requirement this provider reads"),
+        ));
+    }
+    let members = Members {
+        object,
+        refuse: |field, message| Refusal::invalid_requirements(field, message),
+    };
+    let demand = |field: &str, value: Option<u8>| match value {
+        Some(value) if value > DEMAND_MAX => {
+            Err(members.refuse(field, format!("{field} is above {DEMAND_MAX}")))
+        }
+        _ => Ok(value),
+    };
+    let iq = demand("iq", Some(members.required("iq")?))?.unwrap_or_default();
+    let eq = demand("eq", members.optional("eq")?)?;
+    let tools: Option<ToolsRequirement> = members.optional("tools")?;
+    if tools.as_ref().is_some_and(|tools| !tools.is_known()) {
+        return Err(members.refuse("tools", "tools must be \"none\" or \"required\""));
+    }
+    let tool_capabilities: Option<Vec<String>> = members.optional("tool_capabilities")?;
+    if tool_capabilities
+        .as_ref()
+        .is_some_and(|tags| tags.iter().any(String::is_empty))
+    {
+        return Err(members.refuse("tool_capabilities", "a tag must not be empty"));
+    }
+    let modalities: Option<Vec<Modality>> = members.optional("modalities")?;
+    if let Some(unknown) = modalities
+        .iter()
+        .flatten()
+        .find(|modality| !modality.is_known())
+    {
+        return Err(members.refuse(
+            "modalities",
+            format!("{unknown} is not a modality this provider reads"),
+        ));
+    }
+    Ok(Requirements {
+        iq,
+        eq,
+        context_window: members.optional("context_window")?,
+        max_output_tokens: members.optional("max_output_tokens")?,
+        tools,
+        tool_capabilities,
+        modalities,
+        structured_output: members.optional("structured_output")?,
+        unknown: BTreeMap::new(),
+    })
+}
+
+/// Why a `route.select` answer breaks a rule a consumer can check alone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AnswerProblem {
+    /// The answer's runner is not one of the request's `runners`.
+    RunnerNotListed(String),
+    /// The answer's route key is in the request's `exclude`.
+    Excluded(String),
+    /// The explanation is longer than [`EXPLANATION_MAX_CHARS`].
+    ExplanationTooLong(usize),
+}
+
+impl std::fmt::Display for AnswerProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RunnerNotListed(runner) => {
+                write!(f, "runner {runner:?} is not one of the request's runners")
+            }
+            Self::Excluded(key) => write!(f, "route {key:?} is in the request's exclude"),
+            Self::ExplanationTooLong(chars) => write!(
+                f,
+                "the explanation is {chars} characters, over {EXPLANATION_MAX_CHARS}"
+            ),
+        }
+    }
+}
+
+/// Check an answer against the request it answers: the runner is one the
+/// caller listed, the route is not one it excluded, and the explanation is
+/// within its bound.
+pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
+    if let Some(runners) = &request.runners {
+        if !runners.contains(&answer.runner.module) {
+            return Err(AnswerProblem::RunnerNotListed(answer.runner.module.clone()));
+        }
+    }
+    let key = answer.route.route_key();
+    if request
+        .exclude
+        .as_ref()
+        .is_some_and(|exclude| exclude.contains(&key))
+    {
+        return Err(AnswerProblem::Excluded(key));
+    }
+    let chars = answer.explanation.chars().count();
+    if chars > EXPLANATION_MAX_CHARS {
+        return Err(AnswerProblem::ExplanationTooLong(chars));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::RefusalCode;
+    use serde_json::json;
+
+    fn field(refusal: &Refusal) -> &str {
+        refusal.detail["field"].as_str().unwrap()
+    }
+
+    #[test]
+    fn pins_parse_with_and_without_a_variant() {
+        let pin = RouteRef::parse_pin("example-provider/model-a:fast").unwrap();
+        assert_eq!(pin.route_key(), "example-provider/model-a");
+        assert_eq!(pin.variant.as_deref(), Some("fast"));
+        assert_eq!(pin.pin(), "example-provider/model-a:fast");
+        assert!(RouteRef::parse_pin("example-provider/model-a")
+            .unwrap()
+            .variant
+            .is_none());
+        for bad in ["model-a", "/m", "p/", "p/m:", ""] {
+            assert!(RouteRef::parse_pin(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_requirement_is_refused_by_name() {
+        let refusal = parse_select_request(
+            &json!({"consumer": "flow", "requirements": {"iq": 50, "gpu_count": 2}}),
+        )
+        .unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::InvalidRequirements);
+        assert_eq!(field(&refusal), "gpu_count");
+    }
+
+    #[test]
+    fn a_decoded_request_keeps_unknown_requirements() {
+        let request: SelectRequest = serde_json::from_value(
+            json!({"consumer": "flow", "requirements": {"iq": 50, "gpu_count": 2}}),
+        )
+        .unwrap();
+        assert_eq!(request.requirements.unknown["gpu_count"], json!(2));
+    }
+
+    #[test]
+    fn bad_members_are_refused_by_name() {
+        let cases = [
+            (
+                json!({"requirements": {"iq": 1}}),
+                "invalid_request",
+                "consumer",
+            ),
+            (
+                json!({"consumer": "flow"}),
+                "invalid_requirements",
+                "requirements",
+            ),
+            (
+                json!({"consumer": "flow", "requirements": {}}),
+                "invalid_requirements",
+                "iq",
+            ),
+            (
+                json!({"consumer": "flow", "requirements": {"iq": 101}}),
+                "invalid_requirements",
+                "iq",
+            ),
+            (
+                json!({"consumer": "flow", "requirements": {"iq": 1, "tools": "some"}}),
+                "invalid_requirements",
+                "tools",
+            ),
+            (
+                json!({"consumer": "flow", "requirements": {"iq": 1, "modalities": ["smell"]}}),
+                "invalid_requirements",
+                "modalities",
+            ),
+            (
+                json!({"consumer": "flow", "requirements": {"iq": 1}, "exclude": ["model-a"]}),
+                "invalid_request",
+                "exclude",
+            ),
+            (
+                json!({"consumer": "flow", "requirements": {"iq": 1}, "affinity": "x".repeat(129)}),
+                "invalid_request",
+                "affinity",
+            ),
+        ];
+        for (params, code, expected) in cases {
+            let refusal = parse_select_request(&params).unwrap_err();
+            assert_eq!(refusal.code.as_str(), code, "{params}");
+            assert_eq!(field(&refusal), expected, "{params}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_pin_is_pin_unavailable_invalid() {
+        let refusal = parse_select_request(
+            &json!({"consumer": "flow", "requirements": {"iq": 1}, "pin": "model-a"}),
+        )
+        .unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::PinUnavailable);
+        assert_eq!(refusal.detail["reason"], "invalid");
+        assert_eq!(refusal.wait_until_ms(), None);
+    }
+
+    #[test]
+    fn null_members_read_as_absent() {
+        let with_nulls = parse_select_request(&json!({
+            "consumer": "flow",
+            "requirements": {"iq": 1, "eq": null},
+            "pin": null,
+            "exclude": null,
+            "detail": null,
+        }))
+        .unwrap();
+        let without =
+            parse_select_request(&json!({"consumer": "flow", "requirements": {"iq": 1}})).unwrap();
+        assert_eq!(with_nulls, without);
+        assert_eq!(
+            serde_json::to_value(&without).unwrap(),
+            json!({"consumer": "flow", "requirements": {"iq": 1}})
+        );
+    }
+}

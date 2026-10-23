@@ -1,0 +1,302 @@
+{
+  "about": "route.select requests, the refusals parse_select_request answers before any provider state is read, and answers. A request vector decodes and re-encodes to its params, or to encodes_as when given (members sent as null are left out). A refused vector names the code and detail the validator answers.",
+  "requests": [
+    {
+      "name": "minimal",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        }
+      }
+    },
+    {
+      "name": "every_member",
+      "params": {
+        "consumer": "codemode",
+        "requirements": {
+          "iq": 85,
+          "eq": 30,
+          "context_window": 128000,
+          "max_output_tokens": 8000,
+          "tools": "required",
+          "tool_capabilities": [
+            "code.read/v1"
+          ],
+          "modalities": [
+            "image",
+            "pdf"
+          ],
+          "structured_output": true
+        },
+        "pin": "example-provider/model-a:fast",
+        "exclude": [
+          "example-provider/model-b"
+        ],
+        "runners": [
+          "runner-one",
+          "runner-two"
+        ],
+        "affinity": "conversation-41",
+        "correlation_id": "work-item-7",
+        "concurrency_slots": [
+          {
+            "key": "example-provider",
+            "running": 2,
+            "limit": 4,
+            "queued": 1
+          },
+          {
+            "key": "runner-one",
+            "running": 0,
+            "limit": 8
+          }
+        ],
+        "detail": true
+      }
+    },
+    {
+      "name": "tools_none",
+      "params": {
+        "consumer": "flow",
+        "requirements": {
+          "iq": 30,
+          "tools": "none"
+        }
+      }
+    },
+    {
+      "name": "null_members_read_as_absent",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50,
+          "eq": null,
+          "tool_capabilities": null
+        },
+        "pin": null,
+        "exclude": null,
+        "runners": null,
+        "affinity": null,
+        "detail": null
+      },
+      "encodes_as": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        }
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "unknown_requirement_named",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50,
+          "gpu_count": 2
+        }
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "gpu_count"
+        }
+      }
+    },
+    {
+      "name": "tool_provider_module_list_is_not_a_requirement",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50,
+          "tool_providers": [
+            "example-tools"
+          ]
+        }
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "tool_providers"
+        }
+      }
+    },
+    {
+      "name": "iq_missing",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {}
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "iq"
+        }
+      }
+    },
+    {
+      "name": "iq_above_100",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 101
+        }
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "iq"
+        }
+      }
+    },
+    {
+      "name": "tools_unknown_value",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50,
+          "tools": "optional"
+        }
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "tools"
+        }
+      }
+    },
+    {
+      "name": "requirements_missing",
+      "params": {
+        "consumer": "example_summary"
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "requirements"
+        }
+      }
+    },
+    {
+      "name": "consumer_missing",
+      "params": {
+        "requirements": {
+          "iq": 50
+        }
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "consumer"
+        }
+      }
+    },
+    {
+      "name": "pin_malformed",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "pin": "model-a"
+      },
+      "refusal": {
+        "code": "pin_unavailable",
+        "detail": {
+          "pin": "model-a",
+          "reason": "invalid"
+        }
+      }
+    },
+    {
+      "name": "exclude_entry_not_a_route_key",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "exclude": [
+          "model-b"
+        ]
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "exclude"
+        }
+      }
+    },
+    {
+      "name": "affinity_over_128_characters",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "affinity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "affinity"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "minimal",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+      }
+    },
+    {
+      "name": "key_pool_variant_and_detail",
+      "answer": {
+        "decision_id": "decision-2",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a",
+          "variant": "fast"
+        },
+        "runner": {
+          "module": "runner-two",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a",
+            "variant": "fast"
+          },
+          "auth": {
+            "pool": "example-pool",
+            "credential_id": "credential-7"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "The pin example-provider/model-a:fast is servable on runner-two.",
+        "detail": {
+          "candidates_considered": 3,
+          "note": "non-normative"
+        }
+      }
+    }
+  ]
+}

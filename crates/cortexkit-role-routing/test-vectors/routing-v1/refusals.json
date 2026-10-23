@@ -1,0 +1,327 @@
+{
+  "about": "One refusal body for every refusal code, with the ops that answer it and when its cause ends (wait_until_ms, null when the refusal is not timed). A body is {code, message, detail}; detail is always an object. The last cases decode an unknown code, which a reader keeps and never treats as timed, and unknown open-set reasons.",
+  "refusals": [
+    {
+      "name": "invalid_request",
+      "ops": [
+        "route.select",
+        "route.report",
+        "route.account_for",
+        "route.account_observe"
+      ],
+      "body": {
+        "code": "invalid_request",
+        "message": "decision_id is required",
+        "detail": {
+          "field": "decision_id"
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "invalid_requirements",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "invalid_requirements",
+        "message": "gpu_count is not a requirement this provider reads",
+        "detail": {
+          "field": "gpu_count"
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "unknown_consumer",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "unknown_consumer",
+        "message": "no consumer \"example_nightly\" is configured",
+        "detail": {
+          "consumer": "example_nightly"
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "pin_unavailable_untimed",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "pin_unavailable",
+        "message": "the pin \"example-provider/model-z\" cannot be served: unknown_model",
+        "detail": {
+          "pin": "example-provider/model-z",
+          "reason": "unknown_model"
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "pin_unavailable_cooldown",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "pin_unavailable",
+        "message": "the pin \"example-provider/model-a\" cannot be served: cooldown",
+        "detail": {
+          "pin": "example-provider/model-a",
+          "reason": "cooldown",
+          "reset_at_ms": 1767226200000
+        }
+      },
+      "wait_until_ms": 1767226200000
+    },
+    {
+      "name": "no_route_untimed",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "no_route",
+        "message": "no route meets the request: missing_capability",
+        "detail": {
+          "reason": "missing_capability"
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "no_route_quota_or_cooldown",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "no_route",
+        "message": "no route meets the request: quota_or_cooldown",
+        "detail": {
+          "reason": "quota_or_cooldown",
+          "reset_at_ms": 1767226200000
+        }
+      },
+      "wait_until_ms": 1767226200000
+    },
+    {
+      "name": "unknown_decision",
+      "ops": [
+        "route.report",
+        "route.account_for"
+      ],
+      "body": {
+        "code": "unknown_decision",
+        "message": "no such decision for this caller",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "report_conflict",
+      "ops": [
+        "route.report"
+      ],
+      "body": {
+        "code": "report_conflict",
+        "message": "a different report is recorded for this decision",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "account_not_authorized",
+      "ops": [
+        "route.account_for",
+        "route.account_observe"
+      ],
+      "body": {
+        "code": "account_not_authorized",
+        "message": "only runner modules call the account ops",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "auth_required",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "auth_required",
+        "message": "no account of example-subscription is signed in",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "account_hold",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_hold",
+        "message": "the account is held",
+        "detail": {
+          "until_ms": 1767227000000
+        }
+      },
+      "wait_until_ms": 1767227000000
+    },
+    {
+      "name": "account_quota_unknown",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_quota_unknown",
+        "message": "the account's quota has not been read",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "account_pool_exhausted_timed",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_pool_exhausted",
+        "message": "no account has headroom",
+        "detail": {
+          "reset_at_ms": 1767229200000
+        }
+      },
+      "wait_until_ms": 1767229200000
+    },
+    {
+      "name": "account_pool_exhausted_untimed",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_pool_exhausted",
+        "message": "no account has headroom",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "account_pool_reserve_limited",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_pool_reserve_limited",
+        "message": "the accounts left are held in reserve",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "account_selection_unavailable",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_selection_unavailable",
+        "message": "the allocator cannot choose right now",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "admission_conflict",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "admission_conflict",
+        "message": "admission-1 was used with a different body",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "pin_generation_conflict",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "pin_generation_conflict",
+        "message": "pin-1 is at generation 3, not 2",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "routing_unavailable",
+      "ops": [],
+      "body": {
+        "code": "routing_unavailable",
+        "message": "no routing provider is listed",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "routing_ambiguous",
+      "ops": [],
+      "body": {
+        "code": "routing_ambiguous",
+        "message": "more than one routing provider is listed",
+        "detail": {
+          "modules": [
+            "routing-a",
+            "routing-b"
+          ]
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "unknown_code_kept_and_not_timed",
+      "ops": [],
+      "body": {
+        "code": "region_paused",
+        "message": "a code from a later version",
+        "detail": {
+          "reset_at_ms": 1767229200000
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "unknown_pin_reason_kept",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "pin_unavailable",
+        "message": "the pin \"example-provider/model-a\" cannot be served: retired",
+        "detail": {
+          "pin": "example-provider/model-a",
+          "reason": "retired"
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
+      "name": "unknown_no_route_reason_kept_and_timed",
+      "ops": [
+        "route.select"
+      ],
+      "body": {
+        "code": "no_route",
+        "message": "no route meets the request: region_closed",
+        "detail": {
+          "reason": "region_closed",
+          "reset_at_ms": 1767226200000
+        }
+      },
+      "wait_until_ms": 1767226200000
+    }
+  ]
+}
