@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+- Depend on routing contract 0.2.0, a breaking Rust minor because its extended
+  request structs were exhaustive in 0.1.1. Build requests with constructors
+  and setters; the three extended requests are now non-exhaustive.
+- Add eight checks (31 total): parent account preference and fallback,
+  eligibility without an account hold/exhaustion, unseen-pool acceptance,
+  malformed-pool `detail.field`, and admission/report id reuse for new members.
+  Each has a positive probe and a single-rule faulty provider.
+- State which eligibility and provider/runner behaviors the current hooks
+  cannot check:
+  account-scope eligibility versus exhaustion, pool isolation, disabled-window
+  omission and size-class fencing are not observable with the existing hooks.
+
 ## 0.2.0
 
 - Add six declaration checks (23 checks total), each paired with a faulty provider: owning

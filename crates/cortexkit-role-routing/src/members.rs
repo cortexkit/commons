@@ -69,6 +69,19 @@ impl<'a> Members<'a> {
         Ok(text)
     }
 
+    /// An opaque quota pool name, compared exactly; no registry lookup.
+    pub(crate) fn pool(&self) -> Result<Option<String>, Refusal> {
+        let pool = self.optional_text("pool", Some(64))?;
+        if pool.as_ref().is_some_and(|name| {
+            !name
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._-".contains(&c))
+        }) {
+            return Err(self.refuse("pool", "pool must use only [a-z0-9._-]"));
+        }
+        Ok(pool)
+    }
+
     fn check_text(&self, field: &str, text: &str, max: Option<usize>) -> Result<(), Refusal> {
         if text.is_empty() {
             return Err(self.refuse(field, format!("{field} must not be empty")));

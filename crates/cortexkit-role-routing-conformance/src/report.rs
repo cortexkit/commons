@@ -14,6 +14,14 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("parent_account_preference", "an eligible account other than the parent's is preferred"),
+    check("parent_account_fallback", "the parent's account is used when it is the only eligible one"),
+    check("eligibility_never_holds_or_exhausts", "a model eligibility report never holds or exhausts the account for another model"),
+    check("unknown_pool_accepted", "unseen well-formed pools are accepted in account_for, account_observe and report"),
+    check("malformed_pool_refused_by_field", "malformed pools are invalid_request with detail.field pool on all three ops"),
+    check("pool_body_admission_conflict", "changing pool under a reused admission_id is admission_conflict"),
+    check("parent_body_admission_conflict", "changing parent_conversation_key under a reused admission_id is admission_conflict"),
+    check("new_report_members_conflict", "changing pool, eligibility or request_input_tokens under a reused decision_id is report_conflict"),
     check(
         "describe_lists_consumers_and_fields",
         "role.describe names routing version 1 and every required op and requirement field, and lists exactly the configured consumers, each with its priced_only",
@@ -115,7 +123,10 @@ pub const NARROWINGS: &[&str] = &[
     "Tool provider reachability is configured for every project at once, so the kit does not check that reachability is read for the scoped project.",
     "Affinity is checked with one failure outcome (failed); the other failure outcomes, and the rule that a cancelled or completed report keeps the preference, are not checked.",
     "account_observe idempotency is checked for one runner; the kit does not check that another runner's equal event_id is a separate event.",
-    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict and unknown_decision.",
+    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools.",
+    "Eligibility is checked with model scope and another model on the same account. Account scope cannot distinguish a legitimate account-wide eligibility fence from an incorrect exhaustion/hold with the current hooks, so that distinction is not checked.",
+    "Parent preference and fallback are checked on fresh admit requests; priority against an existing child pin, requested_account, renew or reassign is not checked.",
+    "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",
     "Declaration precedence is checked with max_output_tokens only; the other demand fields are not independently checked for precedence.",
     "The kit does not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
     "requirements other than tool_capabilities and the declared max_output_tokens floor are not checked against the catalog beyond what every check's answer must meet.",

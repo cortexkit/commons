@@ -44,8 +44,34 @@ pub struct Usage {
     pub cost_usd: Option<f64>,
 }
 
+open_set! {
+    /// Whether the account cannot serve this model or cannot serve at all.
+    pub enum EligibilityScope {
+        Model => "model",
+        Account => "account",
+    }
+}
+
+/// Ineligibility reported by the model provider, never exhaustion or a hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Eligibility {
+    pub scope: EligibilityScope,
+    pub code: String,
+}
+
+/// Quota-exhaustion labels in the contract's refusal, reason and observation
+/// vocabulary (sections 5.3, 9.1 and 9.2), when relayed as a runner code.
+pub const EXHAUSTION_CODES: &[&str] = &[
+    "account_limit_exhausted",
+    "account_pool_exhausted",
+    "quota_exhausted",
+    "credential_billing_exhausted",
+];
+
 /// The `route.report` request.
+/// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ReportRequest {
     pub decision_id: String,
     pub outcome: Outcome,
@@ -60,6 +86,16 @@ pub struct ReportRequest {
     pub reset_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+    /// The pool the refused or served model drew from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
+    /// Sent instead of exhaustion when the account cannot serve the model
+    /// or cannot serve at all. Never causes exhaustion or a hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eligibility: Option<Eligibility>,
+    /// Input size of the request, so a refusal can fence only its size class.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_input_tokens: Option<u64>,
 }
 
 impl ReportRequest {
@@ -71,7 +107,52 @@ impl ReportRequest {
             credential_id: None,
             reset_at_ms: None,
             usage: None,
+            pool: None,
+            eligibility: None,
+            request_input_tokens: None,
         }
+    }
+
+    /// Set the runner's refusal or error code verbatim.
+    pub fn with_runner_code(mut self, runner_code: impl Into<String>) -> Self {
+        self.runner_code = Some(runner_code.into());
+        self
+    }
+
+    /// Set the public credential id the runner reported.
+    pub fn with_credential_id(mut self, credential_id: impl Into<String>) -> Self {
+        self.credential_id = Some(credential_id.into());
+        self
+    }
+
+    /// Set the reset time the runner reported, in Unix milliseconds.
+    pub fn with_reset_at_ms(mut self, reset_at_ms: u64) -> Self {
+        self.reset_at_ms = Some(reset_at_ms);
+        self
+    }
+
+    /// Set the work's token usage and optional cost claim.
+    pub fn with_usage(mut self, usage: Usage) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// Set the quota pool the refused or served model drew from.
+    pub fn with_pool(mut self, pool: impl Into<String>) -> Self {
+        self.pool = Some(pool.into());
+        self
+    }
+
+    /// Set model or account ineligibility, instead of exhaustion or a hold.
+    pub fn with_eligibility(mut self, eligibility: Eligibility) -> Self {
+        self.eligibility = Some(eligibility);
+        self
+    }
+
+    /// Set the request's input size in tokens.
+    pub fn with_request_input_tokens(mut self, request_input_tokens: u64) -> Self {
+        self.request_input_tokens = Some(request_input_tokens);
+        self
     }
 }
 
@@ -91,14 +172,30 @@ pub struct ReportAnswer {
 /// accepted and kept.
 pub fn parse_report_request(params: &Value) -> Result<ReportRequest, Refusal> {
     let members = Members::of(params)?;
-    Ok(ReportRequest {
+    let request = ReportRequest {
         decision_id: members.text("decision_id", None)?,
         outcome: members.required("outcome")?,
         runner_code: members.optional_text("runner_code", None)?,
         credential_id: members.optional_text("credential_id", None)?,
         reset_at_ms: members.optional("reset_at_ms")?,
         usage: members.optional("usage")?,
-    })
+        pool: members.pool()?,
+        eligibility: members.optional("eligibility")?,
+        request_input_tokens: members.optional("request_input_tokens")?,
+    };
+    if request.eligibility.is_some()
+        && (request.reset_at_ms.is_some()
+            || request
+                .runner_code
+                .as_deref()
+                .is_some_and(|code| EXHAUSTION_CODES.contains(&code)))
+    {
+        return Err(members.refuse(
+            "eligibility",
+            "eligibility cannot accompany exhaustion or a reset time",
+        ));
+    }
+    Ok(request)
 }
 
 #[cfg(test)]

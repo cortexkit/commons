@@ -98,10 +98,20 @@ a module plays.
   timed, whatever its detail carries.
 - [pinned] Every other enumeration a reader decodes is an open set too: a
   report's `outcome`, `pin_unavailable`'s and `no_route`'s `reason`, an
-  observation's `kind`, and an account answer's `reason.code`. An unknown
+  observation's `kind`, a report's `eligibility.scope`, and an account
+  answer's `reason.code`. An unknown
   value decodes and is kept as the string it was sent as.
 - [pinned] An optional member is left out when it has no value. A member
   sent as `null` reads exactly as one left out.
+- [pinned] Quota `pool` names in §§8–9 are opaque, 1 to 64 characters of
+  `[a-z0-9._-]`, compared exactly. Absent means the account is a single
+  pool. The provider keeps no pool registry: an unseen well-formed pool is
+  never refused for being unseen; it has no recorded block. A malformed
+  pool is `invalid_request {field: "pool"}`.
+- [pinned] Rollout is provider-first: a 0.1.1 provider refuses unknown
+  members. The routing provider adopts this release before any consumer
+  sends the new members. A consumer sending them to an older provider gets
+  `invalid_request {field}` naming the member, never silent omission.
 
 ## 3. Scope comes from the route
 
@@ -271,7 +281,8 @@ a module plays.
 ## 8. `route.report`
 
 `report::ReportRequest`, validated by `report::parse_report_request`:
-`{decision_id, outcome, runner_code?, credential_id?, reset_at_ms?, usage?}`.
+`{decision_id, outcome, runner_code?, credential_id?, reset_at_ms?, usage?,
+pool?, eligibility?, request_input_tokens?}`.
 
 - [pinned] `outcome` is an open set: `completed`, `refused`, `failed`,
   `timed_out`, `cancelled`. `refused`, `failed` and `timed_out` are
@@ -282,6 +293,20 @@ a module plays.
   verbatim, so the provider can tell "this route cannot serve this" from
   "this attempt failed".
 - [pinned] `credential_id` and `reset_at_ms`: when the runner reported them.
+- [pinned] `pool`: the pool the refused or served model drew from (§2).
+- [pinned] `eligibility`: `{scope: "model" | "account", code: string}`,
+  sent instead of exhaustion when the model provider says the account
+  cannot serve this model (`model`) or cannot serve at all (`account`).
+  `scope` is open on decode (§2). Routing never treats eligibility as
+  exhaustion and never holds on it.
+- [pinned] Eligibility with an exhaustion `runner_code` or with
+  `reset_at_ms` is `invalid_request {field: "eligibility"}`. Exhaustion
+  codes are `account_limit_exhausted` (§9.2), `account_pool_exhausted`
+  (§9.1), `quota_exhausted` and `credential_billing_exhausted` (§5.3), when
+  relayed as `runner_code`. A reset time implies a hold.
+- [pinned] `request_input_tokens`: non-negative integer, the request's
+  input size in tokens. A size-shaped refusal fences only that request-size
+  class, not smaller requests that can pass.
 - [pinned] `usage`: `{input_tokens, output_tokens, cost_usd?}`. Reasoning
   tokens are counted in `output_tokens`. `cost_usd` is the caller's own
   claim: the provider prices usage from its own catalog and may ignore it.
@@ -292,6 +317,7 @@ a module plays.
   returns exactly the first answer; a different body after the first is
   `report_conflict`. Bodies are compared as decoded, so key order, and a
   member sent as `null` instead of left out, never make bodies differ.
+  `pool`, `eligibility` and `request_input_tokens` are part of the body.
 - [pinned] Refusals: `invalid_request {field}`, `unknown_decision`,
   `report_conflict`.
 
@@ -325,12 +351,19 @@ the routing provider allocates (subscription logins).
   characters): the runner's stable conversation id. One key stays on one
   account while that account is healthy, keeping the provider's prompt
   cache warm.
+- [pinned] `parent_conversation_key` (optional): the same string rules as
+  `conversation_key` (`CONVERSATION_KEY_MAX_CHARS`). The provider prefers an
+  eligible account the parent conversation is not on, and falls back to
+  the parent's account when no other is eligible.
+- [pinned] `pool` (optional): the quota pool the requested model draws from,
+  as the runner names it (§2).
 - [pinned] `admission_id` (required, non-empty, at most 128 characters):
   the idempotency key. The same id and body from the same runner returns
   exactly the first answer; a different body is `admission_conflict`.
   Bodies are compared with defaults applied
   (`AccountForRequest::same_body`): a member left out and the same member
   sent with its default value are the same body.
+  `pool` and `parent_conversation_key` are part of the body.
 - [pinned] `mode`: `admit` (the default), `renew` (extend the current pin)
   or `reassign` (a different account after the current one failed).
   `renew` and `reassign` require `expected_pin {id, generation}`; without
@@ -396,10 +429,14 @@ What a runner saw on an account, so the provider's headroom stays current.
   `credential_id`, `view_digest`, `observed_at_ms` (the original
   observation time, never a forwarding time), `upstream_origin`,
   `limit_window`, `resets_at_ms`, `resets_at_source`.
+- [pinned] `pool` (optional): the quota pool for the reading or used-account
+  report (§2). Both use this flat observation shape.
 - [pinned] `headers`: the upstream provider's rate-limit headers, names
   lowercased, values raw, unknown names included. Absent means none were
   received. A name that is not lowercase is
   `invalid_request {field: "headers"}`.
+- [pinned] In `headers` and `limit_window`, a disabled usage window is left
+  out of a reading, never sent with a stale fraction.
 - [pinned] The answer (`observe::AccountObserveAnswer`) is
   `{observation: {id, duplicate, bound, effects}}`. `bound` says whether
   the observation matched an admission; `effects` lists, in the provider's

@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.2.0"
+cortexkit-role-routing-conformance = "0.3.0"
 ```
 
 ```rust,ignore
@@ -62,10 +62,18 @@ for defaults; the operator-precedence check also overrides the request's `iq`.
 
 ## Checks
 
-The kit runs 23 checks, including six declaration checks.
+The kit runs 31 checks, including six declaration checks and eight optional-member checks.
 
 | Check | Contract rule |
 |---|---|
+| `parent_account_preference` | §9.1: prefer an eligible account other than the parent's |
+| `parent_account_fallback` | §9.1: fall back to the parent when it is the only eligible account |
+| `eligibility_never_holds_or_exhausts` | §8: model ineligibility never holds/exhausts the account for another model |
+| `unknown_pool_accepted` | §2: unseen well-formed pools are accepted on all three ops |
+| `malformed_pool_refused_by_field` | §2: malformed pools are `invalid_request {field: "pool"}` on all three ops |
+| `pool_body_admission_conflict` | §9.1: pool changes under a used admission id are conflicts |
+| `parent_body_admission_conflict` | §9.1: parent key changes under a used admission id are conflicts |
+| `new_report_members_conflict` | §8: pool, eligibility and input-size changes under a used decision id are conflicts |
 | `describe_lists_consumers_and_fields` | §4: describe lists every configured consumer with `priced_only`, every required op and every requirement field |
 | `unknown_requirement_refused_by_name` | §5.1: an unknown requirement is `invalid_requirements {field}`, never ignored |
 | `unknown_consumer_refused` | §5.1: an unknown consumer is `unknown_consumer` |
@@ -95,6 +103,16 @@ where it checks less than the contract says; every report prints both.
 The declaration checks exercise unverified entries and conflicting verified
 owners, but do not check invalid catalog declarations or provider health
 reports for invalid, unverified or conflicting entries.
+
+The eligibility check reports model-scoped ineligibility for one model, then
+checks that a different model on the same account remains eligible. The current
+hooks cannot distinguish legitimate account-scope ineligibility from incorrect
+exhaustion/hold, so that distinction is not claimed. Pool isolation,
+disabled-window omission by runners and size-class fencing also need richer
+provider/runner hooks. Wire vectors cover the pool and input-size fields, not
+those provider or runner policies.
+Parent checks use fresh admissions; they do not establish priority against an
+existing child pin, `requested_account`, `renew` or `reassign`.
 
 ## The kit's own tests
 

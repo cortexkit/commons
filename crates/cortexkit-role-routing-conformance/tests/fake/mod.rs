@@ -53,6 +53,22 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    /// Keeps the parent's account even when another eligible account exists.
+    pub ignores_parent_preference: bool,
+    /// Refuses rather than falling back to the sole eligible parent account.
+    pub refuses_parent_fallback: bool,
+    /// Turns model ineligibility into an account hold.
+    pub holds_on_eligibility: bool,
+    /// Refuses a well-formed pool that has no recorded block.
+    pub refuses_unknown_pool: bool,
+    /// Uses the wrong detail key for a malformed pool.
+    pub malformed_pool_wrong_detail: bool,
+    /// Omits pool from admission body equality.
+    pub ignores_pool_body: bool,
+    /// Omits the parent key from admission body equality.
+    pub ignores_parent_body: bool,
+    /// Omits the new report members from decision-id body equality.
+    pub ignores_report_members: bool,
     /// role.describe states priced_only false for every consumer.
     pub describe_drops_priced_only: bool,
     /// A requirement the provider does not read is dropped, not refused.
@@ -72,8 +88,8 @@ pub struct Defects {
     pub accepts_report_from_any_principal: bool,
     /// The same report body again is recorded anew, with a new answer.
     pub rerecords_repeated_report: bool,
-    /// A different report body after the first replaces it instead of
-    /// being refused report_conflict.
+    /// A changed outcome after the first replaces it instead of being
+    /// refused report_conflict.
     pub overwrites_conflicting_report: bool,
     /// A failure report does not end the decision's affinity preference.
     pub affinity_survives_failure: bool,
@@ -81,8 +97,8 @@ pub struct Defects {
     pub expiry_in_past: bool,
     /// The same admission again is allocated anew, with a new answer.
     pub account_for_reallocates_on_replay: bool,
-    /// A different body under a used admission_id is allocated instead of
-    /// being refused admission_conflict.
+    /// A changed conversation key under a used admission_id is allocated
+    /// instead of being refused admission_conflict.
     pub account_for_ignores_body_change: bool,
     /// A decision_id is honoured from any runner.
     pub account_for_ignores_decision_runner: bool,
@@ -134,6 +150,8 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    held_credentials: Vec<String>,
+    ineligible: Vec<(String, Option<String>)>,
     consumers: Vec<ConsumerConfig>,
     catalog: Option<Catalog>,
     declarations: BTreeMap<String, (Option<String>, DemandDefaults)>,
@@ -600,15 +618,32 @@ impl FakeRoute {
             return Err(Refusal::unknown_decision());
         }
         if let Some((first, answer)) = state.reports.get(&request.decision_id) {
-            if *first == request {
+            let mut compared = request.clone();
+            if defects.ignores_report_members {
+                compared.pool.clone_from(&first.pool);
+                compared.eligibility.clone_from(&first.eligibility);
+                compared.request_input_tokens = first.request_input_tokens;
+            }
+            if *first == compared {
                 if !defects.rerecords_repeated_report {
                     return to_value(answer);
                 }
-            } else if !defects.overwrites_conflicting_report {
+            } else if !defects.overwrites_conflicting_report || first.outcome == request.outcome {
                 return Err(Refusal::new(
                     RefusalCode::ReportConflict,
                     "a different report is recorded for this decision",
                 ));
+            }
+        }
+        if let (Some(eligibility), Some(credential)) =
+            (&request.eligibility, &request.credential_id)
+        {
+            let model = (eligibility.scope
+                == cortexkit_role_routing_conformance::wire::report::EligibilityScope::Model)
+                .then(|| decision.route.model.clone());
+            state.ineligible.push((credential.clone(), model));
+            if defects.holds_on_eligibility {
+                state.held_credentials.push(credential.clone());
             }
         }
         let answer = ReportAnswer {
@@ -644,19 +679,53 @@ impl FakeRoute {
                 "only runner modules call the account ops",
             ));
         }
-        let request = parse_account_for_request(params)?;
+        let request = parse_account_for_request(params).map_err(|mut refusal| {
+            if defects.malformed_pool_wrong_detail
+                && refusal.detail.get("field") == Some(&Value::String("pool".into()))
+            {
+                refusal.detail.remove("field");
+                refusal
+                    .detail
+                    .insert("member".into(), Value::String("pool".into()));
+            }
+            refusal
+        })?;
         let key = (self.principal().to_owned(), request.admission_id.clone());
         if let Some((first, answer)) = state.admissions.get(&key) {
-            if first.same_body(&request) {
+            let mut compared = request.clone();
+            if defects.ignores_pool_body {
+                compared.pool.clone_from(&first.pool);
+            }
+            if defects.ignores_parent_body {
+                compared
+                    .parent_conversation_key
+                    .clone_from(&first.parent_conversation_key);
+            }
+            if first.same_body(&compared) {
                 if !defects.account_for_reallocates_on_replay {
                     return to_value(answer);
                 }
-            } else if !defects.account_for_ignores_body_change {
+            } else if !defects.account_for_ignores_body_change
+                || first.conversation_key == request.conversation_key
+            {
                 return Err(Refusal::new(
                     RefusalCode::AdmissionConflict,
                     "the admission id was used with a different body",
                 ));
             }
+        }
+        if defects.refuses_unknown_pool && request.pool.is_some() {
+            return Err(Refusal::invalid_request("pool", "pool is not registered"));
+        }
+        if state.held_credentials.iter().any(|credential| {
+            request.candidates.as_ref().is_some_and(|candidates| {
+                candidates
+                    .accounts
+                    .iter()
+                    .any(|account| &account.credential_id == credential)
+            })
+        }) {
+            return Err(Refusal::account_hold(now_ms() + 60_000));
         }
         if let Some(decision_id) = &request.decision_id {
             let Some(decision) = state.decisions.get(decision_id) else {
@@ -677,6 +746,12 @@ impl FakeRoute {
             .iter()
             .enumerate()
             .filter(|(_, account)| account.provider == request.provider)
+            .filter(|(_, account)| {
+                !state.ineligible.iter().any(|(credential, model)| {
+                    credential == &account.credential_id
+                        && model.as_ref().is_none_or(|model| model == &request.model)
+                })
+            })
             .filter(|(_, account)| {
                 request.candidates.as_ref().is_none_or(|candidates| {
                     candidates
@@ -725,6 +800,18 @@ impl FakeRoute {
                 }
             }
         }
+        let parent = request
+            .parent_conversation_key
+            .as_ref()
+            .and_then(|key| state.conversations.get(key))
+            .map(|pin| pin.account);
+        let away = parent.and_then(|parent| usable.iter().copied().find(|index| *index != parent));
+        if parent.is_some() && away.is_none() && defects.refuses_parent_fallback {
+            return Err(Refusal::new(
+                RefusalCode::AccountSelectionUnavailable,
+                "no account away from parent",
+            ));
+        }
         let (account, code) = match (&mode, &current) {
             (AccountMode::Reassign, Some((_, _, held))) => (
                 usable
@@ -740,7 +827,14 @@ impl FakeRoute {
             }
             _ => match requested {
                 Some(index) => (index, AccountReasonCode::RequestedAccount),
-                None => (usable[0], AccountReasonCode::Headroom),
+                None => (
+                    if defects.ignores_parent_preference {
+                        usable[0]
+                    } else {
+                        away.unwrap_or(usable[0])
+                    },
+                    AccountReasonCode::Headroom,
+                ),
             },
         };
         let code = if request.decision_id.is_some() {

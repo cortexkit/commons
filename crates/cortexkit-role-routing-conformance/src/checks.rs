@@ -235,6 +235,19 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 self.account_observe_idempotent_per_event_id().await
             }
             "tool_capabilities_matched_by_tag" => self.tool_capabilities_matched_by_tag().await,
+            "parent_account_preference" => self.parent_account_preference(false).await,
+            "parent_account_fallback" => self.parent_account_preference(true).await,
+            "eligibility_never_holds_or_exhausts" => {
+                self.eligibility_never_holds_or_exhausts().await
+            }
+            "unknown_pool_accepted" => self.unknown_pool_accepted().await,
+            "malformed_pool_refused_by_field" => self.malformed_pool_refused_by_field().await,
+            "pool_body_admission_conflict" => self.member_admission_conflict("pool").await,
+            "parent_body_admission_conflict" => {
+                self.member_admission_conflict("parent_conversation_key")
+                    .await
+            }
+            "new_report_members_conflict" => self.new_report_members_conflict().await,
             other => Err(format!("the kit has no check named {other}")),
         }
     }
@@ -974,6 +987,215 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             "conversation_key": conversation,
             "admission_id": admission,
         })
+    }
+
+    async fn parent_account_preference(&self, fallback: bool) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let parent: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for("parent-admission", "parent", "model-c"),
+            "parent admission",
+        )
+        .await?;
+        let mut child = Self::account_for("child-admission", "child", "model-c");
+        child["parent_conversation_key"] = json!("parent");
+        if fallback {
+            child["candidates"] = json!({"view_digest": "only-parent", "accounts": [{
+                "account_id": parent.account.account_id, "credential_id": parent.account.credential_id
+            }]});
+        }
+        let chosen: AccountForAnswer =
+            answer(&runner, ops::ROUTE_ACCOUNT_FOR, &child, "child admission").await?;
+        if (chosen.account.account_id == parent.account.account_id) != fallback {
+            return Err(if fallback {
+                "did not fall back to the parent's only eligible account"
+            } else {
+                "picked the parent's account despite another eligible account"
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    async fn eligibility_never_holds_or_exhausts(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        let selected = select(
+            &consumer,
+            &with(
+                base(),
+                "pin",
+                json!(format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER)),
+            ),
+            "subscription select",
+        )
+        .await?;
+        let runner = self.route_as(&selected.runner.module).await?;
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for("eligibility-admission", "eligibility", "model-c"),
+            "initial admission",
+        )
+        .await?;
+        let _: ReportAnswer = answer(
+            &consumer,
+            ops::ROUTE_REPORT,
+            &json!({
+                "decision_id": selected.decision_id, "outcome": "refused",
+                "credential_id": admitted.account.credential_id,
+                "eligibility": {"scope": "model", "code": "model_not_included"}
+            }),
+            "model eligibility report",
+        )
+        .await?;
+        // A different model on the same account remains eligible. An account-level
+        // quota refusal or hold would incorrectly refuse this call.
+        let mut next = Self::account_for("after-eligibility", "other-model", "model-d");
+        next["candidates"] = json!({"view_digest": "same-account", "accounts": [{
+            "account_id": admitted.account.account_id, "credential_id": admitted.account.credential_id
+        }]});
+        let after: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &next,
+            "another model after eligibility report",
+        )
+        .await?;
+        if after.account.account_id != admitted.account.account_id {
+            return Err("another model did not retain access to the eligible account".into());
+        }
+        Ok(())
+    }
+
+    async fn unknown_pool_accepted(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let body = with(
+            Self::account_for("new-pool", "new-pool", "model-c"),
+            "pool",
+            json!("never-seen.pool_7-x"),
+        );
+        let _: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &body,
+            "an unseen well-formed pool",
+        )
+        .await?;
+        let _: AccountObserveAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_OBSERVE,
+            &json!({"event_id": "new-pool", "kind": "attempt", "pool": "another-unseen.pool"}),
+            "an unseen observation pool",
+        )
+        .await?;
+        let consumer = self.route_as(CONSUMER).await?;
+        let selected = select(&consumer, &base(), "select for pool report").await?;
+        let _: ReportAnswer = answer(&consumer, ops::ROUTE_REPORT,
+            &json!({"decision_id": selected.decision_id, "outcome": "completed", "pool": "unseen-report.pool"}), "an unseen report pool").await?;
+        Ok(())
+    }
+
+    async fn malformed_pool_refused_by_field(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let consumer = self.route_as(CONSUMER).await?;
+        let selected = select(&consumer, &base(), "select for malformed pool report").await?;
+        for pool in [
+            json!(""),
+            json!("Upper"),
+            json!("a/b"),
+            json!("a".repeat(65)),
+            json!(7),
+        ] {
+            for (route, op, mut body) in [
+                (
+                    &runner,
+                    ops::ROUTE_ACCOUNT_FOR,
+                    Self::account_for("bad-pool", "bad-pool", "model-c"),
+                ),
+                (
+                    &runner,
+                    ops::ROUTE_ACCOUNT_OBSERVE,
+                    json!({"event_id": "bad-pool", "kind": "attempt"}),
+                ),
+                (
+                    &consumer,
+                    ops::ROUTE_REPORT,
+                    json!({"decision_id": selected.decision_id, "outcome": "completed"}),
+                ),
+            ] {
+                body["pool"] = pool.clone();
+                let refusal = refused(
+                    route,
+                    op,
+                    &body,
+                    RefusalCode::InvalidRequest,
+                    "a malformed pool",
+                )
+                .await?;
+                if refusal.detail.get("field") != Some(&json!("pool")) {
+                    return Err(format!(
+                        "{op}: malformed pool must name detail.field pool, got {:?}",
+                        refusal.detail
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn member_admission_conflict(&self, member: &str) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let body = Self::account_for("member-conflict", "member-conflict", "model-c");
+        let _: AccountForAnswer =
+            answer(&runner, ops::ROUTE_ACCOUNT_FOR, &body, "initial admission").await?;
+        for value in ["one", "two"] {
+            refused(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &with(body.clone(), member, json!(value)),
+                RefusalCode::AdmissionConflict,
+                &format!("changed {member} under reused admission_id"),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn new_report_members_conflict(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        for (member, first_value, second_value) in [
+            ("pool", json!("one"), json!("two")),
+            (
+                "eligibility",
+                json!({"scope": "model", "code": "one"}),
+                json!({"scope": "model", "code": "two"}),
+            ),
+            (
+                "eligibility",
+                json!({"scope": "model", "code": "one"}),
+                json!({"scope": "account", "code": "one"}),
+            ),
+            ("request_input_tokens", json!(0), json!(1)),
+        ] {
+            let selected = select(&consumer, &base(), "select for report body comparison").await?;
+            let body = with(
+                json!({"decision_id": selected.decision_id, "outcome": "refused"}),
+                member,
+                first_value,
+            );
+            let _: ReportAnswer =
+                answer(&consumer, ops::ROUTE_REPORT, &body, "initial report").await?;
+            refused(
+                &consumer,
+                ops::ROUTE_REPORT,
+                &with(body, member, second_value),
+                RefusalCode::ReportConflict,
+                &format!("changed {member} under reused decision_id"),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn account_for_idempotent_on_admission_id(&self) -> Check {

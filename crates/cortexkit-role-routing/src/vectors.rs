@@ -31,6 +31,16 @@ pub const ROUTE_REPORT_JSON: &str = include_str!("../test-vectors/routing-v1/rou
 /// `route.select` requests, refusals and answers.
 pub const ROUTE_SELECT_JSON: &str = include_str!("../test-vectors/routing-v1/route-select.json");
 
+/// Optional account-allocation members added after the original v1 vectors.
+pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-account-for-optional.json");
+/// Optional pool members on readings and used-account reports.
+pub const ROUTE_ACCOUNT_OBSERVE_OPTIONAL_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-account-observe-optional.json");
+/// Optional report members, conflicts and unknown eligibility scope.
+pub const ROUTE_REPORT_OPTIONAL_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-report-optional.json");
+
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
     ("consumer-declarations.json", CONSUMER_DECLARATIONS_JSON),
@@ -38,8 +48,17 @@ pub const FILES: &[(&str, &str)] = &[
     ("refusals.json", REFUSALS_JSON),
     ("reply-envelope.json", REPLY_ENVELOPE_JSON),
     ("role-describe.json", ROLE_DESCRIBE_JSON),
+    (
+        "route-account-for-optional.json",
+        ROUTE_ACCOUNT_FOR_OPTIONAL_JSON,
+    ),
     ("route-account-for.json", ROUTE_ACCOUNT_FOR_JSON),
+    (
+        "route-account-observe-optional.json",
+        ROUTE_ACCOUNT_OBSERVE_OPTIONAL_JSON,
+    ),
     ("route-account-observe.json", ROUTE_ACCOUNT_OBSERVE_JSON),
+    ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
     ("route-report.json", ROUTE_REPORT_JSON),
     ("route-select.json", ROUTE_SELECT_JSON),
 ];

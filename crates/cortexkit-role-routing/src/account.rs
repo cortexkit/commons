@@ -83,7 +83,9 @@ pub struct RequestedAccount {
 }
 
 /// The `route.account_for` request.
+/// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AccountForRequest {
     /// The call about to be made.
     pub provider: String,
@@ -122,6 +124,14 @@ pub struct AccountForRequest {
     /// for that decision's provider and model; otherwise `unknown_decision`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_id: Option<String>,
+    /// Prefer an eligible account other than the parent's, falling back to
+    /// the parent's account when no other is eligible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_conversation_key: Option<String>,
+    /// The requested model's quota pool, as the runner names it. Absent
+    /// means the account is a single pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
 }
 
 impl AccountForRequest {
@@ -146,7 +156,78 @@ impl AccountForRequest {
             requested_account: None,
             hold_wait_max_s: None,
             decision_id: None,
+            parent_conversation_key: None,
+            pool: None,
         }
+    }
+
+    /// Set the model used for conversation account affinity.
+    pub fn with_affinity_model(mut self, affinity_model: impl Into<String>) -> Self {
+        self.affinity_model = Some(affinity_model.into());
+        self
+    }
+
+    /// Set the admission mode.
+    pub fn with_mode(mut self, mode: AccountMode) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+
+    /// Set the pin a renewal or reassignment expects to replace.
+    pub fn with_expected_pin(mut self, expected_pin: ExpectedPin) -> Self {
+        self.expected_pin = Some(expected_pin);
+        self
+    }
+
+    /// Set the input size in bytes.
+    pub fn with_initial_input_bytes(mut self, initial_input_bytes: u64) -> Self {
+        self.initial_input_bytes = Some(initial_input_bytes);
+        self
+    }
+
+    /// Set whether the input size is estimated.
+    pub fn with_initial_input_estimated(mut self, initial_input_estimated: bool) -> Self {
+        self.initial_input_estimated = Some(initial_input_estimated);
+        self
+    }
+
+    /// Set the accounts the runner can use now.
+    pub fn with_candidates(mut self, candidates: Candidates) -> Self {
+        self.candidates = Some(candidates);
+        self
+    }
+
+    /// Set the explicit account hint.
+    pub fn with_requested_account(mut self, requested_account: RequestedAccount) -> Self {
+        self.requested_account = Some(requested_account);
+        self
+    }
+
+    /// Set the longest time the runner will wait out a hold, in seconds.
+    pub fn with_hold_wait_max_s(mut self, hold_wait_max_s: u64) -> Self {
+        self.hold_wait_max_s = Some(hold_wait_max_s);
+        self
+    }
+
+    /// Set the selection decision to honor instead of deciding twice.
+    pub fn with_decision_id(mut self, decision_id: impl Into<String>) -> Self {
+        self.decision_id = Some(decision_id.into());
+        self
+    }
+
+    /// Set the parent conversation whose account should be avoided if possible.
+    pub fn with_parent_conversation_key(
+        mut self,
+        parent_conversation_key: impl Into<String>,
+    ) -> Self {
+        self.parent_conversation_key = Some(parent_conversation_key.into());
+        self
+    }
+
+    /// Set the quota pool the requested model draws from.
+    pub fn with_pool(mut self, pool: impl Into<String>) -> Self {
+        self.pool = Some(pool.into());
+        self
     }
 
     /// The mode, with its default applied.
@@ -249,6 +330,9 @@ pub fn parse_account_for_request(params: &Value) -> Result<AccountForRequest, Re
         requested_account: members.optional("requested_account")?,
         hold_wait_max_s: members.optional("hold_wait_max_s")?,
         decision_id: members.optional_text("decision_id", None)?,
+        parent_conversation_key: members
+            .optional_text("parent_conversation_key", Some(CONVERSATION_KEY_MAX_CHARS))?,
+        pool: members.pool()?,
     };
     match request.mode() {
         AccountMode::Admit => {}

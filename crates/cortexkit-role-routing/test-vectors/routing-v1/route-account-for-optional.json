@@ -1,0 +1,21 @@
+{
+  "about": "Optional parent conversation and quota pool members. Legacy vectors are unchanged.",
+  "requests": [
+    {"name": "parent", "params": {"provider": "example-subscription", "model": "model-c", "conversation_key": "child", "admission_id": "a", "parent_conversation_key": "parent"}},
+    {"name": "pool", "params": {"provider": "example-subscription", "model": "model-c", "conversation_key": "child", "admission_id": "a", "pool": "model.pool_1-x"}},
+    {"name": "null_is_absent", "params": {"provider": "example-subscription", "model": "model-c", "conversation_key": "child", "admission_id": "a", "pool": null, "parent_conversation_key": null}, "encodes_as": {"provider": "example-subscription", "model": "model-c", "conversation_key": "child", "admission_id": "a"}}
+  ],
+  "refused": [
+    {"name": "empty_parent", "params": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "parent_conversation_key": ""}, "refusal": {"code": "invalid_request", "detail": {"field": "parent_conversation_key"}}},
+    {"name": "non_string_parent", "params": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "parent_conversation_key": 7}, "refusal": {"code": "invalid_request", "detail": {"field": "parent_conversation_key"}}},
+    {"name": "empty_pool", "params": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "pool": ""}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}},
+    {"name": "uppercase_pool", "params": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "pool": "Pool"}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}},
+    {"name": "non_string_pool", "params": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "pool": []}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}}
+  ],
+  "answers": [],
+  "bodies": [
+    {"name": "pool_is_body", "first": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "pool": "one"}, "second": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "pool": "two"}, "same": false},
+    {"name": "parent_is_body", "first": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "parent_conversation_key": "one"}, "second": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "parent_conversation_key": "two"}, "same": false},
+    {"name": "new_nulls_are_absent", "first": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a"}, "second": {"provider": "p", "model": "m", "conversation_key": "c", "admission_id": "a", "parent_conversation_key": null, "pool": null}, "same": true}
+  ]
+}

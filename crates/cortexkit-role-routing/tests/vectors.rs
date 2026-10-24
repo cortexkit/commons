@@ -34,8 +34,11 @@ const FILES: &[&str] = &[
     "refusals.json",
     "reply-envelope.json",
     "role-describe.json",
+    "route-account-for-optional.json",
     "route-account-for.json",
+    "route-account-observe-optional.json",
     "route-account-observe.json",
+    "route-report-optional.json",
     "route-report.json",
     "route-select.json",
 ];
@@ -207,6 +210,50 @@ fn route_account_observe() {
     assert!(again.observation.duplicate);
     assert_eq!(first.observation.id, again.observation.id);
     assert!(again.observation.effects.is_empty());
+}
+
+#[test]
+fn optional_members() {
+    check_op::<AccountForRequest, AccountForAnswer>(
+        "route-account-for-optional.json",
+        parse_account_for_request,
+    );
+    check_op::<AccountObserveRequest, AccountObserveAnswer>(
+        "route-account-observe-optional.json",
+        parse_account_observe_request,
+    );
+    check_op::<ReportRequest, ReportAnswer>("route-report-optional.json", parse_report_request);
+    for case in cases(&load("route-account-for-optional.json"), "bodies") {
+        let first = parse_account_for_request(&case["first"]).unwrap();
+        let second = parse_account_for_request(&case["second"]).unwrap();
+        assert_eq!(first.same_body(&second), case["same"], "{}", name(case));
+    }
+    for case in cases(&load("route-report-optional.json"), "bodies") {
+        let first = parse_report_request(&case["first"]).unwrap();
+        let second = parse_report_request(&case["second"]).unwrap();
+        assert_eq!(first == second, case["same"], "{}", name(case));
+    }
+}
+
+#[test]
+fn legacy_requests_keep_their_bytes() {
+    let account = r#"{"provider":"p","model":"m","affinity_model":"m","conversation_key":"c","admission_id":"a","mode":"admit","expected_pin":{"id":"pin","generation":1},"initial_input_bytes":12,"initial_input_estimated":true,"candidates":{"view_digest":"v","accounts":[{"account_id":"a","credential_id":"c"}]},"requested_account":{"account_id":"a","credential_id":"c"},"hold_wait_max_s":9,"decision_id":"d"}"#;
+    let observe = r#"{"event_id":"e","kind":"attempt","admission_id":"a","run_id":"r","served_account_id":"a","credential_id":"c","view_digest":"v","observed_at_ms":1,"upstream_origin":"u","headers":{"x-remaining":"4"},"limit_window":"w","resets_at_ms":2,"resets_at_source":"s"}"#;
+    let report = r#"{"decision_id":"d","outcome":"completed","runner_code":"ok","credential_id":"c","reset_at_ms":1,"usage":{"input_tokens":12,"output_tokens":3,"cost_usd":0.5}}"#;
+    assert_eq!(
+        serde_json::to_string(&serde_json::from_str::<AccountForRequest>(account).unwrap())
+            .unwrap(),
+        account
+    );
+    assert_eq!(
+        serde_json::to_string(&serde_json::from_str::<AccountObserveRequest>(observe).unwrap())
+            .unwrap(),
+        observe
+    );
+    assert_eq!(
+        serde_json::to_string(&serde_json::from_str::<ReportRequest>(report).unwrap()).unwrap(),
+        report
+    );
 }
 
 #[test]

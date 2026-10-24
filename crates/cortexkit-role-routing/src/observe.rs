@@ -24,7 +24,9 @@ open_set! {
 }
 
 /// The `route.account_observe` request.
+/// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AccountObserveRequest {
     /// The idempotency key, unique per runner (a log position, say).
     pub event_id: String,
@@ -54,6 +56,9 @@ pub struct AccountObserveRequest {
     pub resets_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at_source: Option<String>,
+    /// The quota pool for this reading or used-account report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
 }
 
 impl AccountObserveRequest {
@@ -72,7 +77,80 @@ impl AccountObserveRequest {
             limit_window: None,
             resets_at_ms: None,
             resets_at_source: None,
+            pool: None,
         }
+    }
+
+    /// Set the admission the observation belongs to.
+    pub fn with_admission_id(mut self, admission_id: impl Into<String>) -> Self {
+        self.admission_id = Some(admission_id.into());
+        self
+    }
+
+    /// Set the run the observation belongs to.
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
+        self
+    }
+
+    /// Set the account that served the request.
+    pub fn with_served_account_id(mut self, served_account_id: impl Into<String>) -> Self {
+        self.served_account_id = Some(served_account_id.into());
+        self
+    }
+
+    /// Set the public credential id.
+    pub fn with_credential_id(mut self, credential_id: impl Into<String>) -> Self {
+        self.credential_id = Some(credential_id.into());
+        self
+    }
+
+    /// Set the digest of the runner's account view.
+    pub fn with_view_digest(mut self, view_digest: impl Into<String>) -> Self {
+        self.view_digest = Some(view_digest.into());
+        self
+    }
+
+    /// Set the original observation time in Unix milliseconds.
+    pub fn with_observed_at_ms(mut self, observed_at_ms: u64) -> Self {
+        self.observed_at_ms = Some(observed_at_ms);
+        self
+    }
+
+    /// Set the upstream origin of the observation.
+    pub fn with_upstream_origin(mut self, upstream_origin: impl Into<String>) -> Self {
+        self.upstream_origin = Some(upstream_origin.into());
+        self
+    }
+
+    /// Set the provider's raw rate-limit headers, with lowercase names.
+    pub fn with_headers(mut self, headers: BTreeMap<String, String>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    /// Set the observed usage window.
+    pub fn with_limit_window(mut self, limit_window: impl Into<String>) -> Self {
+        self.limit_window = Some(limit_window.into());
+        self
+    }
+
+    /// Set the usage window's reset time in Unix milliseconds.
+    pub fn with_resets_at_ms(mut self, resets_at_ms: u64) -> Self {
+        self.resets_at_ms = Some(resets_at_ms);
+        self
+    }
+
+    /// Set the source of the usage window's reset time.
+    pub fn with_resets_at_source(mut self, resets_at_source: impl Into<String>) -> Self {
+        self.resets_at_source = Some(resets_at_source.into());
+        self
+    }
+
+    /// Set the quota pool for the reading or used-account report.
+    pub fn with_pool(mut self, pool: impl Into<String>) -> Self {
+        self.pool = Some(pool.into());
+        self
     }
 }
 
@@ -123,6 +201,7 @@ pub fn parse_account_observe_request(params: &Value) -> Result<AccountObserveReq
         limit_window: members.optional_text("limit_window", None)?,
         resets_at_ms: members.optional("resets_at_ms")?,
         resets_at_source: members.optional_text("resets_at_source", None)?,
+        pool: members.pool()?,
     })
 }
 

@@ -1,0 +1,14 @@
+{
+  "about": "The flat observation carries pool for both readings and used-account reports.",
+  "requests": [
+    {"name": "reading_pool", "params": {"event_id": "e", "kind": "attempt", "pool": "reading.pool_1-x", "headers": {"x-ratelimit-remaining": "4"}}},
+    {"name": "used_account_pool", "params": {"event_id": "e", "kind": "run_finished", "served_account_id": "account-1", "pool": "served.pool"}},
+    {"name": "null_pool_is_absent", "params": {"event_id": "e", "kind": "attempt", "pool": null}, "encodes_as": {"event_id": "e", "kind": "attempt"}}
+  ],
+  "refused": [
+    {"name": "empty_pool", "params": {"event_id": "e", "kind": "attempt", "pool": ""}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}},
+    {"name": "invalid_pool_alphabet", "params": {"event_id": "e", "kind": "attempt", "pool": "a/b"}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}},
+    {"name": "non_string_pool", "params": {"event_id": "e", "kind": "attempt", "pool": 7}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}}
+  ],
+  "answers": []
+}

@@ -361,3 +361,82 @@ async fn matching_tool_provider_module_names_fails() {
     )
     .await;
 }
+
+// Each new rule has a positive probe and a single-rule faulty provider.
+// The positive probes also make deliberate mutation runs fail by case name.
+macro_rules! account_case {
+    ($case:ident, $faulty:ident, $defect:ident, $because:literal) => {
+        #[tokio::test]
+        async fn $case() {
+            let report = run_suite(&FakeSubject::new(Defects::default())).await;
+            assert_eq!(
+                report.outcome(stringify!($case)),
+                Some(&CheckOutcome::Passed),
+                "{}",
+                report.render()
+            );
+        }
+
+        #[tokio::test]
+        async fn $faulty() {
+            breaks(
+                Defects {
+                    $defect: true,
+                    ..Defects::default()
+                },
+                stringify!($case),
+                $because,
+            )
+            .await;
+        }
+    };
+}
+
+account_case!(
+    parent_account_preference,
+    choosing_parent_despite_alternative_fails,
+    ignores_parent_preference,
+    "picked the parent's account"
+);
+account_case!(
+    parent_account_fallback,
+    refusing_parent_fallback_fails,
+    refuses_parent_fallback,
+    "child admission was refused"
+);
+account_case!(
+    eligibility_never_holds_or_exhausts,
+    holding_on_eligibility_fails,
+    holds_on_eligibility,
+    "another model after eligibility report was refused account_hold"
+);
+account_case!(
+    unknown_pool_accepted,
+    refusing_unknown_pool_fails,
+    refuses_unknown_pool,
+    "an unseen well-formed pool was refused"
+);
+account_case!(
+    malformed_pool_refused_by_field,
+    wrong_malformed_pool_detail_fails,
+    malformed_pool_wrong_detail,
+    "malformed pool must name detail.field pool"
+);
+account_case!(
+    pool_body_admission_conflict,
+    ignoring_pool_body_fails,
+    ignores_pool_body,
+    "changed pool under reused admission_id was answered"
+);
+account_case!(
+    parent_body_admission_conflict,
+    ignoring_parent_body_fails,
+    ignores_parent_body,
+    "changed parent_conversation_key under reused admission_id was answered"
+);
+account_case!(
+    new_report_members_conflict,
+    ignoring_new_report_members_fails,
+    ignores_report_members,
+    "changed pool under reused decision_id was answered"
+);
