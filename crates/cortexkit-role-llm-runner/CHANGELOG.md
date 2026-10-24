@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.8
+
+- Add `serializer_profile::OWNED_BROCA` and `PI`, and support their part containers in `top_level_part_count` and `ReadMessage::check_descriptor_rows(profile)`. Malformed containers are refused by profile name; existing profiles and wire types are unchanged.
+- Pin the four supported profiles' part containers in the contract, with unit tests for message samples, descriptor shapes and malformed-container refusals.
+
 ## 0.6.7
 
 - Update the tool-provider test dependency to 0.13.0 for the `tool-result/v1` format rename. Runtime dependencies and wire behavior are unchanged.

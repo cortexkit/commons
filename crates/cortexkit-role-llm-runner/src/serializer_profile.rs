@@ -6,9 +6,9 @@
 //! profile can read the body. The same value reaches a session's providers
 //! as their plan item's `params.serializer_profile` (pinned in the
 //! step-transform-provider and compaction-provider contracts, which name
-//! `opencode-aisdk`). This module defines [`ANTHROPIC_MESSAGES`] and pins
-//! the body schema of [`OPENCODE_AISDK`]; `display` holds each profile's
-//! projection to a display row.
+//! `opencode-aisdk`). This module names the supported profiles and pins
+//! their part containers; `display` holds the supported projections to
+//! display rows.
 
 use serde_json::Value;
 
@@ -30,9 +30,20 @@ pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
 /// finished stay as the runner first read them.
 pub const OPENCODE_AISDK: &str = "opencode-aisdk";
 
-/// Count top-level parts without deriving their runner-defined keys. Anthropic
-/// string content (including a whole-content descriptor ref) is one part;
-/// content arrays and OpenCode's `parts` count only their immediate elements.
+/// The `owned-broca` profile: an entry body stores its parts in a `content`
+/// array. Descriptors replace payloads inside a part, never the whole array.
+pub const OWNED_BROCA: &str = "owned-broca";
+
+/// The `pi` profile: an entry body is a wrapped journal message with its parts
+/// at `/message/content`, not a bare message body. String content or a
+/// whole-content `text_ref` is one part; array content holds parts in order.
+pub const PI: &str = "pi";
+
+/// Count top-level parts without deriving their runner-defined keys.
+/// `anthropic-messages` uses `content`, `opencode-aisdk` uses `parts`,
+/// `owned-broca` uses a `content` array, and `pi` uses `/message/content`.
+/// Arrays count only their immediate elements. For `anthropic-messages` and
+/// `pi`, a string (even empty) or a whole-content `text_ref` is one part.
 /// Unknown profiles and malformed part containers are refused by name.
 pub fn top_level_part_count(profile: &str, message: &Value) -> Result<usize, String> {
     match profile {
@@ -53,6 +64,21 @@ pub fn top_level_part_count(profile: &str, message: &Value) -> Result<usize, Str
             .and_then(Value::as_array)
             .map(Vec::len)
             .ok_or_else(|| "opencode-aisdk message parts must be an array".into()),
+        OWNED_BROCA => message
+            .get("content")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .ok_or_else(|| "owned-broca message content must be an array".into()),
+        PI => match message.pointer("/message/content") {
+            Some(Value::Array(parts)) => Ok(parts.len()),
+            Some(Value::String(_)) => Ok(1),
+            Some(Value::Object(reference))
+                if reference.get("type").and_then(Value::as_str) == Some("text_ref") =>
+            {
+                Ok(1)
+            }
+            _ => Err("pi wrapped message content must be a string, array or text_ref".into()),
+        },
         _ => Err(format!("unknown serializer profile: {profile}")),
     }
 }
@@ -174,6 +200,174 @@ mod tests {
             assert_eq!(
                 top_level_part_count(OPENCODE_AISDK, &message).unwrap_err(),
                 "opencode-aisdk message parts must be an array"
+            );
+        }
+    }
+
+    #[test]
+    fn owned_broca_counts_only_content_array_parts() {
+        use serde_json::json;
+        for (message, count) in [
+            (
+                json!({"role":"user","content":[{"type":"text","text":"hello"}]}),
+                1,
+            ),
+            (
+                json!({"role":"assistant","content":[{"type":"text","text":"answer"}],
+                    "origin":{"provider_module_id":"p","model_id":"m"}}),
+                1,
+            ),
+            (
+                json!({"role":"assistant","content":[{"type":"tool_call",
+                    "tool_call_id":"reduce_old_outputs","tool_name":"ctx_reduce",
+                    "input":{"drop":"2,5"}}],
+                    "origin":{"provider_module_id":"p","model_id":"m"}}),
+                1,
+            ),
+            (
+                json!({"role":"assistant","content":[{"type":"text","text":"answer"},
+                    {"type":"reasoning","text":"reason"},
+                    {"type":"tool_call","tool_call_id":"c1","tool_name":"read","input":{}}],
+                    "origin":{"provider_module_id":"p","model_id":"m"},
+                    "tool_calls":[{"id":"c1"},{"id":"c2"}]}),
+                3,
+            ),
+            (
+                json!({"role":"user","content":[{"type":"tool_result","tool_call_id":"c1",
+                    "output":[{"type":"text","text":"image"},
+                        {"type":"image","data":"AAAA","mime_type":"image/png"}]}]}),
+                1,
+            ),
+            (json!({"role":"user","content":[]}), 0),
+            (
+                json!({"role":"user","content":[{"type":"text","text":{"type":"text_ref"}},
+                    {"type":"image","data":{"type":"media_ref"}}]}),
+                2,
+            ),
+        ] {
+            assert_eq!(
+                top_level_part_count(OWNED_BROCA, &message),
+                Ok(count),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn owned_broca_refuses_malformed_content_by_name() {
+        use serde_json::json;
+        let error = "owned-broca message content must be an array";
+        for content in [
+            json!("hello"),
+            json!(""),
+            json!({"type":"text_ref","byte_size":100}),
+            json!(null),
+            json!(42),
+            json!(false),
+            json!({}),
+        ] {
+            assert_eq!(
+                top_level_part_count(OWNED_BROCA, &json!({"role":"user","content":content}))
+                    .unwrap_err(),
+                error
+            );
+        }
+        assert_eq!(
+            top_level_part_count(
+                OWNED_BROCA,
+                &json!({"role":"assistant",
+                "origin":{"provider_module_id":"p","model_id":"m"},"tool_calls":[]})
+            )
+            .unwrap_err(),
+            error
+        );
+    }
+
+    #[test]
+    fn pi_counts_only_wrapped_message_content_parts() {
+        use serde_json::json;
+        for (message, count) in [
+            (
+                json!({"type":"message","id":"a1","parentId":null,
+                    "message":{"role":"user","content":"hello"}}),
+                1,
+            ),
+            (
+                json!({"type":"message","id":"a2","parentId":"a1",
+                    "message":{"role":"user","content":[{"type":"text","text":"see"},
+                        {"type":"image","data":"AAAA","mimeType":"image/png"}]}}),
+                2,
+            ),
+            (
+                json!({"type":"message","id":"a3","parentId":"a2",
+                    "message":{"role":"assistant","content":[{"type":"thinking","thinking":"..."},
+                        {"type":"text","text":"ok"},
+                        {"type":"toolCall","id":"c1","name":"read","arguments":{}}]}}),
+                3,
+            ),
+            (
+                json!({"type":"message","id":"a4","parentId":"a3",
+                    "message":{"role":"toolResult","toolCallId":"c1","toolName":"read",
+                        "content":[{"type":"text","text":"..."}],"isError":false,"details":{"x":1}}}),
+                1,
+            ),
+            (
+                json!({"type":"message","id":"a5","parentId":"a4",
+                    "message":{"role":"user","content":""}}),
+                1,
+            ),
+            (
+                json!({"type":"message","id":"a6","parentId":"a5",
+                    "message":{"role":"user","content":{"type":"text_ref","byte_size":100}}}),
+                1,
+            ),
+            (
+                json!({"type":"message","id":"a7","parentId":"a6",
+                    "message":{"role":"user","content":[]}}),
+                0,
+            ),
+        ] {
+            assert_eq!(top_level_part_count(PI, &message), Ok(count), "{message}");
+        }
+    }
+
+    #[test]
+    fn pi_refuses_bare_bodies_and_malformed_content_by_name() {
+        use serde_json::json;
+        let error = "pi wrapped message content must be a string, array or text_ref";
+        for content in [
+            json!(null),
+            json!(42),
+            json!(false),
+            json!({}),
+            json!({"type":"unknown_ref"}),
+            json!({"type":"media_ref"}),
+            json!({"type":42}),
+        ] {
+            assert_eq!(
+                top_level_part_count(
+                    PI,
+                    &json!({"type":"message","id":"a1","parentId":null,
+                    "message":{"role":"user","content":content}})
+                )
+                .unwrap_err(),
+                error
+            );
+        }
+        for message in [
+            json!({}),
+            json!({"role":"user","content":"hello"}),
+            json!({"role":"user","content":[]}),
+            json!({"role":"user","content":{"type":"text_ref"}}),
+            json!({"type":"message","message":null}),
+            json!({"type":"message","message":"hello"}),
+            json!({"type":"message","message":[]}),
+            json!({"type":"message","message":{"role":"user"},"content":"outside"}),
+        ] {
+            assert_eq!(
+                top_level_part_count(PI, &message).unwrap_err(),
+                error,
+                "{message}"
             );
         }
     }

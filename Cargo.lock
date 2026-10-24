@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",

@@ -479,7 +479,21 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   `ReadMessage::check_descriptor_rows(profile)` checks the provider-visible
   envelope: digest shapes, unique keys, the profile's top-level part count,
   and exact equality with the entry's tag-row keys in order. Missing tag rows
-  are refused by name, as are unknown profiles.
+  are rejected. Unknown profiles and malformed part containers return errors
+  naming the profile.
+  `serializer_profile::top_level_part_count(profile, message)` counts the
+  following containers without deriving part keys:
+
+  | Profile | Part container |
+  | --- | --- |
+  | `anthropic-messages` | `content`: array length, or one part for a string (even empty) or whole-content `text_ref`. |
+  | `opencode-aisdk` | `parts`: array length. |
+  | `owned-broca` | `content`: array length only; strings, missing content and whole-content `text_ref` are malformed. |
+  | `pi` | `/message/content` in a wrapped journal entry: array length, or one part for a string (even empty) or whole-content `text_ref`. Bare bodies and other content types are malformed. |
+
+  Arrays count only their immediate elements, never nested media. No other
+  member contributes parts, including `role`, `origin` or `tool_calls` for
+  `owned-broca`, or `details` on a `pi` message with role `toolResult`.
   `ReadMessage::check_descriptors(keys)` is the runner-side strict check using
   independently known keys in message order; a provider uses the complete keys
   the entry itself serves in its `tags` rows, never keys derived from bytes.
@@ -636,8 +650,10 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   body (`serializer_profile`). It is the value a session's providers
   receive as their plan item's `params.serializer_profile`, which the
   step-transform-provider and compaction-provider contracts pin; they name
-  `opencode-aisdk`. This role defines `anthropic-messages`
-  (`serializer_profile::ANTHROPIC_MESSAGES`).
+  `opencode-aisdk`. This role names `anthropic-messages`
+  (`serializer_profile::ANTHROPIC_MESSAGES`), `opencode-aisdk`
+  (`serializer_profile::OPENCODE_AISDK`), `owned-broca`
+  (`serializer_profile::OWNED_BROCA`) and `pi` (`serializer_profile::PI`).
 - [pinned] **`anthropic-messages`.** An entry's body is the message exactly
   as the client sent it in its Anthropic Messages request, with
   `cache_control` members removed in two places only: at the message's
@@ -656,6 +672,12 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   `filename?`) and OpenCode's bookkeeping parts. Fields OpenCode changes
   after a message finished stay as the runner first read them (read
   stability, §4.2). `display::opencode_aisdk` is its decoder (§4.7).
+- [pinned] **`owned-broca`.** An entry's body has a `content` array of parts.
+  Descriptors replace payloads inside a part, never the whole array.
+- [pinned] **`pi`.** An entry's body is the wrapped journal entry
+  `{type: "message", id, parentId, message: {role, content, ...}}`, not a
+  bare message body. Only `/message/content` holds parts, as specified in
+  §4.2; a whole-content `text_ref` replaces a single string part.
 - [pinned] Read stability (§4.2) applies: the runner serves the form it
   first ingested (`serializer_profile::ingest`). A client re-sending the
   same message with its cache marker moved (a string `content` turning
