@@ -1,0 +1,11 @@
+{
+  "agent": {"name": "Quill", "agent_id": null, "project": "demo-project", "workspace": null, "role": "scribe"},
+  "model": {"provider": "example", "id": "model-large-2", "family": "large", "variant": "default"},
+  "harness": {"id": "example-harness", "capabilities": {"submit_tool": true}},
+  "tools": {"search": true},
+  "mcp": {},
+  "modules": {"memory": true},
+  "demand": {"iq": 80, "eq": 40},
+  "env": {"os": "linux", "timezone": "Europe/Istanbul", "locale": "en-GB"},
+  "module": {"max_words": 400}
+}

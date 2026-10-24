@@ -1,0 +1,41 @@
+{
+  "module": "demo",
+  "role": "scribe",
+  "project_key": "pj-demo-1",
+  "extensions": [
+    "limits"
+  ],
+  "tiers": [
+    {
+      "name": "base",
+      "trust": "operator",
+      "root": "scribe/tiers/base",
+      "roles_path": "roles"
+    },
+    {
+      "name": "user",
+      "trust": "operator",
+      "root": "scribe/tiers/user",
+      "roles_path": "cortexkit/demo/roles"
+    },
+    {
+      "name": "project",
+      "trust": "repository",
+      "root": "scribe/tiers/project",
+      "roles_path": ".cortexkit/demo/roles"
+    }
+  ],
+  "context": "scribe/context.json",
+  "supplied": {
+    "mc/memory-profile@1": "scribe/supplied/memory-profile.md"
+  },
+  "approvals": [
+    {
+      "module": "demo",
+      "role": "scribe",
+      "project_key": "pj-other-2",
+      "relative_path": ".cortexkit/demo/roles/scribe",
+      "layer_digest": "sha256:10800e6a5730e83f6c74f28b5673f279424b577d6df328cd88ee7d4c0b34d911"
+    }
+  ]
+}

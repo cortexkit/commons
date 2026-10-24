@@ -1,0 +1,4 @@
+# The golden vectors are compared as exact bytes, and the echo-crlf fixture
+# must keep its CRLF line endings, so no line-ending conversion applies here
+# (the repository default would rewrite CRLF to LF on commit).
+test-vectors/** -text

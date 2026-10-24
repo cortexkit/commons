@@ -1,0 +1,42 @@
+# cortexkit-persona — the shared engine a module uses to load, merge and
+# render the system text ("persona") of its own roles: tier ladders with trust
+# classes, project-tier approvals, typed extensions, MiniJinja rendering in a
+# sealed environment, LF-normalised digests and a serialisable resolution
+# report. SPEC.md states every rule; the golden vectors ship in test-vectors/.
+[package]
+name = "cortexkit-persona"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Load, merge and render persona/v1 role bundles: tiers with trust classes, project-tier approvals, typed extensions, sealed MiniJinja templates, LF-normalised digests and a resolution report."
+keywords = ["persona", "prompt", "template", "minijinja", "cortexkit"]
+categories = ["template-engine"]
+publish = true
+# The golden vectors ship with the crate so a consumer can check them without
+# a checkout of this repository.
+include = ["Cargo.toml", "SPEC.md", "README.md", "CHANGELOG.md", "src/**", "tests/**", "test-vectors/**"]
+
+[dependencies]
+# The config-home lookup: a non-empty XDG_CONFIG_HOME; on Windows APPDATA,
+# then USERPROFILE\AppData\Roaming; then HOME/.config; otherwise a bare
+# `.config`, which this crate refuses as relative. The same rule the
+# subconscious daemon uses for its own config file, pinned in that crate to
+# the daemon's golden rows.
+cortexkit-store-types = { version = "0.2.2", path = "../cortexkit-store-types" }
+# Exact pin: rendered bytes are part of the contract, so a MiniJinja upgrade is
+# a deliberate, versioned change (see SPEC.md, "Bytes and digests"). The
+# feature set is the minimum: no loader, no macros, no debug helpers.
+minijinja = { version = "=2.12.0", default-features = false, features = ["builtins", "fuel", "multi_template", "serde", "unstable_machinery"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# RFC 8785 canonical JSON for the source revision.
+serde_json_canonicalizer = "0.3"
+sha2 = "0.10"
+thiserror = "2"
+# The maintained fork of serde_yaml, for the PERSONA.md front matter.
+yaml_serde = "0.10.7"
+
+[dev-dependencies]
+tempfile = "3"

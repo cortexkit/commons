@@ -1,0 +1,69 @@
+{
+  "format": "persona/v1",
+  "module": "demo",
+  "role": "scribe",
+  "tiers": [
+    {
+      "name": "base",
+      "trust": "operator",
+      "root": "test-vectors/persona-v1/scribe/tiers/base",
+      "relative_path": "roles/scribe",
+      "present": true,
+      "approval": "not_required",
+      "layer_digest": "sha256:3e5dffaf972bcadead21b34ec71ababcd612debee2d291d98bbd9d621580054f",
+      "used": true
+    },
+    {
+      "name": "user",
+      "trust": "operator",
+      "root": "test-vectors/persona-v1/scribe/tiers/user",
+      "relative_path": "cortexkit/demo/roles/scribe",
+      "present": true,
+      "approval": "not_required",
+      "layer_digest": "sha256:96ef7b7f96466030a69e73bdf5517d077caa30a4ead10bee0ea295bb62c8667b",
+      "used": true
+    },
+    {
+      "name": "project",
+      "trust": "repository",
+      "root": "test-vectors/persona-v1/scribe/tiers/project",
+      "relative_path": ".cortexkit/demo/roles/scribe",
+      "present": true,
+      "approval": "approved",
+      "layer_digest": "sha256:10800e6a5730e83f6c74f28b5673f279424b577d6df328cd88ee7d4c0b34d911",
+      "used": true
+    }
+  ],
+  "parents": [],
+  "fragments": [
+    {
+      "id": "rules",
+      "origin": {
+        "kind": "bundle",
+        "tier": "base"
+      },
+      "digest": "sha256:14f7e81c96afe89c70a7e9c84a9e0e9e637bf4d111a44ad78d627698c72a1800",
+      "included": true
+    },
+    {
+      "id": "tone",
+      "origin": {
+        "kind": "bundle",
+        "tier": "user"
+      },
+      "digest": "sha256:35bc01499c3b477537e3e8a8c30ff48c234ec15ca2a9596084ac2fe8fd97cd75",
+      "included": true
+    },
+    {
+      "id": "mc/memory-profile@1",
+      "origin": {
+        "kind": "supplied"
+      },
+      "digest": "sha256:c3f83843efd2ba4a2346c1fc15dbda4d310e1f05ebca74ede98c14f76a027592",
+      "included": true
+    }
+  ],
+  "entry_tier": "project",
+  "source_revision": "sha256:c9f0ec4237eeeb25184b1026dac384f028edd522176c67ec5cf67786b2378056",
+  "rendered_digest": "sha256:f7464d5e50bb0b1d46d53ba4417848baf3eb13011b5bb56e4c42e261179e614d"
+}

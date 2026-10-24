@@ -1,0 +1,11 @@
+{
+  "agent": {"role": "echo"},
+  "model": {"provider": "example", "id": "model-small-1", "variant": "fast"},
+  "harness": {"id": "example-harness", "capabilities": {"submit_tool": true}},
+  "tools": {},
+  "mcp": {},
+  "modules": {},
+  "demand": {"iq": 30, "eq": 30},
+  "env": {"os": "windows", "timezone": "UTC", "locale": "tr-TR"},
+  "module": null
+}

@@ -1,0 +1,32 @@
+{
+  "format": "persona/v1",
+  "module": "demo",
+  "role": "echo",
+  "tiers": [
+    {
+      "name": "base",
+      "trust": "operator",
+      "root": "test-vectors/persona-v1/echo-lf/tiers/base",
+      "relative_path": "roles/echo",
+      "present": true,
+      "approval": "not_required",
+      "layer_digest": "sha256:5a1c67f0b12fe0376e2b81bd4499bcb8497df8a5b9411e92322b0c9930d8bbbf",
+      "used": true
+    }
+  ],
+  "parents": [],
+  "fragments": [
+    {
+      "id": "footer",
+      "origin": {
+        "kind": "bundle",
+        "tier": "base"
+      },
+      "digest": "sha256:e4d6d21382529f9e6104369780ff057b3625226e234619c9212a042cba2cdacd",
+      "included": true
+    }
+  ],
+  "entry_tier": "base",
+  "source_revision": "sha256:2489102716b4d009c78e6c14bdf8b058bcd9dc4af43ff9a71572fee18e379b37",
+  "rendered_digest": "sha256:b76f2c5f3aed588fdbac4ecf9a860505328e8f37f6a9f16bbe8c122e0176c8a2"
+}

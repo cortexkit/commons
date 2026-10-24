@@ -1,0 +1,17 @@
+{
+  "module": "demo",
+  "role": "echo",
+  "project_key": null,
+  "extensions": [],
+  "tiers": [
+    {
+      "name": "base",
+      "trust": "operator",
+      "root": "echo-lf/tiers/base",
+      "roles_path": "roles"
+    }
+  ],
+  "approvals": [],
+  "context": "echo-context.json",
+  "supplied": {}
+}
