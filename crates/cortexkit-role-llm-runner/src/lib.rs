@@ -148,6 +148,10 @@ pub mod ops {
 /// refuses a module missing any of them, by name, before routing anything.
 pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::SESSION_BASELINE];
 
+/// The provider manifest capability required to admit preset-less system text.
+/// Read from the daemon catalog, not from a provider's crate version.
+pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v1";
+
 /// Capability names: the module-level groups `role.describe` declares, and
 /// the session-level capabilities a session's admission reply or baseline
 /// declares.
@@ -219,6 +223,9 @@ pub mod capabilities {
     /// `session.baseline`. Identical later plans do not fetch again; different
     /// plans are refused to preserve the session's frozen manifest.
     pub const PLANS: &str = "plans";
+    /// Admit preset-less system text only for a provider declaring
+    /// `system-text-default/v1`, and forward the item unchanged.
+    pub const SYSTEM_TEXT_DEFAULT: &str = "system_text_default";
     /// Hosting a compaction provider: the runner half of
     /// compaction-provider 0.3.0 §3 (Setup, advance notices, views applied at
     /// step boundaries, rides, the ceiling and native markers). Requires
@@ -298,6 +305,7 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (SYSTEM_TEXT_DEFAULT, &[ops::SESSION_SEND]),
         (
             OUTPUT_REFS,
             &[ops::SESSION_OUTPUT_REFS, ops::SESSION_OUTPUT_REF_READ],

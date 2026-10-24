@@ -6,14 +6,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = "0.12.0"
+cortexkit-role-tool-provider = "0.12.1"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = { version = "0.12.0", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.12.1", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_tool_provider::vectors::FILES` and a
@@ -36,5 +36,9 @@ lists it (`lists_preset`).
 
 A system-text item's preset is optional (`SystemTextItem.preset` is an
 `Option<String>`): without one, the provider answers with its default system
-text. Send an item without a preset only to a provider on 0.12.0 or later;
-an older one refuses it as `invalid_params`.
+text. Since 0.12.1, `SYSTEM_TEXT_DEFAULT` names the manifest fact
+`system-text-default/v1`. Declare it in `capabilities.provides` only when
+serving that default. A composer omits a system-text preset only when both
+the provider declares this fact (read from `catalog.list`) and the runner
+declares `system_text_default`; otherwise it keeps naming the preset.
+Crate versions are not evidence of either promise.

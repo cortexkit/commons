@@ -72,6 +72,7 @@ mod history;
 mod media;
 mod output_refs;
 mod session_change;
+mod system_text_default;
 mod tags;
 mod user_commands;
 pub use compaction::{CacheTtlDefect, CompactionDefect, CompactionRouteMode};
@@ -166,6 +167,8 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub system_text_default_invents_preset: bool,
+    pub system_text_default_ignores_catalog: bool,
     pub incarnation_changes_on_cut: bool,
     pub incarnation_reused_on_recreation: bool,
     pub head_sender_ignores_caller: bool,
@@ -520,6 +523,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    system_text_default: Mutex<BTreeMap<String, system_text_default::Provider>>,
     held_replies: Mutex<BTreeMap<String, held_calls::HeldReply>>,
     standalone_in_process: bool,
     /// Host entries every session holds before the runner numbered
@@ -2958,6 +2962,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = self.admit_system_text_default(session, &params) {
+            return Ok(reply);
+        }
         if let Some(reply) = self.refuse_fork(session) {
             return Ok(reply);
         }
@@ -4882,6 +4889,7 @@ impl FakeSubject {
                     structured_output_support: Mutex::new(BTreeMap::new()),
                     model_requests: Mutex::new(BTreeMap::new()),
                     user_commands: Mutex::new(user_commands::Commands::default()),
+                    system_text_default: Mutex::new(BTreeMap::new()),
                     pending_model_holds: Mutex::new(BTreeSet::new()),
                     held_models: Mutex::new(BTreeMap::new()),
                     staging_holds: Mutex::new(BTreeSet::new()),
@@ -5017,6 +5025,23 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn prepare_system_text_default(
+        &self,
+        session: &str,
+        provides: &[String],
+        item: &Value,
+    ) -> Result<Map<String, Value>, HarnessError> {
+        self.prepare_default_text(session, provides, item)
+    }
+
+    async fn system_text_default_observation(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<cortexkit_role_llm_runner_conformance::SystemTextDefaultObservation, HarnessError>
+    {
+        self.observe_default_text(handle, session)
+    }
     async fn cut_incarnation_log(&self, session: &str) -> Result<bool, HarnessError> {
         if !self.incarnation_fixtures {
             return Ok(false);

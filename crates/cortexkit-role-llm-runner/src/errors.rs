@@ -389,6 +389,26 @@ pub const SCOPE_UNSUPPORTED: &str = "scope_unsupported";
 /// `detail.provider` names it. Nothing was written. Retryable.
 pub const FETCH_UNAVAILABLE: &str = "fetch_unavailable";
 
+/// A preset-less system-text item's provider lacks `system-text-default/v1`.
+/// `detail.provider` names the module id. Terminal, never timed; nothing is
+/// written or forwarded.
+pub const SYSTEM_TEXT_PRESET_REQUIRED: &str = "system_text_preset_required";
+
+/// The provider module id whose system-text item still requires a preset.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SystemTextPresetRequiredDetail {
+    pub provider: String,
+}
+
+impl SystemTextPresetRequiredDetail {
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+        }
+    }
+}
+
 /// Admission found fetched items that disagree with the plan's composition.
 /// `detail.differences` names them. Nothing was written. The starter
 /// preflights again and retries once with a new plan, never the same one.
@@ -527,6 +547,7 @@ pub const CODES: &[&str] = &[
     SCOPE_ADOPTION_REFUSED,
     SCOPE_UNSUPPORTED,
     FETCH_UNAVAILABLE,
+    SYSTEM_TEXT_PRESET_REQUIRED,
     PLAN_STALE,
     TOOL_NAME_COLLISION,
     PLAN_DRIFT,
@@ -757,9 +778,11 @@ mod tests {
     fn retryability_matches_the_vectors() {
         let file = vectors::load("errors.json");
         let output_refs = vectors::load("output-refs.json");
+        let system_text_default = vectors::load("system-text-default.json");
         let cases: Vec<_> = vectors::cases(&file, "codes")
             .iter()
             .chain(vectors::cases(&output_refs, "codes"))
+            .chain(vectors::cases(&system_text_default, "codes"))
             .collect();
         let listed: Vec<&str> = cases
             .iter()

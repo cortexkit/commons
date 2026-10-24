@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5
+
+- Add the `system_text_default` describe group and typed accessor, plus the provider capability name without a runtime tool-provider dependency.
+- Pin the joint composer rule and catalog admission check, with terminal `system_text_preset_required`, its typed provider detail, and describe/refusal vectors. Existing vector data is unchanged.
+- Keep refusal codes open strings and unknown codes terminal; no refusal-code enum is introduced.
+
 ## 0.6.4
 
 - Require cortexkit-rich-ui-syntax 0.2.0. The functions this crate calls

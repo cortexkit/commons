@@ -113,6 +113,7 @@ mod session_change;
 mod session_usage;
 mod structured_output;
 mod subject;
+mod system_text_default;
 mod tags;
 mod tool_calls;
 mod user_commands;
@@ -130,7 +131,8 @@ pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
     AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
     RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall,
-    ScriptedTurn, ScriptedUsage, ToolResultObservation, UserCommandFixture, UserCommandObservation,
+    ScriptedTurn, ScriptedUsage, SystemTextDefaultObservation, ToolResultObservation,
+    UserCommandFixture, UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

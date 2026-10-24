@@ -696,16 +696,26 @@ where
         message.part_digests.as_ref() == Some(&expected),
         "part digests do not identify stored parts",
     )?;
-    for page in [&inline, &descriptors] {
+    for (page, required) in [(&inline, false), (&descriptors, true)] {
         let other = page
             .messages
             .iter()
             .find(|m| m.mid == message.mid)
             .ok_or("rendered read lost a stored message")?;
-        check(
-            other.digest == message.digest && other.part_digests == message.part_digests,
-            "media rendering changed stored content identities",
-        )?;
+        // Inline reads may omit either identity independently; descriptors
+        // must carry both. A supplied identity always names the stored content.
+        if required || other.digest.is_some() {
+            check(
+                other.digest == message.digest,
+                "media rendering changed stored content digest",
+            )?;
+        }
+        if required || other.part_digests.is_some() {
+            check(
+                other.part_digests == message.part_digests,
+                "media rendering changed stored part digests",
+            )?;
+        }
     }
     media(route, &hash, bytes).await
 }

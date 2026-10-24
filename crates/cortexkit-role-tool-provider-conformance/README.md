@@ -2,12 +2,13 @@
 
 Run `run_suite` against a live provider using its `ToolProviderSubject`, real
 `Harness`, and `ToolRoute` adapter. Each case is reported by name as `PASS`,
-`FAIL`, or `SKIP`; missing capabilities never count as passes. Simulated
+`FAIL`, `SKIP`, or `N/A`; missing capabilities never count as passes. Simulated
 kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.12.0
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.12.1
+pairs with cortexkit-role-tool-provider 0.12.1. Version 0.12.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.12.0. Version 0.11.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.11.0. Version 0.10.1
 pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.4; version
@@ -165,3 +166,19 @@ hide a whitespace-only or member-order change. The other cases cover catalog
 and reply shape, the five-second first-reply deadline, codemode/flow refusals and
 accepted progress followed by a terminal command reply. Deliberately faulty
 fakes prove every named command case, including a bytes-only repeat defect.
+
+## Default system-text manifest fact
+
+Version 0.12.1 adds `system_text_default_served`. Set
+`Capability::SystemTextDefault` only when the subject's module manifest lists
+`system-text-default/v1` in `capabilities.provides`. The route has no daemon
+catalog access, so this declaration is an adapter fixture flag. Supply
+`system_text_catalog_arguments` and, when the default is also named,
+`system_text_default_preset`. The case removes both presets, requires valid
+system text rather than a refusal, checks repeat stability and compares with
+the named default where available. Undeclared subjects receive `N/A`, never
+`SKIP` or `FAIL`. A faulty provider declaring the fact but refusing a
+preset-less item fails this case by name. The older
+`system_text_preset_optional_served` fixture and its skip behavior remain
+available for compatibility. `SystemTextOptionalPreset` is a conformance
+fixture flag, not a manifest fact; composers use `system-text-default/v1`.

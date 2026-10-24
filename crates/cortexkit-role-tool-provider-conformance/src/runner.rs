@@ -233,7 +233,13 @@ where
             .filter(|required| !capabilities.contains(required))
             .copied()
             .collect();
-        let outcome = if !missing.is_empty() {
+        let outcome = if spec.name == "system_text_default_served"
+            && !capabilities.contains(&Capability::SystemTextDefault)
+        {
+            CaseOutcome::Inapplicable {
+                reason: "provider does not declare system-text-default/v1".into(),
+            }
+        } else if !missing.is_empty() {
             CaseOutcome::Skipped { missing }
         } else {
             let result = match spec.name {
@@ -358,6 +364,7 @@ where
                 self.system_text_preflight_digest_stable().await
             }
             "system_text_preset_optional_served" => self.system_text_preset_optional_served().await,
+            "system_text_default_served" => self.system_text_preset_optional_served().await,
             "catalog_disabled_tool_absent" => self.catalog_disabled_tool_absent().await,
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,

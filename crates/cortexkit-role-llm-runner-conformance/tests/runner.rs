@@ -138,6 +138,11 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("system_text_default_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare system_text_default")
+    {
+        return;
+    }
     if case == "head_incarnation_survives_cut_and_changes_on_recreation"
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
     {
@@ -5231,6 +5236,48 @@ async fn attachments_reference_fake() {
     }
 }
 
+#[tokio::test]
+async fn attachments_inline_identities_optional() {
+    for variant in [
+        "attachments_inline_identities_omitted",
+        "attachments_inline_digest_omitted",
+        "attachments_inline_part_digests_omitted",
+    ] {
+        let report = run(&attachment_subject_with(variant)).await;
+        for case in CASES
+            .iter()
+            .filter(|case| case.name.starts_with("attachments_"))
+        {
+            assert_eq!(
+                report.outcome(case.name),
+                Some(&CaseOutcome::Passed),
+                "{variant}: {}\n{}",
+                case.name,
+                report.render()
+            );
+        }
+        assert_none_failed_but(&report, &[]);
+    }
+}
+
+#[tokio::test]
+async fn attachments_inline_wrong_digest_fails_by_name() {
+    attachment_read_fault(
+        "attachments_inline_digest",
+        "media rendering changed stored content digest",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachments_inline_wrong_part_digests_fail_by_name() {
+    attachment_read_fault(
+        "attachments_inline_part_digests",
+        "media rendering changed stored part digests",
+    )
+    .await;
+}
+
 macro_rules! attachment_control {
     ($name:ident) => {
         #[tokio::test]
@@ -5506,4 +5553,71 @@ async fn output_refs_unsupported_plan_write_before_refusal_is_detected() {
         failed(&report, "output_refs_unsupported_plan")
     );
     assert_none_failed_but(&report, &["output_refs_unsupported_plan"]);
+}
+
+fn system_text_default_subject(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.insert(Capability::SystemTextDefault);
+    subject
+}
+
+#[tokio::test]
+async fn system_text_default_forwarded_unchanged() {
+    let report = run(&system_text_default_subject(Defects::default())).await;
+    assert_eq!(
+        report.outcome("system_text_default_forwarded_unchanged"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn system_text_default_preset_required() {
+    let report = run(&system_text_default_subject(Defects::default())).await;
+    assert_eq!(
+        report.outcome("system_text_default_preset_required"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn system_text_default_invented_preset_fails_by_name() {
+    let report = run(&system_text_default_subject(Defects {
+        system_text_default_invents_preset: true,
+        ..Defects::default()
+    }))
+    .await;
+    let name = "system_text_default_forwarded_unchanged";
+    assert!(failed(&report, name).contains("byte-equal"));
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn system_text_default_forward_without_capability_fails_by_name() {
+    let report = run(&system_text_default_subject(Defects {
+        system_text_default_ignores_catalog: true,
+        ..Defects::default()
+    }))
+    .await;
+    let name = "system_text_default_preset_required";
+    assert!(failed(&report, name).contains("not refused"));
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn system_text_default_undeclared_is_not_applicable() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in [
+        "system_text_default_forwarded_unchanged",
+        "system_text_default_preset_required",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare system_text_default")
+        );
+    }
 }

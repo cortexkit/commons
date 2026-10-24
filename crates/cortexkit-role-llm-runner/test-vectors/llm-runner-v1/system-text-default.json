@@ -1,0 +1,14 @@
+{
+  "codes": [{"code": "system_text_preset_required", "retryable": false}],
+  "describe": {
+    "majors": [{"version": "llm-runner/v1", "stability": "alpha", "ops": ["role.describe", "session.baseline", "session.send"]}],
+    "implementation_version": "conformance",
+    "capabilities": ["plans", "system_text_default"],
+    "session_capabilities_from": "baseline"
+  },
+  "refusal": {
+    "code": "system_text_preset_required",
+    "message": "Provider requires a system-text preset",
+    "detail": {"provider": "example.system-text"}
+  }
+}

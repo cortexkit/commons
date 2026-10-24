@@ -35,6 +35,13 @@ async fn a_faithful_provider_passes_every_case_but_its_simulated_kills_fail_the_
     let report = run(&FakeSubject::new(Defects::default())).await;
     assert_eq!(report.cases.len(), CASES.len());
     for spec in CASES {
+        if spec.name == "system_text_default_served" {
+            assert!(matches!(
+                report.outcome(spec.name),
+                Some(CaseOutcome::Inapplicable { .. })
+            ));
+            continue;
+        }
         assert_passed(&report, spec.name);
     }
     assert_eq!(report.kills.len(), 2);
@@ -282,7 +289,9 @@ async fn ignoring_bind_mode_fails_the_mode_case() {
     let reason = failed(&report, "call_mode_matches_catalog");
     assert!(reason.contains("an unlisted-mode call"), "{reason}");
     for case in &report.cases {
-        if case.case != "call_mode_matches_catalog" {
+        if case.case == "system_text_default_served" {
+            assert!(matches!(case.outcome, CaseOutcome::Inapplicable { .. }));
+        } else if case.case != "call_mode_matches_catalog" {
             assert_passed(&report, case.case);
         }
     }
@@ -428,7 +437,12 @@ async fn digesting_a_json_wrapper_fails_system_text_digests_match_text_by_name()
         if spec.name == "system_text_preset_optional_served" {
             let reason = failed(&report, spec.name);
             assert!(reason.contains("system_text.item_digest"), "{reason}");
-        } else if spec.name != "system_text_digests_match_text" {
+        } else if ![
+            "system_text_digests_match_text",
+            "system_text_default_served",
+        ]
+        .contains(&spec.name)
+        {
             assert_passed(&report, spec.name);
         }
     }
@@ -577,7 +591,12 @@ async fn refusing_a_preset_less_system_text_item_fails_the_optional_preset_case_
     assert!(reason.contains("refused as invalid_params"), "{reason}");
     assert!(reason.contains("without a preset"), "{reason}");
     for spec in CASES {
-        if spec.name != "system_text_preset_optional_served" {
+        if ![
+            "system_text_preset_optional_served",
+            "system_text_default_served",
+        ]
+        .contains(&spec.name)
+        {
             assert_passed(&report, spec.name);
         }
     }
@@ -732,4 +751,40 @@ async fn user_command_codemode_scope_is_refused() {
     let report = run(&FakeSubject::new(Defects::default())).await;
     assert_passed(&report, "user_commands_codemode_refused");
     assert_passed(&report, "user_commands_flow_refused");
+}
+
+#[tokio::test]
+async fn system_text_default_served() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::SystemTextDefault);
+    assert_passed(&run(&subject).await, "system_text_default_served");
+}
+
+#[tokio::test]
+async fn system_text_default_refusing_provider_fails_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        refuse_preset_less_system_text: true,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::SystemTextDefault);
+    subject
+        .capabilities
+        .remove(&Capability::SystemTextOptionalPreset);
+    let report = run(&subject).await;
+    let reason = failed(&report, "system_text_default_served");
+    assert!(reason.contains("refused as invalid_params"), "{reason}");
+    let failures: Vec<_> = report
+        .cases
+        .iter()
+        .filter_map(|case| matches!(case.outcome, CaseOutcome::Failed { .. }).then_some(case.case))
+        .collect();
+    assert_eq!(failures, ["system_text_default_served"]);
+}
+
+#[tokio::test]
+async fn system_text_default_undeclared_is_not_applicable() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert!(matches!(report.outcome("system_text_default_served"),
+        Some(CaseOutcome::Inapplicable { reason }) if reason == "provider does not declare system-text-default/v1"));
+    assert!(report.render().contains("N/A system_text_default_served"));
 }

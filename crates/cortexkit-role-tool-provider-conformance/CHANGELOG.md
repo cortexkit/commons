@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- Add `system_text_default_served`, gated by the subject's manifest-fact fixture flag, with a named not-applicable result for undeclared subjects.
+- Add a faulty provider that declares the fact but refuses preset-less text and prove it fails the case by name. Preserve the older optional-preset case.
+
 ## 0.12.0
 
 - Breaking dependency update: the public `wire` re-export moves to

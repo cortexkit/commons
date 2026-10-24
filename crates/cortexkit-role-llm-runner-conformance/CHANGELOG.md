@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.3
+
+- Fix attachment read checks to accept independently omitted inline `digest` and `part_digests`, while requiring descriptors identities and validating any inline identities that are present.
+- Add `system_text_default_forwarded_unchanged` and `system_text_default_preset_required`, discovered from live describe; undeclared runners are not applicable.
+- Add scripted provider/catalog setup and external item-byte/durable-state observations. Faulty runners inventing a preset or forwarding without the provider fact fail their matching case by name.
+- Pair with llm-runner 0.6.5.
+
 ## 0.12.2
 
 - Require cortexkit-rich-ui-syntax 0.2.0. The functions this crate calls

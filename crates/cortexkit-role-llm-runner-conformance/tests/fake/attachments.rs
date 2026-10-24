@@ -592,6 +592,21 @@ pub fn page_of(page: &mut ReadPage, mode: Option<MediaMode>, defects: &Defects) 
         if blocks && defects.attachments == "attachments_blocks_digest" {
             message.digest = Some(content_digest(&json!({"rendered": marker_text(&body)})));
         }
+        if !blocks {
+            match defects.attachments {
+                "attachments_inline_identities_omitted" => {
+                    message.digest = None;
+                    message.part_digests = None;
+                }
+                "attachments_inline_digest_omitted" => message.digest = None,
+                "attachments_inline_part_digests_omitted" => message.part_digests = None,
+                "attachments_inline_digest" => {
+                    message.digest = Some(content_digest(&json!({"wrong": true})));
+                }
+                "attachments_inline_part_digests" => message.part_digests = Some(vec![]),
+                _ => {}
+            }
+        }
         if blocks && defects.attachments == "attachments_blocks_part_digest" {
             // What a page of markers alone would describe: a text part
             // reading as the marker, where the stored media part is.

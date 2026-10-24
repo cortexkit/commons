@@ -70,6 +70,10 @@ pub enum Capability {
     /// subject, so a provider on an older release skips the case rather than
     /// failing it. See [`ToolProviderSubject::system_text_default_preset`].
     SystemTextOptionalPreset,
+    /// The module manifest declares `system-text-default/v1` in
+    /// `capabilities.provides`. The adapter supplies this fact because the
+    /// provider route does not expose the daemon's module catalog.
+    SystemTextDefault,
 }
 
 impl Capability {
@@ -92,6 +96,7 @@ impl Capability {
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
             Self::Presets => "presets",
             Self::SystemTextOptionalPreset => "system_text_optional_preset",
+            Self::SystemTextDefault => cortexkit_role_tool_provider::SYSTEM_TEXT_DEFAULT,
         }
     }
 }

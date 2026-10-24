@@ -18,6 +18,8 @@ use serde_json::{Map, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Capability {
+    /// Preset-less system-text admission checked against the daemon catalog.
+    SystemTextDefault,
     /// Chunked uploads, send references and session-scoped media reads.
     Attachments,
     /// The `transcript_reads` group: `session.read` and `session.head`.
@@ -139,6 +141,7 @@ impl Capability {
     /// The role groups represented by this enum, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
+        Self::SystemTextDefault,
         Self::Attachments,
         Self::TranscriptReads,
         Self::HostHistory,
@@ -197,6 +200,7 @@ impl Capability {
     /// capability.
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
+            Self::SystemTextDefault => groups::SYSTEM_TEXT_DEFAULT,
             Self::Attachments => groups::ATTACHMENTS,
             Self::UserCommands => groups::USER_COMMANDS,
             Self::TranscriptReads => groups::TRANSCRIPT_READS,
@@ -564,6 +568,34 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Install the scripted tool provider with exactly `provides` in the
+    /// daemon catalog's manifest capabilities. Return first-send fields whose
+    /// plan includes `item` as that provider's system-text item, unchanged.
+    /// Required only when the runner declares `system_text_default`.
+    async fn prepare_system_text_default(
+        &self,
+        _session: &str,
+        _provides: &[String],
+        _item: &Value,
+    ) -> Result<Map<String, Value>, HarnessError> {
+        Err(HarnessError::new(
+            "system-text default fixture is not implemented",
+        ))
+    }
+
+    /// Observe every provider fetch, the actual received system-text item
+    /// bytes, and durable runner state. Never reconstruct these from inputs or
+    /// admission replies. The snapshot must change for any admission write
+    /// (including a baseline, send-id reservation or transcript record).
+    async fn system_text_default_observation(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<SystemTextDefaultObservation, HarnessError> {
+        Err(HarnessError::new(
+            "system-text default observations are not implemented",
+        ))
+    }
     /// Apply a real compaction cut to the key's existing log, without replacing
     /// the log. False means the adapter cannot provide this observation.
     async fn cut_incarnation_log(&self, _session: &str) -> Result<bool, HarnessError> {
@@ -1494,6 +1526,16 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Wait a short while between polls that check whether a run has ended.
     async fn pause(&self);
+}
+
+/// External observations for the preset-less system-text admission cases.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SystemTextDefaultObservation {
+    /// All provider fetches, including requests without system text.
+    pub provider_calls: usize,
+    pub provider_items: Vec<Vec<u8>>,
+    pub durable_state: Vec<u8>,
 }
 
 /// Configuration for scripted commands, interactivity and replies outside model history.

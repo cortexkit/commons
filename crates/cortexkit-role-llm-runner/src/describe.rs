@@ -245,6 +245,12 @@ impl RoleDescribe {
         self.capabilities.iter().any(|declared| declared == name)
     }
 
+    /// Whether this runner promises admission and unchanged forwarding of
+    /// preset-less system text for providers declaring the default capability.
+    pub fn system_text_default(&self) -> bool {
+        self.declares(capabilities::SYSTEM_TEXT_DEFAULT)
+    }
+
     /// The capabilities in `required` this answer does not declare, in the
     /// order given. A consumer refuses the module, naming them, when this is
     /// not empty.

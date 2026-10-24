@@ -117,6 +117,10 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("system_text_default_forwarded_unchanged", &[],
+        "when system_text_default is declared and the provider advertises system-text-default/v1, a preset-less item is admitted and reaches the provider byte-equal"),
+    case("system_text_default_preset_required", &[],
+        "when system_text_default is declared but the provider lacks system-text-default/v1, admission refuses system_text_preset_required naming the provider, with no writes or forwards"),
     case("head_incarnation_survives_cut_and_changes_on_recreation", &[Queue, TranscriptReads],
         "a reported log identity holds across a real cut but changes when the same key's log is created again"),
     case("head_sender_is_callers_effective_grant", &[Queue, TranscriptReads],

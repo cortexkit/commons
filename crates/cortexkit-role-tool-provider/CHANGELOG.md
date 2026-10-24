@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- Add `SYSTEM_TEXT_DEFAULT` (`system-text-default/v1`), a manifest promise to serve default system text without a preset.
+- Replace version-based rollout advice with the joint provider/runner declaration rule; document the terminal admission refusal. Existing vector bytes are unchanged.
+
 ## 0.12.0
 
 - A system-text item's `preset` is optional (contract §3). Without one, the

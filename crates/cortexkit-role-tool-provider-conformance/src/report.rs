@@ -37,6 +37,11 @@ const CRASH: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    CaseSpec {
+        name: "system_text_default_served",
+        requires: &[Capability::SystemTextDefault],
+        checks: "a provider declaring system-text-default/v1 serves valid default system text for an item without a preset, never a refusal",
+    },
     CaseSpec { name: "user_commands_catalog", requires: &[], checks: "command declarations are valid, unique, and separate from reserved tools" },
     CaseSpec { name: "user_commands_reply", requires: &[Capability::UserCommands], checks: "a listed command replies within five seconds with bounded person-only text" },
     CaseSpec { name: "user_commands_repeat", requires: &[Capability::UserCommands], checks: "the same call key returns the identical stored reply" },
@@ -248,6 +253,13 @@ pub const CASES: &[CaseSpec] = &[
 /// How one case ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CaseOutcome {
+    /// The case checks an optional promise the provider does not make, such
+    /// as a manifest capability it does not declare, so it does not apply and
+    /// does not count against the provider. Compare [`Self::Skipped`], where
+    /// the subject cannot supply what the case needs to run.
+    Inapplicable {
+        reason: String,
+    },
     Passed,
     Failed {
         reason: String,
@@ -305,6 +317,9 @@ impl SuiteReport {
             let requires: Vec<&str> = case.requires.iter().map(|c| c.name()).collect();
             let line = match &case.outcome {
                 CaseOutcome::Passed => format!("PASS {}", case.case),
+                CaseOutcome::Inapplicable { reason } => {
+                    format!("N/A {}: {reason}", case.case)
+                }
                 CaseOutcome::Failed { reason } => format!("FAIL {}: {reason}", case.case),
                 CaseOutcome::Skipped { missing } => {
                     let missing: Vec<&str> = missing.iter().map(|c| c.name()).collect();

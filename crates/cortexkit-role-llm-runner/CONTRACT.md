@@ -159,6 +159,7 @@ shipping runner with this document.
 | `queue` | `session.send` with `delivery: "queue"` | §9 |
 | `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
 | `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
+| `system_text_default` | `session.send` with preset-less `system_text` plan items | §10.1 |
 | `compaction` | `session.read`, `session.resolve` (it requires `tags`), and the runner half of compaction-provider 0.3.0 §3 | §11.1 |
 | `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
@@ -183,6 +184,16 @@ shipping runner with this document.
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
+- [pinned] A runner declares `system_text_default` only when it accepts a
+  plan whose `system_text` item has no preset and forwards that item unchanged
+  to its provider. `check_describe` checks the group for `session.send`; no
+  additional `role.describe` fields are required.
+- [pinned] A composer omits `preset` on a `system_text` item only when the
+  runner carrying the plan declares `system_text_default` and the item's
+  provider declares `system-text-default/v1` in its module manifest's
+  `capabilities.provides`, read from `catalog.list`. Otherwise it keeps
+  naming the preset. These are declared facts, never inferred from crate
+  versions.
 - [pinned] `host_history` is declared on its own (§4.6). A runner with no
   host under it, one that is its own host and keeps the session's whole
   history itself, must declare it. A runner on a host (one that runs its
@@ -3218,6 +3229,14 @@ its host's file storage, not a second copy of the host's media store.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
+- [pinned] A runner declaring `system_text_default` checks at plan admission
+  that each provider of a preset-less `system_text` item declares
+  `system-text-default/v1` in the daemon catalog. If it does not, the runner
+  refuses the plan by name as `system_text_preset_required` with
+  `detail: {provider}` naming the provider module id, writing nothing and
+  forwarding nothing. The refusal is terminal and never timed. With the
+  declaration present, the runner admits the item and forwards it unchanged:
+  it never invents a preset.
 - [pinned] A plan carrying a `compaction_item`, sent to a runner that does
   not declare `compaction`, is refused at admission `invalid_params {field:
   "plan.compaction_item"}` and writes nothing
@@ -3499,6 +3518,7 @@ treats it as a terminal refusal of that one request.
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |
+| `system_text_preset_required` | a preset-less `system_text` item's provider lacks `system-text-default/v1`; nothing is written or forwarded; never timed (§10.1) | `provider` (module id) | no: terminal |
 | `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
 | `user_command_collision` | plan providers share a command name | `name`, `providers` (every declaring provider) | no |

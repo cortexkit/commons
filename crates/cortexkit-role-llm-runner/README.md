@@ -6,10 +6,20 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.6.2"
+cortexkit-role-llm-runner = "0.6.5"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+
+Since 0.6.5, `system_text_default` promises preset-less system-text admission
+and unchanged forwarding. `RoleDescribe::system_text_default()` reads this
+group. A composer omits a preset only with both this runner fact and the
+provider's manifest `system-text-default/v1` fact from `catalog.list`.
+Admission checks that provider fact before writing or forwarding; its absence
+is terminal `system_text_preset_required {provider}`, never a timed refusal.
+The provider name is exposed as `SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY`
+without a tool-provider runtime dependency. `system-text-default.json` adds
+describe and refusal vectors; existing vector data is unchanged.
 
 Since 0.6.1, `session.head.model` optionally reports the runner's recorded
 next-send selection, not the frozen plan. Absence means unknown; no group is

@@ -48,6 +48,10 @@ pub const PROVIDES: &str = "tool-provider/v1";
 /// their capability tags.
 pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
 
+/// The manifest capability promising default text for a `system_text` item
+/// without a preset. Consumers discover it through the daemon's catalog.
+pub const SYSTEM_TEXT_DEFAULT: &str = "system-text-default/v1";
+
 /// The route-bind capability a consumer declares when it decodes `content/v1` results.
 pub const CONTENT_V1_CAPABILITY: &str = "content/v1";
 

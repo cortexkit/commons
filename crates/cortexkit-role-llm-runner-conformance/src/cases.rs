@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("system_text_default_") => {
+                crate::system_text_default::run(self, name).await
+            }
             name if name.starts_with("output_refs_") => crate::output_refs::run(self, name).await,
             name if name.starts_with("held_calls_") => crate::held_calls::run(self, name).await,
             name if name.starts_with("attachments_") => crate::attachments::run(self, name).await,

@@ -18,6 +18,22 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## What a runner supplies
 
+New in 0.12.3, for llm-runner 0.6.5: `system_text_default` is read from
+live `role.describe`. Both new cases are `N/A` when it is absent, never
+skipped or failed. Declare `Capability::SystemTextDefault` alongside the
+live group for the kit's group-consistency check.
+`prepare_system_text_default` installs the scripted tool provider with the
+supplied manifest capabilities in the daemon catalog and returns a plan
+carrying the supplied system-text item. `system_text_default_observation`
+captures the actual provider-received item bytes and durable state, not a
+reconstruction from the plan. Declaring runners must supply these hooks.
+`system_text_default_forwarded_unchanged` admits an item without a preset
+with a capable provider and requires byte-equal forwarding.
+`system_text_default_preset_required` uses a provider without the capability
+and requires `system_text_preset_required` naming it, no durable writes and
+no provider calls. Faulty fakes invent a preset or bypass the catalog check;
+each fails only its matching case by name.
+
 New in 0.11.2, for llm-runner 0.6.2: `head_sender` is discovered directly
 from `role.describe` (no new `Capability` enum variant). Without that group,
 `head_sender_is_callers_effective_grant` is inapplicable with a reason naming

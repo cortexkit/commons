@@ -113,11 +113,19 @@ to them. Nothing here names a particular implementation.
       variant; an encoder omits the member rather than sending `null`. A
       present preset keeps its meaning: one the provider does not define is
       refused, never guessed.
-    - Rollout. A sender omits `system_text.preset` only to a provider whose
-      release reads it as optional (cortexkit-role-tool-provider 0.12.0 or
-      later). A provider on an older release refuses a missing preset as
-      `invalid_params`, so senders adopt this after providers do
-      (`test-vectors/tool-provider-v1/catalog-requests.json` pins both forms).
+    - A provider declares `system-text-default/v1` in its module manifest's
+      `capabilities.provides` only when it serves its default text for a
+      `system_text` item without a preset. Core reads this fact from
+      `catalog.list`, never from crate versions.
+    - A composer omits `preset` on a `system_text` item only when the runner
+      carrying the plan declares the `system_text_default` `role.describe`
+      group and the item's provider declares `system-text-default/v1`.
+      Otherwise it keeps naming the preset. A runner declaring the group
+      checks the provider's declaration in the daemon catalog at plan
+      admission. If it is absent, the runner refuses the plan as
+      `system_text_preset_required` with `detail: {provider}` naming the
+      provider module id, writing nothing and forwarding nothing. This
+      refusal is terminal and never timed.
 - Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
   tools: [...], system_text?, capabilities?, user_commands?, presets?}`.
   `user_commands` is §4.2; `presets` is §4.3.
@@ -781,6 +789,7 @@ CI against its real module over a real route; never against a double.
 | `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
 | `system_text_preset_optional_served` | `system_text`, `system_text_optional_preset` |
+| `system_text_default_served` | manifest fact `system-text-default/v1` (subject flag `SystemTextDefault`) |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
 | `tool_result_content_v1_valid` | a catalog tool declaring `result_format: "content/v1"` |
@@ -827,6 +836,13 @@ must return the same `item_digest`. When the subject names the preset its
 default text belongs to, the answer's `text` and `item_digest` must equal
 the answer for that preset. A provider whose default is not a named preset
 gets only the first checks.
+
+The `system_text_default_served` case applies those same default-text checks
+only when the subject reports the manifest fact `system-text-default/v1` as
+`Capability::SystemTextDefault`. The provider route does not expose the daemon
+catalog, so the adapter supplies this declaration. Without it, the case is
+reported as not applicable (`N/A`), never skipped or failed. Declaring the fact
+without supplying the system-text fixture fails the case rather than hiding it.
 
 The `call_modes` case requires a restricted tool probe and a harness that
 opens real routes with known bind modes. The subject supplies the call and
