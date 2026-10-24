@@ -25,9 +25,13 @@ open_set! {
         /// `route.select`: a requirement is unknown or invalid;
         /// `detail.field` names it. Never ignored.
         InvalidRequirements => "invalid_requirements",
-        /// `route.select`: the consumer id is not in the provider's
-        /// configuration; `detail.consumer` names it.
+        /// `route.select`: the consumer id is unknown in configuration and
+        /// accepted declarations; `detail.consumer` names it.
         UnknownConsumer => "unknown_consumer",
+        /// `route.select`: neither the attested caller nor its stamped scope
+        /// owns the declared consumer, or ownership conflicts. Terminal;
+        /// `detail.consumer` names it.
+        ConsumerNotOwned => "consumer_not_owned",
         /// `route.select`: the pin cannot be served now;
         /// `detail {pin, reason, reset_at_ms?}`.
         PinUnavailable => "pin_unavailable",
@@ -189,6 +193,16 @@ impl Refusal {
         )
     }
 
+    /// `consumer_not_owned {consumer}`. Terminal, never timed.
+    pub fn consumer_not_owned(consumer: impl Into<String>) -> Self {
+        let consumer = consumer.into();
+        Self::with(
+            RefusalCode::ConsumerNotOwned,
+            format!("the caller and its scope do not own consumer {consumer:?}"),
+            &ConsumerNotOwnedDetail { consumer },
+        )
+    }
+
     /// `pin_unavailable {pin, reason, reset_at_ms?}`.
     pub fn pin_unavailable(
         pin: impl Into<String>,
@@ -298,6 +312,12 @@ pub struct UnknownConsumerDetail {
     pub consumer: String,
 }
 
+/// The detail of the terminal `consumer_not_owned` refusal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumerNotOwnedDetail {
+    pub consumer: String,
+}
+
 /// The detail of `pin_unavailable`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinUnavailableDetail {
@@ -339,6 +359,23 @@ pub struct RoutingAmbiguousDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn consumer_not_owned_names_the_consumer_and_is_terminal() {
+        let mut refusal = Refusal::consumer_not_owned("example.curate");
+        assert_eq!(refusal.code, RefusalCode::ConsumerNotOwned);
+        assert_eq!(
+            refusal
+                .detail_as::<ConsumerNotOwnedDetail>()
+                .unwrap()
+                .consumer,
+            "example.curate"
+        );
+        refusal
+            .detail
+            .insert("reset_at_ms".into(), serde_json::json!(99));
+        assert_eq!(refusal.wait_until_ms(), None);
+    }
 
     #[test]
     fn an_unknown_code_is_kept_and_never_timed() {

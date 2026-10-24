@@ -16,7 +16,7 @@
 //! Each field of [`Defects`] breaks exactly one of those rules.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -31,16 +31,16 @@ use cortexkit_role_routing_conformance::{
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
         observe::{parse_account_observe_request, AccountObserveAnswer, Observation, ObserveKind},
-        ops,
+        ops, parse_consumer_declarations,
         report::{parse_report_request, ReportAnswer, ReportRequest},
         select::{
             parse_select_request, Requirements, RouteRef, RunnerRef, SelectAnswer,
             ToolsRequirement, REQUIREMENT_FIELDS,
         },
-        wire,
+        wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
     },
-    Catalog, CatalogModel, CatalogRunner, ConsumerConfig, Reply, RouteFailure, RouteStamp,
-    RoutingRoute, RoutingSubject,
+    Catalog, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig, Reply, RouteFailure,
+    RouteStamp, RoutingRoute, RoutingSubject,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -57,8 +57,7 @@ pub struct Defects {
     pub describe_drops_priced_only: bool,
     /// A requirement the provider does not read is dropped, not refused.
     pub ignores_unknown_requirements: bool,
-    /// A select for an unconfigured consumer is answered as if it were
-    /// configured.
+    /// The unknown-consumer check's probe is answered as if configured.
     pub answers_unknown_consumer: bool,
     /// `exclude` is ignored.
     pub ignores_exclude: bool,
@@ -93,6 +92,18 @@ pub struct Defects {
     pub observe_never_duplicate: bool,
     /// Tool capability tags are matched against tool provider module names.
     pub tools_matched_by_module_name: bool,
+    /// Serves a declared consumer without either ownership arm.
+    pub serves_foreign_consumer: bool,
+    /// Ignores a declaration's default when the request omits the demand.
+    pub ignores_declared_default: bool,
+    /// Applies declared demand after configured demand.
+    pub declaration_overrides_config: bool,
+    /// Checks the caller principal but ignores the stamped scope owner.
+    pub admits_only_declaring_principal: bool,
+    /// Trusts module declarations whose catalog entries were not nonce-verified.
+    pub trusts_unverified_declarations: bool,
+    /// Keeps the first verified owner instead of locking a conflicting name.
+    pub first_declarer_wins_conflict: bool,
 }
 
 fn now_ms() -> u64 {
@@ -125,6 +136,7 @@ struct ConversationPin {
 struct State {
     consumers: Vec<ConsumerConfig>,
     catalog: Option<Catalog>,
+    declarations: BTreeMap<String, (Option<String>, DemandDefaults)>,
     /// (project, consumer) to pin.
     project_pins: HashMap<(String, String), String>,
     /// Route key to the end of its cooldown.
@@ -178,6 +190,37 @@ impl RoutingSubject for FakeSubject {
 
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String> {
         self.state.lock().unwrap().catalog = Some(catalog.clone());
+        Ok(())
+    }
+
+    async fn configure_catalog_declarations(
+        &self,
+        modules: &[CatalogModule],
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        state.declarations.clear();
+        for module in modules
+            .iter()
+            .filter(|module| module.nonce_verified || self.defects.trusts_unverified_declarations)
+        {
+            let Some(raw) = module.role_declarations.get(ROLE_DECLARATIONS_KEY) else {
+                continue;
+            };
+            let Ok(declaration) = parse_consumer_declarations(raw) else {
+                continue;
+            };
+            for consumer in declaration.consumers {
+                let entry = state
+                    .declarations
+                    .entry(consumer.name)
+                    .or_insert_with(|| (Some(module.principal.clone()), consumer.defaults));
+                if entry.0.as_deref() != Some(module.principal.as_str())
+                    && !self.defects.first_declarer_wins_conflict
+                {
+                    entry.0 = None;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -279,7 +322,7 @@ impl FakeRoute {
     }
 
     fn describe(&self, state: &State) -> Result<Value, Refusal> {
-        let consumers = state
+        let mut consumers: Vec<_> = state
             .consumers
             .iter()
             .map(|consumer| ConsumerEntry {
@@ -287,6 +330,20 @@ impl FakeRoute {
                 priced_only: consumer.priced_only && !self.defects.describe_drops_priced_only,
             })
             .collect();
+        consumers.retain(|consumer| {
+            state
+                .declarations
+                .get(&consumer.id)
+                .is_none_or(|(owner, _)| owner.is_some())
+        });
+        for (id, (owner, _)) in &state.declarations {
+            if owner.is_some() && !consumers.iter().any(|consumer| &consumer.id == id) {
+                consumers.push(ConsumerEntry {
+                    id: id.clone(),
+                    priced_only: false,
+                });
+            }
+        }
         to_value(RoleDescribe::new(consumers, true))
     }
 
@@ -310,15 +367,54 @@ impl FakeRoute {
                 requirements.retain(|key, _| REQUIREMENT_FIELDS.contains(&key.as_str()));
             }
         }
-        let request = parse_select_request(&params)?;
+        let mut request = parse_select_request(&params)?;
+        let declaration = state.declarations.get(&request.consumer);
+        if let Some((owner, _)) = declaration {
+            let scope_owner = self.stamp.scope.as_ref().map(|scope| scope.owner.as_str());
+            let owned = owner.as_deref().is_some_and(|owner| {
+                self.principal() == owner
+                    || (!defects.admits_only_declaring_principal && scope_owner == Some(owner))
+            });
+            if owner.is_none() || (!defects.serves_foreign_consumer && !owned) {
+                return Err(Refusal::consumer_not_owned(request.consumer.clone()));
+            }
+        }
         let consumer = match state.consumers.iter().find(|c| c.id == request.consumer) {
             Some(consumer) => consumer.clone(),
-            None if defects.answers_unknown_consumer => ConsumerConfig {
-                id: request.consumer.clone(),
-                priced_only: false,
-            },
+            None if declaration.is_some()
+                || (defects.answers_unknown_consumer
+                    && request.consumer
+                        == cortexkit_role_routing_conformance::fixture::UNCONFIGURED) =>
+            {
+                ConsumerConfig {
+                    id: request.consumer.clone(),
+                    priced_only: false,
+                    requirements: Default::default(),
+                }
+            }
             None => return Err(Refusal::unknown_consumer(request.consumer.clone())),
         };
+        let declared = declaration
+            .map(|(_, defaults)| serde_json::to_value(defaults).unwrap())
+            .unwrap_or_else(|| serde_json::json!({}));
+        let configured = serde_json::to_value(&consumer.requirements).unwrap();
+        let mut demands = if defects.ignores_declared_default {
+            serde_json::Map::new()
+        } else {
+            declared.as_object().unwrap().clone()
+        };
+        demands.extend(
+            serde_json::to_value(&request.requirements)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        demands.extend(configured.as_object().unwrap().clone());
+        if defects.declaration_overrides_config && !configured.as_object().unwrap().is_empty() {
+            demands.extend(declared.as_object().unwrap().clone());
+        }
+        request.requirements = serde_json::from_value(Value::Object(demands)).unwrap();
         let catalog = Self::catalog(state);
         let project = match params.get("project_id").and_then(Value::as_str) {
             Some(project) if defects.reads_scope_from_body => Some(project.to_owned()),

@@ -47,6 +47,16 @@
       "wait_until_ms": null
     },
     {
+      "name": "consumer_not_owned",
+      "ops": ["route.select"],
+      "body": {
+        "code": "consumer_not_owned",
+        "message": "the caller and its scope do not own consumer example.curate",
+        "detail": {"consumer": "example.curate"}
+      },
+      "wait_until_ms": null
+    },
+    {
       "name": "pin_unavailable_untimed",
       "ops": [
         "route.select"

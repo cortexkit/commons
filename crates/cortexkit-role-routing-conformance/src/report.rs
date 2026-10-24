@@ -31,6 +31,30 @@ pub const CHECKS: &[CheckSpec] = &[
         "a select that excludes the route key the provider otherwise answers is answered with another route",
     ),
     check(
+        "declared_consumer_owner_uses_default",
+        "a declaring module is admitted for its catalog-declared consumer; an omitted output floor uses the declared default, and an explicit request floor overrides it",
+    ),
+    check(
+        "declared_consumer_scope_owner_admitted",
+        "a third-party caller carrying a daemon-stamped scope owned by the declaring module is admitted for that module's declared consumer",
+    ),
+    check(
+        "declared_consumer_non_owner_refused",
+        "a third-party caller without the declaring module's scope, unscoped or carrying its own scope, is refused terminal consumer_not_owned naming the consumer",
+    ),
+    check(
+        "operator_config_overrides_declared_default",
+        "operator demand overrides both request demand and the declared default, even when those would rule out the explicitly pinned model",
+    ),
+    check(
+        "declared_consumer_unverified_entry_ignored",
+        "an unverified catalog declaration grants no name or defaults; configuration-only names remain usable by any caller, and a verified owner wins regardless of catalog order",
+    ),
+    check(
+        "declared_consumer_conflict_refused",
+        "two verified declarers of the same name are both refused terminal consumer_not_owned naming the consumer, and role.describe omits the name even when it is configured",
+    ),
+    check(
         "runners_honoured",
         "a select whose runners list only the runner the provider does not otherwise answer is answered on that runner",
     ),
@@ -92,7 +116,9 @@ pub const NARROWINGS: &[&str] = &[
     "Affinity is checked with one failure outcome (failed); the other failure outcomes, and the rule that a cancelled or completed report keeps the preference, are not checked.",
     "account_observe idempotency is checked for one runner; the kit does not check that another runner's equal event_id is a separate event.",
     "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict and unknown_decision.",
-    "requirements other than tool_capabilities (iq, eq, floors, tools, modalities, structured_output) are not checked against the catalog beyond what every check's answer must meet.",
+    "Declaration precedence is checked with max_output_tokens only; the other demand fields are not independently checked for precedence.",
+    "The kit does not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
+    "requirements other than tool_capabilities and the declared max_output_tokens floor are not checked against the catalog beyond what every check's answer must meet.",
 ];
 
 /// How one check ended.

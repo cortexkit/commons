@@ -90,6 +90,84 @@ async fn answering_an_unknown_consumer_fails() {
 }
 
 #[tokio::test]
+async fn serving_another_modules_consumer_fails() {
+    breaks(
+        Defects {
+            serves_foreign_consumer: true,
+            ..Defects::default()
+        },
+        "declared_consumer_non_owner_refused",
+        "not refused consumer_not_owned",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_a_declared_default_fails() {
+    breaks(
+        Defects {
+            ignores_declared_default: true,
+            ..Defects::default()
+        },
+        "declared_consumer_owner_uses_default",
+        "ignored the declared max_output_tokens default",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn letting_a_declaration_override_config_fails() {
+    breaks(
+        Defects {
+            declaration_overrides_config: true,
+            ..Defects::default()
+        },
+        "operator_config_overrides_declared_default",
+        "operator config overrides request and declaration was refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn admitting_only_by_caller_principal_fails() {
+    breaks(
+        Defects {
+            admits_only_declaring_principal: true,
+            ..Defects::default()
+        },
+        "declared_consumer_scope_owner_admitted",
+        "carrying the declaring module's scope was refused consumer_not_owned",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn trusting_unverified_declarations_fails() {
+    breaks(
+        Defects {
+            trusts_unverified_declarations: true,
+            ..Defects::default()
+        },
+        "declared_consumer_unverified_entry_ignored",
+        "not refused unknown_consumer",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn letting_first_declarer_win_conflict_fails() {
+    breaks(
+        Defects {
+            first_declarer_wins_conflict: true,
+            ..Defects::default()
+        },
+        "declared_consumer_conflict_refused",
+        "not refused consumer_not_owned",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn ignoring_exclude_fails() {
     breaks(
         Defects {

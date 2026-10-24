@@ -108,7 +108,7 @@ pub struct ConcurrencySlot {
 /// The `route.select` request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectRequest {
-    /// A consumer id the provider knows from its configuration.
+    /// A consumer id the provider knows from configuration or declarations.
     pub consumer: String,
     pub requirements: Requirements,
     /// `provider/model[:variant]`.
@@ -254,7 +254,7 @@ pub struct SelectAnswer {
 /// so is a requirement this version does not define: it is never ignored.
 /// A malformed pin is `pin_unavailable` with reason `invalid`. Any other
 /// bad member is `invalid_request` naming it. Whether the consumer is
-/// configured, and whether anything can serve, is the provider's to answer
+/// known and owned, and whether anything can serve, is the provider's to answer
 /// after this.
 pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
@@ -299,7 +299,7 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
     })
 }
 
-fn parse_requirements(value: Option<&Value>) -> Result<Requirements, Refusal> {
+pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, Refusal> {
     let Some(Value::Object(object)) = value else {
         return Err(Refusal::invalid_requirements(
             "requirements",

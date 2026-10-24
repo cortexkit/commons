@@ -40,6 +40,48 @@ a module plays.
   scope, and the runner's own admission applies. A routing provider never
   relays model calls.
 
+### 1.1 Consumer declarations
+
+- [pinned] A module may declare its consumers in its manifest's daemon slot
+  `role_declarations["routing/v1"]` (`ROLE_DECLARATIONS_KEY`). The daemon
+  relays this JSON object unread; this role owns its schema
+  (`ConsumerDeclarations`, validated by `parse_consumer_declarations`).
+  Declarations come only from the daemon catalog, never from a call.
+- [pinned] The object is `{consumers: [{name, eq?, context_window?,
+  max_output_tokens?, tools?, tool_capabilities?, modalities?,
+  structured_output?}]}`. `name` is required and uses the consumer id
+  grammar of §5.1. Every other member is an optional default for the
+  same-named requirement in §5.1, with that requirement's type and limits.
+  Unknown members, invalid names or demands, and duplicate names within
+  one declaration invalidate the whole declaration; the provider applies
+  none of it and reports the problem on its health.
+- [pinned] A declared name belongs to the module whose manifest declares
+  it, keyed by that module's attested identity in the catalog, not by a
+  declaration body member. A provider trusts ownership only for catalog
+  entries the daemon nonce-verified. It ignores unverified entries for
+  both ownership and defaults and reports them on its health; an
+  unverified entry never reserves or steals a configured name.
+- [pinned] If two verified modules declare the same name, the provider
+  accepts neither owner's requests for it, refuses all selects for that
+  name as `consumer_not_owned {consumer}`, and reports the conflict on its
+  health. Operator configuration cannot bypass ownership or a conflict.
+- [pinned] A select naming a declared consumer is admitted when either the
+  caller's attested principal is the declaring module, or the request's
+  daemon-stamped scope is owned by the declaring module. Scope ownership
+  comes from the bind stamp's `owner` in `(owner, ref, epoch)`, never from
+  request params; `ref` and `epoch` identify the scope, not its owner. A
+  third-party caller carrying the declaring module's scope is admitted;
+  a module carrying only its own scope cannot borrow another's consumer.
+  Every other caller is refused `consumer_not_owned {consumer}`. This refusal
+  is terminal, never timed. A name found only in operator configuration
+  remains usable by any caller. Until a module declares, the provider
+  keeps its configuration names.
+- [pinned] For each demand field, the first value present wins: operator
+  configuration, then the request's own requirement, then the declared
+  default. Omission is not a zero or false value. The request's required
+  `iq` remains required; a declaration cannot set `iq` and does not relax
+  request validation. An operator may still override `iq` in configuration.
+
 ## 2. Wire
 
 - [pinned] Every reply is a `RESPONSE` frame whose body is exactly
@@ -85,7 +127,8 @@ a module plays.
 - [pinned] `ops` lists every op the provider serves, at least
   `REQUIRED_OPS`.
 - [pinned] `consumers` lists every consumer id in the provider's
-  configuration, each once.
+  configuration or accepted declarations, each once; conflicted names are
+  not listed.
 - [pinned] `priced_only: true` states that the consumer is answered only
   with routes priced per token, never with a route paid from subscription
   quota. A consumer reads the policy here instead of knowing it.
@@ -104,8 +147,12 @@ a module plays.
 `select::SelectRequest`, validated by `select::parse_select_request`.
 
 - [pinned] `consumer` (required): an id the provider knows from its
-  configuration. Unknown: `unknown_consumer {consumer}`. Consumer ids are
-  routing configuration; operator include and exclude pins attach to them.
+  configuration or accepted declarations (§1.1). Unknown:
+  `unknown_consumer {consumer}`. Operator include and exclude pins attach
+  to consumer ids. A declared name used without either ownership arm is
+  `consumer_not_owned {consumer}`.
+- [pinned] A consumer id is a non-empty string, with no character-set or
+  length restriction in this version.
 - [pinned] `requirements` (required, an object):
   - `iq` (required, 0 to 100) and `eq` (optional, 0 to 100): task demand,
     which the provider maps onto its own model facts.
@@ -184,7 +231,8 @@ a module plays.
 ### 5.3 Refusals
 
 - [pinned] `invalid_request {field}`, `invalid_requirements {field}`,
-  `unknown_consumer {consumer}`.
+  `unknown_consumer {consumer}`, `consumer_not_owned {consumer}` (terminal,
+  never timed).
 - [pinned] `pin_unavailable {pin, reason, reset_at_ms?}`. `reason` is an
   open set: `invalid`, `unknown_provider`, `unknown_model`,
   `invalid_variant`, `excluded`, `not_available`, `credential_unentitled`,
@@ -369,6 +417,7 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `invalid_request` | every op except `role.describe` | `{field}` | no |
 | `invalid_requirements` | `route.select` (§5.1) | `{field}` | no |
 | `unknown_consumer` | `route.select` (§5.1) | `{consumer}` | no |
+| `consumer_not_owned` | `route.select` (§1.1) | `{consumer}` | no (terminal) |
 | `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present |
 | `no_route` | `route.select` (§5.3) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present |
 | `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1) | `{}` | no |
@@ -401,7 +450,8 @@ What a runner saw on an account, so the provider's headroom stays current.
 - [pinned] `test-vectors/routing-v1/` holds every op's requests and
   answers, the refusals the validators answer, one body per refusal code,
   unknown values for every open set, and the reply envelope's accepted and
-  refused bodies. `SHA256SUMS` pins every file.
+  refused bodies. It also holds valid and invalid consumer declarations,
+  including a byte-exact declaration round trip. `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks

@@ -12,13 +12,15 @@ use cortexkit_role_routing::{
     account::{parse_account_for_request, AccountForAnswer, AccountForRequest},
     describe::{check_describe, RoleDescribe},
     errors::{
-        AccountHoldDetail, FieldDetail, NoRouteDetail, PinUnavailableDetail, Refusal, RefusalCode,
-        RoutingAmbiguousDetail, UnknownConsumerDetail, CONSUMER_CODES,
+        AccountHoldDetail, ConsumerNotOwnedDetail, FieldDetail, NoRouteDetail,
+        PinUnavailableDetail, Refusal, RefusalCode, RoutingAmbiguousDetail, UnknownConsumerDetail,
+        CONSUMER_CODES,
     },
     observe::{parse_account_observe_request, AccountObserveAnswer, AccountObserveRequest},
+    parse_consumer_declarations,
     report::{parse_report_request, ReportAnswer, ReportRequest},
     select::{parse_select_request, SelectAnswer, SelectRequest, REQUIREMENT_FIELDS},
-    vectors, wire, REQUIRED_OPS,
+    vectors, wire, ConsumerDeclarations, DeclarationError, REQUIRED_OPS,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -27,6 +29,7 @@ use serde_json::{json, Value};
 /// `vectors::FILES`, which `tests/vectors_feature.rs` checks against the
 /// directory, so a new file cannot land without a test reading it.
 const FILES: &[&str] = &[
+    "consumer-declarations.json",
     "open-sets.json",
     "refusals.json",
     "reply-envelope.json",
@@ -103,6 +106,49 @@ fn every_file_is_read() {
     let mut shipped: Vec<&str> = vectors::FILES.iter().map(|(name, _)| *name).collect();
     shipped.sort_unstable();
     assert_eq!(shipped, FILES);
+}
+
+#[test]
+fn consumer_declarations() {
+    let file = load("consumer-declarations.json");
+    for case in cases(&file, "valid") {
+        let parsed = parse_consumer_declarations(&case["declaration"])
+            .unwrap_or_else(|problem| panic!("{}: {problem}", name(case)));
+        parsed.validate().unwrap();
+        let wire = case["wire"].as_str().unwrap();
+        let decoded: ConsumerDeclarations = serde_json::from_str(wire).unwrap();
+        assert_eq!(parsed, decoded, "{}", name(case));
+        assert_eq!(
+            serde_json::to_string(&decoded).unwrap().as_bytes(),
+            wire.as_bytes(),
+            "{}",
+            name(case)
+        );
+    }
+    for case in cases(&file, "invalid") {
+        let expected = match case["error"].as_str().unwrap() {
+            "duplicate_name" => DeclarationError::DuplicateName {
+                name: "example.curate".into(),
+            },
+            "invalid_name" => DeclarationError::InvalidName {
+                index: 0,
+                name: String::new(),
+            },
+            "unknown_member" => DeclarationError::UnknownMember {
+                field: "consumers[0].no_tools".into(),
+            },
+            "unknown_iq" => DeclarationError::UnknownMember {
+                field: "consumers[0].iq".into(),
+            },
+            other => panic!("unknown vector error {other}"),
+        };
+        assert_eq!(
+            parse_consumer_declarations(&case["declaration"]),
+            Err(expected),
+            "{}",
+            name(case)
+        );
+    }
 }
 
 #[test]
@@ -202,6 +248,9 @@ fn every_refusal_code_has_a_vector() {
                 refusal.detail_as::<FieldDetail>().is_some()
             }
             RefusalCode::UnknownConsumer => refusal.detail_as::<UnknownConsumerDetail>().is_some(),
+            RefusalCode::ConsumerNotOwned => {
+                refusal.detail_as::<ConsumerNotOwnedDetail>().is_some()
+            }
             RefusalCode::PinUnavailable => refusal.detail_as::<PinUnavailableDetail>().is_some(),
             RefusalCode::NoRoute => refusal.detail_as::<NoRouteDetail>().is_some(),
             RefusalCode::AccountHold => refusal.detail_as::<AccountHoldDetail>().is_some(),

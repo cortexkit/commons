@@ -22,7 +22,9 @@ use serde_json::{json, Map, Value};
 use crate::{
     fixture::{self, CONSUMER, IQ, SUMMARY},
     route::{Reply, RoutingRoute},
-    subject::{RouteStamp, RoutingSubject},
+    subject::{
+        CatalogModule, ConsumerConfig, OperatorRequirements, RouteStamp, RoutingSubject, ScopeStamp,
+    },
 };
 
 type Check = Result<(), String>;
@@ -185,6 +187,22 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 self.unknown_requirement_refused_by_name().await
             }
             "unknown_consumer_refused" => self.unknown_consumer_refused().await,
+            "declared_consumer_owner_uses_default" => {
+                self.declared_consumer_owner_uses_default().await
+            }
+            "declared_consumer_scope_owner_admitted" => {
+                self.declared_consumer_scope_owner_admitted().await
+            }
+            "declared_consumer_non_owner_refused" => {
+                self.declared_consumer_non_owner_refused().await
+            }
+            "declared_consumer_unverified_entry_ignored" => {
+                self.declared_consumer_unverified_entry_ignored().await
+            }
+            "declared_consumer_conflict_refused" => self.declared_consumer_conflict_refused().await,
+            "operator_config_overrides_declared_default" => {
+                self.operator_config_overrides_declared_default().await
+            }
             "exclude_honoured" => self.exclude_honoured().await,
             "runners_honoured" => self.runners_honoured().await,
             "timed_refusals_carry_reset_at_ms" => self.timed_refusals_carry_reset_at_ms().await,
@@ -319,6 +337,273 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 fixture::UNCONFIGURED
             )),
         }
+    }
+
+    async fn declarations(&self) -> Check {
+        self.declaration_entries(&fixture::catalog_declarations())
+            .await
+    }
+
+    async fn declaration_entries(&self, modules: &[CatalogModule]) -> Check {
+        self.subject
+            .configure_catalog_declarations(modules)
+            .await
+            .map_err(|e| format!("configure_catalog_declarations: {e}"))
+    }
+
+    async fn declared_consumer_owner_uses_default(&self) -> Check {
+        self.declarations().await?;
+        let route = self.route_as(fixture::DECLARING_PRINCIPAL).await?;
+        let params = json!({"consumer": fixture::DECLARED, "requirements": {"iq": IQ}});
+        let selected = select(&route, &params, "the declaring module's select").await?;
+        let model = fixture::catalog()
+            .models
+            .into_iter()
+            .find(|model| model.route_key() == selected.route.route_key())
+            .ok_or("the answer names a model outside the fixture catalog")?;
+        if model.max_output_tokens < 50_000 || selected.max_output_tokens != model.max_output_tokens
+        {
+            return Err("the declaring module's select ignored the declared max_output_tokens default 50000".into());
+        }
+        // A request value must win even when the declaration's floor would
+        // make the explicitly pinned model unavailable.
+        let params = json!({"consumer": fixture::DECLARED,
+            "requirements": {"iq": IQ, "max_output_tokens": 16_000},
+            "pin": format!("{}/model-a", fixture::PRICED_PROVIDER)});
+        let selected = select(&route, &params, "a request overriding the declared default").await?;
+        if selected.route.pin() != params["pin"].as_str().unwrap() {
+            return Err(
+                "the request overriding the declaration did not receive its pinned model".into(),
+            );
+        }
+        Ok(())
+    }
+
+    async fn declared_consumer_scope_owner_admitted(&self) -> Check {
+        self.declarations().await?;
+        let route = self
+            .route(RouteStamp::scoped(
+                fixture::DELEGATE_PRINCIPAL,
+                ScopeStamp {
+                    owner: fixture::DECLARING_PRINCIPAL.into(),
+                    scope_ref: "example-run".into(),
+                    scope_epoch: 7,
+                },
+            ))
+            .await?;
+        let params = json!({"consumer": fixture::DECLARED,
+            "requirements": {"iq": IQ, "max_output_tokens": 16_000}});
+        select(
+            &route,
+            &params,
+            "a third-party select carrying the declaring module's scope",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn declared_consumer_non_owner_refused(&self) -> Check {
+        self.declarations().await?;
+        let own_scope = RouteStamp::scoped(
+            fixture::DELEGATE_PRINCIPAL,
+            ScopeStamp {
+                owner: fixture::DELEGATE_PRINCIPAL.into(),
+                scope_ref: "example-run".into(),
+                scope_epoch: 7,
+            },
+        );
+        for stamp in [RouteStamp::unscoped(fixture::DELEGATE_PRINCIPAL), own_scope] {
+            let route = self.route(stamp).await?;
+            let params = json!({"consumer": fixture::DECLARED,
+                "requirements": {"iq": IQ, "max_output_tokens": 16_000}});
+            let refusal = refused(
+                &route,
+                ops::ROUTE_SELECT,
+                &params,
+                RefusalCode::ConsumerNotOwned,
+                "a non-owner's select without the declaring module's scope",
+            )
+            .await?;
+            if refusal.detail.get("consumer") != Some(&json!(fixture::DECLARED))
+                || refusal.wait_until_ms().is_some()
+                || refusal.detail.contains_key("reset_at_ms")
+            {
+                return Err(
+                    "consumer_not_owned must name the consumer and be terminal, never timed".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn declared_consumer_unverified_entry_ignored(&self) -> Check {
+        let mut unverified = fixture::catalog_declarations();
+        unverified[0].nonce_verified = false;
+        self.declaration_entries(&unverified).await?;
+        let params = json!({"consumer": fixture::DECLARED,
+            "requirements": {"iq": IQ}});
+        let route = self.route_as(fixture::DECLARING_PRINCIPAL).await?;
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &params,
+            RefusalCode::UnknownConsumer,
+            "a select relying only on an unverified declaration",
+        )
+        .await?;
+        if refusal.detail.get("consumer") != Some(&json!(fixture::DECLARED)) {
+            return Err("unknown_consumer must name the unverified declaration's consumer".into());
+        }
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        if describe.consumer(fixture::DECLARED).is_some() {
+            return Err(
+                "role.describe lists a consumer known only from an unverified declaration".into(),
+            );
+        }
+        let params = with(
+            params,
+            "pin",
+            json!(format!("{}/model-a", fixture::PRICED_PROVIDER)),
+        );
+
+        self.fresh().await?;
+        let mut consumers = fixture::consumers();
+        consumers.push(ConsumerConfig {
+            id: fixture::DECLARED.into(),
+            priced_only: false,
+            requirements: Default::default(),
+        });
+        self.subject
+            .configure_consumers(&consumers)
+            .await
+            .map_err(|e| format!("configure_consumers: {e}"))?;
+        self.declaration_entries(&unverified).await?;
+        // The unverified output floor excludes model-a. With no request or
+        // operator floor, this pin succeeds only if that default is ignored.
+        for principal in [fixture::DECLARING_PRINCIPAL, fixture::DELEGATE_PRINCIPAL] {
+            let route = self.route_as(principal).await?;
+            let selected = select(
+                &route,
+                &params,
+                "a configured consumer alongside an unverified declaration",
+            )
+            .await?;
+            if selected.route.pin() != params["pin"].as_str().unwrap()
+                || selected.max_output_tokens != 32_000
+            {
+                return Err("an unverified declaration changed the configured consumer's pinned model or limits".into());
+            }
+        }
+
+        let mut verified = fixture::catalog_declarations().remove(0);
+        verified.principal = fixture::DELEGATE_PRINCIPAL.into();
+        verified.role_declarations.insert(
+            cortexkit_role_routing::ROLE_DECLARATIONS_KEY.into(),
+            json!({"consumers": [{"name": fixture::DECLARED, "max_output_tokens": 16_000}]}),
+        );
+        // Catalog ordering cannot let an unverified claimant steal a verified
+        // module's name or replace that module's declared output floor.
+        for modules in [
+            vec![unverified[0].clone(), verified.clone()],
+            vec![verified.clone(), unverified[0].clone()],
+        ] {
+            self.fresh().await?;
+            self.declaration_entries(&modules).await?;
+            let owner = self.route_as(fixture::DELEGATE_PRINCIPAL).await?;
+            let selected = select(
+                &owner,
+                &params,
+                "the verified owner alongside an unverified claimant",
+            )
+            .await?;
+            if selected.route.pin() != params["pin"].as_str().unwrap() {
+                return Err("the verified owner did not receive its pinned model".into());
+            }
+        }
+        Ok(())
+    }
+
+    async fn declared_consumer_conflict_refused(&self) -> Check {
+        let mut modules = fixture::catalog_declarations();
+        let mut other = modules[0].clone();
+        other.principal = fixture::DELEGATE_PRINCIPAL.into();
+        modules.push(other);
+        // Configuration does not bypass conflicting verified ownership.
+        let mut consumers = fixture::consumers();
+        consumers.push(ConsumerConfig {
+            id: fixture::DECLARED.into(),
+            priced_only: false,
+            requirements: Default::default(),
+        });
+        self.subject
+            .configure_consumers(&consumers)
+            .await
+            .map_err(|e| format!("configure_consumers: {e}"))?;
+        self.declaration_entries(&modules).await?;
+        let params = json!({"consumer": fixture::DECLARED,
+            "requirements": {"iq": IQ, "max_output_tokens": 16_000}});
+        for principal in [fixture::DECLARING_PRINCIPAL, fixture::DELEGATE_PRINCIPAL] {
+            let route = self.route_as(principal).await?;
+            let refusal = refused(
+                &route,
+                ops::ROUTE_SELECT,
+                &params,
+                RefusalCode::ConsumerNotOwned,
+                "a verified declarer's select for a conflicted consumer",
+            )
+            .await?;
+            if refusal.detail.get("consumer") != Some(&json!(fixture::DECLARED))
+                || refusal.wait_until_ms().is_some()
+                || refusal.detail.contains_key("reset_at_ms")
+            {
+                return Err(
+                    "a conflicted consumer must be named in terminal consumer_not_owned".into(),
+                );
+            }
+            let describe: RoleDescribe =
+                answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+            if describe.consumer(fixture::DECLARED).is_some() {
+                return Err(
+                    "role.describe lists a consumer with conflicting verified owners".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn operator_config_overrides_declared_default(&self) -> Check {
+        self.declarations().await?;
+        let mut consumers = fixture::consumers();
+        consumers.push(ConsumerConfig {
+            id: fixture::DECLARED.into(),
+            priced_only: false,
+            requirements: OperatorRequirements {
+                iq: Some(IQ),
+                defaults: cortexkit_role_routing::DemandDefaults {
+                    max_output_tokens: Some(16_000),
+                    ..Default::default()
+                },
+            },
+        });
+        self.subject
+            .configure_consumers(&consumers)
+            .await
+            .map_err(|e| format!("configure_consumers: {e}"))?;
+        let route = self.route_as(fixture::DECLARING_PRINCIPAL).await?;
+        let params = json!({"consumer": fixture::DECLARED,
+            "requirements": {"iq": 100, "max_output_tokens": 80_000},
+            "pin": format!("{}/model-a", fixture::PRICED_PROVIDER)});
+        let selected = select(
+            &route,
+            &params,
+            "a select whose operator config overrides request and declaration",
+        )
+        .await?;
+        if selected.route.pin() != params["pin"].as_str().unwrap() {
+            return Err("operator config did not make the pinned model available".into());
+        }
+        Ok(())
     }
 
     async fn exclude_honoured(&self) -> Check {

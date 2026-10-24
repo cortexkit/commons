@@ -33,6 +33,7 @@ mod open;
 mod members;
 
 pub mod account;
+pub mod declarations;
 pub mod describe;
 pub mod errors;
 pub mod observe;
@@ -41,6 +42,11 @@ pub mod select;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
 pub mod wire;
+
+pub use declarations::{
+    parse_consumer_declarations, ConsumerDeclaration, ConsumerDeclarations, DeclarationError,
+    DemandDefaults,
+};
 
 /// The role name, as `role.describe` states it.
 pub const ROLE: &str = "routing";
@@ -54,6 +60,9 @@ pub const VERSION_NUMBER: u32 = 1;
 /// The capability identifier a routing provider lists in its manifest's
 /// `capabilities.provides`.
 pub const PROVIDES: &str = "routing/v1";
+
+/// The daemon catalog's `role_declarations` key for consumer declarations.
+pub const ROLE_DECLARATIONS_KEY: &str = "routing/v1";
 
 /// Names of the ops a routing provider serves.
 pub mod ops {

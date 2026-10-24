@@ -26,6 +26,6 @@ pub use report::{
 pub use route::{Reply, RouteFailure, RoutingRoute};
 pub use runner::run_suite;
 pub use subject::{
-    Catalog, CatalogAccount, CatalogModel, CatalogRunner, ConsumerConfig, ReachableToolProvider,
-    RouteStamp, RoutingSubject,
+    Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,
+    OperatorRequirements, ReachableToolProvider, RouteStamp, RoutingSubject, ScopeStamp,
 };

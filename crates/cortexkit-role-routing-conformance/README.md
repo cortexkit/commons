@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.1.0"
+cortexkit-role-routing-conformance = "0.2.0"
 ```
 
 ```rust,ignore
@@ -24,13 +24,18 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
   so the adapter must never shortcut into the provider's code.
 - A `RoutingSubject`:
   - `route(stamp)`: open a route as `stamp.principal`, bound to
-    `stamp.project_id` when present and unscoped otherwise. The kit opens
+    `stamp.project_id` when present, and carrying `stamp.scope` when present.
+    The scope stamp is `(owner, scope_ref, scope_epoch)`; declaration admission
+    accepts either the declaring module's attested `stamp.principal` or its
+    `stamp.scope.owner`. Neither identity comes from a body member. With neither
+    stamp the route is unscoped. The kit opens
     routes as a consumer module, a second consumer module, and two runner
     modules (`fixture`);
   - `reset()`: forget every consumer, catalog entry, pin, cooldown,
     decision, affinity, report, admission and observation;
   - `configure_consumers(consumers)`: exactly these consumer ids, each with
-    its `priced_only`;
+    its `priced_only` and operator `requirements` (`OperatorRequirements`
+    includes optional `iq` and the other demand fields in `defaults`);
   - `configure_catalog(catalog)`: exactly these models (with their ability,
     limits, tool calls, modalities, structured output and pricing), runners
     (the route keys each runs, and the tool providers it reaches with the
@@ -38,6 +43,11 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
     runner listed is an attested runner module (contract section 9: its
     route carries a principal the daemon verified, and the provider knows it
     as a runner);
+  - `configure_catalog_declarations(modules)`: raw `role_declarations` slots
+    from daemon catalog entries, with each module's attested `principal` and
+    `nonce_verified` status. Feed these through the catalog, never a call.
+    The default hook returns an unsupported error for non-empty input, so
+    older adapters must implement it to pass the new declaration checks;
   - `pin_for_project(project, consumer, pin)`: an operator pin that applies
     to the consumer's selects within the project;
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.
@@ -46,13 +56,25 @@ Before every check the kit resets the provider and configures the fixture
 in `src/fixture.rs`. The provider's choice must be stable: the same request
 against the same state answers the same route and runner.
 
+Declarations cannot set `iq`: every request supplies it, and only operator
+configuration may override it. Declaration checks use `max_output_tokens`
+for defaults; the operator-precedence check also overrides the request's `iq`.
+
 ## Checks
+
+The kit runs 23 checks, including six declaration checks.
 
 | Check | Contract rule |
 |---|---|
 | `describe_lists_consumers_and_fields` | §4: describe lists every configured consumer with `priced_only`, every required op and every requirement field |
 | `unknown_requirement_refused_by_name` | §5.1: an unknown requirement is `invalid_requirements {field}`, never ignored |
 | `unknown_consumer_refused` | §5.1: an unknown consumer is `unknown_consumer` |
+| `declared_consumer_owner_uses_default` | §1.1: the declaring module is admitted, omitted demand uses the declaration, and request demand overrides it |
+| `declared_consumer_scope_owner_admitted` | §1.1: a third-party caller carrying the declaring module's stamped scope is admitted |
+| `declared_consumer_non_owner_refused` | §1.1: a third-party caller without that scope is refused terminal `consumer_not_owned` |
+| `declared_consumer_unverified_entry_ignored` | §1.1: unverified entries reserve no name and apply no defaults; configuration and verified ownership remain authoritative |
+| `declared_consumer_conflict_refused` | §1.1: conflicting verified owners are both refused `consumer_not_owned`, and describe omits the name |
+| `operator_config_overrides_declared_default` | §1.1: operator demand overrides request demand and the declaration |
 | `exclude_honoured` | §5.1: an excluded route key is never answered |
 | `runners_honoured` | §5.2: the runner is one of `runners` |
 | `timed_refusals_carry_reset_at_ms` | §5.3: a timed cause carries `reset_at_ms`; an untimed one does not |
@@ -70,6 +92,9 @@ against the same state answers the same route and runner.
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.
+The declaration checks exercise unverified entries and conflicting verified
+owners, but do not check invalid catalog declarations or provider health
+reports for invalid, unverified or conflicting entries.
 
 ## The kit's own tests
 

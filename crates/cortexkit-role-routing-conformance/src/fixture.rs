@@ -2,8 +2,11 @@
 //! uses. Every name is invented; none is a real provider, model or module.
 
 use crate::subject::{
-    Catalog, CatalogAccount, CatalogModel, CatalogRunner, ConsumerConfig, ReachableToolProvider,
+    Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,
+    ReachableToolProvider,
 };
+use cortexkit_role_routing::ROLE_DECLARATIONS_KEY;
+use serde_json::json;
 
 /// The consumer module most checks select as.
 pub const CONSUMER: &str = "example-consumer";
@@ -23,6 +26,12 @@ pub const FLOW: &str = "flow";
 pub const SUMMARY: &str = "example_summary";
 /// A consumer id the provider is never configured with.
 pub const UNCONFIGURED: &str = "example_unconfigured";
+/// A name learned only from the declaring module's catalog entry.
+pub const DECLARED: &str = "example.declared";
+/// The daemon-attested identity declaring the name.
+pub const DECLARING_PRINCIPAL: &str = "reserved:example-declarer";
+/// An independent module selecting on behalf of scoped work.
+pub const DELEGATE_PRINCIPAL: &str = "reserved:example-delegate";
 
 /// The provider whose models are priced per token.
 pub const PRICED_PROVIDER: &str = "example-provider";
@@ -55,8 +64,24 @@ pub fn consumers() -> Vec<ConsumerConfig> {
         .map(|(id, priced_only)| ConsumerConfig {
             id: id.to_owned(),
             priced_only,
+            requirements: Default::default(),
         })
         .collect()
+}
+
+/// A verified catalog declaration whose output floor only model-c meets.
+pub fn catalog_declarations() -> Vec<CatalogModule> {
+    vec![CatalogModule {
+        principal: DECLARING_PRINCIPAL.into(),
+        nonce_verified: true,
+        role_declarations: [(
+            ROLE_DECLARATIONS_KEY.into(),
+            json!({
+                "consumers": [{"name": DECLARED, "max_output_tokens": 50_000}]
+            }),
+        )]
+        .into(),
+    }]
 }
 
 fn model(

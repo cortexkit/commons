@@ -1,0 +1,15 @@
+{
+  "valid": [
+    {
+      "name": "all_defaults",
+      "declaration": {"consumers": [{"name": "example.curate", "eq": 40, "context_window": 120000, "max_output_tokens": 16000, "tools": "required", "tool_capabilities": ["code.read/v1"], "modalities": ["image"], "structured_output": false}]},
+      "wire": "{\"consumers\":[{\"name\":\"example.curate\",\"eq\":40,\"context_window\":120000,\"max_output_tokens\":16000,\"tools\":\"required\",\"tool_capabilities\":[\"code.read/v1\"],\"modalities\":[\"image\"],\"structured_output\":false}]}"
+    }
+  ],
+  "invalid": [
+    {"name": "duplicate_name", "declaration": {"consumers": [{"name": "example.curate"}, {"name": "example.curate"}]}, "error": "duplicate_name"},
+    {"name": "bad_name", "declaration": {"consumers": [{"name": ""}]}, "error": "invalid_name"},
+    {"name": "unknown_member", "declaration": {"consumers": [{"name": "example.curate", "no_tools": true}]}, "error": "unknown_member"},
+    {"name": "iq_is_not_a_declared_default", "declaration": {"consumers": [{"name": "example.curate", "iq": 70}]}, "error": "unknown_iq"}
+  ]
+}

@@ -7,6 +7,10 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "routing-v1";
 
+/// Valid and invalid catalog consumer declarations, including canonical bytes.
+pub const CONSUMER_DECLARATIONS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/consumer-declarations.json");
+
 /// Unknown values of every open set.
 pub const OPEN_SETS_JSON: &str = include_str!("../test-vectors/routing-v1/open-sets.json");
 /// One refusal body for every refusal code.
@@ -29,6 +33,7 @@ pub const ROUTE_SELECT_JSON: &str = include_str!("../test-vectors/routing-v1/rou
 
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
+    ("consumer-declarations.json", CONSUMER_DECLARATIONS_JSON),
     ("open-sets.json", OPEN_SETS_JSON),
     ("refusals.json", REFUSALS_JSON),
     ("reply-envelope.json", REPLY_ENVELOPE_JSON),

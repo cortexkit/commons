@@ -3,20 +3,35 @@
 //! configuration before each check.
 
 use async_trait::async_trait;
+use cortexkit_role_routing::DemandDefaults;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 use crate::route::RoutingRoute;
+
+/// The daemon's bind scope stamp, matching `(owner, ref, epoch)`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ScopeStamp {
+    /// The attested principal owning the scope, not necessarily the caller.
+    pub owner: String,
+    pub scope_ref: String,
+    pub scope_epoch: u64,
+}
 
 /// The caller identity and scope stamp a route carries.
 ///
 /// `principal` is the module the route is opened as: a consumer module for
 /// `route.select` and `route.report`, a runner module for the runner ops.
 /// `project_id`, when present, is the project the route is bound to; a
-/// route without one is unscoped, and the provider attributes its selects
-/// to the calling module itself.
+/// route without either project or scope is unscoped. Declaration admission
+/// accepts the declaring module's `principal` or `scope.owner`, independently
+/// of project attribution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RouteStamp {
     pub principal: String,
     pub project_id: Option<String>,
+    pub scope: Option<ScopeStamp>,
 }
 
 impl RouteStamp {
@@ -25,6 +40,7 @@ impl RouteStamp {
         Self {
             principal: principal.to_owned(),
             project_id: None,
+            scope: None,
         }
     }
 
@@ -33,8 +49,28 @@ impl RouteStamp {
         Self {
             principal: principal.to_owned(),
             project_id: Some(project_id.to_owned()),
+            scope: None,
         }
     }
+
+    /// A route carrying a daemon-stamped scope under an independent caller.
+    pub fn scoped(principal: &str, scope: ScopeStamp) -> Self {
+        Self {
+            principal: principal.to_owned(),
+            project_id: None,
+            scope: Some(scope),
+        }
+    }
+}
+
+/// Operator demand overrides. Unlike declarations, configuration may set `iq`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorRequirements {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iq: Option<u8>,
+    /// The demand fields that declarations may also default.
+    #[serde(flatten)]
+    pub defaults: DemandDefaults,
 }
 
 /// One consumer in the provider's configuration.
@@ -43,6 +79,17 @@ pub struct ConsumerConfig {
     pub id: String,
     /// Answer this consumer only with routes priced per token.
     pub priced_only: bool,
+    /// Operator demand values, which override request and declared values.
+    pub requirements: OperatorRequirements,
+}
+
+/// A module's raw daemon catalog declaration slots. Ownership is trusted only
+/// when the daemon nonce-verified the entry; the JSON never attests itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatalogModule {
+    pub principal: String,
+    pub nonce_verified: bool,
+    pub role_declarations: BTreeMap<String, Value>,
 }
 
 /// A model in the provider's catalog.
@@ -135,6 +182,20 @@ pub trait RoutingSubject: Send + Sync {
     /// daemon verified, and the provider knows it as a runner); every other
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
+
+    /// Supply module entries through the daemon catalog, never request params.
+    /// Older adapters fail declaration checks explicitly until they implement
+    /// this hook; checks that use only the original catalog need no change.
+    async fn configure_catalog_declarations(
+        &self,
+        modules: &[CatalogModule],
+    ) -> Result<(), String> {
+        if modules.is_empty() {
+            Ok(())
+        } else {
+            Err("catalog declarations are not supported by this subject".into())
+        }
+    }
 
     /// An operator pin: within `project_id`, `consumer`'s selects that carry
     /// no `pin` of their own are answered with `pin` (`provider/model`).
