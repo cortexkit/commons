@@ -7,7 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.11.0
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.12.0
+pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.12.0. Version 0.11.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.11.0. Version 0.10.1
 pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.4; version
 0.10.0 with cortexkit-role-tool-provider 0.10.0. Version
@@ -130,6 +131,23 @@ case checks the list with `check_presets`, then requests the catalog once per
 listed preset. Every listed preset must be answered with a catalog that
 carries no `presets` list of its own; a refusal fails the case naming the
 preset.
+
+## System text without a preset
+
+`system_text_preset_optional_served` runs for a subject declaring both
+`Capability::SystemText` and `Capability::SystemTextOptionalPreset`. A
+provider on a release that still requires `system_text.preset` leaves the
+latter undeclared and gets
+`SKIP system_text_preset_optional_served (requires system_text, system_text_optional_preset; missing system_text_optional_preset)`.
+The case sends `system_text_catalog_arguments()` without the top-level
+`preset` and without `system_text.preset`. A refusal, such as
+`invalid_params`, fails the case naming the refusal code. The answer must
+carry a system-text item that passes the `system_text_digests_match_text`
+checks, and a repeat must return the same `item_digest`. When
+`system_text_default_preset()` names the preset the default text belongs to,
+the preset-less answer's `text` and `item_digest` must equal that preset's.
+The hook defaults to `None`, for a provider whose default is not a named
+preset; the case then cannot tell which variant answered.
 
 ## User commands
 

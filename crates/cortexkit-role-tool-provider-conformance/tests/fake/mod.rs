@@ -67,8 +67,10 @@ pub const DISABLED: &str = "danger";
 const GENERATION: &str = "fake-gen-1";
 /// The fake's default variant, which its catalog arguments name.
 const DEFAULT_PRESET: &str = "default";
+/// The fake's other variant, with its own system text.
+const LEAN_PRESET: &str = "lean";
 /// Every preset the fake serves, as its preset-less catalog answer lists them.
-const SERVED_PRESETS: &[&str] = &[DEFAULT_PRESET, "lean"];
+const SERVED_PRESETS: &[&str] = &[DEFAULT_PRESET, LEAN_PRESET];
 /// The preset `Defects::list_refused_preset` lists but the fake refuses.
 pub const REFUSED_LISTED_PRESET: &str = "ghost";
 const FILTER_TOOL_CAPABILITIES: &[&str] = &[
@@ -97,6 +99,9 @@ fn filter_params(defects: Defects) -> Map<String, Value> {
 /// Quotes, non-ASCII text, newlines and trailing spaces must all be hashed
 /// exactly as returned, without JSON escaping or whitespace normalization.
 pub const SYSTEM_TEXT: &str = "Use \"echo\" for café.\nKeep trailing whitespace. \n";
+
+/// The lean preset's system text, which differs from the default's.
+pub const LEAN_SYSTEM_TEXT: &str = "Use echo.\n";
 
 /// The fake's `preflight_digest`: a digest of its inputs (preset and template),
 /// deliberately different from the text digest, so the suite proves it never
@@ -158,6 +163,12 @@ pub struct Defects {
     pub undefined_unprefixed_tag: bool,
     /// Return malformed system text without changing the other catalog cases.
     pub system_text: Option<SystemTextDefect>,
+    /// Refuse a system-text item without a preset as `invalid_params`, as a
+    /// provider on a release that required the preset does.
+    pub refuse_preset_less_system_text: bool,
+    /// Answer a system-text item without a preset with the lean preset's
+    /// text instead of the default preset's.
+    pub preset_less_system_text_is_lean: bool,
     /// Keep the quick tool's legacy opaque reply and omit its format declaration.
     pub opaque_result: bool,
     /// The content/v1 tool replies with structured data but no content parts.
@@ -497,11 +508,23 @@ impl Module {
             }
         }
         if let Some(item) = &request.system_text {
-            if item.preset != DEFAULT_PRESET {
-                return Err(errors::invalid_request(
-                    "system_text.preset",
-                    format!("no system-text preset named {}", item.preset),
-                ));
+            match item.preset.as_deref() {
+                // Without a preset the item asks for the default text.
+                None if self.defects.refuse_preset_less_system_text => {
+                    // An older provider, whose item type required the
+                    // preset, refuses the request as malformed.
+                    return Err(ErrorBody::new(
+                        "invalid_params",
+                        "missing field `preset` in system_text",
+                    ));
+                }
+                None | Some(DEFAULT_PRESET) | Some(LEAN_PRESET) => {}
+                Some(other) => {
+                    return Err(errors::invalid_request(
+                        "system_text.preset",
+                        format!("no system-text preset named {other}"),
+                    ));
+                }
             }
         }
         let override_emits_events = self.defects.emits_events_override;
@@ -553,13 +576,18 @@ impl Module {
             }
             answer["presets"] = json!(presets);
         }
-        if request.system_text.is_some()
-            && !matches!(
+        if let Some(item) = request.system_text.as_ref().filter(|_| {
+            !matches!(
                 self.defects.system_text,
                 Some(SystemTextDefect::MissingAnswer)
             )
-        {
-            answer["system_text"] = self.system_text();
+        }) {
+            let preset = match item.preset.as_deref() {
+                None if self.defects.preset_less_system_text_is_lean => LEAN_PRESET,
+                None => DEFAULT_PRESET,
+                Some(preset) => preset,
+            };
+            answer["system_text"] = self.system_text(preset);
         }
         let mut digestable = answer.clone();
         digestable.as_object_mut().unwrap().remove("catalog_digest");
@@ -575,7 +603,21 @@ impl Module {
         Ok(answer)
     }
 
-    fn system_text(&self) -> Value {
+    /// The system-text item for `preset`. The default preset's text carries
+    /// the deliberate defects; the lean preset's text exists only so a
+    /// provider can be shown answering the wrong variant.
+    fn system_text(&self, preset: &str) -> Value {
+        if preset == LEAN_PRESET {
+            return json!({
+                "text": LEAN_SYSTEM_TEXT,
+                "item_digest": system_text_digest(LEAN_SYSTEM_TEXT),
+                "preflight_digest": composition_digest(
+                    &json!({ "preset": LEAN_PRESET, "template": LEAN_SYSTEM_TEXT }),
+                )
+                .unwrap(),
+                "tool_names": [QUICK, HELD, SLOW],
+            });
+        }
         let digest = system_text_digest(SYSTEM_TEXT);
         let preflight = system_text_preflight_digest();
         let fetch = self.system_text_fetches.fetch_add(1, Ordering::SeqCst);
@@ -973,6 +1015,8 @@ pub struct FakeSubject {
     pub defects: Defects,
     pub capabilities: BTreeSet<Capability>,
     pub system_text_arguments: Option<Value>,
+    /// What the subject reports as its default system-text preset.
+    pub system_text_default_preset: Option<String>,
     pub mode_probe: Option<CallModeProbe>,
     live: Mutex<Option<Arc<Module>>>,
 }
@@ -992,6 +1036,7 @@ impl FakeSubject {
                 Capability::ApprovalExecution,
                 Capability::LateResults,
                 Capability::SystemText,
+                Capability::SystemTextOptionalPreset,
                 Capability::CallModes,
                 Capability::HeldReplyV1,
             ]
@@ -1000,6 +1045,7 @@ impl FakeSubject {
                 "params": params, "preset": DEFAULT_PRESET,
                 "system_text": { "preset": DEFAULT_PRESET, "params": {} },
             })),
+            system_text_default_preset: Some(DEFAULT_PRESET.into()),
             mode_probe: Some(CallModeProbe {
                 call: (QUICK.into(), json!({ "text": "hi" })),
                 unlisted_mode: CallMode::Codemode,
@@ -1132,6 +1178,10 @@ impl ToolProviderSubject for FakeSubject {
 
     fn system_text_catalog_arguments(&self) -> Option<Value> {
         self.system_text_arguments.clone()
+    }
+
+    fn system_text_default_preset(&self) -> Option<String> {
+        self.system_text_default_preset.clone()
     }
 
     fn quick_call(&self) -> CallSpec {

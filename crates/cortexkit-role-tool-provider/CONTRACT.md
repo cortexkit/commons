@@ -95,7 +95,7 @@ to them. Nothing here names a particular implementation.
       forms are pinned by `test-vectors/tool-provider-v1/catalog-capabilities.json`.
   - `preset` is the plan item's named variant, defined by the provider. It
     sits beside `params`, not inside it, so it never collides with a
-    provider's own axis, and mirrors `system_text`'s `{preset, params}`.
+    provider's own axis, and mirrors `system_text`'s `{preset?, params}`.
     Absent means the provider's default variant; an encoder omits the member
     rather than sending `null`. A preset the provider does not define is
     refused as `invalid_request {field: "preset"}`, never guessed, like an
@@ -105,8 +105,19 @@ to them. Nothing here names a particular implementation.
   - `composition` is the session's composition, carried verbatim as an opaque
     JSON object. Providers never interpret it beyond resolving their own text
     against it. Absent on a preflight call.
-  - `system_text` is `{preset, params}` when the plan has a system-prompt item
-    for this provider.
+  - `system_text` is `{preset?, params}` (`SystemTextItem`) when the plan has
+    a system-prompt item for this provider.
+    - `preset` is the item's named variant, defined by the provider. Absent
+      means the provider answers with its default system text, exactly as a
+      request without the top-level `preset` is answered with the default
+      variant; an encoder omits the member rather than sending `null`. A
+      present preset keeps its meaning: one the provider does not define is
+      refused, never guessed.
+    - Rollout. A sender omits `system_text.preset` only to a provider whose
+      release reads it as optional (cortexkit-role-tool-provider 0.12.0 or
+      later). A provider on an older release refuses a missing preset as
+      `invalid_params`, so senders adopt this after providers do
+      (`test-vectors/tool-provider-v1/catalog-requests.json` pins both forms).
 - Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
   tools: [...], system_text?, capabilities?, user_commands?, presets?}`.
   `user_commands` is §4.2; `presets` is §4.3.
@@ -769,6 +780,7 @@ CI against its real module over a real route; never against a double.
 | `catalog_listed_presets_served` | `presets` listed in the live preset-less catalog answer |
 | `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
+| `system_text_preset_optional_served` | `system_text`, `system_text_optional_preset` |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
 | `tool_result_content_v1_valid` | a catalog tool declaring `result_format: "content/v1"` |
@@ -804,6 +816,17 @@ requests must return the same `item_digest` and the same `preflight_digest`,
 but the provider-defined `preflight_digest` need not equal the text digest.
 There is no digest-only comparison of `preflight_digest`: a `digest_only`
 answer carries only `generation` and `catalog_digest`, not `system_text`.
+
+The `system_text_preset_optional_served` case runs only for a subject that
+declares `system_text_optional_preset`, so a provider on an older release
+skips it by name rather than failing. It sends the subject's system-text
+request without the top-level `preset` and without `system_text.preset`. The
+provider must answer, not refuse, with a well-formed system-text item (the
+same checks as `system_text_digests_match_text`), and an identical request
+must return the same `item_digest`. When the subject names the preset its
+default text belongs to, the answer's `text` and `item_digest` must equal
+the answer for that preset. A provider whose default is not a named preset
+gets only the first checks.
 
 The `call_modes` case requires a restricted tool probe and a harness that
 opens real routes with known bind modes. The subject supplies the call and

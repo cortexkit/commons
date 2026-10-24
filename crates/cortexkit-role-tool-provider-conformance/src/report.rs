@@ -16,6 +16,7 @@ pub struct CaseSpec {
 use Capability::{
     ApprovalExecution, CallKey, CallModes, Cancellation, CatalogCapabilityFilter, ContentV1,
     DisableTool, HeldCalls, HeldReplyV1, LateResults, SchemaPin, ScopeStamp, SystemText,
+    SystemTextOptionalPreset,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -111,6 +112,11 @@ pub const CASES: &[CaseSpec] = &[
         name: "system_text_preflight_digest_stable",
         requires: &[SystemText],
         checks: "two identical full catalog requests with system_text carry the same item_digest and the same provider-defined preflight_digest",
+    },
+    CaseSpec {
+        name: "system_text_preset_optional_served",
+        requires: &[SystemText, SystemTextOptionalPreset],
+        checks: "a system_text item without a preset, in a catalog request without a preset, is answered, not refused, with a well-formed system-text item whose item_digest a repeat request returns again, and whose text and item_digest equal the subject's named default preset's, when it names one",
     },
     CaseSpec {
         name: "catalog_disabled_tool_absent",

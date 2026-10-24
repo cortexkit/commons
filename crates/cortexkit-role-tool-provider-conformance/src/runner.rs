@@ -357,6 +357,7 @@ where
             "system_text_preflight_digest_stable" => {
                 self.system_text_preflight_digest_stable().await
             }
+            "system_text_preset_optional_served" => self.system_text_preset_optional_served().await,
             "catalog_disabled_tool_absent" => self.catalog_disabled_tool_absent().await,
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
@@ -1076,51 +1077,81 @@ where
         let arguments = self.system_text_arguments()?;
         let route = self.plain_route().await?;
         let answer = self.system_text_catalog(&route, arguments).await?;
-        // Inspect the raw fields so even a missing digest reports its received
-        // value and the digest expected from the returned text.
-        let item = &answer["system_text"];
-        if !item.is_object() {
+        check_system_text_item(&answer)
+    }
+
+    /// The subject's system-text request with the top-level `preset` and
+    /// the item's own `preset` removed: a request for the provider's default
+    /// catalog variant and its default system text.
+    fn preset_less_system_text_arguments(&self) -> Result<Value, String> {
+        let mut arguments = self.system_text_arguments()?;
+        if let Some(members) = arguments.as_object_mut() {
+            members.remove(PRESET_FIELD);
+        }
+        if let Some(item) = arguments["system_text"].as_object_mut() {
+            item.remove(PRESET_FIELD);
+        }
+        Ok(arguments)
+    }
+
+    /// Fetch system text with `arguments`, requiring an answer rather than a
+    /// refusal, and a well-formed system-text item in it.
+    async fn served_system_text(
+        &self,
+        route: &S::Route,
+        what: &str,
+        arguments: Value,
+    ) -> Result<Value, String> {
+        let exchange = request(route, op_body(ops::TOOL_CATALOG, arguments)).await?;
+        let answer = match single_terminal(&exchange).map_err(|p| format!("{what}: {p}"))? {
+            ObservedFrame::Response(body) => body.clone(),
+            ObservedFrame::Error(error) => {
+                return Err(format!(
+                    "{what} was refused as {} ({}) {:?}; a provider reading system_text.preset \
+                     as optional answers with its default system text",
+                    error.code, error.message, error.detail
+                ))
+            }
+            other => return Err(format!("{what} ended with {other:?}, not a response")),
+        };
+        check_system_text_item(&answer).map_err(|reason| format!("{what}: {reason}"))?;
+        Ok(answer)
+    }
+
+    async fn system_text_preset_optional_served(&self) -> CaseResult {
+        let arguments = self.preset_less_system_text_arguments()?;
+        let route = self.plain_route().await?;
+        let what = "tool.catalog with a system_text item without a preset";
+        let first = self
+            .served_system_text(&route, what, arguments.clone())
+            .await?;
+        let second = self
+            .served_system_text(&route, what, arguments.clone())
+            .await?;
+        let digest = &first["system_text"]["item_digest"];
+        let repeated = &second["system_text"]["item_digest"];
+        if repeated != digest {
             return Err(format!(
-                "system_text received {item}; expected a system-text answer"
+                "{what}: a repeat received system_text.item_digest {repeated}; expected digest \
+                 {digest} from the identical first request"
             ));
         }
-        let text = item["text"].as_str().ok_or_else(|| {
-            format!(
-                "system_text.text received {}; expected the resolved text as a string",
-                item["text"]
-            )
-        })?;
-        let expected = system_text_digest(text);
-        let received = &item["item_digest"];
-        if !received
-            .as_str()
-            .is_some_and(|digest| is_schema_digest(digest) && digest == expected)
-        {
-            return Err(format!(
-                "system_text.item_digest received {received}; expected digest {expected} \
-                 (SHA-256 of the exact UTF-8 text bytes, as 64 lowercase hex characters)"
-            ));
-        }
-        let preflight = &item["preflight_digest"];
-        if !preflight.as_str().is_some_and(is_schema_digest) {
-            return Err(format!(
-                "system_text.preflight_digest received {preflight}; expected a provider-defined \
-                 digest as 64 lowercase hex characters (not necessarily {expected}, the text digest)"
-            ));
-        }
-        let names: Vec<String> = serde_json::from_value(item["tool_names"].clone()).map_err(|e| {
-            format!(
-                "system_text.tool_names received {}; expected a sorted, deduplicated list of tool names: {e}",
-                item["tool_names"]
-            )
-        })?;
-        let mut ordered = names.clone();
-        ordered.sort();
-        ordered.dedup();
-        if names != ordered {
-            return Err(format!(
-                "system_text.tool_names received {names:?}; expected sorted, deduplicated {ordered:?}"
-            ));
+        let Some(default) = self.subject.system_text_default_preset() else {
+            return Ok(());
+        };
+        let mut named = arguments;
+        named["system_text"][PRESET_FIELD] = json!(default);
+        let named_what = format!("tool.catalog with system_text preset {default:?}");
+        let named = self.served_system_text(&route, &named_what, named).await?;
+        for field in ["text", "item_digest"] {
+            let expected = &named["system_text"][field];
+            let received = &first["system_text"][field];
+            if received != expected {
+                return Err(format!(
+                    "{what}: system_text.{field} received {received}; expected {expected}, the \
+                     answer for the default preset {default:?}"
+                ));
+            }
         }
         Ok(())
     }
@@ -1818,6 +1849,59 @@ fn expect_invalid_field(error: &ErrorBody, field: &str) -> CaseResult {
             errors::INVALID_REQUEST
         ))
     }
+}
+
+/// Check the `system_text` item of a full catalog answer: its text, an
+/// `item_digest` that hashes that text, a provider-defined
+/// `preflight_digest`, and sorted, deduplicated `tool_names`.
+fn check_system_text_item(answer: &Value) -> CaseResult {
+    // Inspect the raw fields so even a missing digest reports its received
+    // value and the digest expected from the returned text.
+    let item = &answer["system_text"];
+    if !item.is_object() {
+        return Err(format!(
+            "system_text received {item}; expected a system-text answer"
+        ));
+    }
+    let text = item["text"].as_str().ok_or_else(|| {
+        format!(
+            "system_text.text received {}; expected the resolved text as a string",
+            item["text"]
+        )
+    })?;
+    let expected = system_text_digest(text);
+    let received = &item["item_digest"];
+    if !received
+        .as_str()
+        .is_some_and(|digest| is_schema_digest(digest) && digest == expected)
+    {
+        return Err(format!(
+            "system_text.item_digest received {received}; expected digest {expected} \
+             (SHA-256 of the exact UTF-8 text bytes, as 64 lowercase hex characters)"
+        ));
+    }
+    let preflight = &item["preflight_digest"];
+    if !preflight.as_str().is_some_and(is_schema_digest) {
+        return Err(format!(
+            "system_text.preflight_digest received {preflight}; expected a provider-defined \
+             digest as 64 lowercase hex characters (not necessarily {expected}, the text digest)"
+        ));
+    }
+    let names: Vec<String> = serde_json::from_value(item["tool_names"].clone()).map_err(|e| {
+        format!(
+            "system_text.tool_names received {}; expected a sorted, deduplicated list of tool names: {e}",
+            item["tool_names"]
+        )
+    })?;
+    let mut ordered = names.clone();
+    ordered.sort();
+    ordered.dedup();
+    if names != ordered {
+        return Err(format!(
+            "system_text.tool_names received {names:?}; expected sorted, deduplicated {ordered:?}"
+        ));
+    }
+    Ok(())
 }
 
 fn decode_answer(exchange: Exchange) -> Result<WithdrawAnswer, String> {

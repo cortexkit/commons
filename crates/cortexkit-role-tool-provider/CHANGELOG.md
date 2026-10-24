@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.0
+
+- A system-text item's `preset` is optional (contract §3). Without one, the
+  provider answers with its default system text, as a `tool.catalog` request
+  without a `preset` is answered with its default variant. A present preset
+  keeps its meaning, including the refusal of one the provider does not define.
+- Breaking: `SystemTextItem.preset` is `Option<String>`, omitted from the
+  encoding when `None`. Migration: wrap existing presets in `Some(...)`, and
+  treat `None` as the provider's default text. An item with a preset encodes
+  byte for byte as before.
+- Add `SystemTextItem::new` and `SystemTextItem::with_preset`, and derive
+  `Default` for `SystemTextItem`.
+- Rollout: a sender omits `system_text.preset` only to a provider on this
+  release or later. An older provider refuses a missing preset as
+  `invalid_params`, so senders adopt this after providers do.
+- `catalog-requests.json` adds a system-text request with a preset and one
+  without; existing vectors are unchanged.
+
 ## 0.11.0
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

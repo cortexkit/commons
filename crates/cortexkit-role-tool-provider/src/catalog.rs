@@ -202,11 +202,36 @@ impl CatalogRequest {
 }
 
 /// A system-prompt plan item fetched alongside the catalog.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct SystemTextItem {
-    pub preset: String,
+    /// The item's named variant, defined by the provider. Absent means the
+    /// provider's default system text, as an absent [`CatalogRequest::preset`]
+    /// means its default catalog variant; an encoder omits the member rather
+    /// than sending `null`. A present preset the provider does not define is
+    /// refused, never guessed. Send `None` only to a provider whose release
+    /// reads this member as optional: an older one refuses a missing preset
+    /// as `invalid_params`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
     #[serde(default)]
     pub params: Map<String, Value>,
+}
+
+impl SystemTextItem {
+    /// An item for `params` without a preset, asking for the provider's
+    /// default system text.
+    pub fn new(params: Map<String, Value>) -> Self {
+        Self {
+            preset: None,
+            params,
+        }
+    }
+
+    /// Name the item's preset.
+    pub fn with_preset(mut self, preset: impl Into<String>) -> Self {
+        self.preset = Some(preset.into());
+        self
+    }
 }
 
 /// The `tool.catalog` answer. A `digest_only` answer carries only
@@ -1175,25 +1200,70 @@ mod tests {
         // The `round_trip` requests of `catalog-requests.json`, in its order,
         // built with the constructor and setters, so the builder's output is
         // checked against the recorded wire form too.
+        let text_params: Map<String, Value> =
+            serde_json::from_value(json!({"tone": "brief"})).unwrap();
         let built = [
             CatalogRequest::new(params.clone()),
-            CatalogRequest::new(params).with_preset("default"),
+            CatalogRequest::new(params.clone()).with_preset("default"),
+            CatalogRequest::new(params.clone())
+                .with_system_text(SystemTextItem::new(text_params.clone()).with_preset("default")),
+            CatalogRequest::new(params).with_system_text(SystemTextItem::new(text_params)),
         ];
         assert_eq!(cases.len(), built.len());
         for (case, built) in cases.iter().zip(built) {
             let name = &case["name"];
             let decoded: CatalogRequest = serde_json::from_value(case["request"].clone()).unwrap();
             assert_eq!(decoded, built, "{name}");
-            let encoded = serde_json::to_value(&built).unwrap();
+            let encoded = serde_json::to_value(&decoded).unwrap();
+            // An absent member is named by its path: `preset` at the top
+            // level, or `system_text.preset` inside the system-text item.
             for member in case["absent"].as_array().unwrap() {
                 let member = member.as_str().unwrap();
+                let (parent, key) = match member.split_once('.') {
+                    Some((parent, key)) => (&encoded[parent], key),
+                    None => (&encoded, member),
+                };
                 assert!(
-                    !encoded.as_object().unwrap().contains_key(member),
+                    !parent.as_object().unwrap().contains_key(key),
                     "{name}: the encoding carries absent member {member}: {encoded}"
                 );
             }
+            // Byte for byte, in canonical (JCS) form, so the comparison does
+            // not depend on member order.
+            assert_eq!(
+                serde_jcs::to_string(&decoded).unwrap(),
+                serde_jcs::to_string(&case["request"]).unwrap(),
+                "{name}"
+            );
             assert_eq!(encoded, case["request"], "{name}");
         }
+    }
+
+    #[test]
+    fn a_system_text_item_with_a_preset_encodes_exactly_as_before() {
+        // Before the preset became optional, an item encoded as
+        // `{"preset": ..., "params": ...}` in this member order. A present
+        // preset must keep exactly those bytes, so digests and stored
+        // requests that cover the item do not change.
+        let params: Map<String, Value> = serde_json::from_value(json!({"tone": "brief"})).unwrap();
+        let item = SystemTextItem::new(params.clone()).with_preset("default");
+        assert_eq!(
+            serde_json::to_string(&item).unwrap(),
+            r#"{"preset":"default","params":{"tone":"brief"}}"#
+        );
+        // Without a preset the member is omitted, never sent as `null`, and
+        // a decoded item without one reads as `None`.
+        let item = SystemTextItem::new(params);
+        assert_eq!(
+            serde_json::to_string(&item).unwrap(),
+            r#"{"params":{"tone":"brief"}}"#
+        );
+        let decoded: SystemTextItem =
+            serde_json::from_str(r#"{"params":{"tone":"brief"}}"#).unwrap();
+        assert_eq!(decoded.preset, None);
+        let decoded: SystemTextItem =
+            serde_json::from_str(r#"{"preset":null,"params":{}}"#).unwrap();
+        assert_eq!(decoded.preset, None);
     }
 
     #[test]

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.0
+
+- Breaking dependency update: the public `wire` re-export moves to
+  cortexkit-role-tool-provider 0.12, whose `SystemTextItem.preset` is
+  `Option<String>`. Migration: wrap existing presets in `Some(...)`, and
+  treat `None` as the provider's default text.
+- Add `system_text_preset_optional_served`: a system-text item without a
+  preset must be answered, not refused, with a well-formed system-text item
+  that a repeat returns again. When the subject names its default preset with
+  the new `system_text_default_preset` hook, the text and `item_digest` must
+  equal that preset's. The case requires the new subject-declared
+  `Capability::SystemTextOptionalPreset`, so a provider on an older release
+  skips it by name instead of failing.
+- The fake provider serves a system-text item without a preset, with faults
+  for refusing one as `invalid_params` and for answering another variant's
+  text.
+
 ## 0.11.0
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

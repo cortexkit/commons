@@ -423,7 +423,12 @@ async fn digesting_a_json_wrapper_fails_system_text_digests_match_text_by_name()
         "{reason}"
     );
     for spec in CASES {
-        if spec.name != "system_text_digests_match_text" {
+        // The optional-preset case applies the same checks to its preset-less
+        // answer, so the wrapped digest fails it too, under its own name.
+        if spec.name == "system_text_preset_optional_served" {
+            let reason = failed(&report, spec.name);
+            assert!(reason.contains("system_text.item_digest"), "{reason}");
+        } else if spec.name != "system_text_digests_match_text" {
             assert_passed(&report, spec.name);
         }
     }
@@ -559,6 +564,89 @@ async fn changing_either_digest_fails_system_text_preflight_digest_stable_by_nam
 }
 
 #[tokio::test]
+async fn refusing_a_preset_less_system_text_item_fails_the_optional_preset_case_by_name() {
+    // A provider whose release still requires the item's preset refuses the
+    // request as malformed; the other system-text cases, which always send a
+    // preset, still pass.
+    let report = run(&FakeSubject::new(Defects {
+        refuse_preset_less_system_text: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "system_text_preset_optional_served");
+    assert!(reason.contains("refused as invalid_params"), "{reason}");
+    assert!(reason.contains("without a preset"), "{reason}");
+    for spec in CASES {
+        if spec.name != "system_text_preset_optional_served" {
+            assert_passed(&report, spec.name);
+        }
+    }
+}
+
+#[tokio::test]
+async fn answering_another_variant_without_a_preset_fails_the_optional_preset_case_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        preset_less_system_text_is_lean: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "system_text_preset_optional_served");
+    assert!(reason.contains("system_text.text received"), "{reason}");
+    assert!(
+        reason.contains("the answer for the default preset \"default\""),
+        "{reason}"
+    );
+    assert_passed(&report, "system_text_digests_match_text");
+    assert_passed(&report, "system_text_preflight_digest_stable");
+}
+
+#[tokio::test]
+async fn an_unnamed_default_preset_checks_only_that_the_preset_less_item_is_served() {
+    // Without a named default the kit cannot tell which variant answered, so
+    // a wrong variant passes; a refusal still fails.
+    let mut subject = FakeSubject::new(Defects {
+        preset_less_system_text_is_lean: true,
+        ..Defects::default()
+    });
+    subject.system_text_default_preset = None;
+    assert_passed(&run(&subject).await, "system_text_preset_optional_served");
+
+    let mut subject = FakeSubject::new(Defects {
+        refuse_preset_less_system_text: true,
+        ..Defects::default()
+    });
+    subject.system_text_default_preset = None;
+    let report = run(&subject).await;
+    let reason = failed(&report, "system_text_preset_optional_served");
+    assert!(reason.contains("refused as invalid_params"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_provider_not_declaring_the_optional_preset_skips_the_case_by_name() {
+    // An older provider refuses a preset-less item; not declaring the
+    // capability reports the case as not applicable instead of failed.
+    let mut subject = FakeSubject::new(Defects {
+        refuse_preset_less_system_text: true,
+        ..Defects::default()
+    });
+    subject
+        .capabilities
+        .remove(&Capability::SystemTextOptionalPreset);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("system_text_preset_optional_served"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::SystemTextOptionalPreset],
+        })
+    );
+    assert!(report.render().contains(
+        "SKIP system_text_preset_optional_served (requires system_text, \
+         system_text_optional_preset; missing system_text_optional_preset)"
+    ));
+    assert_passed(&report, "system_text_digests_match_text");
+}
+
+#[tokio::test]
 async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.remove(&Capability::ApprovalExecution);
@@ -570,6 +658,7 @@ async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
         "call_disabled_tool_refused_by_name",
         "system_text_digests_match_text",
         "system_text_preflight_digest_stable",
+        "system_text_preset_optional_served",
         "late_results_cursor_round_trip",
         "late_results_ack",
         "crash_after_prepared_not_started",

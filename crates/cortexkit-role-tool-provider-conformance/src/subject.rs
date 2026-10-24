@@ -65,6 +65,11 @@ pub enum Capability {
     /// The provider's catalog answer to a request without a preset lists the
     /// presets it serves. Inferred from the live catalog, not a subject flag.
     Presets,
+    /// The provider reads `system_text.preset` as optional and answers a
+    /// system-text item without one with its default text. Declared by the
+    /// subject, so a provider on an older release skips the case rather than
+    /// failing it. See [`ToolProviderSubject::system_text_default_preset`].
+    SystemTextOptionalPreset,
 }
 
 impl Capability {
@@ -86,6 +91,7 @@ impl Capability {
             Self::HeldReplyV1 => "held-reply/v1",
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
             Self::Presets => "presets",
+            Self::SystemTextOptionalPreset => "system_text_optional_preset",
         }
     }
 }
@@ -207,9 +213,23 @@ pub trait ToolProviderSubject: Harness {
     /// The arguments of a full `tool.catalog` request for system text, including
     /// `system_text: {preset, params}` with a preset this provider defines.
     /// Do not set `digest_only: true`: these cases need the full answer's text
-    /// and digests. Required by
+    /// and digests. The `system_text_preset_optional_served` case sends them
+    /// with both the top-level and the item's `preset` removed. Required by
     /// [`Capability::SystemText`]; the default keeps existing subjects opt-in.
     fn system_text_catalog_arguments(&self) -> Option<Value> {
+        None
+    }
+
+    /// The system-text preset whose text this provider serves when a
+    /// system-text item omits `preset`. When this names one, the
+    /// `system_text_preset_optional_served` case requires the preset-less
+    /// answer's `text` and `item_digest` to equal that preset's. Return `None`
+    /// when the default text is not a named preset: the case then checks only
+    /// that the preset-less request is answered with a well-formed item and
+    /// that a repeat gives the same `item_digest`, so it cannot tell whether
+    /// the text is really the default. Used only with
+    /// [`Capability::SystemTextOptionalPreset`].
+    fn system_text_default_preset(&self) -> Option<String> {
         None
     }
 

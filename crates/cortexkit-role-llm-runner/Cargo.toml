@@ -31,7 +31,7 @@ cortexkit-rich-ui-syntax = { version = "0.2.0", path = "../cortexkit-rich-ui-syn
 
 [dev-dependencies]
 cortexkit-rich-ui-syntax = { version = "0.2.0", path = "../cortexkit-rich-ui-syntax", features = ["test-vectors"] }
-cortexkit-role-tool-provider = { version = "0.11.0", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.12.0", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
 
 [[test]]
 name = "vectors_feature"
