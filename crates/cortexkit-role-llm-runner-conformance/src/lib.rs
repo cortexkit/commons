@@ -112,6 +112,7 @@ mod runner;
 mod session_change;
 mod session_retention;
 mod session_usage;
+pub mod step_events;
 mod structured_output;
 mod subject;
 mod system_text_default;

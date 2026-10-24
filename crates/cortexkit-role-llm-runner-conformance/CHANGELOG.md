@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.1
+
+- Pin the wire dependency to llm-runner 0.6.11. All new adapter hooks have
+  defaults, so existing `LlmRunnerSubject` implementations compile unchanged;
+  the step-event hook is only required when its new group is declared.
+
+- Capture the actual publication subject and check its publisher against the
+  body before using an event. Add faulty-content checks for `prompt` and
+  `project_root`, and a faulty publisher check. Native session references are
+  read from durable records; consumers must not derive them.
+
+- Gate three new cases on `step_events`: one publication per native recorded
+  step at the declared granularity, exact native durable position, and
+  publish-after-durability. Add an independent adapter observation hook;
+  missing evidence fails by case name. Faulty runners duplicate events,
+  publish an off-by-one position, or publish before syncing their records.
+
 ## 0.13.0
 
 - Pair with llm-runner 0.6.10. Add named, capability-gated session policy cases

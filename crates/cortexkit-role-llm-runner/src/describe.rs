@@ -48,6 +48,9 @@ pub mod problem_names {
     /// The answer declares `run_cause` without `live_events`, whose
     /// `run_started` event carries the run's cause.
     pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
+    pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
+    pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
+    pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -101,6 +104,9 @@ pub struct RoleDescribe {
     /// Supported cancellation points; absent means only `now` is supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_cancel: Option<RunCancel>,
+    /// Publication granularity and durable-history join for `step_events`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_events: Option<crate::step_events::StepEvents>,
 }
 
 /// Limits for per-session storage policies.
@@ -239,6 +245,12 @@ impl RoleDescribe {
         self
     }
 
+    /// State the step-event policy (the capability must also be listed).
+    pub fn with_step_events(mut self, policy: crate::step_events::StepEvents) -> Self {
+        self.step_events = Some(policy);
+        self
+    }
+
     /// Say where session-level capabilities come from.
     pub fn with_session_capabilities_from(mut self, source: impl Into<String>) -> Self {
         self.session_capabilities_from = Some(source.into());
@@ -354,11 +366,32 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if !raw.is_object() {
         return Err(vec![DescribeProblem::NotAnObject]);
     }
+    if let Some(policy) = raw.get("step_events") {
+        if serde_json::from_value::<crate::step_events::StepEvents>(policy.clone())
+            .map_or(true, |policy| !policy.valid())
+        {
+            return Err(vec![DescribeProblem::Undecodable(
+                problem_names::INVALID_STEP_EVENTS.into(),
+            )]);
+        }
+    }
     let describe: RoleDescribe = match serde_json::from_value(raw.clone()) {
         Ok(describe) => describe,
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    match (
+        describe.declares(capabilities::STEP_EVENTS),
+        describe.step_events.is_some(),
+    ) {
+        (true, false) => problems.push(DescribeProblem::Undecodable(
+            problem_names::STEP_EVENTS_MISSING.into(),
+        )),
+        (false, true) => problems.push(DescribeProblem::Undecodable(
+            problem_names::STEP_EVENTS_UNDECLARED.into(),
+        )),
+        _ => {}
+    }
     if describe.declares(capabilities::OUTPUT_REFS) && !describe.declares(capabilities::TAGS) {
         problems.push(DescribeProblem::Undecodable(
             "output_refs requires tags".into(),

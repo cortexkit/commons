@@ -85,7 +85,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -145,6 +145,7 @@ shipping runner with this document.
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
+| `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
@@ -3762,7 +3763,7 @@ above.
 
 - [pinned] Every field is declared required or optional.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
-  strings): `role.describe`, every reply and event a consumer decodes
+  strings): `role.describe`, every reply and session-stream event a consumer decodes
   (`ReadPage`, `ModelPage`, `HeadMeta`, `HistoryPage`, `RunResult`, `SubscribeEvent`,
   `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
   `ToolCallsPage`, `RefreshReply`, `RefreshPolicyReply`,
@@ -3771,6 +3772,9 @@ above.
   around it is exactly `{"result": <answer>}` (§1). A run call's `outcome`, a ceiling's
   `cause` and a read entry's `delivered_as.mode` are open strings. One
   exception: a model-view entry's `source` kind is strict (§8).
+- [pinned] **Closed live hint**: `step.finished.v1` refuses every unknown
+  member (§14.3), while its status and classification strings stay open.
+  `role.describe.step_events` is likewise closed and checked by name.
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `session.history`, `run.result`, `run.status`,
   `run.tool_calls`, `session.subscribe`, `session.baseline`,
@@ -3939,6 +3943,88 @@ to the session's whole length.
   the opt-in case `per_step_cost_scales_with_new_messages` (§15); it does
   not measure memory and does not enforce the rule on a runner that does
   not opt in.
+
+## 14.3 `step_events`: content-free live step hints
+
+- [pinned] A runner publishing these hints lists `step_events` in
+  `role.describe.capabilities` and supplies `step_events: {granularity,
+  history_key}`. `granularity` is exactly `per_attempt` or
+  `per_completed_step`; `history_key` is exactly `step_ref` or `harness`.
+  The declaration is closed. `check_describe` refuses malformed declarations
+  as `invalid_step_events`, a declared group without metadata as
+  `step_events_missing`, and metadata without the group as
+  `step_events_undeclared`.
+- [pinned] The runner publishes one `step.finished.v1` event per durably
+  recorded step at its declared granularity, **only after the record is
+  durable, never before**. With `per_attempt`, each recorded attempt is
+  visible. With `per_completed_step`, attempts the host retried inside one
+  step are invisible: a missing attempt is not evidence of a lost event.
+  Terminal failed, cancelled and interrupted steps are included, not only
+  successful steps.
+- [pinned] The subject is `ck.{acct}.live.<runner>.step.finished.v1`, where
+  `runner` is the publishing module id. The `live` root is beside `event`,
+  not beneath it. This is a plain publish; no stream captures it and nothing
+  is stored on the bus. A deleted session therefore leaves nothing behind
+  there. Consumers subscribe to granted live subjects without connecting to
+  every runner. An app with account-wide live access can use
+  `ck.{acct}.live.*.step.finished.v1`; a filtered consumer uses its allowed
+  per-runner subjects.
+- [pinned] The subject's module token is the authority for who published:
+  bus grants let a module publish only on its own live subjects. A consumer
+  takes the publisher from that token and drops an event whose body `runner`
+  differs. `step_events::decode_step_finished` checks the concrete subject,
+  closed body and publisher agreement before returning a hint. Publisher
+  identity does not make the hint authoritative history or grant any right.
+- [pinned] The body (`step_events::StepFinished`) has exactly the following
+  closed field list. Unknown members, including content-looking members such
+  as `prompt` or `project_root`, are refused on decode. Identifiers and open classifications
+  must never carry prompt text, tool names or arguments, error text, or any
+  other host-supplied user content. Optional means unknown when absent, never
+  zero; optional members are omitted when unavailable.
+
+  | Fields | Wire type and meaning |
+  |---|---|
+  | `runner`, `session_ref`, `log_incarnation`, `seq` | Required strings for the first three, unsigned 64-bit integer for `seq`; together the durable `step_ref` |
+  | `run_id`, `step_id`, `attempt`, `terminal_status` | Required identifier strings, positive 64-bit integer attempt (1-based), and open status string (`completed`, `failed`, `cancelled`, `interrupted`, or a future value) |
+  | `harness_step_ref?`, `provider_request_id?` | Optional host-record and vendor-request identifier strings |
+  | `harness`, `session` | Required strings: the harness and session the runner received |
+  | `work_class?`, `provider`, `model` | Optional open work-class string, required provider identifier and the model actually sent |
+  | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters, with the same names as run usage |
+  | `cache_write_5m_tokens?`, `cache_write_1h_tokens?` | Optional unsigned 64-bit cache-write counters split by TTL; absent is not zero and a partial split need not add up to the total |
+  | `reasoning_included_in_output?` | Optional boolean stating whether reasoning tokens are included in output tokens; absence does not imply either convention |
+  | `request_body_bytes?`, `context_limit?`, `finish_reason?` | Optional unsigned 64-bit request-byte count and context-token limit, and optional open finish-reason string |
+  | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
+
+- [pinned] `seq` is the runner's **native durable log position**, scoped by
+  runner, session reference and log incarnation: the position acknowledged by
+  the step-history consumer. It is never assumed to equal a `session.read`
+  message ordinal or a `session.subscribe` frame sequence. This adds no field
+  to `session.read` or `session.history`.
+- [pinned] `session_ref` is the runner's §14.1 reference, opaque to consumers;
+  consumers never derive it. A live hint carries no folder path or project-root
+  member: paths name user directories and do not belong in a content-free hint.
+- [pinned] With `history_key: "harness"`, `harness_step_ref` is the host's own
+  record id (for example a request id or message id). Its absence means the
+  attempt has no host record, such as a refusal before forwarding; an app
+  shows it as unmatched. With `history_key: "step_ref"`, the member is
+  omitted. `provider_request_id` is absent when the provider gave none.
+- [pinned] The event is a hint for a live view, **never authority, never
+  billing, and grants nothing**. Missed or duplicate delivery may briefly
+  stale a view; durable reads repair it. Consumer rule: **subscribe first
+  and buffer, then read the native durable step history** (directly or through
+  the step-history consumer), then drop buffered events whose `step_ref`
+  (or present `harness_step_ref` under the harness key) is already in history.
+  After reconnecting, re-query history by cursor shortly after reconnect:
+  the step-history consumer may take seconds to read a just-recorded step.
+- [pinned] The event owns a separate closed wire shape. `StepUsage` supplies
+  the five per-step counters through `with_usage`, but is not itself a wire
+  shape. `RunUsage` is a lenient aggregate with required step counts and a
+  per-model list, so neither type is changed or flattened into the event.
+- [pinned] The kit gates its three cases on `step_events`. Its adapter reads
+  native durable step positions independently of actual captured publishes,
+  and observes publish order at the runner's durability point. Missing
+  adapter evidence fails by case name; a later read alone does not prove
+  publish-after-durability.
 
 ## 15. Conformance suite (planned)
 

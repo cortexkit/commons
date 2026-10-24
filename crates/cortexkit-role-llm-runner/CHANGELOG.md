@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.11
+
+- Additive release alongside `session_retention` from 0.6.10; its policy group
+  and §9.14 remain unchanged.
+
+- Omit folder paths from the closed live hint and refuse `project_root` as
+  unknown content. Treat `session_ref` as the runner's opaque reference.
+  Add `decode_step_finished`, which takes the publisher from the actual live
+  subject and refuses a different body `runner`.
+
+- Add the closed, content-free `step_events::StepFinished` body for plain
+  `step.finished.v1` bus hints, native durable `StepRef`, and checked
+  `role.describe.step_events` policy metadata. Publish only after durability;
+  consumers subscribe/buffer before reading durable history and re-query after
+  reconnect. Keep step/run usage types unchanged; copy per-step counters with
+  `with_usage` and add optional TTL splits and reasoning inclusion facts.
+- Add full/minimal vectors and named declaration/closed-decode refusals.
+
 ## 0.6.10
 
 - Add the separate `session_retention` group: strict per-session policy on send

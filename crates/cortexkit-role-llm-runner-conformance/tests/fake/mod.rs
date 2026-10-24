@@ -72,6 +72,7 @@ mod history;
 mod media;
 mod output_refs;
 mod session_change;
+mod step_events;
 mod system_text_default;
 mod tags;
 mod user_commands;
@@ -167,6 +168,12 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub step_events_duplicate: bool,
+    pub step_events_wrong_position: bool,
+    pub step_events_before_durability: bool,
+    pub step_events_no_evidence: bool,
+    pub step_events_content_member: Option<&'static str>,
+    pub step_events_wrong_publisher: bool,
     pub system_text_default_invents_preset: bool,
     pub system_text_default_ignores_catalog: bool,
     pub incarnation_changes_on_cut: bool,
@@ -523,6 +530,10 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
+    step_publications: Mutex<
+        BTreeMap<String, Vec<cortexkit_role_llm_runner_conformance::step_events::PublishedStep>>,
+    >,
     system_text_default: Mutex<BTreeMap<String, system_text_default::Provider>>,
     held_replies: Mutex<BTreeMap<String, held_calls::HeldReply>>,
     standalone_in_process: bool,
@@ -1305,10 +1316,10 @@ impl Module {
 
     /// Append one record to the log, then apply it. A kill armed for the
     /// record's point takes effect right after the record is written: nothing
-    /// later is written or done. The fake never syncs: its kill only stops this
-    /// process's state, and the replay reads the log back through the same OS,
-    /// so a written record survives every crash these tests simulate. A real
-    /// runner must sync before it replies.
+    /// later is written or done. Outside the step-event fixture the fake never
+    /// syncs: its kills only stop process state and replay uses the same OS.
+    /// The step-event fixture syncs to observe publication against a real
+    /// durability point. A real runner must sync before it replies.
     fn commit(&self, session: &str, mut record: Value) -> Result<(), Killed> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
@@ -1336,12 +1347,19 @@ impl Module {
         }
         record["session"] = json!(session);
         record["at"] = json!(self.world.now());
+        step_events::prepare(self, session, &mut record)?;
+        step_events::publish(self, session, &record, false);
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.log)
             .expect("fake log opens");
         writeln!(file, "{record}").expect("fake log writes");
+        if self.world.serves(groups::STEP_EVENTS) {
+            file.sync_all()
+                .expect("step-event fixture reaches durability");
+        }
+        step_events::publish(self, session, &record, true);
         let point = point_of(record["kind"].as_str().unwrap_or_default());
         if !point.is_empty() && self.kill_hook.lock().unwrap().as_deref() == Some(point) {
             self.alive.store(false, Ordering::SeqCst);
@@ -2780,6 +2798,9 @@ impl Module {
         }
         if self.world.serves(groups::RUN_CANCEL) && self.world.cancel_step_boundary {
             describe = describe.with_run_cancel(vec!["now".into(), "step_boundary".into()]);
+        }
+        if self.world.serves(groups::STEP_EVENTS) {
+            describe = describe.with_step_events(self.world.step_event_policy.clone());
         }
         respond(describe)
     }
@@ -4670,6 +4691,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
     pub incarnation_fixtures: bool,
     pub head_sender_fixtures: bool,
     pub head_sender_group: bool,
@@ -4790,6 +4812,10 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents::new(
+                "per_attempt",
+                "step_ref",
+            ),
             held_calls_group: false,
             head_sender_fixtures: false,
             head_sender_group: true,
@@ -4841,6 +4867,8 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    step_event_policy: self.step_event_policy.clone(),
+                    step_publications: Mutex::new(BTreeMap::new()),
                     held_replies: Mutex::new(BTreeMap::new()),
                     standalone_in_process: self.standalone_in_process,
                     host_prefix_everywhere: self.host_prefix_everywhere,
@@ -5025,6 +5053,16 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn step_event_observation(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<
+        cortexkit_role_llm_runner_conformance::step_events::StepEventObservation,
+        HarnessError,
+    > {
+        step_events::observe(&handle.0, session)
+    }
     async fn prepare_system_text_default(
         &self,
         session: &str,

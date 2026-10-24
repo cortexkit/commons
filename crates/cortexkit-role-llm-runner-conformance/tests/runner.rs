@@ -123,6 +123,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::LiveEvents,
     Capability::ClientMessageId,
     Capability::RunCause,
+    Capability::StepEvents,
 ];
 
 // The in-process fake does not declare session_retention or exercise a real
@@ -426,6 +427,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         Capability::LiveEvents,
         Capability::ClientMessageId,
         Capability::RunCause,
+        Capability::StepEvents,
     ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
@@ -756,6 +758,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::LiveEvents,
                     Capability::ClientMessageId,
                     Capability::RunCause,
+                    Capability::StepEvents,
                     Capability::RetentionClock,
                     Capability::HoldToolCalls,
                     Capability::KillAt(points::RELEASE_PENDING)
@@ -1126,6 +1129,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::LiveEvents,
                     Capability::ClientMessageId,
                     Capability::RunCause,
+                    Capability::StepEvents,
                     Capability::RetentionClock,
                     Capability::KillAt(points::RELEASE_PENDING)
                 ],
@@ -1512,6 +1516,7 @@ async fn retention_paused_non_terminal_run_passes() {
         Capability::LiveEvents,
         Capability::ClientMessageId,
         Capability::RunCause,
+        Capability::StepEvents,
     ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
@@ -1550,6 +1555,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
         Capability::LiveEvents,
         Capability::ClientMessageId,
         Capability::RunCause,
+        Capability::StepEvents,
     ]);
     subject.host_prefix_hook = true;
     subject.capabilities.extend([
@@ -5707,4 +5713,164 @@ async fn system_text_default_undeclared_is_not_applicable() {
             matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare system_text_default")
         );
     }
+}
+
+fn step_event_subject(defects: Defects, granularity: &str, history_key: &str) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.insert(Capability::StepEvents);
+    subject.step_event_policy =
+        cortexkit_role_llm_runner::step_events::StepEvents::new(granularity, history_key);
+    subject
+}
+
+#[tokio::test]
+async fn step_events_faithful_runner_passes_both_granularities_and_history_keys() {
+    for granularity in ["per_attempt", "per_completed_step"] {
+        for history_key in ["step_ref", "harness"] {
+            let report = run(&step_event_subject(
+                Defects::default(),
+                granularity,
+                history_key,
+            ))
+            .await;
+            for name in cases_of(&["step_events_"]) {
+                assert_eq!(
+                    report.outcome(name),
+                    Some(&CaseOutcome::Passed),
+                    "{granularity}/{history_key}: {name}\n{}",
+                    report.render()
+                );
+            }
+            assert_none_failed_but(&report, &[]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn step_events_duplicate_fails_only_count_case() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_duplicate: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let name = "step_events_one_per_recorded_step";
+    let reason = failed(&report, name);
+    println!("{name}: {reason}");
+    assert!(reason.contains("one event per recorded step"), "{reason}");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn step_events_off_by_one_fails_only_position_case() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_wrong_position: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let name = "step_events_match_durable_position";
+    let reason = failed(&report, name);
+    println!("{name}: {reason}");
+    assert!(
+        reason.contains("differs from native durable position"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn step_events_early_publish_fails_only_durability_case() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_before_durability: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let name = "step_events_after_durability";
+    let reason = failed(&report, name);
+    println!("{name}: {reason}");
+    assert!(reason.contains("before its record was durable"), "{reason}");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn step_events_missing_adapter_evidence_fails_by_name() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_no_evidence: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let names = cases_of(&["step_events_"]);
+    for name in &names {
+        assert!(failed(&report, name).contains("evidence unavailable"));
+    }
+    assert_none_failed_but(&report, &names);
+}
+
+#[tokio::test]
+async fn step_events_undeclared_skips_all_cases_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in cases_of(&["step_events_"]) {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::StepEvents)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+}
+
+#[tokio::test]
+async fn step_events_content_members_are_refused_by_name() {
+    for member in ["prompt", "project_root"] {
+        let report = run(&step_event_subject(
+            Defects {
+                step_events_content_member: Some(member),
+                ..Defects::default()
+            },
+            "per_attempt",
+            "step_ref",
+        ))
+        .await;
+        let names = cases_of(&["step_events_"]);
+        for name in &names {
+            let reason = failed(&report, name);
+            assert!(
+                reason.contains("unknown field") && reason.contains(member),
+                "{name}: {reason}"
+            );
+        }
+        assert_none_failed_but(&report, &names);
+    }
+}
+
+#[tokio::test]
+async fn step_events_subject_publisher_mismatch_is_refused_by_name() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_wrong_publisher: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let names = cases_of(&["step_events_"]);
+    for name in &names {
+        assert!(failed(&report, name).contains("subject publisher"));
+    }
+    assert_none_failed_but(&report, &names);
 }

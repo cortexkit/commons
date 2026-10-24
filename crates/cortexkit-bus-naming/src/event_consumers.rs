@@ -39,7 +39,12 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "astrocyte",
         durable: "m_astrocyte",
-        filter_subjects: &["event.insula.>"],
+        filter_subjects: &[
+            "event.insula.>",
+            "event.broca.step.finished.v1",
+            "event.thalamus-harness.step.finished.v1",
+            "event.thalamus.step.finished.v1",
+        ],
     },
     EventConsumer {
         module_id: "prefrontal-routing",
@@ -118,7 +123,7 @@ impl fmt::Display for EventConsumerError {
             Self::InvalidFilters(id) => {
                 write!(
                     f,
-                    "event-consumer {id:?} needs nonempty filters under event."
+                    "event-consumer {id:?} needs nonempty, non-overlapping filters under event."
                 )
             }
         }
@@ -180,6 +185,17 @@ fn validate_filters(module_id: &str, filters: &[&str]) -> Result<(), EventConsum
             .any(|filter| !filter.starts_with("event.") || filter.len() == "event.".len())
     {
         return Err(EventConsumerError::InvalidFilters(module_id.to_owned()));
+    }
+    // NATS rejects overlapping filters on one durable, including duplicates.
+    // Check each module's static list without comparing different consumers.
+    for (index, filter) in filters.iter().enumerate() {
+        for previous in filters.iter().take(index) {
+            if crate::limits::subject_filters_overlap(previous, filter)
+                .map_err(EventConsumerError::Limits)?
+            {
+                return Err(EventConsumerError::InvalidFilters(module_id.to_owned()));
+            }
+        }
     }
     Ok(())
 }
@@ -277,6 +293,32 @@ mod tests {
         }
         let names = AccountNames::derive("box_readers").unwrap();
         assert!(module_event_spec(&names, "reader", &["event.broca.>.run"]).is_err());
+    }
+
+    #[test]
+    fn event_consumer_filters_refuse_overlap_within_one_module() {
+        let names = AccountNames::derive("box_readers").unwrap();
+        for filters in [
+            &["event.insula.>", "event.*.step.finished.v1"][..],
+            &["event.*.step.finished.v1", "event.insula.>"][..],
+            &["event.runner_a.>", "event.runner_a.step.finished.v1"][..],
+            &[
+                "event.runner_a.step.finished.v1",
+                "event.runner_a.step.finished.v1",
+            ][..],
+        ] {
+            assert_eq!(
+                module_event_spec(&names, "reader", filters),
+                Err(EventConsumerError::InvalidFilters("reader".into())),
+                "{filters:?}"
+            );
+        }
+        assert!(module_event_spec(
+            &names,
+            "reader",
+            &["event.insula.>", "event.runner_a.step.finished.v1"]
+        )
+        .is_ok());
     }
 
     #[test]

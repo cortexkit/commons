@@ -282,6 +282,10 @@ pub fn validate_consumer(
     Ok(())
 }
 
+pub(crate) fn subject_filters_overlap(left: &str, right: &str) -> Result<bool, LimitError> {
+    Ok(SubjectPattern::parse(left)?.overlaps(&SubjectPattern::parse(right)?))
+}
+
 /// Enforces that the owning store keeps a body at least as long as its stream.
 ///
 /// A module declaring a `resolved` event calls this against the event stream:

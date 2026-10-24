@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.8
+
+- Additive patch: overlap validation uses the existing
+  `EventConsumerError::InvalidFilters` refusal for the static reader table.
+  No public enum variant or existing signature changes, and downstream
+  dependency constraints stay unchanged.
+
+- Give the step-history consumer three exact runner step-finished filters in
+  addition to its existing event family, without an overlapping module wildcard.
+  ck-bus updates the durable's filters in place while preserving its cursor.
+- Refuse overlapping filters within one reviewed module's static filter list,
+  including duplicates, before NATS can reject bootstrap. Keep disjoint filters
+  on the same durable.
+
+- Add validated `live_subject` and account-wide `live_subscription` builders
+  for plain, non-stored hints on `ck.{acct}.live.<module>.<kind>`.
+
 ## 0.2.7
 
 - Allow the bus module to publish only `event.subc.activity.v1`, so ck-bus can

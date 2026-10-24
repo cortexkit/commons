@@ -46,7 +46,12 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             .unwrap();
         assert_eq!(
             astrocyte.consumer.filter_subjects,
-            [format!("ck.{account}.event.insula.>")]
+            [
+                format!("ck.{account}.event.insula.>"),
+                format!("ck.{account}.event.broca.step.finished.v1"),
+                format!("ck.{account}.event.thalamus-harness.step.finished.v1"),
+                format!("ck.{account}.event.thalamus.step.finished.v1"),
+            ]
         );
         let routing = specs
             .iter()

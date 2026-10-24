@@ -212,6 +212,36 @@ impl AccountNames {
         format!("ck.{}.event.>", self.account)
     }
 
+    /// A plain, non-stored live hint from one module. No stream captures the
+    /// `live` root. Event names and versions obey the same rules as events.
+    pub fn live_subject(
+        &self,
+        module_id: &str,
+        event: &str,
+        version: u32,
+    ) -> Result<String, NamingError> {
+        validate_token(TokenKind::ModuleId, module_id)?;
+        validate_token(TokenKind::EventName, event)?;
+        let version_token = format!("v{version}");
+        validate_token(TokenKind::EventVersion, &version_token)?;
+        Ok(format!(
+            "ck.{}.live.{module_id}.{event}.{version_token}",
+            self.account
+        ))
+    }
+
+    /// Subscribe to one live hint kind from every module in the account.
+    /// This is a plain subscription, not a durable consumer filter.
+    pub fn live_subscription(&self, event: &str, version: u32) -> Result<String, NamingError> {
+        validate_token(TokenKind::EventName, event)?;
+        let version_token = format!("v{version}");
+        validate_token(TokenKind::EventVersion, &version_token)?;
+        Ok(format!(
+            "ck.{}.live.*.{event}.{version_token}",
+            self.account
+        ))
+    }
+
     pub fn sentinel_ping(&self) -> String {
         format!("ck.{}.sentinel.ping", self.account)
     }

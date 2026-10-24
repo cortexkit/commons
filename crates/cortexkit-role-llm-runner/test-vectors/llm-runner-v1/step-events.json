@@ -1,0 +1,98 @@
+{
+  "full": {
+    "runner": "runner_a",
+    "session_ref": "runner_session_a",
+    "log_incarnation": "log_a",
+    "seq": 42,
+    "run_id": "run_a",
+    "step_id": "step_a",
+    "attempt": 2,
+    "terminal_status": "future_terminal_status",
+    "harness_step_ref": "msg_record_a",
+    "provider_request_id": "request_a",
+    "harness": "host_a",
+    "session": "session_a",
+    "work_class": "future_work_class",
+    "provider": "provider_a",
+    "model": "model_a",
+    "input_tokens": 100,
+    "cached_input_tokens": 50,
+    "cache_write_tokens": 30,
+    "output_tokens": 20,
+    "reasoning_tokens": 7,
+    "cache_write_5m_tokens": 10,
+    "cache_write_1h_tokens": 20,
+    "reasoning_included_in_output": true,
+    "request_body_bytes": 4096,
+    "context_limit": 200000,
+    "finish_reason": "future_finish_reason",
+    "started_at_ms": 1790000000000,
+    "finished_at_ms": 1790000001000
+  },
+  "minimal": {
+    "runner": "runner_a",
+    "session_ref": "runner_session_a",
+    "log_incarnation": "log_a",
+    "seq": 43,
+    "run_id": "run_a",
+    "step_id": "step_b",
+    "attempt": 1,
+    "terminal_status": "completed",
+    "harness": "host_a",
+    "session": "session_a",
+    "provider": "provider_a",
+    "model": "model_a",
+    "started_at_ms": 1790000001001,
+    "finished_at_ms": 1790000002000
+  },
+  "refused_members": [
+    {
+      "future_member": 1
+    },
+    {
+      "prompt": "forbidden content"
+    },
+    {
+      "tool_name": "forbidden content"
+    },
+    {
+      "arguments": {}
+    },
+    {
+      "error": "forbidden content"
+    },
+    {
+      "project_root": "/private/example"
+    }
+  ],
+  "valid_policies": [
+    {
+      "granularity": "per_attempt",
+      "history_key": "step_ref"
+    },
+    {
+      "granularity": "per_completed_step",
+      "history_key": "harness"
+    }
+  ],
+  "malformed_groups": [
+    null,
+    {},
+    {
+      "granularity": "per_attempt"
+    },
+    {
+      "granularity": "per_attempt",
+      "history_key": "ordinal"
+    },
+    {
+      "granularity": "per_run",
+      "history_key": "step_ref"
+    },
+    {
+      "granularity": "per_attempt",
+      "history_key": "step_ref",
+      "prompt": "forbidden content"
+    }
+  ]
+}

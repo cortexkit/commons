@@ -112,6 +112,8 @@ pub enum Capability {
     /// naming the send that started the run, absent only for a turn the
     /// host started with no send.
     RunCause,
+    /// Non-stored step-finished hints joined to native durable history.
+    StepEvents,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -181,6 +183,7 @@ impl Capability {
         Self::LiveEvents,
         Self::ClientMessageId,
         Self::RunCause,
+        Self::StepEvents,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -241,6 +244,7 @@ impl Capability {
             Self::LiveEvents => groups::LIVE_EVENTS,
             Self::ClientMessageId => groups::CLIENT_MESSAGE_ID,
             Self::RunCause => groups::RUN_CAUSE,
+            Self::StepEvents => groups::STEP_EVENTS,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
@@ -572,6 +576,22 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Return actual publication subjects and bodies for the fixture session and each
+    /// step's position read independently from the runner's native durable log.
+    /// Capture publication order against the actual durability point at publish
+    /// time. Wait until the fixture's publication work has settled; do not
+    /// reconstruct events from records, inputs or session.read ordinals.
+    /// Required with `step_events`: the default fails its cases by name.
+    async fn step_event_observation(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<crate::step_events::StepEventObservation, HarnessError> {
+        Err(HarnessError::new(
+            "native step-event observations are not implemented",
+        ))
+    }
+
     /// Install the scripted tool provider with exactly `provides` in the
     /// daemon catalog's manifest capabilities. Return first-send fields whose
     /// plan includes `item` as that provider's system-text item, unchanged.

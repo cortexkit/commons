@@ -780,3 +780,33 @@ scripted tool result. `hold_send_staging` lets a host-side adapter delay staging
 for the separate already-sent-result case; it returns false only where
 acceptance and staging coincide, making that scenario N/A. Releasing a staging
 hold does not deliver the send or render a boundary.
+
+## Step-finished bus hints
+
+Declaring `Capability::StepEvents` enables `step_events_one_per_recorded_step`,
+`step_events_match_durable_position`, and `step_events_after_durability` (also
+requiring queue and transcript reads to drive and settle the fixture). Implement
+`LlmRunnerSubject::step_event_observation`: it returns a settled
+`step_events::StepEventObservation` for the fixture session. The kit sends two
+scripted steps and requires independent native-history evidence for both runs.
+
+Read `RecordedStep` positions from the runner's own durable log, including
+recorded retries. Mark `completes_step` false only for internal retries hidden by
+`per_completed_step`; terminal failures and cancellations still complete a step.
+Capture each `PublishedStep.subject` and `PublishedStep.body` at the actual bus
+publish seam. The subject's module token identifies the publisher; the kit
+refuses a mismatched body `runner` before using the hint. Observe
+`record_durable_at_publish` against the actual durability point **at publication
+time**, not from a later successful read. Wait for the fixture's publication
+work to settle before returning. Do not generate events from records or derive
+native `seq` from message ordinals. Read the opaque `session_ref` from native
+records, never derive it on the consumer side. The durable tuple is the position the
+step-history consumer acknowledges, not a new `session.read` field.
+
+Missing observation support fails these cases by name, never silently passes.
+The fake runner tests exercise both granularities and both history keys, a
+hidden retry with no host record, and faulty runners that duplicate events,
+publish `seq` off by one, or publish before syncing the record. No real bus is
+required by the kit; the adapter observes the runner's real publish seam.
+Faulty-content self-tests also check that `prompt` and `project_root` members
+are refused, along with a publication whose subject names a different runner.

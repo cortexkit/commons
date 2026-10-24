@@ -66,6 +66,8 @@ fn every_governed_name_obeys_its_rule_and_exemptions_are_closed() {
         names.event_subject("module_a", "event_a", 1).unwrap(),
         names.event_publish_grant("module_a").unwrap(),
         names.event_binding(),
+        names.live_subject("module_a", "step.finished", 1).unwrap(),
+        names.live_subscription("step.finished", 1).unwrap(),
         names.sentinel_ping(),
     ];
     for subject in subjects {
@@ -88,6 +90,69 @@ fn every_governed_name_obeys_its_rule_and_exemptions_are_closed() {
     for (name, exemption) in exempt {
         validate_tenancy_name(&names, name, NamingRule::Exempt(exemption)).unwrap();
     }
+}
+
+#[test]
+fn live_hints_have_a_separate_root_and_a_module_wildcard() {
+    let names = AccountNames::derive("box_live").unwrap();
+    assert_eq!(
+        names.live_subject("runner_a", "step.finished", 1).unwrap(),
+        "ck.box_live.live.runner_a.step.finished.v1"
+    );
+    assert_eq!(
+        names.live_subscription("step.finished", 1).unwrap(),
+        "ck.box_live.live.*.step.finished.v1"
+    );
+    assert_ne!(
+        names.live_subject("runner_a", "step.finished", 1).unwrap(),
+        names.event_subject("runner_a", "step.finished", 1).unwrap()
+    );
+}
+
+#[test]
+fn live_hints_refuse_invalid_modules_names_and_versions() {
+    let names = AccountNames::derive("box_live").unwrap();
+    for module in ["", "*", ">", "runner.a", "Runner"] {
+        assert_eq!(
+            names
+                .live_subject(module, "step.finished", 1)
+                .unwrap_err()
+                .kind(),
+            TokenKind::ModuleId
+        );
+    }
+    for event in [
+        "",
+        "*",
+        "step.>",
+        "step..finished",
+        "step.v1",
+        "a.b.c.d.e",
+        "bad-name",
+    ] {
+        assert_eq!(
+            names.live_subject("runner_a", event, 1).unwrap_err().kind(),
+            TokenKind::EventName
+        );
+        assert_eq!(
+            names.live_subscription(event, 1).unwrap_err().kind(),
+            TokenKind::EventName
+        );
+    }
+    assert_eq!(
+        names
+            .live_subject("runner_a", "step.finished", 0)
+            .unwrap_err()
+            .kind(),
+        TokenKind::EventVersion
+    );
+    assert_eq!(
+        names
+            .live_subscription("step.finished", 0)
+            .unwrap_err()
+            .kind(),
+        TokenKind::EventVersion
+    );
 }
 
 #[test]

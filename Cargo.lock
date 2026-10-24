@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-naming"
-version = "0.2.7"
+version = "0.2.8"
 
 [[package]]
 name = "cortexkit-bus-nats"
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.6.10"
+version = "0.6.11"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "async-trait",
  "base64",

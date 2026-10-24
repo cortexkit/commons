@@ -6,6 +6,12 @@ send/adopt/head members, state flags, session-bound release and all associated
 refusal shapes. `session_retention::tests` checks these bytes and decoded values;
 existing vector files are unchanged.
 
+`step-events.json` pins the full and minimal closed `step.finished.v1` bodies,
+open status/classification values, unknown/content-member refusals (including
+`project_root`, which is rejected as an unknown member), and valid
+or malformed `step_events` discovery groups. `step_events::tests` checks their
+round trips, absence versus reported zero, one-based attempts and named refusals.
+
 `read-descriptors.json` uses compact expansion recipes for large UTF-8 text
 and arguments. The shared descriptor tests expand them before checking the
 Anthropic top-level image, nested tool-result image, PDF/document, URL image,

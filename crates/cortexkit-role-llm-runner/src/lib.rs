@@ -13,7 +13,8 @@
 //! (admission, baseline, rungs, hooks, scopes). The types here are the wire
 //! shapes it describes. Shapes a consumer decodes are lenient (unknown fields ignored,
 //! enumerations decoded as open strings); request shapes whose missing field
-//! would silently change the question are strict.
+//! would silently change the question are strict. The content-free step-finished
+//! hint is also closed: unknown members must not become a user-content channel.
 //!
 //! The session an op acts on is the session the route is bound to; no
 //! request in this crate names its session.
@@ -43,6 +44,7 @@ pub mod serializer_profile;
 pub mod session_change;
 pub mod session_ref;
 pub mod session_retention;
+pub mod step_events;
 pub mod structured_output;
 pub mod subscribe;
 pub mod tags;
@@ -194,6 +196,9 @@ pub mod capabilities {
     /// run; on any other runner it may only mean an older runner. Requires
     /// [`LIVE_EVENTS`], whose event it extends.
     pub const RUN_CAUSE: &str = "run_cause";
+
+    /// Content-free, non-stored `step.finished.v1` hints after durable recording.
+    pub const STEP_EVENTS: &str = "step_events";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -340,6 +345,7 @@ pub mod capabilities {
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
+        (STEP_EVENTS, &[]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (HELD_CALLS, &[ops::RUN_STATUS]),
@@ -494,7 +500,12 @@ mod tests {
             ops::SEND_STATUS,
         ];
         for (group, group_ops) in capabilities::GROUPS {
-            assert!(!group_ops.is_empty(), "{group} names no op");
+            // Step events are plain bus publishes, not management-route ops.
+            assert_eq!(
+                group_ops.is_empty(),
+                *group == capabilities::STEP_EVENTS,
+                "{group}"
+            );
             for op in *group_ops {
                 assert!(role_ops.contains(op), "{group} names {op}");
             }

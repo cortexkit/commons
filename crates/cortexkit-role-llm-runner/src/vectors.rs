@@ -18,6 +18,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/session-retention.json"),
     ),
     (
+        "step-events.json",
+        include_str!("../test-vectors/llm-runner-v1/step-events.json"),
+    ),
+    (
         "system-text-default.json",
         include_str!("../test-vectors/llm-runner-v1/system-text-default.json"),
     ),
