@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.5
+
+- Use `cortexkit-rich-ui-syntax` 0.3.0 (exact `pulldown-cmark` 0.13.5). Cases and vectors are unchanged.
+
 ## 0.12.4
 
 - Add `media_descriptors_provider_rows`, checking exact key equality with the entry's complete tags rows and the named serializer profile's part count, never deriving opaque keys from bytes. This case requires the serializer-profile hook; when the adapter names no profile, the case is reported as inapplicable.

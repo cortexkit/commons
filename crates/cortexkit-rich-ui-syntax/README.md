@@ -274,7 +274,12 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-The pinned `pulldown-cmark` dependency supplies CommonMark delimiter behavior,
+A reference must parse identically in every build that scans or renders it.
+Patch releases of `pulldown-cmark` have changed output on edge cases, so its
+version is pinned exactly. The pin moves only in a minor release of this crate,
+with every sample rerun against the new parser version.
+
+The `pulldown-cmark` dependency supplies CommonMark delimiter behavior,
 GFM tables/task/strike syntax, entity decoding and source offsets. A byte-length
 preserving shielding layer keeps rich UI syntax and failed literals opaque to
 Markdown. `serde_json` (sample loading) and `sha2` (immutable fixture digest) are

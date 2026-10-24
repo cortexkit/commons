@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.9
+
+- Use `cortexkit-rich-ui-syntax` 0.3.0, which pins `pulldown-cmark` exactly at 0.13.5 instead of 0.13.0, so dependent crates no longer have to downgrade the parser. Every sample parses as before; the runner API and wire are unchanged.
+
 ## 0.6.8
 
 - Add `serializer_profile::OWNED_BROCA` and `PI`, and support their part containers in `top_level_part_count` and `ReadMessage::check_descriptor_rows(profile)`. Malformed containers are refused by profile name; existing profiles and wire types are unchanged.

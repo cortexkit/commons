@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Move the exact `pulldown-cmark` pin from `=0.13.0` to `=0.13.5`.
+- All samples retain the same results under `0.13.5`.
+
 ## 0.2.0
 
 What a caller gains:

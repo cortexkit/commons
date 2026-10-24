@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-rich-ui-syntax"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -16,7 +16,9 @@ categories = ["parser-implementations", "text-processing"]
 test-vectors = []
 
 [dependencies]
-pulldown-cmark = { version = "=0.13.0", default-features = false }
+# A reference must parse identically in every build that scans or renders it.
+# Patch releases of this parser have changed output on edge cases.
+pulldown-cmark = { version = "=0.13.5", default-features = false }
 
 [dev-dependencies]
 serde_json = "1"
