@@ -52,31 +52,31 @@ pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
 /// without a preset. Consumers discover it through the daemon's catalog.
 pub const SYSTEM_TEXT_DEFAULT: &str = "system-text-default/v1";
 
-/// The route-bind capability a consumer declares when it decodes `content/v1` results.
-pub const CONTENT_V1_CAPABILITY: &str = "content/v1";
+/// The route-bind capability a consumer declares when it decodes `tool-result/v1` results.
+pub const TOOL_RESULT_V1_CAPABILITY: &str = "tool-result/v1";
 
 /// The route-bind capability a consumer declares when it understands held replies.
 pub const HELD_REPLY_V1: &str = "held-reply/v1";
 
-/// Whether a route's bind says that its consumer decodes `content/v1` results.
+/// Whether a route's bind says that its consumer decodes `tool-result/v1` results.
 ///
 /// Providers use this bind-scoped declaration, together with the tool's
 /// catalog `result_format`, to choose the result body for each route.
-pub fn consumer_reads_content_v1(consumer_capabilities: Option<&[String]>) -> bool {
+pub fn consumer_reads_tool_result_v1(consumer_capabilities: Option<&[String]>) -> bool {
     consumer_capabilities.is_some_and(|capabilities| {
         capabilities
             .iter()
-            .any(|capability| capability == CONTENT_V1_CAPABILITY)
+            .any(|capability| capability == TOOL_RESULT_V1_CAPABILITY)
     })
 }
 
 /// Whether a route's bind permits the `held-reply/v1` marker.
 ///
 /// Both consumer declarations are required. Providers must also check that the
-/// tool uses `content/v1`, the call has a `call_key`, and they advertise
+/// tool uses `tool-result/v1`, the call has a `call_key`, and they advertise
 /// `late_results`. Neither per-call arguments nor `call_mode` grant support.
 pub fn consumer_reads_held_reply_v1(consumer_capabilities: Option<&[String]>) -> bool {
-    consumer_reads_content_v1(consumer_capabilities)
+    consumer_reads_tool_result_v1(consumer_capabilities)
         && consumer_capabilities.is_some_and(|capabilities| {
             capabilities
                 .iter()
@@ -108,28 +108,36 @@ pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::TOOL_CATALOG];
 
 #[cfg(test)]
 mod consumer_capability_tests {
-    use super::{consumer_reads_content_v1, CONTENT_V1_CAPABILITY};
+    use super::{consumer_reads_tool_result_v1, TOOL_RESULT_V1_CAPABILITY};
 
     #[test]
-    fn absent_capabilities_do_not_declare_content_v1() {
-        assert!(!consumer_reads_content_v1(None));
+    fn absent_capabilities_do_not_declare_tool_result_v1() {
+        assert!(!consumer_reads_tool_result_v1(None));
     }
 
     #[test]
-    fn empty_capabilities_do_not_declare_content_v1() {
-        assert!(!consumer_reads_content_v1(Some(&[])));
+    fn empty_capabilities_do_not_declare_tool_result_v1() {
+        assert!(!consumer_reads_tool_result_v1(Some(&[])));
     }
 
     #[test]
-    fn other_capabilities_do_not_declare_content_v1() {
+    fn other_capabilities_do_not_declare_tool_result_v1() {
         let capabilities = vec!["other/v1".to_owned(), "content/v2".to_owned()];
-        assert!(!consumer_reads_content_v1(Some(&capabilities)));
+        assert!(!consumer_reads_tool_result_v1(Some(&capabilities)));
     }
 
     #[test]
-    fn content_v1_capability_declares_support() {
-        let capabilities = vec!["other/v1".to_owned(), CONTENT_V1_CAPABILITY.to_owned()];
-        assert!(consumer_reads_content_v1(Some(&capabilities)));
+    fn the_retired_content_v1_name_is_not_an_alias() {
+        // The format was renamed with no alias: a route that still declares
+        // the old name gets the legacy body, never a tool-result/v1 one.
+        let capabilities = vec!["content/v1".to_owned()];
+        assert!(!consumer_reads_tool_result_v1(Some(&capabilities)));
+    }
+
+    #[test]
+    fn tool_result_v1_capability_declares_support() {
+        let capabilities = vec!["other/v1".to_owned(), TOOL_RESULT_V1_CAPABILITY.to_owned()];
+        assert!(consumer_reads_tool_result_v1(Some(&capabilities)));
     }
 }
 

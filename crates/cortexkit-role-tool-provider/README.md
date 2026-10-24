@@ -6,14 +6,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = "0.12.1"
+cortexkit-role-tool-provider = "0.13.0"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = { version = "0.12.1", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.13.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_tool_provider::vectors::FILES` and a
@@ -22,7 +22,7 @@ the crate package, pinned by `SHA256SUMS`.
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-tool-provider-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 
-Consumers opt into `content/v1` on the route bind. Understanding held first
+Consumers opt into `tool-result/v1` on the route bind. Understanding held first
 replies additionally requires `held-reply/v1`; providers use
 `consumer_reads_held_reply_v1` to check both declarations. `ToolResult::held()`
 exposes the interim marker: the answer arrives later through `late_results`.
@@ -36,7 +36,7 @@ lists it (`lists_preset`).
 
 A system-text item's preset is optional (`SystemTextItem.preset` is an
 `Option<String>`): without one, the provider answers with its default system
-text. Since 0.12.1, `SYSTEM_TEXT_DEFAULT` names the manifest fact
+text. Since 0.13.0, `SYSTEM_TEXT_DEFAULT` names the manifest fact
 `system-text-default/v1`. Declare it in `capabilities.provides` only when
 serving that default. A composer omits a system-text preset only when both
 the provider declares this fact (read from `catalog.list`) and the runner

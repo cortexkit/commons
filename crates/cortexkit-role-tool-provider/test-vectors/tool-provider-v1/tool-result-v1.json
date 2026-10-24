@@ -1,5 +1,5 @@
 {
-  "_about": "Opt-in content/v1 tool replies, using MCP CallToolResult member names. Content order is significant. Oversize uses expand_text to repeat the indicated part's text before serialization and decoding; it avoids storing a multi-MiB fixture. Every vector has a named decode-and-validate test in the wire crate.",
+  "_about": "Opt-in tool-result/v1 tool replies, using MCP CallToolResult member names. Content order is significant. Oversize uses expand_text to repeat the indicated part's text before serialization and decoding; it avoids storing a multi-MiB fixture. Every vector has a named decode-and-validate test in the wire crate.",
   "valid": [
     {"name": "text_only", "body": {"content": [{"type": "text", "text": "Verbatim model text.\nSecond line."}]}},
     {"name": "text_two_images_in_order", "body": {"content": [

@@ -694,7 +694,7 @@ pub trait LlmRunnerSubject: Harness {
     }
     /// Configure the actual scripted provider to answer this call with a
     /// `held-reply/v1` first reply, not an unanswered request. Declare
-    /// `late_results` and opt the tool into `content/v1`; the runner must bind
+    /// `late_results` and opt the tool into `tool-result/v1`; the runner must bind
     /// with both consumer capabilities. Do not synthesize runner status.
     async fn install_held_reply(
         &self,

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.7
+
+- Update the tool-provider test dependency to 0.13.0 for the `tool-result/v1` format rename. Runtime dependencies and wire behavior are unchanged.
+
 ## 0.6.6
 
 - Pin part keys as runner-defined opaque strings, not serializer-profile derivations; descriptors list exactly the complete keys served by the entry's tags rows, in the same order, preserving the existing tags Reads rule.

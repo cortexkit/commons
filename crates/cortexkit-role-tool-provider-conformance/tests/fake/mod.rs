@@ -39,7 +39,7 @@ use cortexkit_role_tool_provider_conformance::{
             composition_digest, params_for_capabilities, schema_digest, select_by_capabilities,
             serves_call_mode, system_text_digest, CatalogRequest, CatalogTool,
         },
-        consumer_reads_content_v1, consumer_reads_held_reply_v1,
+        consumer_reads_held_reply_v1, consumer_reads_tool_result_v1,
         describe::{Major, RoleDescribe},
         errors,
         late_results::{
@@ -171,9 +171,9 @@ pub struct Defects {
     pub preset_less_system_text_is_lean: bool,
     /// Keep the quick tool's legacy opaque reply and omit its format declaration.
     pub opaque_result: bool,
-    /// The content/v1 tool replies with structured data but no content parts.
+    /// The tool-result/v1 tool replies with structured data but no content parts.
     pub malformed_result: bool,
-    /// Send content/v1 even when the route's bind does not declare support.
+    /// Send tool-result/v1 even when the route's bind does not declare support.
     pub ignore_consumer_capabilities: bool,
     /// Do not advertise capability filtering in `role.describe`.
     pub omit_catalog_capability_filter: bool,
@@ -477,7 +477,7 @@ impl Module {
         }
         tools[0]["reply"] = json!({"max_ms": if self.defects.invalid_reply { 0 } else { 120_000 }});
         if !self.defects.opaque_result {
-            tools[0]["result_format"] = json!("content/v1");
+            tools[0]["result_format"] = json!("tool-result/v1");
         }
         tools[0]["modes"] = if self.defects.invalid_modes {
             json!([])
@@ -747,7 +747,7 @@ impl Module {
             QUICK if request.arguments.get("hold_for_person") == Some(&Value::Bool(true)) => {
                 let frames = self.hold(stamp, &request);
                 if !self.defects.opaque_result
-                    && consumer_reads_content_v1(consumer_capabilities)
+                    && consumer_reads_tool_result_v1(consumer_capabilities)
                     && matches!(frames.as_slice(), [ObservedFrame::Response(_)])
                 {
                     let mut body = json!({"content": [{"type": "text", "text": "Please approve the consent card."}]});
@@ -769,7 +769,7 @@ impl Module {
             QUICK
                 if !self.defects.opaque_result
                     && (self.defects.ignore_consumer_capabilities
-                        || consumer_reads_content_v1(consumer_capabilities)) =>
+                        || consumer_reads_tool_result_v1(consumer_capabilities)) =>
             {
                 vec![ObservedFrame::Response(if self.defects.malformed_result {
                     json!({"content": [], "structuredContent": {"only": "program data"}})

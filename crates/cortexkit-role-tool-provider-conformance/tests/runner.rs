@@ -125,13 +125,13 @@ async fn an_invalid_reply_fails_the_catalog_reply_case_by_tool_and_member() {
 }
 
 #[tokio::test]
-async fn malformed_content_v1_reply_fails_by_case_tool_and_member() {
+async fn malformed_tool_result_v1_reply_fails_by_case_tool_and_member() {
     let report = run(&FakeSubject::new(Defects {
         malformed_result: true,
         ..Defects::default()
     }))
     .await;
-    let reason = failed(&report, "tool_result_content_v1_valid");
+    let reason = failed(&report, "tool_result_v1_valid");
     assert!(reason.contains(fake::QUICK), "{reason}");
     assert!(
         reason.contains("content: must contain at least one part"),
@@ -142,13 +142,13 @@ async fn malformed_content_v1_reply_fails_by_case_tool_and_member() {
 }
 
 #[tokio::test]
-async fn content_v1_is_sent_only_to_a_route_that_declares_support() {
+async fn tool_result_v1_is_sent_only_to_a_route_that_declares_support() {
     let report = run(&FakeSubject::new(Defects {
         ignore_consumer_capabilities: true,
         ..Defects::default()
     }))
     .await;
-    let reason = failed(&report, "tool_result_content_v1_valid");
+    let reason = failed(&report, "tool_result_v1_valid");
     assert!(reason.contains("without consumer declaration"), "{reason}");
     assert_passed(&report, "terminal_frame_on_success");
 }
@@ -162,8 +162,8 @@ async fn held_reply_requires_both_route_declarations() {
     .await;
     let reason = failed(&report, "tool_result_held_reply_route_gating");
     assert!(reason.contains("held marker disagrees"), "{reason}");
-    assert!(reason.contains("[\"content/v1\"]"), "{reason}");
-    assert_passed(&report, "tool_result_content_v1_valid");
+    assert!(reason.contains("[\"tool-result/v1\"]"), "{reason}");
+    assert_passed(&report, "tool_result_v1_valid");
 }
 
 #[tokio::test]
@@ -175,7 +175,7 @@ async fn held_reply_case_requires_a_positive_held_marker() {
     .await;
     let reason = failed(&report, "tool_result_held_reply_route_gating");
     assert!(reason.contains("held marker disagrees"), "{reason}");
-    assert_passed(&report, "tool_result_content_v1_valid");
+    assert_passed(&report, "tool_result_v1_valid");
 }
 
 #[tokio::test]
@@ -190,7 +190,7 @@ async fn held_reply_case_validates_the_interim_body() {
         reason.contains("held: must not accompany isError: true"),
         "{reason}"
     );
-    assert_passed(&report, "tool_result_content_v1_valid");
+    assert_passed(&report, "tool_result_v1_valid");
 }
 
 #[tokio::test]
@@ -207,32 +207,30 @@ async fn undeclared_held_reply_fixture_is_skipped_by_name() {
 }
 
 #[tokio::test]
-async fn opaque_tools_skip_content_v1_by_name_never_pass() {
+async fn opaque_tools_skip_tool_result_v1_by_name_never_pass() {
     let mut subject = FakeSubject::new(Defects {
         opaque_result: true,
         ..Defects::default()
     });
     // Even a manually supplied flag cannot substitute for the catalog declaration.
-    subject.capabilities.insert(Capability::ContentV1);
+    subject.capabilities.insert(Capability::ToolResultV1);
     let report = run(&subject).await;
     assert_eq!(
-        report.outcome("tool_result_content_v1_valid"),
+        report.outcome("tool_result_v1_valid"),
         Some(&CaseOutcome::Skipped {
-            missing: vec![Capability::ContentV1],
+            missing: vec![Capability::ToolResultV1],
         })
     );
-    assert!(report
-        .render()
-        .contains("SKIP tool_result_content_v1_valid"));
+    assert!(report.render().contains("SKIP tool_result_v1_valid"));
     assert_passed(&report, "terminal_frame_on_success");
 }
 
 #[tokio::test]
-async fn catalog_content_v1_declaration_cannot_be_opted_out_of() {
+async fn catalog_tool_result_v1_declaration_cannot_be_opted_out_of() {
     let mut subject = FakeSubject::new(Defects::default());
-    subject.capabilities.remove(&Capability::ContentV1);
+    subject.capabilities.remove(&Capability::ToolResultV1);
     let report = run(&subject).await;
-    assert_passed(&report, "tool_result_content_v1_valid");
+    assert_passed(&report, "tool_result_v1_valid");
 }
 
 #[tokio::test]

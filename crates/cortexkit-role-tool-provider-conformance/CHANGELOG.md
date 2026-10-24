@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0
+
+- Renamed the tool-result format from `content/v1` to `tool-result/v1`, with no alias. Providers and consumers that declared `content/v1` switch to `tool-result/v1` together.
+
 ## 0.12.1
 
 - Add `system_text_default_served`, gated by the subject's manifest-fact fixture flag, with a named not-applicable result for undeclared subjects.

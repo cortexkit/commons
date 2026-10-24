@@ -14,7 +14,7 @@ The role document is [`CONTRACT.md`](../../CONTRACT.md).
 | `catalog-schemas.json` | flat and non-flat argument schemas | the wire crate's `check_flat_schema` test |
 | `catalog-requests.json` | `tool.catalog` request bodies: without a `preset` (the encoding omits the member), with `preset: "default"` and params, with a system-text item that names a preset and with one that omits it (the provider's default text; the encoding omits `system_text.preset`), and an unknown preset with the `invalid_request {field: "preset"}` refusal body | the wire crate's request round-trip and refusal tests; the runner's `catalog_unknown_preset_refused` sends an undefined preset to a live provider, and `system_text_preset_optional_served` sends a system-text item without a preset |
 | `catalog-answers.json` | a full and a `digest_only` catalog answer (same `catalog_digest`), and tool entries a decoder refuses | the wire crate's catalog test |
-| `content-v1.json` | ordered text and image replies, tool errors with stable codes, structured program data, unknown parts, and malformed content/error/image/size cases | the wire crate's named decode-and-validate tests; `tool_result_content_v1_valid` checks live replies only for tools declaring the format |
+| `tool-result-v1.json` | ordered text and image replies, tool errors with stable codes, structured program data, unknown parts, and malformed content/error/image/size cases | the wire crate's named decode-and-validate tests; `tool_result_v1_valid` checks live replies only for tools declaring the format |
 | `held-reply-v1.json` | held replies for consent, login handoff, login capture and running work; open reasons and opaque detail; malformed held/error, reason, detail and content cases; the two-capability route-bind gating table; which reasons are person waits (unknown reasons are not) | the wire crate's named decode-and-validate, gating and `is_person_wait` tests; `tool_result_held_reply_route_gating` exercises a live provider declaring `late_results` |
 | `call-modes.json` | classic-only omission, pinned catalog-content digests for default and nondefault mode lists, and empty, duplicate and unknown declarations | the wire crate's mode tests; the runner's `catalog_modes_valid` checks every live tool with `check_modes` |
 | `reply-deadline.json` | per-tool reply deadlines, integral and unusable hold arguments, fallback floors, saturating arithmetic, and valid, invalid and malformed declarations | the wire crate's reply tests; the runner's `catalog_reply_valid` checks every live tool with `check_reply` |
@@ -29,7 +29,7 @@ wire crate checks these sums when its `test-vectors` feature is enabled.
 Changing a vector changes the contract: bump the role crate's version and say
 why in the commit.
 
-The oversize `content-v1.json` case uses `expand_text` to repeat the text at
+The oversize `tool-result-v1.json` case uses `expand_text` to repeat the text at
 the `part` index `repeat` times before serializing and decoding. This pins
 the 3 MiB refusal without checking in a multi-MiB string. The result-format
 omission test also compares encoded catalog bytes and the existing

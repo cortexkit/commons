@@ -7,7 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.12.1
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.13.0
+pairs with cortexkit-role-tool-provider 0.13.0. Version 0.12.1
 pairs with cortexkit-role-tool-provider 0.12.1. Version 0.12.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.12.0. Version 0.11.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.11.0. Version 0.10.1
@@ -17,27 +18,27 @@ pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.4; version
 subc-protocol 0.32; versions 0.7.x pair with protocol 0.31, and versions 0.6.x
 pair with protocol 0.30.
 
-## Opt-in `content/v1` results
+## Opt-in `tool-result/v1` results
 
-`tool_result_content_v1_valid` runs when the catalog declares at least one
-tool with `result_format: "content/v1"`. `Capability::ContentV1` is inferred
+`tool_result_v1_valid` runs when the catalog declares at least one
+tool with `result_format: "tool-result/v1"`. `Capability::ToolResultV1` is inferred
 from that catalog, not controlled by the subject's capability flags. No
-declaration produces a named `SKIP` with missing `content/v1`, never a pass;
+declaration produces a named `SKIP` with missing `tool-result/v1`, never a pass;
 unknown format strings do not opt in.
 
-`content_v1_calls()` supplies promptly completing `(tool name, arguments)`
+`tool_result_v1_calls()` supplies promptly completing `(tool name, arguments)`
 probes for every declared tool. The default is `[quick_call()]`; override it
 when other tools opt in, and supply multiple probes to check success and
 tool-level error bodies. A missing probe fails by tool name. For every probe,
 the case makes the same call over a route with no consumer declaration and
-over a route whose bind declares `content/v1`. The first reply must not decode
+over a route whose bind declares `tool-result/v1`. The first reply must not decode
 as `ToolResult`; the second must decode and pass `validate`. The opted-in route
-must still list `result_format: "content/v1"` in its catalog. The case also
+must still list `result_format: "tool-result/v1"` in its catalog. The case also
 checks the entire serialized JSON body's size before decoding so unmodeled
 extensions cannot evade the 3 MiB bound. Malformed replies fail by case, tool
 and member, not as an opaque success.
 
-Subjects with a catalog tool that opts into `content/v1` must implement
+Subjects with a catalog tool that opts into `tool-result/v1` must implement
 `route_with_consumer_capabilities()` to open the declared route through the
 real route-opening path. The method receives the exact consumer capability
 list to send when opening the route; it must not add that declaration to a
@@ -46,11 +47,11 @@ call body.
 ## Held first replies: `held-reply/v1`
 
 Declare the suite fixture capability `Capability::HeldReplyV1` and supply
-`held_reply_call(marker)` for a person-gated tool opting into `content/v1`.
+`held_reply_call(marker)` for a person-gated tool opting into `tool-result/v1`.
 The default reuses `held_call`. This suite capability is not a new provider
 advertisement; the provider must advertise the existing `late_results`
 session capability. The case also requires the scoped, keyed held-call and
-approval-execution fixtures and a live `content/v1` catalog declaration.
+approval-execution fixtures and a live `tool-result/v1` catalog declaration.
 
 `tool_result_held_reply_route_gating` opens scoped routes with absent, empty,
 content-only, held-only and both consumer declarations. Each call carries a

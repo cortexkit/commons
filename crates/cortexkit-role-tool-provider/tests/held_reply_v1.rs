@@ -1,7 +1,7 @@
 use cortexkit_role_tool_provider::{
     consumer_reads_held_reply_v1,
     result::{held_reasons, is_person_wait, validate, ContentPart, HeldReply, ToolResult},
-    vectors, CONTENT_V1_CAPABILITY, HELD_REPLY_V1,
+    vectors, HELD_REPLY_V1, TOOL_RESULT_V1_CAPABILITY,
 };
 use serde_json::{json, Value};
 
@@ -101,7 +101,7 @@ fn held_route_gating_decision_table() {
         );
     }
     assert_eq!(HELD_REPLY_V1, "held-reply/v1");
-    assert_eq!(CONTENT_V1_CAPABILITY, "content/v1");
+    assert_eq!(TOOL_RESULT_V1_CAPABILITY, "tool-result/v1");
 }
 
 #[test]

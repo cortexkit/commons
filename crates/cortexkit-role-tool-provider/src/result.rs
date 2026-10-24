@@ -1,4 +1,4 @@
-//! Opt-in `content/v1` tool reply bodies, shared by providers and consumers.
+//! Opt-in `tool-result/v1` tool reply bodies, shared by providers and consumers.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -13,14 +13,14 @@ pub const MAX_RESULT_BYTES: usize = 3 * 1024 * 1024;
 #[serde(from = "String", into = "String")]
 #[non_exhaustive]
 pub enum ResultFormat {
-    ContentV1,
+    ToolResultV1,
     Unknown(String),
 }
 
 impl ResultFormat {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::ContentV1 => "content/v1",
+            Self::ToolResultV1 => "tool-result/v1",
             Self::Unknown(value) => value,
         }
     }
@@ -29,7 +29,7 @@ impl ResultFormat {
 impl From<String> for ResultFormat {
     fn from(value: String) -> Self {
         match value.as_str() {
-            "content/v1" => Self::ContentV1,
+            "tool-result/v1" => Self::ToolResultV1,
             _ => Self::Unknown(value),
         }
     }
@@ -41,7 +41,7 @@ impl From<ResultFormat> for String {
     }
 }
 
-/// A `content/v1` reply, using MCP's CallToolResult member names.
+/// A `tool-result/v1` reply, using MCP's CallToolResult member names.
 ///
 /// Consumers build model input from `content` only, never from
 /// `structuredContent`, which is for programs. Content order is significant;
@@ -275,7 +275,7 @@ impl<'de> Deserialize<'de> for ContentPart {
     }
 }
 
-/// The member path and reason for a malformed `content/v1` reply.
+/// The member path and reason for a malformed `tool-result/v1` reply.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResultProblem {

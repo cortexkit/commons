@@ -211,7 +211,7 @@ to them. Nothing here names a particular implementation.
   - `result_ops` lists the hook result operations the tool accepts, from
     `prepend`, `append`, `replace`. Absent means all three.
   - `result_format` opts this tool into a reply body format. It is an open
-    string enum (`ResultFormat`), with known value `"content/v1"`; unknown
+    string enum (`ResultFormat`), with known value `"tool-result/v1"`; unknown
     strings decode and round-trip unchanged. Absence leaves today's opaque
     provider JSON body unchanged and emits no new catalog bytes, preserving
     existing catalogs and digests. A present format is catalog content,
@@ -421,25 +421,25 @@ to them. Nothing here names a particular implementation.
   checks them. Scope, owner and agent are never arguments; they come from the
   route's stamp.
 
-## 4.1. Opt-in tool results: `content/v1`
+## 4.1. Opt-in tool results: `tool-result/v1`
 
-A consumer that decodes `content/v1` result bodies declares the string
-`content/v1` in its `route.open` `consumer_capabilities`. The daemon relays
+A consumer that decodes `tool-result/v1` result bodies declares the string
+`tool-result/v1` in its `route.open` `consumer_capabilities`. The daemon relays
 that list verbatim on the provider's route bind as
 `RouteBindRequest.consumer_capabilities`. This declaration is the consumer's
 unverified statement; it grants no permission or other authority.
 
-For a tool whose catalog entry declares `result_format: "content/v1"`, a
-provider sends a `content/v1` body only on a route whose bind declared
-`content/v1`. On every other route, including one whose bind has no
+For a tool whose catalog entry declares `result_format: "tool-result/v1"`, a
+provider sends a `tool-result/v1` body only on a route whose bind declared
+`tool-result/v1`. On every other route, including one whose bind has no
 `consumer_capabilities`, the provider sends that tool's legacy body exactly as
 before. The decision is made separately for each route from its bind, never
 from anything in a call. The catalog lists `result_format` regardless of who
 asks: it does not change schema digests, and older consumers ignore it.
 
-A consumer must not decode a body as `content/v1` unless it both declared
-`content/v1` on that route and the tool's catalog entry opts in with
-`result_format: "content/v1"`.
+A consumer must not decode a body as `tool-result/v1` unless it both declared
+`tool-result/v1` on that route and the tool's catalog entry opts in with
+`result_format: "tool-result/v1"`.
 
 On a route with both declarations, the tool returns the following body
 (`result::ToolResult`), with MCP's CallToolResult member names exactly:
@@ -489,25 +489,25 @@ On a route with both declarations, the tool returns the following body
   `result::validate` returns a typed `ResultProblem` naming the member path
   and reason. Missing required fields or wrong JSON member types do not
   decode. Tools without the opt-in keep their opaque bodies; consumers never
-  guess `content/v1` from a reply's appearance.
+  guess `tool-result/v1` from a reply's appearance.
 
-`test-vectors/tool-provider-v1/content-v1.json` pins valid and malformed bodies.
+`test-vectors/tool-provider-v1/tool-result-v1.json` pins valid and malformed bodies.
 The existing catalog vectors pin unchanged encoded bytes and digests when
 `result_format` is absent.
 
 ### Held first replies: `held-reply/v1`
 
 A consumer that understands held first replies declares the string
-`held-reply/v1` alongside `content/v1` in its `route.open`
+`held-reply/v1` alongside `tool-result/v1` in its `route.open`
 `consumer_capabilities`. The daemon relays that list verbatim on the provider's
-route bind as `RouteBindRequest.consumer_capabilities`. Like `content/v1`, this
+route bind as `RouteBindRequest.consumer_capabilities`. Like `tool-result/v1`, this
 is an unverified consumer statement and grants no permission or authority.
 
 A provider sends a held reply only on a route whose bind declared **both**
-`held-reply/v1` and `content/v1`, for a tool whose catalog entry opts into
-`result_format: "content/v1"`. On every other route the provider sends today's
-body unchanged: a `content/v1` body without the marker for a content-only
-consumer, or the legacy body when `content/v1` is not declared. The decision
+`held-reply/v1` and `tool-result/v1`, for a tool whose catalog entry opts into
+`result_format: "tool-result/v1"`. On every other route the provider sends today's
+body unchanged: a `tool-result/v1` body without the marker for a content-only
+consumer, or the legacy body when `tool-result/v1` is not declared. The decision
 is made separately for each route from its bind, never from anything in a call
 and never from `call_mode`. `HELD_REPLY_V1` names the consumer capability;
 `consumer_reads_held_reply_v1` checks the two bind declarations. Providers also
@@ -545,7 +545,7 @@ check the tool opt-in and the call/provider prerequisites below.
     interim `content` says so and says that the result will arrive later.
 - The prerequisites above apply to every reason, `running` included: a
   `call_key`, the `late_results` capability, and a route whose bind declared
-  both `held-reply/v1` and `content/v1`.
+  both `held-reply/v1` and `tool-result/v1`.
 - A consumer may show a person a prompt to act, or count the call as waiting
   on a person, only for the three person-wait reasons
   (`result::is_person_wait`). For `running` and for any reason it does not
@@ -792,8 +792,8 @@ CI against its real module over a real route; never against a double.
 | `system_text_default_served` | manifest fact `system-text-default/v1` (subject flag `SystemTextDefault`) |
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
-| `tool_result_content_v1_valid` | a catalog tool declaring `result_format: "content/v1"` |
-| `tool_result_held_reply_route_gating` | `held-reply/v1` suite fixture, `held_calls`, `late_results`, `scope_stamp`, `call_key`, `approval_execution`, a catalog tool declaring `content/v1` |
+| `tool_result_v1_valid` | a catalog tool declaring `result_format: "tool-result/v1"` |
+| `tool_result_held_reply_route_gating` | `held-reply/v1` suite fixture, `held_calls`, `late_results`, `scope_stamp`, `call_key`, `approval_execution`, a catalog tool declaring `tool-result/v1` |
 | `terminal_frame_on_cancel` | `cancellation` |
 | `call_key_malformed_refused`, `call_key_well_formed_accepted` | `call_key` |
 | `schema_pin_current_accepted`, `schema_pin_malformed_refused` | `schema_pin` |
@@ -802,20 +802,20 @@ CI against its real module over a real route; never against a double.
 | `late_results_incarnation_change_refused` | `late_results`, `scope_stamp` |
 | `crash_after_prepared_not_started`, `crash_after_authorized_not_started` | `approval_execution`, `held_calls`, `scope_stamp`, `call_key`, `late_results` |
 
-The result case infers its `content/v1` requirement from the catalog, not
+The result case infers its `tool-result/v1` requirement from the catalog, not
 from an opt-out flag on the subject (the adapter a provider writes to run
-this suite against itself). For every tool that declares `content/v1`, it
-makes the calls the subject lists in `content_v1_calls` on a route with no
-consumer declaration and on a route whose bind declares `content/v1`. The
-first reply must not decode as `content/v1`; the second must decode and
+this suite against itself). For every tool that declares `tool-result/v1`, it
+makes the calls the subject lists in `tool_result_v1_calls` on a route with no
+consumer declaration and on a route whose bind declares `tool-result/v1`. The
+first reply must not decode as `tool-result/v1`; the second must decode and
 validate, including the whole serialized body's size. The catalog must list
-`result_format: "content/v1"` on both routes. By default `content_v1_calls`
+`result_format: "tool-result/v1"` on both routes. By default `tool_result_v1_calls`
 is the subject's `quick_call`, a `(tool name, arguments)` pair that completes
-promptly; a subject overrides it when other tools declare `content/v1`, and
+promptly; a subject overrides it when other tools declare `tool-result/v1`, and
 may list several calls per tool. Subjects must open the declared route through
 their real route-opening path. Missing probes for a declared tool fail by
-tool name. With no declared tool, `tool_result_content_v1_valid` is skipped by
-name with missing `content/v1`, never passed. Unknown result formats do not
+tool name. With no declared tool, `tool_result_v1_valid` is skipped by
+name with missing `tool-result/v1`, never passed. Unknown result formats do not
 opt in.
 
 The `system_text` cases request full catalog answers. They check `item_digest`

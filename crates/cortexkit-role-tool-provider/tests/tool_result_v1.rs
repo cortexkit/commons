@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 fn vectors() -> Value {
-    serde_json::from_str(vectors::CONTENT_V1_JSON).unwrap()
+    serde_json::from_str(vectors::TOOL_RESULT_V1_JSON).unwrap()
 }
 
 fn check_vector(group: &str, name: &str) {
@@ -274,9 +274,9 @@ fn result_formats_are_open_and_do_not_change_the_schema_digest() {
     let schema = json!({"type": "object"});
     let digest = schema_digest(&schema).unwrap();
     let tool = CatalogTool::new("example", digest.clone(), 1, schema)
-        .with_result_format(ResultFormat::ContentV1);
+        .with_result_format(ResultFormat::ToolResultV1);
     let wire = serde_json::to_value(&tool).unwrap();
-    assert_eq!(wire["result_format"], "content/v1");
+    assert_eq!(wire["result_format"], "tool-result/v1");
     assert_eq!(schema_digest(&tool.input_schema).unwrap(), digest);
     assert_eq!(serde_json::from_value::<CatalogTool>(wire).unwrap(), tool);
     let unknown = tool.with_result_format(ResultFormat::Unknown("future/v9".into()));

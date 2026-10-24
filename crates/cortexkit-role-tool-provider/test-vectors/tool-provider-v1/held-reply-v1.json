@@ -56,12 +56,12 @@
   "gating": [
     {"name": "absent", "consumer_capabilities": null, "held": false},
     {"name": "empty", "consumer_capabilities": [], "held": false},
-    {"name": "content_only", "consumer_capabilities": ["content/v1"], "held": false},
+    {"name": "content_only", "consumer_capabilities": ["tool-result/v1"], "held": false},
     {"name": "held_only", "consumer_capabilities": ["held-reply/v1"], "held": false},
-    {"name": "both", "consumer_capabilities": ["content/v1", "held-reply/v1"], "held": true},
-    {"name": "both_with_other", "consumer_capabilities": ["other/v1", "held-reply/v1", "content/v1"], "held": true},
+    {"name": "both", "consumer_capabilities": ["tool-result/v1", "held-reply/v1"], "held": true},
+    {"name": "both_with_other", "consumer_capabilities": ["other/v1", "held-reply/v1", "tool-result/v1"], "held": true},
     {"name": "wrong_content_version", "consumer_capabilities": ["content/v2", "held-reply/v1"], "held": false},
-    {"name": "wrong_held_version", "consumer_capabilities": ["content/v1", "held-reply/v2"], "held": false}
+    {"name": "wrong_held_version", "consumer_capabilities": ["tool-result/v1", "held-reply/v2"], "held": false}
   ],
   "person_wait": [
     {"name": "consent", "reason": "consent", "person_wait": true},

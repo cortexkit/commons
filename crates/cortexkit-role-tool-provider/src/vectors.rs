@@ -26,8 +26,9 @@ pub const CATALOG_SCHEMAS_JSON: &str =
 /// The `composition-digest.json` vector cases.
 pub const COMPOSITION_DIGEST_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/composition-digest.json");
-/// The `content-v1.json` vector cases.
-pub const CONTENT_V1_JSON: &str = include_str!("../test-vectors/tool-provider-v1/content-v1.json");
+/// The `tool-result-v1.json` vector cases.
+pub const TOOL_RESULT_V1_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/tool-result-v1.json");
 /// The `emits-events.json` vector cases.
 pub const EMITS_EVENTS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/emits-events.json");
@@ -77,7 +78,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("catalog-requests.json", CATALOG_REQUESTS_JSON),
     ("catalog-schemas.json", CATALOG_SCHEMAS_JSON),
     ("composition-digest.json", COMPOSITION_DIGEST_JSON),
-    ("content-v1.json", CONTENT_V1_JSON),
+    ("tool-result-v1.json", TOOL_RESULT_V1_JSON),
     ("emits-events.json", EMITS_EVENTS_JSON),
     ("held-reply-v1.json", HELD_REPLY_V1_JSON),
     ("late-results.json", LATE_RESULTS_JSON),

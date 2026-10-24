@@ -52,10 +52,10 @@ pub enum Capability {
     /// See [`ToolProviderSubject::call_mode_probe`] and
     /// [`ToolProviderSubject::route_with_mode`].
     CallModes,
-    /// At least one catalog tool declares `result_format: "content/v1"`.
+    /// At least one catalog tool declares `result_format: "tool-result/v1"`.
     /// Inferred by the runner, not an opt-out subject flag.
-    ContentV1,
-    /// The provider and harness can exercise a `content/v1` call that sends
+    ToolResultV1,
+    /// The provider and harness can exercise a `tool-result/v1` call that sends
     /// a held reply when both consumer capabilities are declared.
     /// See [`ToolProviderSubject::held_reply_call`].
     HeldReplyV1,
@@ -91,7 +91,7 @@ impl Capability {
             Self::LateResults => "late_results",
             Self::SystemText => "system_text",
             Self::CallModes => "call_modes",
-            Self::ContentV1 => "content/v1",
+            Self::ToolResultV1 => "tool-result/v1",
             Self::HeldReplyV1 => "held-reply/v1",
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
             Self::Presets => "presets",
@@ -190,7 +190,7 @@ pub trait ToolProviderSubject: Harness {
     /// Open a real route whose bind declares the supplied consumer
     /// capabilities. The adapter must put this list on `route.open` exactly
     /// as provided; it must not infer the declaration from a call body.
-    /// Required when the catalog declares a `content/v1` tool.
+    /// Required when the catalog declares a `tool-result/v1` tool.
     async fn route_with_consumer_capabilities(
         &self,
         _handle: &Self::Handle,
@@ -242,11 +242,11 @@ pub trait ToolProviderSubject: Harness {
     /// the catalog.
     fn quick_call(&self) -> CallSpec;
 
-    /// Prompt calls covering every tool that declares `content/v1`. Multiple
+    /// Prompt calls covering every tool that declares `tool-result/v1`. Multiple
     /// probes per tool may exercise success and tool-level error bodies.
     /// The default reuses `quick_call`; override when other tools opt in.
     /// Missing probes for a declared tool fail the case, rather than skip it.
-    fn content_v1_calls(&self) -> Vec<CallSpec> {
+    fn tool_result_v1_calls(&self) -> Vec<CallSpec> {
         vec![self.quick_call()]
     }
 
@@ -285,9 +285,9 @@ pub trait ToolProviderSubject: Harness {
     /// action never ran.
     fn held_call(&self, marker: &Path) -> Option<CallSpec>;
 
-    /// A person-gated `content/v1` call for the held-reply route-gating case.
+    /// A person-gated `tool-result/v1` call for the held-reply route-gating case.
     /// Required by [`Capability::HeldReplyV1`]. The default reuses `held_call`;
-    /// override when that tool does not opt into `content/v1`.
+    /// override when that tool does not opt into `tool-result/v1`.
     fn held_reply_call(&self, marker: &Path) -> Option<CallSpec> {
         self.held_call(marker)
     }

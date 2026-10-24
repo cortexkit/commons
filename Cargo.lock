@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -769,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_jcs",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",

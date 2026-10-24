@@ -23,7 +23,7 @@ use cortexkit_role_tool_provider::{
     ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    CallMode, CATALOG_CAPABILITY_FILTER, CONTENT_V1_CAPABILITY, HELD_REPLY_V1, PROVIDES,
+    CallMode, CATALOG_CAPABILITY_FILTER, HELD_REPLY_V1, PROVIDES, TOOL_RESULT_V1_CAPABILITY,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -151,7 +151,7 @@ where
 
     // Catalog declarations, not a subject flag, decide whether result checks
     // apply. A catalog/setup error must fail the case rather than hide as a skip.
-    let has_content_v1 = match &main {
+    let has_tool_result_v1 = match &main {
         Err(_) => true,
         Ok(handle) => {
             let case = Case {
@@ -168,14 +168,14 @@ where
                     Ok(catalog) => catalog
                         .tools
                         .iter()
-                        .any(|tool| tool.result_format == Some(ResultFormat::ContentV1)),
+                        .any(|tool| tool.result_format == Some(ResultFormat::ToolResultV1)),
                 },
             }
         }
     };
-    capabilities.remove(&Capability::ContentV1);
-    if has_content_v1 {
-        capabilities.insert(Capability::ContentV1);
+    capabilities.remove(&Capability::ToolResultV1);
+    if has_tool_result_v1 {
+        capabilities.insert(Capability::ToolResultV1);
     }
 
     capabilities.remove(&Capability::UserCommands);
@@ -368,7 +368,7 @@ where
             "catalog_disabled_tool_absent" => self.catalog_disabled_tool_absent().await,
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
-            "tool_result_content_v1_valid" => self.tool_result_content_v1_valid().await,
+            "tool_result_v1_valid" => self.tool_result_v1_valid().await,
             "tool_result_held_reply_route_gating" => self.held_reply_route_gating(mint).await,
             "terminal_frame_on_refusal" => self.terminal_frame_on_refusal().await,
             "terminal_frame_on_cancel" => self.terminal_frame_on_cancel().await,
@@ -481,27 +481,27 @@ where
         self.catalog_with(route, false).await
     }
 
-    async fn tool_result_content_v1_valid(&self) -> CaseResult {
+    async fn tool_result_v1_valid(&self) -> CaseResult {
         let legacy_route = self.plain_route().await?;
         let catalog = self.catalog(&legacy_route).await?;
-        let calls = self.subject.content_v1_calls();
+        let calls = self.subject.tool_result_v1_calls();
         let tools: Vec<_> = catalog
             .tools
             .iter()
-            .filter(|tool| tool.result_format == Some(ResultFormat::ContentV1))
+            .filter(|tool| tool.result_format == Some(ResultFormat::ToolResultV1))
             .collect();
         if tools.is_empty() {
-            return Err("content/v1 catalog declaration disappeared during the run".into());
+            return Err("tool-result/v1 catalog declaration disappeared during the run".into());
         }
-        let capabilities = vec![CONTENT_V1_CAPABILITY.to_owned()];
-        let content_v1_route = self.consumer_route(&capabilities).await?;
-        let opted_in_catalog = self.catalog(&content_v1_route).await?;
+        let capabilities = vec![TOOL_RESULT_V1_CAPABILITY.to_owned()];
+        let tool_result_v1_route = self.consumer_route(&capabilities).await?;
+        let opted_in_catalog = self.catalog(&tool_result_v1_route).await?;
         for tool in tools {
             if !opted_in_catalog.tools.iter().any(|listed| {
-                listed.name == tool.name && listed.result_format == Some(ResultFormat::ContentV1)
+                listed.name == tool.name && listed.result_format == Some(ResultFormat::ToolResultV1)
             }) {
                 return Err(format!(
-                    "{}: catalog did not list result_format content/v1 on the declared route",
+                    "{}: catalog did not list result_format tool-result/v1 on the declared route",
                     tool.name
                 ));
             }
@@ -511,7 +511,7 @@ where
                 .collect();
             if probes.is_empty() {
                 return Err(format!(
-                    "{}: no content_v1_calls probe for declared content/v1 tool",
+                    "{}: no tool_result_v1_calls probe for declared tool-result/v1 tool",
                     tool.name
                 ));
             }
@@ -521,11 +521,11 @@ where
                     expect_response(name, request(&legacy_route, call.clone()).await?)?;
                 if serde_json::from_value::<ToolResult>(legacy_body).is_ok() {
                     return Err(format!(
-                        "{name}: route without consumer declaration returned a body decodable as content/v1"
+                        "{name}: route without consumer declaration returned a body decodable as tool-result/v1"
                     ));
                 }
 
-                let body = expect_response(name, request(&content_v1_route, call).await?)?;
+                let body = expect_response(name, request(&tool_result_v1_route, call).await?)?;
                 let bytes = serde_json::to_vec(&body)
                     .map_err(|e| format!("{name}: reply serialization: {e}"))?;
                 if bytes.len() >= MAX_RESULT_BYTES {
@@ -534,7 +534,7 @@ where
                     ));
                 }
                 let result: ToolResult = serde_json::from_value(body)
-                    .map_err(|e| format!("{name}: content/v1 reply does not decode: {e}"))?;
+                    .map_err(|e| format!("{name}: tool-result/v1 reply does not decode: {e}"))?;
                 validate(&result).map_err(|e| format!("{name}: {e}"))?;
             }
         }
@@ -549,11 +549,11 @@ where
         for (declarations, expected_held) in [
             (None, false),
             (Some(vec![]), false),
-            (Some(vec![CONTENT_V1_CAPABILITY.to_owned()]), false),
+            (Some(vec![TOOL_RESULT_V1_CAPABILITY.to_owned()]), false),
             (Some(vec![HELD_REPLY_V1.to_owned()]), false),
             (
                 Some(vec![
-                    CONTENT_V1_CAPABILITY.to_owned(),
+                    TOOL_RESULT_V1_CAPABILITY.to_owned(),
                     HELD_REPLY_V1.to_owned(),
                 ]),
                 true,
@@ -577,10 +577,10 @@ where
                 return Err("held replies require the late_results catalog capability".into());
             }
             if !catalog.tools.iter().any(|tool| {
-                tool.name == name && tool.result_format == Some(ResultFormat::ContentV1)
+                tool.name == name && tool.result_format == Some(ResultFormat::ToolResultV1)
             }) {
                 return Err(format!(
-                    "{name}: held_reply_call tool must declare content/v1"
+                    "{name}: held_reply_call tool must declare tool-result/v1"
                 ));
             }
             let body = expect_response(
@@ -595,15 +595,16 @@ where
             if expected_held
                 || declarations
                     .as_ref()
-                    .is_some_and(|caps| caps.iter().any(|cap| cap == CONTENT_V1_CAPABILITY))
+                    .is_some_and(|caps| caps.iter().any(|cap| cap == TOOL_RESULT_V1_CAPABILITY))
             {
                 if serde_json::to_vec(&body).map_err(|e| e.to_string())?.len() >= MAX_RESULT_BYTES {
                     return Err(format!(
                         "{name}: reply: serialized reply must be under 3 MiB"
                     ));
                 }
-                let result: ToolResult = serde_json::from_value(body)
-                    .map_err(|e| format!("{name}: content/v1 held reply does not decode: {e}"))?;
+                let result: ToolResult = serde_json::from_value(body).map_err(|e| {
+                    format!("{name}: tool-result/v1 held reply does not decode: {e}")
+                })?;
                 validate(&result).map_err(|e| format!("{name}: {e}"))?;
             }
             self.subject
