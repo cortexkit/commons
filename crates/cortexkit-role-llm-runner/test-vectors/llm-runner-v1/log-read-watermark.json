@@ -1,0 +1,8 @@
+{
+  "capability": "log-read-watermark/v1",
+  "op": "watermark.get",
+  "request": {},
+  "invalid_requests": [{"module":"another-module"},{"extra":null}],
+  "replies": [{"watermark_ms":1700000000000},{"watermark_ms":null}],
+  "refusal": {"code":"not_a_read_source","message":"caller is not read"}
+}

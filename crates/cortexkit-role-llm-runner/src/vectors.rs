@@ -14,6 +14,14 @@ pub const DIR: &str = "llm-runner-v1";
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "retention-floor.json",
+        include_str!("../test-vectors/llm-runner-v1/retention-floor.json"),
+    ),
+    (
+        "log-read-watermark.json",
+        include_str!("../test-vectors/llm-runner-v1/log-read-watermark.json"),
+    ),
+    (
         "session-retention.json",
         include_str!("../test-vectors/llm-runner-v1/session-retention.json"),
     ),

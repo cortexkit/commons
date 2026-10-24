@@ -119,6 +119,11 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("session_retention_floor_describe", &[Capability::SessionRetention], "shared describe check refuses a floor above max_days"),
+    case("session_retention_floor", SESSION_RETAINED, "content survives the declared floor and expires at max(policy, floor), never their sum"),
+    case("session_retention_release_hold", SESSION_RETAINED, "release stays visible and readable, refuses sends with its deadline and answers pending twice"),
+    case("session_retention_release_after_idle", SESSION_RETAINED, "release after an idle gap anchors a keep-none session's floor and actual deletion to the later release time"),
+    case("session_retention_zero_floor_drain", SESSION_RETAINED, "floor zero still exposes released metadata, reads and pending release while draining"),
     case("session_retention_honoured", SESSION_RETAINED, "accepted policy appears unchanged in head and keep none fallback deletes without release"),
     case("session_retention_days_and_archive", &[Capability::SessionRetention, Queue, TranscriptReads, RunOps, Capability::RetentionClock], "archive preserves reads and days expiry deletes the idle session"),
     case("session_retention_adopt_policy", &[Capability::SessionRetention, Capability::Adopt, TranscriptReads], "adopt follows required, replaces runner policy once, freezes decoded values and records release owner"),

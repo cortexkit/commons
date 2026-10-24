@@ -53,6 +53,7 @@ pub mod usage;
 pub mod user_commands;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
+pub mod watermark;
 pub mod wire;
 
 pub use run::{

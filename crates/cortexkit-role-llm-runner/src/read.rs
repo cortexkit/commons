@@ -872,6 +872,9 @@ pub struct HeadMeta {
     pub retention_policy: Option<crate::session_retention::RetentionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_state: Option<crate::session_retention::RetentionState>,
+    /// Recorded release and the end of its minimum storage hold, until deletion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<crate::session_retention::Released>,
 }
 
 /// The caller's own delivery grant on `session.head`, independent of lineage.
@@ -1005,6 +1008,10 @@ impl HeadInput {
 }
 
 impl HeadMeta {
+    pub fn with_released(mut self, released: crate::session_retention::Released) -> Self {
+        self.released = Some(released);
+        self
+    }
     pub fn with_retention_policy(
         mut self,
         policy: crate::session_retention::RetentionPolicy,
@@ -1036,6 +1043,7 @@ impl HeadMeta {
             incarnation: None,
             retention_policy: None,
             retention_state: None,
+            released: None,
         }
     }
 
@@ -1057,6 +1065,7 @@ impl HeadMeta {
             incarnation: None,
             retention_policy: None,
             retention_state: None,
+            released: None,
         }
     }
 

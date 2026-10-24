@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.1
+
+- Add default-omitted `min_hold_days` and `deletion_waits_for_readers` describe
+  limits; reject a floor above `max_days`. Floors are minima, not additions.
+- Add optional `HeadMeta::released` and typed release timestamps and refusal
+  detail. Release remains pending and readable throughout the hold, including
+  a zero-floor drain window. Existing constructors and absent-member bytes stay
+  unchanged; the extended structs were already non-exhaustive.
+- Pin same-computer reader-gated deletion and durable, caller-scoped
+  `log-read-watermark/v1` progress. Export its capability/op/refusal names and
+  strict request and number/null reply types, with new packaged vectors.
+
 ## 0.7.0
 
 - Keep the per-session retention policy and live step event releases intact.

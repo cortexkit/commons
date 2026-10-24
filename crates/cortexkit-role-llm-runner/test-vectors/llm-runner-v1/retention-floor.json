@@ -1,0 +1,6 @@
+{
+  "limits": {"max_days":30,"max_unreleased_hold_ms":60000,"required":false,"min_hold_days":7,"deletion_waits_for_readers":true},
+  "invalid_limits": {"max_days":6,"max_unreleased_hold_ms":60000,"required":false,"min_hold_days":7},
+  "head": {"released":{"at_ms":1000,"delete_after_ms":604801000}},
+  "refusal": {"code":"session_released","message":"deletion pending","detail":{"delete_after_ms":604801000}}
+}

@@ -230,6 +230,36 @@ impl RetentionState {
     }
 }
 
+/// A release remains visible in head until the session's deletion completes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct Released {
+    pub at_ms: u64,
+    pub delete_after_ms: u64,
+}
+
+impl Released {
+    pub fn new(at_ms: u64, delete_after_ms: u64) -> Self {
+        Self {
+            at_ms,
+            delete_after_ms,
+        }
+    }
+}
+
+/// Detail on a send refused after release is recorded but before deletion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionReleasedDetail {
+    pub delete_after_ms: u64,
+}
+
+impl SessionReleasedDetail {
+    pub fn new(delete_after_ms: u64) -> Self {
+        Self { delete_after_ms }
+    }
+}
+
 /// Release always targets the session bound to the management route.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -645,6 +675,79 @@ mod tests {
                 .unwrap_err()
                 .detail,
             json!({"field":"retention_policy.backup"})
+        );
+    }
+}
+
+#[cfg(test)]
+mod floor_tests {
+    use super::*;
+    use crate::{
+        capabilities,
+        describe::{check_describe, DescribeProblem, Major, RoleDescribe, SessionRetention},
+        ops,
+        read::HeadMeta,
+        PROVIDES,
+    };
+
+    #[test]
+    fn retention_floor_describe_and_released_vectors() {
+        let v: Value =
+            serde_json::from_str(crate::vectors::file("retention-floor.json").unwrap()).unwrap();
+        let limits: SessionRetention = serde_json::from_value(v["limits"].clone()).unwrap();
+        assert_eq!(
+            limits,
+            SessionRetention::new(30, 60000, false)
+                .with_min_hold_days(7)
+                .with_deletion_waits_for_readers()
+        );
+        assert_eq!(serde_json::to_value(limits).unwrap(), v["limits"]);
+        let head: HeadMeta = serde_json::from_value(v["head"].clone()).unwrap();
+        assert_eq!(head.released, Some(Released::new(1000, 604801000)));
+        assert_eq!(serde_json::to_value(head).unwrap(), v["head"]);
+        assert_eq!(
+            serde_json::to_value(
+                HeadMeta::no_lineage().with_released(Released::new(1000, 604801000))
+            )
+            .unwrap(),
+            v["head"]
+        );
+        let detail: SessionReleasedDetail =
+            serde_json::from_value(v["refusal"]["detail"].clone()).unwrap();
+        assert_eq!(detail, SessionReleasedDetail::new(604801000));
+        assert_eq!(
+            serde_json::to_value(detail).unwrap(),
+            v["refusal"]["detail"]
+        );
+        let describe = RoleDescribe::new(
+            vec![Major::new(
+                PROVIDES,
+                vec![
+                    ops::ROLE_DESCRIBE.into(),
+                    ops::SESSION_BASELINE.into(),
+                    ops::SESSION_SEND.into(),
+                    ops::SESSION_HEAD.into(),
+                    ops::SESSION_RELEASE.into(),
+                ],
+                "alpha",
+            )],
+            "fixture",
+        )
+        .with_session_capabilities_from("baseline")
+        .with_capabilities(vec![capabilities::SESSION_RETENTION.into()])
+        .with_session_retention(limits);
+        let mut raw = serde_json::to_value(describe).unwrap();
+        check_describe(&raw).unwrap();
+        raw["session_retention"] = v["invalid_limits"].clone();
+        assert_eq!(
+            check_describe(&raw).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                "invalid_session_retention".into()
+            )]
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionRetention::new(30, 60000, false)).unwrap(),
+            r#"{"max_days":30,"max_unreleased_hold_ms":60000,"required":false}"#
         );
     }
 }

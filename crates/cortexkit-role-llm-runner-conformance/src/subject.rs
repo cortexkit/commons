@@ -1398,7 +1398,8 @@ pub trait LlmRunnerSubject: Harness {
     }
 
     /// Advance the session's retention clock by `milliseconds`, completing
-    /// expiry and any due deletion work before returning. Durable activity
+    /// expiry and any due deletion work before returning, including letting
+    /// declared log readers durably read through the due content. Durable activity
     /// timestamps, expiry checks, and deletion deadlines must all use this
     /// same clock. Declare [`Capability::RetentionClock`] only when the
     /// adapter can provide this behavior; otherwise short waits use real time.

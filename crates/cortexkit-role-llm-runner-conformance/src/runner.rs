@@ -305,6 +305,19 @@ where
 /// The outcome of a case that cannot run against this subject: skipped
 /// with what it lacks, or inapplicable. `None` when the case can run.
 fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome> {
+    if matches!(
+        spec.name,
+        "session_retention_floor_describe"
+            | "session_retention_floor"
+            | "session_retention_release_hold"
+            | "session_retention_release_after_idle"
+            | "session_retention_zero_floor_drain"
+    ) && !declared.contains(&Capability::SessionRetention)
+    {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "session_retention is not declared".into(),
+        });
+    }
     let mut missing: Vec<Capability> = spec
         .requires
         .iter()
@@ -336,4 +349,33 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
         });
     }
     None
+}
+
+#[cfg(test)]
+mod retention_gate_tests {
+    use super::*;
+
+    #[test]
+    fn new_retention_cases_are_inapplicable_without_group() {
+        for name in [
+            "session_retention_floor_describe",
+            "session_retention_floor",
+            "session_retention_release_hold",
+            "session_retention_release_after_idle",
+            "session_retention_zero_floor_drain",
+        ] {
+            let spec = CASES.iter().find(|spec| spec.name == name).unwrap();
+            assert!(
+                matches!(
+                    gate(spec, &BTreeSet::new()),
+                    Some(CaseOutcome::Inapplicable { .. })
+                ),
+                "{name}"
+            );
+            assert!(
+                gate(spec, &spec.requires.iter().copied().collect()).is_none(),
+                "{name}"
+            );
+        }
+    }
 }

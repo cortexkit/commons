@@ -11,6 +11,102 @@ use cortexkit_role_llm_runner::{describe::check_describe, errors, ops, points, s
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, path::Path};
 
+const DAY_MS: u64 = 86_400_000;
+
+async fn finish_hold<S: LlmRunnerSubject>(
+    subject: &S,
+    session: &str,
+    floor: u32,
+) -> Result<(), String> {
+    if floor > 0 || subject.capabilities().contains(&Capability::RetentionClock) {
+        subject
+            .advance_retention_clock(session, u64::from(floor) * DAY_MS + 1)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+async fn release_and_delete<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    s: &Session<S::Route>,
+    floor: u32,
+) -> Result<(), String>
+where
+    S::Route: RunnerRoute,
+{
+    let reply = ok(&s.route, ops::SESSION_RELEASE, json!({})).await?;
+    check(
+        reply == json!({"state":"deleted"}) || reply == json!({"state":"pending"}),
+        "release must be pending or deleted",
+    )?;
+    if reply["state"] == "pending" {
+        finish_hold(case.subject, &s.name, floor).await?;
+        wait_gone(case.subject, &s.route).await?;
+    }
+    Ok(())
+}
+
+async fn released_observations<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    s: &Session<S::Route>,
+    floor: u32,
+    before: &Value,
+) -> Result<(), String>
+where
+    S::Route: RunnerRoute,
+{
+    let initial_head = ok(&s.route, ops::SESSION_HEAD, json!({})).await?;
+    let tail = ok(&s.route, ops::SESSION_READ, json!({})).await?;
+    release(&s.route, "pending").await?;
+    let head = ok(&s.route, ops::SESSION_HEAD, json!({})).await?;
+    let released = head
+        .get("released")
+        .ok_or("head omitted released during hold")?;
+    let at = released["at_ms"].as_u64().ok_or("released lacks at_ms")?;
+    let deadline = released["delete_after_ms"]
+        .as_u64()
+        .ok_or("released lacks delete_after_ms")?;
+    let activity = head["updated_at"].as_u64().unwrap_or(0);
+    check(
+        at >= initial_head["updated_at"].as_u64().unwrap_or(0),
+        "release time predates prior durable activity",
+    )?;
+    check(
+        deadline == at.max(activity).saturating_add(u64::from(floor) * DAY_MS),
+        "released has incorrect delete_after_ms",
+    )?;
+    let page = ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?;
+    check(
+        page["messages"] == before["messages"],
+        "released session reads changed during hold",
+    )?;
+    check(
+        ok(&s.route, ops::SESSION_READ, json!({})).await?["messages"] == tail["messages"],
+        "released tail reads changed during hold",
+    )?;
+    let params = case.params(s, "released-send", &case.mint.next("released"), None);
+    let error = expect_error(
+        "released send",
+        raw(&s.route, ops::SESSION_SEND, params).await?,
+    )?;
+    expect_code("released send", &error, errors::SESSION_RELEASED)?;
+    check(
+        error
+            .detail
+            .as_ref()
+            .and_then(|d| d["delete_after_ms"].as_u64())
+            == Some(deadline),
+        "session_released lacks matching detail.delete_after_ms",
+    )?;
+    release(&s.route, "pending").await?;
+    let repeated = ok(&s.route, ops::SESSION_HEAD, json!({})).await?;
+    check(
+        repeated["released"] == *released,
+        "repeat release changed released metadata",
+    )
+}
+
 fn policy(keep: Value, dumps: bool) -> Value {
     json!({"keep":keep,"archive_after_days":0,"backup":false,"request_dumps":dumps})
 }
@@ -232,8 +328,180 @@ where
     let limits = described
         .session_retention
         .ok_or("missing session_retention limits")?;
+    if limits.min_hold_days > 0
+        && !case.declared.contains(&Capability::RetentionClock)
+        && matches!(
+            name,
+            "session_retention_owner_can_release"
+                | "session_retention_release_idempotent"
+                | "session_retention_deletion_observable"
+                | "session_retention_adopt_policy"
+                | "session_retention_media_deleted"
+        )
+    {
+        return Ok(Ending::Inapplicable(
+            "deletion through a nonzero floor requires a retention clock".into(),
+        ));
+    }
     let p = policy(json!("forever"), false);
     match name {
+        "session_retention_floor_describe" => {
+            let mut invalid = serde_json::to_value(&described).map_err(|e| e.to_string())?;
+            invalid["session_retention"]["min_hold_days"] = json!(limits.max_days + 1);
+            check(
+                check_describe(&invalid).is_err_and(|problems| {
+                    problems.contains(
+                        &cortexkit_role_llm_runner::describe::DescribeProblem::Undecodable(
+                            "invalid_session_retention".into(),
+                        ),
+                    )
+                }),
+                "shared check accepted min_hold_days above max_days",
+            )?;
+        }
+        "session_retention_floor" => {
+            if limits.min_hold_days == 0 || !case.declared.contains(&Capability::RetentionClock) {
+                return Ok(Ending::Inapplicable(
+                    "requires a declared nonzero floor and retention clock".into(),
+                ));
+            }
+            // One-day and none policies exercise the floor as a minimum, not an added duration.
+            for keep in [json!({"days":1}), json!("none")] {
+                let mut s = open(case).await?;
+                send(case, &mut s, Some(policy(keep.clone(), false)), true).await?;
+                let before = ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?;
+                let floor_ms = u64::from(limits.min_hold_days) * DAY_MS;
+                let due_ms = if keep == "none" {
+                    floor_ms.max(limits.max_unreleased_hold_ms)
+                } else {
+                    floor_ms
+                };
+                case.subject
+                    .advance_retention_clock(&s.name, due_ms - 1)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                check(
+                    ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?["messages"]
+                        == before["messages"],
+                    "content did not survive until floor",
+                )?;
+                case.subject
+                    .advance_retention_clock(&s.name, 2)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                gone(&s.route, None).await?;
+            }
+        }
+        "session_retention_release_after_idle" => {
+            if limits.min_hold_days == 0 || !case.declared.contains(&Capability::RetentionClock) {
+                return Ok(Ending::Inapplicable(
+                    "requires a declared nonzero floor and retention clock".into(),
+                ));
+            }
+            let floor_ms = u64::from(limits.min_hold_days) * DAY_MS;
+            // Stay below the unreleased floor so even a one-day keep-none session survives the gap.
+            let idle_ms = (2 * DAY_MS).min(floor_ms / 2);
+            send(case, &mut s, Some(policy(json!("none"), false)), true).await?;
+            let head = ok(&s.route, ops::SESSION_HEAD, json!({})).await?;
+            let activity = head["updated_at"].as_u64().ok_or("head lacks updated_at")?;
+            let before = ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?;
+            case.subject
+                .advance_retention_clock(&s.name, idle_ms)
+                .await
+                .map_err(|e| e.to_string())?;
+            released_observations(case, &s, limits.min_hold_days, &before).await?;
+            let head = ok(&s.route, ops::SESSION_HEAD, json!({})).await?;
+            let at = head["released"]["at_ms"]
+                .as_u64()
+                .ok_or("released lacks at_ms")?;
+            let deadline = head["released"]["delete_after_ms"]
+                .as_u64()
+                .ok_or("released lacks delete_after_ms")?;
+            check(
+                at >= activity.saturating_add(idle_ms),
+                "release did not follow the idle gap",
+            )?;
+            check(
+                deadline == at.saturating_add(floor_ms),
+                "delete_after_ms is not release time plus the floor",
+            )?;
+            case.subject
+                .advance_retention_clock(&s.name, floor_ms - 1)
+                .await
+                .map_err(|e| e.to_string())?;
+            check(
+                ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?["messages"]
+                    == before["messages"],
+                "idle session did not survive until its release-based deadline",
+            )?;
+            case.subject
+                .advance_retention_clock(&s.name, 2)
+                .await
+                .map_err(|e| e.to_string())?;
+            gone(&s.route, None).await?;
+        }
+        "session_retention_release_hold" | "session_retention_zero_floor_drain" => {
+            if name == "session_retention_zero_floor_drain" && limits.min_hold_days != 0 {
+                return Ok(Ending::Inapplicable(
+                    "runner declares a nonzero floor".into(),
+                ));
+            }
+            let drain = limits.min_hold_days == 0;
+            let hash = if case.declared.contains(&Capability::Attachments) {
+                Some(seed_media(case, &mut s, &p).await?)
+            } else {
+                None
+            };
+            if drain {
+                if let Err(error) = case.subject.hold_next_model_step(&s.name).await {
+                    return Ok(Ending::Inapplicable(format!(
+                        "zero-floor drain requires a held model step: {error}"
+                    )));
+                }
+            }
+            send(case, &mut s, Some(p.clone()), !drain).await?;
+            if drain {
+                case.subject
+                    .await_model_step(&s.name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            let before = ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?;
+            released_observations(case, &s, limits.min_hold_days, &before).await?;
+            if let Some(hash) = hash {
+                let media = ok(
+                    &s.route,
+                    ops::SESSION_MEDIA_READ,
+                    json!({"sha256":hash,"offset":0,"length":1}),
+                )
+                .await?;
+                check(
+                    media["data"] == "iQ==",
+                    "released media is not served during hold",
+                )?;
+            }
+            if drain {
+                case.subject
+                    .release_model_step(&s.name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            } else if case.declared.contains(&Capability::RetentionClock) {
+                case.subject
+                    .advance_retention_clock(&s.name, u64::from(limits.min_hold_days) * DAY_MS - 1)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                check(
+                    ok(&s.route, ops::SESSION_READ, json!({"from_ordinal":0})).await?["messages"]
+                        == before["messages"],
+                    "released content did not survive until floor",
+                )?;
+                case.subject
+                    .advance_retention_clock(&s.name, 2)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                gone(&s.route, None).await?;
+            }
+        }
         "session_retention_honoured" => {
             let p = policy(json!("none"), false);
             case.subject
@@ -251,7 +519,10 @@ where
                 .await
                 .map_err(|e| e.to_string())?;
             let already_gone = wait_end_or_gone(case.subject, &s.route).await?;
-            let ms = limits.max_unreleased_hold_ms.saturating_add(1);
+            let ms = limits
+                .max_unreleased_hold_ms
+                .max(u64::from(limits.min_hold_days) * DAY_MS)
+                .saturating_add(1);
             if already_gone {
                 gone(&s.route, None).await?;
                 return Ok(Ending::Passed);
@@ -286,7 +557,12 @@ where
                 )?;
             }
             case.subject
-                .advance_retention_clock(&s.name, 86_400_001)
+                .advance_retention_clock(
+                    &s.name,
+                    u64::from(limits.min_hold_days.max(limits.max_days.min(2))) * DAY_MS
+                        - if limits.max_days >= 2 { DAY_MS } else { 0 }
+                        + 1,
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             gone(&s.route, None).await?;
@@ -378,13 +654,13 @@ where
                 .await?;
                 state(&s.route, &p, "starter").await?;
             } else {
-                release(&s.route, "deleted").await?;
+                release_and_delete(case, &s, limits.min_hold_days).await?;
             }
         }
         "session_retention_release_idempotent" | "session_retention_deletion_observable" => {
             send(case, &mut s, Some(p.clone()), true).await?;
             let before = state(&s.route, &p, "starter").await?;
-            release(&s.route, "deleted").await?;
+            release_and_delete(case, &s, limits.min_hold_days).await?;
             if name == "session_retention_release_idempotent" {
                 release(&s.route, "absent").await?;
                 for keep in [json!("none"), json!({"days":1})] {
@@ -407,9 +683,10 @@ where
                             .release_model_step(&other.name)
                             .await
                             .map_err(|e| e.to_string())?;
+                        finish_hold(case.subject, &other.name, limits.min_hold_days).await?;
                         wait_gone(case.subject, &other.route).await?;
                     } else {
-                        release(&other.route, "deleted").await?;
+                        release_and_delete(case, &other, limits.min_hold_days).await?;
                     }
                     release(&other.route, "absent").await?;
                 }
@@ -549,7 +826,7 @@ where
                 e.detail.as_ref().and_then(|d| d.get("frozen")) == Some(&p),
                 "adopt conflict lacks frozen policy",
             )?;
-            release(&s.route, "deleted").await?;
+            release_and_delete(case, &s, limits.min_hold_days).await?;
         }
         "session_retention_active_never_deleted" => {
             for cause in ["days", "release", "fallback"] {
@@ -591,7 +868,10 @@ where
                     let ms = if cause == "days" {
                         86_400_001
                     } else {
-                        limits.max_unreleased_hold_ms.saturating_add(1)
+                        limits
+                            .max_unreleased_hold_ms
+                            .max(u64::from(limits.min_hold_days) * DAY_MS)
+                            .saturating_add(1)
                     };
                     case.subject
                         .advance_retention_clock(&s.name, ms)
@@ -605,6 +885,7 @@ where
                     .map_err(|e| e.to_string())?;
                 wait_models(case.subject, &s.name, 2).await?;
                 if cause == "release" {
+                    finish_hold(case.subject, &s.name, limits.min_hold_days).await?;
                     wait_gone(case.subject, &s.route).await?;
                 } else if cause == "days" {
                     check(
@@ -618,7 +899,10 @@ where
                         .map_err(|e| e.to_string())?;
                     state(&s.route, &p, "starter").await?;
                     case.subject
-                        .advance_retention_clock(&s.name, 43_200_001)
+                        .advance_retention_clock(
+                            &s.name,
+                            u64::from(limits.min_hold_days.max(1)) * DAY_MS - 43_200_000 + 1,
+                        )
                         .await
                         .map_err(|e| e.to_string())?;
                     gone(&s.route, None).await?;
@@ -629,7 +913,10 @@ where
                         case.subject
                             .advance_retention_clock(
                                 &s.name,
-                                limits.max_unreleased_hold_ms.saturating_add(1),
+                                limits
+                                    .max_unreleased_hold_ms
+                                    .max(u64::from(limits.min_hold_days) * DAY_MS)
+                                    .saturating_add(1),
                             )
                             .await
                             .map_err(|e| e.to_string())?;
@@ -640,7 +927,7 @@ where
         }
         "session_retention_media_deleted" => {
             let hash = seed_media(case, &mut s, &p).await?;
-            release(&s.route, "deleted").await?;
+            release_and_delete(case, &s, limits.min_hold_days).await?;
             gone(&s.route, Some(&hash)).await?;
         }
         "session_retention_queued_never_deleted" => {
@@ -683,7 +970,10 @@ where
                     let ms = if cause == "days" {
                         86_400_001
                     } else {
-                        limits.max_unreleased_hold_ms.saturating_add(1)
+                        limits
+                            .max_unreleased_hold_ms
+                            .max(u64::from(limits.min_hold_days) * DAY_MS)
+                            .saturating_add(1)
                     };
                     case.subject
                         .advance_retention_clock(&s.name, ms)
@@ -697,6 +987,7 @@ where
                     .map_err(|e| e.to_string())?;
                 wait_models(case.subject, &s.name, 1).await?;
                 if cause == "release" {
+                    finish_hold(case.subject, &s.name, limits.min_hold_days).await?;
                     wait_gone(case.subject, &s.route).await?;
                 }
             }
@@ -780,6 +1071,17 @@ where
         mint,
     };
     let mut s = open(&case).await?;
+    let described = check_describe(&ok(&s.route, ops::ROLE_DESCRIBE, json!({})).await?)
+        .map_err(|e| format!("describe: {e:?}"))?;
+    let floor = described
+        .session_retention
+        .ok_or("missing session_retention limits")?
+        .min_hold_days;
+    if floor > 0 && !declared.contains(&Capability::RetentionClock) {
+        return Ok(Ending::Inapplicable(
+            "release recovery through a nonzero floor requires a retention clock".into(),
+        ));
+    }
     let p = policy(json!("forever"), false);
     let hash = seed_media(&case, &mut s, &p).await?;
     subject
@@ -834,6 +1136,7 @@ where
         .map_err(|e| e.to_string())?;
     // Recovery is autonomous: reads must become unavailable without a second
     // release request.
+    finish_hold(subject, &s.name, floor).await?;
     wait_gone(subject, &route).await?;
     gone(&route, Some(&hash)).await?;
     release(&route, "absent").await?;

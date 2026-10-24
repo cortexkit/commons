@@ -143,6 +143,14 @@ fn assert_only_session_retention_skipped(report: &SuiteReport) {
 /// The opt-in cost case: a subject without the seeding hook cannot run it.
 const COST_CASE: &str = "per_step_cost_scales_with_new_messages";
 
+const NEW_RETENTION_CASES: &[&str] = &[
+    "session_retention_floor_describe",
+    "session_retention_floor",
+    "session_retention_release_hold",
+    "session_retention_release_after_idle",
+    "session_retention_zero_floor_drain",
+];
+
 /// The cases that interrupt a running turn: inapplicable on a runner
 /// without `interrupt`.
 const INTERRUPT_CASES: &[&str] = &[
@@ -155,6 +163,11 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if NEW_RETENTION_CASES.contains(&case)
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "session_retention is not declared")
+    {
+        return;
+    }
     if case.starts_with("system_text_default_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare system_text_default")
     {
@@ -686,13 +699,22 @@ async fn a_group_claimed_on_the_wire_but_skipped_by_the_suite_fails_the_groups_c
 }
 
 #[tokio::test]
-async fn a_subject_declaring_nothing_is_skipped_everywhere_and_never_passes() {
+async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.clear();
     subject.kill_points.clear();
     let report = run(&subject).await;
     for spec in CASES {
         if spec.requires.is_empty() {
+            continue;
+        }
+        if NEW_RETENTION_CASES.contains(&spec.name) {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "session_retention is not declared".into(),
+                })
+            );
             continue;
         }
         assert!(

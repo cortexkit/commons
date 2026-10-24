@@ -1,5 +1,11 @@
 # `llm-runner/v1` test vectors
 
+`retention-floor.json` adds the optional floor/reader describe limits, invalid
+floor, released head and refused-send deadline. `log-read-watermark.json` pins
+the capability/op names, strict empty request, number/null answers and
+`not_a_read_source` refusal. `session_retention::floor_tests` and
+`watermark::tests` check them. All existing vector files are unchanged.
+
 `session-retention.json` pins the separate per-session policy (§9.14): all keep
 shapes, required/unknown members, value and combination refusals, describe limits,
 send/adopt/head members, state flags, session-bound release and all associated

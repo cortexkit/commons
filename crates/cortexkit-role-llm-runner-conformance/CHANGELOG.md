@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.0
+
+- Add `session_retention_release_after_idle`: delay release after durable activity
+  and require a keep-none session's full floor from that later release, both in
+  head's deadline and actual deletion. A faulty activity-anchored deadline fails
+  the named case; one-day and seven-day floors are covered.
+- Depend on llm-runner 0.7.1. Add named `session_retention` cases for invalid
+  floors, survival to the declared floor and deletion after it, readable pending
+  release with head/refusal deadlines, and the floor-zero drain window.
+- Defend the cases with subprocess faults for early deletion, inaccessible
+  reads, missing release metadata, incorrect deadlines and non-pending repeats.
+- Existing retention cases account for the declared floor instead of requiring
+  immediate deletion. Time-dependent cases use the existing retention clock;
+  that hook also lets declared readers finish reading due content. No new
+  subject methods are required.
+
 ## 0.14.0
 
 - Retain the retention and step-event cases from 0.13.x. Step-event fake

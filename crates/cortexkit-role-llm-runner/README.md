@@ -6,10 +6,18 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.7.0"
+cortexkit-role-llm-runner = "0.7.1"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+
+Since 0.7.1, `session_retention` may declare a default-zero `min_hold_days` and
+`deletion_waits_for_readers: true`. The floor is a minimum, never added to a
+policy's lifetime. Head exposes `released` until deletion, reads remain served,
+and refused sends carry `detail.delete_after_ms`. The separate `watermark`
+module defines a log reader's caller-scoped `log-read-watermark/v1` capability,
+strict empty `watermark.get` request and timestamp-or-null reply. See contract
+§9.14–9.15 for the durability and same-computer clock requirements.
 
 ## Hosted session references
 

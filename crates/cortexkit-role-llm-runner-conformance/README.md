@@ -2,9 +2,32 @@
 
 ## Per-session retention policies
 
+Version 0.15.0 depends on the llm-runner 0.7.1 wire contract. The new
+`session_retention_floor_describe`, `session_retention_floor`,
+`session_retention_release_hold`, `session_retention_release_after_idle` and
+`session_retention_zero_floor_drain` cases
+are named not applicable when `session_retention` is absent. The floor case
+uses the runner's declared nonzero floor and `RetentionClock`; a zero floor or
+missing clock is named not applicable. No hook configures the runner's floor.
+`session_retention_release_after_idle` uses the same floor/clock applicability.
+It idles a `keep: "none"` session for two days or half the declared floor,
+whichever is shorter, then checks that release starts a full floor: the deadline is release
+time plus the floor, reads survive just before it, and deletion follows it.
+The release observations always run: a nonzero-floor runner releases with
+nothing running; a zero-floor runner releases during a held run. Both must
+serve reads, report `released`, refuse sends with the matching deletion deadline
+and answer `pending` twice. The zero-floor-specific case is not applicable to
+a runner declaring a nonzero floor or lacking a held-model fixture.
+`advance_retention_clock` completes due
+deletion work, including allowing declared readers to durably read the content.
+Reader watermark computation, persistence and health degradation need the log
+reader's and runner's own integration tests; these kit cases do not simulate a
+billing reader.
+
 The `session_retention_*` cases require the separate `session_retention` group;
-they do not replace the legacy `retention_*` cases. Missing groups are named
-skips. Ordinary suite sends and adopts discover the group and add a default
+they do not replace the legacy `retention_*` cases. Older policy cases report
+missing groups as named skips; the five new cases report not applicable.
+Ordinary suite sends and adopts discover the group and add a default
 forever policy only when it is declared, repeating an existing starter policy
 unchanged on later calls. When both groups are declared, ordinary starters prefer
 the new policy. Legacy seconds cases call the runner directly, bypassing the

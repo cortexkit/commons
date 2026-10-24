@@ -116,6 +116,14 @@ pub struct SessionRetention {
     pub max_days: u32,
     pub max_unreleased_hold_ms: u64,
     pub required: bool,
+    #[serde(default, skip_serializing_if = "is_zero_days")]
+    pub min_hold_days: u32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deletion_waits_for_readers: bool,
+}
+
+fn is_zero_days(days: &u32) -> bool {
+    *days == 0
 }
 
 impl SessionRetention {
@@ -124,7 +132,19 @@ impl SessionRetention {
             max_days,
             max_unreleased_hold_ms,
             required,
+            min_hold_days: 0,
+            deletion_waits_for_readers: false,
         }
+    }
+
+    pub fn with_min_hold_days(mut self, days: u32) -> Self {
+        self.min_hold_days = days;
+        self
+    }
+
+    pub fn with_deletion_waits_for_readers(mut self) -> Self {
+        self.deletion_waits_for_readers = true;
+        self
     }
 }
 
@@ -443,7 +463,9 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         let problem = match describe.session_retention {
             None => Some(problem_names::MISSING_SESSION_RETENTION),
             Some(limits)
-                if !(1..=3650).contains(&limits.max_days) || limits.max_unreleased_hold_ms == 0 =>
+                if !(1..=3650).contains(&limits.max_days)
+                    || limits.max_unreleased_hold_ms == 0
+                    || limits.min_hold_days > limits.max_days =>
             {
                 Some(problem_names::INVALID_SESSION_RETENTION)
             }

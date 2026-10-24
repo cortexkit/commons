@@ -3191,10 +3191,13 @@ its host's file storage, not a second copy of the host's media store.
 
 - [pinned] This group is separate from §9.1 `retention`, which is unchanged.
   `role.describe` declares `session_retention` and limits
-  `session_retention: {max_days: u32, max_unreleased_hold_ms: u64, required: bool}`
+  `session_retention: {max_days: u32, max_unreleased_hold_ms: u64, required: bool,
+  min_hold_days?: u32, deletion_waits_for_readers?: true}`
   (`describe::SessionRetention`). `check_describe` refuses a declared group
   without limits (`missing_session_retention`), or with `max_days` outside
-  1..=3650 or a zero `max_unreleased_hold_ms` (`invalid_session_retention`).
+  1..=3650, a zero `max_unreleased_hold_ms`, or `min_hold_days` greater than
+  `max_days` (`invalid_session_retention`). `min_hold_days` defaults to 0 and
+  is omitted at 0; `deletion_waits_for_readers` is omitted unless true.
   The group serves `session.send`, `session.head` and `session.release`;
   it also extends `session.adopt` wherever `adopt` is declared.
 - [pinned] `session.send` and `session.adopt` accept optional
@@ -3227,6 +3230,13 @@ its host's file storage, not a second copy of the host's media store.
   An archived session's reads return exactly what they returned before archive;
   only storage changes. Nothing is deleted while a run is active or a send is
   queued, whether deletion is due to days expiry, release or the fallback hold.
+- [pinned] No session's content is deleted less than `min_hold_days` after the
+  later of its last durable activity and its release. The floor is a minimum,
+  never an addition: without release, `keep: {days: N}` expires at max(N, floor)
+  after last activity. Release instead uses the floor deadline below.
+  `keep: "none"` expires at release plus the floor, or, when never
+  released, at max(`max_unreleased_hold_ms`, floor in milliseconds) after its
+  last run ends.
 - [pinned] The first send or adopt carrying a policy freezes it. Later sends
   or adopts may repeat it. Equality is on decoded values, not bytes. A different
   policy is refused `retention_conflict` with `detail.frozen` equal to the frozen
@@ -3245,33 +3255,57 @@ its host's file storage, not a second copy of the host's media store.
   `host_limited` means the host keeps the transcript and may delete it sooner
   than the policy says. Flags appear only as true, never false.
 - [pinned] `session.release {}` (`ReleaseRequest`) targets the bound session
-  name, for every keep value: the policy is the longest a session lives and
-  release is the owner ending it sooner. Owner-only means the principal that
+  name, for every keep value: the policy is the longest a session is served;
+  a declared `min_hold_days` and a wait on a declared reader are the only extra
+  storage time allowed. Release is the owner ending the session sooner.
+  Owner-only means the principal that
   made the session's first send (or adopt), as the daemon attested it, never
   the owner of a parent scope. Any other principal is refused
   `scope_owner_mismatch`, including a caller under that parent scope. The
   starter's principal can release even under another principal's parent scope.
 - [pinned] Release is idempotent. The answer (`ReleaseReply`) is
-  `{state: "pending"}` while a run is active or a send is queued,
+  `{state: "pending"}` until deletion completes,
   `{state: "deleted"}` when this call completed deletion before answering, and `{state: "absent"}`
   when the bound name has no session (never created or already deleted).
   The runner records release durably before answering pending. It then deletes
-  once the active run ends and the queue drains, without another starter call,
+  once the active run ends, the queue drains, the floor ends and any declared
+  reader permits deletion, without another starter call,
   including after a process kill and restart. Pending means release was recorded
   durably; deleted means this call completed deletion with nothing running;
   absent means no session exists under the bound name right now. A repeat after
   deletion always answers absent; no completed-deletion record is required.
   Deletion after pending must not wait for another call, including after restart:
-  once the recovered run ends and the queue drains, deletion completes autonomously.
+  once the recovered run ends, the queue drains, the floor ends and any declared
+  reader permits deletion, deletion completes autonomously.
   A release after that completion answers absent.
-- [pinned] After release and before deletion completes, a send to the name is
-  refused `session_released` (retryable). After deletion, head and reads refuse
+- [pinned] From the moment release is recorded until deletion completes, for
+  every runner, including floor 0, `session.head` carries
+  `released: {at_ms: u64, delete_after_ms: u64}`. `at_ms` is the recorded release
+  time; `delete_after_ms` is the earliest deletion time, the end of the floor
+  measured from the later of release and last durable activity. Deletion may
+  come later only while waiting on a declared reader (and never while a run is
+  active or a send queued). Reads and media are served as before. `released`
+  marks the session as ended; it does not change `last_run_state`, which keeps
+  reporting the run as it is until the run ends. A send to the name is refused `session_released`
+  (retryable) with `detail.delete_after_ms`. Release answers `pending`, including
+  on repeated calls while deletion is incomplete. After deletion, head and reads refuse
   `unknown_session`, and `session.media_read` refuses `unknown_media` for its
   checksum. The next send starts a new incarnation under the same name.
   Release frees live runner data only: backups already taken follow the backup
   service's own retention.
 - [pinned] For `keep: "none"`, if no release arrives, the runner deletes the
-  session `max_unreleased_hold_ms` after its last run ends.
+  session max(`max_unreleased_hold_ms`, floor in milliseconds) after its last
+  run ends, subject to any declared reader wait.
+- [pinned] A runner may delay a due deletion until a declared log reader has
+  read the content; it declares `deletion_waits_for_readers: true`. A due log
+  is deleted only when its last recorded write time is strictly before that
+  reader's watermark (§9.15). With `{watermark_ms: null}` or `not_a_read_source`,
+  nothing waiting on that reader is deleted. The runner's health degrades when
+  any due deletion has waited more than 24 hours past its floor. The writer
+  stamps every log record with its wall-clock time, taken immediately before
+  an append that is durable and visible to the reader within ε = 60 seconds.
+  Writer and reader run on the same computer and use the same wall clock;
+  a runner never relies on a reader on another computer.
 - [pinned] Deletion removes everything the session owns: log, indexes, lease,
   media and attachments the runner holds by checksum, outbox entries and request
   dumps. A session's dumps never outlive it. Files placed in the user's project
@@ -3282,6 +3316,30 @@ its host's file storage, not a second copy of the host's media store.
   accepts and silently skips backup. A session with `backup: false` is absent
   after a restore, never half there. A restore never brings back a deleted
   incarnation, and never deletes a later incarnation under the same name.
+
+### 9.15 `log-read-watermark/v1`: durable log-reader progress
+
+- [pinned] A log reader declares `log-read-watermark/v1` in its manifest's
+  `provides`. Its one operation is `watermark.get {}`. The request is strict:
+  any member is `invalid_params`. The reply is `{watermark_ms: u64 | null}`:
+  every record the calling module wrote before `watermark_ms` has been durably
+  read and recorded. The crate exposes the names and wire types in `watermark`.
+- [pinned] The reader answers only for the daemon-attested caller (the bind
+  principal), never for another module's logs. A caller it does not read,
+  excluded callers included, is refused `not_a_read_source`. `null` means the
+  watermark is not established, for example before the first complete pass.
+- [pinned] T is the start of a complete pass over every log of that caller,
+  minus ε = 60 seconds, set only after that pass's recording commits.
+  An attempt is a model call whose start the writer has logged and whose final
+  record the reader has not yet read. While an open attempt comes from the
+  writer's current boot, T stays at or before that attempt's start, because its
+  final record is still to come. An open attempt from an earlier writer boot
+  can never finish: the reader records it as possibly billed, and from then it
+  counts as read. T never passes an earlier-boot attempt the reader has not yet
+  recorded that way. An unparseable record counts as read once it is set aside
+  as evidence. T is persisted and never goes backwards,
+  including across restarts.
+
 
 ## 10. `session.baseline` and the admission reply
 

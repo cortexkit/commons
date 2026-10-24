@@ -91,6 +91,7 @@ impl RunnerRoute for Route {
 struct Fake {
     fault: &'static str,
     required: bool,
+    floor: u32,
     current: Mutex<Option<Arc<Mutex<Process>>>>,
 }
 impl Fake {
@@ -98,6 +99,7 @@ impl Fake {
         Self {
             fault,
             required,
+            floor: 0,
             current: Mutex::new(None),
         }
     }
@@ -136,6 +138,7 @@ impl Harness for Fake {
             .env("CK_RETENTION_FAKE_ROOT", root)
             .env("CK_RETENTION_FAKE_FAULT", self.fault)
             .env("CK_RETENTION_FAKE_REQUIRED", self.required.to_string())
+            .env("CK_RETENTION_FAKE_FLOOR", self.floor.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -294,6 +297,9 @@ impl LlmRunnerSubject for Fake {
         self.control(session, "fixture.drain", json!({}))
     }
     async fn hold_next_model_step(&self, session: &str) -> Result<(), HarnessError> {
+        if self.fault == "unavailable_hold" {
+            return Err(HarnessError::new("held model fixture is unavailable"));
+        }
         self.control(session, "fixture.hold", json!({}))
     }
     async fn await_model_step(&self, session: &str) -> Result<(), HarnessError> {
@@ -329,6 +335,7 @@ struct Stored {
     active: bool,
     queued: bool,
     pending: bool,
+    released_at: Option<u64>,
     media: Option<String>,
     activity: u64,
     runner_origin: bool,
@@ -392,6 +399,7 @@ fn handle(
     queue_held: &mut BTreeSet<String>,
     fault: &str,
     required: bool,
+    floor: u32,
     request: &Value,
 ) -> Value {
     let name = request["session"].as_str().unwrap();
@@ -401,6 +409,12 @@ fn handle(
     let answer = |v| json!({"result":v});
     if method == ops::ROLE_DESCRIBE {
         let mut result = json!({"majors":[{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.send","session.adopt","session.head","session.read","session.release","run.result","session.upload_begin","session.upload_append","session.upload_commit","session.upload_status","session.media_read"],"stability":"alpha"}],"implementation_version":"fixture","capabilities":["retention","session_retention","adopt","queue","transcript_reads","run_ops","attachments"],"max_bytes":{"default":1048576,"maximum":1048576},"session_capabilities_from":"admission","retention":{"max_seconds":60,"delete_within_ms":1},"session_retention":{"max_days":3650,"max_unreleased_hold_ms":10,"required":required}});
+        if floor > 0 {
+            result["session_retention"]["min_hold_days"] = json!(floor);
+        }
+        if fault == "invalid_floor" {
+            result["session_retention"]["min_hold_days"] = json!(3651);
+        }
         if fault == "undeclared" {
             result["capabilities"] = json!(["retention"]);
         }
@@ -446,7 +460,7 @@ fn handle(
             }
             s.queued = false;
             s.activity = disk.clock;
-            if s.pending {
+            if s.pending && floor == 0 {
                 disk.sessions.remove(name);
             }
         }
@@ -475,7 +489,24 @@ fn handle(
             } else {
                 p["keep"]["days"].as_u64().map(|d| d * 86_400_000)
             };
-            ms.is_some_and(|ms| disk.clock - s.activity >= ms)
+            let floor_ms = if fault == "early_floor" {
+                0
+            } else {
+                u64::from(floor) * DAY_MS
+            };
+            let deadline = if s.pending {
+                Some(s.activity.max(s.released_at.unwrap()) + floor_ms)
+            } else {
+                ms.map(|ms| {
+                    s.activity
+                        + if fault == "add_floor" {
+                            ms + floor_ms
+                        } else {
+                            ms.max(floor_ms)
+                        }
+                })
+            };
+            deadline.is_some_and(|deadline| disk.clock >= deadline)
                 && ((!s.active && !s.queued)
                     || fault == "delete_active" && s.active
                     || fault == "delete_queue" && s.queued)
@@ -535,7 +566,14 @@ fn handle(
         }
         if let Some(s) = disk.sessions.get(name) {
             if s.pending {
-                return failure(errors::SESSION_RELEASED, json!({}));
+                return failure(
+                    errors::SESSION_RELEASED,
+                    if fault == "missing_deadline" {
+                        json!({})
+                    } else {
+                        json!({"delete_after_ms":s.activity.max(s.released_at.unwrap()) + u64::from(floor) * DAY_MS})
+                    },
+                );
             }
             if s.source == "starter"
                 && p.is_some()
@@ -619,8 +657,14 @@ fn handle(
         if principal == s.owner && fault == "deny_owner" {
             return failure(errors::SCOPE_OWNER_MISMATCH, json!({}));
         }
-        if s.active || s.queued {
-            s.pending = true;
+        let repeated = s.pending;
+        s.pending = true;
+        s.released_at.get_or_insert(disk.clock);
+        if (s.active
+            || s.queued
+            || disk.clock < s.activity.max(s.released_at.unwrap()) + u64::from(floor) * DAY_MS)
+            && !(fault == "repeat_deleted" && repeated)
+        {
             return answer(json!({"state":"pending"}));
         }
         if fault == "media_deleted" && s.media.is_some() {
@@ -648,6 +692,14 @@ fn handle(
     };
     if method == ops::SESSION_HEAD {
         let mut result = json!({"lineage_id":format!("lineage-{}",s.incarnation),"first_ordinal":0,"history_version":1,"updated_at":s.activity,"incarnation":format!("incarnation-{}",s.incarnation),"last_run_state":{"run_id":format!("run-{}",s.started),"state":if s.active {"running"} else {"completed"}},"retention_policy":s.policy,"retention_state":{"source":s.source}});
+        if s.pending && fault != "omit_released" && fault != "omit_zero_released" {
+            let at = s.released_at.unwrap();
+            result["released"] = json!({"at_ms":at,"delete_after_ms":s.activity.max(at) + u64::from(floor) * DAY_MS + u64::from(fault == "wrong_deadline")});
+            if fault == "release_from_activity" {
+                result["released"]["delete_after_ms"] =
+                    json!(s.activity + u64::from(floor) * DAY_MS);
+            }
+        }
         if s.started == 0 {
             result.as_object_mut().unwrap().remove("last_run_state");
         }
@@ -660,6 +712,9 @@ fn handle(
         return answer(result);
     }
     if method == ops::SESSION_READ {
+        if s.pending && fault == "released_unreadable" {
+            return failure(errors::UNKNOWN_SESSION, json!({}));
+        }
         return answer(
             json!({"lineage_id":format!("lineage-{}",s.incarnation),"messages":if s.archive.is_empty() {&s.log} else {&s.archive}}),
         );
@@ -703,12 +758,20 @@ fn process_server() {
     let path = root.join("state.json");
     let fault = std::env::var("CK_RETENTION_FAKE_FAULT").unwrap();
     let required = std::env::var("CK_RETENTION_FAKE_REQUIRED").unwrap() == "true";
+    let floor: u32 = std::env::var("CK_RETENTION_FAKE_FLOOR")
+        .unwrap()
+        .parse()
+        .unwrap();
     let mut disk: Disk = std::fs::read(&path)
         .ok()
         .map(|bytes| serde_json::from_slice(&bytes).unwrap())
         .unwrap_or_default();
-    disk.sessions
-        .retain(|_, s| !(s.pending && !s.active && !s.queued));
+    disk.sessions.retain(|_, s| {
+        !(s.pending
+            && !s.active
+            && !s.queued
+            && disk.clock >= s.activity.max(s.released_at.unwrap()) + u64::from(floor) * DAY_MS)
+    });
     let mut held = BTreeSet::new();
     let mut queue_held = BTreeSet::new();
     for line in std::io::stdin().lock().lines() {
@@ -719,6 +782,7 @@ fn process_server() {
             &mut queue_held,
             &fault,
             required,
+            floor,
             &request,
         );
         if fault == "immediate_none" {
@@ -748,8 +812,26 @@ fn process_server() {
 }
 
 async fn exercise(name: &str, fault: &'static str, required: bool) -> Result<Ending, String> {
+    let floor = if matches!(
+        name,
+        "session_retention_floor" | "session_retention_release_hold"
+    ) {
+        7
+    } else {
+        0
+    };
+    exercise_floor(name, fault, required, floor).await
+}
+
+async fn exercise_floor(
+    name: &str,
+    fault: &'static str,
+    required: bool,
+    floor: u32,
+) -> Result<Ending, String> {
     let temp = tempfile::tempdir().unwrap();
-    let fake = Fake::new(fault, required);
+    let mut fake = Fake::new(fault, required);
+    fake.floor = floor;
     let mut driver = CrashDriver::new(&fake);
     let handle = driver.spawn(temp.path()).await.unwrap();
     let mut declared = fake.capabilities();
@@ -801,6 +883,13 @@ macro_rules! defended {
                 "delete_active" | "delete_queue" => "unknown_session",
                 "rewrite_dumps" => "rewrote or ignored",
                 "memory_pending" => "recorded release did not delete",
+                "invalid_floor" => "invalid_session_retention",
+                "early_floor" | "released_unreadable" => "unknown_session",
+                "omit_released" | "omit_zero_released" => "omitted released",
+                "wrong_deadline" => "incorrect delete_after_ms",
+                "missing_deadline" => "detail.delete_after_ms",
+                "repeat_deleted" => "release expected pending",
+                "add_floor" => "not refused",
                 _ => panic!("missing expected failure for {}", $fault),
             };
             assert!(
@@ -812,6 +901,56 @@ macro_rules! defended {
         }
     };
 }
+defended!(session_retention_floor_describe, "invalid_floor");
+defended!(session_retention_floor, "early_floor");
+defended!(session_retention_release_hold, "released_unreadable");
+
+#[tokio::test]
+async fn session_retention_release_after_idle() {
+    let name = "session_retention_release_after_idle";
+    for floor in [1, 7] {
+        assert!(matches!(
+            exercise_floor(name, CONTROL_FAULT, false, floor)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: {e}")),
+            Ending::Passed
+        ));
+        let error = exercise_floor(name, "release_from_activity", false, floor)
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{name}: faulty runner escaped"));
+        assert!(
+            error.contains("incorrect delete_after_ms"),
+            "{name}: wrong failure: {error}"
+        );
+        println!("{name}: faulty runner rejected: {error}");
+    }
+    assert!(matches!(
+        exercise_floor(name, CONTROL_FAULT, false, 0).await.unwrap(),
+        Ending::Inapplicable(_)
+    ));
+}
+defended!(session_retention_zero_floor_drain, "omit_zero_released");
+
+#[tokio::test]
+async fn session_retention_release_hold_faults() {
+    for (fault, expected) in [
+        ("omit_released", "omitted released"),
+        ("wrong_deadline", "incorrect delete_after_ms"),
+        ("missing_deadline", "detail.delete_after_ms"),
+        ("repeat_deleted", "release expected pending"),
+    ] {
+        let error = exercise("session_retention_release_hold", fault, false)
+            .await
+            .err()
+            .unwrap();
+        assert!(error.contains(expected), "{fault}: {error}");
+    }
+    assert!(exercise("session_retention_floor", "add_floor", false)
+        .await
+        .is_err());
+}
+
 defended!(session_retention_honoured, "ignore");
 defended!(session_retention_days_and_archive, "ignore_days");
 defended!(session_retention_adopt_policy, "adopt_conflict");
@@ -828,6 +967,63 @@ defended!(session_retention_backup_none_refused, "backup_none");
 defended!(session_retention_dumps_preserved, "rewrite_dumps");
 defended!(session_retention_runner_replaced_once, "replace_twice");
 defended!(session_retention_pending_durable, "memory_pending");
+
+#[tokio::test]
+async fn session_retention_existing_cases_honour_floor() {
+    assert!(matches!(
+        exercise_floor(
+            "session_retention_zero_floor_drain",
+            "unavailable_hold",
+            false,
+            0
+        )
+        .await
+        .unwrap(),
+        Ending::Inapplicable(_)
+    ));
+    for name in [
+        "session_retention_honoured",
+        "session_retention_days_and_archive",
+        "session_retention_owner_can_release",
+        "session_retention_release_idempotent",
+        "session_retention_deletion_observable",
+        "session_retention_media_deleted",
+        "session_retention_active_never_deleted",
+        "session_retention_queued_never_deleted",
+        "session_retention_adopt_policy",
+        "session_retention_pending_durable",
+    ] {
+        assert!(matches!(
+            exercise_floor(name, CONTROL_FAULT, false, 7)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: {e}")),
+            Ending::Passed
+        ));
+    }
+    assert!(matches!(
+        exercise_floor("session_retention_release_hold", CONTROL_FAULT, false, 0)
+            .await
+            .unwrap(),
+        Ending::Passed
+    ));
+    assert!(matches!(
+        exercise_floor("session_retention_floor", CONTROL_FAULT, false, 0)
+            .await
+            .unwrap(),
+        Ending::Inapplicable(_)
+    ));
+    assert!(matches!(
+        exercise_floor(
+            "session_retention_zero_floor_drain",
+            CONTROL_FAULT,
+            false,
+            7
+        )
+        .await
+        .unwrap(),
+        Ending::Inapplicable(_)
+    ));
+}
 
 #[tokio::test]
 async fn session_retention_required_true() {
