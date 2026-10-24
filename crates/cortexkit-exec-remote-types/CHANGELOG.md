@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.13
+
+- Add `TerminalRecord.execution_ended`, with `with_execution_ended` and
+  `execution_ended()`. True means the producer has proof that no process of the
+  job remains: the unit was confirmed exited, or a real exit status was read.
+  False is omitted on the wire and, like absence, means the job may still be
+  running. The field says nothing about the exit code or success.
+- Add three terminal vectors for true, absent, and explicit false values,
+  preserving existing vector bytes and omitting false values on re-encoding.
+
 ## 0.2.12
 
 - Add optional `ReturnManifestEntry.chunks`, with `with_chunks` and `chunks()`:

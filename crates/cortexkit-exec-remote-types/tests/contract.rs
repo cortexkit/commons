@@ -61,6 +61,9 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-return-result-not-regular",
     "crate-local-return-result-frame-limit",
     "crate-local-return-result-unknown-cause",
+    "crate-local-execution-ended-true",
+    "crate-local-execution-ended-absent",
+    "crate-local-execution-ended-false",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -205,6 +208,9 @@ fn expected_canonical_bytes(folder: &str, name: &str) -> Vec<u8> {
     // separately pinned report containing only known fields.
     if folder == "outcomes" && name == "crate-local-server-reports-unknown-fields" {
         bytes(folder, "crate-local-server-reports-all")
+    } else if folder == "outcomes" && name == "crate-local-execution-ended-false" {
+        // An explicit false carries no proof and canonicalizes to absence.
+        bytes(folder, "crate-local-execution-ended-absent")
     } else {
         bytes(folder, name)
     }
@@ -258,9 +264,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 34);
+    assert_eq!(LOCAL_OUTCOMES.len(), 37);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 71);
+    assert_eq!(cases().len(), 74);
 }
 
 #[test]
@@ -353,6 +359,51 @@ fn server_report(name: &str) -> TerminalRecord {
         panic!("expected one terminal in {name}")
     };
     terminal.clone()
+}
+
+#[test]
+fn terminal_execution_ended_true_round_trips_and_matches_builder() {
+    let name = "crate-local-execution-ended-true";
+    let report = server_report(name);
+    assert!(report.execution_ended());
+    assert_eq!(
+        value("outcomes", name)["stream"][0]["execution_ended"],
+        true
+    );
+    let built = TerminalRecord::new(job_id(), Outcome::OutcomeUnknown, 0, 0, 0)
+        .with_killed(Killed::Cancel)
+        .with_ran(Ran::Remote)
+        .with_workspace_changes(vec![])
+        .with_execution_ended();
+    assert_eq!(built, report);
+    let pinned = bytes("outcomes", name);
+    assert_eq!(round_trip::<OutcomeCase>(&pinned), pinned);
+}
+
+#[test]
+fn terminal_execution_ended_absent_defaults_to_false_and_preserves_bytes() {
+    let name = "crate-local-execution-ended-absent";
+    assert!(value("outcomes", name)["stream"][0]
+        .get("execution_ended")
+        .is_none());
+    assert!(!server_report(name).execution_ended());
+    assert!(!TerminalRecord::new(job_id(), Outcome::OutcomeUnknown, 0, 0, 0).execution_ended());
+    let pinned = bytes("outcomes", name);
+    assert_eq!(round_trip::<OutcomeCase>(&pinned), pinned);
+}
+
+#[test]
+fn terminal_execution_ended_false_decodes_and_is_omitted_on_reencode() {
+    let name = "crate-local-execution-ended-false";
+    assert_eq!(
+        value("outcomes", name)["stream"][0]["execution_ended"],
+        false
+    );
+    assert!(!server_report(name).execution_ended());
+    assert_eq!(
+        round_trip::<OutcomeCase>(&bytes("outcomes", name)),
+        bytes("outcomes", "crate-local-execution-ended-absent")
+    );
 }
 
 #[test]

@@ -807,6 +807,13 @@ pub struct TerminalRecord {
     pub retry_after_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub killed: Option<Killed>,
+    /// True only when the producer has proof that no process of the job remains:
+    /// the unit was confirmed exited, or a real exit status was read. False is
+    /// omitted on the wire and means the same as an absent field: execution has
+    /// not been proven to have ended, so the job may still be running. This says
+    /// nothing about the exit code or success.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub execution_ended: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipestatus: Option<Vec<i32>>,
     pub wall_ms: u64,
@@ -858,6 +865,7 @@ impl TerminalRecord {
             refusal_detail: None,
             retry_after_ms: None,
             killed: None,
+            execution_ended: false,
             pipestatus: None,
             wall_ms,
             queue_wait_ms,
@@ -902,6 +910,17 @@ impl TerminalRecord {
     pub fn with_killed(mut self, killed: Killed) -> Self {
         self.killed = Some(killed);
         self
+    }
+
+    /// Record proof that no process of the job remains.
+    pub fn with_execution_ended(mut self) -> Self {
+        self.execution_ended = true;
+        self
+    }
+
+    /// Read whether the producer has proved that no process of the job remains.
+    pub fn execution_ended(&self) -> bool {
+        self.execution_ended
     }
 
     /// Record the pipeline exit statuses.
