@@ -8,14 +8,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.2.0"
+cortexkit-role-routing = "0.3.0"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.2.0", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.3.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -28,9 +28,13 @@ What the crate holds:
 
 - `declarations`: `ConsumerDeclarations`, optional demand defaults and a typed
   validator for the catalog's `role_declarations[ROLE_DECLARATIONS_KEY]`;
-- `describe`: the `role.describe` answer and `check_describe`;
-- `select`: the `route.select` request, `parse_select_request`, the answer
-  and `check_answer`;
+- `describe`: the `role.describe` answer, its optional `capabilities`
+  groups, and `check_describe`;
+- `capabilities`: the optional groups this version defines
+  (`select_hold_control`);
+- `select`: the `route.select` request, `parse_select_request` and
+  `parse_select_request_serving` (which reads the members of the groups a
+  provider declares), the answer and `check_answer`;
 - `report`: the `route.report` request, `parse_report_request` and the
   answer;
 - `account`: the `route.account_for` request, `parse_account_for_request`

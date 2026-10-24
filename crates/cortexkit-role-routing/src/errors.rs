@@ -118,6 +118,11 @@ open_set! {
         QuotaOrCooldown => "quota_or_cooldown",
         /// Every candidate falls short of the requirements.
         AllInadequate => "all_inadequate",
+        /// Every entry that would serve has all its eligible accounts
+        /// blocked, and none can be held under the provider's hold rules;
+        /// carries `reset_at_ms` when the earliest reset across entries is
+        /// known.
+        AccountsBlocked => "accounts_blocked",
     }
 }
 

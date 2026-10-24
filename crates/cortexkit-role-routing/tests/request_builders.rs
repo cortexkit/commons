@@ -5,9 +5,14 @@ use cortexkit_role_routing::{
         parse_account_for_request, AccountForRequest, AccountMode, CandidateAccount, Candidates,
         ExpectedPin, RequestedAccount,
     },
+    capabilities::SELECT_HOLD_CONTROL,
     errors::Refusal,
     observe::{parse_account_observe_request, AccountObserveRequest, ObserveKind},
     report::{parse_report_request, Eligibility, EligibilityScope, Outcome, ReportRequest, Usage},
+    select::{
+        parse_select_request_serving, ConcurrencySlot, Requirements, RouteRef, RunnerAuth,
+        RunnerRef, SelectRequest,
+    },
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -22,6 +27,59 @@ where
         request
     );
     assert_eq!(parse(&expected).unwrap(), request);
+}
+
+fn parse_with_hold_control(params: &Value) -> Result<SelectRequest, Refusal> {
+    parse_select_request_serving(params, &[SELECT_HOLD_CONTROL])
+}
+
+#[test]
+fn select_builds_and_round_trips_from_outside_the_crate() {
+    let select = SelectRequest::new("example_summary", Requirements::iq(50))
+        .with_pin("example-provider/model-a:fast")
+        .with_exclude(vec!["example-provider/model-b".into()])
+        .with_runners(vec!["runner-one".into()])
+        .with_affinity("conversation-1")
+        .with_correlation_id("work-1")
+        .with_concurrency_slots(vec![ConcurrencySlot {
+            key: "runner-one".into(),
+            running: 1,
+            limit: 2,
+            queued: None,
+        }])
+        .with_detail(true)
+        .with_hold_ok(false)
+        .with_hold_wait_max_s(120);
+    assert!(!select.hold_ok());
+    round_trip(
+        select,
+        json!({
+            "consumer": "example_summary", "requirements": {"iq": 50},
+            "pin": "example-provider/model-a:fast", "exclude": ["example-provider/model-b"],
+            "runners": ["runner-one"], "affinity": "conversation-1",
+            "correlation_id": "work-1",
+            "concurrency_slots": [{"key": "runner-one", "running": 1, "limit": 2}],
+            "detail": true, "hold_ok": false, "hold_wait_max_s": 120
+        }),
+        parse_with_hold_control,
+    );
+    assert!(SelectRequest::new("c", Requirements::iq(1)).hold_ok());
+
+    let runner = RunnerRef::new("runner-one", RouteRef::new("p", "m"))
+        .with_auth(RunnerAuth {
+            pool: Some("keys".into()),
+            credential_id: None,
+        })
+        .with_harness("example-harness");
+    assert_eq!(
+        serde_json::to_value(&runner).unwrap(),
+        json!({"module": "runner-one", "model": {"provider": "p", "model": "m"},
+               "auth": {"pool": "keys"}, "harness": "example-harness"})
+    );
+    assert_eq!(
+        serde_json::to_value(RunnerRef::new("runner-one", RouteRef::new("p", "m"))).unwrap(),
+        json!({"module": "runner-one", "model": {"provider": "p", "model": "m"}})
+    );
 }
 
 #[test]

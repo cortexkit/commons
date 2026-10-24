@@ -112,6 +112,11 @@ a module plays.
   members. The routing provider adopts this release before any consumer
   sends the new members. A consumer sending them to an older provider gets
   `invalid_request {field}` naming the member, never silent omission.
+- [pinned] Members that belong to an optional group (§4) follow the same
+  rule per provider: a provider that does not declare the group refuses
+  them as `invalid_request {field}` naming the member, exactly as it
+  refuses any member it does not read. A caller sends them only to a
+  provider whose `role.describe` declares the group.
 
 ## 3. Scope comes from the route
 
@@ -133,7 +138,7 @@ a module plays.
 
 - [pinned] Params are `{}`. The answer (`describe::RoleDescribe`) is
   `{role: "routing", version: 1, ops, consumers: [{id, priced_only}],
-  requirement_fields, detail_supported}`.
+  requirement_fields, detail_supported, capabilities?}`.
 - [pinned] `ops` lists every op the provider serves, at least
   `REQUIRED_OPS`.
 - [pinned] `consumers` lists every consumer id in the provider's
@@ -147,6 +152,17 @@ a module plays.
   (`select::REQUIREMENT_FIELDS`), so it lists all of them.
 - [pinned] `detail_supported` states whether a `detail: true` select is
   answered with the provider's explanation object.
+- [pinned] `capabilities` lists the optional groups the provider serves
+  (`capabilities::KNOWN`), each once. It is left out when the provider
+  serves none, and a reader decodes it left out as empty. A name a reader
+  does not know is kept and means nothing to it. This version defines one
+  group:
+  - `select_hold_control`: `route.select` reads `hold_ok` and
+    `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
+    A provider without it refuses both members (§2). That refusal is why
+    the group exists: a caller learns from `role.describe` whether its
+    hold choice will be read, and is never answered with the choice
+    silently ignored.
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
 
@@ -201,6 +217,18 @@ a module plays.
 - [pinned] `concurrency_slots`: an optional hint,
   `[{key, running, limit, queued?}]`.
 - [pinned] `detail`: bool; asks for the provider's explanation object.
+- [pinned] `hold_ok`: bool, default `true` (group `select_hold_control`).
+  `false` asks the provider not to answer an entry the runner would have
+  to hold on while another can serve now (§5.4).
+- [pinned] `hold_wait_max_s`: non-negative integer seconds (group
+  `select_hold_control`): the caller's own cap on a hold. `0` means no
+  hold. It is valid together with `hold_ok: false`, because the fallback
+  that request can take may still hold, and the cap applies to it.
+- [pinned] `hold_ok` and `hold_wait_max_s` sent to a provider that does not
+  declare `select_hold_control` are `invalid_request {field}` naming the
+  member, `hold_ok` first when both are sent. The validator takes the
+  provider's declared groups (`select::parse_select_request_serving`);
+  `select::parse_select_request` declares none.
 - [pinned] Any other malformed member is `invalid_request {field}` naming
   it.
 - [informative] Providers and consumers may share a tier guide that places
@@ -215,7 +243,7 @@ a module plays.
 {
   decision_id,
   route: {provider, model, variant?},
-  runner: {module, model: {provider, model, variant?}, auth?: {pool?, credential_id?}},
+  runner: {module, model: {provider, model, variant?}, auth?: {pool?, credential_id?}, harness?},
   context_window, max_output_tokens,   // tokens, from the provider's own catalog read
   expires_at_ms,
   explanation,                         // one sentence, at most 200 characters
@@ -231,6 +259,10 @@ a module plays.
   pool. It names the key by public id only, never secret material. The
   runner sends with that key, still under its own admission check, and a
   runner refuses a key-pool send without it.
+- [pinned] `harness` is the harness the answered runner hosts this route
+  on. The provider fills it only from the runner's own declaration and
+  leaves it out otherwise. A caller never binds a runner session on an
+  answer without it.
 - [pinned] `context_window` and `max_output_tokens` are the answered model's
   figures from the provider's own catalog read, so a consumer sizes its
   work without a second lookup.
@@ -249,11 +281,62 @@ a module plays.
   `credential_billing_exhausted`, `cooldown`, `quota_exhausted`, `backoff`.
 - [pinned] `no_route {reason, reset_at_ms?}`. `reason` is an open set:
   `no_available_model`, `missing_capability`, `context_too_small`,
-  `quota_or_cooldown`, `all_inadequate`.
+  `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4).
 - [pinned] **A timed cause carries `reset_at_ms`**: a cooldown, a backoff, or
   exhausted quota whose reset is known. A consumer waits until then and
   asks again, rather than failing its work. A refusal without `reset_at_ms`
   is not timed. `reset_at_ms` alone decides whether a consumer waits.
+
+### 5.4 Holds
+
+This section binds a provider declaring `select_hold_control` (§4).
+
+- [pinned] `route.select` never waits and has no hold answer. A hold
+  happens only at `route.account_for`, as `account_hold {until_ms}`
+  (§9.1). What select decides is whether to answer an entry whose
+  eligible accounts are all blocked, so that the runner holds there, or to
+  move.
+- [informative] Switching models costs a full prompt-cache rebuild, so
+  staying on an entry is worth a short wait.
+- [pinned] An entry is one ladder entry: one route (`provider/model`, with
+  its variant) of a consumer the operator routes by ladder
+  (`mode: "ladder"`), in the ladder's order. A consumer routed by demand
+  (`mode: "demand"`) has no entries to hold on: a model whose eligible
+  accounts are all blocked is skipped for the next-cheapest adequate one.
+- [pinned] An entry's accounts are every account the provider's own
+  account policy lets it use for that route and consumer. That includes a
+  per-token (metered) account the provider is configured to fall back to
+  when its subscription accounts are blocked, so while such an account can
+  serve, the entry is not blocked. An entry is
+  blocked when every one of them is blocked by a window. Its reset is the
+  time the first of those windows ends, and is unknown when no window's
+  end is known.
+- [pinned] The operator sets, per provider, `max_hold` (default 900
+  seconds, the `route.account_for` default) and `hold_when_reset_within`
+  (default 900 seconds). The hold limit is the smaller of `max_hold` and
+  the request's `hold_wait_max_s`.
+- [pinned] For a blocked entry the provider decides, in this order:
+  1. `hold_ok: false`: move.
+  2. The reset is unknown, or further away than `hold_when_reset_within`:
+     move.
+  3. The wait until the reset exceeds the hold limit: move.
+  4. Otherwise it answers the entry, and the runner holds at
+     `route.account_for`.
+
+  Moving is going on to the next entry in ladder order.
+- [pinned] With `hold_ok: false`, the provider answers the next entry in
+  ladder order that has an account usable now. If none has one, it falls
+  back to the `hold_ok: true` behaviour, because work that cannot proceed
+  otherwise is held rather than failed: it answers the blocked entry
+  whose reset is soonest among those steps 2 and 3 let through, and the
+  runner holds at `route.account_for`.
+- [pinned] When every entry is blocked and none resets within the limit,
+  the provider refuses `no_route` with reason `accounts_blocked`.
+  `reset_at_ms` is the earliest known reset across those entries, and is
+  left out when none is known (§5.3).
+- [pinned] The provider records the request's `hold_wait_max_s` on the
+  decision. A `route.account_for` naming that decision applies it too
+  (§9.1).
 
 ## 6. Decisions
 
@@ -379,7 +462,10 @@ the routing provider allocates (subscription logins).
 - [pinned] `requested_account` (optional): `{account_id?, credential_id?}`,
   a hint from an explicit pin; `account_id` wins when both are present.
 - [pinned] `hold_wait_max_s` (optional, default 900): the longest the
-  runner waits out a short hold instead of being refused.
+  runner waits out a short hold instead of being refused. When the
+  request's `decision_id` names a decision that recorded a caller's
+  `hold_wait_max_s` (§5.4), the provider holds only within the smallest of
+  its `max_hold`, that recorded cap and this member.
 - [pinned] `decision_id` (optional): with it, the provider honours its own
   selection instead of deciding twice. It is honoured only from the runner
   module that decision named, and only for that decision's provider and
@@ -488,9 +574,14 @@ What a runner saw on an account, so the provider's headroom stays current.
   answers, the refusals the validators answer, one body per refusal code,
   unknown values for every open set, and the reply envelope's accepted and
   refused bodies. It also holds valid and invalid consumer declarations,
-  including a byte-exact declaration round trip. `SHA256SUMS` pins every file.
+  including a byte-exact declaration round trip. `route-select-hold-control.json`
+  holds the `select_hold_control` members with and without the group, the
+  `accounts_blocked` refusal, and an answer naming its runner's harness.
+  `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks
-  only that rule and must fail it by name. Its README lists the checks and
+  only that rule and must fail it by name. A check of an optional group's
+  rules reports not applicable against a provider that does not declare
+  the group, and leaves its verdict a pass. Its README lists the checks and
   where the kit checks less than this contract says.

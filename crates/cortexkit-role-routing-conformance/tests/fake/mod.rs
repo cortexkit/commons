@@ -28,19 +28,20 @@ use cortexkit_role_routing_conformance::{
             parse_account_for_request, Account, AccountForAnswer, AccountForRequest, AccountMode,
             AccountPin, AccountReason, AccountReasonCode, Admission,
         },
+        capabilities::SELECT_HOLD_CONTROL,
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
         observe::{parse_account_observe_request, AccountObserveAnswer, Observation, ObserveKind},
         ops, parse_consumer_declarations,
         report::{parse_report_request, ReportAnswer, ReportRequest},
         select::{
-            parse_select_request, Requirements, RouteRef, RunnerRef, SelectAnswer,
-            ToolsRequirement, REQUIREMENT_FIELDS,
+            parse_select_request, parse_select_request_serving, Requirements, RouteRef, RunnerRef,
+            SelectAnswer, ToolsRequirement, REQUIREMENT_FIELDS,
         },
         wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
     },
-    Catalog, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig, Reply, RouteFailure,
-    RouteStamp, RoutingRoute, RoutingSubject,
+    Catalog, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig, ConsumerMode, HoldLimits,
+    Reply, RouteFailure, RouteStamp, RoutingRoute, RoutingSubject,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -120,6 +121,36 @@ pub struct Defects {
     pub trusts_unverified_declarations: bool,
     /// Keeps the first verified owner instead of locking a conflicting name.
     pub first_declarer_wins_conflict: bool,
+    /// Names a harness for a runner that declared none.
+    pub invents_harness: bool,
+    /// Leaves out the harness a runner declared.
+    pub drops_harness: bool,
+    /// Moves past a blocked ladder entry even when its reset is within
+    /// every limit.
+    pub never_holds_entry: bool,
+    /// Holds on a blocked entry whose reset is beyond
+    /// hold_when_reset_within, as long as it is within the hold limit.
+    pub ignores_hold_window: bool,
+    /// Holds on a blocked entry whose reset is unknown.
+    pub holds_on_unknown_reset: bool,
+    /// Takes the hold limit from max_hold alone, ignoring the request's
+    /// hold_wait_max_s.
+    pub ignores_caller_cap: bool,
+    /// Walks the ladder as if hold_ok were true.
+    pub holds_despite_hold_ok_false: bool,
+    /// With hold_ok false and nothing usable now, falls back to the first
+    /// holdable entry in ladder order instead of the soonest.
+    pub fallback_in_ladder_order: bool,
+    /// accounts_blocked carries the first blocked entry's reset, not the
+    /// earliest.
+    pub accounts_blocked_reset_from_first_entry: bool,
+    /// accounts_blocked carries a reset even when none is known.
+    pub accounts_blocked_invents_reset: bool,
+    /// A demand-mode consumer is answered a model whose accounts are all
+    /// blocked when its reset is within the limits.
+    pub holds_in_demand_mode: bool,
+    /// account_for naming a decision ignores the cap its select recorded.
+    pub account_for_ignores_recorded_cap: bool,
 }
 
 fn now_ms() -> u64 {
@@ -133,6 +164,8 @@ struct Decision {
     principal: String,
     route: RouteRef,
     runner: String,
+    /// The select request's hold_wait_max_s.
+    hold_cap: Option<u64>,
 }
 
 struct AffinityEntry {
@@ -168,19 +201,61 @@ struct State {
     conversations: HashMap<String, ConversationPin>,
     /// (runner, event id) to its observation.
     observations: HashMap<(String, String), Observation>,
+    /// Consumer to its ladder entries; a consumer not listed is routed by
+    /// demand.
+    ladders: HashMap<String, Vec<String>>,
+    /// Model provider to (max_hold, hold_when_reset_within), in seconds.
+    hold_limits: HashMap<String, (u64, u64)>,
+    /// Account id to the end of its blocking window; `None` when unknown.
+    blocks: HashMap<String, Option<u64>>,
     counter: u64,
 }
+
+/// The contract's default max_hold and hold_when_reset_within, in seconds.
+const DEFAULT_HOLD_S: u64 = 900;
 
 impl State {
     fn next(&mut self, prefix: &str) -> String {
         self.counter += 1;
         format!("{prefix}-{}", self.counter)
     }
+
+    fn hold_limits(&self, provider: &str) -> (u64, u64) {
+        self.hold_limits
+            .get(provider)
+            .copied()
+            .unwrap_or((DEFAULT_HOLD_S, DEFAULT_HOLD_S))
+    }
+
+    /// Whether every account of `provider` is blocked at `now`, and if so
+    /// the soonest known end of their windows. `None` when an account is
+    /// usable, or the provider has no accounts.
+    fn blocked(&self, catalog: &Catalog, provider: &str, now: u64) -> Option<Option<u64>> {
+        let mut accounts = catalog
+            .accounts
+            .iter()
+            .filter(|account| account.provider == provider)
+            .peekable();
+        accounts.peek()?;
+        let mut soonest: Option<u64> = None;
+        for account in accounts {
+            match self.blocks.get(&account.account_id) {
+                Some(Some(reset)) if *reset > now => {
+                    soonest = Some(soonest.map_or(*reset, |s| s.min(*reset)));
+                }
+                Some(None) => {}
+                _ => return None,
+            }
+        }
+        Some(soonest)
+    }
 }
 
 pub struct FakeSubject {
     state: Arc<Mutex<State>>,
     defects: Defects,
+    /// Declares select_hold_control.
+    hold_control: bool,
 }
 
 impl FakeSubject {
@@ -188,6 +263,15 @@ impl FakeSubject {
         Self {
             state: Arc::new(Mutex::new(State::default())),
             defects,
+            hold_control: true,
+        }
+    }
+
+    /// A fake that does not declare select_hold_control.
+    pub fn without_hold_control(defects: Defects) -> Self {
+        Self {
+            hold_control: false,
+            ..Self::new(defects)
         }
     }
 }
@@ -265,10 +349,53 @@ impl RoutingSubject for FakeSubject {
         Ok(())
     }
 
+    async fn configure_consumer_mode(
+        &self,
+        consumer: &str,
+        mode: &ConsumerMode,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        match mode {
+            ConsumerMode::Ladder { entries } => {
+                state.ladders.insert(consumer.to_owned(), entries.clone());
+            }
+            _ => {
+                state.ladders.remove(consumer);
+            }
+        }
+        Ok(())
+    }
+
+    async fn configure_hold_limits(
+        &self,
+        provider: &str,
+        limits: HoldLimits,
+    ) -> Result<(), String> {
+        self.state.lock().unwrap().hold_limits.insert(
+            provider.to_owned(),
+            (limits.max_hold_s, limits.hold_when_reset_within_s),
+        );
+        Ok(())
+    }
+
+    async fn block_account(
+        &self,
+        account_id: &str,
+        reset_at_ms: Option<u64>,
+    ) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap()
+            .blocks
+            .insert(account_id.to_owned(), reset_at_ms);
+        Ok(())
+    }
+
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
             state: Arc::clone(&self.state),
             defects: self.defects,
+            hold_control: self.hold_control,
             stamp: stamp.clone(),
         })
     }
@@ -278,6 +405,7 @@ impl RoutingSubject for FakeSubject {
 pub struct FakeRoute {
     state: Arc<Mutex<State>>,
     defects: Defects,
+    hold_control: bool,
     stamp: RouteStamp,
 }
 
@@ -362,7 +490,12 @@ impl FakeRoute {
                 });
             }
         }
-        to_value(RoleDescribe::new(consumers, true))
+        let describe = RoleDescribe::new(consumers, true);
+        to_value(if self.hold_control {
+            describe.with_capability(SELECT_HOLD_CONTROL)
+        } else {
+            describe
+        })
     }
 
     fn reaches(&self, runner: &CatalogRunner, tags: &[String]) -> bool {
@@ -385,7 +518,11 @@ impl FakeRoute {
                 requirements.retain(|key, _| REQUIREMENT_FIELDS.contains(&key.as_str()));
             }
         }
-        let mut request = parse_select_request(&params)?;
+        let mut request = if self.hold_control {
+            parse_select_request_serving(&params, &[SELECT_HOLD_CONTROL])?
+        } else {
+            parse_select_request(&params)?
+        };
         let declaration = state.declarations.get(&request.consumer);
         if let Some((owner, _)) = declaration {
             let scope_owner = self.stamp.scope.as_ref().map(|scope| scope.owner.as_str());
@@ -473,6 +610,13 @@ impl FakeRoute {
                 })
                 .map(|runner| runner.module.clone())
         };
+        let blocked = |model: &CatalogModel| {
+            if model.priced_per_token {
+                None
+            } else {
+                state.blocked(&catalog, &model.provider, now)
+            }
+        };
 
         let pin = request.pin.clone().or_else(|| {
             project.and_then(|project| {
@@ -509,10 +653,21 @@ impl FakeRoute {
             };
             (model.clone(), route.variant, runner)
         } else {
-            let mut candidates = Vec::new();
+            let ladder = state.ladders.get(&consumer.id).cloned();
+            let ordered: Vec<CatalogModel> = match &ladder {
+                Some(entries) => entries
+                    .iter()
+                    .filter_map(|entry| catalog.models.iter().find(|m| &m.route_key() == entry))
+                    .cloned()
+                    .collect(),
+                None => catalog.models.clone(),
+            };
+            // Every entry that would serve, in order, with whether all its
+            // accounts are blocked and, if so, its reset.
+            let mut entries = Vec::new();
             let mut earliest: Option<u64> = None;
             let mut unreachable = false;
-            for model in catalog.models.iter().filter(|m| eligible(m)) {
+            for model in ordered.iter().filter(|m| eligible(m)) {
                 let key = model.route_key();
                 if exclude.contains(&key) {
                     continue;
@@ -525,28 +680,101 @@ impl FakeRoute {
                     earliest = Some(earliest.map_or(until, |e: u64| e.min(until)));
                     continue;
                 }
-                candidates.push((model.clone(), runner));
+                entries.push((model.clone(), runner, blocked(model)));
             }
-            // The affinity key's previous route wins over the catalog order
-            // while it is still a candidate: it meets the request and is not
-            // cooling down. A failure report on it ends the preference.
-            let preferred = request.affinity.as_ref().and_then(|affinity| {
-                let entry = state.affinity.get(&(
-                    self.principal().to_owned(),
-                    consumer.id.clone(),
-                    affinity.clone(),
-                ))?;
-                if entry.ended && !defects.affinity_survives_failure {
-                    return None;
-                }
-                let previous = state.decisions.get(&entry.decision_id)?.route.route_key();
-                candidates
+            // Whether a blocked entry with this reset may be held on: steps
+            // 2 and 3 of the contract's hold decision.
+            let holdable = |model: &CatalogModel, reset: Option<u64>| {
+                let (max_hold, within) = state.hold_limits(&model.provider);
+                let cap = request
+                    .hold_wait_max_s
+                    .filter(|_| !defects.ignores_caller_cap);
+                let limit = cap.map_or(max_hold, |cap| cap.min(max_hold));
+                let Some(reset) = reset else {
+                    return defects.holds_on_unknown_reset;
+                };
+                let wait = reset.saturating_sub(now);
+                (wait <= within * 1000 || defects.ignores_hold_window) && wait <= limit * 1000
+            };
+            let chosen = if ladder.is_some() {
+                let hold_ok = request.hold_ok() || defects.holds_despite_hold_ok_false;
+                let walked = entries.iter().find(|(model, _, blocked)| match blocked {
+                    None => true,
+                    Some(reset) => hold_ok && holdable(model, *reset) && !defects.never_holds_entry,
+                });
+                walked
+                    .or_else(|| {
+                        if hold_ok {
+                            return None;
+                        }
+                        // Nothing usable now: hold on the entry that clears
+                        // soonest within the limits.
+                        let mut fallback = entries
+                            .iter()
+                            .filter_map(|entry| match entry.2 {
+                                Some(Some(reset)) if holdable(&entry.0, Some(reset)) => {
+                                    Some((reset, entry))
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>();
+                        if !defects.fallback_in_ladder_order {
+                            fallback.sort_by_key(|(reset, _)| *reset);
+                        }
+                        fallback.first().map(|(_, entry)| *entry)
+                    })
+                    .map(|(model, runner, _)| (model.clone(), runner.clone()))
+            } else {
+                let candidates: Vec<_> = entries
                     .iter()
-                    .position(|(model, _)| model.route_key() == previous)
-            });
-            match candidates.into_iter().nth(preferred.unwrap_or(0)) {
+                    .filter(|(model, _, blocked)| match blocked {
+                        None => true,
+                        Some(reset) => defects.holds_in_demand_mode && holdable(model, *reset),
+                    })
+                    .collect();
+                // The affinity key's previous route wins over the catalog
+                // order while it is still a candidate: it meets the request
+                // and is not cooling down. A failure report on it ends the
+                // preference.
+                let preferred = request.affinity.as_ref().and_then(|affinity| {
+                    let entry = state.affinity.get(&(
+                        self.principal().to_owned(),
+                        consumer.id.clone(),
+                        affinity.clone(),
+                    ))?;
+                    if entry.ended && !defects.affinity_survives_failure {
+                        return None;
+                    }
+                    let previous = state.decisions.get(&entry.decision_id)?.route.route_key();
+                    candidates
+                        .iter()
+                        .position(|(model, _, _)| model.route_key() == previous)
+                });
+                candidates
+                    .get(preferred.unwrap_or(0))
+                    .map(|(model, runner, _)| (model.clone(), runner.clone()))
+            };
+            match chosen {
                 Some((model, runner)) => (model, None, runner),
                 None => {
+                    let resets: Vec<Option<u64>> =
+                        entries.iter().filter_map(|entry| entry.2).collect();
+                    if !resets.is_empty() {
+                        let known = if defects.accounts_blocked_reset_from_first_entry {
+                            resets[0]
+                        } else {
+                            resets.iter().flatten().min().copied()
+                        };
+                        let known = known.or_else(|| {
+                            defects
+                                .accounts_blocked_invents_reset
+                                .then_some(now + 60_000)
+                        });
+                        return Err(Refusal::no_route(
+                            NoRouteReason::AccountsBlocked,
+                            known.and_then(reset),
+                        ));
+                    }
                     return Err(match earliest {
                         Some(until) => {
                             Refusal::no_route(NoRouteReason::QuotaOrCooldown, reset(until))
@@ -555,7 +783,7 @@ impl FakeRoute {
                             Refusal::no_route(NoRouteReason::MissingCapability, None)
                         }
                         None => Refusal::no_route(NoRouteReason::AllInadequate, None),
-                    })
+                    });
                 }
             }
         };
@@ -572,6 +800,7 @@ impl FakeRoute {
                 principal: self.principal().to_owned(),
                 route: route.clone(),
                 runner: runner.clone(),
+                hold_cap: request.hold_wait_max_s,
             },
         );
         if let Some(affinity) = &request.affinity {
@@ -592,14 +821,24 @@ impl FakeRoute {
         } else {
             now + DECISION_TTL_MS
         };
+        let declared = catalog
+            .runners
+            .iter()
+            .find(|candidate| candidate.module == runner)
+            .and_then(|candidate| candidate.harnesses.get(&route.route_key()).cloned());
+        let harness = match declared {
+            Some(_) if defects.drops_harness => None,
+            None if defects.invents_harness => Some("default-harness".to_owned()),
+            declared => declared,
+        };
+        let mut runner_ref = RunnerRef::new(runner.clone(), route.clone());
+        if let Some(harness) = harness {
+            runner_ref = runner_ref.with_harness(harness);
+        }
         to_value(SelectAnswer {
             decision_id,
             explanation: format!("{} meets the request on {runner}.", route.route_key()),
-            runner: RunnerRef {
-                module: runner,
-                model: route.clone(),
-                auth: None,
-            },
+            runner: runner_ref,
             route,
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,
@@ -741,6 +980,29 @@ impl FakeRoute {
             }
         }
         let catalog = Self::catalog(state);
+        let now = now_ms();
+        if let Some(reset) = state.blocked(&catalog, &request.provider, now) {
+            // Every account is blocked: hold within the smallest of
+            // max_hold, the runner's own cap and the cap the decision's
+            // select recorded; beyond it, refuse with the reset.
+            let (max_hold, _) = state.hold_limits(&request.provider);
+            let recorded = request
+                .decision_id
+                .as_ref()
+                .and_then(|id| state.decisions.get(id))
+                .and_then(|decision| decision.hold_cap)
+                .filter(|_| !defects.account_for_ignores_recorded_cap);
+            let own = request.hold_wait_max_s.unwrap_or(
+                cortexkit_role_routing_conformance::wire::account::DEFAULT_HOLD_WAIT_MAX_S,
+            );
+            let limit = recorded.map_or(own, |cap| cap.min(own)).min(max_hold);
+            return Err(match reset {
+                Some(reset) if reset.saturating_sub(now) <= limit * 1000 => {
+                    Refusal::account_hold(reset)
+                }
+                reset => Refusal::account_pool_exhausted(reset),
+            });
+        }
         let usable: Vec<usize> = catalog
             .accounts
             .iter()
@@ -859,7 +1121,6 @@ impl FakeRoute {
             Some(decision_id) => decision_id.clone(),
             None => state.next("allocation"),
         };
-        let now = now_ms();
         let chosen = &catalog.accounts[account];
         let answer = AccountForAnswer {
             admission: Admission {

@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexkit_role_routing::{
     account::AccountForAnswer,
+    capabilities::{self, SELECT_HOLD_CONTROL},
     describe::{check_describe, RoleDescribe},
     errors::{
         NoRouteDetail, NoRouteReason, PinUnavailableDetail, PinUnavailableReason, Refusal,
@@ -13,21 +14,49 @@ use cortexkit_role_routing::{
     observe::AccountObserveAnswer,
     ops,
     report::ReportAnswer,
-    select::{check_answer, parse_select_request, SelectAnswer},
+    select::{check_answer, parse_select_request_serving, SelectAnswer},
     wire,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Map, Value};
 
 use crate::{
-    fixture::{self, CONSUMER, IQ, SUMMARY},
+    fixture::{self, CONSUMER, HOLD_FIRST, HOLD_PRICED, HOLD_SECOND, IQ, SUMMARY},
     route::{Reply, RoutingRoute},
     subject::{
-        CatalogModule, ConsumerConfig, OperatorRequirements, RouteStamp, RoutingSubject, ScopeStamp,
+        CatalogModule, ConsumerConfig, ConsumerMode, HoldLimits, OperatorRequirements, RouteStamp,
+        RoutingSubject, ScopeStamp,
     },
 };
 
 type Check = Result<(), String>;
+
+/// How a check that did not fail ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ending {
+    Passed,
+    /// The check covers an optional group the provider does not declare.
+    NotApplicable(String),
+}
+
+/// The checks of the `select_hold_control` group's rules (contract section
+/// 5.4). Each is not applicable to a provider that does not declare it.
+const HOLD_CHECKS: &[&str] = &[
+    "hold_answers_blocked_entry_within_limits",
+    "hold_moves_when_reset_beyond_window",
+    "hold_moves_when_reset_unknown",
+    "hold_moves_beyond_caller_cap",
+    "hold_ok_false_moves_to_usable_entry",
+    "hold_ok_false_falls_back_to_soonest_entry",
+    "hold_nothing_within_limit_accounts_blocked",
+    "hold_demand_mode_skips_blocked_model",
+    "hold_account_for_applies_recorded_cap",
+];
+
+/// The operator hold settings the hold checks start from, in seconds: the
+/// contract's defaults.
+const MAX_HOLD_S: u64 = 900;
+const HOLD_WHEN_RESET_WITHIN_S: u64 = 900;
 
 /// A decision id no provider has made.
 const NEVER_MADE: &str = "decision-never-made";
@@ -148,7 +177,9 @@ async fn select<R: RoutingRoute>(
     what: &str,
 ) -> Result<SelectAnswer, String> {
     let answer: SelectAnswer = answer(route, ops::ROUTE_SELECT, params, what).await?;
-    let request = parse_select_request(params)
+    // The kit sends a group's members only to a provider declaring the
+    // group, so the request is read here as every group would read it.
+    let request = parse_select_request_serving(params, capabilities::KNOWN)
         .map_err(|refusal| format!("the kit sent an invalid select: {refusal}"))?;
     check_answer(&request, &answer).map_err(|problem| format!("{what}: {problem}"))?;
     Ok(answer)
@@ -177,8 +208,16 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     }
 
     /// Run the check named `name` from a fresh provider.
-    pub async fn run(&self, name: &str) -> Check {
+    pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if HOLD_CHECKS.contains(&name) {
+            return self.hold_check(name).await;
+        }
+        self.ungated(name).await.map(|()| Ending::Passed)
+    }
+
+    /// A check every provider is held to.
+    async fn ungated(&self, name: &str) -> Check {
         match name {
             "describe_lists_consumers_and_fields" => {
                 self.describe_lists_consumers_and_fields().await
@@ -248,6 +287,7 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                     .await
             }
             "new_report_members_conflict" => self.new_report_members_conflict().await,
+            "harness_only_when_declared" => self.harness_only_when_declared().await,
             other => Err(format!("the kit has no check named {other}")),
         }
     }
@@ -1376,5 +1416,362 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         )
         .await?;
         Ok(())
+    }
+
+    async fn harness_only_when_declared(&self) -> Check {
+        // Each runner runs one priced model, so a pin on each is answered on
+        // a different runner.
+        let mut catalog = fixture::catalog();
+        let keys: Vec<String> = catalog.models[..2]
+            .iter()
+            .map(|model| model.route_key())
+            .collect();
+        for (runner, key) in catalog.runners.iter_mut().zip(&keys) {
+            runner.route_keys = vec![key.clone()];
+            runner.harnesses.retain(|declared, _| declared == key);
+        }
+        self.subject
+            .configure_catalog(&catalog)
+            .await
+            .map_err(|e| format!("configure_catalog: {e}"))?;
+        let route = self.route_as(CONSUMER).await?;
+        for pin in &keys {
+            let what = format!("a select pinned to {pin}");
+            let answer = select(&route, &with(base(), "pin", json!(pin)), &what).await?;
+            let runner = &answer.runner.module;
+            let key = answer.route.route_key();
+            let declared = catalog
+                .runners
+                .iter()
+                .find(|candidate| &candidate.module == runner)
+                .ok_or_else(|| {
+                    format!("{what} was answered on {runner}, which the catalog does not list")
+                })?
+                .harnesses
+                .get(&key)
+                .map(String::as_str);
+            let harness = answer.runner.harness.as_deref();
+            if harness != declared {
+                return Err(match declared {
+                    Some(declared) => format!(
+                        "{what} was answered with harness {harness:?}; {runner} declared {declared:?} for {key}"
+                    ),
+                    None => format!(
+                        "{what} was answered with harness {harness:?}; {runner} declared none"
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Run the hold check `name`, or report it not applicable when the
+    /// provider does not declare `select_hold_control`.
+    async fn hold_check(&self, name: &str) -> Result<Ending, String> {
+        let route = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        if !describe.serves(SELECT_HOLD_CONTROL) {
+            return Ok(Ending::NotApplicable(format!(
+                "role.describe does not declare {SELECT_HOLD_CONTROL}"
+            )));
+        }
+        self.subject
+            .configure_catalog(&fixture::hold_catalog())
+            .await
+            .map_err(|e| format!("configure_catalog: {e}"))?;
+        self.hold_limits(MAX_HOLD_S, HOLD_WHEN_RESET_WITHIN_S)
+            .await?;
+        let checked = match name {
+            "hold_answers_blocked_entry_within_limits" => {
+                self.hold_answers_blocked_entry_within_limits().await
+            }
+            "hold_moves_when_reset_beyond_window" => {
+                self.hold_moves_when_reset_beyond_window().await
+            }
+            "hold_moves_when_reset_unknown" => self.hold_moves_when_reset_unknown().await,
+            "hold_moves_beyond_caller_cap" => self.hold_moves_beyond_caller_cap().await,
+            "hold_ok_false_moves_to_usable_entry" => {
+                self.hold_ok_false_moves_to_usable_entry().await
+            }
+            "hold_ok_false_falls_back_to_soonest_entry" => {
+                self.hold_ok_false_falls_back_to_soonest_entry().await
+            }
+            "hold_nothing_within_limit_accounts_blocked" => {
+                self.hold_nothing_within_limit_accounts_blocked().await
+            }
+            "hold_demand_mode_skips_blocked_model" => {
+                self.hold_demand_mode_skips_blocked_model().await
+            }
+            "hold_account_for_applies_recorded_cap" => {
+                self.hold_account_for_applies_recorded_cap().await
+            }
+            other => Err(format!("the kit has no hold check named {other}")),
+        };
+        checked.map(|()| Ending::Passed)
+    }
+
+    /// Set the operator's hold settings for both subscription providers of
+    /// the hold catalog.
+    async fn hold_limits(&self, max_hold_s: u64, within_s: u64) -> Check {
+        for provider in [
+            fixture::SUBSCRIPTION_PROVIDER,
+            fixture::SECOND_SUBSCRIPTION_PROVIDER,
+        ] {
+            self.subject
+                .configure_hold_limits(provider, HoldLimits::new(max_hold_s, within_s))
+                .await
+                .map_err(|e| format!("configure_hold_limits: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Route the summary consumer by a ladder of `entries`.
+    async fn ladder(&self, entries: &[&str]) -> Check {
+        let mode = ConsumerMode::Ladder {
+            entries: entries.iter().map(|entry| (*entry).to_owned()).collect(),
+        };
+        self.subject
+            .configure_consumer_mode(SUMMARY, &mode)
+            .await
+            .map_err(|e| format!("configure_consumer_mode: {e}"))
+    }
+
+    /// Block every hold-catalog account of `provider` until `reset_at_ms`,
+    /// or until an unknown time.
+    async fn block_provider(&self, provider: &str, reset_at_ms: Option<u64>) -> Check {
+        for account in fixture::hold_catalog()
+            .accounts
+            .iter()
+            .filter(|account| account.provider == provider)
+        {
+            self.subject
+                .block_account(&account.account_id, reset_at_ms)
+                .await
+                .map_err(|e| format!("block_account: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Select as the summary consumer with `members` added, and require
+    /// the answer to be the route `expected`.
+    async fn hold_select(
+        &self,
+        members: Value,
+        expected: &str,
+        what: &str,
+    ) -> Result<SelectAnswer, String> {
+        let route = self.route_as(CONSUMER).await?;
+        let mut params = base();
+        params
+            .as_object_mut()
+            .expect("base is an object")
+            .extend(members.as_object().cloned().unwrap_or_default());
+        let answer = select(&route, &params, what).await?;
+        let key = answer.route.route_key();
+        if key != expected {
+            return Err(format!("{what} was answered {key}, not {expected}"));
+        }
+        Ok(answer)
+    }
+
+    /// `route.account_for` from the runner `answer` names, for its model,
+    /// naming its decision when `decision` is set.
+    async fn hold_account_for(
+        &self,
+        answer: &SelectAnswer,
+        admission: &str,
+        decision: bool,
+    ) -> Result<Result<AccountForAnswer, Refusal>, String> {
+        let runner = self.route_as(&answer.runner.module).await?;
+        let mut params = json!({
+            "provider": answer.route.provider,
+            "model": answer.route.model,
+            "conversation_key": format!("{admission}-conversation"),
+            "admission_id": admission,
+        });
+        if decision {
+            params["decision_id"] = json!(answer.decision_id);
+        }
+        call(&runner, ops::ROUTE_ACCOUNT_FOR, &params).await
+    }
+
+    async fn hold_answers_blocked_entry_within_limits(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_PRICED]).await?;
+        let reset = now_ms() + 60_000;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(reset))
+            .await?;
+        let what = "a select whose first ladder entry is blocked for 60 s, within both limits";
+        let answer = self.hold_select(json!({}), HOLD_FIRST, what).await?;
+        match self.hold_account_for(&answer, "hold-admission", true).await? {
+            Err(refusal) if refusal.code == RefusalCode::AccountHold => Ok(()),
+            Err(refusal) => Err(format!(
+                "account_for on the held entry was refused {}, not account_hold: {}",
+                refusal.code, refusal.message
+            )),
+            Ok(admitted) => Err(format!(
+                "account_for on the held entry was answered account {}, though every account is blocked",
+                admitted.account.account_id
+            )),
+        }
+    }
+
+    async fn hold_moves_when_reset_beyond_window(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_PRICED]).await?;
+        self.hold_limits(1_800, 600).await?;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now_ms() + 900_000))
+            .await?;
+        let what = "a select whose first ladder entry resets in 900 s, beyond hold_when_reset_within 600 s and within max_hold 1800 s,";
+        self.hold_select(json!({}), HOLD_PRICED, what).await?;
+        Ok(())
+    }
+
+    async fn hold_moves_when_reset_unknown(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_PRICED]).await?;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, None)
+            .await?;
+        let what = "a select whose first ladder entry is blocked with an unknown reset";
+        self.hold_select(json!({}), HOLD_PRICED, what).await?;
+        Ok(())
+    }
+
+    async fn hold_moves_beyond_caller_cap(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_PRICED]).await?;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now_ms() + 300_000))
+            .await?;
+        let what = "a select with hold_wait_max_s 120 whose first ladder entry resets in 300 s, within max_hold 900 s,";
+        self.hold_select(json!({"hold_wait_max_s": 120}), HOLD_PRICED, what)
+            .await?;
+        Ok(())
+    }
+
+    async fn hold_ok_false_moves_to_usable_entry(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_PRICED]).await?;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now_ms() + 60_000))
+            .await?;
+        let what = "a select with hold_ok false whose first ladder entry is blocked for 60 s and whose second is usable now";
+        self.hold_select(json!({"hold_ok": false}), HOLD_PRICED, what)
+            .await?;
+        Ok(())
+    }
+
+    async fn hold_ok_false_falls_back_to_soonest_entry(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_SECOND]).await?;
+        let now = now_ms();
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now + 300_000))
+            .await?;
+        self.block_provider(fixture::SECOND_SUBSCRIPTION_PROVIDER, Some(now + 60_000))
+            .await?;
+        let what = "a select with hold_ok false whose ladder entries are both blocked, the first for 300 s and the second for 60 s,";
+        self.hold_select(json!({"hold_ok": false}), HOLD_SECOND, what)
+            .await?;
+        Ok(())
+    }
+
+    async fn hold_nothing_within_limit_accounts_blocked(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_SECOND]).await?;
+        let route = self.route_as(CONSUMER).await?;
+        let params = with(base(), "hold_ok", json!(false));
+        let now = now_ms();
+        let earliest = now + 1_500_000;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now + 2_000_000))
+            .await?;
+        self.block_provider(fixture::SECOND_SUBSCRIPTION_PROVIDER, Some(earliest))
+            .await?;
+        for known in [true, false] {
+            if !known {
+                for provider in [
+                    fixture::SUBSCRIPTION_PROVIDER,
+                    fixture::SECOND_SUBSCRIPTION_PROVIDER,
+                ] {
+                    self.block_provider(provider, None).await?;
+                }
+            }
+            let what = if known {
+                "a select with hold_ok false whose ladder entries reset in 2000 s and 1500 s, beyond the 900 s limit,"
+            } else {
+                "a select with hold_ok false whose ladder entries are blocked with unknown resets"
+            };
+            let refusal = refused(
+                &route,
+                ops::ROUTE_SELECT,
+                &params,
+                RefusalCode::NoRoute,
+                what,
+            )
+            .await?;
+            let detail: NoRouteDetail = refusal.detail_as().ok_or_else(|| {
+                format!(
+                    "{what}: the no_route detail does not decode: {:?}",
+                    refusal.detail
+                )
+            })?;
+            if detail.reason != NoRouteReason::AccountsBlocked {
+                return Err(format!(
+                    "{what} is no_route reason {}, not accounts_blocked",
+                    detail.reason
+                ));
+            }
+            match (known, detail.reset_at_ms) {
+                (true, Some(reset)) if reset.abs_diff(earliest) <= 1_000 => {}
+                (true, other) => {
+                    return Err(format!(
+                    "{what} carries reset_at_ms {other:?}, not the earliest known reset {earliest}"
+                ))
+                }
+                (false, None) => {}
+                (false, Some(reset)) => {
+                    return Err(format!(
+                        "{what} carries reset_at_ms {reset}, though no reset is known"
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn hold_demand_mode_skips_blocked_model(&self) -> Check {
+        self.subject
+            .configure_consumer_mode(SUMMARY, &ConsumerMode::Demand)
+            .await
+            .map_err(|e| format!("configure_consumer_mode: {e}"))?;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now_ms() + 60_000))
+            .await?;
+        let what = "a demand-mode select whose first adequate model is blocked for 60 s, within both limits,";
+        self.hold_select(json!({}), HOLD_SECOND, what).await?;
+        Ok(())
+    }
+
+    async fn hold_account_for_applies_recorded_cap(&self) -> Check {
+        self.ladder(&[HOLD_FIRST, HOLD_PRICED]).await?;
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now_ms() + 300_000))
+            .await?;
+        let what = "a select with hold_wait_max_s 600 whose first ladder entry resets in 300 s";
+        let answer = self
+            .hold_select(json!({"hold_wait_max_s": 600}), HOLD_FIRST, what)
+            .await?;
+        // The window now ends further away: within the runner's own cap and
+        // max_hold, beyond the cap the select recorded.
+        self.block_provider(fixture::SUBSCRIPTION_PROVIDER, Some(now_ms() + 700_000))
+            .await?;
+        match self.hold_account_for(&answer, "undecided-admission", false).await? {
+            Err(refusal) if refusal.code == RefusalCode::AccountHold => {}
+            Err(refusal) => {
+                return Err(format!(
+                    "account_for without a decision, on accounts blocked for 700 s within max_hold 900 s, was refused {}, not account_hold",
+                    refusal.code
+                ))
+            }
+            Ok(_) => {
+                return Err("account_for without a decision was answered, though every account is blocked".into())
+            }
+        }
+        match self.hold_account_for(&answer, "decided-admission", true).await? {
+            Err(refusal) if refusal.code == RefusalCode::AccountHold => Err(
+                "account_for naming a decision whose select recorded hold_wait_max_s 600 was refused account_hold for a 700 s wait".into(),
+            ),
+            Err(_) => Ok(()),
+            Ok(_) => Err("account_for naming the decision was answered, though every account is blocked".into()),
+        }
     }
 }

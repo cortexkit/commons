@@ -114,6 +114,46 @@ pub const CHECKS: &[CheckSpec] = &[
         "tool_capabilities_matched_by_tag",
         "a select requiring a tool capability tag is answered on the runner that reaches a tool provider serving it, and a select listing a tool provider's module name as a tag is no_route",
     ),
+    check(
+        "harness_only_when_declared",
+        "runner.harness is the harness the answered runner declared for the route, and is left out for a runner that declared none",
+    ),
+    check(
+        "hold_answers_blocked_entry_within_limits",
+        "select_hold_control: a ladder entry whose accounts are all blocked, with a reset within both hold_when_reset_within and max_hold, is answered, and the runner then holds at account_for",
+    ),
+    check(
+        "hold_moves_when_reset_beyond_window",
+        "select_hold_control: a blocked entry whose reset is further away than hold_when_reset_within, though within max_hold, is moved past to the next entry",
+    ),
+    check(
+        "hold_moves_when_reset_unknown",
+        "select_hold_control: a blocked entry whose reset is unknown is moved past to the next entry",
+    ),
+    check(
+        "hold_moves_beyond_caller_cap",
+        "select_hold_control: a blocked entry whose reset is within max_hold but beyond the request's smaller hold_wait_max_s is moved past to the next entry",
+    ),
+    check(
+        "hold_ok_false_moves_to_usable_entry",
+        "select_hold_control: with hold_ok false, a blocked entry that would be held is moved past to a later entry usable now",
+    ),
+    check(
+        "hold_ok_false_falls_back_to_soonest_entry",
+        "select_hold_control: with hold_ok false and no entry usable now, the blocked entry whose reset is soonest within the limit is answered, not the first in ladder order",
+    ),
+    check(
+        "hold_nothing_within_limit_accounts_blocked",
+        "select_hold_control: when every entry is blocked and none resets within the limit, select is no_route accounts_blocked with reset_at_ms the earliest known reset, and without reset_at_ms when no reset is known",
+    ),
+    check(
+        "hold_demand_mode_skips_blocked_model",
+        "select_hold_control: a demand-mode consumer's model whose accounts are all blocked is skipped for the next adequate one, even with its reset within both limits",
+    ),
+    check(
+        "hold_account_for_applies_recorded_cap",
+        "select_hold_control: account_for naming a decision holds only within the cap that decision's select recorded; the same wait without the decision is account_hold",
+    ),
 ];
 
 /// Where the kit checks less than the contract says, and why. Every report
@@ -130,13 +170,24 @@ pub const NARROWINGS: &[&str] = &[
     "Declaration precedence is checked with max_output_tokens only; the other demand fields are not independently checked for precedence.",
     "The kit does not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
     "requirements other than tool_capabilities and the declared max_output_tokens floor are not checked against the catalog beyond what every check's answer must meet.",
+    "Holds are checked with whole-account blocks set through a hook, on ladders of two entries; the operator max_hold limit alone, variants as separate entries, the metered-fallback rule and pooled windows are not checked, and the hold_ok true path past every entry is checked only through hold_ok false.",
+    "When account_for holds only within a decision's recorded cap, the kit checks that a wait beyond it is refused with some code other than account_hold; it does not check which.",
 ];
 
 /// How one check ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CheckOutcome {
     Passed,
-    Failed { reason: String },
+    Failed {
+        reason: String,
+    },
+    /// The check covers an optional group the provider does not declare.
+    /// It leaves the verdict a pass: the provider is not asked to serve
+    /// what it does not declare.
+    NotApplicable {
+        reason: String,
+    },
 }
 
 /// One check's outcome.
@@ -149,7 +200,8 @@ pub struct CheckReport {
 /// The run's verdict.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SuiteVerdict {
-    /// Every check ran and passed.
+    /// No check failed. Checks of optional groups the provider does not
+    /// declare are not applicable and do not change this.
     Passed,
     Failed {
         reasons: Vec<String>,
@@ -181,6 +233,15 @@ impl SuiteReport {
             .collect()
     }
 
+    /// The names of the checks that were not applicable, in run order.
+    pub fn not_applicable(&self) -> Vec<&'static str> {
+        self.checks
+            .iter()
+            .filter(|report| matches!(report.outcome, CheckOutcome::NotApplicable { .. }))
+            .map(|report| report.check)
+            .collect()
+    }
+
     /// The report as text, one line per check, then the narrowings and the
     /// verdict.
     pub fn render(&self) -> String {
@@ -189,6 +250,9 @@ impl SuiteReport {
             let line = match &report.outcome {
                 CheckOutcome::Passed => format!("PASS {}", report.check),
                 CheckOutcome::Failed { reason } => format!("FAIL {}: {reason}", report.check),
+                CheckOutcome::NotApplicable { reason } => {
+                    format!("N/A  {}: {reason}", report.check)
+                }
             };
             out.push_str(&line);
             out.push('\n');

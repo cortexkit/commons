@@ -1,14 +1,17 @@
 //! The `role.describe` answer.
 //!
 //! `role.describe` takes empty params (`{}`) and answers
-//! `{role, version, ops, consumers, requirement_fields, detail_supported}`.
+//! `{role, version, ops, consumers, requirement_fields, detail_supported,
+//! capabilities?}`.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{select::REQUIREMENT_FIELDS, REQUIRED_OPS, ROLE, VERSION_NUMBER};
 
 /// The `role.describe` answer.
+/// Build with [`Self::new`] and [`Self::with_capability`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RoleDescribe {
     /// Always `"routing"`.
     pub role: String,
@@ -24,6 +27,11 @@ pub struct RoleDescribe {
     /// Whether the provider answers a `detail: true` select with its
     /// explanation object.
     pub detail_supported: bool,
+    /// The optional groups the provider serves ([`crate::capabilities`]).
+    /// Left out when empty, so a provider serving none answers exactly as
+    /// before groups existed. A name this crate does not define is kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
 }
 
 /// One configured consumer.
@@ -46,7 +54,23 @@ impl RoleDescribe {
             consumers,
             requirement_fields: REQUIREMENT_FIELDS.iter().map(|f| (*f).to_owned()).collect(),
             detail_supported,
+            capabilities: Vec::new(),
         }
+    }
+
+    /// Declare the optional group `capability`; declaring it twice lists it
+    /// once.
+    pub fn with_capability(mut self, capability: impl Into<String>) -> Self {
+        let capability = capability.into();
+        if !self.serves(&capability) {
+            self.capabilities.push(capability);
+        }
+        self
+    }
+
+    /// Whether the provider declares the optional group `capability`.
+    pub fn serves(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|listed| listed == capability)
     }
 
     /// The consumer entry for `id`.

@@ -37,6 +37,13 @@ pub const DELEGATE_PRINCIPAL: &str = "reserved:example-delegate";
 pub const PRICED_PROVIDER: &str = "example-provider";
 /// The provider whose models are paid from subscription accounts.
 pub const SUBSCRIPTION_PROVIDER: &str = "example-subscription";
+/// A second subscription provider, with its own account, so the hold
+/// checks can block two ladder entries with different resets.
+pub const SECOND_SUBSCRIPTION_PROVIDER: &str = "example-subscription-two";
+
+/// The harness `runner-one` declares for every route it runs. `runner-two`
+/// declares none.
+pub const HARNESS: &str = "example-harness";
 
 /// The project a check pins a model for.
 pub const PINNED_PROJECT: &str = "project-pinned";
@@ -105,8 +112,8 @@ fn model(
 }
 
 /// The configured catalog: two priced models, two subscription models, two
-/// runners that run every model and reach different tool providers, and two
-/// subscription accounts.
+/// runners that run every model and reach different tool providers (the
+/// first declaring a harness), and two subscription accounts.
 pub fn catalog() -> Catalog {
     let models = vec![
         model(PRICED_PROVIDER, "model-a", 200_000, 32_000, true),
@@ -115,14 +122,6 @@ pub fn catalog() -> Catalog {
         model(SUBSCRIPTION_PROVIDER, "model-d", 100_000, 8_000, false),
     ];
     let route_keys: Vec<String> = models.iter().map(CatalogModel::route_key).collect();
-    let runner = |module: &str, tools: &str, tag: &str| CatalogRunner {
-        module: module.to_owned(),
-        route_keys: route_keys.clone(),
-        tool_providers: vec![ReachableToolProvider {
-            module: tools.to_owned(),
-            capabilities: vec![tag.to_owned()],
-        }],
-    };
     let account = |n: u32| CatalogAccount {
         provider: SUBSCRIPTION_PROVIDER.to_owned(),
         account_id: format!("account-{n}"),
@@ -130,11 +129,75 @@ pub fn catalog() -> Catalog {
         method: "oauth".to_owned(),
     };
     Catalog {
+        runners: runners(&route_keys),
         models,
-        runners: vec![
-            runner(RUNNER_ONE, TOOLS_ONE, TAG_ONE),
-            runner(RUNNER_TWO, TOOLS_TWO, TAG_TWO),
-        ],
         accounts: vec![account(1), account(2)],
+    }
+}
+
+/// Two runners that run every one of `route_keys` and reach different tool
+/// providers; `runner-one` declares [`HARNESS`] for each route.
+fn runners(route_keys: &[String]) -> Vec<CatalogRunner> {
+    let runner = |module: &str, tools: &str, tag: &str, harness: Option<&str>| CatalogRunner {
+        module: module.to_owned(),
+        route_keys: route_keys.to_vec(),
+        tool_providers: vec![ReachableToolProvider {
+            module: tools.to_owned(),
+            capabilities: vec![tag.to_owned()],
+        }],
+        harnesses: harness
+            .map(|harness| {
+                route_keys
+                    .iter()
+                    .map(|key| (key.clone(), harness.to_owned()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+    vec![
+        runner(RUNNER_ONE, TOOLS_ONE, TAG_ONE, Some(HARNESS)),
+        runner(RUNNER_TWO, TOOLS_TWO, TAG_TWO, None),
+    ]
+}
+
+/// The route key of [`hold_catalog`]'s first subscription model.
+pub const HOLD_FIRST: &str = "example-subscription/model-c";
+/// The route key of [`hold_catalog`]'s second subscription model, on
+/// [`SECOND_SUBSCRIPTION_PROVIDER`].
+pub const HOLD_SECOND: &str = "example-subscription-two/model-e";
+/// The route key of [`hold_catalog`]'s priced model, which no account
+/// blocks.
+pub const HOLD_PRICED: &str = "example-provider/model-a";
+
+/// The catalog the hold checks configure instead of [`catalog`], in this
+/// order: [`HOLD_FIRST`] with accounts `account-1` and `account-2`,
+/// [`HOLD_SECOND`] with `account-3`, and [`HOLD_PRICED`].
+pub fn hold_catalog() -> Catalog {
+    let models = vec![
+        model(SUBSCRIPTION_PROVIDER, "model-c", 200_000, 64_000, false),
+        model(
+            SECOND_SUBSCRIPTION_PROVIDER,
+            "model-e",
+            200_000,
+            64_000,
+            false,
+        ),
+        model(PRICED_PROVIDER, "model-a", 200_000, 32_000, true),
+    ];
+    let route_keys: Vec<String> = models.iter().map(CatalogModel::route_key).collect();
+    let account = |provider: &str, n: u32| CatalogAccount {
+        provider: provider.to_owned(),
+        account_id: format!("account-{n}"),
+        credential_id: format!("credential-{n}"),
+        method: "oauth".to_owned(),
+    };
+    Catalog {
+        runners: runners(&route_keys),
+        models,
+        accounts: vec![
+            account(SUBSCRIPTION_PROVIDER, 1),
+            account(SUBSCRIPTION_PROVIDER, 2),
+            account(SECOND_SUBSCRIPTION_PROVIDER, 3),
+        ],
     }
 }

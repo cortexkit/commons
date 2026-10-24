@@ -1,10 +1,125 @@
 use cortexkit_role_routing::{
     account::{parse_account_for_request, AccountForRequest, CONVERSATION_KEY_MAX_CHARS},
+    capabilities::SELECT_HOLD_CONTROL,
+    describe::RoleDescribe,
     errors::RefusalCode,
     observe::parse_account_observe_request,
     report::{parse_report_request, EligibilityScope},
+    select::{parse_select_request, parse_select_request_serving},
 };
 use serde_json::{json, Value};
+
+fn select_with(members: Value) -> Value {
+    let mut params = json!({"consumer": "example_summary", "requirements": {"iq": 50}});
+    params
+        .as_object_mut()
+        .unwrap()
+        .extend(members.as_object().unwrap().clone());
+    params
+}
+
+#[test]
+fn hold_members_decode_each_value_with_the_group() {
+    let group = [SELECT_HOLD_CONTROL];
+    for (members, hold_ok, cap) in [
+        (json!({}), true, None),
+        (json!({"hold_ok": true}), true, None),
+        (json!({"hold_ok": false}), false, None),
+        (json!({"hold_wait_max_s": 0}), true, Some(0)),
+        (json!({"hold_wait_max_s": 300}), true, Some(300)),
+        (json!({"hold_wait_max_s": u64::MAX}), true, Some(u64::MAX)),
+        (
+            json!({"hold_ok": true, "hold_wait_max_s": 60}),
+            true,
+            Some(60),
+        ),
+        // Valid together: the answer a caller that takes no hold falls back
+        // to may still hold, and the cap applies to that hold.
+        (
+            json!({"hold_ok": false, "hold_wait_max_s": 60}),
+            false,
+            Some(60),
+        ),
+        (
+            json!({"hold_ok": false, "hold_wait_max_s": 0}),
+            false,
+            Some(0),
+        ),
+        (
+            json!({"hold_ok": null, "hold_wait_max_s": null}),
+            true,
+            None,
+        ),
+    ] {
+        let request = parse_select_request_serving(&select_with(members.clone()), &group)
+            .unwrap_or_else(|refusal| panic!("{members}: {refusal}"));
+        assert_eq!(request.hold_ok(), hold_ok, "{members}");
+        assert_eq!(request.hold_wait_max_s, cap, "{members}");
+    }
+    for (members, field) in [
+        (json!({"hold_ok": 0}), "hold_ok"),
+        (json!({"hold_ok": "true"}), "hold_ok"),
+        (json!({"hold_wait_max_s": -1}), "hold_wait_max_s"),
+        (json!({"hold_wait_max_s": 0.5}), "hold_wait_max_s"),
+        (json!({"hold_wait_max_s": true}), "hold_wait_max_s"),
+    ] {
+        let refusal = parse_select_request_serving(&select_with(members.clone()), &group)
+            .expect_err(&members.to_string());
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest, "{members}");
+        assert_eq!(refusal.detail["field"], field, "{members}");
+    }
+}
+
+#[test]
+fn hold_members_are_refused_by_name_without_the_group() {
+    let describe = RoleDescribe::new(vec![], false);
+    assert!(!describe.serves(SELECT_HOLD_CONTROL));
+    for (members, field) in [
+        (json!({"hold_ok": true}), "hold_ok"),
+        (json!({"hold_ok": false}), "hold_ok"),
+        (json!({"hold_wait_max_s": 0}), "hold_wait_max_s"),
+        (json!({"hold_ok": false, "hold_wait_max_s": 9}), "hold_ok"),
+    ] {
+        let params = select_with(members.clone());
+        for refusal in [
+            parse_select_request(&params).expect_err("no group"),
+            parse_select_request_serving(&params, &describe.capabilities[..])
+                .expect_err("no group"),
+            parse_select_request_serving(&params, &["some_other_group"]).expect_err("other"),
+        ] {
+            assert_eq!(refusal.code, RefusalCode::InvalidRequest, "{members}");
+            assert_eq!(refusal.detail["field"], field, "{members}");
+        }
+    }
+    let declared = describe.with_capability(SELECT_HOLD_CONTROL);
+    assert!(parse_select_request_serving(
+        &select_with(json!({"hold_ok": false})),
+        &declared.capabilities[..]
+    )
+    .is_ok());
+    assert!(parse_select_request(&select_with(json!({"hold_ok": null}))).is_ok());
+}
+
+#[test]
+fn describe_capabilities_are_left_out_when_empty() {
+    let describe = RoleDescribe::new(vec![], false);
+    assert!(serde_json::to_value(&describe)
+        .unwrap()
+        .get("capabilities")
+        .is_none());
+    let declared = describe
+        .with_capability(SELECT_HOLD_CONTROL)
+        .with_capability(SELECT_HOLD_CONTROL);
+    assert_eq!(declared.capabilities, [SELECT_HOLD_CONTROL]);
+    assert_eq!(
+        serde_json::to_value(&declared).unwrap()["capabilities"],
+        json!(["select_hold_control"])
+    );
+    let mut future = serde_json::to_value(&declared).unwrap();
+    future["capabilities"] = json!(["select_hold_control", "future_group"]);
+    let decoded: RoleDescribe = serde_json::from_value(future).unwrap();
+    assert!(decoded.serves("future_group"));
+}
 
 #[test]
 fn pool_changes_the_admission_body() {

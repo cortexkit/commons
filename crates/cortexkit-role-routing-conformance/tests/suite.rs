@@ -14,8 +14,16 @@ use fake::{Defects, FakeSubject};
 /// Run the fake with `defects`, and check that exactly the check `red`
 /// fails, for a reason containing `because`.
 async fn breaks(defects: Defects, red: &str, because: &str) {
+    breaks_all(defects, &[red], because).await;
+}
+
+/// Run the fake with `defects`, and check that exactly the checks `reds`
+/// fail, the first for a reason containing `because`. For a break that
+/// rightly fails more than one check.
+async fn breaks_all(defects: Defects, reds: &[&str], because: &str) {
     let report = run_suite(&FakeSubject::new(defects)).await;
-    assert_eq!(report.failing(), [red], "{}", report.render());
+    assert_eq!(report.failing(), reds, "{}", report.render());
+    let red = reds[0];
     match report.outcome(red) {
         Some(CheckOutcome::Failed { reason }) => {
             assert!(reason.contains(because), "{red}: {reason}")
@@ -23,6 +31,214 @@ async fn breaks(defects: Defects, red: &str, because: &str) {
         other => panic!("{red} should fail, got {other:?}"),
     }
     assert!(matches!(report.verdict, SuiteVerdict::Failed { .. }));
+}
+
+/// The checks of the `select_hold_control` group, in run order.
+const HOLD_CHECKS: &[&str] = &[
+    "hold_answers_blocked_entry_within_limits",
+    "hold_moves_when_reset_beyond_window",
+    "hold_moves_when_reset_unknown",
+    "hold_moves_beyond_caller_cap",
+    "hold_ok_false_moves_to_usable_entry",
+    "hold_ok_false_falls_back_to_soonest_entry",
+    "hold_nothing_within_limit_accounts_blocked",
+    "hold_demand_mode_skips_blocked_model",
+    "hold_account_for_applies_recorded_cap",
+];
+
+#[tokio::test]
+async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_passes() {
+    let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
+    assert_eq!(report.not_applicable(), HOLD_CHECKS, "{}", report.render());
+    for check in &report.checks {
+        if !HOLD_CHECKS.contains(&check.check) {
+            assert_eq!(check.outcome, CheckOutcome::Passed, "{}", check.check);
+        }
+    }
+    assert_eq!(report.verdict, SuiteVerdict::Passed);
+    let rendered = report.render();
+    assert!(rendered.contains(
+        "N/A  hold_answers_blocked_entry_within_limits: role.describe does not declare select_hold_control"
+    ));
+    assert!(rendered.contains("VERDICT passed"));
+}
+
+#[tokio::test]
+async fn a_hold_break_without_the_group_is_not_reached() {
+    // The hold checks never run against a provider that does not declare
+    // the group, so a hold break there leaves the verdict a pass.
+    let report = run_suite(&FakeSubject::without_hold_control(Defects {
+        never_holds_entry: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test]
+async fn naming_an_undeclared_harness_fails() {
+    breaks(
+        Defects {
+            invents_harness: true,
+            ..Defects::default()
+        },
+        "harness_only_when_declared",
+        "was answered with harness Some(\"default-harness\"); runner-two declared none",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn dropping_a_declared_harness_fails() {
+    breaks(
+        Defects {
+            drops_harness: true,
+            ..Defects::default()
+        },
+        "harness_only_when_declared",
+        "was answered with harness None; runner-one declared \"example-harness\"",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn never_holding_a_blocked_entry_fails() {
+    // The recorded-cap check needs a held answer to start from, so it
+    // fails too.
+    breaks_all(
+        Defects {
+            never_holds_entry: true,
+            ..Defects::default()
+        },
+        &[
+            "hold_answers_blocked_entry_within_limits",
+            "hold_account_for_applies_recorded_cap",
+        ],
+        "was answered example-provider/model-a, not example-subscription/model-c",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn holding_beyond_the_reset_window_fails() {
+    breaks(
+        Defects {
+            ignores_hold_window: true,
+            ..Defects::default()
+        },
+        "hold_moves_when_reset_beyond_window",
+        "was answered example-subscription/model-c, not example-provider/model-a",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn holding_on_an_unknown_reset_fails() {
+    breaks(
+        Defects {
+            holds_on_unknown_reset: true,
+            ..Defects::default()
+        },
+        "hold_moves_when_reset_unknown",
+        "was answered example-subscription/model-c, not example-provider/model-a",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_the_callers_cap_fails() {
+    breaks(
+        Defects {
+            ignores_caller_cap: true,
+            ..Defects::default()
+        },
+        "hold_moves_beyond_caller_cap",
+        "was answered example-subscription/model-c, not example-provider/model-a",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn holding_despite_hold_ok_false_fails() {
+    // Reading hold_ok false as true also holds the first entry where the
+    // fallback must take the soonest, so both hold_ok false checks fail.
+    breaks_all(
+        Defects {
+            holds_despite_hold_ok_false: true,
+            ..Defects::default()
+        },
+        &[
+            "hold_ok_false_moves_to_usable_entry",
+            "hold_ok_false_falls_back_to_soonest_entry",
+        ],
+        "was answered example-subscription/model-c, not example-provider/model-a",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn falling_back_in_ladder_order_fails() {
+    breaks(
+        Defects {
+            fallback_in_ladder_order: true,
+            ..Defects::default()
+        },
+        "hold_ok_false_falls_back_to_soonest_entry",
+        "was answered example-subscription/model-c, not example-subscription-two/model-e",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_accounts_blocked_reset_from_the_first_entry_fails() {
+    breaks(
+        Defects {
+            accounts_blocked_reset_from_first_entry: true,
+            ..Defects::default()
+        },
+        "hold_nothing_within_limit_accounts_blocked",
+        "not the earliest known reset",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_invented_accounts_blocked_reset_fails() {
+    breaks(
+        Defects {
+            accounts_blocked_invents_reset: true,
+            ..Defects::default()
+        },
+        "hold_nothing_within_limit_accounts_blocked",
+        "though no reset is known",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn holding_in_demand_mode_fails() {
+    breaks(
+        Defects {
+            holds_in_demand_mode: true,
+            ..Defects::default()
+        },
+        "hold_demand_mode_skips_blocked_model",
+        "was answered example-subscription/model-c, not example-subscription-two/model-e",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn account_for_ignoring_the_recorded_cap_fails() {
+    breaks(
+        Defects {
+            account_for_ignores_recorded_cap: true,
+            ..Defects::default()
+        },
+        "hold_account_for_applies_recorded_cap",
+        "recorded hold_wait_max_s 600 was refused account_hold for a 700 s wait",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -195,12 +411,16 @@ async fn answering_a_runner_outside_runners_fails() {
 
 #[tokio::test]
 async fn dropping_reset_at_ms_fails() {
-    breaks(
+    // accounts_blocked is a timed cause too, so its check fails with it.
+    breaks_all(
         Defects {
             drops_reset_at_ms: true,
             ..Defects::default()
         },
-        "timed_refusals_carry_reset_at_ms",
+        &[
+            "timed_refusals_carry_reset_at_ms",
+            "hold_nothing_within_limit_accounts_blocked",
+        ],
         "a timed cause, but carries no reset_at_ms",
     )
     .await;

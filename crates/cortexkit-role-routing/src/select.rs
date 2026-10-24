@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    capabilities::SELECT_HOLD_CONTROL,
     errors::{PinUnavailableReason, Refusal},
     members::Members,
 };
@@ -106,7 +107,9 @@ pub struct ConcurrencySlot {
 }
 
 /// The `route.select` request.
+/// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SelectRequest {
     /// A consumer id the provider knows from configuration or declarations.
     pub consumer: String,
@@ -132,6 +135,18 @@ pub struct SelectRequest {
     /// Asks for the provider's explanation object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<bool>,
+    /// `false`: do not answer a blocked entry while another entry is usable
+    /// now; when none is, the fallback may still hold. Absent means `true`.
+    /// Sent only to a provider declaring
+    /// [`crate::capabilities::SELECT_HOLD_CONTROL`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ok: Option<bool>,
+    /// The caller's own cap on a hold, in seconds; `0` means no hold. Sent
+    /// only to a provider declaring
+    /// [`crate::capabilities::SELECT_HOLD_CONTROL`]. Valid with
+    /// `hold_ok: false` too: the fallback that answer can take may hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_wait_max_s: Option<u64>,
 }
 
 impl SelectRequest {
@@ -147,7 +162,69 @@ impl SelectRequest {
             correlation_id: None,
             concurrency_slots: None,
             detail: None,
+            hold_ok: None,
+            hold_wait_max_s: None,
         }
+    }
+
+    /// Set the pin, `provider/model[:variant]`.
+    pub fn with_pin(mut self, pin: impl Into<String>) -> Self {
+        self.pin = Some(pin.into());
+        self
+    }
+
+    /// Set the route keys the caller will not take.
+    pub fn with_exclude(mut self, exclude: Vec<String>) -> Self {
+        self.exclude = Some(exclude);
+        self
+    }
+
+    /// Set the runner module ids the caller can send to.
+    pub fn with_runners(mut self, runners: Vec<String>) -> Self {
+        self.runners = Some(runners);
+        self
+    }
+
+    /// Set the affinity key.
+    pub fn with_affinity(mut self, affinity: impl Into<String>) -> Self {
+        self.affinity = Some(affinity.into());
+        self
+    }
+
+    /// Set the correlation id the provider echoes in its logs.
+    pub fn with_correlation_id(mut self, correlation_id: impl Into<String>) -> Self {
+        self.correlation_id = Some(correlation_id.into());
+        self
+    }
+
+    /// Set the concurrency hint.
+    pub fn with_concurrency_slots(mut self, concurrency_slots: Vec<ConcurrencySlot>) -> Self {
+        self.concurrency_slots = Some(concurrency_slots);
+        self
+    }
+
+    /// Ask, or decline to ask, for the provider's explanation object.
+    pub fn with_detail(mut self, detail: bool) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+
+    /// Set `hold_ok`: whether a blocked entry may be answered while another
+    /// entry is usable now.
+    pub fn with_hold_ok(mut self, hold_ok: bool) -> Self {
+        self.hold_ok = Some(hold_ok);
+        self
+    }
+
+    /// Set the caller's own cap on a hold, in seconds.
+    pub fn with_hold_wait_max_s(mut self, hold_wait_max_s: u64) -> Self {
+        self.hold_wait_max_s = Some(hold_wait_max_s);
+        self
+    }
+
+    /// `hold_ok` with its default (`true`) applied.
+    pub fn hold_ok(&self) -> bool {
+        self.hold_ok.unwrap_or(true)
     }
 }
 
@@ -218,7 +295,9 @@ pub struct RunnerAuth {
 }
 
 /// Where the work runs.
+/// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RunnerRef {
     /// The runner module id; one of the request's `runners` when it sent
     /// them.
@@ -228,6 +307,35 @@ pub struct RunnerRef {
     /// Present only for providers whose policy names a key pool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<RunnerAuth>,
+    /// The harness the runner hosts this route on, filled only from the
+    /// runner's own declaration. A caller does not bind a runner session
+    /// on an answer without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+}
+
+impl RunnerRef {
+    /// `module` running `model`, with no key pool and no harness.
+    pub fn new(module: impl Into<String>, model: RouteRef) -> Self {
+        Self {
+            module: module.into(),
+            model,
+            auth: None,
+            harness: None,
+        }
+    }
+
+    /// Set the key the runner sends with.
+    pub fn with_auth(mut self, auth: RunnerAuth) -> Self {
+        self.auth = Some(auth);
+        self
+    }
+
+    /// Set the harness the runner declared for this route.
+    pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
+        self.harness = Some(harness.into());
+        self
+    }
 }
 
 /// The `route.select` answer.
@@ -248,15 +356,26 @@ pub struct SelectAnswer {
     pub detail: Option<Value>,
 }
 
-/// Validate and decode `route.select` params.
+/// Validate and decode `route.select` params for a provider that declares
+/// no optional group: [`parse_select_request_serving`] with none.
+pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
+    parse_select_request_serving::<&str>(params, &[])
+}
+
+/// Validate and decode `route.select` params for a provider that declares
+/// `capabilities` in `role.describe`.
 ///
 /// A malformed requirement is refused `invalid_requirements` naming it, and
 /// so is a requirement this version does not define: it is never ignored.
 /// A malformed pin is `pin_unavailable` with reason `invalid`. Any other
-/// bad member is `invalid_request` naming it. Whether the consumer is
-/// known and owned, and whether anything can serve, is the provider's to answer
-/// after this.
-pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
+/// bad member is `invalid_request` naming it. `hold_ok` and
+/// `hold_wait_max_s` are refused by name unless `capabilities` lists
+/// [`SELECT_HOLD_CONTROL`]. Whether the consumer is known and owned, and
+/// whether anything can serve, is the provider's to answer after this.
+pub fn parse_select_request_serving<C: AsRef<str>>(
+    params: &Value,
+    capabilities: &[C],
+) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
     let consumer = members.text("consumer", None)?;
     let requirements = parse_requirements(members.object.get("requirements"))?;
@@ -286,6 +405,27 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
     {
         return Err(members.refuse("runners", "a runner id must not be empty"));
     }
+    let hold_ok: Option<bool> = members.optional("hold_ok")?;
+    let hold_wait_max_s: Option<u64> = members.optional("hold_wait_max_s")?;
+    let hold_control = capabilities
+        .iter()
+        .any(|capability| capability.as_ref() == SELECT_HOLD_CONTROL);
+    if !hold_control {
+        // A provider that does not declare the group refuses its members
+        // exactly as it refuses any member it does not read, so a caller
+        // never mistakes an ignored cap for an honoured one.
+        for (field, present) in [
+            ("hold_ok", hold_ok.is_some()),
+            ("hold_wait_max_s", hold_wait_max_s.is_some()),
+        ] {
+            if present {
+                return Err(members.refuse(
+                    field,
+                    format!("{field} is read only by a provider declaring {SELECT_HOLD_CONTROL}"),
+                ));
+            }
+        }
+    }
     Ok(SelectRequest {
         consumer,
         requirements,
@@ -296,6 +436,8 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
         correlation_id: members.optional_text("correlation_id", Some(CORRELATION_ID_MAX_CHARS))?,
         concurrency_slots: members.optional("concurrency_slots")?,
         detail: members.optional("detail")?,
+        hold_ok,
+        hold_wait_max_s,
     })
 }
 

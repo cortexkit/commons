@@ -137,6 +137,10 @@ pub struct CatalogRunner {
     pub route_keys: Vec<String>,
     /// The tool providers it can reach, for every project.
     pub tool_providers: Vec<ReachableToolProvider>,
+    /// The runner's own declaration of the harness it hosts each route on,
+    /// by route key. A route not listed has no declared harness, and an
+    /// answer on it carries none.
+    pub harnesses: BTreeMap<String, String>,
 }
 
 /// A subscription account the provider allocates.
@@ -156,6 +160,38 @@ pub struct Catalog {
     /// In the order the provider prefers them when nothing else decides.
     pub runners: Vec<CatalogRunner>,
     pub accounts: Vec<CatalogAccount>,
+}
+
+/// How the operator routes one consumer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConsumerMode {
+    /// `mode: "demand"`: the next-cheapest adequate model, in catalog order
+    /// when nothing else decides.
+    Demand,
+    /// `mode: "ladder"`: these entries, in order, each a route
+    /// `provider/model`.
+    Ladder { entries: Vec<String> },
+}
+
+/// The operator's per-provider hold settings, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HoldLimits {
+    /// The longest the provider lets a runner hold.
+    pub max_hold_s: u64,
+    /// A blocked entry is held on only when its reset is at most this far
+    /// away.
+    pub hold_when_reset_within_s: u64,
+}
+
+impl HoldLimits {
+    pub fn new(max_hold_s: u64, hold_when_reset_within_s: u64) -> Self {
+        Self {
+            max_hold_s,
+            hold_when_reset_within_s,
+        }
+    }
 }
 
 /// A routing provider under test.
@@ -209,6 +245,43 @@ pub trait RoutingSubject: Send + Sync {
     /// Cool the route `route_key` (`provider/model`) down until `until_ms`
     /// (Unix milliseconds): it serves nothing before then.
     async fn cool_down(&self, route_key: &str, until_ms: u64) -> Result<(), String>;
+
+    /// Route `consumer` by `mode`. Used only against a provider declaring
+    /// `select_hold_control`; the default fails those checks.
+    async fn configure_consumer_mode(
+        &self,
+        consumer: &str,
+        mode: &ConsumerMode,
+    ) -> Result<(), String> {
+        let _ = (consumer, mode);
+        Err("consumer modes are not supported by this subject".into())
+    }
+
+    /// Set the operator's `max_hold` and `hold_when_reset_within` for
+    /// `provider`. Used only against a provider declaring
+    /// `select_hold_control`; the default fails those checks.
+    async fn configure_hold_limits(
+        &self,
+        provider: &str,
+        limits: HoldLimits,
+    ) -> Result<(), String> {
+        let _ = (provider, limits);
+        Err("hold limits are not supported by this subject".into())
+    }
+
+    /// Block the catalog account `account_id` by a window that ends at
+    /// `reset_at_ms` (Unix milliseconds), or at an unknown time when
+    /// `None`. A later call replaces the account's block. Used only against
+    /// a provider declaring `select_hold_control`; the default fails those
+    /// checks.
+    async fn block_account(
+        &self,
+        account_id: &str,
+        reset_at_ms: Option<u64>,
+    ) -> Result<(), String> {
+        let _ = (account_id, reset_at_ms);
+        Err("account blocks are not supported by this subject".into())
+    }
 
     /// Open a route to the provider under `stamp`.
     async fn route(&self, stamp: &RouteStamp) -> Result<Self::Route, String>;

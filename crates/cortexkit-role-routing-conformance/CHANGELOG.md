@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.0
+
+- Depend on routing contract 0.3.0, a breaking Rust minor (`SelectRequest`,
+  `RoleDescribe` and `RunnerRef` are now non-exhaustive).
+- Add nine hold checks for the optional `select_hold_control` group (41
+  checks total). They cover answering a blocked ladder entry within both
+  limits, with `account_for` then holding, and moving on a reset beyond
+  `hold_when_reset_within`, an unknown reset, or a wait beyond the caller's
+  smaller cap. They also cover `hold_ok: false` moving to an entry usable
+  now, or falling back to the soonest reset; `no_route` `accounts_blocked`
+  with the earliest known reset, or none; demand mode skipping a blocked
+  model; and `account_for` applying the cap its decision recorded. Against
+  a provider that does not declare the group they report the new
+  `CheckOutcome::NotApplicable`, and the verdict stays `Passed`.
+- Add `harness_only_when_declared`: `runner.harness` is the runner's
+  declared harness, absent when it declared none.
+- Breaking: `CheckOutcome` gains `NotApplicable` and is now
+  `#[non_exhaustive]`; `CatalogRunner` gains `harnesses`, so adapters
+  building it with a struct literal must add the field. Add defaulted
+  subject hooks `configure_consumer_mode` (`ConsumerMode`),
+  `configure_hold_limits` (`HoldLimits`) and `block_account`, the
+  `fixture::hold_catalog()` the hold checks configure, and
+  `SuiteReport::not_applicable`.
+- Each new check is paired with a faulty provider that fails it by name.
+  Three breaks rightly fail a second check, and their tests pin both: never
+  holding also fails the recorded-cap check, reading `hold_ok: false` as
+  `true` also fails the fallback check, and dropping `reset_at_ms` also
+  fails `accounts_blocked`.
 ## 0.3.0
 
 - Depend on routing contract 0.2.0, a breaking Rust minor because its extended

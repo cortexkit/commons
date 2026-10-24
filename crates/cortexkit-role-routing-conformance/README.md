@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.3.0"
+cortexkit-role-routing-conformance = "0.4.0"
 ```
 
 ```rust,ignore
@@ -38,8 +38,9 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
     includes optional `iq` and the other demand fields in `defaults`);
   - `configure_catalog(catalog)`: exactly these models (with their ability,
     limits, tool calls, modalities, structured output and pricing), runners
-    (the route keys each runs, and the tool providers it reaches with the
-    tool capability tags each serves), and subscription accounts. Every
+    (the route keys each runs, the tool providers it reaches with the
+    tool capability tags each serves, and the harness it declares for each
+    route), and subscription accounts. Every
     runner listed is an attested runner module (contract section 9: its
     route carries a principal the daemon verified, and the provider knows it
     as a runner);
@@ -52,6 +53,23 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
     to the consumer's selects within the project;
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.
 
+A provider that declares `select_hold_control` in `role.describe` also
+supplies these hooks for the hold checks. Their defaults return an
+unsupported error, which fails those checks; a provider that does not
+declare the group never has them called.
+
+  - `configure_consumer_mode(consumer, mode)`: route the consumer by
+    `ConsumerMode::Demand` or by `ConsumerMode::Ladder { entries }`, route
+    keys in ladder order;
+  - `configure_hold_limits(provider, limits)`: the operator's `max_hold`
+    and `hold_when_reset_within`, in seconds, for that model provider;
+  - `block_account(account_id, reset_at_ms)`: block the account by a window
+    ending then, or at an unknown time for `None`; a later call replaces
+    the block.
+
+The hold checks configure `fixture::hold_catalog()` instead of the usual
+catalog.
+
 Before every check the kit resets the provider and configures the fixture
 in `src/fixture.rs`. The provider's choice must be stable: the same request
 against the same state answers the same route and runner.
@@ -62,7 +80,11 @@ for defaults; the operator-precedence check also overrides the request's `iq`.
 
 ## Checks
 
-The kit runs 31 checks, including six declaration checks and eight optional-member checks.
+The kit runs 41 checks, including six declaration checks, eight optional-member
+checks, and nine hold checks. The hold checks cover the optional
+`select_hold_control` group: against a provider whose `role.describe` does
+not declare it they report not applicable (`CheckOutcome::NotApplicable`,
+printed `N/A`), and the verdict stays `Passed`.
 
 | Check | Contract rule |
 |---|---|
@@ -97,6 +119,16 @@ The kit runs 31 checks, including six declaration checks and eight optional-memb
 | `account_for_foreign_decision_unknown` | §9.1: a `decision_id` from another runner, or for another model, is `unknown_decision` |
 | `account_observe_idempotent_per_event_id` | §9.2: the same `event_id` again is `duplicate: true` |
 | `tool_capabilities_matched_by_tag` | §5.1: tool capabilities are matched by tag, never by module name |
+| `harness_only_when_declared` | §5.2: `runner.harness` is the runner's declared harness, and absent when it declared none |
+| `hold_answers_blocked_entry_within_limits` | §5.4: a blocked entry whose reset is within both limits is answered, and `account_for` holds |
+| `hold_moves_when_reset_beyond_window` | §5.4: a reset further away than `hold_when_reset_within` moves |
+| `hold_moves_when_reset_unknown` | §5.4: an unknown reset moves |
+| `hold_moves_beyond_caller_cap` | §5.4: a wait beyond the request's smaller `hold_wait_max_s` moves |
+| `hold_ok_false_moves_to_usable_entry` | §5.4: `hold_ok: false` moves to an entry usable now |
+| `hold_ok_false_falls_back_to_soonest_entry` | §5.4: with nothing usable now, the soonest reset within the limit is answered |
+| `hold_nothing_within_limit_accounts_blocked` | §5.4: nothing within the limit is `no_route` `accounts_blocked` with the earliest known reset, or none |
+| `hold_demand_mode_skips_blocked_model` | §5.4: a demand-mode consumer skips a blocked model |
+| `hold_account_for_applies_recorded_cap` | §9.1: `account_for` naming a decision applies the cap its select recorded |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.
@@ -118,4 +150,8 @@ existing child pin, `requested_account`, `renew` or `reassign`.
 
 `tests/suite.rs` runs the kit against the fake: a faithful fake passes every
 check, and each deliberate break in `fake::Defects` turns exactly its check
-red, for a reason the test names.
+red, for a reason the test names. A break that rightly fails a second check
+pins both: never holding (the recorded-cap check needs a held answer to
+start from), reading `hold_ok: false` as `true` (the fallback check too),
+and dropping `reset_at_ms` (a timed cause on two refusals). `FakeSubject::without_hold_control` shows the hold
+checks not applicable and the verdict a pass.

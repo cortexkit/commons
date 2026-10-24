@@ -30,6 +30,11 @@ pub const ROUTE_ACCOUNT_OBSERVE_JSON: &str =
 pub const ROUTE_REPORT_JSON: &str = include_str!("../test-vectors/routing-v1/route-report.json");
 /// `route.select` requests, refusals and answers.
 pub const ROUTE_SELECT_JSON: &str = include_str!("../test-vectors/routing-v1/route-select.json");
+/// The `select_hold_control` group: a describe declaring it, the select
+/// members it adds with and without the group, the `accounts_blocked`
+/// refusal, and an answer naming its runner's harness.
+pub const ROUTE_SELECT_HOLD_CONTROL_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-hold-control.json");
 
 /// Optional account-allocation members added after the original v1 vectors.
 pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
@@ -60,6 +65,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("route-account-observe.json", ROUTE_ACCOUNT_OBSERVE_JSON),
     ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
     ("route-report.json", ROUTE_REPORT_JSON),
+    (
+        "route-select-hold-control.json",
+        ROUTE_SELECT_HOLD_CONTROL_JSON,
+    ),
     ("route-select.json", ROUTE_SELECT_JSON),
 ];
 

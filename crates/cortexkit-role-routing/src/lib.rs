@@ -10,7 +10,8 @@
 //! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document:
 //! every rule in it is marked pinned. The types here are its wire shapes:
 //!
-//! - [`describe`]: the `role.describe` answer;
+//! - [`describe`]: the `role.describe` answer, and [`capabilities`] for the
+//!   optional groups it declares;
 //! - [`select`]: the `route.select` request, its validator, and its answer;
 //! - [`report`]: the `route.report` request, its validator, and its answer;
 //! - [`account`]: the `route.account_for` request, validator and answer;
@@ -91,6 +92,17 @@ pub const REQUIRED_OPS: &[&str] = &[
 /// The ops only runner modules call. A consumer that only selects never
 /// depends on them.
 pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBSERVE];
+
+/// Optional groups a provider declares in `role.describe`'s `capabilities`.
+/// A caller sends a group's members only to a provider that declares the
+/// group; a provider that does not declare it refuses them as unknown.
+pub mod capabilities {
+    /// `route.select` reads the caller's `hold_ok` and `hold_wait_max_s`.
+    pub const SELECT_HOLD_CONTROL: &str = "select_hold_control";
+
+    /// Every group this version defines.
+    pub const KNOWN: &[&str] = &[SELECT_HOLD_CONTROL];
+}
 
 #[cfg(test)]
 mod tests {

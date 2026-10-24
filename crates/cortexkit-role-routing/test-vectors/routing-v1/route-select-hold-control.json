@@ -1,0 +1,98 @@
+{
+  "about": "route.select's optional hold_ok and hold_wait_max_s, read only by a provider declaring select_hold_control in role.describe's capabilities; the no_route reason accounts_blocked; and the answer's optional runner.harness. requests and refused are validated with the group declared, requests_without_group and refused_without_group without it. A request vector decodes and re-encodes to its params, or to encodes_as when given (members sent as null are left out). A refused vector names the code and detail the validator answers. Each refusal body round-trips, and wait_until_ms is the time a caller waits for.",
+  "describe": {
+    "role": "routing",
+    "version": 1,
+    "ops": [
+      "role.describe",
+      "route.select",
+      "route.report",
+      "route.account_for",
+      "route.account_observe"
+    ],
+    "consumers": [
+      {
+        "id": "example_summary",
+        "priced_only": false
+      }
+    ],
+    "requirement_fields": [
+      "iq",
+      "eq",
+      "context_window",
+      "max_output_tokens",
+      "tools",
+      "tool_capabilities",
+      "modalities",
+      "structured_output"
+    ],
+    "detail_supported": false,
+    "capabilities": [
+      "select_hold_control"
+    ]
+  },
+  "requests": [
+    {"name": "hold_ok_true", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": true}},
+    {"name": "hold_ok_false", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": false}},
+    {"name": "cap_zero_means_no_hold", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": 0}},
+    {"name": "cap_seconds", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": 300}},
+    {"name": "hold_ok_true_with_cap", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": true, "hold_wait_max_s": 300}},
+    {"name": "hold_ok_false_with_cap_caps_the_fallback", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": false, "hold_wait_max_s": 300}},
+    {"name": "hold_ok_false_with_zero_cap", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": false, "hold_wait_max_s": 0}},
+    {"name": "nulls_are_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": null, "hold_wait_max_s": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused": [
+    {"name": "hold_ok_not_bool", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": "false"}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_ok"}}},
+    {"name": "cap_negative", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": -1}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_wait_max_s"}}},
+    {"name": "cap_fractional", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": 1.5}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_wait_max_s"}}},
+    {"name": "cap_string", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": "300"}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_wait_max_s"}}}
+  ],
+  "answers": [
+    {
+      "name": "runner_harness",
+      "answer": {
+        "decision_id": "decision-7",
+        "route": {"provider": "example-subscription", "model": "model-c"},
+        "runner": {
+          "module": "runner-one",
+          "model": {"provider": "example-subscription", "model": "model-c"},
+          "harness": "example-harness"
+        },
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+        "expires_at_ms": 1767226200000,
+        "explanation": "example-subscription/model-c is the ladder's first entry."
+      }
+    }
+  ],
+  "requests_without_group": [
+    {"name": "nulls_are_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": null, "hold_wait_max_s": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused_without_group": [
+    {"name": "hold_ok_true", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": true}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_ok"}}},
+    {"name": "hold_ok_false", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": false}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_ok"}}},
+    {"name": "cap", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": 300}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_wait_max_s"}}},
+    {"name": "cap_zero", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_wait_max_s": 0}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_wait_max_s"}}},
+    {"name": "both_name_hold_ok_first", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "hold_ok": true, "hold_wait_max_s": 300}, "refusal": {"code": "invalid_request", "detail": {"field": "hold_ok"}}}
+  ],
+  "refusals": [
+    {
+      "name": "accounts_blocked_timed",
+      "body": {
+        "code": "no_route",
+        "message": "every entry's accounts are blocked beyond the hold limit",
+        "detail": {"reason": "accounts_blocked", "reset_at_ms": 1767226200000}
+      },
+      "wait_until_ms": 1767226200000
+    },
+    {
+      "name": "accounts_blocked_reset_unknown",
+      "body": {
+        "code": "no_route",
+        "message": "every entry's accounts are blocked and no reset is known",
+        "detail": {"reason": "accounts_blocked"}
+      },
+      "wait_until_ms": null
+    }
+  ]
+}
