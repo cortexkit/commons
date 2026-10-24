@@ -11,9 +11,17 @@ pub const FLOW_SCOPE_REQUIRED: &str = "flow_scope_required";
 pub const COST_UNPRICEABLE: &str = "cost_unpriceable";
 pub const OUTPUT_INVALID: &str = "output_invalid";
 pub const NO_ROUTE: &str = "no_route";
+/// The provider answered, but nothing gives the billed cost: a count the
+/// per-token price rests on is missing and there is no provider billing figure.
+/// The answer is withheld rather than returned with a guessed cost.
+pub const COST_UNMEASURED: &str = "cost_unmeasured";
 
 /// Permanent pre-dispatch refusals common to all three tools.
 pub const TOOL_ADMISSION_CODES: &[&str] = &[SCOPE_REQUIRED, FLOW_SCOPE_REQUIRED, COST_UNPRICEABLE];
+
+/// Permanent failures common to all three tools, raised after the provider
+/// answered.
+pub const TOOL_RESULT_CODES: &[&str] = &[COST_UNMEASURED];
 
 /// Completion's applicable model-batch codes plus its two completion-only codes.
 /// Batch identity and role-specific model-kind errors do not apply to completion.
@@ -38,7 +46,10 @@ pub const COMPLETE_CODES: &[&str] = &[
 /// The published class, or None for a code outside this vocabulary. Decoding
 /// refusals remains open, just as it is in the roles.
 pub fn class(code: &str) -> Option<ErrorClass> {
-    if TOOL_ADMISSION_CODES.contains(&code) || [OUTPUT_INVALID, NO_ROUTE].contains(&code) {
+    if TOOL_ADMISSION_CODES.contains(&code)
+        || TOOL_RESULT_CODES.contains(&code)
+        || [OUTPUT_INVALID, NO_ROUTE].contains(&code)
+    {
         Some(ErrorClass::Permanent)
     } else {
         batch::admission_class(code).or_else(|| batch::item_class(code))

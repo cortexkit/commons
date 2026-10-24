@@ -124,6 +124,7 @@ fn json_results_validate_against_their_requested_schema() {
 fn refusals_cover_every_published_code_and_class() {
     let expected: BTreeSet<_> = errors::TOOL_ADMISSION_CODES
         .iter()
+        .chain(errors::TOOL_RESULT_CODES)
         .chain(errors::COMPLETE_CODES)
         .chain(errors::classifier::ADMISSION_CODES)
         .chain(errors::classifier::ITEM_CODES)

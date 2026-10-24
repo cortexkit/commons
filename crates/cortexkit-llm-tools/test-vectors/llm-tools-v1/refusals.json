@@ -20,5 +20,6 @@
   {"code":"invalid_item","message":"The fictional provider rejected the invented item.","detail":{"class":"permanent"}},
   {"code":"answer_too_large","message":"The invented answer exceeded its bound.","detail":{"class":"permanent","field":"fields.color","limit":1024}},
   {"code":"output_invalid","message":"The invented reply failed the requested schema.","detail":{"class":"permanent"}},
-  {"code":"no_route","message":"No per-token model satisfies the demand.","detail":{"class":"permanent"}}
+  {"code":"no_route","message":"No per-token model satisfies the demand.","detail":{"class":"permanent"}},
+  {"code":"cost_unmeasured","message":"The fictional provider omitted the input-token count its price needs.","detail":{"class":"permanent"}}
 ]

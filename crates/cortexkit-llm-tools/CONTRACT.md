@@ -38,6 +38,8 @@ requires a non-negative numeric `cost_usd`,
 even when the provider omits token counts. The serving module must determine
 the billed cost independently when usage is incomplete; missing measurements
 must not be fabricated to derive a cost. A known free rate and cost may be zero.
+When nothing gives the billed cost, the call fails `cost_unmeasured` (below)
+instead of succeeding.
 
 ## Common tool-admission refusals (all three tools)
 
@@ -52,6 +54,24 @@ is always refused `flow_scope_required`.
 | `scope_required` | permanent | No daemon-stamped run or flow scope. |
 | `flow_scope_required` | permanent | A flow carrier called without a daemon-stamped flow scope. |
 | `cost_unpriceable` | permanent | The chosen model has no known applicable per-token rate. Refused before the call. |
+
+## Common post-call failure (all three tools)
+
+| Code | Class | Meaning |
+|---|---|---|
+| `cost_unmeasured` | permanent | The provider answered, but nothing gives the billed cost: a count the per-token price rests on is missing and there is no provider billing figure. |
+
+- The answer is withheld. A result is never returned without a measured cost,
+  and a cost is never derived from a missing count.
+- The usage the provider did report is recorded as reported; an absent count
+  stays absent.
+- The provider may still have charged for the call, so the caller charges the
+  request's `max_cost_usd` against its budget for it. That bound is safe: the
+  call was admitted only because its estimate fit that ceiling.
+- A retry with the same call key replays this failure and never calls the
+  provider again.
+- A serving module should not offer these tools a model whose provider is known
+  to omit a count its price needs, so this failure stays rare.
 
 These are tool-admission codes, not replacements for role failure codes.
 Refusals reuse `cortexkit_model_batch::errors::Refusal`:
