@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Contract text only: in the hold rules (5.4), a per-token account counts among an entry's accounts only where the provider's account policy allows falling back to one. No code or wire change.
+
 ## 0.3.0
 
 - Add the optional `select_hold_control` group. `role.describe` gains

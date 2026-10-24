@@ -304,9 +304,9 @@ This section binds a provider declaring `select_hold_control` (§4).
   (`mode: "demand"`) has no entries to hold on: a model whose eligible
   accounts are all blocked is skipped for the next-cheapest adequate one.
 - [pinned] An entry's accounts are every account the provider's own
-  account policy lets it use for that route and consumer. That includes a
-  per-token (metered) account the provider is configured to fall back to
-  when its subscription accounts are blocked, so while such an account can
+  account policy lets it use for that route and consumer. A per-token
+  (metered) account counts only where that policy allows falling back to
+  one when the subscription accounts are blocked; while such an account can
   serve, the entry is not blocked. An entry is
   blocked when every one of them is blocked by a window. Its reset is the
   time the first of those windows ends, and is unknown when no window's
