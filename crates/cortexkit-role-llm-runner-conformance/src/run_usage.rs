@@ -40,16 +40,20 @@ fn totals(usage: &RunUsage) -> [(&'static str, Option<u64>); 5] {
 }
 
 /// What the run's `usage` must say after the two scripted steps: both
-/// reported, each total the sum of what the script reported, and
-/// `reasoning_tokens`, which the script never reports, absent.
+/// reported, each total the sum over the steps that reported it, and
+/// `reasoning_tokens` absent when no step reported any.
 fn check_usage(what: &str, usage: &RunUsage, steps: &[ScriptedUsage]) -> Check {
     let sum = |field: fn(&ScriptedUsage) -> u64| Some(steps.iter().map(field).sum::<u64>());
+    let reasoning = steps
+        .iter()
+        .filter_map(|s| s.reasoning_tokens)
+        .reduce(|total, tokens| total + tokens);
     let expected = [
         ("input_tokens", sum(|s| s.input_tokens)),
         ("cached_input_tokens", sum(|s| s.cache_read_tokens)),
         ("cache_write_tokens", sum(|s| s.cache_write_tokens)),
         ("output_tokens", sum(|s| s.output_tokens)),
-        ("reasoning_tokens", None),
+        ("reasoning_tokens", reasoning),
     ];
     if usage.steps != steps.len() as u64 || usage.unreported_steps != 0 {
         return Err(format!(
@@ -61,6 +65,15 @@ fn check_usage(what: &str, usage: &RunUsage, steps: &[ScriptedUsage]) -> Check {
         ));
     }
     for ((name, got), (_, want)) in totals(usage).into_iter().zip(expected) {
+        if let (Some(seen), Some(output)) = (got, usage.output_tokens) {
+            if name == "reasoning_tokens" && seen > output {
+                return Err(format!(
+                    "{what} usage reports reasoning_tokens {seen} and output_tokens {output}: \
+                     reasoning is a breakdown of output, never an addition to it, so it can \
+                     never exceed output_tokens"
+                ));
+            }
+        }
         match (got, want) {
             (Some(0), None) => {
                 return Err(format!(
@@ -91,18 +104,34 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
-    // Two steps, a tool call and then the final text, with distinct counts
-    // per field and per step, so a total taken from one step or from the
-    // wrong field differs from the sum. Neither step reports reasoning.
-    let reported = [
+    // Counts distinct per field and per step, so a total taken from one step
+    // or from the wrong field differs from the sum.
+    let plain = [
         ScriptedUsage::new(11, 101, 7, 13),
         ScriptedUsage::new(17, 211, 3, 19),
     ];
+    measure(case, "run-usage", &plain).await?;
+    // Only the second step reports reasoning, so the total must come from
+    // that step alone, and it stays a breakdown of that step's output.
+    let with_reasoning = [
+        ScriptedUsage::new(11, 101, 7, 13),
+        ScriptedUsage::new(17, 211, 3, 19).with_reasoning_tokens(7),
+    ];
+    measure(case, "run-usage", &with_reasoning).await
+}
+
+/// One scripted run of two steps, a tool call and then the final text, each
+/// reporting `reported`'s usage, and the run's `usage` checked against it.
+async fn measure<S>(case: &Case<'_, S>, label: &str, reported: &[ScriptedUsage; 2]) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
     let tool_call = case.mint.call("usage-call");
     let (last, _) = case.mint.text("usage-final");
     let mut session = case
         .open(
-            "run-usage",
+            label,
             Script {
                 turns: vec![
                     ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool_call)])
@@ -136,7 +165,7 @@ where
              run_usage: {result:?}"
         ));
     };
-    check_usage("run.result", usage, &reported)?;
+    check_usage("run.result", usage, reported)?;
     if case.declared.contains(&Capability::RunStatus) {
         // The ended run has completed steps, so run.status must carry usage
         // too. Before its first step completes, usage may be present or

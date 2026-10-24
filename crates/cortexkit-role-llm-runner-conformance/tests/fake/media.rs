@@ -34,6 +34,46 @@ pub fn payloads(message: &Value) -> Vec<Payload> {
     out
 }
 
+/// Payloads of a descriptor message for a runner whose own schema keeps media
+/// inline: whatever `payloads` finds, plus a `media_ref` over each `file`
+/// part's `data:` URL, whose decoded bytes the ref replaces.
+pub fn descriptor_payloads(value: &Value, defects: &Defects) -> Vec<Payload> {
+    let mut out = payloads(value);
+    if defects.attachments_store_data_url {
+        url_refs(value, "", &mut out);
+    }
+    out
+}
+
+fn url_refs(value: &Value, path: &str, out: &mut Vec<Payload>) {
+    if let Some((mime, bytes)) = attachments::data_url(value["url"].as_str().unwrap_or_default()) {
+        out.push(Payload {
+            pointer: format!("{path}/url"),
+            reference: Reference::media(
+                None,
+                if mime.starts_with("image/") {
+                    "image"
+                } else {
+                    "document"
+                },
+                &mime,
+                &bytes,
+                None,
+            ),
+            required: true,
+        });
+    }
+    if let Some(map) = value.as_object() {
+        for (name, child) in map {
+            url_refs(child, &format!("{path}/{name}"), out);
+        }
+    } else if let Some(items) = value.as_array() {
+        for (i, child) in items.iter().enumerate() {
+            url_refs(child, &format!("{path}/{i}"), out);
+        }
+    }
+}
+
 fn collect(value: &Value, path: &str, key: Option<String>, out: &mut Vec<Payload>) {
     if let Some(array) = value.as_array() {
         for (i, child) in array.iter().enumerate() {
@@ -152,7 +192,7 @@ pub fn describe_message(
     if defects.media == Some("page_position") && page_budget <= 1024 {
         budget = budget.saturating_sub(300_000);
     }
-    let mut candidates = payloads(&inline);
+    let mut candidates = descriptor_payloads(&inline, defects);
     if defects.media == Some("base64") {
         candidates.retain(|p| !p.required);
     }

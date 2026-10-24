@@ -96,6 +96,21 @@ fn has_hash(value: &Value, hash: &str) -> bool {
     }
 }
 
+/// Whether a stored message references the media with `hash`: a stored
+/// media block names it, while a `data:` URL `file` part holds the bytes
+/// inline and names no digest, so its file must be in this store.
+fn refers_to(body: &Value, hash: &str) -> bool {
+    if has_hash(body, hash) {
+        return true;
+    }
+    match body {
+        Value::Array(items) => items.iter().any(|v| refers_to(v, hash)),
+        Value::Object(map) => map.values().any(|v| refers_to(v, hash)),
+        Value::String(url) => data_url(url).is_some_and(|(_, bytes)| sha256_hex(&bytes) == hash),
+        _ => false,
+    }
+}
+
 pub fn handle(
     module: &Module,
     stamp: &RouteStamp,
@@ -156,7 +171,7 @@ pub fn handle(
             s.messages
                 .iter()
                 .chain(s.archive.iter())
-                .any(|m| has_hash(&m.body, &request.sha256))
+                .any(|m| refers_to(&m.body, &request.sha256))
         });
         if !referenced
             && !fault(module, session, "attachments_media_unreferenced")
@@ -340,7 +355,12 @@ pub fn admit_send(
             }
         }
         if let Some(upload) = upload {
-            parts.push(media_block(&upload.mime, &upload.data));
+            let mut part = media_block(&upload.mime, &upload.data);
+            // The send record carries the bytes so a runner whose schema
+            // stores the media as a `data:` URL can encode them again; a
+            // runner that stores a media block never reads this member.
+            part["data"] = json!(STANDARD.encode(&upload.data));
+            parts.push(part);
         }
     }
     Ok(parts)
@@ -351,9 +371,24 @@ pub fn add_parts(body: &mut Value, record: &Value) {
         .as_array()
         .filter(|p| !p.is_empty())
     {
+        let parts: Vec<Value> = parts
+            .iter()
+            .map(|part| {
+                // A runner whose own schema keeps media inline: a `data:` URL
+                // in a `file` part, with the digest written nowhere.
+                if record["stored_as"] == json!("data_url") {
+                    json!({"type":"file","mime":part["mime"],
+                        "url":format!("data:{};base64,{}",
+                            part["mime"].as_str().unwrap_or_default(),
+                            part["data"].as_str().unwrap_or_default())})
+                } else {
+                    part.clone()
+                }
+            })
+            .collect();
         let prompt = record.get("prompt").unwrap_or(&body["text"]);
         let mut all = vec![json!({"type":"text","text":prompt})];
-        all.extend(parts.iter().cloned());
+        all.extend(parts);
         body.as_object_mut().unwrap().remove("text");
         body["parts"] = json!(all);
     }
@@ -377,7 +412,13 @@ pub fn ingest(module: &Module, body: &mut Value) {
             .media
             .insert(sha256_hex(&bytes), (mime.clone(), bytes.clone()));
         store.save();
-        *body = media_block(&mime, &bytes);
+        // A runner that keeps media inline stores the bytes where its own
+        // schema holds them; both forms are read back as a marker.
+        *body = if module.data_url_media {
+            json!({"type":"file","mime":mime,"url":format!("data:{mime};base64,{}",STANDARD.encode(&bytes))})
+        } else {
+            media_block(&mime, &bytes)
+        };
         return;
     }
     match body {
@@ -387,13 +428,47 @@ pub fn ingest(module: &Module, body: &mut Value) {
     }
 }
 
-fn contains_media(value: &Value) -> bool {
-    if value["type"] == "media" {
-        return true;
+pub(super) fn data_url(url: &str) -> Option<(String, Vec<u8>)> {
+    let rest = url.strip_prefix("data:")?;
+    let (mime, payload) = rest.split_once(";base64,")?;
+    Some((mime.to_owned(), STANDARD.decode(payload).ok()?))
+}
+
+/// The kind, media type and bytes of each media a read message stores: what
+/// a stored media block names, or the inline bytes a `data:` URL `file`
+/// part holds. A stored media block keeps its bytes outside the message, so
+/// its byte vector stays empty.
+pub(super) fn stored_media(message: &Value) -> Vec<(&'static str, String, Vec<u8>)> {
+    fn kind(mime: &str) -> &'static str {
+        if mime.starts_with("image/") {
+            "image"
+        } else {
+            "document"
+        }
     }
+    let mut found = Vec::new();
+    if message["type"] == "media" {
+        let mime = message["mime"].as_str().unwrap_or_default().to_owned();
+        found.push((kind(&mime), mime, Vec::new()));
+    } else if message["type"] == "file" {
+        if let Some((mime, bytes)) = data_url(message["url"].as_str().unwrap_or_default()) {
+            let kind = kind(&mime);
+            found.push((kind, mime, bytes));
+        }
+    }
+    match message {
+        Value::Array(items) => items.iter().for_each(|v| found.extend(stored_media(v))),
+        Value::Object(map) => map.values().for_each(|v| found.extend(stored_media(v))),
+        _ => {}
+    }
+    found
+}
+
+fn has_marker(value: &Value) -> bool {
     match value {
-        Value::Array(items) => items.iter().any(contains_media),
-        Value::Object(map) => map.values().any(contains_media),
+        Value::Array(items) => items.iter().any(has_marker),
+        Value::Object(map) => map.values().any(has_marker),
+        Value::String(text) => text.starts_with("[media not shown:"),
         _ => false,
     }
 }
@@ -401,10 +476,29 @@ fn contains_media(value: &Value) -> bool {
 pub(super) fn render(value: &mut Value) {
     if value["type"] == "media" {
         let text = wire::marker(
-            value["kind"].as_str().unwrap(),
-            value["mime"].as_str().unwrap(),
-            value["bytes"].as_u64().unwrap(),
-            value["sha256"].as_str().unwrap(),
+            value["kind"].as_str().unwrap_or_default(),
+            value["mime"].as_str().unwrap_or_default(),
+            value["bytes"].as_u64().unwrap_or_default(),
+            value["sha256"].as_str().unwrap_or_default(),
+            "not_requested",
+        );
+        *value = json!({"type":"text","text":text});
+        return;
+    }
+    if value["type"] == "file" {
+        let Some((mime, bytes)) = data_url(value["url"].as_str().unwrap_or_default()) else {
+            return;
+        };
+        let kind = if mime.starts_with("image/") {
+            "image"
+        } else {
+            "document"
+        };
+        let text = wire::marker(
+            kind,
+            &mime,
+            bytes.len() as u64,
+            &sha256_hex(&bytes),
             "not_requested",
         );
         *value = json!({"type":"text","text":text});
@@ -412,7 +506,10 @@ pub(super) fn render(value: &mut Value) {
     }
     if value["type"] == "tool_result"
         && value["content"].is_array()
-        && contains_media(&value["content"])
+        && (value["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().any(|p| !stored_media(p).is_empty()))
+            || has_marker(&value["content"]))
     {
         let mut parts = value["content"].as_array().unwrap().clone();
         parts.iter_mut().for_each(render);
@@ -431,26 +528,89 @@ pub(super) fn render(value: &mut Value) {
     }
 }
 
-pub fn page(page: &mut ReadPage, mode: Option<MediaMode>, defects: &Defects) {
+/// Page-wide faults, whichever message of a run they touch: these are the
+/// read cases' own defects, and their sessions hold the name in their mids, so
+/// they key on the defect, not the message.
+fn named_page_wide(defects: &Defects) -> bool {
+    defects.attachments == "attachments_default_read"
+        || defects.attachments == "attachments_tool_result"
+}
+
+/// The marker text a rendered media part would read as.
+fn marker_text(body: &Value) -> String {
+    match stored_media(body).first() {
+        Some((kind, mime, bytes)) => wire::marker(
+            kind,
+            mime,
+            bytes.len() as u64,
+            &sha256_hex(bytes),
+            "not_requested",
+        ),
+        None => String::new(),
+    }
+}
+
+/// A part whose content a stored part's digest never names.
+fn stray_part() -> Value {
+    json!({"type":"text","text":"part digests name a part this message does not store"})
+}
+
+fn part_row(key: &str, value: &Value) -> cortexkit_role_llm_runner::read::descriptors::PartDigest {
+    cortexkit_role_llm_runner::read::descriptors::PartDigest::new(key, value)
+}
+
+/// Write the page's stored media identities: every message this group touches
+/// carries `digest` of its stored body and one `part_digests` row per stored
+/// top-level part.
+///
+/// The defects here are the read cases' own faulty runners, each breaking one
+/// rule the case checks and nothing else: a marker where the block belongs, a
+/// digest or part digests of something else, or identities that change when
+/// the descriptors page serves the same message.
+pub fn page_of(page: &mut ReadPage, mode: Option<MediaMode>, defects: &Defects) {
+    let blocks = mode == Some(MediaMode::Blocks);
     for message in &mut page.messages {
-        if !contains_media(&message.message) {
+        let body = message.message.clone();
+        // A message with neither stored media nor a rendered marker has
+        // nothing this group touches, so its identities are left alone.
+        if stored_media(&body).is_empty() && !has_marker(&body) {
             continue;
         }
-        message.digest = Some(content_digest(&message.message));
-        message.part_digests = Some(
-            media::parts(&message.message)
-                .iter()
-                .map(|(key, value)| {
-                    cortexkit_role_llm_runner::read::descriptors::PartDigest::new(key, value)
-                })
-                .collect(),
-        );
-        let broken = matches!(
-            defects.attachments,
-            "attachments_default_read" | "attachments_tool_result"
-        ) && message.mid.contains(defects.attachments);
-        if mode != Some(MediaMode::Blocks) && !broken {
+        // The read cases' own faults answer the blocks page with the inline
+        // form too, because they hold no stored block to serve.
+        let broken = named_page_wide(defects);
+        if mode != Some(MediaMode::Blocks) || broken {
             render(&mut message.message);
         }
+        message.digest = Some(content_digest(&body));
+        message.part_digests = Some(
+            media::parts(&body)
+                .iter()
+                .map(|(key, value)| part_row(key, value))
+                .collect(),
+        );
+        if blocks && defects.attachments == "attachments_blocks_digest" {
+            message.digest = Some(content_digest(&json!({"rendered": marker_text(&body)})));
+        }
+        if blocks && defects.attachments == "attachments_blocks_part_digest" {
+            // What a page of markers alone would describe: a text part
+            // reading as the marker, where the stored media part is.
+            message.part_digests = Some(
+                media::parts(&body)
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (key, value))| match stored_media(value).first() {
+                        Some(_) => part_row(key, &json!({"type":"text","text":marker_text(&body)})),
+                        None if i == 0 => part_row(key, &stray_part()),
+                        None => part_row(key, value),
+                    })
+                    .collect(),
+            );
+        }
     }
+}
+
+/// [`page_of`] for a whole page.
+pub fn page(page: &mut ReadPage, mode: Option<MediaMode>, defects: &Defects) {
+    page_of(page, mode, defects)
 }

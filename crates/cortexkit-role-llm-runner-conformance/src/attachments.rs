@@ -644,48 +644,68 @@ where
             "multipart tool result did not render as today's text output in part order",
         )?;
     }
-    let stored: Vec<_> = blocks
+    // The default read replaced every media block with the marker, so its
+    // exact text names the message that holds the media. Blocks and
+    // descriptors mode are then matched by that `mid`: a runner's stored
+    // schema contains the media its own way and need not carry the digest.
+    let mid = inline
         .messages
         .iter()
-        .filter(|m| m.message.to_string().contains(&hash))
-        .collect();
-    check(
-        !stored.is_empty(),
-        "media blocks opt-in did not return the stored block",
-    )?;
+        .find(|m| {
+            let mut found = Vec::new();
+            strings(&m.message, &mut found);
+            found.iter().any(|text| text.contains(&marker))
+        })
+        .map(|m| m.mid.clone())
+        .ok_or("default read has no exact not_requested marker")?;
     check(
         descriptors.messages.iter().any(|m| {
-            m.message.to_string().contains("media_ref") && m.message.to_string().contains(&hash)
+            m.mid == mid
+                && m.message.to_string().contains("media_ref")
+                && m.message.to_string().contains(&hash)
         }),
         "descriptors mode lost media_ref",
     )?;
-    for message in stored {
-        check(
-            message.digest.as_deref() == Some(content_digest(&message.message).as_str()),
-            "blocks digest does not identify the stored message",
-        )?;
-        let parts = case.subject.read_parts(&message.message);
-        let expected: Vec<_> = parts
+    let message = blocks
+        .messages
+        .iter()
+        .find(|m| m.mid == mid)
+        .ok_or("media blocks opt-in did not return the stored message")?;
+    let stored_texts = {
+        let mut found = Vec::new();
+        strings(&message.message, &mut found);
+        found
+    };
+    check(
+        !stored_texts.iter().any(|text| text.contains(&marker)),
+        "blocks mode skipped markers instead of serving the stored message",
+    )?;
+    check(
+        message.digest.as_deref() == Some(content_digest(&message.message).as_str()),
+        "blocks digest does not identify the stored message",
+    )?;
+    let expected: Vec<_> = case
+        .subject
+        .read_parts(&message.message)
+        .iter()
+        .map(|(key, value)| {
+            cortexkit_role_llm_runner::read::descriptors::PartDigest::new(key, value)
+        })
+        .collect();
+    check(
+        message.part_digests.as_ref() == Some(&expected),
+        "part digests do not identify stored parts",
+    )?;
+    for page in [&inline, &descriptors] {
+        let other = page
+            .messages
             .iter()
-            .map(|(key, value)| {
-                cortexkit_role_llm_runner::read::descriptors::PartDigest::new(key, value)
-            })
-            .collect();
+            .find(|m| m.mid == message.mid)
+            .ok_or("rendered read lost a stored message")?;
         check(
-            message.part_digests.as_ref() == Some(&expected),
-            "part digests do not identify stored parts",
+            other.digest == message.digest && other.part_digests == message.part_digests,
+            "media rendering changed stored content identities",
         )?;
-        for page in [&inline, &descriptors] {
-            let other = page
-                .messages
-                .iter()
-                .find(|m| m.mid == message.mid)
-                .ok_or("rendered read lost a stored message")?;
-            check(
-                other.digest == message.digest && other.part_digests == message.part_digests,
-                "media rendering changed stored content identities",
-            )?;
-        }
     }
     media(route, &hash, bytes).await
 }

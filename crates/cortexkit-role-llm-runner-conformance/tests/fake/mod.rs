@@ -182,6 +182,9 @@ pub struct Defects {
     pub held_calls_never_listed: bool,
     pub held_calls_stale: bool,
     pub attachments: &'static str,
+    /// Store attachment media in the runner's own schema as a `data:` URL
+    /// `file` part, with no digest anywhere in the stored message.
+    pub attachments_store_data_url: bool,
     pub media: Option<&'static str>,
     pub user_command: Option<&'static str>,
     pub compaction: CompactionDefect,
@@ -368,6 +371,10 @@ pub struct Defects {
     /// reported any, at the top and in every `by_model` entry, instead of
     /// leaving the total absent.
     pub usage_absent_reasoning_as_zero: bool,
+    /// Bill reasoning as extra output by adding it to the step's output
+    /// count, as a runner that reads it as an addition rather than a
+    /// breakdown would.
+    pub usage_reasoning_added_to_output: bool,
     /// After a restart, `send.status` answers a queued send that was
     /// delivered before it `pending` again, as a status kept only in memory
     /// would; a re-send still answers from the durable record.
@@ -538,6 +545,9 @@ struct World {
     advertise_status: bool,
     cancel_step_boundary: bool,
     defects: Defects,
+    /// Store media the way a runner whose own schema keeps it inline does,
+    /// as a `data:` URL `file` part that carries the digest nowhere.
+    data_url_media: bool,
     step_recovery: StepRecovery,
     compaction_route_mode: compaction::CompactionRouteMode,
     queue_receipt_pending_then_unknown: bool,
@@ -993,6 +1003,10 @@ fn baseline() -> Baseline {
 /// One running incarnation: its log on disk and what it rebuilt from it.
 pub struct Module {
     attachments: Mutex<attachments::Store>,
+    /// Store a sent upload as a `data:` URL `file` part, the way a runner
+    /// that keeps media inline in its own schema does, instead of the
+    /// default stored media block.
+    data_url_media: bool,
     world: Arc<World>,
     log: PathBuf,
     alive: AtomicBool,
@@ -1115,6 +1129,7 @@ impl Module {
         std::fs::create_dir_all(root).map_err(|e| HarnessError::new(e.to_string()))?;
         let module = Arc::new(Self {
             attachments: Mutex::new(attachments::Store::open(root)),
+            data_url_media: world.data_url_media,
             world,
             log: root.join("records.jsonl"),
             alive: AtomicBool::new(true),
@@ -1675,6 +1690,18 @@ impl Module {
                         .with_cached_input_tokens(count("cached_input_tokens"))
                         .with_cache_write_tokens(count("cache_write_tokens"))
                         .with_output_tokens(count("output_tokens"));
+                    if let Some(reasoning) = reported["reasoning_tokens"].as_u64() {
+                        step = step.with_reasoning_tokens(reasoning);
+                    }
+                    // A provider that billed reasoning as extra output adds
+                    // it on top of the output count instead of reporting a
+                    // breakdown of it.
+                    if self.world.defects.usage_reasoning_added_to_output {
+                        if let Some(reasoning) = reported["reasoning_tokens"].as_u64() {
+                            let output = count("output_tokens") + reasoning;
+                            step = step.with_output_tokens(output);
+                        }
+                    }
                 }
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.usage.record_step(FAKE_PROVIDER, FAKE_MODEL, None, step);
@@ -2152,13 +2179,18 @@ impl Module {
                 }
             }
             let no_calls = calls.is_empty();
-            // The scripted model reports these four counts and never
-            // reasoning; a turn without usage reports nothing.
+            // The scripted model reports the counts each turn states, with
+            // reasoning only where a turn states it; a turn without usage
+            // reports nothing.
             let usage = turn.usage.as_ref().map(|usage| {
-                json!({ "input_tokens": usage.input_tokens,
+                let mut reported = json!({ "input_tokens": usage.input_tokens,
                         "cached_input_tokens": usage.cache_read_tokens,
                         "cache_write_tokens": usage.cache_write_tokens,
-                        "output_tokens": usage.output_tokens })
+                        "output_tokens": usage.output_tokens });
+                if let Some(reasoning) = usage.reasoning_tokens {
+                    reported["reasoning_tokens"] = json!(reasoning);
+                }
+                reported
             });
             let input_spent = turn.usage.as_ref().map(|usage| {
                 sess.input_spent
@@ -2957,6 +2989,13 @@ impl Module {
             Ok(parts) => parts,
             Err(reply) => return Ok(reply),
         };
+        // How this runner's schema stores a sent upload; recorded with the
+        // send so a replay writes the same parts it wrote the first time.
+        let stored_as = if self.world.data_url_media {
+            json!("data_url")
+        } else {
+            json!("media_block")
+        };
         if let Err(field) = request.check_delivery_order(&self.world.groups) {
             if !self.world.defects.order_list_accepted_without_group {
                 return Ok(invalid(field));
@@ -3228,6 +3267,7 @@ impl Module {
                     session,
                     json!({ "kind": "steer", "send_id": request.send_id,
                             "attachment_parts": attachment_parts,
+                            "stored_as": stored_as,
                             "prompt": request.prompt_text(), "delivery": delivery,
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
                             "sender": stamp.principal,
@@ -3346,6 +3386,7 @@ impl Module {
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
                     "attachment_parts": attachment_parts,
+                    "stored_as": stored_as,
                     "attachment_accepts": request.runner_params.get("attachment_accepts"),
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "cause": cause, "sender": stamp.principal,
@@ -4629,6 +4670,9 @@ pub struct FakeSubject {
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
+    /// Store attachment media in the runner's own schema as a `data:` URL
+    /// `file` part, with no digest anywhere in the stored message.
+    pub data_url_media: bool,
     /// The tool provider cannot answer an image-only result, so a scripted
     /// call that would carry one carries its default text result instead.
     pub no_image_results: bool,
@@ -4745,6 +4789,7 @@ impl FakeSubject {
             incarnation_fixtures: false,
             output_refs_group: false,
             descriptor_case: None,
+            data_url_media: false,
             descriptor_fixtures: false,
             no_image_results: false,
             standalone_in_process: false,
@@ -4808,6 +4853,7 @@ impl FakeSubject {
                     advertise_status: self.advertise_status,
                     cancel_step_boundary: self.cancel_step_boundary,
                     defects: self.defects,
+                    data_url_media: self.data_url_media,
                     step_recovery: self.step_recovery,
                     queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
                     steer_receipt_confirm: self.steer_receipt_confirm,

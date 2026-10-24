@@ -281,6 +281,9 @@ pub struct ScriptedUsage {
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub output_tokens: u64,
+    /// Output the provider reports as reasoning, already part of
+    /// `output_tokens`; a step that reports none leaves it `None`.
+    pub reasoning_tokens: Option<u64>,
 }
 
 /// Decoded facts from a native tool-result body, not a shared wire shape.
@@ -364,7 +367,15 @@ impl ScriptedUsage {
             cache_read_tokens,
             cache_write_tokens,
             output_tokens,
+            reasoning_tokens: None,
         }
+    }
+
+    /// Report some of this step's output as reasoning. It is a breakdown of
+    /// `output_tokens`, not a count added to it, so it must not exceed them.
+    pub fn with_reasoning_tokens(mut self, tokens: u64) -> Self {
+        self.reasoning_tokens = Some(tokens);
+        self
     }
 }
 

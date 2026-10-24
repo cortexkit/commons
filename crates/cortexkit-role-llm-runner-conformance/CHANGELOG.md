@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.12.1
+
+- Require llm-runner 0.6.3.
+- Fix `attachments_default_read` and `attachments_tool_result`: they found
+  the stored media message by searching the blocks page for the media's hex
+  sha256, which a correct runner need not write anywhere in its own message
+  schema, so both failed runners that store media inline. They now find that
+  message through the default read's marker and its `mid`, and still compare
+  its digest and part digests against independently computed ones, and its
+  served bytes against `session.media_read`. The descriptors `media_ref`
+  check is unchanged, since that shape is contract-defined.
+- Add a fake that stores a sent upload and a tool-result image as a `data:`
+  URL part with no digest in it: both read cases pass against it. Add a
+  fault for each rule a blocks page must meet (markers served instead of the
+  stored message, a wrong `digest`, wrong `part_digests`), each failing both
+  read cases by name with its own reason.
+- Add a check to `run_usage_counts_reported_steps` covering reasoning:
+  a runner that bills `reasoning_tokens` on top of `output_tokens` reports
+  more output than the scripted model did and fails by name. The case now
+  runs twice, once with no step reporting reasoning and once with a step
+  that does, so both the absent-total rule and the reasoning total are
+  observable.
+- Fix the test harness for faulty runners: `only_these_fail` checked an
+  expected reason only on a failed case, so an expectation against a case
+  that passed or ran inapplicable was never compared.
+
 ## 0.12.0
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

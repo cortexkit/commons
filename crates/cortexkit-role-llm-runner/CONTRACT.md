@@ -1303,6 +1303,13 @@ run's token usage whichever runner served it.
   "unreported_steps": 0}`, with every total absent and `by_model` empty or
   absent. A decoder reads an absent `by_model` as empty; a usage with
   `steps > 0` MUST carry it. `RunUsage` always encodes it.
+- [pinned] `reasoning_tokens` is a breakdown of `output_tokens`, never an
+  addition to it: it counts output the provider reports as reasoning, and
+  that output is already inside `output_tokens`. So `reasoning_tokens <=
+  output_tokens` whenever both are present. A consumer computing cost
+  charges `output_tokens` once and never adds `reasoning_tokens` on top. A
+  missing `reasoning_tokens` means not reported, not zero. §6.4's totals and
+  the `session_usage` totals that share its shape follow this rule.
 - [pinned] Usage counts what the provider billed or reported for this run's
   steps only, never steps of earlier runs in the session.
 - [pinned] A runner that declares `run_usage` includes `usage` on every
@@ -3022,12 +3029,18 @@ its host's file storage, not a second copy of the host's media store.
   by a single `\n`, without a trailing newline), not a new multi-part shape. Strict readers, including
   compaction readers, therefore see only their existing shapes. The rule
   also applies to inline history and resolve reads where those are served.
-- [pinned] `media: "blocks"` opts in to stored media blocks, never binary
-  payload bytes added by this group. Older runners refuse the unknown
-  `MediaMode` value as `invalid_params {field: "media"}`, so readers fail
-  closed. Descriptors mode keeps `media_ref`, and display rows still use
-  refs (§4.7). `digest` and `part_digests` always identify the stored message
-  and its stored parts, never the marker render or descriptors.
+- [pinned] `media: "blocks"` returns each message the way the runner stores
+  it, media included: a stored block, or whatever bytes the runner's own
+  schema keeps inline for that media (a `data:` URL, say). This group adds no
+  member of its own that carries bytes, and a stored message need not hold
+  the media's sha256 anywhere. Older runners refuse the unknown `MediaMode`
+  value as `invalid_params {field: "media"}`, so readers fail closed.
+  Descriptors mode keeps `media_ref`, and display rows still use refs (§4.7).
+  `digest` and `part_digests` always identify the stored message and its
+  stored parts, never the marker render or descriptors. The frame budget
+  still applies (§4.2): a stored message too large for one reply, media
+  bytes included, is refused `reply_too_large` in blocks mode exactly as in
+  inline mode, and descriptors mode is how a reader pages such a message.
 - [pinned] Model fallback and reads share `attachments::marker` and the
   grammar above. The context selects `reason`: `not_requested` for default
   reads, `unsupported` when a model cannot take stored media. Size and hash

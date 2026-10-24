@@ -2743,7 +2743,7 @@ async fn without_a_new_lineage_the_left_lineage_case_is_inapplicable() {
 }
 
 #[tokio::test]
-async fn a_runner_reporting_usage_passes_and_an_absent_reasoning_total_as_zero_fails_by_name() {
+async fn a_faithful_usage_runner_passes_the_usage_cases() {
     only_these_fail(
         Capability::RunUsage,
         USAGE_PREFIXES,
@@ -2751,6 +2751,12 @@ async fn a_runner_reporting_usage_passes_and_an_absent_reasoning_total_as_zero_f
         &[],
     )
     .await;
+}
+
+/// A runner that writes `reasoning_tokens: 0` where no step reported any: the
+/// usage case must say the total is absent, never 0.
+#[tokio::test]
+async fn run_usage_total_nobody_reported_as_zero_fails_by_name() {
     only_these_fail(
         Capability::RunUsage,
         USAGE_PREFIXES,
@@ -2761,6 +2767,26 @@ async fn a_runner_reporting_usage_passes_and_an_absent_reasoning_total_as_zero_f
         &[(
             "run_usage_counts_reported_steps",
             "reports reasoning_tokens as 0, but the scripted model reported no reasoning_tokens",
+        )],
+    )
+    .await;
+}
+
+/// Reasoning is a breakdown of output, never a count added to it: a runner
+/// that bills it as extra output reports more output than the provider did,
+/// and the usage case must say so by name.
+#[tokio::test]
+async fn run_usage_reasoning_billed_on_top_of_output_fails_by_name() {
+    only_these_fail(
+        Capability::RunUsage,
+        USAGE_PREFIXES,
+        Defects {
+            usage_reasoning_added_to_output: true,
+            ..Defects::default()
+        },
+        &[(
+            "run_usage_counts_reported_steps",
+            "output_tokens Some(39), but the scripted model reported Some(32)",
         )],
     )
     .await;
@@ -5214,13 +5240,50 @@ macro_rules! attachment_control {
         }
     };
 }
+
+/// One fault and the exact reason it must give, in each of the two read cases
+/// (the tool-result one nests the media in a tool result), and nothing else
+/// failed. This mirrors the external check the read cases and their faults
+/// exist for.
+async fn attachment_read_fault(defect: &'static str, reason: &str) {
+    let report = run(&attachment_subject_with(defect)).await;
+    eprintln!("REPORT {defect}: {}", report.render());
+    for name in ["attachments_default_read", "attachments_tool_result"] {
+        let got = failed(&report, name);
+        println!("{name}: {got}");
+        assert!(got.contains(reason), "{name} ({defect}): {got}");
+    }
+    assert_none_failed_but(
+        &report,
+        &["attachments_default_read", "attachments_tool_result"],
+    );
+}
+
+/// The attachments fake carrying one read fault, with the process kill every
+/// run of the suite wants.
+fn attachment_subject_with(defect: &'static str) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        attachments: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::Attachments);
+    subject.capabilities.insert(Capability::DeliveryOrder);
+    subject.claim_process_kill = true;
+    subject.enable_retention();
+    subject
+}
 attachment_control!(attachments_default_read);
+attachment_control!(attachments_tool_result);
 attachment_control!(attachments_media_unreferenced);
 attachment_control!(attachments_commit_sha256);
 attachment_control!(attachments_chunk_cap);
 
 #[tokio::test]
 async fn attachment_faults_fail_cases_by_name() {
+    // The two read cases share one check over the same replies, so a runner
+    // faulty in either of them fails both, and their own deliberate faults
+    // (served markers, blocks digests, a stray prompt) redden the pair.
+    const READ_CASES: [&str; 2] = ["attachments_default_read", "attachments_tool_result"];
     for spec in CASES
         .iter()
         .filter(|case| case.name.starts_with("attachments_"))
@@ -5231,8 +5294,52 @@ async fn attachment_faults_fail_cases_by_name() {
             .iter()
             .filter(|case| case.name.starts_with("attachments_") && case.name != spec.name)
         {
+            if READ_CASES.contains(&spec.name) && READ_CASES.contains(&other.name) {
+                failed(&report, other.name);
+                continue;
+            }
             assert_passed(&report, other.name);
         }
+    }
+}
+
+/// The two read cases must pass against a runner whose stored message is a
+/// `data:` URL `file` part: it carries the media's sha256 nowhere, which the
+/// contract does not require of a runner's own message schema.
+#[tokio::test]
+async fn attachments_read_cases_pass_when_stored_media_is_a_data_url() {
+    let mut subject = FakeSubject::new(Defects {
+        attachments_store_data_url: true,
+        ..Defects::default()
+    });
+    subject.data_url_media = true;
+    subject.capabilities.insert(Capability::Attachments);
+    subject.capabilities.insert(Capability::DeliveryOrder);
+    subject.claim_process_kill = true;
+    subject.enable_retention();
+    let report = run(&subject).await;
+    for name in ["attachments_default_read", "attachments_tool_result"] {
+        assert_passed(&report, name);
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+/// Every rule the read cases hold a blocks or descriptors page to has its own
+/// faulty runner, and each fails both cases with that rule's reason alone.
+#[tokio::test]
+async fn attachment_read_rule_faults_fail_by_name() {
+    let defaults: [(&'static str, &str); 2] = [
+        (
+            "attachments_blocks_digest",
+            "blocks digest does not identify the stored message",
+        ),
+        (
+            "attachments_blocks_part_digest",
+            "part digests do not identify stored parts",
+        ),
+    ];
+    for (defect, reason) in defaults {
+        attachment_read_fault(defect, reason).await;
     }
 }
 

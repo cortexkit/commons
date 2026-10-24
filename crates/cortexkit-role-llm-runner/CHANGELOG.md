@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.3
+
+Text and vectors only: no wire type or behaviour changes.
+
+- Say what `media: "blocks"` returns: the stored message exactly as the
+  runner stores it, including media bytes the runner's own schema keeps
+  inline (a `data:` URL, for example). The group adds no member carrying
+  bytes, and a stored message need not hold the media's sha256. The frame
+  budget still applies: a stored message too large for one reply is refused
+  `reply_too_large` in blocks mode, and descriptors mode is how a reader
+  pages it.
+- Clarify that `reasoning_tokens` is a breakdown of `output_tokens`, never an
+  addition to it, so it never exceeds `output_tokens`. A consumer charges
+  `output_tokens` once and never adds `reasoning_tokens` on top; a missing
+  `reasoning_tokens` means not reported, not zero.
+
 ## 0.6.2
 
 - Add the `head_sender` describe group for `session.head.sender`. With the
