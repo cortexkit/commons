@@ -143,16 +143,19 @@ fn runners() -> Vec<&'static str> {
 #[test]
 fn broad_targets_get_independent_baseline_and_mutant_deadlines() {
     for runner in runners() {
-        // Each target fits two seconds, but the pair cannot fit one deadline.
+        // Each target fits a five-second deadline, but the pair cannot fit
+        // one. The two seconds of headroom per target absorb a slow test
+        // binary launch: on a loaded Windows runner a launch alone has taken
+        // over a second.
         let f = Fixture::new(
-            "std::thread::sleep(std::time::Duration::from_millis(1100)); assert!(deadline_fixture::guarded());",
-            "std::thread::sleep(std::time::Duration::from_millis(1100));",
+            "std::thread::sleep(std::time::Duration::from_millis(3000)); assert!(deadline_fixture::guarded());",
+            "std::thread::sleep(std::time::Duration::from_millis(3000));",
         );
-        let rows = f.run(&[2], runner);
+        let rows = f.run(&[5], runner);
         let row = &rows[0];
         assert_eq!(row["outcome"], "CAUGHT", "{runner}: {rows}");
-        assert!(row["baseline_test_ms"].as_u64().unwrap() > 2000, "{row}");
-        assert!(row["test_ms"].as_u64().unwrap() > 2000, "{row}");
+        assert!(row["baseline_test_ms"].as_u64().unwrap() > 5000, "{row}");
+        assert!(row["test_ms"].as_u64().unwrap() > 5000, "{row}");
         for phase in ["baseline_targets", "targets"] {
             let targets = row[phase].as_array().unwrap();
             assert_eq!(targets.len(), 3, "{runner}: {row}");
