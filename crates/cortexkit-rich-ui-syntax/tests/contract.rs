@@ -50,20 +50,46 @@ fn run_cases(name: &str) {
                 )
             })
             .collect();
+        let mode = if case["mode"] == "program" {
+            Mode::Program
+        } else {
+            Mode::Reply
+        };
         assert_eq!(
             actual,
             expected,
             "{}: {:?}",
             case["name"],
-            parse(
-                source,
-                if case["mode"] == "program" {
-                    Mode::Program
-                } else {
-                    Mode::Reply
-                }
-            )
+            parse(source, mode)
         );
+        if let Some(diagnostics) = case.get("diagnostics") {
+            let expected: Vec<_> = diagnostics
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| {
+                    (
+                        d["code"].as_str().unwrap().to_owned(),
+                        d["start"].as_u64().unwrap() as usize,
+                        d["end"].as_u64().unwrap() as usize,
+                        d.get("subject").map(|s| s.as_str().unwrap().to_owned()),
+                    )
+                })
+                .collect();
+            let actual: Vec<_> = parse(source, mode)
+                .diagnostics
+                .into_iter()
+                .map(|d| {
+                    (
+                        d.code.as_str().to_owned(),
+                        d.span.start,
+                        d.span.end,
+                        d.subject,
+                    )
+                })
+                .collect();
+            assert_eq!(actual, expected, "{}: diagnostics", case["name"]);
+        }
     }
 }
 #[test]
@@ -74,6 +100,176 @@ fn original_samples_and_digest() {
 #[test]
 fn extended_samples() {
     run_cases("refs-scan-samples-v1.1.json");
+}
+#[test]
+fn stream_and_diagnostic_samples() {
+    run_cases("refs-scan-samples-v1.2.json");
+}
+
+/// The only diagnostic `parse` reports for `source`, as (code, span, subject).
+fn only(source: &str, mode: Mode) -> (DiagnosticCode, usize, usize, Option<String>) {
+    let doc = parse(source, mode);
+    assert_eq!(doc.diagnostics.len(), 1, "{source:?}: {doc:?}");
+    let d = doc.diagnostics.into_iter().next().unwrap();
+    (d.code, d.span.start, d.span.end, d.subject)
+}
+
+#[test]
+fn unterminated_string_names_the_string() {
+    use DiagnosticCode::UnterminatedString as U;
+    // A raw line break inside a declaration's string.
+    let source = "export const a = 'abc\nexport const b = 1";
+    assert_eq!(only(source, Mode::Program), (U, 17, 21, None));
+    assert_eq!(&source[17..21], "'abc");
+    // The construct ends before the closing quote.
+    assert_eq!(only("{'abc}", Mode::Program), (U, 1, 6, None));
+    // A line break after a backslash is still a raw line break.
+    assert_eq!(only("{'a\\\nb'}", Mode::Program), (U, 1, 4, None));
+    // A reply prop string.
+    assert_eq!(only("<A x=\"abc\ndef\" />", Mode::Reply), (U, 5, 9, None));
+    assert_eq!(U.as_str(), "E_UNTERMINATED_STRING");
+}
+
+#[test]
+fn bad_escape_names_the_escape() {
+    use DiagnosticCode::BadEscape as B;
+    for (source, start, end) in [
+        ("{'a\\q'}", 3, 5),
+        ("{'\\u{110000}'}", 2, 12),
+        ("{'\\u{d800}'}", 2, 10),
+        ("{'\\u{}'}", 2, 6),
+        ("{'\\u{12'}", 2, 7),
+        ("{'\\u{0000041}'}", 2, 13),
+        ("{'\\u12'}", 2, 4),
+    ] {
+        assert_eq!(
+            only(source, Mode::Program),
+            (B, start, end, None),
+            "{source}"
+        );
+        assert!(source[start..end].starts_with("\\"));
+    }
+    // Inside a declaration it is not reported as an incomplete declaration.
+    assert_eq!(
+        only("export const s = 'a\\q'", Mode::Program),
+        (B, 19, 21, None)
+    );
+    assert_eq!(B.as_str(), "E_BAD_ESCAPE");
+}
+
+#[test]
+fn keyword_declarations_are_reserved_names() {
+    for name in ["true", "false", "null", "export", "let", "const"] {
+        let source = format!("export const {name} = 1");
+        assert_eq!(
+            only(&source, Mode::Program),
+            (
+                DiagnosticCode::ReservedName,
+                0,
+                source.len(),
+                Some(name.to_owned())
+            ),
+        );
+        let source = format!("export let ${name} = 1");
+        assert_eq!(
+            only(&source, Mode::Program),
+            (
+                DiagnosticCode::ReservedName,
+                0,
+                source.len(),
+                Some(name.to_owned())
+            ),
+        );
+    }
+}
+
+#[test]
+fn diagnostics_name_their_subject() {
+    use DiagnosticCode as C;
+    let cases: &[(&str, Mode, C, &str)] = &[
+        (
+            "export const data = 1",
+            Mode::Program,
+            C::ReservedName,
+            "data",
+        ),
+        (
+            "export const x = 1\nexport let $x = 2",
+            Mode::Program,
+            C::DuplicateName,
+            "x",
+        ),
+        (
+            "export let $s = $$tc(1)",
+            Mode::Program,
+            C::LiteralRequired,
+            "s",
+        ),
+        ("{File(name)}", Mode::Program, C::LiteralRequired, "File"),
+        ("{{a: 1, 'a': 2}}", Mode::Program, C::DuplicateKey, "a"),
+        ("<A x={1} x={2} />", Mode::Reply, C::DuplicateProp, "x"),
+        ("<A x={a}>b</A>", Mode::Reply, C::ReplyForbidden, "x"),
+        ("<A>b", Mode::Reply, C::UnclosedTag, "A"),
+        ("<A>b</B>", Mode::Reply, C::MismatchedClose, "A"),
+    ];
+    for (source, mode, code, subject) in cases {
+        let (got, _, _, named) = only(source, *mode);
+        assert_eq!((got, named.as_deref()), (*code, Some(*subject)), "{source}");
+    }
+    // Limit and nesting diagnostics about a tag name it.
+    let tags = (0..65).map(|_| "<A x={1} />\n").collect::<String>();
+    let doc = parse(&tags, Mode::Reply);
+    let limit = doc
+        .diagnostics
+        .iter()
+        .find(|d| d.code == C::LimitTags)
+        .unwrap();
+    assert_eq!(limit.subject.as_deref(), Some("A"));
+    let deep = "<B>".repeat(33) + "x" + &"</B>".repeat(33);
+    let doc = parse(&deep, Mode::Reply);
+    let nesting = doc
+        .diagnostics
+        .iter()
+        .find(|d| d.code == C::Nesting)
+        .unwrap();
+    assert_eq!(nesting.subject.as_deref(), Some("B"), "{doc:?}");
+    // A refused duplicate still names what it refused, and the first stands.
+    let doc = parse("export const x = 1\nexport const x = 2", Mode::Program);
+    assert!(matches!(doc.nodes[0].kind, Kind::Declaration { ref name, .. } if name == "x"));
+    assert_eq!(doc.diagnostics[0].subject.as_deref(), Some("x"));
+}
+
+#[test]
+fn program_limit_measures_raw_bytes() {
+    // Every invalid byte repairs to three bytes; the limit applies before that.
+    let doc = parse_bytes(&vec![0xff; PROGRAM_BYTES], Mode::Program);
+    assert!(!doc.fallback && !doc.shortened, "{:?}", doc.diagnostics);
+    assert_eq!(
+        doc.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>(),
+        [DiagnosticCode::Encoding]
+    );
+    assert_eq!(doc.parsed_bytes, 3 * PROGRAM_BYTES);
+    let doc = parse_bytes(&vec![0xff; PROGRAM_BYTES + 1], Mode::Program);
+    assert!(doc.fallback && doc.shortened);
+    assert_eq!(
+        doc.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>(),
+        [DiagnosticCode::SourceTooLarge, DiagnosticCode::Encoding]
+    );
+    // A valid scalar straddling the limit is left out whole, as by `parse`.
+    let mut source = vec![b'x'; PROGRAM_BYTES - 1];
+    source.extend_from_slice("é".as_bytes());
+    let doc = parse_bytes(&source, Mode::Program);
+    assert!(
+        doc.fallback
+            && doc
+                .diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::Encoding)
+    );
+    assert_eq!(
+        doc,
+        parse(std::str::from_utf8(&source).unwrap(), Mode::Program)
+    );
 }
 
 fn refs(source: &str, mode: Mode) -> Vec<String> {
@@ -86,7 +282,7 @@ fn refs(source: &str, mode: Mode) -> Vec<String> {
 fn diagnostic(source: &str, mode: Mode, code: &str) {
     let doc = parse(source, mode);
     assert!(
-        doc.diagnostics.iter().any(|d| d.code == code),
+        doc.diagnostics.iter().any(|d| d.code.as_str() == code),
         "missing {code}: {doc:?}"
     );
 }
@@ -222,7 +418,7 @@ fn source_limits_and_unicode_boundaries() {
     assert!(parse_bytes(b"\xff$$tc(1)", Mode::Program)
         .diagnostics
         .iter()
-        .any(|d| d.code == "W_ENCODING"));
+        .any(|d| d.code == DiagnosticCode::Encoding));
 }
 
 #[test]
@@ -325,13 +521,13 @@ fn chunking_does_not_change_final_parse() {
             let expected = parse(source, mode);
             for split in 0..=source.len() {
                 let mut stream = StreamParser::new(mode);
-                stream.push(&source.as_bytes()[..split]);
-                stream.push(&source.as_bytes()[split..]);
+                stream.feed(&source.as_bytes()[..split]);
+                stream.feed(&source.as_bytes()[split..]);
                 assert_eq!(stream.finish(), expected, "{source} at {split}");
             }
             let mut stream = StreamParser::new(mode);
             for byte in source.as_bytes() {
-                stream.push(&[*byte]);
+                stream.feed(&[*byte]);
             }
             assert_eq!(stream.finish(), expected);
         }
@@ -445,7 +641,7 @@ fn streaming_cap_preserves_valid_utf8() {
             assert_eq!(parse_bytes(source.as_bytes(), mode), expected);
             let mut stream = StreamParser::new(mode);
             for chunk in source.as_bytes().chunks(37) {
-                stream.push(chunk);
+                stream.feed(chunk);
             }
             assert_eq!(stream.finish(), expected);
         }

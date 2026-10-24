@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-rich-ui-syntax"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "pulldown-cmark",
  "serde_json",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "async-trait",
  "base64",

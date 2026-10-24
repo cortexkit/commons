@@ -16,6 +16,11 @@ pub const ORIGINAL_SAMPLES: &str =
 pub const EXTENDED_SAMPLES: &str =
     include_str!("../test-vectors/rich-ui-syntax-v1/refs-scan-samples-v1.1.json");
 
+/// Streaming-hazard and diagnostic samples. Their cases may also pin the
+/// exact `diagnostics` list: code, span and subject.
+pub const STREAM_AND_DIAGNOSTIC_SAMPLES: &str =
+    include_str!("../test-vectors/rich-ui-syntax-v1/refs-scan-samples-v1.2.json");
+
 /// The sample-set guide.
 pub const README: &str = include_str!("../test-vectors/rich-ui-syntax-v1/README.md");
 
@@ -23,6 +28,7 @@ pub const README: &str = include_str!("../test-vectors/rich-ui-syntax-v1/README.
 pub const FILES: &[(&str, &str)] = &[
     ("refs-scan-samples-v1.json", ORIGINAL_SAMPLES),
     ("refs-scan-samples-v1.1.json", EXTENDED_SAMPLES),
+    ("refs-scan-samples-v1.2.json", STREAM_AND_DIAGNOSTIC_SAMPLES),
     ("README.md", README),
 ];
 

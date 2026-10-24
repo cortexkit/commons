@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.2
+
+- Require cortexkit-rich-ui-syntax 0.2.0. The functions this crate calls
+  behave as before, so nothing else changes.
+
 ## 0.12.1
 
 - Require llm-runner 0.6.3.

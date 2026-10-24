@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4
+
+- Require cortexkit-rich-ui-syntax 0.2.0. The functions this crate calls
+  behave as before, so nothing else changes.
+
 ## 0.6.3
 
 Text and vectors only: no wire type or behaviour changes.

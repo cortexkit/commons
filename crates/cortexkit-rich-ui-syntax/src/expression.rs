@@ -1,7 +1,12 @@
 use crate::parser::Engine;
-use crate::{reference_end, Expression as E, Kind, Node, Span, EXPRESSION_DEPTH};
+use crate::{
+    reference_end, DiagnosticCode as C, Expression as E, Kind, Node, Span, EXPRESSION_DEPTH,
+};
 
-pub(crate) type Result<T> = std::result::Result<T, &'static str>;
+pub(crate) type Result<T> = std::result::Result<T, C>;
+
+/// Words the grammar gives a meaning of its own, so they never name a value.
+pub(crate) const KEYWORDS: [&str; 6] = ["true", "false", "null", "export", "let", "const"];
 
 pub(crate) struct ExprParser<'a, 's> {
     pub engine: &'a mut Engine<'s>,
@@ -32,17 +37,25 @@ impl ExprParser<'_, '_> {
         if self.eat(text) {
             Ok(())
         } else {
-            Err("E_SYNTAX")
+            Err(C::Syntax)
         }
     }
     pub fn identifier(&mut self) -> Result<String> {
+        let name = self.word()?;
+        if KEYWORDS.contains(&name.as_str()) {
+            return Err(C::Syntax);
+        }
+        Ok(name)
+    }
+    /// Reads an identifier-shaped word, keywords included.
+    pub fn word(&mut self) -> Result<String> {
         self.ws();
         let start = self.pos;
         let bytes = self.engine.source.as_bytes();
         if self.pos >= self.end
             || !(bytes[self.pos].is_ascii_alphabetic() || bytes[self.pos] == b'_')
         {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         self.pos += 1;
         while self.pos < self.end
@@ -50,35 +63,42 @@ impl ExprParser<'_, '_> {
         {
             self.pos += 1;
         }
-        let name = &self.engine.source[start..self.pos];
-        if matches!(name, "true" | "false" | "null" | "export" | "let" | "const") {
-            return Err("E_SYNTAX");
-        }
-        Ok(name.to_owned())
+        Ok(self.engine.source[start..self.pos].to_owned())
     }
+    /// Reads a quoted string. A raw line break, or the end of the enclosing
+    /// construct, before the closing quote is `E_UNTERMINATED_STRING`, spanning
+    /// the opening quote up to that point; a bad escape is `E_BAD_ESCAPE`,
+    /// spanning the escape as far as it was read.
     pub fn string(&mut self) -> Result<String> {
         self.ws();
-        let quote = self.rest().chars().next().ok_or("E_SYNTAX")?;
+        let open = self.pos;
+        let quote = self.rest().chars().next().ok_or(C::Syntax)?;
         if quote != '\'' && quote != '"' {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         self.pos += 1;
         let mut value = String::new();
         while self.pos < self.end {
             self.engine.work(1)?;
-            let c = self.rest().chars().next().ok_or("E_SYNTAX")?;
+            let at = self.pos;
+            let c = self.rest().chars().next().ok_or(C::Syntax)?;
+            if c == '\n' || c == '\r' {
+                return Err(self.unterminated(open, at));
+            }
             self.pos += c.len_utf8();
             if c == quote {
                 return Ok(value);
-            }
-            if c == '\n' || c == '\r' {
-                return Err("E_SYNTAX");
             }
             if c != '\\' {
                 value.push(if c == '\0' { '\u{fffd}' } else { c });
                 continue;
             }
-            let c = self.rest().chars().next().ok_or("E_SYNTAX")?;
+            let Some(c) = self.rest().chars().next() else {
+                return Err(self.unterminated(open, self.pos));
+            };
+            if c == '\n' || c == '\r' {
+                return Err(self.unterminated(open, self.pos));
+            }
             self.pos += c.len_utf8();
             match c {
                 '\'' | '"' | '\\' | '/' => value.push(c),
@@ -87,7 +107,7 @@ impl ExprParser<'_, '_> {
                 't' => value.push('\t'),
                 'u' => {
                     if !self.rest().starts_with('{') {
-                        return Err("E_SYNTAX");
+                        return Err(self.bad_escape(at));
                     }
                     self.pos += 1;
                     let start = self.pos;
@@ -96,21 +116,35 @@ impl ExprParser<'_, '_> {
                     {
                         self.pos += 1;
                     }
-                    if self.pos - start == 0
-                        || self.pos - start > 6
-                        || !self.rest().starts_with('}')
-                    {
-                        return Err("E_SYNTAX");
+                    let digits = self.pos - start;
+                    if !self.rest().starts_with('}') {
+                        return Err(self.bad_escape(at));
                     }
-                    let scalar = u32::from_str_radix(&self.engine.source[start..self.pos], 16)
-                        .map_err(|_| "E_SYNTAX")?;
-                    value.push(char::from_u32(scalar).ok_or("E_SYNTAX")?);
                     self.pos += 1;
+                    let scalar = (1..=6)
+                        .contains(&digits)
+                        .then(|| {
+                            u32::from_str_radix(&self.engine.source[start..start + digits], 16)
+                        })
+                        .and_then(std::result::Result::ok)
+                        .and_then(char::from_u32);
+                    match scalar {
+                        Some(scalar) => value.push(scalar),
+                        None => return Err(self.bad_escape(at)),
+                    }
                 }
-                _ => return Err("E_SYNTAX"),
+                _ => return Err(self.bad_escape(at)),
             }
         }
-        Err("E_SYNTAX")
+        Err(self.unterminated(open, self.pos))
+    }
+    fn unterminated(&mut self, open: usize, stop: usize) -> C {
+        self.engine
+            .fail(C::UnterminatedString, Some(Span::new(open, stop)), None)
+    }
+    fn bad_escape(&mut self, backslash: usize) -> C {
+        self.engine
+            .fail(C::BadEscape, Some(Span::new(backslash, self.pos)), None)
     }
     fn node(&mut self, start: usize, expression: E, children: Vec<Node>) -> Result<Node> {
         let node = self.engine.node(
@@ -119,14 +153,14 @@ impl ExprParser<'_, '_> {
             children,
         )?;
         if height(&node) > EXPRESSION_DEPTH + 1 {
-            return Err("E_NESTING");
+            return Err(C::Nesting);
         }
         Ok(node)
     }
     pub fn expression(&mut self, min: u8, depth: usize) -> Result<Node> {
         self.engine.expression_frames += 1;
         let result = if self.engine.expression_frames > EXPRESSION_DEPTH + 1 {
-            Err("E_NESTING")
+            Err(C::Nesting)
         } else {
             self.expression_inner(min, depth)
         };
@@ -136,7 +170,7 @@ impl ExprParser<'_, '_> {
     fn expression_inner(&mut self, min: u8, depth: usize) -> Result<Node> {
         self.engine.work(1)?;
         if depth > EXPRESSION_DEPTH {
-            return Err("E_NESTING");
+            return Err(C::Nesting);
         }
         self.ws();
         let start = self.pos;
@@ -175,14 +209,14 @@ impl ExprParser<'_, '_> {
                 if (prec == 4 && matches!(prev.as_str(), "==" | "!="))
                     || (prec == 5 && matches!(prev.as_str(), "<" | "<=" | ">" | ">="))
                 {
-                    return Err("E_NONASSOC");
+                    return Err(C::NonAssoc);
                 }
             }
             self.pos += op.len();
             let right = self.expression(if op == "**" { 9 } else { prec + 1 }, depth + 1)?;
             let mixes = |node: &Node| matches!(&node.kind, Kind::Expression(E::Binary(other)) if (op == "??" && matches!(other.as_str(), "||" | "&&")) || (matches!(op, "||" | "&&") && other == "??"));
             if mixes(&left) || mixes(&right) {
-                return Err("E_MIXED_COALESCE");
+                return Err(C::MixedCoalesce);
             }
             left = self.node(start, E::Binary(op.to_owned()), vec![left, right])?;
         }
@@ -197,11 +231,11 @@ impl ExprParser<'_, '_> {
     }
     fn primary(&mut self, depth: usize) -> Result<Node> {
         if depth > EXPRESSION_DEPTH {
-            return Err("E_NESTING");
+            return Err(C::Nesting);
         }
         self.ws();
         let start = self.pos;
-        let first = self.rest().chars().next().ok_or("E_SYNTAX")?;
+        let first = self.rest().chars().next().ok_or(C::Syntax)?;
         let mut node = match first {
             '\'' | '"' => {
                 let value = self.string()?;
@@ -219,7 +253,7 @@ impl ExprParser<'_, '_> {
                         self.pos += 1;
                     }
                     if self.pos == digits {
-                        return Err("E_NUMBER_LITERAL");
+                        return Err(C::NumberLiteral);
                     }
                 }
                 if self.pos < self.end && matches!(bytes[self.pos], b'e' | b'E') {
@@ -232,12 +266,12 @@ impl ExprParser<'_, '_> {
                         self.pos += 1;
                     }
                     if self.pos == digits {
-                        return Err("E_NUMBER_LITERAL");
+                        return Err(C::NumberLiteral);
                     }
                 }
                 let token = &self.engine.source[start..self.pos];
                 if !valid_number(token) {
-                    return Err("E_NUMBER_LITERAL");
+                    return Err(C::NumberLiteral);
                 }
                 self.node(start, E::Number(token.to_owned()), vec![])?
             }
@@ -261,7 +295,7 @@ impl ExprParser<'_, '_> {
                         .get(start + 1)
                         .is_some_and(u8::is_ascii_whitespace)
                     {
-                        return Err("E_SYNTAX");
+                        return Err(C::Syntax);
                     }
                     self.node(start, E::State(name), vec![])?
                 }
@@ -291,7 +325,7 @@ impl ExprParser<'_, '_> {
                             self.identifier()?
                         };
                         if !unique.insert(key.clone()) {
-                            return Err("E_DUPLICATE_KEY");
+                            return Err(self.engine.fail(C::DuplicateKey, None, Some(key)));
                         }
                         keys.push(key);
                         self.expect(":")?;
@@ -312,7 +346,7 @@ impl ExprParser<'_, '_> {
                     self.engine
                         .tag(start, self.end, self.tag_depth + 1, false)?;
                 if broken {
-                    return Err("E_SYNTAX");
+                    return Err(C::Syntax);
                 }
                 self.pos = end;
                 node
@@ -342,11 +376,18 @@ impl ExprParser<'_, '_> {
                     if self.eat("(") {
                         let children = self.arguments(")", depth)?;
                         if matches!(name.as_str(), "Artifact" | "File") {
-                            if children.len() != 1 {
-                                return Err("E_LITERAL_REQUIRED");
-                            }
-                            let Kind::Expression(E::String(path)) = &children[0].kind else {
-                                return Err("E_LITERAL_REQUIRED");
+                            let path = match children.as_slice() {
+                                [Node {
+                                    kind: Kind::Expression(E::String(path)),
+                                    ..
+                                }] => path,
+                                _ => {
+                                    return Err(self.engine.fail(
+                                        C::LiteralRequired,
+                                        None,
+                                        Some(name),
+                                    ))
+                                }
                             };
                             self.engine.node(
                                 Span::new(start, self.pos),

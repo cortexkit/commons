@@ -1,5 +1,6 @@
 use crate::expression::Result;
 use crate::parser::Engine;
+use crate::DiagnosticCode as C;
 use crate::*;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 use std::collections::VecDeque;
@@ -30,7 +31,7 @@ pub(crate) fn assemble(
             }
         }
     }
-    let masked = String::from_utf8(masked).map_err(|_| "E_SYNTAX")?;
+    let masked = String::from_utf8(masked).map_err(|_| C::Syntax)?;
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let events = Parser::new_ext(&masked, options).into_offset_iter();
@@ -101,14 +102,13 @@ pub(crate) fn assemble(
                     engine.blocks += 1;
                     if engine.blocks > BLOCKS {
                         engine.fatal = true;
-                        return Err("E_LIMIT_BLOCKS");
+                        return Err(C::LimitBlocks);
                     }
                 }
                 stack.push(engine.node(span, Kind::Markdown(kind), vec![])?);
             }
             Event::End(_) => {
-                let (skip, is_block, is_emphasis, delimiter) =
-                    suppressed.pop().ok_or("E_SYNTAX")?;
+                let (skip, is_block, is_emphasis, delimiter) = suppressed.pop().ok_or(C::Syntax)?;
                 if is_block {
                     block_depth -= 1;
                 }
@@ -131,7 +131,7 @@ pub(crate) fn assemble(
                     }
                     continue;
                 }
-                let mut node = stack.pop().ok_or("E_SYNTAX")?;
+                let mut node = stack.pop().ok_or(C::Syntax)?;
                 node.span.end = span.end;
                 if inline && matches!(node.kind, Kind::Markdown(Markdown::Paragraph)) {
                     for child in node.children {
@@ -190,7 +190,7 @@ pub(crate) fn assemble(
     // A Markdown structural event may consume a masked span (for example a
     // table delimiter). Such a span must never silently lose a language node.
     if !pending.is_empty() {
-        return Err("E_SYNTAX");
+        return Err(C::Syntax);
     }
     split_blocks(engine, roots)
 }
@@ -240,7 +240,7 @@ fn emit_text(
                 roots,
             );
         }
-        let node = pending.pop_front().ok_or("E_SYNTAX")?;
+        let node = pending.pop_front().ok_or(C::Syntax)?;
         pos = node.span.end;
         append(node, stack, roots);
     }

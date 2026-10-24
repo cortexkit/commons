@@ -1,4 +1,5 @@
 use crate::expression::{literal, reply_value, ExprParser, Result};
+use crate::DiagnosticCode as C;
 use crate::*;
 use std::collections::{HashMap, HashSet};
 
@@ -17,20 +18,70 @@ pub(crate) struct Engine<'s> {
     body_depth: usize,
     pub expression_frames: usize,
     structural_failures: usize,
+    /// Detail for the failure most recently returned as an error code: a
+    /// narrower span and the subject name. Consumed by the next report of the
+    /// same code, discarded by a report of any other code.
+    failure: Option<(DiagnosticCode, Option<Span>, Option<String>)>,
 }
 
 impl<'s> Engine<'s> {
+    /// An engine over `source[..end]` with the allowance documented for
+    /// adversarial input: `max(1024, 128 * end)` units of work.
+    pub fn new(source: &'s str, end: usize, mode: Mode) -> Self {
+        Engine {
+            source,
+            mode,
+            nodes: 0,
+            blocks: 0,
+            tags: 0,
+            declarations: 0,
+            names: HashSet::new(),
+            remaining_work: end.saturating_mul(128).max(1024),
+            diagnostics: vec![],
+            suppressed: 0,
+            fatal: false,
+            body_depth: 0,
+            expression_frames: 0,
+            structural_failures: 0,
+            failure: None,
+        }
+    }
+    /// Records detail for a failure about to be returned as `code`.
+    pub fn fail(
+        &mut self,
+        code: DiagnosticCode,
+        span: Option<Span>,
+        subject: Option<String>,
+    ) -> DiagnosticCode {
+        self.failure = Some((code, span, subject));
+        code
+    }
     pub fn work(&mut self, count: usize) -> Result<()> {
         if count > self.remaining_work {
             self.fatal = true;
-            return Err("E_PARSE_WORK");
+            return Err(C::ParseWork);
         }
         self.remaining_work -= count;
         Ok(())
     }
-    pub fn report(&mut self, code: &'static str, span: Span) {
+    pub fn report(&mut self, code: DiagnosticCode, span: Span) {
+        let (span, subject) = match self.failure.take() {
+            Some((failed, detail, subject)) if failed == code => (detail.unwrap_or(span), subject),
+            _ => (span, None),
+        };
+        self.push_diagnostic(code, span, subject);
+    }
+    fn report_about(&mut self, code: DiagnosticCode, span: Span, subject: &str) {
+        self.failure = None;
+        self.push_diagnostic(code, span, Some(subject.to_owned()));
+    }
+    fn push_diagnostic(&mut self, code: DiagnosticCode, span: Span, subject: Option<String>) {
         if self.diagnostics.len() < DIAGNOSTICS {
-            self.diagnostics.push(Diagnostic { code, span });
+            self.diagnostics.push(Diagnostic {
+                code,
+                span,
+                subject,
+            });
         } else {
             self.suppressed += 1;
         }
@@ -39,7 +90,7 @@ impl<'s> Engine<'s> {
         self.nodes += 1;
         if self.nodes > AST_NODES {
             self.fatal = true;
-            return Err("E_LIMIT_AST");
+            return Err(C::LimitAst);
         }
         Ok(Node {
             span,
@@ -120,7 +171,7 @@ impl<'s> Engine<'s> {
         let (name, props, open_end, self_closing) = match opening {
             Ok(value) => value,
             Err(code) => {
-                if code == "E_NESTING" {
+                if code == C::Nesting {
                     self.structural_failures += 1;
                 }
                 let stop = self.candidate_end(start, end).max(start + 1);
@@ -131,7 +182,7 @@ impl<'s> Engine<'s> {
         self.tags += 1;
         let over_tags = self.mode == Mode::Reply && self.tags > 64;
         if self.tags == 65 && self.mode == Mode::Reply {
-            self.report("E_LIMIT_TAGS", Span::new(start, open_end));
+            self.report_about(C::LimitTags, Span::new(start, open_end), &name);
         }
         let block = block_candidate
             && self.source[open_end..line_content_end(self.source, open_end, end)]
@@ -150,7 +201,7 @@ impl<'s> Engine<'s> {
                     stop = close_end;
                     if close_name != name {
                         broken = true;
-                        self.report("E_MISMATCHED_CLOSE", Span::new(start, stop));
+                        self.report_about(C::MismatchedClose, Span::new(start, stop), &name);
                     }
                     if block {
                         let tail = line_content_end(self.source, close_end, end);
@@ -158,30 +209,33 @@ impl<'s> Engine<'s> {
                             || !self.source[close_end..tail].trim().is_empty()
                         {
                             broken = true;
-                            self.report("E_MISMATCHED_CLOSE", Span::new(start, stop));
+                            self.report_about(C::MismatchedClose, Span::new(start, stop), &name);
                         }
                     }
                 }
                 None => {
                     broken = true;
-                    self.report("E_UNCLOSED_TAG", Span::new(start, stop));
+                    self.report_about(C::UnclosedTag, Span::new(start, stop), &name);
                 }
             }
         }
         if depth > TAG_DEPTH {
             broken = true;
-            self.report("E_NESTING", Span::new(start, stop));
+            self.report_about(C::Nesting, Span::new(start, stop), &name);
         }
         if broken {
             self.structural_failures += 1;
         }
         if !children.is_empty() && props.iter().any(|p| p.name == "children") {
             broken = true;
-            self.report("E_DUPLICATE_PROP", Span::new(start, stop));
+            self.report_about(C::DuplicateProp, Span::new(start, stop), "children");
         }
-        if self.mode == Mode::Reply && props.iter().any(|p| !reply_value(&p.value)) {
-            broken = true;
-            self.report("E_REPLY_FORBIDDEN", Span::new(start, stop));
+        if self.mode == Mode::Reply {
+            if let Some(prop) = props.iter().find(|p| !reply_value(&p.value)) {
+                broken = true;
+                let prop = prop.name.clone();
+                self.report_about(C::ReplyForbidden, Span::new(start, stop), &prop);
+            }
         }
         // A crossed or missing close invalidates the outer component span. A
         // child's forbidden prop, by contrast, is a local literal-text failure.
@@ -204,14 +258,22 @@ impl<'s> Engine<'s> {
         end: usize,
         depth: usize,
     ) -> Result<(String, Vec<Prop>, usize, bool)> {
-        if depth > TAG_DEPTH {
-            return Err("E_NESTING");
-        }
         let bytes = self.source.as_bytes();
+        if depth > TAG_DEPTH {
+            let name = self.source[start..end]
+                .strip_prefix('<')
+                .filter(|rest| rest.starts_with(|c: char| c.is_ascii_uppercase()))
+                .map(|rest| {
+                    rest.chars()
+                        .take_while(char::is_ascii_alphanumeric)
+                        .collect::<String>()
+                });
+            return Err(self.fail(C::Nesting, None, name));
+        }
         if bytes.get(start) != Some(&b'<')
             || !bytes.get(start + 1).is_some_and(u8::is_ascii_uppercase)
         {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         let mut pos = start + 2;
         while pos < end && bytes[pos].is_ascii_alphanumeric() {
@@ -227,7 +289,7 @@ impl<'s> Engine<'s> {
                 pos += 1;
             }
             if has_blank_line(&self.source[before..pos]) {
-                return Err("E_SYNTAX");
+                return Err(C::Syntax);
             }
             if self.source[pos..end].starts_with("/>") {
                 return Ok((name, props, pos + 2, true));
@@ -236,7 +298,7 @@ impl<'s> Engine<'s> {
                 return Ok((name, props, pos + 1, false));
             }
             if before == pos {
-                return Err("E_SYNTAX");
+                return Err(C::Syntax);
             }
             let prop_start = pos;
             let mut p = ExprParser {
@@ -247,7 +309,7 @@ impl<'s> Engine<'s> {
             };
             let prop_name = p.identifier()?;
             if !unique.insert(prop_name.clone()) {
-                return Err("E_DUPLICATE_PROP");
+                return Err(p.engine.fail(C::DuplicateProp, None, Some(prop_name)));
             }
             let name_end = p.pos;
             p.ws();
@@ -263,11 +325,11 @@ impl<'s> Engine<'s> {
                     )?
                 } else {
                     if !p.eat("{") {
-                        return Err("E_SYNTAX");
+                        return Err(C::Syntax);
                     }
                     let node = p.expression(0, 0)?;
                     if !p.eat("}") {
-                        return Err("E_SYNTAX");
+                        return Err(C::Syntax);
                     }
                     node
                 }
@@ -281,7 +343,7 @@ impl<'s> Engine<'s> {
             };
             pos = p.pos;
             if has_blank_line(&self.source[prop_start..pos]) {
-                return Err("E_SYNTAX");
+                return Err(C::Syntax);
             }
             props.push(Prop {
                 name: prop_name,
@@ -320,7 +382,7 @@ impl<'s> Engine<'s> {
     ) -> Result<(Node, usize)> {
         self.declarations += 1;
         if self.declarations > DECLARATIONS {
-            return Err("E_LIMIT_DECLARATIONS");
+            return Err(C::LimitDeclarations);
         }
         let mut p = ExprParser {
             engine: self,
@@ -333,15 +395,15 @@ impl<'s> Engine<'s> {
         } else if p.eat("const") {
             false
         } else {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         };
         let before = p.pos;
         p.ws();
         if p.pos == before {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         if state && !p.eat("$") {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         if state
             && p.engine
@@ -350,33 +412,34 @@ impl<'s> Engine<'s> {
                 .get(p.pos)
                 .is_some_and(u8::is_ascii_whitespace)
         {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
-        let name = p.identifier()?;
+        let name = p.word()?;
         if name.as_bytes()[0].is_ascii_uppercase()
+            || crate::expression::KEYWORDS.contains(&name.as_str())
             || matches!(name.as_str(), "data" | "input" | "view" | "now" | "zone")
         {
-            return Err("E_RESERVED_NAME");
+            return Err(p.engine.fail(C::ReservedName, None, Some(name)));
         }
         if !p.engine.names.insert(name.clone()) {
-            return Err("E_DUPLICATE_NAME");
+            return Err(p.engine.fail(C::DuplicateName, None, Some(name)));
         }
         if !p.eat("=") {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         let child = p.expression(0, 0).map_err(|code| {
-            if code == "E_SYNTAX" {
-                "E_DECLARATION_INCOMPLETE"
+            if code == C::Syntax {
+                C::DeclarationIncomplete
             } else {
                 code
             }
         })?;
         p.ws();
         if p.pos != stop {
-            return Err("E_SYNTAX");
+            return Err(C::Syntax);
         }
         if state && !literal(&child) {
-            return Err("E_LITERAL_REQUIRED");
+            return Err(p.engine.fail(C::LiteralRequired, None, Some(name)));
         }
         Ok((
             p.engine.node(
@@ -400,7 +463,7 @@ impl<'s> Engine<'s> {
         self.body_depth += 1;
         if self.body_depth > 64 {
             self.fatal = true;
-            return Err("E_NESTING");
+            return Err(C::Nesting);
         }
         self.work(end - start)?;
         let contexts = markdown_contexts(self.source, start, end);
@@ -590,7 +653,7 @@ impl<'s> Engine<'s> {
                         continue;
                     }
                     Err(code) => self.report(code, Span::new(pos, pos + 1)),
-                    _ => self.report("E_SYNTAX", Span::new(pos, pos + 1)),
+                    _ => self.report(C::Syntax, Span::new(pos, pos + 1)),
                 }
                 let stop = self.literal_braces(pos, end)?;
                 specials.push(self.opaque(pos, stop)?);
@@ -1044,35 +1107,32 @@ fn fence_content(source: &str, start: usize, end: usize) -> String {
         .replace('\r', "\n")
 }
 
-pub fn parse(source: &str, mode: Mode) -> Document {
-    let cap = if mode == Mode::Reply {
+/// The mode's source limit in bytes. `parse` and `parse_bytes` cut the
+/// source at it (at a UTF-8 boundary); `StreamParser` keeps three bytes past
+/// it, so a scalar straddling the limit is complete when `parse_bytes` cuts.
+pub(crate) fn source_cap(mode: Mode) -> usize {
+    if mode == Mode::Reply {
         REPLY_BYTES
     } else {
         PROGRAM_BYTES
-    };
-    let mut end = source.len().min(cap);
+    }
+}
+
+pub fn parse(source: &str, mode: Mode) -> Document {
+    let mut end = source.len().min(source_cap(mode));
     while !source.is_char_boundary(end) {
         end -= 1;
     }
-    let mut engine = Engine {
-        source,
-        mode,
-        nodes: 0,
-        blocks: 0,
-        tags: 0,
-        declarations: 0,
-        names: HashSet::new(),
-        remaining_work: end.saturating_mul(128).max(1024),
-        diagnostics: vec![],
-        suppressed: 0,
-        fatal: false,
-        body_depth: 0,
-        expression_frames: 0,
-        structural_failures: 0,
-    };
-    let mut fallback = mode == Mode::Program && source.len() > cap;
+    parse_prefix(source, end, mode, source.len() > source_cap(mode))
+}
+
+/// Parses `source[..end]`. `over` says the original input was longer than
+/// the mode's limit, which shortens a reply and refuses a program.
+fn parse_prefix(source: &str, end: usize, mode: Mode, over: bool) -> Document {
+    let mut engine = Engine::new(source, end, mode);
+    let mut fallback = mode == Mode::Program && over;
     if fallback {
-        engine.report("E_SOURCE_TOO_LARGE", Span::new(0, end));
+        engine.report(C::SourceTooLarge, Span::new(0, end));
     }
     let start = if source.starts_with('\u{feff}') {
         3.min(end)
@@ -1095,7 +1155,7 @@ pub fn parse(source: &str, mode: Mode) -> Document {
         fallback = true;
     }
     if mode == Mode::Reply && text_scalars(&nodes) > OUTPUT_SCALARS {
-        engine.report("E_LIMIT_TEXT", Span::new(start, end));
+        engine.report(C::LimitText, Span::new(start, end));
         fallback = true;
     }
     if fallback {
@@ -1117,20 +1177,24 @@ pub fn parse(source: &str, mode: Mode) -> Document {
         diagnostics: engine.diagnostics,
         suppressed_diagnostics: engine.suppressed,
         parsed_bytes: end,
-        shortened: source.len() > cap,
+        shortened: over,
         fallback,
     };
     if doc.references().len() > REFERENCES {
-        add_diagnostic(&mut doc, "E_REFERENCE_LIMIT", Span::new(start, end));
+        add_diagnostic(&mut doc, C::ReferenceLimit, Span::new(start, end));
     }
     if count_handles(&doc.nodes) > HANDLES {
-        add_diagnostic(&mut doc, "E_REFERENCE_LIMIT", Span::new(start, end));
+        add_diagnostic(&mut doc, C::ReferenceLimit, Span::new(start, end));
     }
     doc
 }
-fn add_diagnostic(doc: &mut Document, code: &'static str, span: Span) {
+fn add_diagnostic(doc: &mut Document, code: DiagnosticCode, span: Span) {
     if doc.diagnostics.len() < DIAGNOSTICS {
-        doc.diagnostics.push(Diagnostic { code, span });
+        doc.diagnostics.push(Diagnostic {
+            code,
+            span,
+            subject: None,
+        });
     } else {
         doc.suppressed_diagnostics += 1;
     }
@@ -1155,74 +1219,42 @@ fn text_scalars(nodes: &[Node]) -> usize {
     nodes.iter().map(|n| match &n.kind { Kind::Text(t) | Kind::Literal(t) => t.chars().count(), Kind::Markdown(Markdown::Code(t) | Markdown::CodeBlock { text: t, .. }) => t.chars().count(), _ => 0 } + text_scalars(&n.children)).sum()
 }
 
-/// Invalid UTF-8 is replaced before parsing; offsets refer to the repaired text.
+/// Invalid UTF-8 is replaced before parsing; offsets refer to the repaired
+/// text. The size limit measures the raw input bytes, before repair. Each
+/// maximal invalid subsequence (one to three bytes) becomes one three-byte
+/// U+FFFD, so repaired text is never shorter than the input and may be longer
+/// than the limit; an input within the limit is never refused for it.
 pub fn parse_bytes(source: &[u8], mode: Mode) -> Document {
-    let cap = if mode == Mode::Reply {
-        REPLY_BYTES
-    } else {
-        PROGRAM_BYTES
-    };
-    // A scalar can straddle the source cap. Retain at most three lookahead
-    // bytes so truncation never manufactures an encoding error for valid UTF-8.
-    let prefix = &source[..source.len().min(cap + 3)];
-    let repaired = String::from_utf8_lossy(prefix);
-    let mut doc = parse(&repaired, mode);
+    let cut = raw_cut(source, source_cap(mode));
+    let repaired = String::from_utf8_lossy(&source[..cut]);
+    let mut doc = parse_prefix(&repaired, repaired.len(), mode, source.len() > cut);
     if matches!(repaired, std::borrow::Cow::Owned(_)) {
         let end = doc.parsed_bytes;
-        add_diagnostic(&mut doc, "W_ENCODING", Span::new(0, end));
-    }
-    if source.len() > cap {
-        doc.shortened = true;
-        if mode == Mode::Program && !doc.fallback {
-            doc.fallback = true;
-            doc.nodes.clear();
-            let end = doc.parsed_bytes;
-            add_diagnostic(&mut doc, "E_SOURCE_TOO_LARGE", Span::new(0, end));
-        }
+        add_diagnostic(&mut doc, C::Encoding, Span::new(0, end));
     }
     doc
 }
 
-/// Collects a streamed source and parses it once, when `finish` is called.
-/// Bytes beyond the mode's size limit, plus a three-byte margin for a split
-/// UTF-8 character, are counted but not kept. `finish` then marks the
-/// document shortened, and in program mode also refuses it
-/// (`E_SOURCE_TOO_LARGE`, no nodes), so a program is never run from a cut-off
-/// prefix. No partial parse is offered while bytes are still arriving.
-pub struct StreamParser {
-    mode: Mode,
-    bytes: Vec<u8>,
-    total: usize,
-}
-impl StreamParser {
-    pub fn new(mode: Mode) -> Self {
-        Self {
-            mode,
-            bytes: vec![],
-            total: 0,
-        }
+/// Where a raw input is cut to the limit `cap`. A valid UTF-8 scalar that
+/// straddles the limit is left out whole, so cutting never manufactures an
+/// encoding error in valid text.
+pub(crate) fn raw_cut(source: &[u8], cap: usize) -> usize {
+    if source.len() <= cap {
+        return source.len();
     }
-    pub fn push(&mut self, chunk: &[u8]) {
-        let cap = if self.mode == Mode::Reply {
-            REPLY_BYTES
-        } else {
-            PROGRAM_BYTES
+    for lead in (cap.saturating_sub(3)..cap).rev() {
+        let width = match source[lead] {
+            0x80..=0xBF => continue,
+            0xC2..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF4 => 4,
+            _ => break,
         };
-        self.total = self.total.saturating_add(chunk.len());
-        let count = chunk.len().min(cap + 3 - self.bytes.len());
-        self.bytes.extend_from_slice(&chunk[..count]);
+        let straddles = lead + width > cap
+            && source
+                .get(lead..lead + width)
+                .is_some_and(|scalar| std::str::from_utf8(scalar).is_ok());
+        return if straddles { lead } else { cap };
     }
-    pub fn finish(self) -> Document {
-        let mut doc = parse_bytes(&self.bytes, self.mode);
-        if self.total > self.bytes.len() {
-            doc.shortened = true;
-            if self.mode == Mode::Program && !doc.fallback {
-                doc.fallback = true;
-                doc.nodes.clear();
-                let end = doc.parsed_bytes;
-                add_diagnostic(&mut doc, "E_SOURCE_TOO_LARGE", Span::new(0, end));
-            }
-        }
-        doc
-    }
+    cap
 }
