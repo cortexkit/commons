@@ -64,6 +64,7 @@ async fn held_calls_undeclared_group_is_inapplicable_by_name() {
     }
 }
 
+use cortexkit_role_llm_runner::points;
 use cortexkit_role_llm_runner::send::{delivered_as, Delivered};
 use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, progress, run_suite, run_suite_with, Capability, CaseOutcome,
@@ -97,6 +98,7 @@ const LEFT_LINEAGE_CASE: &str = "tags_resolve_answers_the_current_lineage";
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::SessionRetention,
     Capability::Attachments,
     Capability::RetentionClock,
     Capability::UserCommands,
@@ -122,6 +124,20 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::ClientMessageId,
     Capability::RunCause,
 ];
+
+// The in-process fake does not declare session_retention or exercise a real
+// process kill at ReleasePending. A separate subprocess fixture covers those
+// cases. All other cases must pass.
+fn assert_only_session_retention_skipped(report: &SuiteReport) {
+    assert!(
+        matches!(&report.verdict,
+            SuiteVerdict::ConformingForDeclaredCapabilities { skipped, .. }
+            if skipped == &vec![Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+        ),
+        "{}",
+        report.render()
+    );
+}
 
 /// The opt-in cost case: a subject without the seeding hook cannot run it.
 const COST_CASE: &str = "per_step_cost_scales_with_new_messages";
@@ -191,6 +207,21 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     }
     // A case skipped only for optional groups the subject leaves undeclared.
     if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
+        if case == "session_retention_legacy_required"
+            && missing
+                .iter()
+                .all(|group| OPTIONAL_GROUPS.contains(group) || *group == Capability::Retention)
+        {
+            return;
+        }
+        if case == "session_retention_pending_durable"
+            && missing.iter().all(|group| {
+                OPTIONAL_GROUPS.contains(group)
+                    || *group == Capability::KillAt(points::RELEASE_PENDING)
+            })
+        {
+            return;
+        }
         if !missing.is_empty() && missing.iter().all(|group| OPTIONAL_GROUPS.contains(group)) {
             return;
         }
@@ -407,7 +438,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     ]);
     let started = Instant::now();
     let report = run(&subject).await;
-    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    assert_only_session_retention_skipped(&report);
     for spec in CASES
         .iter()
         .filter(|case| case.name.starts_with("media_") || case.name.starts_with("attachments_"))
@@ -706,6 +737,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::Streaming,
                     Capability::SessionChange,
                     Capability::Retention,
+                    Capability::SessionRetention,
                     Capability::InputTokenCap,
                     Capability::MaxSteps,
                     Capability::MaxOutputTokens,
@@ -725,7 +757,8 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::ClientMessageId,
                     Capability::RunCause,
                     Capability::RetentionClock,
-                    Capability::HoldToolCalls
+                    Capability::HoldToolCalls,
+                    Capability::KillAt(points::RELEASE_PENDING)
                 ]
             );
             assert!(declared.contains(&Capability::TranscriptReads));
@@ -1074,6 +1107,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunOps,
                     Capability::SessionChange,
                     Capability::Retention,
+                    Capability::SessionRetention,
                     Capability::InputTokenCap,
                     Capability::MaxSteps,
                     Capability::MaxOutputTokens,
@@ -1092,7 +1126,8 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::LiveEvents,
                     Capability::ClientMessageId,
                     Capability::RunCause,
-                    Capability::RetentionClock
+                    Capability::RetentionClock,
+                    Capability::KillAt(points::RELEASE_PENDING)
                 ],
                 "{}",
                 report.render()
@@ -1490,7 +1525,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.held_paused = true;
     let report = run(&subject).await;
     assert_passed(&report, "retention_active_run_never_expires");
-    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    assert_only_session_retention_skipped(&report);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1530,7 +1565,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     assert!(
         matches!(report.outcome("retention_run_status_expired"), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("run.status"))
     );
-    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    assert_only_session_retention_skipped(&report);
     println!(
         "retention_status_is_inapplicable_when_not_served verdict: {:?}",
         report.verdict

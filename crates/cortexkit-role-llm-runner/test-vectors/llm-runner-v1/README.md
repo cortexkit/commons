@@ -1,5 +1,11 @@
 # `llm-runner/v1` test vectors
 
+`session-retention.json` pins the separate per-session policy (§9.14): all keep
+shapes, required/unknown members, value and combination refusals, describe limits,
+send/adopt/head members, state flags, session-bound release and all associated
+refusal shapes. `session_retention::tests` checks these bytes and decoded values;
+existing vector files are unchanged.
+
 `read-descriptors.json` uses compact expansion recipes for large UTF-8 text
 and arguments. The shared descriptor tests expand them before checking the
 Anthropic top-level image, nested tool-result image, PDF/document, URL image,

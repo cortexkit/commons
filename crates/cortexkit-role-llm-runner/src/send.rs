@@ -214,6 +214,12 @@ struct WireSendRequest {
         deserialize_with = "deserialize_retention"
     )]
     retention: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::session_retention::deserialize_optional"
+    )]
+    retention_policy: Option<crate::session_retention::RetentionPolicy>,
     #[serde(flatten)]
     runner_params: Map<String, Value>,
 }
@@ -233,6 +239,7 @@ impl From<WireSendRequest> for SendRequest {
             delivery_order,
             plan: wire.plan,
             retention: wire.retention,
+            retention_policy: wire.retention_policy,
             runner_params: wire.runner_params,
         }
     }
@@ -251,6 +258,7 @@ impl From<SendRequest> for WireSendRequest {
             delivery,
             plan: request.plan,
             retention: request.retention,
+            retention_policy: request.retention_policy,
             runner_params: request.runner_params,
         }
     }
@@ -379,6 +387,8 @@ pub struct SendRequest {
     /// Whole-session retention in seconds. Frozen on the first send;
     /// subsequent sends may only shorten it. Absent initially means forever.
     pub retention: Option<u64>,
+    /// Per-session storage policy, sent only with the `session_retention` group.
+    pub retention_policy: Option<crate::session_retention::RetentionPolicy>,
     /// The runner's own send parameters, kept as received.
     pub runner_params: Map<String, Value>,
 }
@@ -410,6 +420,7 @@ impl SendRequest {
             delivery_order: None,
             plan: None,
             retention: None,
+            retention_policy: None,
             runner_params: Map::new(),
         }
     }
@@ -469,6 +480,14 @@ impl SendRequest {
 
     pub fn with_retention(mut self, seconds: u64) -> Self {
         self.retention = Some(seconds);
+        self
+    }
+
+    pub fn with_retention_policy(
+        mut self,
+        policy: crate::session_retention::RetentionPolicy,
+    ) -> Self {
+        self.retention_policy = Some(policy);
         self
     }
 

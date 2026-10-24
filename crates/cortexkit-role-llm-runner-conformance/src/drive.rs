@@ -66,7 +66,40 @@ pub fn result_marker(call: &ScriptedToolCall) -> String {
         .to_owned()
 }
 
-pub async fn call<R: RunnerRoute>(route: &R, method: &str, params: Value) -> Result<Reply, String> {
+pub async fn call<R: RunnerRoute>(
+    route: &R,
+    method: &str,
+    mut params: Value,
+) -> Result<Reply, String> {
+    // Ordinary suite sends repeat the frozen starter policy, or add a default
+    // when session_retention is declared. Policy cases call route.request directly
+    // instead of this helper, so omission or bad input reaches the runner unchanged.
+    if matches!(method, ops::SESSION_SEND | ops::SESSION_ADOPT)
+        && params.get("retention_policy").is_none()
+    {
+        let describe = route
+            .request(ops::ROLE_DESCRIBE, json!({}))
+            .await
+            .map_err(|e| format!("role.describe: {}", e.message))?;
+        if let Reply::Response(value) = describe {
+            if value["capabilities"]
+                .as_array()
+                .is_some_and(|groups| groups.iter().any(|g| g == "session_retention"))
+            {
+                params.as_object_mut().unwrap().remove("retention");
+                let mut policy = json!({"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":false});
+                if let Ok(Reply::Response(head)) = route.request(ops::SESSION_HEAD, json!({})).await
+                {
+                    if head["retention_state"]["source"] == "starter"
+                        && head["retention_policy"].is_object()
+                    {
+                        policy = head["retention_policy"].clone();
+                    }
+                }
+                params["retention_policy"] = policy;
+            }
+        }
+    }
     route
         .request(method, params)
         .await

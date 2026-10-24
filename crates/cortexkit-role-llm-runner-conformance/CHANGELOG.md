@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.0
+
+- Pair with llm-runner 0.6.10. Add named, capability-gated session policy cases
+  for enforcement, required/optional first sends, conflicts, cross-principal
+  release ownership, idempotency, observable deletion including media, active
+  runs/queued sends, backup/none refusal, dumps and runner-policy replacement.
+- Add a durable-pending release crash case requiring a real process kill and
+  restart. A subprocess fake defends the cases, including an in-memory-only
+  release defect. New fixture hooks have defaults for existing adapters.
+- Ordinary suite sends/adopts select a policy only when discovery declares the
+  new group, preserving the separate legacy retention cases.
+
 ## 0.12.5
 
 - Use `cortexkit-rich-ui-syntax` 0.3.0 (exact `pulldown-cmark` 0.13.5). Cases and vectors are unchanged.

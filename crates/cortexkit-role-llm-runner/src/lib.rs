@@ -42,6 +42,7 @@ pub mod send_status;
 pub mod serializer_profile;
 pub mod session_change;
 pub mod session_ref;
+pub mod session_retention;
 pub mod structured_output;
 pub mod subscribe;
 pub mod tags;
@@ -80,6 +81,7 @@ pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
+    pub const SESSION_RELEASE: &str = "session.release";
     pub const SESSION_OUTPUT_REFS: &str = "session.output_refs";
     pub const SESSION_OUTPUT_REF_READ: &str = "session.output_ref_read";
     pub const SESSION_UPLOAD_BEGIN: &str = "session.upload_begin";
@@ -252,6 +254,8 @@ pub mod capabilities {
     /// Caller-chosen whole-session transcript retention, with limits in
     /// `role.describe.retention`.
     pub const RETENTION: &str = "retention";
+    /// Per-session storage policy and owner release, separate from legacy retention.
+    pub const SESSION_RETENTION: &str = "session_retention";
     /// Durable, lower-only session input-token budgets on `session.send`.
     pub const INPUT_TOKEN_CAP: &str = "input_token_cap";
     /// Positive model-response limit in `stop_when.max_steps`.
@@ -305,6 +309,10 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (
+            SESSION_RETENTION,
+            &[ops::SESSION_SEND, ops::SESSION_HEAD, ops::SESSION_RELEASE],
+        ),
         (SYSTEM_TEXT_DEFAULT, &[ops::SESSION_SEND]),
         (
             OUTPUT_REFS,
@@ -456,6 +464,7 @@ mod tests {
     #[test]
     fn every_group_names_only_role_ops() {
         let role_ops = [
+            ops::SESSION_RELEASE,
             ops::SESSION_OUTPUT_REFS,
             ops::SESSION_OUTPUT_REF_READ,
             ops::SESSION_UPLOAD_BEGIN,

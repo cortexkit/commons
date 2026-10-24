@@ -45,6 +45,8 @@ const RUNS: &[Capability] = &[RunOps, Queue];
 const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
 const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
+const SESSION_RETAINED: &[Capability] =
+    &[Capability::SessionRetention, Queue, TranscriptReads, RunOps];
 const COMPACTED: &[Capability] = &[Compaction, ModelView, Queue, TranscriptReads, RunOps];
 const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, RunOps];
 const INPUT_CAP: &[Capability] = &[Capability::InputTokenCap, Queue, TranscriptReads, RunOps];
@@ -117,6 +119,23 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("session_retention_honoured", SESSION_RETAINED, "accepted policy appears unchanged in head and keep none fallback deletes without release"),
+    case("session_retention_days_and_archive", &[Capability::SessionRetention, Queue, TranscriptReads, RunOps, Capability::RetentionClock], "archive preserves reads and days expiry deletes the idle session"),
+    case("session_retention_adopt_policy", &[Capability::SessionRetention, Capability::Adopt, TranscriptReads], "adopt follows required, replaces runner policy once, freezes decoded values and records release owner"),
+    case("session_retention_queued_never_deleted", &[Capability::SessionRetention, Queue, TranscriptReads, RunOps, Capability::RetentionClock], "days expiry, release and fallback cannot delete an idle queued send"),
+    case("session_retention_required", SESSION_RETAINED, "first-send omission follows required and refusal freezes nothing"),
+    case("session_retention_legacy_required", &[Capability::SessionRetention, Retention, Queue, TranscriptReads, RunOps], "when both groups are declared and the new policy is required, a legacy retention-only first send is retention_required"),
+    case("session_retention_conflict", SESSION_RETAINED, "a later different policy is refused with the frozen policy; decoded-equal repeats succeed"),
+    case("session_retention_owner_can_release", SESSION_RETAINED, "the starter principal can release under another principal's parent scope"),
+    case("session_retention_parent_cannot_release", SESSION_RETAINED, "the parent scope owner is not the release owner"),
+    case("session_retention_release_idempotent", SESSION_RETAINED, "release after completed deletion answers absent"),
+    case("session_retention_deletion_observable", SESSION_RETAINED, "deleted head and reads refuse unknown_session; next send creates a new incarnation"),
+    case("session_retention_media_deleted", &[Capability::SessionRetention, Queue, TranscriptReads, RunOps, Capability::Attachments], "deleted session cannot serve its referenced checksum"),
+    case("session_retention_active_never_deleted", &[Capability::SessionRetention, Queue, TranscriptReads, RunOps, Capability::RetentionClock], "days expiry, release and fallback cannot delete an active run or its queued send"),
+    case("session_retention_backup_none_refused", SESSION_RETAINED, "backup true with keep none is invalid_params naming retention_policy.backup"),
+    case("session_retention_dumps_preserved", SESSION_RETAINED, "unsupported dumps set a state flag, never rewrite the accepted request_dumps"),
+    case("session_retention_runner_replaced_once", SESSION_RETAINED, "a runner-assigned policy can be replaced once, then freezes as starter-sourced"),
+    case("session_retention_pending_durable", &[Capability::SessionRetention, Queue, TranscriptReads, RunOps, Capability::Attachments, KillAt(points::RELEASE_PENDING)], "a real process kill after pending preserves release; recovery deletes head, reads and media without another release"),
     case("system_text_default_forwarded_unchanged", &[],
         "when system_text_default is declared and the provider advertises system-text-default/v1, a preset-less item is admitted and reaches the provider byte-equal"),
     case("system_text_default_preset_required", &[],

@@ -63,6 +63,8 @@ pub enum Capability {
     SessionChange,
     /// Whole-session retention with limits from `role.describe.retention`.
     Retention,
+    /// Per-session storage policies and owner release.
+    SessionRetention,
     /// The durable session input-token cap on `session.send.budget`.
     InputTokenCap,
     /// Positive model-response limit in `stop_when.max_steps`.
@@ -159,6 +161,7 @@ impl Capability {
         Self::TagCheckpoint,
         Self::SessionChange,
         Self::Retention,
+        Self::SessionRetention,
         Self::InputTokenCap,
         Self::MaxSteps,
         Self::MaxOutputTokens,
@@ -219,6 +222,7 @@ impl Capability {
             Self::TagCheckpoint => groups::TAG_CHECKPOINT,
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
+            Self::SessionRetention => groups::SESSION_RETENTION,
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
             Self::MaxSteps => groups::MAX_STEPS,
             Self::MaxOutputTokens => groups::MAX_OUTPUT_TOKENS,
@@ -820,6 +824,43 @@ pub trait LlmRunnerSubject: Harness {
     /// provider, available to the model.
     fn send_fields(&self, session: &str, first: bool) -> Map<String, Value>;
 
+    /// Prepare a hosted or pre-existing session with a runner-sourced policy,
+    /// without a starter send or adopt. Return false if the runner cannot host
+    /// this fixture; the case is then named inapplicable.
+    async fn prepare_runner_retention(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Whether request dumps are unavailable for this runner. The dumps case
+    /// always checks the accepted policy; it checks the flag only when true.
+    fn request_dumps_unsupported(&self) -> bool {
+        false
+    }
+
+    /// Hold accepted queued sends before any run starts. Return false when
+    /// the adapter cannot expose an idle queue; that case is named inapplicable.
+    /// The queue must remain durable and observable, not a fabricated reply.
+    async fn hold_retention_queue(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Let the held queue run and drain. Required when hold_retention_queue
+    /// returned true; release and expiry must never discard the queued sends.
+    async fn release_retention_queue(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("held retention queue is not implemented"))
+    }
+
+    /// A daemon-attested starter under a different principal's parent scope.
+    /// The second stamp is that parent principal under the same scope. Return
+    /// None only when the adapter cannot create cross-principal scoped routes.
+    fn retention_scope_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
+        None
+    }
+
     /// Like [`Self::send_fields`], but admitting exactly `tools` as the
     /// session's tool set: an empty list for a tool-free session, or a list
     /// naming `submit_result` for the reserved-name refusal. Every other name
@@ -1129,7 +1170,8 @@ pub trait LlmRunnerSubject: Harness {
     /// Hold the next actual model answer for this session until explicitly
     /// released. Called before the send. Required when describe lists
     /// `run_cancel.at: step_boundary`; do not pause the runner before it sends
-    /// the model request, since cancellation must arrive during a step.
+    /// the model request, since cancellation must arrive during a step. Also
+    /// required by the session_retention active-run and pending-release cases.
     async fn hold_next_model_step(&self, _session: &str) -> Result<(), HarnessError> {
         Err(HarnessError::new("held model step is not implemented"))
     }
@@ -1150,7 +1192,8 @@ pub trait LlmRunnerSubject: Harness {
     /// Count requests actually received by the scripted model for this session.
     /// Keep the count outside the runner and its state root; do not infer it
     /// from transcript messages or configured answers, which can hide an extra
-    /// model step whose answer was discarded after cancellation.
+    /// model step whose answer was discarded after cancellation. Required by
+    /// session_retention queue and pending-release cases to prove queued sends ran.
     async fn model_invocations(&self, _session: &str) -> Result<usize, HarnessError> {
         Err(HarnessError::new(
             "model invocation observation is not implemented",

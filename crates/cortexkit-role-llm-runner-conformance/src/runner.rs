@@ -107,7 +107,7 @@ where
             None => {
                 let mode_gate = match &main {
                     Ok(handle) => {
-                        crate::delivery_order::inapplicable(
+                        crate::session_retention::inapplicable(
                             &Case {
                                 subject,
                                 handle,
@@ -176,6 +176,15 @@ where
                     )
                     .await
                     .map(|()| Ending::Passed)
+                } else if spec.name == "session_retention_pending_durable" {
+                    crate::session_retention::crash(
+                        subject,
+                        &mut driver,
+                        work_dir,
+                        &declared,
+                        &mint,
+                    )
+                    .await
                 } else if spec.name == "crash_at_RetentionTombstoned" {
                     retention::crash(subject, &mut driver, work_dir, &declared, &mint).await
                 } else if let Some(point) = crash::point_of(spec.name) {

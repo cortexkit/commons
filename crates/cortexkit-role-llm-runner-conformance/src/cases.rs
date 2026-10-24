@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("session_retention_") => {
+                crate::session_retention::run(self, name).await
+            }
             name if name.starts_with("system_text_default_") => {
                 crate::system_text_default::run(self, name).await
             }

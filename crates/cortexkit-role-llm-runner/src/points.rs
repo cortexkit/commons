@@ -50,6 +50,8 @@ pub const TERMINAL: &str = "Terminal";
 /// and the runner's copies made from it are not yet deleted. Restart must finish deleting
 /// them.
 pub const RETENTION_TOMBSTONED: &str = "RetentionTombstoned";
+/// Release pending was durably recorded and answered, before deferred deletion.
+pub const RELEASE_PENDING: &str = "ReleasePending";
 
 /// A person-command invocation is durably reserved and sent to its provider,
 /// but the provider's reply is not stored. On resume, the runner must not send
@@ -68,6 +70,7 @@ pub const ALL: &[&str] = &[
     TOOL_RESULT_RECORDED,
     TERMINAL,
     RETENTION_TOMBSTONED,
+    RELEASE_PENDING,
     USER_COMMAND_FORWARDED,
 ];
 

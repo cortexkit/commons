@@ -1,5 +1,49 @@
 # cortexkit-role-llm-runner-conformance
 
+## Per-session retention policies
+
+The `session_retention_*` cases require the separate `session_retention` group;
+they do not replace the legacy `retention_*` cases. Missing groups are named
+skips. Ordinary suite sends and adopts discover the group and add a default
+forever policy only when it is declared, repeating an existing starter policy
+unchanged on later calls. When both groups are declared, ordinary starters prefer
+the new policy. Legacy seconds cases call the runner directly, bypassing the
+suite's policy selection. Omission tests also call the runner directly, without
+the helper that adds a default policy.
+When both groups are declared with the new policy required, legacy retention-only
+scenarios are named inapplicable because no legal first send can start them.
+`session_retention_legacy_required` checks that this combination instead refuses
+a legacy-only first send with `retention_required`. Other runners still run the
+legacy scenarios unchanged.
+
+Adapters declaring the group provide held model steps for active-run checks
+(`hold_next_model_step`, `await_model_step`, `release_model_step`).
+The queue and restart cases also require `model_invocations`, observed at the
+scripted provider, to prove queued sends really ran rather than being discarded.
+Days-scale checks use `RetentionClock`; a long fallback hold without that clock is skipped
+by name. `hold_retention_queue` and `release_retention_queue` expose a queued
+send with no active run; without that fixture the idle-queue case is named
+inapplicable, not treated as evidence from the active-run case. Scope fixtures
+(`retention_scope_stamps`) separate the starter principal from the parent scope
+owner in both directions. `prepare_runner_retention` prepares a hosted or
+pre-existing runner-sourced policy; unsupported fixtures are named inapplicable.
+The dumps case checks the limitation flag when `request_dumps_unsupported()` is
+true. The adopt case additionally requires `adopt` and its existing host fixtures.
+
+`session_retention_pending_durable` requires attachments and a real process kill
+at `ReleasePending`, after the pending reply is observed and before deletion.
+After restart the recovered run is ended, the queue drains, and head must become
+`unknown_session` without another release call. Reads and the previously served
+checksum must also be unavailable; only then are repeated releases checked for
+`absent`. An in-process fault hook or simulated restart cannot satisfy this case.
+The suite's subprocess fake really kills its child and reloads synced state;
+it tests the suite, not a production runner's storage or daemon integration.
+
+The route cases observe deletion through head, transcript reads and media reads.
+They do not inspect every storage backend, a backup service, restore operations,
+project-folder files or cache-maintenance clocks: those require runner-specific
+storage and backup integration tests in addition to this kit.
+
 Descriptor-read adapters supply `media_tool_result` (actual decoded image
 bytes, with a nested tool-result layout when requested), `multipart_tool_result`
 for the fixed-budget fallback, and `read_parts` for their host's stable part

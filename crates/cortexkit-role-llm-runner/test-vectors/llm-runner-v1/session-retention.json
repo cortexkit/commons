@@ -1,0 +1,59 @@
+{
+  "policies": [
+    {"keep":"none","archive_after_days":0,"backup":false,"request_dumps":false},
+    {"keep":{"days":30},"archive_after_days":7,"backup":true,"request_dumps":true},
+    {"keep":"forever","archive_after_days":3650,"backup":false,"request_dumps":true}
+  ],
+  "invalid": [
+    {"policy":null,"field":"retention_policy"},
+    {"policy":{},"field":"retention_policy.keep"},
+    {"policy":{"keep":"forever","backup":false,"request_dumps":false},"field":"retention_policy.archive_after_days"},
+    {"policy":{"keep":"forever","archive_after_days":0,"request_dumps":false},"field":"retention_policy.backup"},
+    {"policy":{"keep":"forever","archive_after_days":0,"backup":false},"field":"retention_policy.request_dumps"},
+    {"policy":{"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":false,"extra":0},"field":"retention_policy.extra"},
+    {"policy":{"keep":"unknown","archive_after_days":0,"backup":false,"request_dumps":false},"field":"retention_policy.keep"},
+    {"policy":{"keep":{"days":0},"archive_after_days":0,"backup":false,"request_dumps":false},"field":"retention_policy.keep.days"},
+    {"policy":{"keep":{"days":3651},"archive_after_days":0,"backup":false,"request_dumps":false},"field":"retention_policy.keep.days"},
+    {"policy":{"keep":{"days":1.5},"archive_after_days":0,"backup":false,"request_dumps":false},"field":"retention_policy.keep.days"},
+    {"policy":{"keep":{"days":2,"extra":true},"archive_after_days":0,"backup":false,"request_dumps":false},"field":"retention_policy.keep.extra"},
+    {"policy":{"keep":{"days":2},"archive_after_days":2,"backup":false,"request_dumps":false},"field":"retention_policy.archive_after_days"},
+    {"policy":{"keep":"none","archive_after_days":1,"backup":false,"request_dumps":false},"field":"retention_policy.archive_after_days"},
+    {"policy":{"keep":"forever","archive_after_days":3651,"backup":false,"request_dumps":false},"field":"retention_policy.archive_after_days"},
+    {"policy":{"keep":"forever","archive_after_days":-1,"backup":false,"request_dumps":false},"field":"retention_policy.archive_after_days"},
+    {"policy":{"keep":"none","archive_after_days":0,"backup":true,"request_dumps":false},"field":"retention_policy.backup"},
+    {"policy":{"keep":"forever","archive_after_days":0,"backup":0,"request_dumps":false},"field":"retention_policy.backup"},
+    {"policy":{"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":null},"field":"retention_policy.request_dumps"}
+  ],
+  "limits": {"max_days":3650,"max_unreleased_hold_ms":60000,"required":true},
+  "bad_limits": [
+    {"limits":null,"problem":"missing_session_retention"},
+    {"limits":{"max_days":0,"max_unreleased_hold_ms":1,"required":false},"problem":"invalid_session_retention"},
+    {"limits":{"max_days":3651,"max_unreleased_hold_ms":1,"required":false},"problem":"invalid_session_retention"},
+    {"limits":{"max_days":1,"max_unreleased_hold_ms":0,"required":true},"problem":"invalid_session_retention"}
+  ],
+  "send": {"prompt":"hello","send_id":"policy-send","retention_policy":{"keep":{"days":30},"archive_after_days":7,"backup":true,"request_dumps":true}},
+  "adopt": {"send_id":"policy-adopt","plan":{},"retention_policy":{"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":true}},
+  "head": [
+    {"retention_policy":{"keep":"none","archive_after_days":0,"backup":false,"request_dumps":false},"retention_state":{"source":"starter"}},
+    {"retention_policy":{"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":true},"retention_state":{"source":"runner","request_dumps_unsupported":true,"host_limited":true}}
+  ],
+  "release": {"request":{},"answers":[{"state":"pending"},{"state":"deleted"},{"state":"absent"}]},
+  "codes": [
+    {"code":"retention_required","retryable":false},
+    {"code":"retention_conflict","retryable":false},
+    {"code":"session_released","retryable":true},
+    {"code":"backup_unsupported","retryable":false}
+  ],
+  "refusals": [
+    {"code":"invalid_params","message":"policy not declared","detail":{"field":"retention_policy"}},
+    {"code":"invalid_params","message":"both retention members","detail":{"field":"retention_policy"}},
+    {"code":"invalid_params","message":"days exceed max_days","detail":{"field":"retention_policy.keep.days"}},
+    {"code":"retention_required","message":"policy required"},
+    {"code":"retention_conflict","message":"policy frozen","detail":{"frozen":{"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":true}}},
+    {"code":"scope_owner_mismatch","message":"not the first sender or adopter"},
+    {"code":"session_released","message":"deletion pending"},
+    {"code":"unknown_session","message":"session deleted"},
+    {"code":"unknown_media","message":"session checksum deleted"},
+    {"code":"backup_unsupported","message":"backup unavailable","detail":{"reason":"single-session backup unavailable"}}
+  ]
+}

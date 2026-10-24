@@ -110,6 +110,7 @@ mod run_parameters;
 mod run_usage;
 mod runner;
 mod session_change;
+mod session_retention;
 mod session_usage;
 mod structured_output;
 mod subject;

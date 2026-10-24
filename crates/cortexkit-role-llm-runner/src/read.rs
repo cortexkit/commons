@@ -868,6 +868,10 @@ pub struct HeadMeta {
     /// Absent means unknown; compare only by equality, not lexical order.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incarnation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_policy: Option<crate::session_retention::RetentionPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_state: Option<crate::session_retention::RetentionState>,
 }
 
 /// The caller's own delivery grant on `session.head`, independent of lineage.
@@ -1001,6 +1005,15 @@ impl HeadInput {
 }
 
 impl HeadMeta {
+    pub fn with_retention_policy(
+        mut self,
+        policy: crate::session_retention::RetentionPolicy,
+        state: crate::session_retention::RetentionState,
+    ) -> Self {
+        self.retention_policy = Some(policy);
+        self.retention_state = Some(state);
+        self
+    }
     /// The head of a session whose lineage is `lineage_id` and starts at
     /// `first_ordinal`. Add the history version with
     /// [`HeadMeta::with_history_version`] and, when `first_ordinal` is above
@@ -1021,6 +1034,8 @@ impl HeadMeta {
             usage: None,
             sender: None,
             incarnation: None,
+            retention_policy: None,
+            retention_state: None,
         }
     }
 
@@ -1040,6 +1055,8 @@ impl HeadMeta {
             usage: None,
             sender: None,
             incarnation: None,
+            retention_policy: None,
+            retention_state: None,
         }
     }
 

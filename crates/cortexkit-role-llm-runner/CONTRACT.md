@@ -85,7 +85,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -164,6 +164,7 @@ shipping runner with this document.
 | `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
+| `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `max_steps` | `session.send` with `stop_when.max_steps` | §9.3.1 |
@@ -3185,6 +3186,102 @@ its host's file storage, not a second copy of the host's media store.
   `session.read` and stored bodies never gain descriptors. A set may be empty
   when scanning found no references; no snapshot is copied in that case.
 
+### 9.14 `session_retention`: per-session storage policy and release
+
+- [pinned] This group is separate from §9.1 `retention`, which is unchanged.
+  `role.describe` declares `session_retention` and limits
+  `session_retention: {max_days: u32, max_unreleased_hold_ms: u64, required: bool}`
+  (`describe::SessionRetention`). `check_describe` refuses a declared group
+  without limits (`missing_session_retention`), or with `max_days` outside
+  1..=3650 or a zero `max_unreleased_hold_ms` (`invalid_session_retention`).
+  The group serves `session.send`, `session.head` and `session.release`;
+  it also extends `session.adopt` wherever `adopt` is declared.
+- [pinned] `session.send` and `session.adopt` accept optional
+  `retention_policy: {keep, archive_after_days, backup, request_dumps}`
+  (`session_retention::RetentionPolicy`). All four members are required inside
+  the object; unknown members inside are refused. `keep` is `"none"`,
+  `{"days": N}` or `"forever"`. Days are integers in 1..=the runner's
+  `max_days`. `archive_after_days` is an integer: 0 means never, otherwise
+  1..=3650. With days it must be less than N; with `"none"` it must be 0.
+  `backup` and `request_dumps` are booleans. Every runner refuses
+  `backup: true` with `keep: "none"`. Any bad value or combination is
+  `invalid_params` with `detail.field` naming the member path, for example
+  `retention_policy.keep.days`, `retention_policy.archive_after_days` or
+  `retention_policy.backup`. A runner without the group refuses the member
+  as `invalid_params {field: "retention_policy"}`, never ignores it.
+- [pinned] A runner declaring `session_retention` honours and enforces every
+  policy it accepts; it never accepts one and ignores it. While `required`
+  is false, a first send without a policy is still accepted. With `required`
+  true, a first send or first adopt without one is refused `retention_required`,
+  and nothing is written. A starter sends `retention_policy` to every runner
+  declaring `session_retention`, whatever `required` says, and to no other
+  runner. A runner may declare both groups during the switch; a send carrying
+  both `retention` and `retention_policy` is refused
+  `invalid_params {field: "retention_policy"}`. A runner may stop declaring
+  §9.1 `retention` in the same release in which it declares `session_retention`.
+  A starter picks which member to send by which group the runner declares;
+  when both are declared it sends only `retention_policy`.
+- [pinned] Days and archive clocks count from the session's last durable
+  activity: sends, adopt and run lifecycle, never cache warms or maintenance.
+  An archived session's reads return exactly what they returned before archive;
+  only storage changes. Nothing is deleted while a run is active or a send is
+  queued, whether deletion is due to days expiry, release or the fallback hold.
+- [pinned] The first send or adopt carrying a policy freezes it. Later sends
+  or adopts may repeat it. Equality is on decoded values, not bytes. A different
+  policy is refused `retention_conflict` with `detail.frozen` equal to the frozen
+  policy. Refusals write nothing. Adopt retains §9.5's caller, idempotency and
+  plan checks, then checks the policy before writing. Its idempotency comparison
+  includes the policy, naming `retention_policy` on `send_id_reuse` when it differs.
+- [pinned] Sessions not started by a send (person-started sessions a runner hosts,
+  or sessions predating the group) get the runner's configured policy, with
+  `source: "runner"`. The first send or adopt carrying a policy replaces a
+  runner-sourced policy exactly once. After that it is starter-sourced and frozen.
+- [pinned] `session.head` gains `retention_policy`, exactly as accepted or
+  runner-assigned, and `retention_state: {source: "starter" | "runner",
+  request_dumps_unsupported?: true, host_limited?: true}`. When dumps were
+  requested but the runner cannot save them, it sets `request_dumps_unsupported`:
+  dumps are best-effort, never a refusal, and the policy keeps `request_dumps: true`.
+  `host_limited` means the host keeps the transcript and may delete it sooner
+  than the policy says. Flags appear only as true, never false.
+- [pinned] `session.release {}` (`ReleaseRequest`) targets the bound session
+  name, for every keep value: the policy is the longest a session lives and
+  release is the owner ending it sooner. Owner-only means the principal that
+  made the session's first send (or adopt), as the daemon attested it, never
+  the owner of a parent scope. Any other principal is refused
+  `scope_owner_mismatch`, including a caller under that parent scope. The
+  starter's principal can release even under another principal's parent scope.
+- [pinned] Release is idempotent. The answer (`ReleaseReply`) is
+  `{state: "pending"}` while a run is active or a send is queued,
+  `{state: "deleted"}` when this call completed deletion before answering, and `{state: "absent"}`
+  when the bound name has no session (never created or already deleted).
+  The runner records release durably before answering pending. It then deletes
+  once the active run ends and the queue drains, without another starter call,
+  including after a process kill and restart. Pending means release was recorded
+  durably; deleted means this call completed deletion with nothing running;
+  absent means no session exists under the bound name right now. A repeat after
+  deletion always answers absent; no completed-deletion record is required.
+  Deletion after pending must not wait for another call, including after restart:
+  once the recovered run ends and the queue drains, deletion completes autonomously.
+  A release after that completion answers absent.
+- [pinned] After release and before deletion completes, a send to the name is
+  refused `session_released` (retryable). After deletion, head and reads refuse
+  `unknown_session`, and `session.media_read` refuses `unknown_media` for its
+  checksum. The next send starts a new incarnation under the same name.
+  Release frees live runner data only: backups already taken follow the backup
+  service's own retention.
+- [pinned] For `keep: "none"`, if no release arrives, the runner deletes the
+  session `max_unreleased_hold_ms` after its last run ends.
+- [pinned] Deletion removes everything the session owns: log, indexes, lease,
+  media and attachments the runner holds by checksum, outbox entries and request
+  dumps. A session's dumps never outlive it. Files placed in the user's project
+  folder (for example uploads written there) are the user's project files and
+  are never deleted with the session.
+- [pinned] A runner that cannot back up a single session refuses `backup: true`
+  with `backup_unsupported`, whose detail names the reason (`reason`). It never
+  accepts and silently skips backup. A session with `backup: false` is absent
+  after a restore, never half there. A restore never brings back a deleted
+  incarnation, and never deletes a later incarnation under the same name.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -3548,6 +3645,10 @@ treats it as a terminal refusal of that one request.
 | `unknown_media` | the bound session's history does not reference the digest | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
+| `retention_required` | first send or adopt omitted a required policy (§9.14) | — | no |
+| `retention_conflict` | policy differs from the starter's frozen policy (§9.14) | `frozen` (policy) | no |
+| `session_released` | send while release deletion is pending (§9.14) | — | **yes** |
+| `backup_unsupported` | runner cannot back up a single session (§9.14) | `reason` | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
@@ -3786,6 +3887,7 @@ their role.
 | `ToolResultRecorded` | a call's result with its PostTool output | 4, 5 |
 | `Terminal` | the run's terminal state | 3 |
 | `RetentionTombstoned` | a content-free expiry tombstone; transcript and derived copies not yet deleted | 9 |
+| `ReleasePending` | release pending was durably recorded and answered, before deferred deletion (§9.14) | 9 |
 | `UserCommandForwarded` | the invocation is durably reserved and its provider received it; the reply is not stored | 10, §9.10 |
 
 A runner whose durable state lives in a store where truncation is not

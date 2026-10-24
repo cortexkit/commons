@@ -20,14 +20,28 @@ use serde_json::json;
 use crate::{
     cases::{Case, Ending, Session},
     drive::{
-        call, decode, expect_code, expect_error, expect_field, expect_ok, head, holding, read,
-        read_all, run_result, send_params, wait_run_end, Mint,
+        decode, expect_code, expect_error, expect_field, expect_ok, head, holding, read, read_all,
+        run_result, send_params, wait_run_end, Mint,
     },
     route::{Reply, RunnerRoute, SubscribeOutcome},
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
 
 const MARGIN_MS: u64 = 300;
+
+// Legacy cases deliberately send the retention request member, expressed in
+// seconds, even when both groups are declared. They bypass the ordinary starter's
+// preference for the new policy.
+async fn call<R: RunnerRoute>(
+    route: &R,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<Reply, String> {
+    route
+        .request(method, params)
+        .await
+        .map_err(|e| format!("{method}: the route failed: {}", e.message))
+}
 const MAX_REAL_WAIT_MS: u64 = 30_000;
 const STATUS: &str = "run.status";
 

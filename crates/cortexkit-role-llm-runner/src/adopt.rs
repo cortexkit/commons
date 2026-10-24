@@ -34,7 +34,7 @@ use crate::errors::PlanDriftDetail;
 /// with another plan.
 pub const PLAN_FIELD: &str = "plan";
 
-/// The `session.adopt` request: `{send_id, plan}`.
+/// The `session.adopt` request: `{send_id, plan, retention_policy?}`.
 ///
 /// Strict: an unknown field is refused `invalid_params` naming it. In
 /// particular the request never names its session: the session is the one
@@ -56,6 +56,12 @@ pub struct AdoptRequest {
     /// same object `SendRequest::plan` carries, never a digest of it.
     #[serde(deserialize_with = "deserialize_plan")]
     pub plan: Map<String, Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::session_retention::deserialize_optional"
+    )]
+    pub retention_policy: Option<crate::session_retention::RetentionPolicy>,
 }
 
 /// Decode `plan` as an object, refusing anything else (a digest string, say)
@@ -81,16 +87,31 @@ impl AdoptRequest {
         Self {
             send_id: send_id.into(),
             plan,
+            retention_policy: None,
         }
+    }
+
+    pub fn with_retention_policy(
+        mut self,
+        policy: crate::session_retention::RetentionPolicy,
+    ) -> Self {
+        self.retention_policy = Some(policy);
+        self
     }
 
     /// Compare `self` with an `earlier` request the runner already answered
     /// under the same `send_id`. `None` means an exact repeat, answered with
     /// the earlier reply. `Some(field)` names the field a `send_id_reuse`
     /// refusal reports. The comparison is of the whole request, as for owner
-    /// sends; with the `send_id` equal, only the plan can differ.
+    /// sends; the plan and policy are compared as decoded values.
     pub fn reused_field(&self, earlier: &Self) -> Option<&'static str> {
-        (self != earlier).then_some(PLAN_FIELD)
+        if self.plan != earlier.plan {
+            Some(PLAN_FIELD)
+        } else if self.retention_policy != earlier.retention_policy {
+            Some("retention_policy")
+        } else {
+            None
+        }
     }
 }
 

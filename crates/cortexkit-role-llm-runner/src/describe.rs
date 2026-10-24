@@ -27,6 +27,8 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const MISSING_SESSION_RETENTION: &str = "missing_session_retention";
+    pub const INVALID_SESSION_RETENTION: &str = "invalid_session_retention";
     pub const RUN_CANCEL_UNDECLARED: &str = "run_cancel_undeclared";
     pub const EMPTY_RUN_CANCEL_AT: &str = "empty_run_cancel_at";
     pub const MISSING_RUN_CANCEL_NOW: &str = "missing_run_cancel_now";
@@ -93,9 +95,31 @@ pub struct RoleDescribe {
     /// Limits required when the `retention` capability group is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<Retention>,
+    /// Required limits when `session_retention` is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_retention: Option<SessionRetention>,
     /// Supported cancellation points; absent means only `now` is supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_cancel: Option<RunCancel>,
+}
+
+/// Limits for per-session storage policies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionRetention {
+    pub max_days: u32,
+    pub max_unreleased_hold_ms: u64,
+    pub required: bool,
+}
+
+impl SessionRetention {
+    pub fn new(max_days: u32, max_unreleased_hold_ms: u64, required: bool) -> Self {
+        Self {
+            max_days,
+            max_unreleased_hold_ms,
+            required,
+        }
+    }
 }
 
 /// Cancellation points advertised by a runner declaring `run_cancel`.
@@ -201,6 +225,11 @@ impl RoleDescribe {
     /// State the retention limits (the capability must also be listed).
     pub fn with_retention(mut self, max_seconds: u64, delete_within_ms: u64) -> Self {
         self.retention = Some(Retention::new(max_seconds, delete_within_ms));
+        self
+    }
+
+    pub fn with_session_retention(mut self, limits: SessionRetention) -> Self {
+        self.session_retention = Some(limits);
         self
     }
 
@@ -375,6 +404,20 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
                 problems.push(DescribeProblem::InvalidRetention)
             }
             Some(_) => {}
+        }
+    }
+    if describe.declares(capabilities::SESSION_RETENTION) {
+        let problem = match describe.session_retention {
+            None => Some(problem_names::MISSING_SESSION_RETENTION),
+            Some(limits)
+                if !(1..=3650).contains(&limits.max_days) || limits.max_unreleased_hold_ms == 0 =>
+            {
+                Some(problem_names::INVALID_SESSION_RETENTION)
+            }
+            Some(_) => None,
+        };
+        if let Some(problem) = problem {
+            problems.push(DescribeProblem::Undecodable(problem.into()));
         }
     }
     if describe.session_capabilities_from.is_none() {

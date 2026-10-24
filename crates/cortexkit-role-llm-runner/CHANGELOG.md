@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.10
+
+- Add the separate `session_retention` group: strict per-session policy on send
+  and adopt, describe limits, frozen policy and source/limitation state on head,
+  and session-bound owner release with durable pending deletion. Legacy §9.1
+  retention and existing wire vectors remain unchanged.
+- Pin activity clocks, release ownership independent of parent scopes, deletion
+  and restore incarnation safety, backup refusal and best-effort request dumps.
+  Add policy/release types, validation, refusal names and shared vectors.
+- Additive: the extended public structs (`RoleDescribe`, `SendRequest`,
+  `AdoptRequest`, `HeadMeta`) are non-exhaustive. New describe problem names use
+  the existing `Undecodable` variant rather than extending the exhaustive enum.
+
 ## 0.6.9
 
 - Use `cortexkit-rich-ui-syntax` 0.3.0, which pins `pulldown-cmark` exactly at 0.13.5 instead of 0.13.0, so dependent crates no longer have to downgrade the parser. Every sample parses as before; the runner API and wire are unchanged.
