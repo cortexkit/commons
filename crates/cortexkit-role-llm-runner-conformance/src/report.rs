@@ -313,6 +313,7 @@ pub const CASES: &[CaseSpec] = &[
     case("media_descriptors_full_content_digests", &[TranscriptReads, Queue, RunOps], "message and part digests equal independently computed stored-content digests; attachments uses blocks, older runners inline"),
     case("media_descriptors_pairing", &[TranscriptReads, Queue, RunOps], "descriptors preserve call/result pairing fields and signatures"),
     case("media_descriptors_part_keys", &[TranscriptReads, Queue, RunOps], "descriptor decoding rejects digest rows whose keys do not match the actual parts"),
+    case("media_descriptors_provider_rows", &[TranscriptReads, Queue, RunOps], "provider-side descriptor validation requires exact equality with complete tag-row keys and the serializer profile's part count, never a derived key scheme"),
     case("media_descriptors_model_view_refused", &[TranscriptReads, Capability::ModelView], "model-view descriptors are refused invalid_params naming media before read work"),
     case("media_descriptors_stable_across_pages", &[TranscriptReads, Queue, RunOps], "below-threshold frame fallback is deterministic per message, independent of page caps and position"),
     case("tags_only_on_tag_rendering_sessions", TAGS,

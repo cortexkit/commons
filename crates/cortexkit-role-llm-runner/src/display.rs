@@ -158,9 +158,9 @@ impl DisplayRow {
 }
 
 /// One part of a [`DisplayRow`], tagged by `type`. Every part carries
-/// `part`, the key of the stored part it comes from (the content block's
-/// index for `anthropic-messages`, the part's `id` for `opencode-aisdk`), so
-/// a live delta naming a part finds its place in the stored row.
+/// `part`, the runner-defined key of the stored part it comes from, so a live
+/// delta naming a part finds its place in the stored row. The projection helpers
+/// below choose default keys; they do not prescribe a serializer profile's keys.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]

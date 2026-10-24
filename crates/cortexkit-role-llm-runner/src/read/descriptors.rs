@@ -273,10 +273,57 @@ fn replace(answer: &mut Value, payload: &Payload) -> Result<(usize, usize), Stri
 }
 
 impl super::ReadMessage {
-    /// Check the descriptor envelope against the adapter's actual top-level
-    /// part keys. The key list must come from the message, not from the
-    /// digest rows being checked. This also rejects duplicates and reorders.
+    /// Provider-side descriptor validation without deriving opaque part keys.
+    /// `profile` is the runner's serializer profile. Count the message's parts,
+    /// validate digests and unique keys, and require exactly the keys served in
+    /// this entry's complete `tags` rows, in the same order. Nonempty messages
+    /// must carry tags rows even for parts with no tag number. Runners also use
+    /// [`Self::check_descriptors`] with their independently known part keys.
+    pub fn check_descriptor_rows(&self, profile: &str) -> Result<(), String> {
+        self.check_descriptor_digests()?;
+        let rows = self.part_digests.as_ref().expect("checked above");
+        let mut keys = std::collections::BTreeSet::new();
+        for row in rows {
+            if !keys.insert(&row.part) {
+                return Err(format!("duplicate part_digests key: {}", row.part));
+            }
+        }
+        let count = crate::serializer_profile::top_level_part_count(profile, &self.message)?;
+        if count > 0 && self.tags.is_empty() {
+            return Err("descriptors read missing tags rows".into());
+        }
+        if rows.len() != count {
+            return Err(format!(
+                "part_digests row count {} does not match top-level part count {count}",
+                rows.len()
+            ));
+        }
+        if rows
+            .iter()
+            .map(|row| &row.part)
+            .ne(self.tags.iter().map(|tag| &tag.part))
+        {
+            return Err("part_digests keys do not match tags rows in order".into());
+        }
+        Ok(())
+    }
+
+    /// Runner-side check against the adapter's independently known top-level
+    /// part keys, in message order. Keys are runner-defined, not a profile
+    /// convention, and must not be copied from the digest rows being checked.
+    /// Providers use [`Self::check_descriptor_rows`] instead.
     pub fn check_descriptors(&self, keys: &[String]) -> Result<(), String> {
+        self.check_descriptor_digests()?;
+        let rows = self.part_digests.as_ref().expect("checked above");
+        if rows.iter().map(|p| &p.part).ne(keys.iter())
+            || keys.iter().collect::<std::collections::BTreeSet<_>>().len() != keys.len()
+        {
+            return Err("part_digests keys do not match message parts in order".into());
+        }
+        Ok(())
+    }
+
+    fn check_descriptor_digests(&self) -> Result<(), String> {
         validate_references(&self.message)?;
         if self.digest.as_deref().is_none_or(|d| !is_sha256_hex(d)) {
             return Err("descriptors read missing message digest".into());
@@ -285,12 +332,242 @@ impl super::ReadMessage {
             .part_digests
             .as_ref()
             .ok_or("descriptors read missing part_digests")?;
-        if rows.iter().map(|p| &p.part).ne(keys.iter())
-            || keys.iter().collect::<std::collections::BTreeSet<_>>().len() != keys.len()
-        {
-            return Err("part_digests keys do not match message parts in order".into());
+        for row in rows {
+            if !is_sha256_hex(&row.digest) {
+                return Err(format!("invalid part_digests digest for key: {}", row.part));
+            }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+    use crate::{read::ReadMessage, serializer_profile::ANTHROPIC_MESSAGES, tags::PartTag};
+    use serde_json::json;
+
+    fn message() -> ReadMessage {
+        let body = json!({"role":"assistant","content":[
+            {"type":"text","text":"before"},
+            {"type":"tool_use","id":"call-1","name":"echo","input":{}},
+            {"type":"text","text":"after"}
+        ]});
+        let mut read = ReadMessage::new(0, "m0", body.clone()).with_tags(vec![
+            PartTag::tagged("token-z", "§1§"),
+            PartTag::untagged("token-q"),
+            PartTag::tagged("token-a", "§2§"),
+        ]);
+        read.digest = Some(content_digest(&body));
+        read.part_digests = Some(vec![
+            PartDigest::new("token-z", &body["content"][0]),
+            PartDigest::new("token-q", &body["content"][1]),
+            PartDigest::new("token-a", &body["content"][2]),
+        ]);
+        read
+    }
+
+    #[test]
+    fn descriptor_rows_accept_opaque_keys_and_untagged_tool_call() {
+        let read = message();
+        assert_eq!(read.check_descriptor_rows(ANTHROPIC_MESSAGES), Ok(()));
+    }
+
+    #[test]
+    fn descriptor_rows_require_tags_rows() {
+        assert_eq!(
+            message()
+                .with_tags(vec![])
+                .check_descriptor_rows(ANTHROPIC_MESSAGES)
+                .unwrap_err(),
+            "descriptors read missing tags rows"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_omitted_untagged_tool_call_row() {
+        let mut read = message();
+        read.tags.remove(1);
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests keys do not match tags rows in order"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_accept_empty_part_containers() {
+        let body = json!({"role":"assistant","content":[]});
+        let mut read = ReadMessage::new(0, "empty", body.clone());
+        read.digest = Some(content_digest(&body));
+        read.part_digests = Some(vec![]);
+        assert_eq!(read.check_descriptor_rows(ANTHROPIC_MESSAGES), Ok(()));
+    }
+
+    #[test]
+    fn descriptor_rows_count_opencode_parts_without_using_part_ids() {
+        let body = json!({"info":{"role":"assistant"},"parts":[
+            {"id":"native-id","type":"tool","state":{"attachments":[{},{}]}},
+            {"id":"bookkeeping-id","type":"step-start"}
+        ]});
+        let mut read = ReadMessage::new(0, "m0", body.clone()).with_tags(vec![
+            PartTag::untagged("opaque-tool"),
+            PartTag::untagged("opaque-step"),
+        ]);
+        read.digest = Some(content_digest(&body));
+        read.part_digests = Some(vec![
+            PartDigest::new("opaque-tool", &body["parts"][0]),
+            PartDigest::new("opaque-step", &body["parts"][1]),
+        ]);
+        assert_eq!(
+            read.check_descriptor_rows(crate::serializer_profile::OPENCODE_AISDK),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_require_message_digest() {
+        let mut read = message();
+        read.digest = None;
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "descriptors read missing message digest"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_malformed_message_digest() {
+        for digest in [
+            "a".repeat(63),
+            "A".repeat(64),
+            "g".repeat(64),
+            "a".repeat(65),
+        ] {
+            let mut read = message();
+            read.digest = Some(digest);
+            assert_eq!(
+                read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+                "descriptors read missing message digest"
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_rows_require_part_digests() {
+        let mut read = message();
+        read.part_digests = None;
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "descriptors read missing part_digests"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_malformed_part_digest() {
+        for digest in [
+            "a".repeat(63),
+            "A".repeat(64),
+            "g".repeat(64),
+            "a".repeat(65),
+        ] {
+            let mut read = message();
+            read.part_digests.as_mut().unwrap()[1].digest = digest;
+            assert_eq!(
+                read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+                "invalid part_digests digest for key: token-q"
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_rows_reject_duplicate_key() {
+        let mut read = message();
+        read.part_digests.as_mut().unwrap()[1].part = "token-z".into();
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "duplicate part_digests key: token-z"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_missing_row() {
+        let mut read = message();
+        read.part_digests.as_mut().unwrap().remove(1);
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests row count 2 does not match top-level part count 3"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_extra_row() {
+        let mut read = message();
+        read.part_digests
+            .as_mut()
+            .unwrap()
+            .push(PartDigest::new("extra", &json!(null)));
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests row count 4 does not match top-level part count 3"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_tag_key_absent_from_rows() {
+        let mut read = message();
+        read.tags[0].part = "absent".into();
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests keys do not match tags rows in order"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_reordered_row() {
+        let mut read = message();
+        read.part_digests.as_mut().unwrap().swap(0, 2);
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests keys do not match tags rows in order"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_reject_reordered_or_repeated_tag() {
+        let mut read = message();
+        read.tags.swap(0, 1);
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests keys do not match tags rows in order"
+        );
+        read.tags[1] = read.tags[0].clone();
+        assert_eq!(
+            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
+            "part_digests keys do not match tags rows in order"
+        );
+    }
+
+    #[test]
+    fn descriptor_rows_refuse_unknown_profile_by_name() {
+        assert_eq!(
+            message()
+                .check_descriptor_rows("future-profile")
+                .unwrap_err(),
+            "unknown serializer profile: future-profile"
+        );
+    }
+
+    #[test]
+    fn runner_check_detects_reorder_when_tags_and_rows_both_reordered() {
+        let mut read = message();
+        let keys = vec!["token-z".into(), "token-q".into(), "token-a".into()];
+        assert_eq!(read.check_descriptors(&keys), Ok(()));
+        read.part_digests.as_mut().unwrap().swap(0, 1);
+        read.tags.swap(0, 1);
+        assert_eq!(read.check_descriptor_rows(ANTHROPIC_MESSAGES), Ok(()));
+        assert_eq!(
+            read.check_descriptors(&keys).unwrap_err(),
+            "part_digests keys do not match message parts in order"
+        );
     }
 }
 

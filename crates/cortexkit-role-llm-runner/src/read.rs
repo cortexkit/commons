@@ -602,7 +602,8 @@ pub struct ReadMessage {
     )]
     pub digest: Option<String>,
     /// Every top-level part in message order, nested media excluded. Required
-    /// in descriptors mode, optional in inline mode, independent of tags.
+    /// in descriptors mode, optional in inline mode. Descriptors list exactly
+    /// the same keys as this entry's complete `tags` rows, in the same order.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_digests: Option<Vec<descriptors::PartDigest>>,
     /// The message's position in the transcript. Never reused or

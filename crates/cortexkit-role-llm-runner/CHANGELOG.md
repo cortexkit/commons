@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.6
+
+- Pin part keys as runner-defined opaque strings, not serializer-profile derivations; descriptors list exactly the complete keys served by the entry's tags rows, in the same order, preserving the existing tags Reads rule.
+- Add provider-side `ReadMessage::check_descriptor_rows(profile)` for digest shapes, unique keys, profile-derived part counts and exact equality with tag-row keys. Missing tag rows are refused by name. Keep `check_descriptors(keys)` as the runner-side strict order check.
+- Add `serializer_profile::top_level_part_count` for `anthropic-messages` and `opencode-aisdk`, refusing unknown profiles by name. Existing vector bytes are unchanged.
+
 ## 0.6.5
 
 - Add the `system_text_default` describe group and typed accessor, plus the provider capability name without a runtime tool-provider dependency.

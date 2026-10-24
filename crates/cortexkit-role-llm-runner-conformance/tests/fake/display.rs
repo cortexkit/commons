@@ -1,7 +1,8 @@
 //! Display rows and live events of the durable-log fake: the
 //! `history_display` and `live_events` groups.
 //!
-//! Sessions the display cases mint (their names start with `cf-display`)
+//! Sessions the display and provider-descriptor cases mint
+//! (`cf-display` and `cf-descriptor-provider`)
 //! keep their bodies in the `anthropic-messages` profile, so their rows come
 //! from that profile's projection; every other session keeps the fake's own
 //! schema, so the fixtures of the other cases keep their bytes.
@@ -21,7 +22,7 @@ use cortexkit_role_llm_runner::{
 
 /// Whether `session` keeps its bodies in the `anthropic-messages` profile.
 pub(super) fn profiled(session: &str) -> bool {
-    session.starts_with("cf-display")
+    session.starts_with("cf-display") || session.starts_with("cf-descriptor-provider")
 }
 
 /// The `anthropic-messages` body of an assistant step from the fake's parts.

@@ -3930,6 +3930,58 @@ async fn described_arguments_with_id_and_name_keep_their_pairing() {
 }
 
 #[tokio::test]
+async fn descriptor_provider_rows_accept_a_faithful_opaque_key_runner() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.descriptor_fixtures = true;
+    subject.descriptor_case = Some("media_descriptors_provider_rows");
+    let report = run(&subject).await;
+    assert_passed(&report, "media_descriptors_provider_rows");
+}
+
+#[tokio::test]
+async fn descriptor_provider_rows_reject_an_omitted_untagged_tool_call_tag_row() {
+    let mut subject = FakeSubject::new(Defects {
+        media: Some("missing_tag_row"),
+        ..Defects::default()
+    });
+    subject.descriptor_fixtures = true;
+    subject.descriptor_case = Some("media_descriptors_provider_rows");
+    let report = run(&subject).await;
+    let reason = failed(&report, "media_descriptors_provider_rows");
+    assert!(
+        reason.contains("part_digests keys do not match tags rows in order"),
+        "{reason}"
+    );
+    let failures = report
+        .cases
+        .iter()
+        .filter(|case| matches!(case.outcome, CaseOutcome::Failed { .. }))
+        .map(|case| case.case)
+        .collect::<Vec<_>>();
+    assert_eq!(failures, ["media_descriptors_provider_rows"]);
+}
+
+#[tokio::test]
+async fn descriptor_part_order_fault_fails_runner_check_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        media: Some("part_order"),
+        ..Defects::default()
+    });
+    subject.descriptor_fixtures = true;
+    subject.descriptor_case = Some("media_descriptors_part_keys");
+    let report = run(&subject).await;
+    assert!(failed(&report, "media_descriptors_part_keys")
+        .contains("part_digests keys do not match message parts in order"));
+    let failures = report
+        .cases
+        .iter()
+        .filter(|case| matches!(case.outcome, CaseOutcome::Failed { .. }))
+        .map(|case| case.case)
+        .collect::<Vec<_>>();
+    assert_eq!(failures, ["media_descriptors_part_keys"]);
+}
+
+#[tokio::test]
 async fn mixed_size_fallback_frame_budget_case() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.descriptor_fixtures = true;

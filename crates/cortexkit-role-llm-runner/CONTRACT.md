@@ -456,10 +456,19 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   `reply_too_large` is non-payload structure exceeding the fixed budget; its
   detail names `ordinal`. `read::descriptors::describe` supplies the shared
   largest-first policy; schema adapters identify payload locations.
+- [pinned] A part key is a runner-defined string, opaque to providers. Providers
+  never derive keys from message bytes; they use only keys the runner served
+  for that message, in `part_digests` and in `tags` rows. Key stability is
+  governed by **Read stability** above (§4.2), not by a serializer-profile key
+  convention.
+- [pinned] Within one message, part keys are unique. In descriptors mode,
+  `part_digests` lists exactly the same keys as the entry's `tags` rows, in
+  the same order. The complete tag-row key list is defined by **Reads** in
+  §9.6; a part without a tag number still has a row there.
 - [pinned] In descriptors mode every `ReadMessage` MUST carry `digest` and
   `part_digests: [{part, digest}]`, every top-level part in message order,
-  nested media excluded. Both fields are optional in inline mode and are
-  independent of the tags group. Digests use `content_digest::content_digest`:
+  nested media excluded. Both digest fields are optional in inline mode.
+  Digests use `content_digest::content_digest`:
   lowercase SHA-256 over RFC 8785 (JCS) of the full stored message or full
   stored part, before any media rendering (§9.12). This is the same function used for compaction
   notices' `through_digest` and `descends_from`, re-exported by the provider
@@ -467,6 +476,13 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   actual parts, missing rows, duplicate keys or wrong order are decode errors
   in the kit. Ref shapes decode strictly. A compaction provider uses these
   served identities and ref hashes as given, never rehashing a descriptor.
+  `ReadMessage::check_descriptor_rows(profile)` checks the provider-visible
+  envelope: digest shapes, unique keys, the profile's top-level part count,
+  and exact equality with the entry's tag-row keys in order. Missing tag rows
+  are refused by name, as are unknown profiles.
+  `ReadMessage::check_descriptors(keys)` is the runner-side strict check using
+  independently known keys in message order; a provider uses the complete keys
+  the entry itself serves in its `tags` rows, never keys derived from bytes.
 - [pinned] Ordinals and `mid`s are never reused or renumbered within a
   lineage, across any crash. Ordinals are session-wide: a cut starts a new
   lineage but renumbers nothing, so a message keeps its ordinal and `mid`

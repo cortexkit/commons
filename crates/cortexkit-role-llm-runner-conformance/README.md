@@ -104,7 +104,7 @@ the affected case. The plan-sender and one-hour lifetime cases additionally
 
 New in 0.10.1, each with a default that makes its cases inapplicable by
 name: `serializer_profile` (the profile of a session's stored bodies, for
-the display projection case), `hold_next_model_stream` (stream the first
+the display projection and provider descriptor-row cases), `hold_next_model_stream` (stream the first
 parts of the next answer, then hold it), `advance_prompt_cache_clock`,
 `switch_model` and `set_observed_cache_lifetime` (the live `cache_ttl`
 cases), and the `CompactionSetup::ReadyWithCacheTtl` answer. Display

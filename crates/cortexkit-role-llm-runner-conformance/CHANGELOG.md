@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.4
+
+- Add `media_descriptors_provider_rows`, checking exact key equality with the entry's complete tags rows and the named serializer profile's part count, never deriving opaque keys from bytes. This case requires the serializer-profile hook; when the adapter names no profile, the case is reported as inapplicable.
+- Keep `media_descriptors_part_keys` as the runner-side strict check and exercise multiple parts so reordered rows fail by name.
+- Add a faithful arbitrary-token key runner, a reordered-row faulty runner, and a faulty runner omitting an unnumbered tool call's tag row as controls. Pair with llm-runner 0.6.6; existing vector bytes are unchanged.
+
 ## 0.12.3
 
 - Fix attachment read checks to accept independently omitted inline `digest` and `part_digests`, while requiring descriptors identities and validating any inline identities that are present.

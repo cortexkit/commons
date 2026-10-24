@@ -176,6 +176,7 @@ async fn pages<S: LlmRunnerSubject>(
     case: &Case<'_, S>,
     route: &S::Route,
     media: MediaMode,
+    provider_profile: Option<&str>,
 ) -> Result<Vec<ReadMessage>, String>
 where
     S::Route: RunnerRoute,
@@ -198,6 +199,12 @@ where
         )?;
         for message in &page.messages {
             if media == MediaMode::Descriptors {
+                if let Some(profile) = provider_profile {
+                    message
+                        .check_descriptor_rows(profile)
+                        .map_err(|e| format!("provider descriptor rows: {e}"))?;
+                    continue;
+                }
                 let keys = case
                     .subject
                     .read_parts(&message.message)
@@ -328,6 +335,13 @@ where
         tool.arguments[key] = value;
     }
     let mut calls = vec![ScriptedPart::ToolCall(tool)];
+    if matches!(
+        name,
+        "media_descriptors_part_keys" | "media_descriptors_provider_rows"
+    ) {
+        calls.insert(0, ScriptedPart::Text("before the untagged call".into()));
+        calls.push(ScriptedPart::Text("after the untagged call".into()));
+    }
     for argument in oversize {
         let mut sibling = case.mint.call("descriptor-sibling-tool");
         sibling.arguments["oversize"] = argument;
@@ -351,7 +365,27 @@ where
             marker.clone()
         })]),
     ];
-    let mut session = case.open("media", Script { turns }).await?;
+    let provider_rows = name == "media_descriptors_provider_rows";
+    let mut session = case
+        .open(
+            if provider_rows {
+                "descriptor-provider"
+            } else {
+                "media"
+            },
+            Script { turns },
+        )
+        .await?;
+    let profile = if provider_rows {
+        let Some(profile) = case.subject.serializer_profile(&session.name) else {
+            return Ok(Ending::Inapplicable(
+                "the adapter does not name a serializer profile".into(),
+            ));
+        };
+        Some(profile)
+    } else {
+        None
+    };
     let send_id = case.mint.next("media-send");
     let params = case.params(&session, "media prompt", &send_id, None);
     let send: SendReply = decode(
@@ -363,12 +397,26 @@ where
     )?;
     session.first = Some((send_id, "media prompt".into()));
     wait_run_end(case.subject, &session.route, case.declared, None, &send).await?;
-    let described = pages(case, &session.route, MediaMode::Descriptors).await?;
+    let described = pages(
+        case,
+        &session.route,
+        MediaMode::Descriptors,
+        profile.as_deref(),
+    )
+    .await?;
     let mut found = Vec::new();
     for message in &described {
         refs(&message.message, &mut found);
     }
     match name {
+        "media_descriptors_provider_rows" => {
+            if !described
+                .iter()
+                .any(|message| message.message.to_string().contains(&marker))
+            {
+                return Err("provider descriptor read lost the scripted answer".into());
+            }
+        }
         "media_descriptors_stable_across_pages" => {
             let reference_count = found.iter().filter(|r| r["type"] == "text_ref").count();
             // 14 x 256,000 = 3,584,000 bytes against DESCRIPTOR_MESSAGE_MAX
@@ -481,7 +529,7 @@ where
             } else {
                 MediaMode::Inline
             };
-            let baseline = pages(case, &session.route, mode).await?;
+            let baseline = pages(case, &session.route, mode, None).await?;
             for old in &baseline {
                 let new = described
                     .iter()

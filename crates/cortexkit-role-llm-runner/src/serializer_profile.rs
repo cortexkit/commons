@@ -30,6 +30,33 @@ pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
 /// finished stay as the runner first read them.
 pub const OPENCODE_AISDK: &str = "opencode-aisdk";
 
+/// Count top-level parts without deriving their runner-defined keys. Anthropic
+/// string content (including a whole-content descriptor ref) is one part;
+/// content arrays and OpenCode's `parts` count only their immediate elements.
+/// Unknown profiles and malformed part containers are refused by name.
+pub fn top_level_part_count(profile: &str, message: &Value) -> Result<usize, String> {
+    match profile {
+        ANTHROPIC_MESSAGES => match message.get("content") {
+            Some(Value::Array(parts)) => Ok(parts.len()),
+            Some(Value::String(_)) => Ok(1),
+            Some(Value::Object(reference))
+                if reference.get("type").and_then(Value::as_str) == Some("text_ref") =>
+            {
+                Ok(1)
+            }
+            _ => {
+                Err("anthropic-messages message content must be a string, array or text_ref".into())
+            }
+        },
+        OPENCODE_AISDK => message
+            .get("parts")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .ok_or_else(|| "opencode-aisdk message parts must be an array".into()),
+        _ => Err(format!("unknown serializer profile: {profile}")),
+    }
+}
+
 /// The member the Anthropic Messages format uses for cache markers.
 pub const CACHE_CONTROL: &str = "cache_control";
 
@@ -90,6 +117,66 @@ pub fn ingest(first: Option<&Value>, sent: &Value) -> Value {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn top_level_part_counts_cover_named_profiles_and_descriptor_shapes() {
+        use serde_json::json;
+        for (message, count) in [
+            (json!({"content":""}), 1),
+            (json!({"content":"hello"}), 1),
+            (json!({"content":[]}), 0),
+            (json!({"content":[{"type":"text","text":"one"}]}), 1),
+            (
+                json!({"content":[{"type":"tool_result","content":[
+                {"type":"text","text":"nested"}, {"type":"image"}
+            ]}, {"type":"future_part"}]}),
+                2,
+            ),
+            (json!({"content":{"type":"text_ref","byte_size":100}}), 1),
+            (
+                json!({"content":[{"type":"text_ref"},{"type":"media_ref"}]}),
+                2,
+            ),
+        ] {
+            assert_eq!(
+                top_level_part_count(ANTHROPIC_MESSAGES, &message),
+                Ok(count)
+            );
+        }
+        for (message, count) in [
+            (json!({"info":{},"parts":[]}), 0),
+            (json!({"info":{},"parts":[{"type":"text"}]}), 1),
+            (
+                json!({"info":{},"parts":[{"type":"tool","state":{"attachments":[{},{}]}},
+                {"type":"step-start"}, {"type":"future_part"}]}),
+                3,
+            ),
+        ] {
+            assert_eq!(top_level_part_count(OPENCODE_AISDK, &message), Ok(count));
+        }
+    }
+
+    #[test]
+    fn top_level_part_counts_refuse_unknown_profiles_and_malformed_containers() {
+        use serde_json::json;
+        assert_eq!(
+            top_level_part_count("future-profile", &json!({})).unwrap_err(),
+            "unknown serializer profile: future-profile"
+        );
+        for content in [json!(null), json!(42), json!({"type":"unknown_ref"})] {
+            assert_eq!(
+                top_level_part_count(ANTHROPIC_MESSAGES, &json!({"content":content})).unwrap_err(),
+                "anthropic-messages message content must be a string, array or text_ref"
+            );
+        }
+        assert!(top_level_part_count(ANTHROPIC_MESSAGES, &json!({})).is_err());
+        for message in [json!({}), json!({"parts":null}), json!({"parts":"text"})] {
+            assert_eq!(
+                top_level_part_count(OPENCODE_AISDK, &message).unwrap_err(),
+                "opencode-aisdk message parts must be an array"
+            );
+        }
+    }
 
     #[test]
     fn markers_are_removed_only_where_the_profile_allows() {

@@ -12,6 +12,16 @@ use cortexkit_role_llm_runner::{
 };
 
 pub fn parts(message: &Value) -> Vec<(String, Value)> {
+    if let Some(parts) = message["content"].as_array() {
+        return parts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (opaque_key(i), p.clone()))
+            .collect();
+    }
+    if message["content"].is_string() {
+        return vec![(opaque_key(0), message["content"].clone())];
+    }
     match message["parts"].as_array() {
         Some(parts) => parts
             .iter()
@@ -22,9 +32,26 @@ pub fn parts(message: &Value) -> Vec<(String, Value)> {
     }
 }
 
+// Fixed tokens make failures reproducible while exercising keys unrelated to
+// block indices and the tool-call ids carried inside the message body.
+fn opaque_key(index: usize) -> String {
+    cortexkit_role_llm_runner::content_digest::sha256_hex(
+        format!("fake-runner-part-slot:{index}").as_bytes(),
+    )
+}
+
 pub fn payloads(message: &Value) -> Vec<Payload> {
     let mut out = Vec::new();
-    if let Some(parts) = message["parts"].as_array() {
+    if let Some(parts) = message["content"].as_array() {
+        for (i, part) in parts.iter().enumerate() {
+            collect(
+                part,
+                &format!("/content/{i}"),
+                Some(opaque_key(i)),
+                &mut out,
+            );
+        }
+    } else if let Some(parts) = message["parts"].as_array() {
         for (i, part) in parts.iter().enumerate() {
             collect(part, &format!("/parts/{i}"), Some(i.to_string()), &mut out);
         }
@@ -225,6 +252,21 @@ pub fn describe_message(
     if defects.media == Some("part_key") {
         read.part_digests.as_mut().unwrap()[0].part = "not-a-part".into();
     }
+    if defects.media == Some("part_order") {
+        let rows = read.part_digests.as_mut().unwrap();
+        if rows.len() > 1 {
+            rows.swap(0, 1);
+        }
+    }
+    if defects.media == Some("missing_tag_row") {
+        if let Some(parts) = inline["content"].as_array() {
+            for (index, part) in parts.iter().enumerate() {
+                if part["type"] == "tool_use" {
+                    read.tags.retain(|tag| tag.part != opaque_key(index));
+                }
+            }
+        }
+    }
     Ok(read)
 }
 
@@ -288,6 +330,25 @@ fn drop_pairing(value: &mut Value) {
 
 pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &Defects) -> Reply {
     let mut page = page;
+    for message in &mut page.messages {
+        if message.message["content"].is_array() || message.message["content"].is_string() {
+            let previous = std::mem::take(&mut message.tags);
+            message.tags = parts(&message.message)
+                .into_iter()
+                .enumerate()
+                .map(|(index, (key, _))| {
+                    match previous
+                        .iter()
+                        .find(|tag| tag.part == index.to_string())
+                        .and_then(|tag| tag.tag.as_ref())
+                    {
+                        Some(tag) => cortexkit_role_llm_runner::tags::PartTag::tagged(key, tag),
+                        None => cortexkit_role_llm_runner::tags::PartTag::untagged(key),
+                    }
+                })
+                .collect();
+        }
+    }
     if mode == Some(MediaMode::Descriptors) {
         let messages = page
             .messages
