@@ -49,7 +49,9 @@ impl StepEvents {
 #[non_exhaustive]
 pub struct StepRef {
     pub runner: String,
-    /// The runner's opaque session reference (§14.1); consumers never derive it.
+    /// The §14.1 reference from `session_ref(&SessionIdentity { runner, harness,
+    /// session })`, with the attested principal's bare runner module id.
+    /// Opaque to consumers; consumers never derive it.
     pub session_ref: String,
     pub log_incarnation: String,
     pub seq: u64,

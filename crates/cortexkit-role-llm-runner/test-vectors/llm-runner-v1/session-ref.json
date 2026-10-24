@@ -1,45 +1,85 @@
 {
-  "description": "session_ref: the first 16 bytes (32 lowercase hex characters) of SHA-256 over the RFC 8785 (JCS) bytes of {\"harness\",\"project_root\",\"session\"} exactly as the bind carried them. project_root is NOT normalised: no realpath, no trailing-slash removal.",
+  "description": "session_ref: the first 16 bytes (32 lowercase hex characters) of SHA-256 over the RFC 8785 (JCS) bytes of {\"harness\",\"runner\",\"session\"}. runner is the attested principal's bare module id from session_binding.runner, never a reserved:<id> display form. The display-form case deliberately uses the wrong spelling to pin distinct bytes; the helper never strips prefixes. Every field is used exactly as given, never normalised. The pure derivation accepts any string, including empty strings; bind validation is separate.",
   "cases": [
     {
-      "name": "plain",
+      "name": "ascii",
       "bind": {
-        "project_root": "/Users/ufukaltinok/Work/Projects/CortexKit/broca",
-        "harness": "alfonso",
-        "session": "bg_0123456789abcdef"
+        "runner": "runner-a",
+        "harness": "harness-a",
+        "session": "session-1"
       },
-      "jcs": "{\"harness\":\"alfonso\",\"project_root\":\"/Users/ufukaltinok/Work/Projects/CortexKit/broca\",\"session\":\"bg_0123456789abcdef\"}",
-      "session_ref": "0ed3e544820e70a2988faa4522cb7717"
+      "jcs": "{\"harness\":\"harness-a\",\"runner\":\"runner-a\",\"session\":\"session-1\"}",
+      "session_ref": "f93ec93e3559a70a8db019b29e0fa883"
     },
     {
-      "name": "trailing slash is part of the bytes",
+      "name": "principal display form is not the bare module id",
       "bind": {
-        "project_root": "/tmp/project/",
-        "harness": "runner",
-        "session": "s1"
+        "runner": "reserved:runner-a",
+        "harness": "harness-a",
+        "session": "session-1"
       },
-      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/project/\",\"session\":\"s1\"}",
-      "session_ref": "58710a071e777b22bf1b3734b691ef7d"
+      "jcs": "{\"harness\":\"harness-a\",\"runner\":\"reserved:runner-a\",\"session\":\"session-1\"}",
+      "session_ref": "e63a853a5046189355d067fb9f1a7759"
     },
     {
-      "name": "no trailing slash",
+      "name": "same session on another runner",
       "bind": {
-        "project_root": "/tmp/project",
-        "harness": "runner",
-        "session": "s1"
+        "runner": "runner-b",
+        "harness": "harness-a",
+        "session": "session-1"
       },
-      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/project\",\"session\":\"s1\"}",
-      "session_ref": "fb99bd3a001d05d029c607bd048ed5a1"
+      "jcs": "{\"harness\":\"harness-a\",\"runner\":\"runner-b\",\"session\":\"session-1\"}",
+      "session_ref": "da978e0dd29a105853d45317fcd66408"
     },
     {
-      "name": "escaping and non-ASCII",
+      "name": "unicode",
       "bind": {
-        "project_root": "/tmp/p",
-        "harness": "runner",
-        "session": "session \"quoted\" é"
+        "runner": "実行器-é",
+        "harness": "配線-λ",
+        "session": "会話-🦀"
       },
-      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/p\",\"session\":\"session \\\"quoted\\\" é\"}",
-      "session_ref": "ffe9f09a57cbb91f59379771fe9f3326"
+      "jcs": "{\"harness\":\"配線-λ\",\"runner\":\"実行器-é\",\"session\":\"会話-🦀\"}",
+      "session_ref": "5c653b2ad6efe06a59f5078e8df8a0b0"
+    },
+    {
+      "name": "quote and backslash escaping",
+      "bind": {
+        "runner": "runner-\"a\"",
+        "harness": "harness\\a",
+        "session": "session\n\t\\\"\u0000"
+      },
+      "jcs": "{\"harness\":\"harness\\\\a\",\"runner\":\"runner-\\\"a\\\"\",\"session\":\"session\\n\\t\\\\\\\"\\u0000\"}",
+      "session_ref": "9358ed7e5db36368618f24997e5756eb"
+    },
+    {
+      "name": "empty fields",
+      "bind": {
+        "runner": "",
+        "harness": "",
+        "session": ""
+      },
+      "jcs": "{\"harness\":\"\",\"runner\":\"\",\"session\":\"\"}",
+      "session_ref": "beeaccb7ec329b79e2096b4abb032ea9"
+    },
+    {
+      "name": "whitespace is significant",
+      "bind": {
+        "runner": "runner-a ",
+        "harness": " harness-a",
+        "session": "session-1 "
+      },
+      "jcs": "{\"harness\":\" harness-a\",\"runner\":\"runner-a \",\"session\":\"session-1 \"}",
+      "session_ref": "a5756495f96bf5737589d79fa8ca3a91"
+    },
+    {
+      "name": "decomposed unicode",
+      "bind": {
+        "runner": "runner-a",
+        "harness": "harness-a",
+        "session": "é"
+      },
+      "jcs": "{\"harness\":\"harness-a\",\"runner\":\"runner-a\",\"session\":\"é\"}",
+      "session_ref": "fd86a219135a67e2b5775cfa1851e2de"
     }
   ]
 }

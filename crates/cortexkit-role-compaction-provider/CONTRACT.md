@@ -69,16 +69,18 @@ contacts after Setup are the ride request and the ceiling pause (§8).
   at project scope may instead have an empty bind session and a generic bind
   harness such as `runner`.
 - [pinned] At Setup, the provider records the authoritative reverse-call
-  identity: Setup's `harness` and `session`, together with the incoming
-  route's `project_root`.
+  identity: the daemon-attested runner principal on the incoming route,
+  together with Setup's `harness` and `session`. `project_root` is retained
+  only as route metadata, never as part of this identity or a state key.
 - [pinned] Calls about the conversation—`session.read`, `session.head`,
   `session.resolve`, sends into it, and reminders—open the provider's own
-  route to the runner with exactly that identity. They never use a constant or
+  route to that attested runner with exactly that harness and session. They never use a constant or
   the Setup route's harness or session. A reverse `session.read` can find
   messages and lineage only under the identity carried by its route.
 - [pinned] A child run the provider creates is a separate session owned by
-  that provider. Its route binds the Setup route's `project_root`, Setup's
-  `harness`, and the child's own new session. It never binds the conversation's
+  that provider. It targets the same attested runner, binds Setup's `harness`
+  and the child's own new session, and retains `project_root` as route metadata.
+  It never binds the conversation's
   session.
 - [pinned] If the incoming route has a non-empty bind session and that value
   differs from Setup's session, the provider may refuse Setup with
@@ -86,13 +88,21 @@ contacts after Setup are the ride request and the ceiling pause (§8).
   the harness is caller-chosen and unattested. The provider recognizes a
   runner only by the daemon-attested principal on the route.
 - [pinned] A provider keys a runner conversation, and every piece of
-  per-session state it keeps for one, on `(project_root, session,
-  harness)`: the project root it serves the request for, the session
-  handle and the harness. Two requests that differ in any of the three
+  per-session state it keeps for one, on `(runner, harness, session)`:
+  the bare module id of the daemon-attested runner principal that ran Setup
+  (never a body field), Setup's harness and its session handle. Folder aliases reach the
+  same state. Two requests that differ in any of the three
   belong to different conversations. The session reference
-  (`llm-runner/v1`'s `session_ref`, its §14.1) is the digest of the same
-  three values; notices, views, `view.get` and `compaction.ride` name the
-  session by it.
+  (`llm-runner/v1` §14.1) is computed by the shared
+  `cortexkit_role_llm_runner::session_ref(&SessionIdentity { runner, harness, session })` function.
+  `runner` is the attested principal's bare module id recorded in
+  `session_binding.runner` (for example, `runner-a`), never the display form
+  `reserved:runner-a`, any other prefix or the project root. Extract that bare
+  id before constructing `SessionIdentity`; the shared function does not strip
+  prefixes. Every input is used exactly as given, never normalised.
+  Notices, views, `view.get` and `compaction.ride` name the session by that
+  folder-independent reference. When migrating stored v1 refs, re-key live
+  sessions once and keep ended rows' v1 refs.
 - [pinned] Every request in this role is `{method, params}` (`OpRequest`):
   `method` is the op's name and `params` its request. `role.describe` takes
   empty params (`DescribeRequest`).
@@ -236,7 +246,8 @@ the session and freezes that plan for use.
   non-retryable code `setup_identity_mismatch` (§10, §13.3). It does not
   compare Setup's harness with the route's bind harness: routes shared across
   sessions may carry a generic harness. For reverse calls, it combines
-  Setup's `harness` and `session` with the incoming route's `project_root`.
+  Setup's `harness` and `session` with the incoming route's daemon-attested
+  runner principal. `project_root` remains route metadata only.
 - [pinned] For calls about the conversation—`session.read`, `session.head`,
   `session.resolve`, sends into it, and reminders—the provider opens its own
   route to the runner using exactly the identity above. It never uses a
@@ -244,8 +255,9 @@ the session and freezes that plan for use.
   `session.read` can find messages and lineage only under the identity its
   route carries.
 - [pinned] A child run the provider creates is a separate session owned by
-  that provider. Its route binds the Setup route's `project_root`, Setup's
-  `harness`, and the child's own new session, never the conversation's session.
+  that provider. It targets the same attested runner and binds Setup's
+  `harness` and the child's own new session, never the conversation's session;
+  `project_root` is retained only as route metadata.
 - [pinned] Optional `descends_from: {lineage_id, through_ordinal}`
   (`lineage::DescendsFrom`) declares that the session's first lineage
   continues another lineage of the same conversation, through the inclusive
@@ -1015,7 +1027,9 @@ view (§6) appears in the model view is the runner role's to define.
   The same inputs give the same bytes.
 - [pinned] No request in this role carries scope, agent or session identity
   beyond the opaque `session` handle, the caller's `harness` and the session
-  reference derived from them (§1). A provider uses them only as keys for its
+  reference derived with the runner module id (§1). The runner principal is
+  daemon-attested route metadata, never a body field. A provider uses the
+  `(runner, harness, session)` identity only as a key for its
   own per-session state, never to choose a variant. A subagent session gets
   different behaviour through its preset or params, never through who is
   asking.

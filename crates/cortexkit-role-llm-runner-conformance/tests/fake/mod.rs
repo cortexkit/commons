@@ -143,6 +143,8 @@ pub enum RetentionDefect {
 const DEFAULT_MAX_BYTES: u64 = 64 * 1024;
 /// The provider and model the fake reports every step's usage under.
 const FAKE_PROVIDER: &str = "scripted";
+const FAKE_RUNNER: &str = "runner-a";
+const FAKE_HARNESS: &str = "harness-a";
 const FAKE_MODEL: &str = "scripted-model";
 const MAXIMUM_MAX_BYTES: u64 = 1024 * 1024;
 const DEFAULT_LIMIT: u64 = 100;
@@ -5063,6 +5065,11 @@ impl LlmRunnerSubject for FakeSubject {
     > {
         step_events::observe(&handle.0, session)
     }
+
+    fn runner_id(&self) -> &str {
+        FAKE_RUNNER
+    }
+
     async fn prepare_system_text_default(
         &self,
         session: &str,

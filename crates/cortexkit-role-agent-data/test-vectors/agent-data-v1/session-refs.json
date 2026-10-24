@@ -1,16 +1,16 @@
 {
   "cases": [
     {
-      "harness": "broca",
-      "project_root": "/Users/ada/Work/atlas",
+      "harness": "harness-a",
       "session": "ses_01J9ZA",
-      "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082"
+      "sessionRef": "c6ea741d409f833ee60be91d9176e493",
+      "runner": "runner-a"
     },
     {
-      "harness": "broca",
-      "project_root": "/Users/ada/Work/atlas",
+      "harness": "harness-a",
       "session": "ses_01J9ZB",
-      "sessionRef": "895e0666f7bb9d4039958519b858fdc8"
+      "sessionRef": "4ace44c6dd17c1d192db9a52d670ed42",
+      "runner": "runner-a"
     }
   ]
 }

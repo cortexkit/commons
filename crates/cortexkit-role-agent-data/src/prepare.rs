@@ -41,8 +41,8 @@ pub struct PreparedItem {
     pub ref_kind: String,
     #[serde(rename = "ref")]
     pub r#ref: String,
-    /// Exactly `cortexkit_role_llm_runner::session_ref` for the session
-    /// this ref's data belongs to: 32 lowercase hex characters.
+    /// Exactly `cortexkit_role_llm_runner::session_ref(&SessionIdentity { runner, harness, session })`
+    /// for the session this ref's data belongs to: 32 lowercase hex characters.
     #[serde(rename = "sessionRef")]
     pub session_ref: String,
     /// This participant's principal, `reserved:<module_id>`.

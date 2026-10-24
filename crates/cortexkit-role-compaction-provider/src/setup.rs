@@ -2,9 +2,9 @@
 //! model call; a runner may call a cut's Setup as soon as it prepares the
 //! view that carries the cut. A cut, a revert or a recovery that
 //! starts a new lineage calls it again, and the provider keeps its state for
-//! the session across those calls. The provider takes `project_root` from the incoming route; together
-//! with Setup's `harness` and `session`, it uses these values as the identity
-//! for later reverse calls.
+//! the session across those calls. The daemon-attested runner principal on the
+//! incoming route supplies its bare module id, which together with Setup's
+//! `harness` and `session` keys provider state and later reverse calls. `project_root` is route metadata only.
 //!
 //! Setup returns the initial CompactionMessage, which the runner renders
 //! until it applies the session's first view (a provider with no head
@@ -38,7 +38,7 @@ pub struct SetupRequest {
     /// a non-empty session that differs, the provider may refuse Setup with
     /// `setup_identity_mismatch`; a shared route has an empty bind session.
     /// `project_root` is not carried here and comes only from the route's bind
-    /// identity.
+    /// metadata, never the provider's per-session state key.
     pub session: String,
     /// The caller-chosen harness in the session identity. The daemon does not
     /// attest this string, and a shared project route may carry a different

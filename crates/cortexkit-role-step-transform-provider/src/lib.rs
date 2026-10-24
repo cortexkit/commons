@@ -47,6 +47,8 @@ impl<T> OpRequest<T> {
 
 pub mod answer;
 pub mod claude_code;
+#[cfg(feature = "conformance")]
+pub mod conformance;
 pub mod describe;
 pub mod errors;
 pub mod grant;

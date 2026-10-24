@@ -1596,6 +1596,7 @@ async fn retention_requires_a_real_tombstone_process_kill() {
 const COMPACTION_CASES: &[&str] = &[
     "compaction_setup_durable_once",
     "compaction_setup_route_session_matches_setup",
+    "session_ref_uses_runner_identity",
     "model_view_half_open_ranges_and_travel",
     "compaction_unavailable_distinct_from_refuse",
 ];
@@ -1623,6 +1624,15 @@ async fn compaction_good_fake_passes_all_named_cases() {
     for name in COMPACTION_CASES {
         assert_passed(&report, name);
     }
+}
+
+#[tokio::test]
+async fn session_ref_from_folder_fails_only_named_case() {
+    compaction_break(
+        CompactionDefect::SessionRefFromFolder,
+        "session_ref_uses_runner_identity",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1770,6 +1780,7 @@ async fn compaction_model_view_missing_is_not_applicable_independently() {
     for name in COMPACTION_CASES {
         if *name == "compaction_unavailable_distinct_from_refuse"
             || *name == "compaction_setup_route_session_matches_setup"
+            || *name == "session_ref_uses_runner_identity"
         {
             assert_passed(&report, name);
         } else {

@@ -6,10 +6,33 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.6.7"
+cortexkit-role-llm-runner = "0.7.0"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+
+## Hosted session references
+
+Use the shared function with named inputs; legacy positional calls no longer
+compile, preventing a folder from silently becoming a hash input:
+
+```rust
+use cortexkit_role_llm_runner::{session_ref, SessionIdentity};
+
+let reference = session_ref(&SessionIdentity {
+    runner: "runner-a",
+    harness: "harness-a",
+    session: "session-1",
+});
+assert_eq!(reference, "f93ec93e3559a70a8db019b29e0fa883");
+```
+
+`runner` is the daemon-attested principal's **bare module id**, exactly as
+recorded in `session_binding.runner`, never `reserved:runner-a` or another
+prefixed/display spelling. Extract the bare id before constructing the
+identity; the helper hashes all fields exactly as supplied and strips nothing.
+Use deprecated `session_ref_v1(harness, project_root, session)` only to migrate
+stored refs: re-key live sessions once; ended rows keep v1 refs.
 
 Since 0.6.5, `system_text_default` promises preset-less system-text admission
 and unchanged forwarding. `RoleDescribe::system_text_default()` reads this

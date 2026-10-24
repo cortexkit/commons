@@ -33,6 +33,8 @@
 
 pub mod cache_ttl;
 pub mod ceiling;
+#[cfg(feature = "conformance")]
+pub mod conformance;
 pub mod describe;
 pub mod digest;
 pub mod errors;

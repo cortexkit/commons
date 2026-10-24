@@ -13,7 +13,7 @@
 # can test against the same bytes without a checkout of this repository.
 [package]
 name = "cortexkit-role-agent-data"
-version = "0.2.2"
+version = "0.2.3"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -34,7 +34,7 @@ serde_json = "1"
 # The vectors' sessionRef values are checked against
 # cortexkit_role_llm_runner::session_ref, the function that defines them,
 # without adding a production dependency.
-cortexkit-role-llm-runner = { version = "0.6.0", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.7.0", path = "../cortexkit-role-llm-runner" }
 # An independent RFC 8785 (JCS) implementation, so the round-trip test
 # compares canonical bytes rather than this crate's own encoding.
 serde_json_canonicalizer = "0.3"

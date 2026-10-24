@@ -45,15 +45,17 @@ pub const DEFAULT_HOOK_CAP_BYTES: usize = 3 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HookCall {
-    /// The runner's opaque name for the session. A provider may key its own
-    /// per-session state on it, and never uses it to choose what it returns.
+    /// The runner's opaque name for the session, one component of the provider's
+    /// per-session state key, never used to choose what it returns.
     pub session: String,
-    /// The harness named in the session's key, which identifies the caller
-    /// (for example `broca`). This differs from the route's bind harness,
+    /// The caller-chosen harness named in the session's key
+    /// (for example `harness-a`). This differs from the route's bind harness,
     /// the harness a connection declares when it opens the route; a runner
     /// always declares `runner`. Required: a request without it does
     /// not decode. A provider keys a runner conversation on
-    /// `(project_root, session, harness)`.
+    /// `(runner, harness, session)`, where runner is the daemon-attested
+    /// principal's bare module id, never `reserved:<id>` or a body field. `project_root` is route
+    /// metadata only and never part of that key.
     pub harness: String,
     /// The session's current lineage. Absent only on `pre_user` for the
     /// first message of a session nothing has been written to.

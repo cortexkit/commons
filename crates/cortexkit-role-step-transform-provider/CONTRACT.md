@@ -52,16 +52,24 @@ and the provider reads history and answers exactly as it does today.
   session handle in a hook call is a state key, not an authorization credential.
 - [pinned] Every hook request (`transform.hook`, §7)
   carries a required string `harness`, next to `session`: the harness
-  named in the session's key, which identifies the caller (for example
-  `broca`). This differs from the route's bind harness, the harness a
+  named in the session's key (for example `harness-a`). It is caller-chosen,
+  not an authenticated runner identity. This differs from the route's bind harness, the harness a
   connection declares when it opens the route; a runner always declares
   `runner`. A request without `harness` does not decode; it is
   never defaulted.
 - [pinned] A provider keys a runner conversation, and every piece of
-  per-session state it keeps for one, on `(project_root, session,
-  harness)`: the project root it serves the request for, the session
-  handle and the harness. Two requests that differ in any of the three
-  belong to different conversations.
+  per-session state it keeps for one, on `(runner, harness, session)`:
+  the bare module id of the daemon-attested runner principal on the route,
+  never its `reserved:<id>` display form or a body field,
+  and the hook's harness and session. This bare-id rule applies to every
+  session, including sessions first established by a hook; this role has no
+  Setup wire op.
+  `project_root` is route metadata only, never part of the state key; folder
+  aliases reach the same state. Two requests that differ in any of the three
+  key fields belong to different conversations. The shared
+  `cortexkit_role_llm_runner::session_ref(&SessionIdentity { runner, harness, session })` function
+  computes the session reference using that runner's module id exactly as
+  recorded in `session_binding.runner`, without normalising any field.
 - [pinned] Every request in this role is `{method, params}` (`OpRequest`):
   `method` is the op's name and `params` its request. `role.describe`
   takes empty params (`DescribeRequest`).
@@ -412,7 +420,8 @@ Optional host service, burn, part and pass fields are specified in §13.2–§13
   session identity.
 - [pinned] No request in this role carries scope, agent or session identity
   beyond the opaque `session` handle and the caller's `harness` (§1). A
-  provider uses them only as keys for its own per-session state (a tag
+  provider combines them with the daemon-attested runner principal from the
+  route, never from a body field, only as keys for its own per-session state (a tag
   counter, say), never to choose a variant.
 - [pinned] A provider tells prompts apart itself, by the mark or by their
   wrapping. The runner does not classify turns.
@@ -551,7 +560,9 @@ change to ordinary runner admission or observation.
   and the frozen `claude_code` capability bundle (§14). Neither the
   body `harness` field nor body params select this exception or confer
   authority. The §1 triple remains the canonical external conversation identity
-  and the legacy-lane provider key. Claude Code provider state (engine namespace,
+  and the legacy-lane provider key: `(runner, harness, session)`, with the
+  bare module id of the principal attested on the route as its runner component. The bind's
+  `project_root` is admission/routing metadata, not a state key. Claude Code provider state (engine namespace,
   locks, message ledgers, cursors, views and receipts) is additionally scoped by
   the frozen provider generation and profile generation. Params never select
   another canonical conversation or change its project/session/agent ownership.
@@ -852,8 +863,10 @@ change to ordinary runner admission or observation.
   presence and JSON syntax; native equivalence, block spans and signed-byte
   safety are provider codec obligations, not permission for generic recursive
   cache-marker stripping.
-- [pinned] The canonical external identity remains the project/session/harness
-  triple with resolved agent ownership. Claude Code provider state, including
+- [pinned] The canonical external identity is the §1 `(runner, harness, session)`
+  triple, with the daemon-attested principal's bare module id as runner. Resolved agent ownership
+  is an authorization concern, not another component of that triple.
+  Project folders remain route/admission metadata only. Claude Code provider state, including
   namespace, locks, ingest ledgers, views and receipts, is additionally scoped
   by provider generation and profile generation. A new native generation never
   overwrites old state or changes memory ownership; bootstrap resumes within

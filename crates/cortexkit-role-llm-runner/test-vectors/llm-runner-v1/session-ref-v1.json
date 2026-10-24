@@ -1,0 +1,45 @@
+{
+  "description": "session_ref_v1: the legacy folder-based reference, only for migrating stored refs. Ended rows keep v1 refs; live sessions are re-keyed once. Fields are not normalised.",
+  "cases": [
+    {
+      "name": "plain",
+      "bind": {
+        "project_root": "/tmp/project-a",
+        "harness": "harness-a",
+        "session": "session-0123456789abcdef"
+      },
+      "jcs": "{\"harness\":\"harness-a\",\"project_root\":\"/tmp/project-a\",\"session\":\"session-0123456789abcdef\"}",
+      "session_ref": "3d3ea0c5340537f94b1cac5c1bbc4f09"
+    },
+    {
+      "name": "trailing slash is part of the bytes",
+      "bind": {
+        "project_root": "/tmp/project/",
+        "harness": "runner",
+        "session": "s1"
+      },
+      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/project/\",\"session\":\"s1\"}",
+      "session_ref": "58710a071e777b22bf1b3734b691ef7d"
+    },
+    {
+      "name": "no trailing slash",
+      "bind": {
+        "project_root": "/tmp/project",
+        "harness": "runner",
+        "session": "s1"
+      },
+      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/project\",\"session\":\"s1\"}",
+      "session_ref": "fb99bd3a001d05d029c607bd048ed5a1"
+    },
+    {
+      "name": "escaping and non-ASCII",
+      "bind": {
+        "project_root": "/tmp/p",
+        "harness": "runner",
+        "session": "session \"quoted\" é"
+      },
+      "jcs": "{\"harness\":\"runner\",\"project_root\":\"/tmp/p\",\"session\":\"session \\\"quoted\\\" é\"}",
+      "session_ref": "ffe9f09a57cbb91f59379771fe9f3326"
+    }
+  ]
+}

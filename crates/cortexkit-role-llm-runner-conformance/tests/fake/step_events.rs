@@ -31,7 +31,13 @@ pub(super) fn prepare(module: &Module, session: &str, record: &mut Value) -> Res
     }
     record["native_seq"] = json!(std::fs::metadata(&module.log).map(|m| m.len()).unwrap_or(0));
     record["native_incarnation"] = json!(module.sessions.lock().unwrap()[session].incarnation);
-    record["native_session_ref"] = json!(format!("opaque-ref-{session}"));
+    record["native_session_ref"] = json!(cortexkit_role_llm_runner::session_ref(
+        &cortexkit_role_llm_runner::SessionIdentity {
+            runner: FAKE_RUNNER,
+            harness: FAKE_HARNESS,
+            session,
+        }
+    ));
     Ok(())
 }
 
@@ -54,7 +60,7 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
         seq += 1;
     }
     let position = StepRef::new(
-        "runner_a",
+        FAKE_RUNNER,
         record["native_session_ref"].as_str().unwrap(),
         record["native_incarnation"].as_str().unwrap(),
         seq,
@@ -69,7 +75,7 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
         } else {
             "completed"
         },
-        "host_a",
+        FAKE_HARNESS,
         session,
         FAKE_PROVIDER,
         FAKE_MODEL,
@@ -87,9 +93,9 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
         body[member] = json!("forbidden-content");
     }
     let publisher = if defects.step_events_wrong_publisher {
-        "runner_b"
+        "runner-b"
     } else {
-        "runner_a"
+        FAKE_RUNNER
     };
     let subject = format!("ck.account_a.live.{publisher}.step.finished.v1");
     let publication = PublishedStep::new(subject, body, durable);
@@ -119,7 +125,7 @@ pub(super) fn observe(
             // Native position is the record's byte offset, independently read
             // from disk, not the seq the publishing code put in its event.
             let position = StepRef::new(
-                "runner_a",
+                FAKE_RUNNER,
                 record["native_session_ref"].as_str().unwrap(),
                 record["native_incarnation"].as_str().unwrap(),
                 offset,

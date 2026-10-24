@@ -184,6 +184,10 @@ impl Harness for Fake {
 
 #[async_trait]
 impl LlmRunnerSubject for Fake {
+    fn runner_id(&self) -> &str {
+        "runner-a"
+    }
+
     fn capabilities(&self) -> BTreeSet<Capability> {
         [
             Capability::SessionRetention,

@@ -180,11 +180,16 @@ The crate's source files use these words as defined here.
 - `status` and `abort` never refuse `unknown_ref`: either can reach a
   receiver for a `cutId` whose `import` never ran there.
 - **`sessionRef`** is exactly the value
-  `cortexkit_role_llm_runner::session_ref(harness, project_root, session)`
-  returns (commons 8ebc492, `cortexkit-role-llm-runner` 0.2.1): the first 16
+  `cortexkit_role_llm_runner::session_ref(&SessionIdentity { runner, harness, session })`
+  returns (`cortexkit-role-llm-runner` 0.7.0): the first 16
   bytes of a SHA-256, as 32 lowercase hex characters, the handle
   participants already share. Nobody derives their own
-  (`refs::is_session_ref` checks the spelling only).
+  (`refs::is_session_ref` checks the spelling only). `runner` is the module
+  id recorded in `session_binding.runner`, never the principal's
+  `reserved:<id>` display form; all three fields are used exactly
+  as given, never normalised. Folder aliases do not change this identity.
+  A module migrating stored v1 refs re-keys live sessions once; ended rows
+  keep their v1 refs.
 
 ## 5. `cutId`, idempotency and lost replies
 

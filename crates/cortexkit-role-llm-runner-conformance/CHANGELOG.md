@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0
+
+- Retain the retention and step-event cases from 0.13.x. Step-event fake
+  records use the shared named session identity on the declared bare runner
+  id; native-history observations still read those stored references.
+- Use the shared helper's named `SessionIdentity` fields; `runner_id` supplies
+  the attested runner principal's bare module id, never a display-form prefix.
+- Breaking: adapters must declare `LlmRunnerSubject::runner_id`, the module id
+  recorded in `session_binding.runner`.
+- Add `session_ref_uses_runner_identity`: bus-captured advance-notice headers
+  must match the shared `session_ref(&SessionIdentity { runner, harness, session })` function. A
+  folder-derived fake fails only that named case.
+- Update fake runners and user-command fixtures to the shared derivation and
+  depend on llm-runner 0.7.0 and compaction-provider 0.7.0.
+
 ## 0.13.1
 
 - Pin the wire dependency to llm-runner 0.6.11. All new adapter hooks have

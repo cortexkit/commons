@@ -56,11 +56,11 @@ fn async_fixture_matches_sha256sum() {
 fn session_ref_is_the_runner_roles_reference() {
     let file = file();
     assert_eq!(
-        cortexkit_role_llm_runner::session_ref::session_ref(
-            str_of(&file, "harness"),
-            str_of(&file, "project_root"),
-            str_of(&file, "session"),
-        ),
+        cortexkit_role_llm_runner::session_ref(&cortexkit_role_llm_runner::SessionIdentity {
+            runner: str_of(&file, "runner_module_id"),
+            harness: str_of(&file, "harness"),
+            session: str_of(&file, "session"),
+        }),
         str_of(&file, "session_ref")
     );
 }
@@ -864,6 +864,12 @@ fn provider_route_identity_vectors_keep_conversation_and_child_scopes_distinct()
         }
 
         if let Some(reverse_bind) = expected.get("reverse_bind") {
+            assert_eq!(
+                expected["runner_principal"],
+                case["incoming_route"]["principal"]["value"],
+                "{}",
+                name(case)
+            );
             assert_eq!(reverse_bind["harness"], setup["harness"], "{}", name(case));
             assert_eq!(reverse_bind["session"], setup["session"], "{}", name(case));
             assert_eq!(
@@ -880,6 +886,12 @@ fn provider_route_identity_vectors_keep_conversation_and_child_scopes_distinct()
         }
 
         if let Some(child_bind) = expected.get("child_bind") {
+            assert_eq!(
+                expected["runner_principal"],
+                case["incoming_route"]["principal"]["value"],
+                "{}",
+                name(case)
+            );
             assert_eq!(child_bind["harness"], setup["harness"], "{}", name(case));
             assert_eq!(
                 child_bind["session"],

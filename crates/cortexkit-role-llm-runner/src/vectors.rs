@@ -300,6 +300,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/session-change.json"),
     ),
     (
+        "session-ref-v1.json",
+        include_str!("../test-vectors/llm-runner-v1/session-ref-v1.json"),
+    ),
+    (
         "session-ref.json",
         include_str!("../test-vectors/llm-runner-v1/session-ref.json"),
     ),

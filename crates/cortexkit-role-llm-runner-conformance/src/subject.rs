@@ -592,6 +592,12 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// The attested runner principal's bare module id, exactly as recorded in
+    /// `session_binding.runner`, never `reserved:<id>` or any other prefix.
+    /// This is not the caller-chosen harness or the project folder. The suite
+    /// uses it with the shared session-reference function to check bus headers.
+    fn runner_id(&self) -> &str;
+
     /// Install the scripted tool provider with exactly `provides` in the
     /// daemon catalog's manifest capabilities. Return first-send fields whose
     /// plan includes `item` as that provider's system-text item, unchanged.

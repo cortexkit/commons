@@ -222,7 +222,12 @@ vocabulary section and identifies the governing contract sections.
    session and a generic harness is valid. The named case
    `compaction_setup_route_session_matches_setup` checks both forms, and
    that a Setup refused `setup_identity_mismatch` ends the run `error` under
-   that code. Hold
+   that code. Declare the runner module's id with the required `runner_id`
+   method, the attested principal's bare module id exactly as recorded in
+   `session_binding.runner`, never its `reserved:<id>` display form, a harness or
+   folder. `session_ref_uses_runner_identity` compares bus-captured advance
+   notices against the shared `session_ref(&SessionIdentity { runner, harness, session })` function,
+   using the declared runner id and Setup's harness and session. Hold
    every model answer until `release_compaction_model`.
    `durable_compaction_setup` must read the initial answer from persistent
    runner storage while a model call is held, never from an in-memory cache,
@@ -317,6 +322,7 @@ is unchanged and prints nothing.
 | `ride_wait_provider_wait_honoured`, `ride_wait_slow_answer_reported`, `ride_wait_fast_answer_not_reported`, `ride_wait_above_cap_fails_setup` | `compaction`, `queue`, `transcript_reads`, `run_ops`, and the hooks `observed_ride_wait_max_ms`, `script_next_ride`, `switch_model`, `set_observed_cache_lifetime` and `advance_prompt_cache_clock`; inapplicable when the runner sends no `ride_wait_max_ms` in its Setup request or never declares `ttl_expired`, and the first three when its cap is below 4,000 ms |
 | `per_step_cost_scales_with_new_messages` | `queue`, `transcript_reads` or `run_ops`, and the seeding hook (opt-in) |
 | `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, `FoldRecorded` |
+| `session_ref_uses_runner_identity` | `compaction`, `queue`; required `runner_id` declaration and bus-captured advance notices |
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |

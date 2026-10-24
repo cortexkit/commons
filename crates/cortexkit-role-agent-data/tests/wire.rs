@@ -622,11 +622,12 @@ fn session_refs_are_the_llm_runner_function() {
     let file = load("session-refs.json");
     let mut derived = BTreeSet::new();
     for case in cases(&file, "cases") {
-        let value = cortexkit_role_llm_runner::session_ref(
-            case["harness"].as_str().unwrap(),
-            case["project_root"].as_str().unwrap(),
-            case["session"].as_str().unwrap(),
-        );
+        let value =
+            cortexkit_role_llm_runner::session_ref(&cortexkit_role_llm_runner::SessionIdentity {
+                runner: case["runner"].as_str().unwrap(),
+                harness: case["harness"].as_str().unwrap(),
+                session: case["session"].as_str().unwrap(),
+            });
         assert_eq!(value, case["sessionRef"], "{case}");
         assert!(is_session_ref(&value));
         derived.insert(value);

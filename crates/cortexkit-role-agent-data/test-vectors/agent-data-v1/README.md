@@ -18,7 +18,7 @@ exactly these bytes.
 | `steps.json` | every (op, step) pair: the step it moves to, or the refusal (`cut_unknown`, or `invalid_state` with the step `detail.step` names) | the wire test's step-machine test |
 | `ref-sets.json` | the one-ref-set-per-`cutId` rule: an op on a `cutId` at a step, the refs the `cutId` started with (`null` when the participant has none), the request's refs, and the outcome, `ok` or the `invalid_state` refusal with its detail; covers `export`, `release`, `activate` and both sides' `abort`, reordered sets, subsets and supersets, an `abort` of a `cutId` never seen, and the first ops and reads the rule never checks | the wire test's ref-set test |
 | `op-refusals.json` | which op may refuse with which code: `ops` gives each op's row, the same table as CONTRACT.md §6.3, and `cases` asks about single (op, code) pairs, among them `busy` allowed on `prepare`, `import` and `activate` only, `local_advanced` on `import` and `activate` only, `cut_not_ready` on `diverged`, and a code outside the closed set in no row | the wire test's per-op refusal test |
-| `session-refs.json` | the inputs behind the `sessionRef` values the other files use, each with the value `cortexkit_role_llm_runner::session_ref` returns for them | the wire test's sessionRef test, against the llm-runner crate |
+| `session-refs.json` | the named `SessionIdentity { runner, harness, session }` fields behind the `sessionRef` values the other files use, with a bare runner module id and the value `cortexkit_role_llm_runner::session_ref` returns | the wire test's sessionRef test, against the llm-runner crate |
 
 A case with `expand_refs: N` replaces its params' `refs` with N refs
 `{"ref_kind": "broca.session", "ref": "ses_<i>"}`, for `i` from 0 to N-1,

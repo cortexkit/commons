@@ -3,10 +3,10 @@
     "harness": "opencode",
     "project_root": "/work/demo",
     "session": "ses_1",
-    "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+    "session_ref": "0b9679cc5a4044d51710921d5233db02",
     "account": "acme",
-    "runner_module_id": "thalamus-harness",
-    "provider_module_id": "ck-mc"
+    "runner_module_id": "runner-a",
+    "provider_module_id": "provider-a"
   },
   "transcript": {
     "lineage_id": "lin_a",
@@ -127,10 +127,10 @@
   "notices": [
     {
       "name": "first notice after a user message",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:1",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:1",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -139,14 +139,14 @@
         "model": "anthropic/claude-sonnet-4-5",
         "window": "200000"
       },
-      "digest": "86f1773244a1808218bb08064725e9fbb76f476a5c01a8d78be9d19c94070b06"
+      "digest": "68933bae4689968a07316d16c364e9f90d8528f525cf49474fcdc4305bcb51ff"
     },
     {
       "name": "tool step with usage, applied view and marker",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:5",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:5",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "5",
         "lineage_id": "lin_a",
         "through_ordinal": "4",
@@ -158,14 +158,14 @@
         "last_usage": "61000:58000:2000:850",
         "applied_view_version": "3"
       },
-      "digest": "b204761e9eead132da22a84d565d7080eff74bcf2362ef787300aa0bb511f918"
+      "digest": "67d80aa2e1572c6cb8869e898505f4914d5c6df54a791711e63e3e192743eadb"
     },
     {
       "name": "model change and cache expiry",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:6",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:6",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "6",
         "lineage_id": "lin_a",
         "through_ordinal": "4",
@@ -177,14 +177,14 @@
         "last_usage": "61000:58000:2000:850",
         "applied_view_version": "3"
       },
-      "digest": "336b9dcd0bf52f0ffae1f64673b47d22229a9b1069506aef4b9fd7e9afe0766f"
+      "digest": "403f9b52e68f3c8ce070a1511724cebb0db249665150b604121f8efcb3c0fd92"
     },
     {
       "name": "surface change with a deferred marker",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:7",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:7",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "7",
         "lineage_id": "lin_a",
         "through_ordinal": "5",
@@ -195,14 +195,14 @@
         "events": "surface_change,marker_outcome:deferred:cut-2",
         "applied_view_version": "4"
       },
-      "digest": "432245d89c48e1e6bad0bbf754ba59e748719441032a97de0b8feff7297b1926"
+      "digest": "ca458c335acc0f79055118813d9c5f3caba81efb0800164251233a421b80c377"
     },
     {
       "name": "revert discards the current view",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:8",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:8",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "8",
         "lineage_id": "lin_a",
         "through_ordinal": "3",
@@ -212,14 +212,14 @@
         "window": "200000",
         "events": "revert_below:4,view_discarded:3"
       },
-      "digest": "b6dd16a22217810e6346cb9c2cbd7e52d0b76767609e4910b20374f9a659275a"
+      "digest": "4d7043bb5c0155615962cb6c20556049cefb67576adfeaae1a27259c38072613"
     },
     {
       "name": "view refused for a split tool pair",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:9",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:9",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "9",
         "lineage_id": "lin_a",
         "through_ordinal": "6",
@@ -230,14 +230,14 @@
         "events": "view_refused:5:tool_pair_split",
         "applied_view_version": "4"
       },
-      "digest": "a5e157b3c60537f0880e10b1112fb1db9fead538a1ac6fe15efa40c2b4ef4c3e"
+      "digest": "c04ea942622d8e0b9cdc58421238a1d31959d37dd0f5781405742d9365ce340d"
     },
     {
       "name": "view refused for an unknown part",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:10",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:10",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "10",
         "lineage_id": "lin_a",
         "through_ordinal": "6",
@@ -248,14 +248,14 @@
         "events": "view_refused:6:unknown_part",
         "applied_view_version": "4"
       },
-      "digest": "6d9ad42573fdba0a5abf10da38e8470ca327772edb7b678826c90cde1041507c"
+      "digest": "88f8a45f0162efb733c35ede9207e11f4885702588c23e58848f832dbb91c4f8"
     },
     {
       "name": "view deferred until a provider-safe boundary",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:11",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:11",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "11",
         "lineage_id": "lin_a",
         "through_ordinal": "6",
@@ -266,14 +266,14 @@
         "events": "view_deferred:6:signed_reasoning",
         "applied_view_version": "4"
       },
-      "digest": "ab9ab171da09e2a6223c14ba3ee807a24d6dd5ed5424f340d02254a0fdce9a90"
+      "digest": "5731c27c09defd43423305775b87f0619aacfa18b282a35718b78b940526b1b3"
     },
     {
       "name": "view applied with a companion edit",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:12",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:12",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "12",
         "lineage_id": "lin_a",
         "through_ordinal": "6",
@@ -284,14 +284,14 @@
         "events": "view_companion:6:strip_signed_reasoning",
         "applied_view_version": "6"
       },
-      "digest": "eacfb5b09efc81b2dafa2013d61835b1de84eda8faa4ddde5d05040cec883ad5"
+      "digest": "f4c300014f19e24784d7ff6eab79afb9ca78fab3870cfe4b142a36b33df0ea49"
     },
     {
       "name": "window unknown",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:2",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:2",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "2",
         "lineage_id": "lin_a",
         "through_ordinal": "2",
@@ -299,14 +299,14 @@
         "est_tokens": "1500",
         "model": "anthropic/claude-sonnet-4-5"
       },
-      "digest": "283e93e3bd49f55593857f27ab3a408870412338529c303f658c87a507a0cc31"
+      "digest": "c85bb60558b1c666c3c9d13e43eaae3f5d66025c89dc4705b880b583ff3f94d2"
     },
     {
       "name": "a fork moves the session to a new lineage, declaring its descent",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:13",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:13",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "13",
         "lineage_id": "lin_b",
         "through_ordinal": "4",
@@ -316,14 +316,14 @@
         "window": "200000",
         "descends_from": "lin_a:3:2c817fe268cc6e06fa84ac216a44a34654869704235fb05b92e77f06d1bb8958"
       },
-      "digest": "845894e2a378d023891d73702f1cc1abb43b78b2ed847bbecd2e88c40d19ba49"
+      "digest": "af57dec4255a630bb4fac59e946238a86a9b67ac1aaf17e46d651ea57e69b6a9"
     },
     {
       "name": "the first notice of a lineage a cut started descends from the old lineage at the cut",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:14",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:14",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "14",
         "lineage_id": "lin_c",
         "through_ordinal": "4",
@@ -334,14 +334,14 @@
         "descends_from": "lin_a:1:efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "first_ordinal": "2"
       },
-      "digest": "22bcde5e0f50534ea593ec7103dc1ea2f125510cbf9aab97b42f3f9253d8aec0"
+      "digest": "c8bf6575aead25251ad5d02dc381e2c0b3b6c2054116506ca7d1f92333d0b7cc"
     },
     {
       "name": "a view tiling from 0 on a cut lineage is refused",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:15",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:15",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "15",
         "lineage_id": "lin_c",
         "through_ordinal": "5",
@@ -352,14 +352,14 @@
         "events": "view_refused:9:ranges_start",
         "first_ordinal": "2"
       },
-      "digest": "00b1c37a5a54337d938c4b8fbe32615aa4da07e00ab67bf78bab0e0b424393e3"
+      "digest": "75463bd1f30618dc63f14eb7cd2809fd598834633c8f9e272a296494154d742d"
     },
     {
       "name": "a revert below the latest cut restarts at the previous cut, descending from the lineage at that cut",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:16",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:16",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "16",
         "lineage_id": "lin_d",
         "through_ordinal": "3",
@@ -370,14 +370,14 @@
         "descends_from": "lin_a:1:efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
         "first_ordinal": "2"
       },
-      "digest": "83053fabeaa30814ad5d73b7b54b42edd4759db1f2082d7e0d99ed926726987a"
+      "digest": "d4276e2adba89baa4709174a36435eaf34faed03f6b71f49411a495d94981515"
     },
     {
       "name": "a revert below every cut restarts at the first message, without descent",
-      "subject": "ck.acme.event.thalamus-harness.compaction.advanced.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:advanced:17",
+      "subject": "ck.acme.event.runner-a.compaction.advanced.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:advanced:17",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "17",
         "lineage_id": "lin_e",
         "through_ordinal": "1",
@@ -387,14 +387,14 @@
         "window": "200000",
         "first_ordinal": "0"
       },
-      "digest": "1c3df30be0e3707b1bbbfa87d657d07f58e6bb53b0e3c83a9621084201eeaadd"
+      "digest": "92e619cb0a91ec0731425dffffd63bdf113e04ba58bca88535d48d80f2c5ee8a"
     }
   ],
   "notices_accepted": [
     {
       "name": "a header this contract does not define is ignored and not digested",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -404,13 +404,13 @@
         "window": "200000",
         "trace_id": "abc"
       },
-      "digest": "86f1773244a1808218bb08064725e9fbb76f476a5c01a8d78be9d19c94070b06",
+      "digest": "68933bae4689968a07316d16c364e9f90d8528f525cf49474fcdc4305bcb51ff",
       "events": []
     },
     {
       "name": "an unknown event token decodes and is ignored",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "5",
         "lineage_id": "lin_a",
         "through_ordinal": "4",
@@ -422,7 +422,7 @@
         "last_usage": "61000:58000:2000:850",
         "applied_view_version": "3"
       },
-      "digest": "fb3f27696ef31fa0f964f5040b07661996e3ccc80deacbce35c81887073cd4cb",
+      "digest": "3fec61a45715bdf3fa79ab715e069ac1bafbd2b859de9a4d2b342707ae16323e",
       "events": [
         "marker_outcome:applied:cut-1",
         "cache_warmed:5m"
@@ -433,7 +433,7 @@
     {
       "name": "no seq",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
@@ -446,7 +446,7 @@
     {
       "name": "no through_digest",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -459,7 +459,7 @@
     {
       "name": "no model",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -472,7 +472,7 @@
     {
       "name": "seq zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "0",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -486,7 +486,7 @@
     {
       "name": "seq with a leading zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "01",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -500,7 +500,7 @@
     {
       "name": "seq with a sign",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "+1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -514,7 +514,7 @@
     {
       "name": "through_digest in uppercase",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -542,7 +542,7 @@
     {
       "name": "model with a space",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -556,7 +556,7 @@
     {
       "name": "model over 256 bytes",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -570,7 +570,7 @@
     {
       "name": "window not a number",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -584,7 +584,7 @@
     {
       "name": "empty events",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -599,7 +599,7 @@
     {
       "name": "an empty event token",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -614,7 +614,7 @@
     {
       "name": "a space after a comma",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -629,7 +629,7 @@
     {
       "name": "argument on an event that takes none",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -644,7 +644,7 @@
     {
       "name": "revert_below without an ordinal",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -659,7 +659,7 @@
     {
       "name": "unknown marker outcome",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -675,7 +675,7 @@
     {
       "name": "marker without a cut id",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -691,7 +691,7 @@
     {
       "name": "view_discarded of version zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -706,7 +706,7 @@
     {
       "name": "view_refused with an uppercase reason",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -721,7 +721,7 @@
     {
       "name": "view_refused without a reason",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -736,7 +736,7 @@
     {
       "name": "view_deferred without a reason",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -751,7 +751,7 @@
     {
       "name": "view_companion with an uppercase edit",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -766,7 +766,7 @@
     {
       "name": "view_companion of version zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -781,7 +781,7 @@
     {
       "name": "duplicate event token",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -796,7 +796,7 @@
     {
       "name": "more than 32 event tokens",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -811,7 +811,7 @@
     {
       "name": "events over 1024 bytes",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -826,7 +826,7 @@
     {
       "name": "view_discarded without revert_below",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -841,7 +841,7 @@
     {
       "name": "marker_outcome without applied_view_version",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -856,7 +856,7 @@
     {
       "name": "applied_view_version zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -871,7 +871,7 @@
     {
       "name": "first_ordinal more than one past through_ordinal",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -886,7 +886,7 @@
     {
       "name": "first_ordinal with a leading zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -901,7 +901,7 @@
     {
       "name": "last_usage with three parts",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -916,7 +916,7 @@
     {
       "name": "no lineage_id",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "through_ordinal": "1",
         "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
@@ -929,7 +929,7 @@
     {
       "name": "lineage_id with a space",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin a",
         "through_ordinal": "1",
@@ -943,7 +943,7 @@
     {
       "name": "lineage_id over 256 bytes",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
         "through_ordinal": "1",
@@ -957,7 +957,7 @@
     {
       "name": "descends_from without a digest",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -972,7 +972,7 @@
     {
       "name": "descends_from with a leading-zero ordinal",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -987,7 +987,7 @@
     {
       "name": "descends_from with an uppercase digest",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -1002,7 +1002,7 @@
     {
       "name": "descends_from without an old lineage",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -1017,7 +1017,7 @@
     {
       "name": "descends_from naming the notice's own lineage",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "1",
         "lineage_id": "lin_a",
         "through_ordinal": "1",
@@ -1033,32 +1033,32 @@
   "view_ready": [
     {
       "name": "view 3 is ready",
-      "subject": "ck.acme.event.ck-mc.compaction.view_ready.v1",
-      "message_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3",
+      "subject": "ck.acme.event.provider-a.compaction.view_ready.v1",
+      "message_id": "0b9679cc5a4044d51710921d5233db02:view_ready:3",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
-      "bus_digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      "bus_digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
     }
   ],
   "view_ready_refused": [
     {
       "name": "view_version zero",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "0",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "problem": "malformed:view_version"
     },
     {
       "name": "no digest",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4"
       },
@@ -1067,10 +1067,10 @@
     {
       "name": "covers_through not a number",
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "m4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "problem": "malformed:covers_through"
     }
@@ -1079,7 +1079,7 @@
     {
       "name": "insertion head before every message",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 1,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1099,7 +1099,7 @@
             "to": 2
           }
         ],
-        "digest": "c396fbdd11cade6565d73b72288f6d327a00c0114875cf6090022cb36f2bf94e"
+        "digest": "c27e8e93fa792f1c8979c1e374af5e8ecfef271ba2079e9018e01a04e2e95052"
       },
       "assembled": [
         {
@@ -1183,7 +1183,7 @@
     {
       "name": "part edits inside a keep range: a dropped tool output and a stripped image",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1221,7 +1221,7 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "assembled": [
         {
@@ -1292,7 +1292,7 @@
     {
       "name": "compressed text inside a kept message",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 4,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1324,7 +1324,7 @@
           "cut_id": "cut-2",
           "through_ordinal": 1
         },
-        "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+        "digest": "0304dc61e742dbe70d95680f6b33da65a5125aa9e55d18205c84788a23a2bf17"
       },
       "assembled": [
         {
@@ -1399,7 +1399,7 @@
     {
       "name": "whole-message fold between kept ranges",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 5,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1434,7 +1434,7 @@
           "cut_id": "cut-3",
           "through_ordinal": 1
         },
-        "digest": "c88645ec6ba481907e3df8948770ef9f70e949d63e5f6755a398dd6c8c1f4006"
+        "digest": "484ce3b0f19a716e9df255eb9af6e6ed0f093c61723d36bdcffc76035d4c36f9"
       },
       "assembled": [
         {
@@ -1505,7 +1505,7 @@
     {
       "name": "after a cut: ranges tile from the lineage's first ordinal, the head inserted there",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 8,
         "lineage_id": "lin_c",
         "covers_through": {
@@ -1533,7 +1533,7 @@
             ]
           }
         ],
-        "digest": "9b0fc6e8499b109bb062235fd0b5443226b837d91ea46f2a6758fca76116703d"
+        "digest": "19e12537f247ea7507221ef4ed581a3225fe22a72964146d9eeb1e4137e72583"
       },
       "assembled": [
         {
@@ -1655,7 +1655,7 @@
     {
       "name": "version zero",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 0,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1693,14 +1693,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "0c3908f1ca6fdbf1e54997fe4d7b59fefc68764b0ea0d88d966e199164cb387a"
+        "digest": "0330546b3b69f0aedac0e5639ac9b188101ca3a37ddf916a17cd3bf2be900158"
       },
       "problem": "version_zero"
     },
     {
       "name": "digest in uppercase",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1738,14 +1738,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "BA88E024BAE6303E4623EC9FC000B178D7A3EF7CC9FAC110ADC8E15530D05367"
+        "digest": "B090D059BFFB4F003B9ACACA62C0665349581ADA1CFEB2915EACCFA91BFB6D92"
       },
       "problem": "digest_malformed"
     },
     {
       "name": "no ranges",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1753,14 +1753,14 @@
           "mid": "m4"
         },
         "ranges": [],
-        "digest": "5a83fd27c1a3c6da28dd419a0640ef54aa884a35a9b4ad519e6a03daa360c248"
+        "digest": "340b7b97504f14c7649b9670c466ef6cb1c98c906177486f1a002f6d316edd6a"
       },
       "problem": "no_ranges"
     },
     {
       "name": "a hole between ranges",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1784,14 +1784,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "c9f73e35f5adbc13d644077909b1fe1583b847bfa83c455a8f88f0dc89160a47"
+        "digest": "a62e65204bbbe9cbec5e9e37b864203a7adc0b62459e881d81dc6070cd1ce555"
       },
       "problem": "gap"
     },
     {
       "name": "an empty keep range",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1820,14 +1820,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ec9dc6f7f23544ec04e4a8fa282174142f1c150cf4544a7461881d69faac1ae9"
+        "digest": "1bffc0ffb4f1f9de73b7d86945c1203d4e70931c653decfb1f5aea42d039e8ba"
       },
       "problem": "inverted"
     },
     {
       "name": "an inverted replace range",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1852,14 +1852,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "b746567843f434ad26156b73f4f14bc0c2eb0e36dd45255b491decc35899a0a1"
+        "digest": "ba0fe4954e9d5dd032a7d495184cf903158ccc7344daaa56deda184c976dce32"
       },
       "problem": "inverted"
     },
     {
       "name": "ranges end before the coverage",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1883,14 +1883,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "413b997443fa977de319fb3fbaae729dbdb6785f9e6f5f8cd7eaee72c5b99424"
+        "digest": "03738565023cb41aa9a7d8759f2b3b9e2c73dffcc1069aa223275b394a4b8ca5"
       },
       "problem": "coverage_end"
     },
     {
       "name": "ranges run past the coverage",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1914,14 +1914,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "c275ea468c230be8ecce343341c924225be6a02bcab1548755fb33e218aabc99"
+        "digest": "4d596ca376e4fe9dcce07486ca05f309de8621cd44b2ee85ffd558d8080037be"
       },
       "problem": "coverage_end"
     },
     {
       "name": "replacement bytes are not a JSON array",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1945,14 +1945,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "b01e85ad224c6122f03e3f715ee860141b99dc22ed2648f5fa10d5ef0f19ba7f"
+        "digest": "e0f127330dd6df12a7de6085ec61985d587dd7d26843cce8995a04ee7b74cd9c"
       },
       "problem": "replacement_not_array"
     },
     {
       "name": "cut not on a range boundary",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -1990,14 +1990,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 0
         },
-        "digest": "aefd852ebce347e2a0c397a9cc0d1901c03ea4ccbb490afce911edcc166ac59c"
+        "digest": "cccfa4fe25094030036f44f98f2ed00bd70a3f5c2bb6489377d3ae8c9180c7af"
       },
       "problem": "cut"
     },
     {
       "name": "cut after a kept range",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2035,14 +2035,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 2
         },
-        "digest": "ee88810e8b46a2736f7079f3fb24e9cc2df3d877337c9eda08d384f05dcf6199"
+        "digest": "1d82894502ba04c12a0f22557951ab3e255d44b6cc7d0c2646ed7140cefcfc9c"
       },
       "problem": "cut"
     },
     {
       "name": "cut beyond the coverage",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2080,14 +2080,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 9
         },
-        "digest": "df49515599c830fc3487167443e90ef6cd80d2dd72c493340a9294ff12c73e35"
+        "digest": "9e6211c981f0245ece674627d0f03ec7aef1c8a89c8d5e29441c34cec66c503e"
       },
       "problem": "cut"
     },
     {
       "name": "cut id with a space",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2125,7 +2125,7 @@
           "cut_id": "cut 1",
           "through_ordinal": 1
         },
-        "digest": "16584e41a9734d5061b7db37c4161692d33d460ca6255bcfda413006a60835c6"
+        "digest": "8cdb430fc2d969b96dd16cf051ff457ba3f2c8f891fc9c162a14a9505cdf9934"
       },
       "problem": "cut"
     }
@@ -2134,7 +2134,7 @@
     {
       "name": "unknown range kind",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2152,13 +2152,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       }
     },
     {
       "name": "range named by message ids",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2176,13 +2176,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       }
     },
     {
       "name": "no digest",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2225,7 +2225,7 @@
     {
       "name": "negative version",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": -1,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2263,7 +2263,7 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       }
     }
   ],
@@ -2271,7 +2271,7 @@
     {
       "name": "edit above its keep range",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2303,14 +2303,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "e60ba18025163ee5a74634456808d19257abbe8e72bc5b7a185f1b933b924376"
+        "digest": "44dca132998d90bf07db7dcca6c731c1b4fc89f2be48b72aab71f90bcb3e5fbd"
       },
       "problem": "edit_outside_range"
     },
     {
       "name": "edit below its keep range",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2342,14 +2342,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "445c00fd3d7d4c98b9f2d916fa1ace58693bd091c5bd463862b7896ceaa036b5"
+        "digest": "d62dbe8b27181bf91e0cf798610212a86bf54a48211c37986a67c327bb3db7e2"
       },
       "problem": "edit_outside_range"
     },
     {
       "name": "edits out of ordinal order",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2387,14 +2387,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "7b9568ff3657712f7b1d25150b27f2afabd13e460f925767422b596cc929dcdb"
+        "digest": "97ed3863a5c0fb6c09bc7dfd34cb9dd7a104294f4b91cbfb4db0dafb465693ad"
       },
       "problem": "edit_order"
     },
     {
       "name": "two edits of one part",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2432,14 +2432,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "9b438cf89fc8327894ea910c1fc5f27e18e3f83e32e20361c07e8533c0867a12"
+        "digest": "65f88db2482b07062cc764b70d70a9acf0c7ad108f7f37557075dededc2f43f0"
       },
       "problem": "duplicate_edit"
     },
     {
       "name": "empty part key",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2471,14 +2471,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "890190cc9143c6b4e33faa13544ccce215208b7e1cfde88e67e1bb1ff954c2b9"
+        "digest": "1d89edcf27c932829058f86374e25226edd2c8777f650520123d249e4b1e22ef"
       },
       "problem": "edit_part"
     },
     {
       "name": "part key over 256 bytes",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2510,14 +2510,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "bf0b8d4db52f0a2c28109d57eb08253aa43712929de4ae93140d163ec29b001d"
+        "digest": "883b287da97aab1289c269215cf7fd60150c039722cc83078254478291fb8c25"
       },
       "problem": "edit_part"
     },
     {
       "name": "both bytes and drop",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2550,14 +2550,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "6fb08e86355cf049e6bf1481f976ea2d5dfbfbb50262fe1da01a896098ed6d95"
+        "digest": "be9c8ca7ad72903db40c4c2ff15f89fc52b47097cc4590a2c455c969a9c593ec"
       },
       "problem": "edit_action"
     },
     {
       "name": "neither bytes nor drop",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2588,14 +2588,14 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "64bfe1f8457fde3065547507cf47568ae56cbf534cdaa7d713d2ef5bc24d1d39"
+        "digest": "13683cd33a6c6adc1c2244c712a25dfd8f91edaa732d47f46d60f2991035b65f"
       },
       "problem": "edit_action"
     },
     {
       "name": "edit bytes are not JSON",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2627,7 +2627,7 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "3a1a4c2d5fdad31c5f97ae3fb6fb18ad35481a20ffff3390fe1eb9a714b97d7a"
+        "digest": "21d63e8fb85883353d2483699a61979e55e809c3a37029249df56a1ef2d861d0"
       },
       "problem": "edit_not_json"
     }
@@ -2636,7 +2636,7 @@
     {
       "name": "newer view over the current transcript applies",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2674,13 +2674,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -2803,7 +2803,7 @@
     {
       "name": "first view applies",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 1,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2823,13 +2823,13 @@
             "to": 2
           }
         ],
-        "digest": "c396fbdd11cade6565d73b72288f6d327a00c0114875cf6090022cb36f2bf94e"
+        "digest": "c27e8e93fa792f1c8979c1e374af5e8ecfef271ba2079e9018e01a04e2e95052"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "1",
         "covers_through": "1",
-        "digest": "c396fbdd11cade6565d73b72288f6d327a00c0114875cf6090022cb36f2bf94e"
+        "digest": "c27e8e93fa792f1c8979c1e374af5e8ecfef271ba2079e9018e01a04e2e95052"
       },
       "current_version": null,
       "lineage_id": "lin_a",
@@ -2952,7 +2952,7 @@
     {
       "name": "same version as the current view is stale",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -2990,13 +2990,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 3,
       "lineage_id": "lin_a",
@@ -3119,7 +3119,7 @@
     {
       "name": "revert truncated below the coverage: discard",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -3157,13 +3157,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -3254,7 +3254,7 @@
     {
       "name": "another message now at the coverage ordinal: discard",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -3292,13 +3292,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -3389,7 +3389,7 @@
     {
       "name": "an edited message now has another id: discard",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -3427,13 +3427,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -3556,7 +3556,7 @@
     {
       "name": "view over another lineage: discard",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -3594,13 +3594,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_b",
@@ -3723,7 +3723,7 @@
     {
       "name": "edit names a part key the message does not have",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 6,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -3751,13 +3751,13 @@
             ]
           }
         ],
-        "digest": "817cd377ee42e2052cf71bc19d56c5bfbaeeaa9ae9bab54c42cac36f9f932568"
+        "digest": "ed5902b9cd5932ee11ebf2d7776d196084f9f4fd32dbff7628ea8955bae8586e"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "6",
         "covers_through": "4",
-        "digest": "817cd377ee42e2052cf71bc19d56c5bfbaeeaa9ae9bab54c42cac36f9f932568"
+        "digest": "ed5902b9cd5932ee11ebf2d7776d196084f9f4fd32dbff7628ea8955bae8586e"
       },
       "current_version": 4,
       "lineage_id": "lin_a",
@@ -3880,7 +3880,7 @@
     {
       "name": "digest differs from the announced digest",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -3918,13 +3918,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+        "digest": "0304dc61e742dbe70d95680f6b33da65a5125aa9e55d18205c84788a23a2bf17"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -4047,7 +4047,7 @@
     {
       "name": "bytes changed but the digest member kept",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -4085,13 +4085,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -4214,7 +4214,7 @@
     {
       "name": "fetched view is not the announced version",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -4252,13 +4252,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "4",
         "covers_through": "4",
-        "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+        "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -4381,7 +4381,7 @@
     {
       "name": "malformed view is rejected before any prefix check",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 3,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -4405,13 +4405,13 @@
           "cut_id": "cut-1",
           "through_ordinal": 1
         },
-        "digest": "c9f73e35f5adbc13d644077909b1fe1583b847bfa83c455a8f88f0dc89160a47"
+        "digest": "a62e65204bbbe9cbec5e9e37b864203a7adc0b62459e881d81dc6070cd1ce555"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "3",
         "covers_through": "4",
-        "digest": "c9f73e35f5adbc13d644077909b1fe1583b847bfa83c455a8f88f0dc89160a47"
+        "digest": "a62e65204bbbe9cbec5e9e37b864203a7adc0b62459e881d81dc6070cd1ce555"
       },
       "current_version": 1,
       "lineage_id": "lin_a",
@@ -4502,7 +4502,7 @@
     {
       "name": "edits of one message out of its part order",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 6,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -4536,13 +4536,13 @@
             ]
           }
         ],
-        "digest": "5fa06633eb4f05d91f599ce2a9ed4006d7ec4c07bb0af6d5af3c1fe4d5a52494"
+        "digest": "0ec456926c3211e18e19daf5fb32307ae39c9ef121d409e1c2a09e6be54937bc"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "6",
         "covers_through": "4",
-        "digest": "5fa06633eb4f05d91f599ce2a9ed4006d7ec4c07bb0af6d5af3c1fe4d5a52494"
+        "digest": "0ec456926c3211e18e19daf5fb32307ae39c9ef121d409e1c2a09e6be54937bc"
       },
       "current_version": 4,
       "lineage_id": "lin_a",
@@ -4665,7 +4665,7 @@
     {
       "name": "on a lineage a cut started at 2, a view tiling from 2 applies",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 8,
         "lineage_id": "lin_c",
         "covers_through": {
@@ -4693,13 +4693,13 @@
             ]
           }
         ],
-        "digest": "9b0fc6e8499b109bb062235fd0b5443226b837d91ea46f2a6758fca76116703d"
+        "digest": "19e12537f247ea7507221ef4ed581a3225fe22a72964146d9eeb1e4137e72583"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "8",
         "covers_through": "5",
-        "digest": "9b0fc6e8499b109bb062235fd0b5443226b837d91ea46f2a6758fca76116703d"
+        "digest": "19e12537f247ea7507221ef4ed581a3225fe22a72964146d9eeb1e4137e72583"
       },
       "current_version": 3,
       "lineage_id": "lin_c",
@@ -4822,7 +4822,7 @@
     {
       "name": "on a lineage a cut started at 2, a view tiling from 0 is refused",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 9,
         "lineage_id": "lin_c",
         "covers_through": {
@@ -4842,13 +4842,13 @@
             "to": 5
           }
         ],
-        "digest": "a78248b486213a53eb0543865447e41367902338566d6fc60c182aeab4a988e8"
+        "digest": "4dad7d16f473585b547232e38a7e3b51ebefedb5f44d9cfd1e668790e11920ef"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "9",
         "covers_through": "4",
-        "digest": "a78248b486213a53eb0543865447e41367902338566d6fc60c182aeab4a988e8"
+        "digest": "4dad7d16f473585b547232e38a7e3b51ebefedb5f44d9cfd1e668790e11920ef"
       },
       "current_version": 3,
       "lineage_id": "lin_c",
@@ -4971,7 +4971,7 @@
     {
       "name": "on a lineage starting at 0, a view tiling from 1 is refused",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 10,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -4991,13 +4991,13 @@
             "to": 5
           }
         ],
-        "digest": "4a04d936aba94e1a0705b037b52ed49dce2173c2615375b91a7096a7ba075a95"
+        "digest": "bab4289a4f3fcb0f9d3da876d7983f4e3f5c812d45270b5fb555967e63a2df82"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "10",
         "covers_through": "4",
-        "digest": "4a04d936aba94e1a0705b037b52ed49dce2173c2615375b91a7096a7ba075a95"
+        "digest": "bab4289a4f3fcb0f9d3da876d7983f4e3f5c812d45270b5fb555967e63a2df82"
       },
       "current_version": 3,
       "lineage_id": "lin_a",
@@ -5120,7 +5120,7 @@
     {
       "name": "on a lineage a cut started at 2, a view without a head range first is refused",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 11,
         "lineage_id": "lin_c",
         "covers_through": {
@@ -5134,13 +5134,13 @@
             "to": 5
           }
         ],
-        "digest": "ff642b65806f3a2e23a4a53462248d9ae88e989a283ab82586794448ae7f0ac6"
+        "digest": "b896fdf164b8f540561f674d70cf0bb0c0e58ed0ca891c21f6913fa7cde6ec2e"
       },
       "ready": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": "11",
         "covers_through": "4",
-        "digest": "ff642b65806f3a2e23a4a53462248d9ae88e989a283ab82586794448ae7f0ac6"
+        "digest": "b896fdf164b8f540561f674d70cf0bb0c0e58ed0ca891c21f6913fa7cde6ec2e"
       },
       "current_version": 3,
       "lineage_id": "lin_c",
@@ -5268,7 +5268,7 @@
         "request": {
           "method": "view.get",
           "params": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "view_version": 3
           }
         }
@@ -5280,7 +5280,7 @@
         "answer": {
           "answer": "view",
           "view": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "view_version": 3,
             "lineage_id": "lin_a",
             "covers_through": {
@@ -5318,7 +5318,7 @@
               "cut_id": "cut-1",
               "through_ordinal": 1
             },
-            "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+            "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
           }
         }
       },
@@ -5345,7 +5345,7 @@
         "answer": {
           "answer": "latest",
           "view": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "view_version": 3,
             "lineage_id": "lin_a",
             "covers_through": {
@@ -5383,7 +5383,7 @@
               "cut_id": "cut-1",
               "through_ordinal": 1
             },
-            "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+            "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
           }
         }
       },
@@ -5403,7 +5403,7 @@
         "request": {
           "method": "compaction.ride",
           "params": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "cause": "ttl_expired",
             "deadline_ms": 1500
           }
@@ -5414,7 +5414,7 @@
         "request": {
           "method": "compaction.ride",
           "params": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "cause": "model_change",
             "deadline_ms": 1500
           }
@@ -5425,7 +5425,7 @@
         "request": {
           "method": "compaction.ride",
           "params": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "cause": "surface_change",
             "deadline_ms": 1500
           }
@@ -5436,7 +5436,7 @@
         "request": {
           "method": "compaction.ride",
           "params": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "cause": "ceiling",
             "deadline_ms": 30000
           }
@@ -5447,7 +5447,7 @@
         "request": {
           "method": "compaction.ride",
           "params": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "cause": "provider_switch",
             "deadline_ms": 1500
           }
@@ -5458,7 +5458,7 @@
       {
         "name": "ceiling after an overflow error that stated a limit",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ceiling",
           "deadline_ms": 30000,
           "overflow": {
@@ -5472,7 +5472,7 @@
       {
         "name": "ceiling after an overflow error with no parsable limit",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ceiling",
           "deadline_ms": 30000,
           "overflow": {}
@@ -5482,7 +5482,7 @@
       {
         "name": "ceiling from the runner's own count: no overflow member",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ceiling",
           "deadline_ms": 30000
         },
@@ -5491,7 +5491,7 @@
       {
         "name": "overflow on a rewrite cause is ignored, not refused",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ttl_expired",
           "deadline_ms": 1500,
           "overflow": {
@@ -5505,7 +5505,7 @@
       {
         "name": "a rewrite ride with a 240,000 ms deadline: a Setup ride_wait_ms at the Claude Code gateway's ride_wait_max_ms cap",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ttl_expired",
           "deadline_ms": 240000
         }
@@ -5513,7 +5513,7 @@
       {
         "name": "a model-change ride waiting the most a ride may: 300,000 ms",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "model_change",
           "deadline_ms": 300000
         }
@@ -5521,7 +5521,7 @@
       {
         "name": "a surface-change ride just past the runner's own 10,000 ms default",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "surface_change",
           "deadline_ms": 10001
         }
@@ -5531,7 +5531,7 @@
       {
         "name": "zero deadline",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ttl_expired",
           "deadline_ms": 0
         },
@@ -5540,7 +5540,7 @@
       {
         "name": "deadline over five minutes",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ceiling",
           "deadline_ms": 300001
         },
@@ -5549,7 +5549,7 @@
       {
         "name": "a rewrite ride over five minutes",
         "params": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "cause": "ttl_expired",
           "deadline_ms": 300001
         },
@@ -5571,7 +5571,7 @@
         "answer": {
           "answer": "view",
           "view": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "view_version": 4,
             "lineage_id": "lin_a",
             "covers_through": {
@@ -5603,7 +5603,7 @@
               "cut_id": "cut-2",
               "through_ordinal": 1
             },
-            "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+            "digest": "0304dc61e742dbe70d95680f6b33da65a5125aa9e55d18205c84788a23a2bf17"
           }
         }
       },
@@ -5629,7 +5629,7 @@
         "answer": {
           "answer": "view",
           "view": {
-            "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+            "session_ref": "0b9679cc5a4044d51710921d5233db02",
             "view_version": 4,
             "lineage_id": "lin_a",
             "covers_through": {
@@ -5661,7 +5661,7 @@
               "cut_id": "cut-2",
               "through_ordinal": 1
             },
-            "digest": "732e5d407ad356d888500e6d65b47fb38504b5519f876f84b635341d0ca4d1e1"
+            "digest": "0304dc61e742dbe70d95680f6b33da65a5125aa9e55d18205c84788a23a2bf17"
           },
           "cache_ttl": {
             "model": "openai/gpt-5",
@@ -5862,7 +5862,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "lin_b",
         "through_ordinal": "4",
@@ -5896,7 +5896,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "lin_c",
         "through_ordinal": "4",
@@ -5930,7 +5930,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "run:fork:2",
         "through_ordinal": "4",
@@ -5964,7 +5964,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "lin_b",
         "through_ordinal": "4",
@@ -5998,7 +5998,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "lin_b",
         "through_ordinal": "4",
@@ -6031,7 +6031,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "lin_b",
         "through_ordinal": "4",
@@ -6065,7 +6065,7 @@
         ]
       ],
       "headers": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "20",
         "lineage_id": "lin_b",
         "through_ordinal": "4",
@@ -6080,7 +6080,7 @@
   ],
   "id_collision": {
     "notice_headers": {
-      "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+      "session_ref": "0b9679cc5a4044d51710921d5233db02",
       "seq": "3",
       "lineage_id": "lin_a",
       "through_ordinal": "3",
@@ -6090,13 +6090,13 @@
       "window": "200000"
     },
     "view_ready_headers": {
-      "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+      "session_ref": "0b9679cc5a4044d51710921d5233db02",
       "view_version": "3",
       "covers_through": "4",
-      "digest": "ba88e024bae6303e4623ec9fc000b178d7a3ef7cc9fac110adc8e15530d05367"
+      "digest": "b090d059bffb4f003b9acaca62c0665349581ada1cfeb2915eaccfa91bfb6d92"
     },
-    "notice_id": "357f07b24fd03982c83220c3c73f52fd:advanced:3",
-    "view_ready_id": "357f07b24fd03982c83220c3c73f52fd:view_ready:3"
+    "notice_id": "0b9679cc5a4044d51710921d5233db02:advanced:3",
+    "view_ready_id": "0b9679cc5a4044d51710921d5233db02:view_ready:3"
   },
   "state_loss": {
     "held_lineage": "lin_a",
@@ -6120,7 +6120,7 @@
     ],
     "notices": [
       {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "30",
         "lineage_id": "lin_a",
         "through_ordinal": "4",
@@ -6131,7 +6131,7 @@
         "applied_view_version": "3"
       },
       {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "seq": "31",
         "lineage_id": "lin_c",
         "through_ordinal": "4",
@@ -6147,7 +6147,7 @@
     "marked": {
       "name": "a view marked to apply at the next step",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 7,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -6180,13 +6180,13 @@
           "through_ordinal": 1
         },
         "apply": "next_step",
-        "digest": "790aaadad8838ad1d46428b1b4310cdeb75f5abffe482803d49241b3e768b87d"
+        "digest": "3dfd997b6703042d832b6d7890195a89cda3bf18c0409db11fcbddecd6f44083"
       }
     },
     "unmarked": {
       "name": "the same view unmarked",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 7,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -6218,13 +6218,13 @@
           "cut_id": "cut-4",
           "through_ordinal": 1
         },
-        "digest": "74297f80146ef7d19c3d22884277598e5750ade558423f26e4c356807c2c8b14"
+        "digest": "e0a7c1df0d05c4c301c9c583054a09a18e370c3169aff8f2509e7ff4534a3aec"
       }
     },
     "unknown_mark": {
       "name": "a mark this crate does not define decodes; the runner refuses it unsupported_apply",
       "view": {
-        "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
         "view_version": 7,
         "lineage_id": "lin_a",
         "covers_through": {
@@ -6257,7 +6257,7 @@
           "through_ordinal": 1
         },
         "apply": "when_idle",
-        "digest": "8d310c6c42b1ddb48cbf4a4702f2fa0b79e5248d10a7efc5a683d0917560cec1"
+        "digest": "8abe46e7b504d44a86e4a58a0c518f8e35af1d91711a2af39e8eb4964bd8e13d"
       }
     },
     "setup_requests": [
@@ -6334,7 +6334,7 @@
       {
         "name": "a view carrying the lifetime for its notice's model",
         "view": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "view_version": 12,
           "lineage_id": "lin_a",
           "covers_through": {
@@ -6359,13 +6359,13 @@
             "ms": 300000,
             "configured": false
           },
-          "digest": "d47023070d7e605ba04ea5546f67edc53540bcef97aa13302ab83f19ba682baf"
+          "digest": "832f9f01f58ec40680d96c5f67026c21b6766a4d5d1a966c66d79485fea70bf0"
         }
       },
       {
         "name": "the same view without it, whose digest differs",
         "view": {
-          "session_ref": "357f07b24fd03982c83220c3c73f52fd",
+          "session_ref": "0b9679cc5a4044d51710921d5233db02",
           "view_version": 12,
           "lineage_id": "lin_a",
           "covers_through": {
@@ -6385,7 +6385,7 @@
               "to": 6
             }
           ],
-          "digest": "2b2b37bc7c2fcf7906810d4c27851abe4f852614501c0c8cd44143a2fd5a0962"
+          "digest": "509aaa59fb038a66a7eb5da268c706213c89ed68af6440d5bcc41a21a0a49629"
         }
       }
     ],

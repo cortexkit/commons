@@ -9,7 +9,7 @@
 # These production wire types do not depend on a conformance harness or suite.
 [package]
 name = "cortexkit-role-step-transform-provider"
-version = "0.3.4"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,6 +18,7 @@ description = "Wire contract of the CortexKit step-transform-provider/v1 role: t
 publish = true
 
 [features]
+conformance = []
 test-vectors = []
 
 [[test]]
@@ -27,7 +28,7 @@ required-features = ["test-vectors"]
 [dependencies]
 # The runner role's crate, for the names and types both sides of the
 # interface share, so they cannot drift apart.
-cortexkit-role-llm-runner = { version = "0.6.0", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.7.0", path = "../cortexkit-role-llm-runner" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

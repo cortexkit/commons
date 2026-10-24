@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+
+- Pin the state-key/probe runner component as the daemon-attested principal's
+  bare module id, never `reserved:<id>` or another display prefix. Document the
+  shared helper's named `SessionIdentity` argument; no wire fields change.
+- Breaking: provider state keys use `(runner, harness, session)`, with the
+  runner principal attested on the route, never in the body. Folder spellings
+  remain route/admission metadata only. No wire fields change.
+- Add a focused folder-alias/runner-isolation probe behind the non-default
+  `conformance` feature, tested against faithful and faulty providers. It is
+  not a full provider conformance kit.
+- Update the shared llm-runner dependency to 0.7.0 for the runner-based session
+  reference release. Hook wire types and route metadata are unchanged.
+
 ## 0.3.4
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

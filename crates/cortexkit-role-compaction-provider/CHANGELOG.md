@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0
+
+- Reference calls now use named `SessionIdentity` fields so legacy positional
+  calls cannot silently compile. State keys, hashes and the focused probe use
+  the attested runner principal's bare module id, never `reserved:<id>`.
+- Breaking: provider conversation state and reverse-call identity now use the
+  daemon-attested runner principal with Setup's harness and session. Project
+  folders are route metadata only; existing session-mismatch rules and the
+  deliberate lack of harness comparison are unchanged. No wire fields change.
+- Add the non-default `conformance` feature's focused folder-alias/runner-isolation
+  probe, with faithful and faulty provider tests; it is not a full provider kit.
+- Session references in notices and views now use the shared llm-runner 0.7.0
+  derivation from runner module id, harness and session, not project folders.
+  Refresh independently generated async vectors and document v1 ref migration.
+- Update the llm-runner dependency to 0.7.0. Public wire types are unchanged.
+
 ## 0.6.0
 
 No behaviour change. The bump follows `cortexkit-role-llm-runner` 0.6.0:

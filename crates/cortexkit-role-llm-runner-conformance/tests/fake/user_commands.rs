@@ -65,7 +65,14 @@ impl FakeSubject {
             .as_object_mut()
             .unwrap()
             .insert("interactive".into(), json!(fixture.interactive));
-        Ok((session.into(), fields))
+        Ok((
+            cortexkit_role_llm_runner::session_ref(&cortexkit_role_llm_runner::SessionIdentity {
+                runner: self.runner_id(),
+                harness: FAKE_HARNESS,
+                session,
+            }),
+            fields,
+        ))
     }
 }
 

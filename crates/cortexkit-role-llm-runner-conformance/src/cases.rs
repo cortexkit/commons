@@ -243,7 +243,10 @@ where
             name if name.starts_with("cache_ttl_") => crate::cache_ttl::run(self, name).await,
             name if name.starts_with("ride_wait_") => crate::ride_wait::run(self, name).await,
             "per_step_cost_scales_with_new_messages" => crate::cost::run(self).await,
-            name if name.starts_with("compaction_") || name.starts_with("model_view_") => {
+            name if name.starts_with("compaction_")
+                || name.starts_with("model_view_")
+                || name == "session_ref_uses_runner_identity" =>
+            {
                 crate::compaction::run(self, name)
                     .await
                     .map(|()| Ending::Passed)

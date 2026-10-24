@@ -94,7 +94,7 @@
           {
             "ref_kind": "broca.session",
             "ref": "ses_01J9ZA",
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "stream": "reserved:broca",
             "endOffset": 48213,
             "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
@@ -104,7 +104,7 @@
           {
             "ref_kind": "broca.session",
             "ref": "ses_01J9ZB",
-            "sessionRef": "895e0666f7bb9d4039958519b858fdc8",
+            "sessionRef": "4ace44c6dd17c1d192db9a52d670ed42",
             "stream": "reserved:broca",
             "endOffset": 0,
             "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -123,7 +123,7 @@
           {
             "ref_kind": "broca.session",
             "ref": "ses_01J9ZA",
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "stream": "reserved:broca",
             "endOffset": 48213,
             "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
@@ -158,11 +158,11 @@
       "reply": {
         "items": [
           {
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "endOffset": 48213
           },
           {
-            "sessionRef": "895e0666f7bb9d4039958519b858fdc8",
+            "sessionRef": "4ace44c6dd17c1d192db9a52d670ed42",
             "endOffset": 0
           }
         ]
@@ -199,12 +199,12 @@
       "reply": {
         "items": [
           {
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "endOffset": 48213,
             "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8"
           },
           {
-            "sessionRef": "895e0666f7bb9d4039958519b858fdc8",
+            "sessionRef": "4ace44c6dd17c1d192db9a52d670ed42",
             "endOffset": 0,
             "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
@@ -241,7 +241,7 @@
       "reply": {
         "items": [
           {
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "endOffset": 18446744073709551615
           }
         ]
@@ -300,7 +300,7 @@
           {
             "ref_kind": "broca.session",
             "ref": "ses_01J9ZA",
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "stream": "reserved:broca",
             "endOffset": 1,
             "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
@@ -320,7 +320,7 @@
           {
             "ref_kind": "broca.session",
             "ref": "ses_01J9ZA",
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "stream": "reserved:broca",
             "endOffset": 1,
             "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
@@ -350,7 +350,7 @@
       "reply": {
         "items": [
           {
-            "sessionRef": "5c55b0cd2410fb527dc0d17b6dde4082",
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
             "endOffset": -1
           }
         ]

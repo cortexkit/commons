@@ -59,7 +59,8 @@ pub use run::{
     COMPACTION_WAIT_REPORT_AFTER_MS, RUN_REASON_COMPACTION_WAIT, RUN_REASON_CONTEXT_CEILING_WAIT,
 };
 
-pub use session_ref::session_ref;
+#[allow(deprecated)]
+pub use session_ref::{session_ref, session_ref_v1, SessionIdentity};
 
 /// The role name as `role.describe` reports it.
 pub const ROLE: &str = "llm-runner";

@@ -490,6 +490,8 @@ pub const CASES: &[CaseSpec] = &[
         "Setup is durable before the first model call and never re-invoked after its recorded answer survives a crash"),
     case("compaction_setup_route_session_matches_setup", &[Compaction, Queue],
         "a route bound to one session uses the same session Setup reports; a shared project route with an empty session and generic harness is accepted; a Setup refused setup_identity_mismatch ends the run error under that code, with no model request"),
+    case("session_ref_uses_runner_identity", &[Compaction, Queue],
+        "advance-notice session_ref headers match the shared function of the declared runner module id, Setup harness and session, never the project folder"),
     case("model_view_half_open_ranges_and_travel", COMPACTED,
         "Setup [0,0) insertions precede message zero and travel with it over count/byte caps, are not repeated on the next page, and the held model request carries that canonical view"),
     case("compaction_unavailable_distinct_from_refuse", &[Compaction, Queue, TranscriptReads, RunOps],

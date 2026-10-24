@@ -33,10 +33,10 @@ def framed(parts):
     return h.hexdigest()
 
 
-SR = sha(jcs({"harness": "opencode", "project_root": "/work/demo", "session": "ses_1"}))[:32]
 ACCT = "acme"
-RUNNER = "thalamus-harness"
-PROVIDER = "ck-mc"
+RUNNER = "runner-a"
+PROVIDER = "provider-a"
+SR = sha(jcs({"harness": "opencode", "runner": RUNNER, "session": "ses_1"}))[:32]
 MODEL = "anthropic/claude-sonnet-4-5"
 
 def text(t):

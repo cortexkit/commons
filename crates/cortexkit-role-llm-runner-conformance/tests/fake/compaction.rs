@@ -21,6 +21,7 @@ pub enum CompactionDefect {
     UnavailableAsRefusal,
     FinerCodeReplacesRoleCode,
     BindWrongSession,
+    SessionRefFromFolder,
     /// A Setup refused `setup_identity_mismatch` is recorded under another
     /// code (`misconfigured`).
     IdentityMismatchUnderAnotherCode,
@@ -301,7 +302,7 @@ impl Module {
                 request_id: id.clone(),
                 lineage_id: Some(sess.lineage.clone()),
                 setup_identity: CompactionSetupIdentity {
-                    harness: "broca".into(),
+                    harness: FAKE_HARNESS.into(),
                     session: session.to_owned(),
                 },
                 route_identity: CompactionRouteIdentity {

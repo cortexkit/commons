@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Use the shared helper's named `SessionIdentity` fields; runner ids are bare
+  attested module ids, not principal display forms. Wire fields are unchanged.
+- Session refs now use the shared llm-runner 0.7.0 derivation from runner module
+  id, harness and session, not the project folder. Refresh the reference/reply
+  vectors and document one-time live-session re-keying; ended refs stay v1.
+- Update the llm-runner dev-dependency to 0.7.0. Public wire types are unchanged.
+
 ## 0.2.2
 
 - Dev-dependency on cortexkit-role-llm-runner 0.4.0 (was 0.3.0), for the

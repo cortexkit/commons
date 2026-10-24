@@ -273,7 +273,11 @@ pub fn view_compaction_id(version: u64) -> String {
 
 /// The session reference the scripted provider keys its state by.
 fn reference(session: &str) -> String {
-    session_ref("broca", "/fake/project", session)
+    session_ref(&cortexkit_role_llm_runner::SessionIdentity {
+        runner: FAKE_RUNNER,
+        harness: FAKE_HARNESS,
+        session,
+    })
 }
 
 /// The canonical model input under an applied view.
@@ -704,8 +708,14 @@ impl Module {
         let mut providers = self.world.compaction.lock().unwrap();
         let provider = providers.sessions.get_mut(session).unwrap();
         let seq = provider.notices.len() as u64 + 1;
+        #[allow(deprecated)]
+        let reference = if self.world.defects.compaction == CompactionDefect::SessionRefFromFolder {
+            cortexkit_role_llm_runner::session_ref_v1(FAKE_HARNESS, "/fake/project", session)
+        } else {
+            reference(session)
+        };
         let mut notice = AdvanceNotice::new(
-            reference(session),
+            reference,
             seq,
             &sess.lineage,
             last.ordinal,

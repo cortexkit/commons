@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+- Keep the per-session retention policy and live step event releases intact.
+  Section 14.3 pins the event's session reference to the shared section 14.1
+  derivation on the bare runner module id.
+- Breaking: `session_ref(&SessionIdentity { runner, harness, session })` names a hosted session by
+  its runner module id, harness and session, with no folder input. The shared
+  helper hashes hand-ordered JCS fields exactly as given, without normalisation.
+- Named fields make old three-string positional calls fail to compile instead
+  of silently reusing the wrong inputs; a compile-fail doctest pins that fence.
+  `runner` is the attested principal's bare module id, never `reserved:<id>`
+  or any display-form prefix. A vector pair pins those strings as distinct.
+- Keep deprecated `session_ref_v1(harness, project_root, session)` only for
+  migrating stored refs: re-key live sessions once; ended rows keep v1 refs.
+- Pin both derivations in packaged vectors, including runner separation,
+  Unicode, escaping and empty-string edges for the new pure derivation.
+
 ## 0.6.11
 
 - Additive release alongside `session_retention` from 0.6.10; its policy group

@@ -3902,22 +3902,39 @@ real process kill.
 ## 14.1 Session reference
 
 - [pinned] A session's `session_ref` is the first 16 bytes of SHA-256 over
-  the RFC 8785 (JCS) bytes of `{"harness", "project_root", "session"}`, the
-  bind identity exactly as the route bind carried it. It is written as 32
-  lowercase hexadecimal characters.
-- [pinned] `project_root` is not normalised: no realpath, no symlink
-  resolution, no trailing-slash removal. Two binds whose roots differ by a
-  single byte are different sessions, because a runner keys its durable state
-  by those same bytes.
+  the RFC 8785 (JCS) bytes of `{"harness", "runner", "session"}`. It is
+  written as 32 lowercase hexadecimal characters. `runner` is the runner
+  principal's bare module id exactly as recorded in `session_binding.runner`
+  (for example, `runner-a`). It is never the principal's `reserved:runner-a`
+  display form, any other prefix, the harness id or a folder. Extract the bare
+  module id from the attested principal before constructing `SessionIdentity`;
+  the shared function never strips prefixes. Session values are unique per
+  runner and harness. Every field is passed exactly as given, never normalised.
+- [pinned] Project folders are not part of the reference. A folder can have
+  multiple spellings (for example `/var/…` and `/private/var/…` on macOS);
+  those aliases must not split one hosted session's identity.
 - [pinned] Any module that keeps state for a runner session (a compaction
   provider, a backup or move participant) derives the same `session_ref`
-  from the same bind identity, without asking the runner.
-  `test-vectors/llm-runner-v1/session-ref.json` pins the derivation,
-  including a trailing slash and non-ASCII escaping, and the crate's
-  `session_ref` function implements it.
+  through the shared `cortexkit_role_llm_runner::session_ref` function with
+  `&SessionIdentity { runner, harness, session }`, without asking the runner
+  or implementing its own hash. Named fields ensure an old positional call
+  cannot compile and silently hash the wrong inputs.
+  `test-vectors/llm-runner-v1/session-ref.json` pins the derivation, including
+  runner separation, bare id versus principal display form, non-ASCII strings
+  and escaping.
+- [pinned] Migration: a module that stored folder-based v1 references re-keys
+  live sessions once; ended rows keep their v1 references. The deprecated
+  `session_ref_v1(harness, project_root, session)` exists only to migrate
+  stored refs and will be removed in a later release. Its legacy derivation
+  is pinned by `test-vectors/llm-runner-v1/session-ref-v1.json`.
 - [pinned] `session_ref` is a correlation key, not proof of identity: a
   direct caller chooses its own bind fields. Authorization still rests on
   the daemon-stamped principal and scope.
+
+- [pinned] The conformance case `session_ref_uses_runner_identity` requires
+  `compaction` and `queue` and the adapter's runner module id declaration.
+  Bus-captured advance-notice headers must match the shared derivation, not
+  a folder-based reference.
 
 ## 14.2 Per-step cost and memory
 
@@ -4000,8 +4017,12 @@ to the session's whole length.
   the step-history consumer. It is never assumed to equal a `session.read`
   message ordinal or a `session.subscribe` frame sequence. This adds no field
   to `session.read` or `session.history`.
-- [pinned] `session_ref` is the runner's §14.1 reference, opaque to consumers;
-  consumers never derive it. A live hint carries no folder path or project-root
+- [pinned] `session_ref` is the §14.1 reference, computed by the publisher with
+  the shared `cortexkit_role_llm_runner::session_ref` function on
+  `&SessionIdentity { runner, harness, session }`. `runner` is the attested
+  principal's bare module id from `session_binding.runner`, never its
+  `reserved:<id>` display form or a folder. The reference remains opaque to
+  consumers; consumers never derive it. A live hint carries no folder path or project-root
   member: paths name user directories and do not belong in a content-free hint.
 - [pinned] With `history_key: "harness"`, `harness_step_ref` is the host's own
   record id (for example a request id or message id). Its absence means the

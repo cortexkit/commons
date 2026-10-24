@@ -399,8 +399,50 @@ where
         "model_view_half_open_ranges_and_travel" => ranges(case).await,
         "compaction_unavailable_distinct_from_refuse" => refusals(case).await,
         "compaction_setup_route_session_matches_setup" => route_session_matches_setup(case).await,
+        "session_ref_uses_runner_identity" => session_ref_uses_runner_identity(case).await,
         _ => Err(format!("unknown compaction case {name}")),
     }
+}
+
+async fn session_ref_uses_runner_identity<S>(case: &Case<'_, S>) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut session = install(
+        case,
+        "session-reference",
+        CompactionSetup::Ready(initial("session-reference")),
+        Script {
+            turns: vec![text("session-reference-answer")],
+        },
+    )
+    .await?;
+    send(case, &mut session, "session-reference-prompt").await?;
+    release_model(case.subject, &session.name).await?;
+    let observed = observation(case.subject, &session.name).await?;
+    let setup = &observed
+        .calls
+        .first()
+        .ok_or("no observed Setup call for the session reference")?
+        .setup_identity;
+    let expected = crate::wire::session_ref(&crate::wire::SessionIdentity {
+        runner: case.subject.runner_id(),
+        harness: &setup.harness,
+        session: &setup.session,
+    });
+    if observed.notices.is_empty() {
+        return Err("no advance notice observed for the session reference".into());
+    }
+    for notice in &observed.notices {
+        if notice.get("session_ref") != Some(&expected) {
+            return Err(format!(
+                "session_ref {:?} differs from shared runner/harness/session reference {expected}",
+                notice.get("session_ref")
+            ));
+        }
+    }
+    Ok(())
 }
 
 async fn route_session_matches_setup<S>(case: &Case<'_, S>) -> Result<(), String>
