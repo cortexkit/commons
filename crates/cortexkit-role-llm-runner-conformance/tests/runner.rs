@@ -3040,6 +3040,63 @@ async fn an_embedded_layout_runner_passes_the_part_counting_cases() {
 }
 
 #[tokio::test]
+async fn marker_free_media_results_pass_whole_result_numbering() {
+    use cortexkit_role_llm_runner::tags::ToolResultBlock::{Image, Media, Text};
+    use cortexkit_role_llm_runner_conformance::LlmRunnerSubject;
+
+    for embedded in [false, true] {
+        let mut subject = declaring(
+            Capability::Tags,
+            Defects {
+                run_tool_calls_embedded_results: embedded,
+                ..Defects::default()
+            },
+        );
+        subject.capabilities.insert(Capability::RunToolCalls);
+        for blocks in [vec![Media], vec![Image, Media], vec![Text(""), Media]] {
+            let result = subject
+                .numbering_tool_result("absent-media-marker", &blocks)
+                .unwrap();
+            assert!(!result.to_string().contains("absent-media-marker"));
+        }
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome("tags_tool_result_blocks_share_one_number"),
+            Some(&CaseOutcome::Passed),
+            "embedded={embedded}\n{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn marker_results_without_call_ids_use_marker_fallback() {
+    use cortexkit_role_llm_runner::tags::ToolResultBlock::{Image, Media, Text};
+    use cortexkit_role_llm_runner_conformance::LlmRunnerSubject;
+
+    let subject = embedded_tags_runner(
+        Defects {
+            tags_marker_only_results: true,
+            ..Defects::default()
+        },
+        true,
+    );
+    for blocks in [vec![Media], vec![Image, Media], vec![Text(""), Media]] {
+        let result = subject
+            .numbering_tool_result("present-media-marker", &blocks)
+            .unwrap();
+        assert!(result.to_string().contains("present-media-marker"));
+    }
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("tags_tool_result_blocks_share_one_number"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
 async fn a_message_array_runner_declaring_run_tool_calls_passes_the_part_counting_cases() {
     let mut subject = declaring(Capability::Tags, Defects::default());
     subject.capabilities.insert(Capability::RunToolCalls);

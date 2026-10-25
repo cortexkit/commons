@@ -1126,8 +1126,10 @@ pub trait LlmRunnerSubject: Harness {
     /// A result in the tool provider's schema, preserving these ordered blocks
     /// (including empty text). Use invented image/PDF media for `Image`/`Media`.
     /// With no blocks, return only a structured value, not serialized text.
-    /// Keep `marker` in the exposed result's metadata or structured value, never
-    /// as an extra text block, so the case can find even an empty result.
+    /// Without `run_tool_calls`, keep `marker` in the exposed result's metadata
+    /// or structured value, never as an extra text block, so the case can find
+    /// even an empty result. With `run_tool_calls`, results may be marker-free:
+    /// the case uses the listed call and `tool_result_part` instead.
     /// `None` names that shape as unchecked by the tool-result numbering case.
     fn numbering_tool_result(
         &self,
@@ -1135,6 +1137,37 @@ pub trait LlmRunnerSubject: Harness {
         _blocks: &[cortexkit_role_llm_runner::tags::ToolResultBlock<'_>],
     ) -> Option<Value> {
         None
+    }
+
+    /// The stored result part's key, exactly as `read_parts` and tags address
+    /// it, for a finished call and its `result_ordinal` entry. No result payload
+    /// marker is required. The default matches common call-id fields or a
+    /// single-part result entry separate from the requesting message. Override
+    /// for other native schemas; `None` names part identity as unchecked.
+    fn tool_result_part(
+        &self,
+        call: &cortexkit_role_llm_runner::tool_calls::RunToolCall,
+        result: &cortexkit_role_llm_runner::read::ReadMessage,
+    ) -> Option<String> {
+        let parts = self.read_parts(&result.message);
+        let matching: Vec<_> = parts
+            .iter()
+            .filter(|(_, part)| {
+                ["tool_use_id", "tool_call_id", "callID", "id"]
+                    .iter()
+                    .any(|field| {
+                        part.get(field).and_then(Value::as_str) == Some(call.tool_call_id.as_str())
+                    })
+                    || call.call_key.as_deref().is_some_and(|key| {
+                        part.get("call_key").and_then(Value::as_str) == Some(key)
+                    })
+            })
+            .collect();
+        match matching.as_slice() {
+            [(key, _)] => Some(key.clone()),
+            [] if result.ordinal != call.ordinal && parts.len() == 1 => Some(parts[0].0.clone()),
+            _ => None,
+        }
     }
 
     /// An image result in the host's actual schema, with exactly `bytes` as

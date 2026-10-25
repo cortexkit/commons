@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.5
+
+- `tags_tool_result_blocks_share_one_number` finds each tool result through its
+  listed call, so a result made only of media, or of empty text plus media, no
+  longer needs the fixture's marker text. The new subject hook
+  `tool_result_part(call, result)` names the stored part that holds a call's
+  result; its default matches common call-id fields. When the hook returns
+  `None`, the case falls back to finding the marker in the result. Only a result
+  the hook cannot name and that carries no marker is reported as an unchecked
+  shape, never as a failure. Regression tests cover separate and embedded result
+  layouts and the marker fallback.
+- The llm-runner contract dependency remains 0.7.4.
+
 ## 0.15.4
 
 - Track llm-runner 0.7.4 and compaction-provider 0.7.1. Add capability-gated

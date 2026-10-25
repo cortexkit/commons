@@ -323,6 +323,9 @@ pub struct Defects {
     pub tags_number_empty_block: bool,
     pub tags_pdf_image_label: bool,
     pub tags_count_structured_result: bool,
+    /// Embedded numbering results omit the stored call id, while their fixtures
+    /// retain the marker, exercising part lookup by marker instead of identity.
+    pub tags_marker_only_results: bool,
     /// A tool-result entry of its own (message-array layout) is left
     /// unnumbered, as if it held only a tool call.
     pub tags_tool_result_entry_unnumbered: bool,
@@ -1916,6 +1919,11 @@ impl Module {
                         .unwrap();
                     if self.world.defects.run_tool_calls_embedded_results {
                         part["result"] = content.clone();
+                        if self.world.defects.tags_marker_only_results
+                            && content["fake_numbering"] == json!(true)
+                        {
+                            part.as_object_mut().unwrap().remove("id");
+                        }
                     }
                     if self.world.defects.run_tool_calls_omit_finished_arguments {
                         part.as_object_mut().unwrap().remove("arguments");
@@ -1924,16 +1932,16 @@ impl Module {
                 if self.world.defects.run_tool_calls_embedded_results {
                     return;
                 }
+                let id = sess
+                    .calls
+                    .get(&key)
+                    .map(|c| c.tool_call_id.clone())
+                    .unwrap_or_default();
                 let mut body = if profiled(&session) {
-                    let id = sess
-                        .calls
-                        .get(&key)
-                        .map(|c| c.tool_call_id.clone())
-                        .unwrap_or_default();
                     json!({ "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id,
                             "content": result_text(&content) }] })
                 } else {
-                    json!({ "role": "tool", "call_key": key, "content": content })
+                    json!({ "role": "tool", "call_key": key, "tool_call_id": id, "content": content })
                 };
                 if self.world.defects.output_refs_result_after_text
                     && (session.contains("output_refs_snapshot_size")
@@ -4530,7 +4538,11 @@ impl Module {
                             .into_iter()
                             .flatten()
                             .find(|part| {
-                                part["type"] == "tool_call" && part["id"] == call.tool_call_id
+                                part["type"] == "tool_call"
+                                    && (part["id"] == call.tool_call_id
+                                        || (self.world.defects.tags_marker_only_results
+                                            && part.get("id").is_none()
+                                            && part["arguments"] == call.arguments))
                             })
                             .and_then(|part| part.get("result"))
                             .map(|result| (message.ordinal, result.to_string().len()))
@@ -5854,6 +5866,16 @@ impl LlmRunnerSubject for FakeSubject {
             .collect();
         Some(if blocks.is_empty() {
             json!({"fake_numbering":true,"structuredContent":{"marker":marker}})
+        } else if self.capabilities.contains(&Capability::RunToolCalls)
+            && !self.defects.tags_marker_only_results
+            && blocks
+                .iter()
+                .any(|block| matches!(block, ToolResultBlock::Media))
+            && !blocks
+                .iter()
+                .any(|block| matches!(block, ToolResultBlock::Text(text) if !text.is_empty()))
+        {
+            json!({"fake_numbering":true,"content":content})
         } else {
             json!({"fake_numbering":true,"marker":marker,"content":content})
         })
