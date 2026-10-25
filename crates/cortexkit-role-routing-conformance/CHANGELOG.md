@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Re-export routing contract 0.4.0 through `wire`, including non-exhaustive
+  `ConsumerDeclarations` and optional runner matching declarations. This is
+  a breaking Rust minor for users constructing declaration struct literals;
+  use the declaration constructor and builders instead. The conformance
+  checks and adapter hooks are unchanged.
+
 ## 0.4.0
 
 - Depend on routing contract 0.3.0, a breaking Rust minor (`SelectRequest`,

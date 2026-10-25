@@ -40,16 +40,19 @@ a module plays.
   scope, and the runner's own admission applies. A routing provider never
   relays model calls.
 
-### 1.1 Consumer declarations
+### 1.1 Catalog declarations and consumers
 
-- [pinned] A module may declare its consumers in its manifest's daemon slot
+- [pinned] A module may declare its consumers, its runner support, or both in its manifest's daemon slot
   `role_declarations["routing/v1"]` (`ROLE_DECLARATIONS_KEY`). The daemon
   relays this JSON object unread; this role owns its schema
   (`ConsumerDeclarations`, validated by `parse_consumer_declarations`).
   Declarations come only from the daemon catalog, never from a call.
-- [pinned] The object is `{consumers: [{name, eq?, context_window?,
+- [pinned] The object has two optional members, `consumers` and `runner`.
+  Omitted `consumers` means an empty list, so a pure runner module need not
+  declare consumers. When present, `consumers` must be an array (not `null`),
+  including an explicitly empty array, with the shape `[{name, eq?, context_window?,
   max_output_tokens?, tools?, tool_capabilities?, modalities?,
-  structured_output?}]}`. `name` is required and uses the consumer id
+  structured_output?}]`. `name` is required and uses the consumer id
   grammar of §5.1. Every other member is an optional default for the
   same-named requirement in §5.1, with that requirement's type and limits.
   Unknown members, invalid names or demands, and duplicate names within
@@ -81,6 +84,54 @@ a module plays.
   default. Omission is not a zero or false value. The request's required
   `iq` remains required; a declaration cannot set `iq` and does not relax
   request validation. An operator may still override `iq` in configuration.
+
+### 1.2 Runner matching declarations
+
+- [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method}],
+  follows_account_choice?: bool, tool_capabilities?: [string],
+  standing_limits?: {explicit_providers?: [string]}}` (`RunnerDeclaration`).
+  Unknown members in the slot, `runner`, any pair, or `standing_limits`
+  invalidate the whole declaration. A refusal names the offending field
+  path, such as `runner.pairs[0].wire_api`; no part is applied.
+- [pinned] `pairs` is required, non-empty, and has at most 64 entries.
+  Each `(wire_api, auth_method)` pair is unique. Both values are tokens
+  matching `^[a-z][a-z0-9._-]{0,63}$`. These are open sets: validation
+  checks their shape, never a fixed list of wire APIs or authentication
+  methods.
+- [pinned] Routing intersects the runner module's pairs with the vault's
+  available provider credentials and the catalog's routes. A declaration
+  promises which combinations the runner module can drive; it creates no
+  credential or route and grants no authority to use one.
+- [pinned] `follows_account_choice` defaults to `false`. When `true`, the
+  runner module calls `route.account_for` and uses its answer. Absence or
+  `false` makes no such promise; a routing provider must not infer it.
+- [pinned] `tool_capabilities` defaults to an empty list. It has at most 64
+  unique names following the tool-provider role's capability-name grammar:
+  role-defined unprefixed tags (such as `code.read/v1`), or
+  `<namespace>:<name>/v<N>` tags. Routing uses these as the runner module's
+  supported tool capabilities when matching tool capability requirements,
+  not as module names. Namespaces are non-empty `-`-separated words of
+  lowercase ASCII letters and digits; names are non-empty `.`-separated
+  words of lowercase ASCII letters, digits and `_`; `N` is a positive
+  decimal integer without a leading zero.
+- [pinned] `standing_limits.explicit_providers`, when present, restricts the
+  runner module to credentials for providers named in that list. Credentials
+  for every other provider are ineligible for that runner module. The list
+  is non-empty, has at most 64 unique entries, and each entry matches the
+  same token grammar as `wire_api`. An empty list is refused rather than
+  ambiguously meaning either no providers or no limit. This lets a gateway
+  use a platform credential only when its registration names the provider.
+  Absent `explicit_providers` means no provider limit. A present
+  `standing_limits: {}` also means no limit and retains its empty object
+  when serialized.
+- [pinned] Optional runner members follow §2's null-as-absence rule.
+  Absent `runner`, false `follows_account_choice`, and empty
+  `tool_capabilities` are omitted when serialized. Existing consumers-only
+  slots retain their bytes, including an explicit `consumers: []`.
+- [pinned] Rollout is readers first: a 0.3.x routing provider refuses a slot
+  carrying `runner` as an unknown member, discarding even valid consumers
+  in that slot. Runner modules **must not declare `runner` until the routing
+  provider runs routing contract 0.4.0** (or a later version supporting it).
 
 ## 2. Wire
 

@@ -1,4 +1,4 @@
-//! Consumer names and demand defaults from the daemon catalog, never a call.
+//! Consumer defaults and runner matching declarations from the catalog, never a call.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,19 +41,156 @@ pub struct ConsumerDeclaration {
 /// The object in a module's `role_declarations["routing/v1"]` catalog slot.
 /// Decode alone does not validate; use [`parse_consumer_declarations`] or
 /// [`Self::validate`] before applying any names or defaults.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConsumerDeclarations {
+    /// Consumer names and demand defaults; absence decodes to an empty list.
     pub consumers: Vec<ConsumerDeclaration>,
-    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub runner: Option<RunnerDeclaration>,
     pub unknown: BTreeMap<String, Value>,
+    // An explicit empty consumer list is an existing wire shape. Keep its
+    // presence so older slots retain their bytes while runner-only slots omit it.
+    consumers_present: bool,
 }
 
 impl ConsumerDeclarations {
+    /// Start an empty slot, omitting both optional members on the wire.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Include consumers, preserving an explicitly empty list on the wire.
+    pub fn with_consumers(mut self, consumers: Vec<ConsumerDeclaration>) -> Self {
+        self.consumers = consumers;
+        self.consumers_present = true;
+        self
+    }
+
+    /// Include the runner module's matching inputs.
+    pub fn with_runner(mut self, runner: RunnerDeclaration) -> Self {
+        self.runner = Some(runner);
+        self
+    }
+
     /// Validate the whole declaration, including values built without serde.
     pub fn validate(&self) -> Result<(), DeclarationError> {
         parse_consumer_declarations(&serde_json::to_value(self).expect("JSON declaration"))?;
         Ok(())
     }
+}
+
+impl Serialize for ConsumerDeclarations {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Slot<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            consumers: Option<&'a Vec<ConsumerDeclaration>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            runner: &'a Option<RunnerDeclaration>,
+            #[serde(flatten)]
+            unknown: &'a BTreeMap<String, Value>,
+        }
+
+        Slot {
+            consumers: (self.consumers_present || !self.consumers.is_empty())
+                .then_some(&self.consumers),
+            runner: &self.runner,
+            unknown: &self.unknown,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ConsumerDeclarations {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Slot {
+            consumers: Option<Vec<ConsumerDeclaration>>,
+            runner: Option<RunnerDeclaration>,
+            #[serde(flatten)]
+            unknown: BTreeMap<String, Value>,
+        }
+
+        let slot = Slot::deserialize(deserializer)?;
+        Ok(Self {
+            consumers_present: slot.consumers.is_some(),
+            consumers: slot.consumers.unwrap_or_default(),
+            runner: slot.runner,
+            unknown: slot.unknown,
+        })
+    }
+}
+
+/// One open-set wire API and authentication method a runner module can drive.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RunnerPair {
+    pub wire_api: String,
+    pub auth_method: String,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unknown: BTreeMap<String, Value>,
+}
+
+impl RunnerPair {
+    pub fn new(wire_api: impl Into<String>, auth_method: impl Into<String>) -> Self {
+        Self {
+            wire_api: wire_api.into(),
+            auth_method: auth_method.into(),
+            unknown: BTreeMap::new(),
+        }
+    }
+}
+
+/// Provider restrictions applied to every credential a runner module may use.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct StandingLimits {
+    /// Absence means no provider limit; a present list must be non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explicit_providers: Option<Vec<String>>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unknown: BTreeMap<String, Value>,
+}
+
+/// Matching inputs supplied by a runner module, not a credential or a route.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RunnerDeclaration {
+    pub pairs: Vec<RunnerPair>,
+    /// When true, the runner calls `route.account_for` and uses its answer.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub follows_account_choice: bool,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub tool_capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing_limits: Option<StandingLimits>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unknown: BTreeMap<String, Value>,
+}
+
+impl RunnerDeclaration {
+    pub fn new(pairs: Vec<RunnerPair>) -> Self {
+        Self {
+            pairs,
+            ..Self::default()
+        }
+    }
+}
+
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// A declaration is rejected as a whole; a path identifies the offending member.
@@ -89,15 +226,21 @@ pub fn parse_consumer_declarations(
 ) -> Result<ConsumerDeclarations, DeclarationError> {
     let invalid = |field: String| DeclarationError::InvalidField { field };
     let object = value.as_object().ok_or_else(|| invalid("$".into()))?;
-    if let Some(field) = object.keys().find(|key| key.as_str() != "consumers") {
+    if let Some(field) = object
+        .keys()
+        .find(|key| !["consumers", "runner"].contains(&key.as_str()))
+    {
         return Err(DeclarationError::UnknownMember {
             field: field.clone(),
         });
     }
-    let consumers = object
-        .get("consumers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid("consumers".into()))?;
+    let consumers = match object.get("consumers") {
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| invalid("consumers".into()))?
+            .as_slice(),
+        None => &[],
+    };
     let mut names = BTreeSet::new();
     for (index, consumer) in consumers.iter().enumerate() {
         let path = format!("consumers[{index}]");
@@ -139,7 +282,129 @@ pub fn parse_consumer_declarations(
             invalid(format!("{path}.{field}"))
         })?;
     }
-    serde_json::from_value(value.clone()).map_err(|_| invalid("consumers".into()))
+    if let Some(runner) = object.get("runner").filter(|value| !value.is_null()) {
+        validate_runner(runner)?;
+    }
+    serde_json::from_value(value.clone()).map_err(|_| invalid("$".into()))
+}
+
+fn declaration_object<'a>(
+    value: &'a Value,
+    path: &str,
+    allowed: &[&str],
+) -> Result<&'a serde_json::Map<String, Value>, DeclarationError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| DeclarationError::InvalidField { field: path.into() })?;
+    if let Some(field) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(DeclarationError::UnknownMember {
+            field: format!("{path}.{field}"),
+        });
+    }
+    Ok(object)
+}
+
+fn is_runner_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.as_bytes()[0].is_ascii_lowercase()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+        })
+}
+
+fn validate_unique_list(
+    value: &Value,
+    path: &str,
+    nonempty: bool,
+    valid: fn(&str) -> bool,
+) -> Result<(), DeclarationError> {
+    let invalid = |field| DeclarationError::InvalidField { field };
+    let values = value.as_array().ok_or_else(|| invalid(path.into()))?;
+    if (nonempty && values.is_empty()) || values.len() > 64 {
+        return Err(invalid(path.into()));
+    }
+    let mut seen = BTreeSet::new();
+    for (index, value) in values.iter().enumerate() {
+        let field = format!("{path}[{index}]");
+        let value = value.as_str().ok_or_else(|| invalid(field.clone()))?;
+        if !valid(value) || !seen.insert(value) {
+            return Err(invalid(field));
+        }
+    }
+    Ok(())
+}
+
+fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
+    let invalid = |field| DeclarationError::InvalidField { field };
+    let runner = declaration_object(
+        value,
+        "runner",
+        &[
+            "pairs",
+            "follows_account_choice",
+            "tool_capabilities",
+            "standing_limits",
+        ],
+    )?;
+    let pairs = runner
+        .get("pairs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("runner.pairs".into()))?;
+    if pairs.is_empty() || pairs.len() > 64 {
+        return Err(invalid("runner.pairs".into()));
+    }
+    let mut seen = BTreeSet::new();
+    for (index, value) in pairs.iter().enumerate() {
+        let path = format!("runner.pairs[{index}]");
+        let pair = declaration_object(value, &path, &["wire_api", "auth_method"])?;
+        let token = |name: &str| {
+            pair.get(name)
+                .and_then(Value::as_str)
+                .filter(|value| is_runner_token(value))
+                .ok_or_else(|| invalid(format!("{path}.{name}")))
+        };
+        let wire_api = token("wire_api")?;
+        let auth_method = token("auth_method")?;
+        if !seen.insert((wire_api, auth_method)) {
+            return Err(invalid(path));
+        }
+    }
+    if runner
+        .get("follows_account_choice")
+        .is_some_and(|value| !value.is_null() && !value.is_boolean())
+    {
+        return Err(invalid("runner.follows_account_choice".into()));
+    }
+    if let Some(value) = runner
+        .get("tool_capabilities")
+        .filter(|value| !value.is_null())
+    {
+        validate_unique_list(
+            value,
+            "runner.tool_capabilities",
+            false,
+            crate::capability_names::is_capability_name,
+        )?;
+    }
+    if let Some(value) = runner
+        .get("standing_limits")
+        .filter(|value| !value.is_null())
+    {
+        let limits = declaration_object(value, "runner.standing_limits", &["explicit_providers"])?;
+        if let Some(value) = limits
+            .get("explicit_providers")
+            .filter(|value| !value.is_null())
+        {
+            validate_unique_list(
+                value,
+                "runner.standing_limits.explicit_providers",
+                true,
+                is_runner_token,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -203,7 +468,6 @@ mod tests {
     fn malformed_declaration_shapes_are_named() {
         for (value, field) in [
             (json!(null), "$"),
-            (json!({}), "consumers"),
             (json!({"consumers": null}), "consumers"),
             (json!({"consumers": [null]}), "consumers[0]"),
             (json!({"consumers": [{}]}), "consumers[0].name"),

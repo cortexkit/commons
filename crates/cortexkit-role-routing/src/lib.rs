@@ -16,6 +16,7 @@
 //! - [`report`]: the `route.report` request, its validator, and its answer;
 //! - [`account`]: the `route.account_for` request, validator and answer;
 //! - [`observe`]: the `route.account_observe` request, validator and answer;
+//! - [`declarations`]: consumer defaults and runner matching inputs from the catalog;
 //! - [`errors`]: refusal codes, the refusal body and each code's detail;
 //! - [`wire`]: the `{"result": <answer>}` reply envelope;
 //! - `vectors` (with the `test-vectors` feature): the role's vector files,
@@ -31,6 +32,7 @@
 
 #[macro_use]
 mod open;
+mod capability_names;
 mod members;
 
 pub mod account;
@@ -46,7 +48,7 @@ pub mod wire;
 
 pub use declarations::{
     parse_consumer_declarations, ConsumerDeclaration, ConsumerDeclarations, DeclarationError,
-    DemandDefaults,
+    DemandDefaults, RunnerDeclaration, RunnerPair, StandingLimits,
 };
 
 /// The role name, as `role.describe` states it.
@@ -62,7 +64,7 @@ pub const VERSION_NUMBER: u32 = 1;
 /// `capabilities.provides`.
 pub const PROVIDES: &str = "routing/v1";
 
-/// The daemon catalog's `role_declarations` key for consumer declarations.
+/// The daemon catalog's `role_declarations` key for consumer and runner declarations.
 pub const ROLE_DECLARATIONS_KEY: &str = "routing/v1";
 
 /// Names of the ops a routing provider serves.

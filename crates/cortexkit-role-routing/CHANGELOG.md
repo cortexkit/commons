@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.0
+
+- Add optional catalog `runner` declarations: unique open-set wire API/auth
+  pairs, the promise to call `route.account_for` and use its answer,
+  validated tool capability names, and optional standing provider limits.
+  Pair, capability and provider lists are bounded at 64 entries; pairs and
+  explicit provider lists must be non-empty. Unknown members and malformed
+  values refuse the whole slot with a field path. Tool capability validation
+  stays local so role crates remain independent at runtime. Development-only
+  tests check that accepted names and grammar stay aligned with the
+  tool-provider role.
+- Make `consumers` optional (empty when omitted), allowing pure runner slots.
+  Keep the `ConsumerDeclarations` name and its `consumers` vector, but make
+  it non-exhaustive: use `new`, `with_consumers` and `with_runner` instead
+  of struct literals. This is a breaking Rust minor. Runner declaration
+  types are also non-exhaustive. Legacy consumers-only slots, including an
+  explicit empty list, keep their bytes; absent optional members are omitted,
+  and `standing_limits: {}` retains its empty object.
+- Pin readers-first rollout: runner modules must not declare `runner` until
+  the routing provider adopts 0.4.0. A 0.3.x provider rejects the whole slot.
+
 ## 0.3.1
 
 - Contract text only: in the hold rules (5.4), a per-token account counts among an entry's accounts only where the provider's account policy allows falling back to one. No code or wire change.
