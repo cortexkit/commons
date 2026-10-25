@@ -344,7 +344,7 @@ where
                         sample["source"].as_str().unwrap().into(),
                     ));
                 } else {
-                    let mut call = case.mint.call("refs-sample");
+                    let mut call = case.mint.call(&case.mint.next("refs-sample"));
                     let slot = if sample["mode"] == "token_slot" {
                         "data"
                     } else {

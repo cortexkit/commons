@@ -98,8 +98,11 @@ pub struct DisplayRow {
     /// Every part, in the stored message's order.
     #[serde(default)]
     pub parts: Vec<DisplayPart>,
-    /// The model that wrote the message. Every assistant row carries it; the
-    /// runner fills it where its stored body does not say.
+    /// The recorded model that wrote the message. A message written through
+    /// the runner's own run always has one. Imported or adopted messages may
+    /// lack a recorded model: absent means unknown, never a guess, a default
+    /// or the session's current model. Readers must handle absence as unknown
+    /// before a runner omits it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// The `client_message_id` of the send that created this user message,

@@ -248,7 +248,9 @@ pub fn host_entries(session: &str, count: u64) -> Vec<HostEntry> {
         .map(|n| HostEntry {
             mid: format!("host-{session}-{n}"),
             written_at: 1_780_000_000_000 + n * 1_000,
-            body: if n.is_multiple_of(2) {
+            body: if super::display::profiled(session) {
+                json!({"role":if n.is_multiple_of(2) {"user"} else {"assistant"}, "content":[{"type":"text","text":format!("host message {n}")}]})
+            } else if n.is_multiple_of(2) {
                 json!({ "role": "user", "text": format!("host prompt {n}") })
             } else {
                 json!({ "role": "assistant", "parts": [{ "type": "text", "text": format!("host reply {n}") }] })

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.13
+
+- Clarify that assistant display rows carry the recorded model: messages written
+  through the runner's own run always have one, while imported or adopted
+  messages may lack it. Absence means unknown, never a guessed or current model.
+  Contract text and `DisplayRow.model` documentation only; the optional field
+  and wire shape are unchanged.
+
 ## 0.6.12
 
 - Add the durable provider-attempt `attempt_id` to `step.finished.v1`, required

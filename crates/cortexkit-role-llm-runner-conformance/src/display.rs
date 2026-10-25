@@ -39,6 +39,7 @@ where
 {
     match name {
         "display_row_is_the_profile_projection" => projection(case).await,
+        "display_own_run_records_model" => own_run_model(case).await,
         "display_limits_cut_on_a_utf8_boundary" => limits(case).await.map(|()| Ending::Passed),
         "display_without_limits_is_whole" => whole(case).await.map(|()| Ending::Passed),
         "display_pages_carry_finished_messages_only" => finished_only(case).await,
@@ -164,8 +165,8 @@ where
 
 /// A served row equals the profile's projection of the same entry's raw
 /// body, with only the fields the runner fills (`model`,
-/// `client_message_id` and `sender`) taken from the served row; every assistant row
-/// carries `model`. Checked without limits and with the apps' limits.
+/// `client_message_id` and `sender`) taken from the served row. Imported rows
+/// may lack a recorded model. Checked without limits and with the apps' limits.
 async fn projection<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
@@ -200,14 +201,6 @@ where
             }
             expected.client_message_id = shown.row.client_message_id.clone();
             expected.sender = shown.row.sender.clone();
-            if expected.role == "assistant" && expected.model.is_none() {
-                return Err(format!(
-                    "{what}, the assistant row of {} carries no model: every assistant row names \
-                     the model that wrote it, filled by the runner where its {profile} body does \
-                     not say",
-                    raw.mid
-                ));
-            }
             if shown.row != expected {
                 return Err(format!(
                     "{what}, the display row of {} is {:?}, but {profile}'s projection of its raw \
@@ -216,6 +209,38 @@ where
                 ));
             }
         }
+    }
+    Ok(Ending::Passed)
+}
+
+/// The unique scripted answer identifies a message the kit drove through
+/// the runner itself, rather than an imported assistant message.
+async fn own_run_model<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let marker = case.mint.next("recorded-model");
+    let mut session = case
+        .open(
+            "display-model",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![ScriptedPart::Text(marker.clone())])],
+            },
+        )
+        .await?;
+    case.run_prompt(&mut session, &case.mint.next("model-prompt"))
+        .await?;
+    let rows = display_walk(&session.route, None).await?;
+    let own: Vec<_> = rows
+        .iter()
+        .filter(|e| e.row.role == "assistant" && e.row.text == marker)
+        .collect();
+    if own.is_empty() {
+        return Err("display omitted the kit's scripted assistant message".into());
+    }
+    if own.iter().any(|e| e.row.model.is_none()) {
+        return Err("a runner-written assistant row carries no model".into());
     }
     Ok(Ending::Passed)
 }

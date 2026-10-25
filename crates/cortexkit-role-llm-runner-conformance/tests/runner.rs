@@ -2940,6 +2940,36 @@ async fn an_embedded_layout_runner_passes_the_part_counting_cases() {
 }
 
 #[tokio::test]
+async fn marker_free_media_results_pass_whole_result_numbering() {
+    use cortexkit_role_llm_runner::tags::ToolResultBlock::{Image, Media, Text};
+    use cortexkit_role_llm_runner_conformance::LlmRunnerSubject;
+
+    for embedded in [false, true] {
+        let mut subject = declaring(
+            Capability::Tags,
+            Defects {
+                run_tool_calls_embedded_results: embedded,
+                ..Defects::default()
+            },
+        );
+        subject.capabilities.insert(Capability::RunToolCalls);
+        for blocks in [vec![Media], vec![Image, Media], vec![Text(""), Media]] {
+            let result = subject
+                .numbering_tool_result("absent-media-marker", &blocks)
+                .unwrap();
+            assert!(!result.to_string().contains("absent-media-marker"));
+        }
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome("tags_tool_result_blocks_share_one_number"),
+            Some(&CaseOutcome::Passed),
+            "embedded={embedded}\n{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_message_array_runner_declaring_run_tool_calls_passes_the_part_counting_cases() {
     let mut subject = declaring(Capability::Tags, Defects::default());
     subject.capabilities.insert(Capability::RunToolCalls);
@@ -4824,6 +4854,7 @@ async fn numbering_restarted_at_a_cut_fails_the_numbering_case() {
 
 /// The display, client-message-id and live-event cases.
 const DISPLAY_AND_LIVE_CASES: &[&str] = &[
+    "display_own_run_records_model",
     "display_row_is_the_profile_projection",
     "display_limits_cut_on_a_utf8_boundary",
     "display_without_limits_is_whole",
@@ -4881,7 +4912,7 @@ async fn a_faithful_runner_passes_the_display_live_and_cache_ttl_cases() {
 }
 
 #[tokio::test]
-async fn a_display_row_without_model_fails_the_projection_case() {
+async fn a_runner_written_display_row_without_model_fails_by_name() {
     let report = run(&displaying(Defects {
         display_drops_model: true,
         ..Defects::default()
@@ -4889,8 +4920,27 @@ async fn a_display_row_without_model_fails_the_projection_case() {
     .await;
     fails_only(
         &report,
-        &["display_row_is_the_profile_projection"],
+        &["display_own_run_records_model"],
         "carries no model",
+    );
+}
+
+#[tokio::test]
+async fn imported_assistant_display_rows_may_have_unknown_model() {
+    let mut subject = displaying(Defects::default());
+    subject.host_prefix_everywhere = 2;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("display_row_is_the_profile_projection"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_eq!(
+        report.outcome("display_own_run_records_model"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
     );
 }
 
@@ -5556,6 +5606,17 @@ async fn output_refs_faithful_runner_passes_all_cases() {
         );
     }
     assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn shared_output_ref_samples_pass_a_runner_rejecting_duplicate_call_ids() {
+    let report = run(&output_refs_subject(None)).await;
+    assert_eq!(
+        report.outcome("output_refs_shared_samples"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
 }
 
 #[tokio::test]

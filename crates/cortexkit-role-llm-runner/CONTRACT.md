@@ -876,11 +876,20 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] The row comes from one pure function per serializer profile
   (`display::anthropic_messages`, `display::opencode_aisdk`, or
   `display::project` by name). A runner calls it on the entry's stored body
-  and then fills what the body lacks: `model` (the model that wrote it,
-  carried by every assistant row; an `anthropic-messages` body names none),
+  and then fills what the body lacks: `model` (the recorded model that wrote
+  it; an `anthropic-messages` body names none),
   `client_message_id` (§9.11) and `sender` (below). The conformance kit
   checks that a served row equals the function applied to the same entry's
   raw form, with only those three members taken from the served row.
+- [pinned] An assistant row carries `model` whenever the runner recorded
+  which model wrote that message. A message written through the runner's
+  own run always has a recorded model, so its row always carries it. Only
+  a message that entered without a recorded model may omit it, for example
+  one imported or adopted from another harness's transcript. Absent means
+  unknown: a runner never fills it with a guess, a default, or the session's
+  current model.
+- [informative] Before a runner omits `model`, readers must treat its absence
+  as unknown.
 - [pinned] **Who sent a message.** A user message's row may carry `sender`
   (added in 0.5.2, `DisplayRow::with_sender`): the attested module id of the
   caller whose send wrote the message (the route principal it arrived on,

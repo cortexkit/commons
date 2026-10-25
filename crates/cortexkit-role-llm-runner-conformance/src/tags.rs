@@ -19,6 +19,7 @@ use cortexkit_role_llm_runner::{
     read::ReadMessage,
     send::SendReply,
     tags::{self, CharRange, ResolveReply, ResolveRequest, RANGE_FIELD, TAG_FIELD},
+    tool_calls::RunToolCall,
 };
 use serde_json::{json, Map, Value};
 
@@ -1057,7 +1058,8 @@ where
 /// The entry holding the result of the call with `arguments`, requested in
 /// `step`: the entry its `result_ordinal` names where the runner declares
 /// `run.tool_calls`, otherwise the one entry holding `result_marker`. Never
-/// assumed from a layout.
+/// assumed from a layout. Return the listed call as well so its stored part
+/// can be identified without requiring a marker in the result payload.
 async fn result_entry<'m, S>(
     case: &Case<'_, S>,
     route: &S::Route,
@@ -1065,13 +1067,14 @@ async fn result_entry<'m, S>(
     step: &ReadMessage,
     arguments: &Value,
     result_marker: &str,
-) -> Result<&'m ReadMessage, String>
+) -> Result<(&'m ReadMessage, Option<RunToolCall>), String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
     if !case.declared.contains(&Capability::RunToolCalls) {
         return entry_holding(messages, result_marker)
+            .map(|entry| (entry, None))
             .map_err(|e| format!("locating the tool call's result by its marker: {e}"));
     }
     let run_id = &step
@@ -1082,7 +1085,7 @@ where
     let calls = crate::tool_calls::list(route, run_id, 50).await?;
     let listed = calls
         .iter()
-        .find(|listed| listed.args == *arguments)
+        .find(|listed| listed.ordinal == step.ordinal && listed.args == *arguments)
         .ok_or_else(|| format!("run.tool_calls of {run_id} does not list the step's call"))?;
     let ordinal = listed.result_ordinal.ok_or_else(|| {
         format!("run.tool_calls of {run_id} lists the finished call with no result_ordinal")
@@ -1091,13 +1094,7 @@ where
         .iter()
         .find(|message| message.ordinal == ordinal)
         .ok_or_else(|| format!("no read entry has the call's result_ordinal {ordinal}"))?;
-    if !entry.message.to_string().contains(result_marker) {
-        return Err(format!(
-            "the entry at the call's result_ordinal {ordinal} does not hold its result \
-             {result_marker}"
-        ));
-    }
-    Ok(entry)
+    Ok((entry, Some(listed.clone())))
 }
 
 /// A countable tool result has one number, placed on its first non-empty text
@@ -1136,6 +1133,13 @@ where
             true,
         ),
         ("pdf", vec![Media], None, Some("[media]"), true),
+        (
+            "empty_text_pdf",
+            vec![Text(""), Media],
+            None,
+            Some("[media]"),
+            true,
+        ),
         ("image_pdf", vec![Image, Media], None, Some("[media]"), true),
         ("empty_text", vec![Text("")], None, None, false),
         ("structured_only", vec![], None, None, false),
@@ -1172,9 +1176,26 @@ where
         let (_, messages) = read_all(&session.route).await?;
         check_tags(name, &messages)?;
         let step = entry_holding(&messages, &before_marker)?;
-        let entry =
+        let (entry, listed) =
             result_entry(case, &session.route, &messages, step, &arguments, &marker).await?;
-        let part = part_holding(case.subject, entry, &marker)?;
+        // Media and empty text cannot carry an arbitrary fixture marker, so the
+        // listed call's stored result identity comes first. When the subject
+        // cannot name that part, a result that does carry the marker is still
+        // checked through it, and only a marker-free one is left unchecked.
+        let identified = listed
+            .as_ref()
+            .and_then(|call| case.subject.tool_result_part(call, entry));
+        let part = match identified {
+            Some(part) => part,
+            None => match part_holding(case.subject, entry, &marker) {
+                Ok(part) => part,
+                Err(_) if listed.is_some() => {
+                    unchecked.push(format!("{name} part identity (tool_result_part)"));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            },
+        };
         let before = number_of(case.subject, &messages, &before_marker, name)?;
         let number = number_of_part(entry, &part)?;
         let expected = counted.then_some(before + 1);
@@ -1312,7 +1333,7 @@ where
              they are separate parts, so only the text can carry its number"
         ));
     }
-    let result_entry = result_entry(
+    let (result_entry, _) = result_entry(
         case,
         &session.route,
         &messages,

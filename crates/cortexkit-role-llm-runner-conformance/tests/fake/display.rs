@@ -293,7 +293,10 @@ impl Module {
                 }
             }
         }
-        if row.role == "assistant" && !defects.display_drops_model {
+        if row.role == "assistant"
+            && !defects.display_drops_model
+            && sess.messages.iter().any(|m| m.mid == entry.mid)
+        {
             row = row.with_model(self.session_model(session));
         }
         if let Some(message) = sess.messages.iter().find(|m| m.mid == entry.mid) {

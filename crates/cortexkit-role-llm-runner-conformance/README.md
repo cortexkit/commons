@@ -1,5 +1,9 @@
 # cortexkit-role-llm-runner-conformance
 
+`display_row_is_the_profile_projection` permits an imported assistant message
+with no recorded model. `display_own_run_records_model` separately drives a
+unique scripted answer through the runner and requires its recorded model.
+
 Descriptor-read adapters supply `media_tool_result` (actual decoded image
 bytes, with a nested tool-result layout when requested), `multipart_tool_result`
 for the fixed-budget fallback, and `read_parts` for their host's stable part
@@ -261,7 +265,7 @@ is unchanged and prints nothing.
 | `head_names_the_cut`, `notice_carries_first_ordinal`, `revert_below_the_cut_restarts_at_the_previous_cut`, `revert_below_a_cut_before_adoption_has_no_descent`, `checkpoint_on_descending_setup_refused`, `cut_setup_leaves_reads_alone`, `cut_numbering_continues_from_the_old_lineage` | as the cut cases; the revert cases need the revert hook, the adoption case `seed_host_history` with `cut`, the checkpoint case `tag_checkpoint`, the reads case the Setup-hold hooks and `holds_reads_during_setup`, the numbering case `tags` |
 | `history_version_unchanged_by_a_cut`, `history_version_rises_at_a_revert`, `history_from_ordinal_and_before_ordinal`, `history_unknown_ordinal_refused`, `history_before_lowest_ordinal_reaches_unnumbered_entries` | `host_history`, `queue`, `transcript_reads`; the cut case the cut requirements, the revert case the revert hook, the last the host-history hook |
 | `history_no_tags_below_first_ordinal`, `history_ordinal_kept_below_the_cut`, `history_cursor_survives_a_cut` | `host_history`, `compaction`, `queue`, `transcript_reads`, `run_ops`, and the view hook |
-| `display_row_is_the_profile_projection`, `display_limits_cut_on_a_utf8_boundary`, `display_without_limits_is_whole`, `display_pages_carry_finished_messages_only` | `history_display`, `host_history`, `queue`, `transcript_reads`; the projection case needs `serializer_profile`, the finished-only case `hold_next_model_step` |
+| `display_row_is_the_profile_projection`, `display_own_run_records_model`, `display_limits_cut_on_a_utf8_boundary`, `display_without_limits_is_whole`, `display_pages_carry_finished_messages_only` | `history_display`, `host_history`, `queue`, `transcript_reads`; the projection case needs `serializer_profile`, the finished-only case `hold_next_model_step` |
 | `client_message_id_on_display_rows_never_in_read` | `client_message_id`, `history_display`, `host_history`, `queue`, `transcript_reads` |
 | `client_message_id_resend_with_another_id_refused` | `client_message_id`, `queue` |
 | `live_message_and_tool_events_durable`, `live_run_events`, `live_attach_replays_the_current_step`, `live_seq_rises_across_lanes` | `live_events`, `streaming`, `queue`, `transcript_reads`; the attach and order cases need `hold_next_model_stream` |
@@ -739,8 +743,12 @@ hold does not deliver the send or render a boundary.
 
 `tags_tool_result_blocks_share_one_number` uses the defaulted
 `numbering_tool_result(marker, blocks)` hook to script mixed text/media, empty
-and structured-only tool results. Preserve empty text blocks and keep the
-marker in metadata, not an extra text block. Unsupported shapes are named
+and structured-only tool results. Preserve empty text blocks. Without
+`run_tool_calls`, keep the marker in metadata, not an extra text block. With
+`run_tool_calls`, marker-free results are located by `result_ordinal` and
+`tool_result_part(call, result)`, which returns the stored part's `read_parts`
+key. Its default covers common call-id fields and single-part separate result
+entries; override it for other native schemas. Unsupported shapes are named
 unchecked; block placement and image/media labels are checked when
 `rendered_model_input` is declared. Reads always check whole-result numbering
 and the next part.

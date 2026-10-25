@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.9
+
+- Require llm-runner 0.6.13. Permit imported assistant display rows without a
+  recorded model and add `display_own_run_records_model` to require one on a
+  message written through the runner's own run, with a named faulty-runner test.
+- Give each `output_refs_shared_samples` call a unique `tool_call_id`; prove the
+  samples pass a fake that refuses duplicate call ids within one model answer.
+- Locate media-only and empty-text-plus-media tool results by their call id in
+  `tags_tool_result_blocks_share_one_number`, not by fixture marker text, with a
+  faithful marker-free media result regression test for separate and embedded
+  layouts. Add the defaulted `tool_result_part` adapter hook for stored part
+  identity; unsupported native schemas name that rule unchecked.
+
 ## 0.12.8
 
 - Track llm-runner 0.6.12. Add `tags_tool_result_blocks_share_one_number`,
