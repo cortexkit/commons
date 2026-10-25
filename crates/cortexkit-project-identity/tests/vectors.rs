@@ -182,6 +182,97 @@ fn sample_enumerate() {
     }
 }
 
+/// A `resolve` record from the root-record captures: decodes, round-trips its
+/// exact bytes, and returns its only root record with the reply.
+fn root_record(index: usize, via: Via, generation: i64) -> (ResolveReply, RootRecord) {
+    let bytes = records("resolve-root-records.json");
+    let rows: Vec<Record<'_>> = serde_json::from_str(&bytes).unwrap();
+    assert_eq!(rows.len(), 5);
+    let request: Request<ResolveParams> = serde_json::from_str(rows[index].request.get()).unwrap();
+    assert_eq!(request.method, "resolve");
+    let Outcome::Success(reply) = check_reply::<ResolveReply>(rows[index].reply) else {
+        panic!("expected success");
+    };
+    let reply = reply.result;
+    assert_eq!(reply.via, via);
+    assert!(!reply.gone);
+    assert_eq!(reply.generation, generation);
+    assert_eq!(
+        reply.matched_root,
+        Presence::new(Some(request.params.canonical_root))
+    );
+    let Presence::Present(roots) = &reply.root_records else {
+        panic!("missing roots")
+    };
+    assert_eq!(roots.len(), 1);
+    let root = roots[0].clone();
+    (reply, root)
+}
+
+fn widget_remotes() -> Vec<GitRemote> {
+    vec![
+        GitRemote::new(
+            "origin".into(),
+            "example-org".into(),
+            "widgets".into(),
+            true,
+        ),
+        GitRemote::new(
+            "upstream".into(),
+            "example-upstream".into(),
+            "widgets".into(),
+            false,
+        ),
+    ]
+}
+
+#[test]
+fn sample_root_unbound_with_two_remotes() {
+    let (_, root) = root_record(0, Via::Root, 2);
+    assert_eq!(root.identity, RootIdentity::Unbound);
+    assert_eq!(root.remotes, widget_remotes());
+    assert_eq!(root.remotes_error, None);
+    assert_eq!(root.approval.state, ApprovalState::Unapproved);
+}
+
+#[test]
+fn sample_root_unreadable_git_config_carries_remotes_error() {
+    let (_, root) = root_record(1, Via::Root, 2);
+    assert_eq!(root.identity, RootIdentity::Unbound);
+    assert!(root.remotes.is_empty());
+    assert_eq!(
+        root.remotes_error.as_deref(),
+        Some("stream did not contain valid UTF-8")
+    );
+}
+
+#[test]
+fn sample_root_bound_and_approved() {
+    let (_, root) = root_record(2, Via::Root, 4);
+    assert_eq!(root.identity, RootIdentity::Bound);
+    assert_eq!(root.approval.state, ApprovalState::Approved);
+    assert_eq!(root.approval.journal_seq, Some(4));
+    assert_eq!(root.remotes, widget_remotes());
+}
+
+#[test]
+fn sample_root_replaced() {
+    let (_, root) = root_record(3, Via::Root, 5);
+    assert_eq!(root.identity, RootIdentity::Replaced);
+    assert_eq!(root.approval.state, ApprovalState::Unapproved);
+}
+
+#[test]
+fn sample_retired_attached_worktree_by_containment() {
+    let (reply, root) = root_record(4, Via::Containment, 6);
+    assert_eq!(
+        reply.source_root,
+        Presence::new(Some("/fixture/remotes-checkout".into()))
+    );
+    assert_eq!(root.identity, RootIdentity::Retired);
+    assert_eq!(root.remotes, widget_remotes());
+}
+
 #[test]
 fn published_samples_match_sha256sums() {
     let sums = std::fs::read_to_string(vector_dir().join("SHA256SUMS")).unwrap();
@@ -194,7 +285,12 @@ fn published_samples_match_sha256sums() {
     }
     assert_eq!(
         names,
-        ["enumerate.json", "resolve-project-id.json", "resolve.json"]
+        [
+            "enumerate.json",
+            "resolve-project-id.json",
+            "resolve-root-records.json",
+            "resolve.json"
+        ]
     );
 }
 

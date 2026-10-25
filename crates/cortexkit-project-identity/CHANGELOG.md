@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Bundle `resolve-root-records.json`, five more replies captured from a running
+  handler: populated Git remotes, an unreadable Git config with
+  `remotesError`, a bound and approved root, and the `unbound`, `replaced` and
+  `retired` root identities, the last through `containment` with `sourceRoot`.
+  Each decodes and re-encodes to its exact bytes. The types are unchanged.
+
 ## 0.1.0
 
 - Add non-exhaustive serde request, success, refusal, and reply types for

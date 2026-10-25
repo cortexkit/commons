@@ -143,13 +143,12 @@ are decoder checks, not claims about captured handler branches.
 
 Replies captured from a running handler are not yet bundled for:
 
-- A populated `GitRemote`; root identity `unbound`, `replaced`, and `retired`.
 - Supplied/null/malformed execution bindings and each non-null binding status;
   filtered/null enumeration requests and snake-case aliases.
-- Non-null workspace/source roots, `containment` results, and root-mode-off
-  replies; a null canonical query root is not currently a served branch.
-- Remote-probe errors, root keys of both known kinds, both mismatch booleans,
-  approved state with a journal sequence, and remote project references.
+- Non-null workspace roots and root-mode-off replies; a null canonical query
+  root is not currently a served branch.
+- Root keys of both known kinds, both mismatch booleans, and remote project
+  references.
 - Unplaced projects, activity timestamps, nonempty/omitted enumeration root
   records, and non-null/absent refusal detail.
 - Other refusals, malformed envelopes, missing/non-string project ids, invalid
