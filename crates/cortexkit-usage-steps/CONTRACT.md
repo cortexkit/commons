@@ -82,7 +82,9 @@ session, so a filtered subscriber resumes exactly like an unfiltered one.
 | Caller's Cancel | Ended by the caller. The provider may still send a last Error `cancelled`, which the daemon may drop. A reader treats `cancelled` after its own Cancel as the normal end, never as a failure. |
 
 Opening refusals: `not_permitted`, `subscription_capacity` (more than 16 open
-subscriptions), `draining` (the provider is stopping), `malformed`.
+subscriptions), `draining` (the provider is stopping), `malformed`,
+`invalid_request` (the request names `harness` without `session`, or `session`
+without `harness`).
 
 ## `usage.steps.read`
 

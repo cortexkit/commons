@@ -97,11 +97,6 @@ fn every_tolerant_input_decodes_and_re_encodes_as_its_canonical_vector() {
 #[test]
 fn every_rejected_input_fails_to_decode_or_the_provider_refuses_it() {
     let cases = cases();
-    let known: BTreeSet<&str> = codes::SUBSCRIBE_REFUSALS
-        .iter()
-        .chain(codes::READ_REFUSALS)
-        .copied()
-        .collect();
     for case in entries(&cases, "reject") {
         let file = case["file"].as_str().unwrap();
         let ty = case["type"].as_str().unwrap();
@@ -125,8 +120,22 @@ fn every_rejected_input_fails_to_decode_or_the_provider_refuses_it() {
                 "did not decode it"
             }
         );
+        // A refusal code must be one the operation it names may send, so
+        // check each request against its own operation's list, not the union
+        // of both: the union hid a subscribe code missing from its list.
         if let Some(code) = case.get("provider_code") {
-            assert!(known.contains(code.as_str().unwrap()), "{file}");
+            let own: &[&str] = match ty {
+                "SubscribeRequest" => codes::SUBSCRIBE_REFUSALS,
+                "ReadRequest" => codes::READ_REFUSALS,
+                other => {
+                    panic!("{file}: provider_code on a {other} case, which no operation refuses")
+                }
+            };
+            let code = code.as_str().unwrap();
+            assert!(
+                own.contains(&code),
+                "{file}: {code} is not among the {ty} refusals {own:?}"
+            );
         }
     }
 }

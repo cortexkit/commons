@@ -65,6 +65,8 @@ pub mod codes {
     /// Subscribe: the provider is stopping.
     pub const DRAINING: &str = "draining";
     /// Read: `limit` is 0, or `after` is not a cursor the provider issued.
+    /// Read and subscribe: the request names `harness` without `session`, or
+    /// `session` without `harness`.
     pub const INVALID_REQUEST: &str = "invalid_request";
     /// Read: `limit` is above [`crate::MAX_READ_LIMIT`].
     pub const RANGE_TOO_LARGE: &str = "range_too_large";
@@ -81,8 +83,13 @@ pub mod codes {
     pub const CANCELLED: &str = "cancelled";
 
     /// Every code that refuses opening a subscription.
-    pub const SUBSCRIBE_REFUSALS: &[&str] =
-        &[NOT_PERMITTED, SUBSCRIPTION_CAPACITY, DRAINING, MALFORMED];
+    pub const SUBSCRIBE_REFUSALS: &[&str] = &[
+        NOT_PERMITTED,
+        SUBSCRIPTION_CAPACITY,
+        DRAINING,
+        MALFORMED,
+        INVALID_REQUEST,
+    ];
     /// Every code that ends an open subscription with an error.
     pub const SUBSCRIBE_ENDINGS: &[&str] = &[LAGGED, CANCELLED];
     /// Every code that refuses a read.

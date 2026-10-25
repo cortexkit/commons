@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- `codes::SUBSCRIBE_REFUSALS` and the contract's subscribe opening refusals
+  now include `invalid_request`, which the session-filter pairing rule
+  already sends when a subscribe request names `harness` without `session`,
+  or `session` without `harness`. The wire behaviour is unchanged.
+- The rejected-vector test checks each request's refusal code against its own
+  operation's list instead of the union of both, which is what hid the gap.
+
 ## 0.2.0
 
 Contract version 1. Adds an optional session filter to both operations, so a
