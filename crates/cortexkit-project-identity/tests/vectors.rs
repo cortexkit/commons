@@ -273,6 +273,109 @@ fn sample_retired_attached_worktree_by_containment() {
     assert_eq!(root.remotes, widget_remotes());
 }
 
+fn remote_record(index: usize, owner: &str, repo: &str) -> ResolveRemoteReply {
+    let bytes = records("resolve-remote.json");
+    let rows: Vec<Record<'_>> = serde_json::from_str(&bytes).unwrap();
+    assert_eq!(rows.len(), 8);
+    let request: Request<ResolveRemoteParams> =
+        serde_json::from_str(rows[index].request.get()).unwrap();
+    assert_eq!(request.method, "resolve_remote");
+    assert_eq!(request.params.owner, owner);
+    assert_eq!(request.params.repo, repo);
+    let Outcome::Success(reply) = check_reply::<ResolveRemoteReply>(rows[index].reply) else {
+        panic!("expected success");
+    };
+    assert_eq!(reply.result.generation, 8);
+    assert_eq!(reply.result.incarnation, "0123456789abcdef");
+    reply.result
+}
+
+fn assert_remote_found(reply: ResolveRemoteReply, project_id: &str, root: &str) {
+    let ResolveRemoteStatus::Found(found) = reply.status else {
+        panic!("expected found");
+    };
+    assert_eq!(found.project_id, project_id);
+    assert_eq!(found.root, root);
+}
+
+#[test]
+fn sample_resolve_remote_found() {
+    assert_remote_found(
+        remote_record(0, "example-org", "widgets"),
+        "pj-widgets",
+        "/fixture/widgets-checkout",
+    );
+}
+
+#[test]
+fn sample_resolve_remote_none() {
+    assert_eq!(
+        remote_record(1, "example-org", "missing").status,
+        ResolveRemoteStatus::None,
+    );
+}
+
+#[test]
+fn sample_resolve_remote_ambiguous() {
+    let reply = remote_record(2, "example-org", "shared");
+    let ResolveRemoteStatus::Ambiguous(ambiguous) = reply.status else {
+        panic!("expected ambiguous");
+    };
+    assert_eq!(ambiguous.project_ids, ["pj-shared-one", "pj-shared-two"]);
+}
+
+#[test]
+fn sample_resolve_remote_ascii_case_insensitive() {
+    assert_remote_found(
+        remote_record(3, "EXAMPLE-ORG", "WiDgEtS"),
+        "pj-widgets",
+        "/fixture/widgets-checkout",
+    );
+}
+
+#[test]
+fn sample_resolve_remote_before_config_corruption() {
+    assert_remote_found(
+        remote_record(4, "example-org", "hidden"),
+        "pj-unreadable",
+        "/fixture/unreadable-config-checkout",
+    );
+}
+
+#[test]
+fn sample_resolve_remote_unreadable_root_is_skipped() {
+    assert_eq!(
+        remote_record(5, "example-org", "hidden").status,
+        ResolveRemoteStatus::None,
+    );
+}
+
+#[test]
+fn sample_resolve_remote_found_despite_unreadable_root() {
+    assert_remote_found(
+        remote_record(6, "example-org", "widgets"),
+        "pj-widgets",
+        "/fixture/widgets-checkout",
+    );
+}
+
+#[test]
+fn sample_resolve_remote_invalid_params() {
+    let bytes = records("resolve-remote.json");
+    let rows: Vec<Record<'_>> = serde_json::from_str(&bytes).unwrap();
+    assert_eq!(rows.len(), 8);
+    let request: Request<Value> = serde_json::from_str(rows[7].request.get()).unwrap();
+    assert_eq!(request.method, "resolve_remote");
+    assert_eq!(request.params, serde_json::json!({}));
+    assert!(serde_json::from_str::<Request<ResolveRemoteParams>>(rows[7].request.get()).is_err());
+    let Outcome::Refusal(refusal) = check_reply::<ResolveRemoteReply>(rows[7].reply) else {
+        panic!("expected refusal");
+    };
+    assert_eq!(refusal.code, RefusalCode::InvalidParams);
+    assert_eq!(refusal.message, "missing field `owner`");
+    assert_eq!(refusal.detail, None);
+}
+
 #[test]
 fn published_samples_match_sha256sums() {
     let sums = std::fs::read_to_string(vector_dir().join("SHA256SUMS")).unwrap();
@@ -288,6 +391,7 @@ fn published_samples_match_sha256sums() {
         [
             "enumerate.json",
             "resolve-project-id.json",
+            "resolve-remote.json",
             "resolve-root-records.json",
             "resolve.json"
         ]

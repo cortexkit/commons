@@ -185,6 +185,10 @@ wire_struct!(EnumerateParams {
     #[serde(alias = "workspace_id", skip_serializing_if = "Option::is_none")]
     workspace_id: Option<String>,
 });
+wire_struct!(
+    /// Owner and repository components, passed through without normalization.
+    ResolveRemoteParams { owner: String, repo: String }
+);
 
 /// Successful reads carry the process incarnation inside `result`.
 #[non_exhaustive]
@@ -255,6 +259,94 @@ wire_struct!(ResolveProjectIdReply {
 wire_struct!(EnumerateReply {
     workspaces: Vec<Workspace>, projects: Vec<Project>, generation: i64, incarnation: String,
 });
+wire_struct!(
+    /// Remote lookup has a flattened status tag with shape-specific fields.
+    ResolveRemoteReply {
+        #[serde(flatten)]
+        status: ResolveRemoteStatus,
+        generation: i64,
+        incarnation: String,
+    }
+);
+wire_struct!(
+    /// A unique matching project and one of its registered canonical roots.
+    ResolveRemoteFound { project_id: String, root: String }
+);
+wire_struct!(
+    /// Matching project ids, sorted lexicographically by the current writer.
+    ResolveRemoteAmbiguous { project_ids: Vec<String> }
+);
+
+/// The status tag selects the required fields; a miss and ambiguity are successes.
+/// Unknown status text is preserved, while unfamiliar object members are ignored.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveRemoteStatus {
+    Found(ResolveRemoteFound),
+    None,
+    Ambiguous(ResolveRemoteAmbiguous),
+    Other(String),
+}
+
+impl ResolveRemoteStatus {
+    pub fn found(project_id: String, root: String) -> Self {
+        Self::Found(ResolveRemoteFound::new(project_id, root))
+    }
+
+    pub fn ambiguous(project_ids: Vec<String>) -> Self {
+        Self::Ambiguous(ResolveRemoteAmbiguous::new(project_ids))
+    }
+
+    pub fn other(status: impl Into<String>) -> Self {
+        Self::Other(status.into())
+    }
+}
+
+impl Serialize for ResolveRemoteStatus {
+    fn serialize<S: Serializer>(&self, encoder: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut map = encoder.serialize_map(None)?;
+        match self {
+            Self::Found(found) => {
+                map.serialize_entry("status", "found")?;
+                map.serialize_entry("projectId", &found.project_id)?;
+                map.serialize_entry("root", &found.root)?;
+            }
+            Self::None => map.serialize_entry("status", "none")?,
+            Self::Ambiguous(ambiguous) => {
+                map.serialize_entry("status", "ambiguous")?;
+                map.serialize_entry("projectIds", &ambiguous.project_ids)?;
+            }
+            Self::Other(status) => map.serialize_entry("status", status)?,
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ResolveRemoteStatus {
+    fn deserialize<D: Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        let mut fields = serde_json::Map::<String, serde_json::Value>::deserialize(decoder)?;
+        let status = fields
+            .remove("status")
+            .ok_or_else(|| D::Error::missing_field("status"))?;
+        let status = String::deserialize(status).map_err(D::Error::custom)?;
+        let payload = serde_json::Value::Object(fields);
+        match status.as_str() {
+            "found" => ResolveRemoteFound::deserialize(payload)
+                .map(Self::Found)
+                .map_err(D::Error::custom),
+            "none" => Ok(Self::None),
+            "ambiguous" => ResolveRemoteAmbiguous::deserialize(payload)
+                .map(Self::Ambiguous)
+                .map_err(D::Error::custom),
+            _ => Ok(Self::Other(status)),
+        }
+    }
+}
+
 wire_struct!(Workspace {
     workspace_id: String, name: String, root: Option<String>,
 });

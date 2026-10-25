@@ -429,3 +429,167 @@ fn constructors_and_nested_unknown_remote_members() {
     );
     round_trip(&Success::new(reply));
 }
+
+#[test]
+fn resolve_remote_params_are_required_exact_strings() {
+    let value = json!({"owner":"EXAMPLE-ORG", "repo":"WiDgEtS"});
+    let request = Request::new(
+        "resolve_remote",
+        ResolveRemoteParams::new("EXAMPLE-ORG".into(), "WiDgEtS".into()),
+    );
+    assert_eq!(serde_json::to_value(&request).unwrap()["params"], value);
+    round_trip(&request);
+    for field in ["owner", "repo"] {
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<ResolveRemoteParams>(missing).is_err());
+        for invalid in [Value::Null, json!(1), json!([])] {
+            let mut wrong = value.clone();
+            wrong[field] = invalid;
+            assert!(serde_json::from_value::<ResolveRemoteParams>(wrong).is_err());
+        }
+    }
+    for params in [Value::Null, json!([]), json!("example-org/widgets")] {
+        assert!(serde_json::from_value::<Request<ResolveRemoteParams>>(
+            json!({"method":"resolve_remote", "params":params})
+        )
+        .is_err());
+    }
+    assert!(serde_json::from_value::<Request<ResolveRemoteParams>>(
+        json!({"method":"resolve_remote"})
+    )
+    .is_err());
+    assert!(serde_json::from_value::<ResolveRemoteParams>(
+        json!({"Owner":"example-org", "Repo":"widgets"})
+    )
+    .is_err());
+    let params: ResolveRemoteParams =
+        serde_json::from_value(json!({"owner":"", "repo":"a/b", "future":true})).unwrap();
+    assert_eq!(params, ResolveRemoteParams::new("".into(), "a/b".into()));
+}
+
+#[test]
+fn resolve_remote_shapes_round_trip() {
+    for (status, fields) in [
+        (
+            ResolveRemoteStatus::found("pj-example".into(), "/checkout".into()),
+            json!({"status":"found", "projectId":"pj-example", "root":"/checkout"}),
+        ),
+        (ResolveRemoteStatus::None, json!({"status":"none"})),
+        (
+            ResolveRemoteStatus::ambiguous(vec!["pj-a".into(), "pj-b".into()]),
+            json!({"status":"ambiguous", "projectIds":["pj-a", "pj-b"]}),
+        ),
+    ] {
+        let reply = ResolveRemoteReply::new(status, -1, "process".into());
+        let mut expected = fields;
+        expected["generation"] = json!(-1);
+        expected["incarnation"] = json!("process");
+        assert_eq!(serde_json::to_value(&reply).unwrap(), expected);
+        round_trip(&reply);
+        round_trip(&Outcome::success(reply));
+    }
+}
+
+#[test]
+fn resolve_remote_tag_selects_shape() {
+    let mut fields = json!({
+        "generation":8, "incarnation":"process", "projectId":"pj-one",
+        "root":"/one", "projectIds":["pj-a", "pj-b"], "future":true
+    });
+    for (tag, expected) in [
+        (
+            "found",
+            ResolveRemoteStatus::found("pj-one".into(), "/one".into()),
+        ),
+        ("none", ResolveRemoteStatus::None),
+        (
+            "ambiguous",
+            ResolveRemoteStatus::ambiguous(vec!["pj-a".into(), "pj-b".into()]),
+        ),
+    ] {
+        fields["status"] = json!(tag);
+        let reply: ResolveRemoteReply = serde_json::from_value(fields.clone()).unwrap();
+        assert_eq!(reply.status, expected);
+        assert!(serde_json::to_value(reply).unwrap().get("future").is_none());
+    }
+    for value in [
+        json!({"status":"found", "projectIds":["pj-a", "pj-b"]}),
+        json!({"status":"ambiguous", "projectId":"pj-one", "root":"/one"}),
+    ] {
+        assert!(serde_json::from_value::<ResolveRemoteStatus>(value).is_err());
+    }
+}
+
+#[test]
+fn resolve_remote_rejects_missing_found_root() {
+    let value = json!({
+        "status":"found", "projectId":"pj-one", "generation":8, "incarnation":"process"
+    });
+    assert!(serde_json::from_value::<ResolveRemoteReply>(value).is_err());
+}
+
+#[test]
+fn resolve_remote_fields_reject_missing_null_and_wrong_types() {
+    for (value, fields) in [
+        (
+            json!({"status":"found", "projectId":"pj-one", "root":"/one", "generation":8, "incarnation":"process"}),
+            vec!["status", "projectId", "root", "generation", "incarnation"],
+        ),
+        (
+            json!({"status":"none", "generation":8, "incarnation":"process"}),
+            vec!["status", "generation", "incarnation"],
+        ),
+        (
+            json!({"status":"ambiguous", "projectIds":["pj-a", "pj-b"], "generation":8, "incarnation":"process"}),
+            vec!["status", "projectIds", "generation", "incarnation"],
+        ),
+    ] {
+        for field in fields {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<ResolveRemoteReply>(missing).is_err(),
+                "missing {field}"
+            );
+            for invalid in [Value::Null, json!(false)] {
+                let mut wrong = value.clone();
+                wrong[field] = invalid;
+                assert!(
+                    serde_json::from_value::<ResolveRemoteReply>(wrong).is_err(),
+                    "invalid {field}"
+                );
+            }
+        }
+    }
+    for ids in [json!("pj-a"), json!([null]), json!([1])] {
+        assert!(serde_json::from_value::<ResolveRemoteStatus>(
+            json!({"status":"ambiguous", "projectIds":ids})
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn resolve_remote_unknown_status_preserves_text() {
+    for status in ["future-雪", "", "FOUND"] {
+        let reply: Outcome<ResolveRemoteReply> = serde_json::from_value(json!({
+            "result":{"status":status, "generation":8, "incarnation":"process", "future":true},
+            "futureEnvelope":true
+        }))
+        .unwrap();
+        let expected = Outcome::success(ResolveRemoteReply::new(
+            ResolveRemoteStatus::other(status),
+            8,
+            "process".into(),
+        ));
+        assert_eq!(reply, expected);
+        assert_eq!(
+            serde_json::to_value(&reply).unwrap(),
+            json!({
+                "result":{"status":status, "generation":8, "incarnation":"process"}
+            })
+        );
+        round_trip(&reply);
+    }
+}

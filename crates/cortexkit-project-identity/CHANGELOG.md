@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2
+
+- Add `resolve_remote` request and reply types with distinct found, none, and
+  ambiguous payloads, required fields, and unknown status text preservation.
+- Bundle eight unchanged handler samples covering remote matches, ambiguity,
+  ASCII case-insensitive matching, skipped unreadable roots, and invalid params.
+  Each reply decodes and re-encodes to its exact embedded bytes; all five sample
+  files are checked against the published checksum manifest.
+
 ## 0.1.1
 
 - Bundle `resolve-root-records.json`, five more replies captured from a running

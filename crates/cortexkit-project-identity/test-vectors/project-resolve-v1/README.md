@@ -1,8 +1,8 @@
 # Project resolution v1 samples
 
-`resolve.json`, `resolve-root-records.json`, `resolve-project-id.json`, and
+`resolve.json`, `resolve-root-records.json`, `resolve-project-id.json`, `resolve-remote.json`, and
 `enumerate.json` hold replies captured from a running project-identity handler.
-The handler's maintainer publishes the same four files and `SHA256SUMS` as the handler's own test data,
+The handler's maintainer publishes the same five files and `SHA256SUMS` as the handler's own test data,
 and they are copied here unchanged. The crate's checksum test checks each file
 against `SHA256SUMS`. Checking the handler's live replies against these types
 is the handler's own test, outside this crate.
@@ -26,6 +26,10 @@ operation parameter. `reply` is either `{result: ...}` or a top-level refusal.
   and a `retired` attached worktree found by `containment`, with `sourceRoot`.
   A retired identity appears only on an attached worktree.
 - `resolve-project-id.json`: current, alias, and gone durable ids.
+- `resolve-remote.json`: a unique match, no match, ambiguous project ids, an
+  ASCII case-insensitive match, a root before its Git config becomes unreadable,
+  no match after that root is skipped, another project found despite the bad
+  root, and the missing-`owner` refusal.
 - `enumerate.json`: an unfiltered request and two local projects in a workspace.
 
 Tests compare each compact embedded reply byte for byte after decoding and

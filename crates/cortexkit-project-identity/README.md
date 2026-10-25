@@ -1,10 +1,10 @@
 # cortexkit-project-identity
 
-Transport-independent serde types for the three reads of the project-identity
-module: the module that maps a folder to the project it belongs to, and lists
+Transport-independent serde types for the four reads of the project-identity
+module: the module that maps a folder or owned remote to its project, and lists
 the known workspaces and projects. In this crate, "the handler" means that
 module's request handler.
-Version **0.1.0** owns request/reply data, not routing, admission, storage, Git
+Version **0.1.2** owns request/reply data, not routing, admission, storage, Git
 probing, filesystem canonicalization, or transport framing. Runtime dependencies
 are only `serde` and `serde_json`. Paths, ids, epochs, and tokens stay strings;
 decoding never consults the reader's filesystem.
@@ -13,7 +13,7 @@ decoding never consults the reader's filesystem.
 
 ```rust
 use cortexkit_project_identity::{
-    EnumerateParams, Request, ResolveParams, ResolveProjectIdParams,
+    EnumerateParams, Request, ResolveParams, ResolveProjectIdParams, ResolveRemoteParams,
 };
 
 let by_path = Request::new("resolve", ResolveParams::new("/a/path".into(), None));
@@ -22,6 +22,10 @@ let by_id = Request::new(
     ResolveProjectIdParams::new("pj-example".into()),
 );
 let all = Request::new("enumerate", EnumerateParams::new(None));
+let by_remote = Request::new(
+    "resolve_remote",
+    ResolveRemoteParams::new("example-org".into(), "widgets".into()),
+);
 assert_eq!(serde_json::to_value(all)?.get("params"), Some(&serde_json::json!({})));
 # Ok::<(), serde_json::Error>(())
 ```
@@ -31,6 +35,7 @@ assert_eq!(serde_json::to_value(all)?.get("params"), Some(&serde_json::json!({})
 | `resolve` | Required `canonicalRoot` (alias `canonical_root`); optional/null `executionBinding: {root, incarnation, registrationEpoch}` | `ResolveReply`: project/workspace metadata, canonical query path, provenance, and optional flattened root-mode fields |
 | `resolve_project_id` | Required `projectId` (alias `project_id`) | `ResolveProjectIdReply`: only `projectId`, `via`, `gone`, `generation`, `incarnation` |
 | `enumerate` | `{}` for unfiltered reads; optional/null `workspaceId` (alias `workspace_id`) | `EnumerateReply`: required `workspaces`, `projects`, `generation`, `incarnation` |
+| `resolve_remote` | Required non-null `owner` and `repo` strings, with no aliases or syntax validation | `ResolveRemoteReply`: flattened `status` and its shape-specific fields, plus required `generation` and `incarnation` |
 
 `resolve` accepts any absolute query path, not only a registered root. Unknown
 durable ids succeed with `via: "gone"` and `gone: true`; missing paths are also
@@ -38,8 +43,9 @@ successful resolutions, not not-found refusals. The types do not validate paths
 or enforce method/parameter pairings. Constructors always include `params`;
 missing/null params do not replace the required parameter object.
 
-Use `Outcome<ResolveReply>`, `Outcome<ResolveProjectIdReply>`, or
-`Outcome<EnumerateReply>` to decode a handler reply. Success is **`{"result": T}`**,
+Use `Outcome<ResolveReply>`, `Outcome<ResolveProjectIdReply>`,
+`Outcome<EnumerateReply>`, or `Outcome<ResolveRemoteReply>` to decode a handler
+reply. Success is **`{"result": T}`**,
 not bare `T`. Refusals are top-level `{code, message, detail}`; `detail` is opaque
 JSON, nullable, and also accepted when absent. Identify a refusal by `code`, not
 its message. The open vocabulary includes `invalid_request`, `invalid_params`,
@@ -57,10 +63,12 @@ also remain readable.
   `deny_unknown_fields`. A shape with both a valid `result` and refusal fields
   decodes as success, following the untagged envelope's success-first order.
 - All enum-like strings have an explicit `Other(String)` arm that preserves and
-  re-encodes unfamiliar text as a JSON string, never as a tagged object. This
+  re-encodes unfamiliar text as a JSON string. This
   applies to `Via`, `RootIdentity`, `BindingStatus`, `ApprovalState`, `RefKind`,
   `RootKeyKind`, `RootIncarnationKind`, and `RefusalCode`. `BindingStatus::Unknown`
   is the **known** wire spelling `"unknown"`, not the fallback for new text.
+  `ResolveRemoteStatus` carries shape-specific data rather than just a string;
+  its `Other(String)` retains the unknown text in the flattened `status` tag.
 - Path provenance currently uses `root`, `walk`, `containment`, `worktree`, or
   `implicit`; id lookup uses `current`, `alias`, or `gone`. `registered` is
   preserved as `Via::Other`, not advertised as a current handler output.
@@ -74,6 +82,35 @@ also remain readable.
   `rootFields` object is introduced. `rootRecords` rejects null when present.
 
 ### Writer presence
+
+`ResolveRemoteReply` always requires non-null `status`, `generation: i64`, and
+process `incarnation`. The flattened `ResolveRemoteStatus` enum selects the
+payload, so decoding cannot mistake an ambiguous or missing match for a unique
+project:
+
+- `Found(ResolveRemoteFound)` writes `status: "found"` with required non-null
+  `projectId` and `root` strings. `root` is one matching registered canonical
+  root, not every root of the project.
+- `None` writes `status: "none"` with neither project nor root fields.
+- `Ambiguous(ResolveRemoteAmbiguous)` writes `status: "ambiguous"` with required
+  non-null `projectIds`, an array of at least two distinct, lexicographically
+  sorted ids from the current handler. It omits `projectId` and `root`.
+- `Other(String)` preserves a future status spelling. As with other unknown
+  keys, any unfamiliar payload fields are ignored rather than retained.
+
+Known status tags require their own payload fields; missing fields cannot fall
+through to another shape or `Other`. No successful field is nullable. Fields
+belonging to a different shape are ignored as unknown keys. The constructors do
+not validate the ambiguous list's length, uniqueness, or ordering.
+
+The handler compares owner and repository components ASCII case-insensitively
+against currently owned GitHub remotes. Multiple matching roots of the same
+project count once. It skips roots whose Git metadata cannot be read: they do
+not cause a `remotes_unreadable` refusal or add warnings to this reply. Other
+readable roots can still yield found or ambiguous; no remaining matches yields
+none. Both none and ambiguous are successful answers. The found root is local,
+not a portable identity or authority to write, and its configuration may change
+between reads.
 
 `ResolveReply` requires `projectId`, `via`, `gone`, `generation`, and process
 `incarnation`. `workspaceId`, `workspaceRoot`, `projectName`, and `canonicalRoot`
@@ -127,7 +164,7 @@ are data, not decoding failures.
 
 ## Samples
 
-See [the bundled vectors](test-vectors/project-resolve-v1/README.md). Three files
+See [the bundled vectors](test-vectors/project-resolve-v1/README.md). Five files
 hold replies captured from a running handler, normalized as that README
 describes, and checked against their `SHA256SUMS`. The handler's maintainer
 publishes the same files as the handler's own test data. Tests decode every
@@ -151,5 +188,6 @@ Replies captured from a running handler are not yet bundled for:
   references.
 - Unplaced projects, activity timestamps, nonempty/omitted enumeration root
   records, and non-null/absent refusal detail.
-- Other refusals, malformed envelopes, missing/non-string project ids, invalid
-  enumeration parameters, and startup/draining/storage/encoding failures.
+- Refusals other than the missing-parameter cases, malformed envelopes,
+  missing/non-string project ids, invalid enumeration parameters, and
+  startup/draining/storage/encoding failures.
