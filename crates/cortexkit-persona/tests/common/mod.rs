@@ -1,5 +1,5 @@
 //! Shared helpers for the integration tests.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 use cortexkit_persona::{
     AgentContext, ApprovalSet, Demand, EmbeddedTier, EnvContext, FragmentSources, GrantMap,
@@ -38,6 +38,8 @@ pub fn context() -> RenderContext<serde_json::Value> {
             locale: "en".into(),
         },
         module: serde_json::json!({"limit": 3}),
+        roots: Default::default(),
+        redeclared: Default::default(),
     }
 }
 

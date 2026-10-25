@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0
+
+- Caller-declared roots: `RenderContext::with_root(name, value)` declares an
+  extra root that every template rendered with that context can read, next to
+  the built-in roots. A name must be a template identifier and must not shadow
+  a built-in root or repeat another declaration; anything else is refused by
+  name before rendering. An undeclared root is still a strict undefined error.
+- `Value` and `TextValue`: the typed values a caller supplies (text, integer,
+  boolean, list, map, and text with named fields). A text value prints as its
+  exact text while `contract.submit_tool` reads one of its fields, so a
+  template can use one value both ways.
+- **Output is no longer LF-normalised.** Template files and supplied fragments
+  are still normalised when they are loaded, so a CRLF checkout renders the
+  same bytes as an LF one. The rendered output is now exactly what the
+  templates produced, so text a caller supplies keeps its CR and CRLF bytes.
+  A render that prints such a value can differ in bytes from 0.1.0; renders
+  whose context holds no CR are unchanged, and every golden vector is
+  unchanged.
+- `Rendered.text` is documented as the produced bytes rather than normalised
+  text.
+
 ## 0.1.0
 
 - First release: persona/v1 as stated in SPEC.md. Loads a role from an

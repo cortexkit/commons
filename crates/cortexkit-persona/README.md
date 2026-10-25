@@ -9,7 +9,7 @@ a serialisable resolution report. [SPEC.md](SPEC.md) states every rule
 
 ```toml
 [dependencies]
-cortexkit-persona = "0.1.0"
+cortexkit-persona = "0.2.0"
 ```
 
 ## Use
@@ -41,6 +41,33 @@ let out = role.render(&context, &supplied)?;
 // out.bytes(), out.digest, and out.report (serialisable, for diagnostic views)
 ```
 
+The context carries the built-in roots (`agent`, `model`, `harness`, `tools`,
+`mcp`, `modules`, `demand`, `env`, `module`). A module whose templates read
+more than that declares the extra roots itself:
+
+```rust
+use cortexkit_persona::{TextValue, Value};
+
+let context = context
+    .with_root(
+        "config",
+        Value::map([("board", Value::map([("enabled", true.into())]))]),
+    )
+    .with_root("limits", Value::map([("sidekick_readers", 6i64.into())]))
+    // Prints as its exact text; `contract.submit_tool` reads the field.
+    .with_root(
+        "contract",
+        TextValue::new(contract_text).with_field("submit_tool", true),
+    );
+```
+
+A declared root is visible to every template rendered with that context,
+including an operator-approved project-level persona, so approvals stay tied
+to a layer's exact content and a declared root never changes a layer's
+digest. A name that shadows a built-in root or is declared twice is refused by
+name before rendering, and a root the caller never declares is still a strict
+undefined error.
+
 At `load`, a `repository` layer that is not approved, or whose bytes changed
 since its approval, is skipped whole; `role.tiers()` still lists it with
 `approval` set to `unapproved` or `changed`, its `relative_path` and its
@@ -54,6 +81,10 @@ one that was skipped, but you never need a render to approve one.
 
 - Rendering touches no filesystem, environment or clock; the same loaded role,
   context and supplied fragments give byte-identical output and report.
+- Template files and supplied fragments are LF-normalised when loaded, so a
+  CRLF checkout renders the same bytes as an LF one. The output itself is not
+  rewritten: a value the caller supplies, including a text value, is rendered
+  exactly as given.
 - Qualified fragment ids (`owner/name@major`) resolve only from sources the
   module supplies; no bundle file at any tier can provide one.
 - MiniJinja is pinned at `=2.12.0`. Any change to a golden render's bytes or

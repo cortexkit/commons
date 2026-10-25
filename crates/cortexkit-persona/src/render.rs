@@ -31,7 +31,9 @@ impl FragmentSources {
         Self::default()
     }
 
-    /// Supply the text of qualified fragment `id`. The text is LF-normalised.
+    /// Supply the text of qualified fragment `id`. The text is LF-normalised,
+    /// like a bundle file: a supplied fragment stands in for a file the module
+    /// ships, so its line endings follow the same rule.
     pub fn insert(&mut self, id: &str, text: impl Into<String>) -> Result<(), PersonaError> {
         let parsed = FragmentId::parse(id)?;
         if !parsed.is_qualified() {
@@ -56,7 +58,10 @@ impl FragmentSources {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Rendered {
-    /// The rendered text, LF-normalised.
+    /// The rendered text, exactly the bytes MiniJinja produced. Every line
+    /// ending a template file had was already normalised to LF when the role
+    /// was loaded; text a context value contributes is passed through
+    /// verbatim.
     pub text: String,
     /// SHA-256 of [`Self::text`]'s bytes.
     pub digest: Digest,
@@ -230,10 +235,12 @@ impl LoadedRole {
             None => self.entry.as_str(),
         };
         let template = env.get_template(entry).expect("the entry was added");
-        let raw = template
+        // Template sources were LF-normalised when the role was loaded, and the
+        // output itself is not normalised: a CR in it can only come from a
+        // context value, and rewriting it would change caller-supplied bytes.
+        let text = template
             .render(context.to_value())
             .map_err(|e| render_error(&e, &templates))?;
-        let text = normalize_newlines(&raw).into_owned();
         let digest = Digest::of(text.as_bytes());
 
         let layers: Vec<serde_json::Value> = self

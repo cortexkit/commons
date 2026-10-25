@@ -33,6 +33,8 @@
 //!     demand: Demand { iq: 50, eq: 50 },
 //!     env: EnvContext { os: OsName::Linux, timezone: "UTC".into(), locale: "en".into() },
 //!     module: (),
+//!     roots: Default::default(),
+//!     redeclared: Default::default(),
 //! };
 //! let out = role.render(&context, &FragmentSources::new())?;
 //! assert_eq!(out.text, "Hello from m-1.");
@@ -56,6 +58,7 @@ mod render;
 mod report;
 mod template;
 mod tier;
+mod value;
 
 pub use approval::{Approval, ApprovalSet, ApprovalState};
 pub use context::{
@@ -71,3 +74,4 @@ pub use render::{FragmentSources, Rendered, FORMAT};
 pub use report::{FragmentOrigin, FragmentReport, ParentReport, ResolutionReport, TierReport};
 pub use template::{FUEL_LIMIT, RECURSION_LIMIT};
 pub use tier::{config_home, DefaultLadder, EmbeddedTier, Tier, TrustClass, MAX_FILE_BYTES};
+pub use value::{TextValue, Value};

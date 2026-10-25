@@ -83,6 +83,31 @@ Typed and closed; unknown keys are refused:
 - `module`: one value the module types itself (for example its config,
   output contract and limits).
 
+**Caller-declared roots.** The module may also declare extra roots on the
+render inputs, one name and one typed value each, and templates read them at
+the root exactly like a built-in root:
+
+- A root name is an identifier: ASCII letters, digits and `_`, starting with
+  a letter or `_`. A name that is one of the built-in roots above, or that is
+  declared twice, is refused by name before any template runs.
+- A value is text, an integer, a boolean, a list, a map of those, or a *text
+  value*: text with named fields. Text renders as its characters, an integer in
+  decimal (`6` renders `6`), a boolean as `true` or `false`, a list and a map
+  as MiniJinja renders them. A text value renders as its exact text when it is
+  printed (`{{ contract }}`), and a field is read as `contract.submit_tool`;
+  a name it does not carry is undefined, like any other unknown name.
+- A root that is not declared is undefined, so reading it is a strict
+  undefined error. Declaring a root never makes a template's other paths
+  lenient.
+
+A declared root is visible to every template rendered with that context:
+`PERSONA.md` bodies and fragments at every tier, including an operator-approved
+project-level persona, because all of them render against the same context.
+That is why an approval stays tied to a layer's exact content: the operator
+approves what the layer says, and the root values it can read are the
+module's, not the layer's. Declaring or changing a root changes no file, so it
+never changes a layer's digest or its approval state.
+
 An optional field that is absent reads as `none`, not as undefined. The
 engine adds no time, counter or other ambient value to the context, so the
 same inputs render the same bytes; a module that puts a time in its own
@@ -221,9 +246,13 @@ Only applied layers take part (present, and `operator` or `approved`).
 ## 6. Bytes and digests
 
 - Every source file and supplied fragment is normalised to LF (CRLF and lone
-  CR become LF) when it is loaded, and the rendered output is normalised the
-  same way. A Windows checkout that converted line endings therefore gives the
-  same bytes and digests as macOS and Linux.
+  CR become LF) when it is loaded. The rendered output is not rewritten: it is
+  exactly what the templates produced. A Windows checkout that converted line
+  endings therefore gives the same bytes and digests as macOS and Linux,
+  because only the files were converted.
+- A value the caller supplies (a render-context string, a declared root, a text
+  value) is rendered exactly as given. Text containing CR or CRLF keeps those
+  bytes in the output.
 - Digests are SHA-256, written `sha256:` and 64 lowercase hex digits.
 - **Layer digest:** SHA-256 over the layer's normalised files in byte order of
   their logical paths (`PERSONA.md`, `fragments/<id>.md`), each file framed as
@@ -283,4 +312,10 @@ reports), plus tests that each fail by name when their rule is removed:
 6. CRLF and LF sources give the same digests and bytes;
 7. the same inputs render byte-identical twice, and the report is identical;
 8. `disabled_blocks` unions across layers; other fields replace;
-9. a repeated front matter key is refused by name, at any depth.
+9. a repeated front matter key is refused by name, at any depth;
+10. a caller-declared root is readable at the root, a name that shadows a
+    built-in root or is declared twice is refused by name, and an undeclared
+    root is still a strict undefined error;
+11. a text value renders its exact text while its fields are readable;
+12. text a caller supplies keeps CR and CRLF bytes in the output, while a CRLF
+    template file renders the same bytes as its LF twin.

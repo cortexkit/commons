@@ -2,12 +2,21 @@
 //! counter or other ambient value, so the same inputs render the same bytes;
 //! the module's own `module` value must be just as stable for that to hold.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
-use minijinja::value::{Enumerator, Object, ObjectRepr, Value};
+use minijinja::value::{Enumerator, Object, ObjectRepr, Value as MinijinjaValue};
 use serde::{Deserialize, Serialize};
 
-use crate::PersonaError;
+use crate::{PersonaError, Value};
+
+/// The names the engine itself puts in the template root. A caller-declared
+/// root may not reuse one, or it would make that built-in unreachable.
+pub(crate) const BUILT_IN_ROOTS: [&str; 9] = [
+    "agent", "model", "harness", "tools", "mcp", "modules", "demand", "env", "module",
+];
 
 /// The agent the persona is rendered for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,8 +107,12 @@ pub struct EnvContext {
 
 /// The whole render context. `M` is the one object the module types itself
 /// and templates read as `module`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// The roots a caller declares with [`Self::with_root`] are skipped by
+/// `serde`: they are a run input, not part of the serialised shape, and a
+/// deserialised context starts with none of them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct RenderContext<M> {
     /// See [`AgentContext`].
     pub agent: AgentContext,
@@ -119,6 +132,56 @@ pub struct RenderContext<M> {
     pub env: EnvContext,
     /// The module's own context.
     pub module: M,
+    /// Extra roots the caller declares, by name, next to the built-in roots.
+    /// Empty unless [`Self::with_root`] added one; a name in here that is not
+    /// allowed is refused at render.
+    ///
+    /// Declare roots with [`Self::with_root`] rather than filling this in by
+    /// hand: only that builder notices a second declaration of a name.
+    #[serde(skip)]
+    pub roots: BTreeMap<String, Value>,
+    /// The names [`Self::with_root`] was given more than once. Only that
+    /// builder fills it in; a context written out by hand has no second
+    /// declaration to report.
+    #[serde(skip)]
+    pub redeclared: BTreeSet<String>,
+}
+
+/// A context with empty roots, no grants and a `module` made by `M::default`.
+impl<M: Default> Default for RenderContext<M> {
+    fn default() -> Self {
+        Self {
+            agent: AgentContext {
+                name: None,
+                agent_id: None,
+                project: None,
+                workspace: None,
+                role: String::new(),
+            },
+            model: ModelContext {
+                provider: String::new(),
+                id: String::new(),
+                family: None,
+                variant: String::new(),
+            },
+            harness: HarnessContext {
+                id: String::new(),
+                capabilities: BTreeMap::new(),
+            },
+            tools: GrantMap::default(),
+            mcp: GrantMap::default(),
+            modules: GrantMap::default(),
+            demand: Demand { iq: 0, eq: 0 },
+            env: EnvContext {
+                os: OsName::Unknown,
+                timezone: String::new(),
+                locale: String::new(),
+            },
+            module: M::default(),
+            roots: BTreeMap::new(),
+            redeclared: BTreeSet::new(),
+        }
+    }
 }
 
 impl<M: Serialize> RenderContext<M> {
@@ -166,25 +229,106 @@ impl<M: Serialize> RenderContext<M> {
         if !locale_ok {
             return invalid("env.locale", "must be a BCP 47 language tag");
         }
+        if let Some(name) = self.redeclared.iter().next() {
+            return invalid(
+                &format!("root.{name}"),
+                "is already declared; declare each root name once",
+            );
+        }
+        for name in self.roots.keys() {
+            if let Some(reason) = root_name_problem(name) {
+                return invalid(&format!("root.{name}"), reason);
+            }
+        }
         Ok(())
     }
 
-    /// The template root value: the nine keys, grant maps as objects that
-    /// answer `false` for a missing name.
-    pub(crate) fn to_value(&self) -> Value {
-        let grant = |g: &GrantMap| Value::from_object(Grants(g.0.clone()));
-        Value::from_iter([
-            ("agent", Value::from_serialize(&self.agent)),
-            ("model", Value::from_serialize(&self.model)),
-            ("harness", Value::from_serialize(&self.harness)),
-            ("tools", grant(&self.tools)),
-            ("mcp", grant(&self.mcp)),
-            ("modules", grant(&self.modules)),
-            ("demand", Value::from_serialize(self.demand)),
-            ("env", Value::from_serialize(&self.env)),
-            ("module", Value::from_serialize(&self.module)),
-        ])
+    /// Declare one more root that every template rendered with this context
+    /// can read by `name`, with the given value.
+    ///
+    /// The name must be an identifier (`[A-Za-z_][A-Za-z0-9_]*`) that is not a
+    /// built-in root (`agent`, `model`, `harness`, `tools`, `mcp`, `modules`,
+    /// `demand`, `env`, `module`) and not already declared here; anything else
+    /// is refused by name at [`LoadedRole::render`](crate::LoadedRole::render),
+    /// before a template runs. A root the caller never declares stays
+    /// undefined, so reading it is still a strict undefined error.
+    ///
+    /// A declared root is a value, not a file: it is rendered exactly as given
+    /// and never changes any layer's digest or approval.
+    #[must_use]
+    pub fn with_root(mut self, name: &str, value: impl Into<Value>) -> Self {
+        let name = name.to_string();
+        if self.roots.insert(name.clone(), value.into()).is_some() {
+            self.redeclared.insert(name);
+        }
+        self
     }
+
+    /// The declared roots, by name.
+    pub fn roots(&self) -> &BTreeMap<String, Value> {
+        &self.roots
+    }
+
+    /// The template root value: the built-in roots, grant maps as objects that
+    /// answer `false` for a missing name, then the caller's declared roots.
+    pub(crate) fn to_value(&self) -> minijinja::Value {
+        let grant = |g: &GrantMap| minijinja::Value::from_object(Grants(g.0.clone()));
+        let mut root: Vec<(String, minijinja::Value)> = vec![
+            (
+                "agent".into(),
+                minijinja::Value::from_serialize(&self.agent),
+            ),
+            (
+                "model".into(),
+                minijinja::Value::from_serialize(&self.model),
+            ),
+            (
+                "harness".into(),
+                minijinja::Value::from_serialize(&self.harness),
+            ),
+            ("tools".into(), grant(&self.tools)),
+            ("mcp".into(), grant(&self.mcp)),
+            ("modules".into(), grant(&self.modules)),
+            (
+                "demand".into(),
+                minijinja::Value::from_serialize(self.demand),
+            ),
+            ("env".into(), minijinja::Value::from_serialize(&self.env)),
+            (
+                "module".into(),
+                minijinja::Value::from_serialize(&self.module),
+            ),
+        ];
+        root.extend(
+            self.roots
+                .iter()
+                .map(|(name, value)| (name.clone(), value.to_minijinja())),
+        );
+        minijinja::Value::from_iter(root)
+    }
+}
+
+/// Why `name` cannot be a caller-declared root, if it cannot. A name that is
+/// not a template identifier could not be written as `name` or `name.field`
+/// in a template, and a built-in name would hide the engine's own root. This
+/// is the one place that decides both, so no caller can reach a built-in name
+/// by another route.
+fn root_name_problem(name: &str) -> Option<&'static str> {
+    let mut bytes = name.bytes();
+    match bytes.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == b'_' => {}
+        Some(_) => {
+            return Some("must start with an ASCII letter or `_`");
+        }
+        None => return Some("must not be empty"),
+    }
+    if !bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return Some("may contain only ASCII letters, digits and `_`");
+    }
+    if BUILT_IN_ROOTS.contains(&name) {
+        return Some("is a built-in root and cannot be declared again");
+    }
+    None
 }
 
 #[derive(Debug)]
@@ -195,12 +339,19 @@ impl Object for Grants {
         ObjectRepr::Map
     }
 
-    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+    fn get_value(self: &Arc<Self>, key: &MinijinjaValue) -> Option<MinijinjaValue> {
         let name = key.as_str()?;
-        Some(Value::from(self.0.get(name).copied().unwrap_or(false)))
+        Some(MinijinjaValue::from(
+            self.0.get(name).copied().unwrap_or(false),
+        ))
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
-        Enumerator::Values(self.0.keys().map(|k| Value::from(k.as_str())).collect())
+        Enumerator::Values(
+            self.0
+                .keys()
+                .map(|k| MinijinjaValue::from(k.as_str()))
+                .collect(),
+        )
     }
 }

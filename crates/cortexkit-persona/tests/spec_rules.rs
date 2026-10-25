@@ -329,7 +329,7 @@ fn crlf_and_lf_sources_give_the_same_digests_and_bytes() {
 }
 
 #[test]
-fn rendered_output_and_supplied_fragments_are_lf_normalised() {
+fn context_values_pass_verbatim_and_supplied_fragments_are_lf_normalised() {
     let tiers = [base(&[(
         "PERSONA.md",
         &full(
@@ -346,7 +346,7 @@ fn rendered_output_and_supplied_fragments_are_lf_normalised() {
     let lf = FragmentSources::new().with("mc/profile@1", "x\ny").unwrap();
     let a = role.render(&ctx, &crlf).unwrap();
     let b = role.render(&ctx, &lf).unwrap();
-    assert_eq!(a.text, "a\nb\nc|x\ny");
+    assert_eq!(a.text, "a\r\nb\rc|x\ny");
     assert_eq!(a.digest, Digest::of(a.text.as_bytes()));
     assert_eq!(a.report, b.report);
 }
