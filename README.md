@@ -47,6 +47,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-store-postgres](crates/cortexkit-store-postgres/README.md) | PostgreSQL storage opening, migrations, and single-writer leases. | Not published |
 | [cortexkit-store-types](crates/cortexkit-store-types/README.md) | Dependency-light storage descriptors and isolation types. | [Published](https://crates.io/crates/cortexkit-store-types) |
 | [cortexkit-test-support](crates/cortexkit-test-support/README.md) | Portable scratch storage, executable staging, and daemon fencing. | [Published](https://crates.io/crates/cortexkit-test-support) |
+| [cortexkit-usage-steps](crates/cortexkit-usage-steps/README.md) | Wire contract, vectors and a last-row-wins helper for the live usage step feed. | [Published](https://crates.io/crates/cortexkit-usage-steps) |
 
 ## Use a crate
 

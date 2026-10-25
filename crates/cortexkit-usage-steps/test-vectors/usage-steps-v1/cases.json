@@ -1,0 +1,184 @@
+{
+  "round_trip": [
+    {
+      "file": "endings/cancelled.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "endings/lagged.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "read/reply-empty.json",
+      "type": "ReadReply"
+    },
+    {
+      "file": "read/reply-last-page.json",
+      "type": "ReadReply"
+    },
+    {
+      "file": "read/reply-page.json",
+      "type": "ReadReply"
+    },
+    {
+      "file": "read/request-after.json",
+      "type": "ReadRequest"
+    },
+    {
+      "file": "read/request-from-oldest.json",
+      "type": "ReadRequest"
+    },
+    {
+      "file": "read/request-limit-only.json",
+      "type": "ReadRequest"
+    },
+    {
+      "file": "read/row-every-member.json",
+      "type": "StepRow"
+    },
+    {
+      "file": "read/row-required-only.json",
+      "type": "StepRow"
+    },
+    {
+      "file": "refusals/cursor_expired.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "refusals/draining.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "refusals/invalid_request.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "refusals/malformed.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "refusals/not_permitted.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "refusals/range_too_large.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "refusals/subscription_capacity.json",
+      "type": "Refusal"
+    },
+    {
+      "file": "subscribe/notice.json",
+      "type": "Notice"
+    },
+    {
+      "file": "subscribe/request.json",
+      "type": "SubscribeRequest"
+    },
+    {
+      "file": "values/request_size-future-value.json",
+      "type": "RequestSize"
+    },
+    {
+      "file": "values/request_size-not_smaller.json",
+      "type": "RequestSize"
+    },
+    {
+      "file": "values/request_size-smaller.json",
+      "type": "RequestSize"
+    },
+    {
+      "file": "values/source-file.json",
+      "type": "StepSource"
+    },
+    {
+      "file": "values/source-future-value.json",
+      "type": "StepSource"
+    },
+    {
+      "file": "values/source-runner.json",
+      "type": "StepSource"
+    },
+    {
+      "file": "values/verdict-bust.json",
+      "type": "Verdict"
+    },
+    {
+      "file": "values/verdict-cold_start.json",
+      "type": "Verdict"
+    },
+    {
+      "file": "values/verdict-full_bust.json",
+      "type": "Verdict"
+    },
+    {
+      "file": "values/verdict-future-value.json",
+      "type": "Verdict"
+    },
+    {
+      "file": "values/verdict-stable.json",
+      "type": "Verdict"
+    },
+    {
+      "file": "values/verdict-unknown.json",
+      "type": "Verdict"
+    },
+    {
+      "file": "values/verdict-warning.json",
+      "type": "Verdict"
+    }
+  ],
+  "normalize": [
+    {
+      "file": "tolerant/notice-unknown-member.json",
+      "type": "Notice",
+      "encodes_as": "subscribe/notice.json"
+    },
+    {
+      "file": "tolerant/read-request-null-members.json",
+      "type": "ReadRequest",
+      "encodes_as": "read/request-from-oldest.json"
+    },
+    {
+      "file": "tolerant/reply-next-absent.json",
+      "type": "ReadReply",
+      "encodes_as": "read/reply-empty.json"
+    },
+    {
+      "file": "tolerant/reply-unknown-member.json",
+      "type": "ReadReply",
+      "encodes_as": "read/reply-empty.json"
+    },
+    {
+      "file": "tolerant/row-unknown-member.json",
+      "type": "StepRow",
+      "encodes_as": "read/row-every-member.json"
+    }
+  ],
+  "reject": [
+    {
+      "file": "rejected/read-request-member.json",
+      "type": "ReadRequest",
+      "provider_code": "malformed"
+    },
+    {
+      "file": "rejected/read-request-negative-limit.json",
+      "type": "ReadRequest",
+      "provider_code": "malformed"
+    },
+    {
+      "file": "rejected/row-missing-occurred_at_ms.json",
+      "type": "StepRow"
+    },
+    {
+      "file": "rejected/row-missing-verdict.json",
+      "type": "StepRow"
+    },
+    {
+      "file": "rejected/subscribe-request-member.json",
+      "type": "SubscribeRequest",
+      "provider_code": "malformed"
+    }
+  ]
+}

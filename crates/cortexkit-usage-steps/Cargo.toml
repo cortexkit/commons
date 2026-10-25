@@ -1,0 +1,25 @@
+# cortexkit-usage-steps — the wire contract of the live usage step feed: a
+# subscription that says new steps exist and a paged read that returns them.
+# Apps on every platform decode the same shapes from this crate's CONTRACT.md
+# and vectors. Pure serde plus one small helper (LatestRows); no transport.
+[package]
+name = "cortexkit-usage-steps"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract, vectors and a last-row-wins helper for the CortexKit live usage step feed (usage.steps.subscribe and usage.steps.read)."
+readme = "README.md"
+publish = true
+include = ["Cargo.toml", "README.md", "CONTRACT.md", "CHANGELOG.md", "src/**", "tests/**", "test-vectors/**"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+sha2 = "0.10"
+# Only for the drift test that keeps the row's runner-step members in line
+# with the runner step event. Never a runtime dependency.
+cortexkit-role-llm-runner = { version = "0.7.0", path = "../cortexkit-role-llm-runner" }
