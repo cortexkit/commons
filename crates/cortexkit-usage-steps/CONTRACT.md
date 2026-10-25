@@ -55,9 +55,12 @@ and never parse them or compare their order.
 
 ## `usage.steps.subscribe`
 
-Request: `{}`. Any member is refused `malformed`.
+Request: `{}`, or `{"harness": "<producer>", "session": "<session>"}` to
+follow one session. `harness` and `session` come together or not at all; a
+request naming one without the other is refused `invalid_request`. Any member
+the lists below do not name is refused `malformed`.
 
-Each notice is one StreamData frame:
+Unfiltered, each notice is one StreamData frame:
 
 ```json
 {"through": "c0000110"}
@@ -66,6 +69,11 @@ Each notice is one StreamData frame:
 `through` is the newest committed cursor. Notices are coalesced: at most four
 a second, and a notice may cover many steps or none that the caller may see.
 A notice carries no rows.
+
+Filtered, a notice is sent only when a row whose `harness` and `session` equal
+the request's is committed. Coalescing and the endings below are unchanged: a
+`through` is still the newest committed cursor of the whole feed, not of the
+session, so a filtered subscriber resumes exactly like an unfiltered one.
 
 | How it ends | Meaning |
 |---|---|
@@ -83,6 +91,13 @@ Without `after`, the read starts at the oldest row the feed still holds. The
 feed holds the rows committed in the last 24 hours. `limit` defaults to 200,
 with a maximum of 1,000.
 
+A read may also name `harness` and `session`. They come together or not at
+all; a request naming one without the other is refused `invalid_request`.
+
+- Unfiltered (no `harness`), the read returns every row of the feed.
+- Filtered, the read returns only the rows whose `harness` and `session` equal
+the request's, matched exactly: no normalisation, no prefix matching.
+
 Reply:
 
 ```json
@@ -94,15 +109,38 @@ Reply:
   when the reply reached `through`.
 - `through` is the newest committed cursor.
 
+A filtered read keeps both meanings: `limit` bounds the rows returned, and a
+filtered page holds at most `limit` matching rows; the provider reads past
+non-matching rows to fill it. `through` stays the newest committed cursor of
+the whole feed, not the newest matching row, so a filtered reader resumes
+exactly like an unfiltered one. A filtered page is therefore never empty with
+`next` non-null: an empty `rows` with `next` null means no matching row was
+committed up to `through`.
+
 Refusals:
 
 | Code | Condition |
 |---|---|
 | `malformed` | The request does not decode, or it carries an unknown member. |
-| `invalid_request` | `limit` is 0, or `after` is not a cursor the provider issued. |
+| `invalid_request` | `limit` is 0; `after` is not a cursor the provider issued; or the request names `harness` without `session`, or `session` without `harness`. |
 | `range_too_large` | `limit` is above 1,000. |
 | `cursor_expired` | `after` is older than the feed holds. Detail `{"through": "<newest cursor>"}`. Reload per-session history with `usage.cache.sessions` and `usage.cache.steps`, then read from `through`. |
 | `not_permitted` | The caller is not admitted (see [Who may read](#who-may-read)). |
+
+The session filter narrows which rows a read returns. It grants nothing: who
+may read is decided as before (see [Who may read](#who-may-read)).
+
+### Session filter and older providers
+
+A request object is closed: a provider that predates the session filter does
+not know `harness` or `session`, so it refuses a filtered request
+`malformed`. There is no version member to ask it first. So a client that
+sends `harness` and `session` and gets `malformed` back knows only that the
+provider cannot filter yet. It must never fall back to an unfiltered read and
+treat the rows it returns as that session's: those rows are every agent's. A
+client that meets `malformed` this way shows the session as not available
+from this provider, or reads unfiltered and marks the rows unfiltered, never
+attributing them to the session.
 
 ## The row
 
@@ -176,11 +214,15 @@ event's §14.3 members:
   `harness_step_ref` (the host's own record id). The provider's later read of
   the host store replaces the live row.
 - **The event carries no `harness_step_ref`.** `harness` is the event's
-  `runner` (the runner's module id) and `step_ref` is the event's `run_id`,
-  `step_id` and `attempt` joined by `#`: `<run_id>#<step_id>#<attempt>`, with
-  `attempt` in decimal and 1-based, as the runner contract pins it. The
-  provider records one row per attempt actually sent, because a billed retry
-  is spend and its cache behaviour differs. For a runner that is its own
+  `runner` (the runner's module id) and `step_ref` is the event's
+  `attempt_id`: the id the runner gave that provider attempt, unique and never
+  reused, which it also writes in its own durable step record (the runner
+  contract requires `attempt_id` on every event without `harness_step_ref`).
+  The event's `run_id`, `step_id` and `attempt` are not part of the identity,
+  because that triple can repeat after a session is restored. The provider
+  records one row per attempt actually sent, because a billed retry is spend
+  and its cache behaviour differs. An event with neither member has no
+  identity, and the provider drops it. For a runner that is its own
   durable source (`history_key: "step_ref"`), that is the identity the
   provider gives the attempt when it reads the runner's step log, so the
   durable row replaces the live one. For a runner keyed by its host (`history_key:

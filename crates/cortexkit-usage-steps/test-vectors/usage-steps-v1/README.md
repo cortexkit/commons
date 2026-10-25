@@ -24,14 +24,21 @@ language can drive them:
   request member, and a reply without `next`.
 - `reject`: must not decode as `type`. `provider_code` names the code the
   provider refuses it with, where the contract names one. An undecodable
-  request is refused `malformed`.
+  request is refused `malformed`. A case marked `"decodes": true` is the
+  exception: the type decodes it on purpose and the provider refuses it with
+  `provider_code`, as it does for a request naming `harness` without `session`
+  or the other way round.
 
 ## Cases
 
-- `subscribe/`: the subscribe request `{}` and one notice.
-- `read/`: three read requests, three replies and two standalone rows.
-  `reply-page.json` has eight rows over five sessions; its fourth row
-  (`c0000104`) has the identity of its first row (`opencode` plus
+- `subscribe/`: the subscribe requests, `{}` and one session's, and one
+  notice.
+- `read/`: four read requests, four replies and two standalone rows. A read
+  request either takes every session or names one with `harness` plus
+  `session`; `read/request-session.json` is the latter.
+  `read/reply-session-empty.json` answers a session-filtered read that found no
+  matching row. `reply-page.json` has eight rows over five sessions; its
+  fourth row (`c0000104`) has the identity of its first row (`opencode` plus
   `msg_ex_0001`) and replaces it because its finish reason arrived late, so a
   reader keeps seven rows. `next` is set because more pages remain.
   `reply-last-page.json` holds a row with every member and a row with only

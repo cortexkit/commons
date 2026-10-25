@@ -21,6 +21,7 @@ fn full_event() -> StepFinished {
         "run_id": "run_ex",
         "step_id": "step_ex",
         "attempt": 1,
+        "attempt_id": "att_ex",
         "terminal_status": "completed",
         "harness_step_ref": "hstep_ex",
         "provider_request_id": "preq_ex",
@@ -54,6 +55,7 @@ fn member_names(value: serde_json::Value) -> BTreeSet<String> {
 /// fails here until someone decides whether the row carries it.
 const EVENT_MEMBERS: &[&str] = &[
     "attempt",
+    "attempt_id",
     "cache_write_1h_tokens",
     "cache_write_5m_tokens",
     "cache_write_tokens",
@@ -155,23 +157,23 @@ fn shared_member_names_match_the_runner_step_event() {
     }
 }
 
-fn identity_of(event: &StepFinished) -> (String, String) {
+fn identity_of(event: &StepFinished) -> Option<(String, String)> {
     live_row_identity(
         &event.runner,
         &event.harness,
         event.harness_step_ref.as_deref(),
-        &event.run_id,
-        &event.step_id,
-        event.attempt.get(),
+        event.attempt_id.as_deref(),
     )
 }
 
-/// `full_event()` without its host record, at the given attempt.
-fn event_without_host_record(attempt: u64) -> StepFinished {
+/// `full_event()` without its host record, at the given attempt number and
+/// attempt id.
+fn event_without_host_record(attempt: u64, attempt_id: &str) -> StepFinished {
     let mut value = serde_json::to_value(full_event()).unwrap();
     let members = value.as_object_mut().unwrap();
     members.remove("harness_step_ref");
     members.insert("attempt".to_owned(), attempt.into());
+    members.insert("attempt_id".to_owned(), attempt_id.into());
     serde_json::from_value(value).unwrap()
 }
 
@@ -181,26 +183,46 @@ fn live_row_identity_uses_the_host_record_when_the_event_carries_one() {
     assert_eq!(event.harness_step_ref.as_deref(), Some("hstep_ex"));
     assert_eq!(
         identity_of(&event),
-        ("example-harness".to_owned(), "hstep_ex".to_owned())
+        Some(("example-harness".to_owned(), "hstep_ex".to_owned()))
     );
 }
 
 #[test]
-fn live_row_identity_uses_the_runner_and_run_step_attempt_without_a_host_record() {
-    let event = event_without_host_record(1);
+fn live_row_identity_uses_the_runner_and_attempt_id_without_a_host_record() {
+    let event = event_without_host_record(1, "att_first");
     assert_eq!(event.harness_step_ref, None);
     assert_eq!(
         identity_of(&event),
-        ("example-runner".to_owned(), "run_ex#step_ex#1".to_owned())
+        Some(("example-runner".to_owned(), "att_first".to_owned()))
     );
 }
 
 #[test]
 fn live_row_identity_gives_each_attempt_of_a_step_its_own_row() {
-    let first = identity_of(&event_without_host_record(1));
-    let retry = identity_of(&event_without_host_record(2));
+    let first = identity_of(&event_without_host_record(1, "att_first"));
+    let retry = identity_of(&event_without_host_record(2, "att_retry"));
     assert_ne!(first, retry, "two attempts of one step share an identity");
-    assert_eq!(retry.1, "run_ex#step_ex#2");
+    assert_eq!(retry.unwrap().1, "att_retry");
+}
+
+/// After a session restore a runner can number a step and attempt the same
+/// as an earlier one. Their attempt ids differ, so their rows must too.
+#[test]
+fn live_row_identity_keeps_restored_attempts_apart_when_the_triple_repeats() {
+    let before = identity_of(&event_without_host_record(1, "att_before_restore"));
+    let after = identity_of(&event_without_host_record(1, "att_after_restore"));
+    assert_ne!(
+        before, after,
+        "a repeated run, step and attempt merged two attempts into one row"
+    );
+}
+
+#[test]
+fn live_row_identity_gives_none_without_host_record_or_attempt_id() {
+    assert_eq!(
+        live_row_identity("example-runner", "example-harness", None, None),
+        None
+    );
 }
 
 #[test]
@@ -240,13 +262,11 @@ fn shared_member_types_match_at_compile_time() {
     // Identity inputs (see live_row_identity): with `harness_step_ref`, the
     // row's `harness` is the event's `harness` and its `step_ref` is
     // `harness_step_ref`; without it, `harness` is the event's `runner` and
-    // `step_ref` is `<run_id>#<step_id>#<attempt>`.
+    // `step_ref` is `attempt_id`.
     same(&row.harness, &event.harness);
     same(&row.harness, &event.runner);
     same(&Some(row.step_ref.clone()), &event.harness_step_ref);
-    same(&row.step_ref, &event.run_id);
-    same(&row.step_ref, &event.step_id);
-    let _attempt: u64 = event.attempt.get();
+    same(&Some(row.step_ref.clone()), &event.attempt_id);
     same(&row.session, &event.session);
     same(&row.run_id, &Some(event.run_id.clone()));
     same(&row.provider, &Some(event.provider.clone()));

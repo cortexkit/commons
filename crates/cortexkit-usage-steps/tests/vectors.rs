@@ -95,7 +95,7 @@ fn every_tolerant_input_decodes_and_re_encodes_as_its_canonical_vector() {
 }
 
 #[test]
-fn every_rejected_input_fails_to_decode() {
+fn every_rejected_input_fails_to_decode_or_the_provider_refuses_it() {
     let cases = cases();
     let known: BTreeSet<&str> = codes::SUBSCRIBE_REFUSALS
         .iter()
@@ -105,9 +105,25 @@ fn every_rejected_input_fails_to_decode() {
     for case in entries(&cases, "reject") {
         let file = case["file"].as_str().unwrap();
         let ty = case["type"].as_str().unwrap();
-        assert!(
-            recode_as(ty, &read(file)).is_err(),
-            "{file} decoded as {ty} but the contract refuses it"
+        let decoded = recode_as(ty, &read(file));
+        // A request naming only one of `harness` and `session` decodes, as a
+        // request with any `limit` does; the contract has the provider refuse
+        // it instead, and the case says so with `decodes: true`.
+        let decodes = case["decodes"].as_bool().unwrap_or(false);
+        assert_eq!(
+            decoded.is_ok(),
+            decodes,
+            "{file} as {ty}: the contract refuses it {}, but this crate {}",
+            if decodes {
+                "at the provider"
+            } else {
+                "undecodable"
+            },
+            if decoded.is_ok() {
+                "decoded it"
+            } else {
+                "did not decode it"
+            }
         );
         if let Some(code) = case.get("provider_code") {
             assert!(known.contains(code.as_str().unwrap()), "{file}");

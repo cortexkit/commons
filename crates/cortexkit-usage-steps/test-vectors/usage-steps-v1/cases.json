@@ -21,6 +21,10 @@
       "type": "ReadReply"
     },
     {
+      "file": "read/reply-session-empty.json",
+      "type": "ReadReply"
+    },
+    {
       "file": "read/request-after.json",
       "type": "ReadRequest"
     },
@@ -30,6 +34,10 @@
     },
     {
       "file": "read/request-limit-only.json",
+      "type": "ReadRequest"
+    },
+    {
+      "file": "read/request-session.json",
       "type": "ReadRequest"
     },
     {
@@ -71,6 +79,10 @@
     {
       "file": "subscribe/notice.json",
       "type": "Notice"
+    },
+    {
+      "file": "subscribe/request-session.json",
+      "type": "SubscribeRequest"
     },
     {
       "file": "subscribe/request.json",
@@ -158,6 +170,12 @@
   ],
   "reject": [
     {
+      "file": "rejected/read-request-harness-alone.json",
+      "type": "ReadRequest",
+      "provider_code": "invalid_request",
+      "decodes": true
+    },
+    {
       "file": "rejected/read-request-member.json",
       "type": "ReadRequest",
       "provider_code": "malformed"
@@ -179,6 +197,12 @@
       "file": "rejected/subscribe-request-member.json",
       "type": "SubscribeRequest",
       "provider_code": "malformed"
+    },
+    {
+      "file": "rejected/subscribe-request-session-alone.json",
+      "type": "SubscribeRequest",
+      "provider_code": "invalid_request",
+      "decodes": true
     }
   ]
 }

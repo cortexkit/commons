@@ -2,16 +2,59 @@ use serde::{Deserialize, Serialize};
 
 use crate::{codes, Cursor, StepRow};
 
-/// Request of `usage.steps.subscribe`: always `{}`. The provider refuses any
-/// member `malformed`, and so does this type.
+/// Request of `usage.steps.subscribe`: `{}` for every notice, or
+/// `{harness, session}` for the notices of one session. The provider refuses
+/// an unknown member `malformed`, and so does this type.
+///
+/// `harness` and `session` are both optional and also accept `null`; each
+/// must be given together with the other or not at all. This type does not
+/// check that pairing: the provider refuses a request naming only one
+/// `invalid_request`, as it does for `limit`. See
+/// [`SubscribeRequest::check_pairing`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct SubscribeRequest {}
+pub struct SubscribeRequest {
+    /// The producer to follow; see [`StepRow::harness`](crate::StepRow::harness).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// The session to follow, matched exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+}
 
 impl SubscribeRequest {
+    /// Notices for every session.
     pub fn new() -> Self {
-        Self {}
+        Self::default()
+    }
+
+    /// Notices only when a row of this harness and session is committed.
+    pub fn for_session(mut self, harness: impl Into<String>, session: impl Into<String>) -> Self {
+        self.harness = Some(harness.into());
+        self.session = Some(session.into());
+        self
+    }
+
+    /// Reports a request naming only one of `harness` and `session`. The
+    /// pair comes together or not at all; the provider refuses a request that
+    /// names one alone `invalid_request`. Both together and neither are fine.
+    pub fn check_pairing(&self) -> Result<(), &'static str> {
+        pairing::check(self.harness.is_some(), self.session.is_some())
+    }
+}
+
+/// The `harness`-with-`session` rule both requests share. The request types
+/// accept either member alone, as they accept any `limit`. The pairing helper
+/// returns an error naming the missing member, and the provider refuses such a
+/// request `invalid_request`.
+pub(crate) mod pairing {
+    pub(crate) fn check(harness: bool, session: bool) -> Result<(), &'static str> {
+        match (harness, session) {
+            (true, true) | (false, false) => Ok(()),
+            (true, false) => Err("request names `harness` without `session`"),
+            (false, true) => Err("request names `session` without `harness`"),
+        }
     }
 }
 
@@ -48,6 +91,12 @@ impl Notice {
 /// (the rows committed in the last 24 hours). `limit` defaults to 200; 0 is
 /// refused `invalid_request` and above 1,000 `range_too_large`. This type
 /// does not check `limit`: the provider does.
+///
+/// `harness` and `session` narrow the read to one session's rows. Without
+/// `after`, such a read also starts at the oldest row the feed holds. They
+/// come together or not at all: this type accepts either alone, and the
+/// provider refuses one alone `invalid_request`, as it refuses a bad
+/// `limit`. See [`ReadRequest::check_pairing`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -56,6 +105,12 @@ pub struct ReadRequest {
     pub after: Option<Cursor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// The producer to read rows of; see [`StepRow::harness`](crate::StepRow::harness).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// The session to read rows of, matched exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 impl ReadRequest {
@@ -74,6 +129,20 @@ impl ReadRequest {
     pub fn with_limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
+    }
+
+    /// Reads only the rows whose `harness` and `session` are these.
+    pub fn for_session(mut self, harness: impl Into<String>, session: impl Into<String>) -> Self {
+        self.harness = Some(harness.into());
+        self.session = Some(session.into());
+        self
+    }
+
+    /// Reports a request naming only one of `harness` and `session`. The
+    /// pair comes together or not at all; the provider refuses a request that
+    /// names one alone `invalid_request`. Both together and neither are fine.
+    pub fn check_pairing(&self) -> Result<(), &'static str> {
+        pairing::check(self.harness.is_some(), self.session.is_some())
     }
 }
 

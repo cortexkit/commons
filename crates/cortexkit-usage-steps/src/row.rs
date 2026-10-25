@@ -128,24 +128,29 @@ impl std::error::Error for BadCounts {}
 ///   event's `harness`, the hosting program, and `step_ref` is the host's
 ///   record id.
 /// - Without one: `harness` is the event's `runner`, the runner's module id,
-///   and `step_ref` is `<run_id>#<step_id>#<attempt>`, with `attempt` in
-///   decimal and 1-based, as the runner contract pins it. Each attempt
+///   and `step_ref` is the event's `attempt_id`, the id the runner gave that
+///   provider attempt and wrote in its own durable step record. Each attempt
 ///   actually sent is its own row, because a billed retry is spend and its
-///   cache behaviour differs. For a runner that is its own durable source
-///   (`history_key: "step_ref"`) this is the identity the provider gives the
-///   attempt when it reads the runner's step log. For a host-keyed runner
-///   with no host record, the row stays live-only.
+///   cache behaviour differs. The event's `run_id`, `step_id` and `attempt`
+///   are not used: that triple can repeat after a session is restored. For a
+///   runner that is its own durable source (`history_key: "step_ref"`) this
+///   is the identity the provider gives the attempt when it reads the
+///   runner's step log. For a host-keyed runner with no host record, the row
+///   stays live-only.
+///
+/// Returns `None` for an event with neither `harness_step_ref` nor
+/// `attempt_id`. The runner contract refuses to publish such an event, so a
+/// provider that receives one drops it rather than inventing an identity.
 pub fn live_row_identity(
     runner: &str,
     harness: &str,
     harness_step_ref: Option<&str>,
-    run_id: &str,
-    step_id: &str,
-    attempt: u64,
-) -> (String, String) {
-    match harness_step_ref {
-        Some(host_record) => (harness.to_owned(), host_record.to_owned()),
-        None => (runner.to_owned(), format!("{run_id}#{step_id}#{attempt}")),
+    attempt_id: Option<&str>,
+) -> Option<(String, String)> {
+    match (harness_step_ref, attempt_id) {
+        (Some(host_record), _) => Some((harness.to_owned(), host_record.to_owned())),
+        (None, Some(attempt_id)) => Some((runner.to_owned(), attempt_id.to_owned())),
+        (None, None) => None,
     }
 }
 

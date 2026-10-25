@@ -249,9 +249,120 @@ fn a_row_missing_any_required_member_is_refused() {
 fn requests_refuse_an_unknown_member_and_accept_null_optionals() {
     assert!(serde_json::from_str::<SubscribeRequest>("{\"after\":\"c1\"}").is_err());
     assert!(serde_json::from_str::<SubscribeRequest>("{}").is_ok());
-    assert!(serde_json::from_str::<ReadRequest>("{\"after\":\"c1\",\"session\":\"s\"}").is_err());
+    assert!(serde_json::from_str::<ReadRequest>("{\"after\":\"c1\",\"unknown\":\"x\"}").is_err());
     let nulls: ReadRequest = serde_json::from_str("{\"after\":null,\"limit\":null}").unwrap();
     assert_eq!(nulls, ReadRequest::new());
+}
+
+#[test]
+fn session_members_round_trip_and_absent_ones_stay_out_of_the_bytes() {
+    let filtered: ReadRequest = serde_json::from_str(&read("read/request-session.json")).unwrap();
+    assert_eq!(filtered.harness.as_deref(), Some("opencode"));
+    assert_eq!(filtered.session.as_deref(), Some("ses_demo01"));
+    assert_eq!(
+        serde_json::to_string(&filtered).unwrap(),
+        read("read/request-session.json")
+    );
+
+    let filtered: SubscribeRequest =
+        serde_json::from_str(&read("subscribe/request-session.json")).unwrap();
+    assert_eq!(filtered.harness.as_deref(), Some("opencode"));
+    assert_eq!(filtered.session.as_deref(), Some("ses_demo01"));
+    assert_eq!(
+        serde_json::to_string(&filtered).unwrap(),
+        read("subscribe/request-session.json")
+    );
+
+    // Null is accepted for both members, as for `after` and `limit`.
+    let nulls: ReadRequest = serde_json::from_str("{\"harness\":null,\"session\":null}").unwrap();
+    assert_eq!(nulls, ReadRequest::new());
+    let nulls: SubscribeRequest =
+        serde_json::from_str("{\"harness\":null,\"session\":null}").unwrap();
+    assert_eq!(nulls, SubscribeRequest::new());
+
+    // Absent, never null, in what this crate encodes.
+    assert_eq!(
+        serde_json::to_string(&ReadRequest::new().after("c0000100").with_limit(200)).unwrap(),
+        "{\"after\":\"c0000100\",\"limit\":200}"
+    );
+    assert_eq!(
+        serde_json::to_string(&ReadRequest::new().for_session("opencode", "ses_demo01")).unwrap(),
+        "{\"harness\":\"opencode\",\"session\":\"ses_demo01\"}"
+    );
+    assert_eq!(
+        serde_json::to_string(&SubscribeRequest::new().for_session("opencode", "ses_demo01"))
+            .unwrap(),
+        read("subscribe/request-session.json")
+    );
+}
+
+#[test]
+fn session_pairing_accepts_both_or_neither_and_refuses_either_alone() {
+    let harness_only: ReadRequest = serde_json::from_str("{\"harness\":\"opencode\"}").unwrap();
+    let session_only: ReadRequest = serde_json::from_str("{\"session\":\"ses_demo01\"}").unwrap();
+    assert!(harness_only.check_pairing().is_err());
+    assert!(session_only.check_pairing().is_err());
+    assert_eq!(ReadRequest::new().check_pairing(), Ok(()));
+    assert_eq!(
+        ReadRequest::new()
+            .for_session("opencode", "ses_demo01")
+            .check_pairing(),
+        Ok(())
+    );
+    let nulls: ReadRequest = serde_json::from_str("{\"harness\":null,\"session\":null}").unwrap();
+    assert_eq!(nulls.check_pairing(), Ok(()));
+
+    let harness_only: SubscribeRequest =
+        serde_json::from_str("{\"harness\":\"opencode\"}").unwrap();
+    let session_only: SubscribeRequest =
+        serde_json::from_str("{\"session\":\"ses_demo01\"}").unwrap();
+    assert!(harness_only.check_pairing().is_err());
+    assert!(session_only.check_pairing().is_err());
+    assert_eq!(SubscribeRequest::new().check_pairing(), Ok(()));
+    assert_eq!(
+        SubscribeRequest::new()
+            .for_session("opencode", "ses_demo01")
+            .check_pairing(),
+        Ok(())
+    );
+}
+
+/// The vectors a provider that predates the session filter pins. Adding the
+/// filter must not change one byte of what an unfiltered request encodes to.
+#[test]
+fn unfiltered_requests_encode_to_the_bytes_they_always_did() {
+    for (request, pinned) in [
+        (serde_json::to_string(&ReadRequest::new()).unwrap(), "{}"),
+        (
+            serde_json::to_string(&ReadRequest::new().after("c0000100").with_limit(200)).unwrap(),
+            "{\"after\":\"c0000100\",\"limit\":200}",
+        ),
+        (
+            serde_json::to_string(&ReadRequest::new().with_limit(1_000)).unwrap(),
+            "{\"limit\":1000}",
+        ),
+        (
+            serde_json::to_string(&SubscribeRequest::new()).unwrap(),
+            "{}",
+        ),
+        (
+            serde_json::to_string(&serde_json::from_str::<ReadRequest>("{}").unwrap()).unwrap(),
+            "{}",
+        ),
+    ] {
+        assert_eq!(request, pinned);
+    }
+    assert_eq!(read("read/request-from-oldest.json"), "{}");
+    assert_eq!(read("subscribe/request.json"), "{}");
+    assert_eq!(
+        read("read/request-after.json"),
+        "{\"after\":\"c0000100\",\"limit\":200}"
+    );
+    assert_eq!(read("read/request-limit-only.json"), "{\"limit\":1000}");
+    assert_eq!(
+        read("tolerant/read-request-null-members.json"),
+        "{\"after\":null,\"limit\":null}"
+    );
 }
 
 #[test]

@@ -32,6 +32,13 @@ let request = ReadRequest::new(); // then .after(cursor) for later reads
 Readers ignore unknown members on rows, replies and notices, and keep an
 unknown verdict, source or request size as `Other`. Requests are strict.
 
+Both requests take an optional session filter: `for_session(harness, session)`
+on `ReadRequest` and `SubscribeRequest` narrows the feed to one session's rows
+or notices. The pair comes together or not at all, and `check_pairing` on
+either request reports a request naming one alone; the provider refuses one
+`invalid_request`. An unfiltered request encodes exactly as before the filter
+existed.
+
 A row's `output` includes reasoning: `reasoning` is a breakdown of `output`,
 never an addition to it, so `reasoning <= output` whenever both are present.
 Charge `output` once and never add `reasoning` on top. The provider's tests
