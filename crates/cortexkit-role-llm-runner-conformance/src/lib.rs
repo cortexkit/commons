@@ -80,6 +80,7 @@
 mod adopt;
 mod attachments;
 mod cache_ttl;
+pub mod call_identity;
 mod cancel;
 mod cases;
 mod ceiling;

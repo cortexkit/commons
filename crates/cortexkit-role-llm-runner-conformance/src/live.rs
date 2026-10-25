@@ -50,14 +50,17 @@ where
 
 /// One frame of a stream: the frame as decoded, and its event decoded
 /// strictly when it carries one.
-struct Frame {
-    frame: SubscribeEvent,
-    event: Option<LiveEvent>,
+pub(crate) struct Frame {
+    pub(crate) frame: SubscribeEvent,
+    pub(crate) event: Option<LiveEvent>,
 }
 
 /// Every frame a subscription from `from` streams, each event decoded
 /// strictly.
-async fn stream<R: RunnerRoute>(route: &R, from: SubscribeFrom) -> Result<Vec<Frame>, String> {
+pub(crate) async fn stream<R: RunnerRoute>(
+    route: &R,
+    from: SubscribeFrom,
+) -> Result<Vec<Frame>, String> {
     let params = serde_json::to_value(LiveSubscribeRequest::new(from)).expect("serializes");
     let events = match route
         .subscribe(params)

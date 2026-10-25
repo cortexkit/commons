@@ -8,7 +8,9 @@
 //! stored body to a row ([`anthropic_messages`], [`opencode_aisdk`], or
 //! [`project`] by profile name). A runner calls the projection and then fills
 //! the fields its stored body lacks ([`DisplayRow::with_model`],
-//! [`DisplayRow::with_client_message_id`], [`DisplayRow::with_sender`]); a
+//! [`DisplayRow::with_client_message_id`], [`DisplayRow::with_sender`], and
+//! under `call_identity` each tool call's [`ToolCallPart::with_call_key`] and
+//! [`ToolCallPart::with_schema_pin`]); a
 //! reader of several runners needs no runner's schema.
 //!
 //! Cuts are the caller's choice: [`Limits`] bounds tool-call arguments and
@@ -155,6 +157,15 @@ impl DisplayRow {
         self.sender = Some(module.into());
         self
     }
+
+    /// The row's tool calls, in order, for a runner filling what the stored
+    /// body lacks (`call_key` and `schema_pin` under `call_identity`).
+    pub fn tool_calls_mut(&mut self) -> impl Iterator<Item = &mut ToolCallPart> {
+        self.parts.iter_mut().filter_map(|part| match part {
+            DisplayPart::ToolCall(call) => Some(call),
+            _ => None,
+        })
+    }
 }
 
 /// One part of a [`DisplayRow`], tagged by `type`. Every part carries
@@ -247,6 +258,19 @@ pub struct ToolCallPart {
     pub arguments: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub arguments_truncated: bool,
+    /// The call's key (CONTRACT.md §11.3), on a runner declaring
+    /// `call_identity`: the value `session.read`'s attribution and
+    /// `run.tool_calls` expose for the same call, once the call is prepared
+    /// or dispatched. Absent means unknown, never empty. Opaque to readers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_key: Option<String>,
+    /// The `schema_pin` of the tool definition the call was dispatched
+    /// against, frozen at dispatch, on a runner declaring `call_identity`.
+    /// Absent for a call never dispatched (denied, or refused before
+    /// dispatch), for a runner-native tool with no provider definition, and
+    /// on any runner without the group. Opaque to readers: never parsed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_pin: Option<String>,
 }
 
 /// A tool result. `content` is its text: a string result as stored, or the
@@ -297,6 +321,19 @@ pub struct OtherPart {
 impl ToolCallPart {
     pub fn with_output_refs(mut self, descriptor: crate::output_refs::Descriptor) -> Self {
         self.output_refs = Some(descriptor);
+        self
+    }
+
+    /// Name the call's key, once the call is prepared or dispatched.
+    pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
+        self.call_key = Some(call_key.into());
+        self
+    }
+
+    /// Name the pin of the definition the call was dispatched against, as
+    /// recorded at dispatch.
+    pub fn with_schema_pin(mut self, schema_pin: impl Into<String>) -> Self {
+        self.schema_pin = Some(schema_pin.into());
         self
     }
     /// A call whose `arguments` are `arguments` as compact JSON text, cut
@@ -443,6 +480,8 @@ fn arguments_part(
         name,
         arguments,
         arguments_truncated,
+        call_key: None,
+        schema_pin: None,
     })
 }
 
@@ -1100,6 +1139,75 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// Each `call_identity` row decodes to the members its case names, and
+    /// the setters rebuild its exact bytes from the row without them. A
+    /// member the case leaves out is absent, never empty.
+    #[test]
+    fn call_identity_rows_carry_their_members_or_leave_them_out() {
+        let file = vectors::load("call-identity.json");
+        let mut seen = (false, false, false);
+        for case in vectors::cases(&file, "rows") {
+            let name = case["name"].as_str().unwrap();
+            let row: DisplayRow = vectors::round_trip(name, &case["row"]);
+            let mut calls = row.parts.iter().filter_map(|part| match part {
+                DisplayPart::ToolCall(call) => Some(call),
+                _ => None,
+            });
+            let call = calls.next().expect("each row holds a tool call");
+            assert_eq!(
+                call.call_key.as_deref(),
+                case["call_key"].as_str(),
+                "{name}"
+            );
+            assert_eq!(
+                call.schema_pin.as_deref(),
+                case["schema_pin"].as_str(),
+                "{name}"
+            );
+            assert_ne!(call.call_key.as_deref(), Some(""), "{name}");
+            assert_ne!(call.schema_pin.as_deref(), Some(""), "{name}");
+            match (&call.call_key, &call.schema_pin) {
+                (Some(_), Some(_)) => seen.0 = true,
+                (Some(_), None) => seen.1 = true,
+                (None, None) => seen.2 = true,
+                (None, Some(_)) => panic!("{name}: a pin without a key"),
+            }
+            // Rebuild the row: the projection's bare call, then the setters.
+            let arguments: Value = serde_json::from_str(&call.arguments).unwrap();
+            let mut built =
+                ToolCallPart::new(&call.part, &call.tool_call_id, &call.name, &arguments, None);
+            assert_eq!(built.call_key, None, "{name}");
+            assert_eq!(built.schema_pin, None, "{name}");
+            if let Some(key) = &call.call_key {
+                built = built.with_call_key(key);
+            }
+            if let Some(pin) = &call.schema_pin {
+                built = built.with_schema_pin(pin);
+            }
+            let mut rebuilt = DisplayRow::new(&row.role, vec![DisplayPart::ToolCall(built)]);
+            if let Some(model) = &row.model {
+                rebuilt = rebuilt.with_model(model);
+            }
+            assert_eq!(
+                serde_json::to_value(&rebuilt).unwrap(),
+                case["row"],
+                "{name}"
+            );
+            // Clearing both through the row leaves neither member on the wire.
+            let mut cleared = row.clone();
+            for call in cleared.tool_calls_mut() {
+                call.call_key = None;
+                call.schema_pin = None;
+            }
+            let text = serde_json::to_string(&cleared).unwrap();
+            assert!(
+                !text.contains("call_key") && !text.contains("schema_pin"),
+                "{name}: {text}"
+            );
+        }
+        assert_eq!(seen, (true, true, true), "every shape has a vector");
     }
 
     #[test]

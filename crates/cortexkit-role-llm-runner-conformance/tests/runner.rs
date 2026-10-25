@@ -173,6 +173,11 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if case.starts_with("call_identity_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare call_identity")
+    {
+        return;
+    }
     if case == "head_incarnation_survives_cut_and_changes_on_recreation"
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
     {
@@ -451,13 +456,17 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         Capability::InterruptReason,
         Capability::SessionChange,
     ]);
+    // Display rows and live tool events carry call identity, which every
+    // other display and live case must still accept.
+    subject.call_identity_group = true;
     let started = Instant::now();
     let report = run(&subject).await;
     assert_only_session_retention_skipped(&report);
-    for spec in CASES
-        .iter()
-        .filter(|case| case.name.starts_with("media_") || case.name.starts_with("attachments_"))
-    {
+    for spec in CASES.iter().filter(|case| {
+        case.name.starts_with("media_")
+            || case.name.starts_with("attachments_")
+            || case.name.starts_with("call_identity_")
+    }) {
         assert_eq!(
             report.outcome(spec.name),
             Some(&CaseOutcome::Passed),
@@ -5588,6 +5597,42 @@ async fn output_refs_undeclared_group_is_inapplicable() {
     );
 }
 
+/// A runner that declares output_refs but cannot revert a session or compact
+/// one in its host: the rewind and compaction cases report not applicable,
+/// by name, and every other output_refs case still passes.
+#[tokio::test]
+async fn output_refs_without_revert_or_host_compaction_is_inapplicable_not_failed() {
+    let mut subject = output_refs_subject(None);
+    subject.cannot_revert = true;
+    subject.cannot_compact_in_host = true;
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome("output_refs_rewind"), Some(CaseOutcome::Inapplicable { reason }) if reason.starts_with("the adapter cannot revert a session: ")),
+        "{}",
+        report.render()
+    );
+    assert!(
+        matches!(report.outcome("output_refs_compaction"), Some(CaseOutcome::Inapplicable { reason }) if reason.starts_with("the adapter cannot compact a session in its host: ")),
+        "{}",
+        report.render()
+    );
+    for name in cases_of(&["output_refs_"]).into_iter().filter(|name| {
+        ![
+            "output_refs_unsupported_plan",
+            "output_refs_rewind",
+            "output_refs_compaction",
+        ]
+        .contains(name)
+    }) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+}
+
 macro_rules! output_refs_fault {
     ($test:ident, $case:literal) => {
         #[tokio::test]
@@ -5906,4 +5951,187 @@ async fn step_events_subject_publisher_mismatch_is_refused_by_name() {
         assert!(failed(&report, name).contains("subject publisher"));
     }
     assert_none_failed_but(&report, &names);
+}
+
+/// A fake declaring `call_identity`, with display history and live events
+/// for the cases to read.
+fn call_identity_subject(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.call_identity_group = true;
+    subject.capabilities.extend([
+        Capability::HostHistory,
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+    ]);
+    subject
+}
+
+const CALL_KEY_CASE: &str = "call_identity_key_matches_attribution";
+const PIN_CASE: &str = "call_identity_pin_frozen_at_dispatch";
+const DENIED_CASE: &str = "call_identity_denied_call_has_no_pin";
+
+#[tokio::test]
+async fn call_identity_faithful_runner_passes_every_case() {
+    let report = run(&call_identity_subject(Defects::default())).await;
+    for name in cases_of(&["call_identity_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+/// Without the group the cases are not applicable, never skipped, whatever
+/// else the runner declares.
+#[tokio::test]
+async fn call_identity_undeclared_group_is_inapplicable_never_skipped() {
+    let mut declaring_surfaces = call_identity_subject(Defects::default());
+    declaring_surfaces.call_identity_group = false;
+    for subject in [declaring_surfaces, FakeSubject::new(Defects::default())] {
+        let report = run(&subject).await;
+        for name in cases_of(&["call_identity_"]) {
+            assert!(
+                matches!(report.outcome(name),
+                    Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare call_identity"),
+                "{name}: {:?}",
+                report.outcome(name)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn call_identity_omitted_key_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_omits_key: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, CALL_KEY_CASE);
+    assert!(reason.contains("carries no call_key"), "{reason}");
+    // The denied call keeps the key §5 attributes to it, so leaving it out
+    // fails there too.
+    let reason = failed(&report, DENIED_CASE);
+    assert!(reason.contains("session.read attributes"), "{reason}");
+    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE]);
+}
+
+#[tokio::test]
+async fn call_identity_another_calls_key_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_swaps_keys: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, CALL_KEY_CASE);
+    assert!(reason.contains("session.read attributes"), "{reason}");
+    assert_none_failed_but(&report, &[CALL_KEY_CASE]);
+}
+
+#[tokio::test]
+async fn call_identity_pin_recomputed_from_the_catalog_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_pin_from_catalog: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, PIN_CASE);
+    assert!(
+        reason.contains("after the catalog changed") && reason.contains("display history"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[PIN_CASE]);
+}
+
+/// On a runner serving only live events, the live tool events are what the
+/// cases read, so a recomputed pin fails there.
+#[tokio::test]
+async fn call_identity_pin_recomputed_fails_on_live_events_alone() {
+    let mut subject = call_identity_subject(Defects {
+        call_identity_pin_from_catalog: true,
+        ..Defects::default()
+    });
+    subject.capabilities.remove(&Capability::HistoryDisplay);
+    let report = run(&subject).await;
+    let reason = failed(&report, PIN_CASE);
+    assert!(
+        reason.contains("after the catalog changed") && reason.contains("live tool_"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[PIN_CASE]);
+}
+
+#[tokio::test]
+async fn call_identity_pin_on_a_denied_call_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_pin_on_denied: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, DENIED_CASE);
+    assert!(reason.contains("never dispatched"), "{reason}");
+    assert_none_failed_but(&report, &[DENIED_CASE]);
+}
+
+/// Display history and live events are separate code paths in a runner, so
+/// a key that is right on history rows and wrong on live events must still
+/// fail. With the key left out of live events alone, the key case fails
+/// naming the live surface, and so does the denied case, whose call has a
+/// key in `session.read`.
+#[tokio::test]
+async fn call_identity_key_omitted_on_live_events_alone_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_live_omits_key: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, CALL_KEY_CASE);
+    assert!(
+        reason.contains("the live tool_") && reason.contains("carries no call_key"),
+        "{reason}"
+    );
+    let reason = failed(&report, DENIED_CASE);
+    assert!(
+        reason.contains("the live tool_finished") && reason.contains("session.read attributes"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE]);
+}
+
+/// A sibling's key on live events alone, history rows right: the key case
+/// fails naming the live surface. The denied call has no sibling, so its
+/// case still passes.
+#[tokio::test]
+async fn call_identity_another_calls_key_on_live_events_alone_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_live_swaps_keys: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, CALL_KEY_CASE);
+    assert!(
+        reason.contains("the live tool_") && reason.contains("session.read attributes"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[CALL_KEY_CASE]);
+}
+
+/// A pin on a denied call's live events alone, history rows right: the
+/// denied case fails naming the live surface.
+#[tokio::test]
+async fn call_identity_pin_on_a_denied_call_on_live_events_alone_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_live_pin_on_denied: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, DENIED_CASE);
+    assert!(
+        reason.contains("the live tool_finished") && reason.contains("never dispatched"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[DENIED_CASE]);
 }

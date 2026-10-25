@@ -51,6 +51,9 @@ pub mod problem_names {
     pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
     pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
     pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
+    /// The answer declares `call_identity` with neither `history_display` nor
+    /// `live_events`, the two surfaces whose tool-call entries it extends.
+    pub const CALL_IDENTITY_WITHOUT_DISPLAY: &str = "call_identity_without_display";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -493,6 +496,14 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.declares(capabilities::RUN_CAUSE) && !describe.declares(capabilities::LIVE_EVENTS) {
         problems.push(DescribeProblem::Undecodable(
             problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS.into(),
+        ));
+    }
+    if describe.declares(capabilities::CALL_IDENTITY)
+        && !describe.declares(capabilities::HISTORY_DISPLAY)
+        && !describe.declares(capabilities::LIVE_EVENTS)
+    {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::CALL_IDENTITY_WITHOUT_DISPLAY.into(),
         ));
     }
     if let Some(modes) = &describe.delivery_order_modes {
@@ -1005,6 +1016,42 @@ mod input_cap_tests {
                 capability: capabilities::INPUT_TOKEN_CAP,
                 op: crate::ops::SESSION_SEND
             }])
+        );
+    }
+}
+
+#[cfg(test)]
+mod call_identity_tests {
+    use super::*;
+    use crate::vectors;
+
+    /// `call_identity` is discovered beside either display surface, is
+    /// refused by name when neither is declared, and a runner without it is usable.
+    #[test]
+    fn call_identity_rides_on_a_display_surface() {
+        let file = vectors::load("call-identity.json");
+        let describe = &file["describe"];
+        for name in ["accept", "live_only"] {
+            let answer: RoleDescribe = vectors::round_trip(name, &describe[name]);
+            assert_eq!(check_describe(&describe[name]).unwrap(), answer, "{name}");
+            assert!(answer.declares(capabilities::CALL_IDENTITY), "{name}");
+        }
+        let refused = &describe["without_display"];
+        assert_eq!(
+            refused["problem"],
+            problem_names::CALL_IDENTITY_WITHOUT_DISPLAY
+        );
+        assert_eq!(
+            check_describe(&refused["answer"]),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::CALL_IDENTITY_WITHOUT_DISPLAY.into()
+            )])
+        );
+        let without = check_describe(&describe["without"]).unwrap();
+        assert!(!without.declares(capabilities::CALL_IDENTITY));
+        assert_eq!(
+            capabilities::group_ops(capabilities::CALL_IDENTITY),
+            Some(&[][..])
         );
     }
 }

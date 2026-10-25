@@ -351,6 +351,9 @@ is unchanged and prints nothing.
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
+| `call_identity_key_matches_attribution` | `call_identity` (otherwise not applicable), `queue`, `transcript_reads`, `dispatch_attribution`, and display history or live events |
+| `call_identity_pin_frozen_at_dispatch` | as above, and `dispatched_schema_pin`; the catalog rule is named unchecked without `change_tool_definition` |
+| `call_identity_denied_call_has_no_pin` | as above; not applicable without `deny_tool_call` |
 | `baseline_owner_only`, `baseline_matches_admission_reply` | `queue` |
 | `tail_read_is_newest_page`, `range_read_stops_by_count`, `range_read_stops_by_bytes`, `oversize_message_alone_on_its_page`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `head_has_no_bodies` | `transcript_reads`, `queue` |
 | `unknown_read_field_refused`, `never_written_session_empty_page`, `never_written_session_empty_head` | `transcript_reads` |
@@ -809,6 +812,27 @@ scripted tool result. `hold_send_staging` lets a host-side adapter delay staging
 for the separate already-sent-result case; it returns false only where
 acceptance and staging coincide, making that scenario N/A. Releasing a staging
 hold does not deliver the send or render a boundary.
+
+## Call identity on display entries
+
+Version 0.15.1 depends on the llm-runner 0.7.2 wire contract. On a runner
+whose `role.describe` declares `call_identity`,
+`call_identity_key_matches_attribution`, `call_identity_pin_frozen_at_dispatch`
+and `call_identity_denied_call_has_no_pin` read every display history
+`tool_call` part (with `history_display` and `host_history`) and every replayed
+`tool_started` and `tool_finished` event (with `live_events` and `streaming`).
+They compare `call_key` with the call's `session.read` attribution (so they also
+need `queue`, `transcript_reads` and `dispatch_attribution`) and `schema_pin`
+with the pin the adapter's tool provider received on the call
+(`dispatched_schema_pin`, required with the group). `change_tool_definition`
+installs `call_identity::CHANGED_DEFINITION` in the provider's catalog after
+dispatch; without it, the pin case passes with the catalog rule named as
+unchecked. `deny_tool_call` makes the runner deny a call before dispatch;
+without it, the denied case is not applicable. On a runner without the group,
+all three cases are not applicable, never skipped.
+`call_identity::DISPATCHED_DEFINITION` is the definition an adapter's provider
+serves for the scripted tool; a test checks both fixture pins against the
+tool-provider crate.
 
 ## Step-finished bus hints
 

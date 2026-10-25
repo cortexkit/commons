@@ -6,10 +6,18 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.7.1"
+cortexkit-role-llm-runner = "0.7.2"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+
+Since 0.7.2, a runner declaring the `call_identity` group puts `call_key` and
+`schema_pin` on display tool calls (`display::ToolCallPart`) and on the live
+`tool_started` and `tool_finished` events. Both are opaque. `call_key` is the
+call's key exactly as `session.read` attributes it, so it is absent only while
+that attribution has none. `schema_pin` is the pin of the tool definition the
+call was dispatched against, recorded at dispatch; it is absent for a call
+never dispatched and for a runner-native tool. See contract §9.16.
 
 Since 0.7.1, `session_retention` may declare a default-zero `min_hold_days` and
 `deletion_waits_for_readers: true`. The floor is a minimum, never added to a

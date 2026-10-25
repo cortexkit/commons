@@ -146,6 +146,7 @@ shipping runner with this document.
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
+| `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
@@ -238,6 +239,14 @@ shipping runner with this document.
   relies on that reading only from a runner declaring the group. A runner
   that cannot name the send that started a send-started run does not
   declare it.
+- [pinned] `call_identity` is a group of its own (added in 0.7.2, §9.16),
+  declared only beside `history_display` or `live_events`, whose tool-call
+  entries it extends: `check_describe` refuses it by name when neither is declared
+  (`call_identity_without_display`). It lists no op, because either of
+  those groups may be the one it extends. It is a group, not bare optional
+  members, because absence has to mean something: from a runner declaring
+  it, an absent `call_key` or `schema_pin` follows §9.16's presence rules;
+  from any other runner it says nothing.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
@@ -865,8 +874,10 @@ display-ready row for an app's reader on a runner declaring
   is `{type, part, ...}`, where `part` is the stored part's key (a content
   block's index for `anthropic-messages`, the part's `id` for
   `opencode-aisdk`): `text {text}`, `reasoning {text}`, `tool_call
-  {tool_call_id, name, arguments, arguments_truncated?}` with `arguments`
-  the call's arguments as compact JSON text, `tool_result {tool_call_id,
+  {tool_call_id, name, arguments, arguments_truncated?, call_key?,
+  schema_pin?}` with `arguments`
+  the call's arguments as compact JSON text (`call_key` and `schema_pin`
+  only on a runner declaring `call_identity`, §9.16), `tool_result {tool_call_id,
   is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
   filename?}` and `other {kind}` for a part the projection does not show.
   A reader decodes a part type it does not know as `other`. `text` joins the
@@ -878,9 +889,11 @@ display-ready row for an app's reader on a runner declaring
   `display::project` by name). A runner calls it on the entry's stored body
   and then fills what the body lacks: `model` (the model that wrote it,
   carried by every assistant row; an `anthropic-messages` body names none),
-  `client_message_id` (§9.11) and `sender` (below). The conformance kit
+  `client_message_id` (§9.11) and `sender` (below), and on a runner
+  declaring `call_identity` each tool call's `call_key` and `schema_pin`
+  (§9.16). The conformance kit
   checks that a served row equals the function applied to the same entry's
-  raw form, with only those three members taken from the served row.
+  raw form, with only those members taken from the served row.
 - [pinned] **Who sent a message.** A user message's row may carry `sender`
   (added in 0.5.2, `DisplayRow::with_sender`): the attested module id of the
   caller whose send wrote the message (the route principal it arrived on,
@@ -920,6 +933,9 @@ display-ready row for an app's reader on a runner declaring
   message, one entry per tool call the message carries. `dispatched_to` is
   absent for a call never dispatched (denied, say); `call_key` is absent
   until the call is prepared or dispatched.
+- [pinned] On a runner declaring `call_identity` (§9.16), every display
+  tool-call entry and live tool event of a call carries this same
+  `call_key`, present exactly when it is present here.
 - [pinned] `tool_call_id` is the model's id: display only, not unique.
 
 ## 6. `run_ops`: `run.result` and run attribution
@@ -1252,7 +1268,8 @@ what a run called without decoding any message body.
   dispatched_to?, ordinal, position?, result_ordinal?}` (`tool_calls::RunToolCall`):
   - `tool_call_id` is the model's id, display only and not unique (§5);
     `call_key` is the call's key, present once the call was prepared or
-    dispatched (§11.3); `dispatched_to` is the module the call was
+    dispatched (§11.3), and the one a `call_identity` runner's display
+    entries carry for it (§9.16); `dispatched_to` is the module the call was
     dispatched to, absent for a call never dispatched (§5);
   - `name` is the model-facing tool name;
   - `args` is the arguments object exactly as dispatched, or, for a call
@@ -1435,11 +1452,11 @@ new members.
     carries the stored message's unit, so a consumer gets the re-read signal
     and the unit together.
   - `tool_started {mid, tool_call_id, name, arguments,
-    arguments_truncated?, started_at?}`: `mid` is the message holding the
+    arguments_truncated?, started_at?, call_key?, schema_pin?}`: `mid` is the message holding the
     call, `tool_call_id` the model's id as the stored row carries it, and
     `arguments` the arguments as JSON text.
   - `tool_finished {mid, tool_call_id, outcome, output_bytes,
-    finished_at?}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
+    finished_at?, call_key?, schema_pin?}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
     `error`, `cancelled` when a caller asked, `interrupted` when a restart
     cut the call and it was never sent again, `denied` when an approval or a
     hook refused it); `output_bytes` is the byte length of the result's
@@ -1467,6 +1484,11 @@ new members.
     not declare the group. On a runner without it, `send_id` may be absent
     for any run, and its absence says nothing.
   - Times are milliseconds since the Unix epoch.
+  - `call_key` and `schema_pin` on `tool_started` and `tool_finished` are
+    the call's key and the pin of the definition it was dispatched against,
+    on a runner declaring `call_identity` (added in 0.7.2, §9.16), with the
+    same values and the same presence rules as on the call's display row. A
+    runner without the group leaves both out.
   - `started_at` and `finished_at` (optional since 0.6.0; required in
     0.5.1 to 0.5.5) are the times the runner recorded when the tool call
     started and when it finished. A runner leaves a member out only when it
@@ -3340,6 +3362,58 @@ its host's file storage, not a second copy of the host's media store.
   as evidence. T is persisted and never goes backwards,
   including across restarts.
 
+### 9.16 `call_identity`: a tool call's key and dispatched definition on display entries
+
+An app that renders a tool call's own page from its display entry needs two
+facts the entry did not carry before 0.7.2: the call's key, by which it names
+the call to the module that renders the page, and the identity of the exact
+tool definition the call ran against, by which that module keys its views.
+A runner declaring `call_identity` (added in 0.7.2) puts both on every
+display tool-call entry it serves.
+
+- [pinned] The group adds no op. It extends the display tool-call entries
+  of `history_display` (§4.7) and the live `tool_started` and
+  `tool_finished` events of `live_events` (§7.1), so a runner declares it
+  only beside at least one of those groups: `check_describe` refuses it
+  by name when neither is declared (`call_identity_without_display`). It adds no
+  discovery metadata.
+- [pinned] The entries are every display row's `tool_call` part
+  (`display::ToolCallPart`) on `session.history` with `form: "display"`,
+  and every `tool_started` and `tool_finished` event (`live::ToolStarted`,
+  `live::ToolFinished`), replays included. `session.read` serves no display
+  form, so it gains nothing; its attribution already carries `call_key`
+  (§5).
+- [pinned] **`call_key`** is the call's key (§11.3), the same value
+  `session.read`'s attribution (§5) and `run.tool_calls` (§6.3) expose for
+  that call, so a call has one key on every surface. It is present on an
+  entry exactly when §5 exposes it: from the moment the call is prepared or
+  dispatched, and absent before. A call prepared and then denied keeps its
+  key; a call denied before any record held it alone has none.
+- [pinned] **`schema_pin`** is the `tool-provider/v1` `schema_pin` of the
+  tool definition the call was dispatched against (`tp1:<pct(tool)>:
+  <schema_digest>:<semantics>`, the same string the call carried to its
+  provider). The runner records it with the call's dispatch and serves that
+  record, frozen: it never recomputes the pin from a catalog read later, so
+  a provider deploy that changes the tool's definition after the call
+  leaves the call's pin as it was. A description edit never changes a pin
+  (tool-provider §3 `schema_digest`, §4 `schema_pin`). It is present on every entry of a call dispatched to
+  a tool provider, and absent for a call never dispatched (denied, refused
+  before dispatch, or sealed unsent) and for a runner-native tool, which has
+  no provider definition.
+- [pinned] Absent means unknown, never empty: neither member is ever an
+  empty string. Both are opaque strings to readers: a reader compares them
+  whole and never parses them, the pin included.
+- [pinned] Neither member enters a stored message body or the default
+  `session.read` entry; the runner keeps them beside the stored call, as it
+  keeps `client_message_id` (§4.7).
+- [pinned] A runner without the group leaves both members out of every
+  entry, and a reader treats their absence there as saying nothing. A
+  reader relies on the members only from a runner declaring the group.
+- [pinned] `call-identity.json` pins a call carrying both members (dispatched
+  to a tool provider), `call_key` only (a runner-native tool, and a call
+  prepared then denied) and neither (a call denied before it was keyed), on
+  display rows and on both live events, and the discovery answers.
+
 
 ## 10. `session.baseline` and the admission reply
 
@@ -4207,6 +4281,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `session_usage_unknown_fields_absent` | same groups; reasoning usage no scripted step reported stays absent, never zero |
 | `head_model_reflects_recorded_switch` | `queue`, `transcript_reads`; when the runner reports a model and the adapter can record a switch, the head follows that switch, not the frozen plan |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; a plan names A with neither flag and B with both; A gets supported modes minus `idle_start`, B gets all supported modes and interrupt, an unnamed caller gets no grant, and the owner gets all supported modes, interrupt and `owner: true`; an undeclared `head_sender` group or defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
+| `call_identity_key_matches_attribution` | `call_identity`, `queue`, `transcript_reads`, `dispatch_attribution`, and `history_display` with `host_history` or `live_events` with `streaming`; every display tool call and live tool event of two dispatched sibling calls carries the `call_key` §5 attributes to that call; not applicable without the group, never skipped |
+| `call_identity_pin_frozen_at_dispatch` | as above; each entry of a dispatched call carries the `schema_pin` the tool provider received with it, and still does after the catalog changes the tool's definition and another run; the catalog half is reported unchecked when the adapter cannot change the definition |
+| `call_identity_denied_call_has_no_pin` | as above; a call denied before dispatch carries no `schema_pin`, and `call_key` exactly as §5 attributes it; inapplicable without the adapter's denial fixture |
 | `head_incarnation_survives_cut_and_changes_on_recreation` | `queue`, `transcript_reads`; a reported incarnation stays equal across a real cut and differs after creation of a new log at the same key; defaulted cut/re-create hooks are inapplicable |
 | `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
 | `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a model whose one step is text ends `completed` with its final message, and with its directives where `turn_directives` is declared, never `max_steps` |

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.15.1
+
+- Depend on llm-runner 0.7.2. Add three cases gated on the `call_identity`
+  describe group, not applicable (never skipped) without it:
+  `call_identity_key_matches_attribution` (each display tool call and live
+  tool event carries the `call_key` `session.read` attributes to that call),
+  `call_identity_pin_frozen_at_dispatch` (each carries the `schema_pin` the
+  tool provider received, still after the catalog changes the tool's
+  definition) and `call_identity_denied_call_has_no_pin`. Faulty runners that
+  omit the key, serve a sibling's key, recompute the pin from the current
+  catalog, or pin a denied call each fail by name, including runners that
+  get only their live tool events wrong and their history rows right.
+- New adapter hooks, all defaulted so existing adapters compile unchanged:
+  `dispatched_schema_pin` (required with the group; the default fails the
+  pin case by name), `change_tool_definition` (without it the pin case
+  reports the catalog rule unchecked) and `deny_tool_call` (without it the
+  denied case is not applicable). The public `call_identity` module carries
+  the fixture definitions and their pins, checked in a test against the
+  tool-provider crate's pin function.
+- `display_row_is_the_profile_projection` takes `call_key` and `schema_pin`
+  from the served row, as it takes the other runner-filled members.
+- `output_refs_rewind` and `output_refs_compaction` report not applicable
+  when the adapter's `revert_session` or `compact_in_host` returns an error,
+  as the subject trait documents for both hooks and as the host-history and
+  lineage cases already do. They used to fail such a runner. A faulty runner
+  that can revert or compact but gets the result wrong still fails both
+  cases by name. Carried from 0.12.6.
+
 ## 0.15.0
 
 - Add `session_retention_release_after_idle`: delay release after durable activity

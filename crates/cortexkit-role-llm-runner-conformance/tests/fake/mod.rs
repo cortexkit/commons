@@ -516,6 +516,26 @@ pub struct Defects {
     /// A Setup answer whose `ride_wait_ms` is above the fake's own
     /// `ride_wait_max_ms` is accepted.
     pub ride_wait_cap_ignored: bool,
+    /// Display entries and live tool events leave out every call's
+    /// `call_key`.
+    pub call_identity_omits_key: bool,
+    /// Display entries and live tool events carry a sibling call's
+    /// `call_key` instead of their own.
+    pub call_identity_swaps_keys: bool,
+    /// `schema_pin` is computed from the catalog as it stands when read,
+    /// instead of the pin recorded at dispatch.
+    pub call_identity_pin_from_catalog: bool,
+    /// A call denied before dispatch carries the catalog's current pin.
+    pub call_identity_pin_on_denied: bool,
+    /// Live tool events leave out every call's `call_key`; display history
+    /// rows keep it.
+    pub call_identity_live_omits_key: bool,
+    /// Live tool events carry a sibling call's `call_key`; display history
+    /// rows carry the call's own.
+    pub call_identity_live_swaps_keys: bool,
+    /// Live tool events of a denied call carry the catalog's current pin;
+    /// display history rows carry none.
+    pub call_identity_live_pin_on_denied: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -635,6 +655,15 @@ struct World {
     current_case: Arc<Mutex<Option<&'static str>>>,
     /// Shared with [`FakeSubject::route_calls`].
     route_calls: RouteCalls,
+    /// The pin the scripted tool provider's catalog gives the scripted tool
+    /// for a session once `change_tool_definition` changed it; otherwise
+    /// the dispatched fixture definition's.
+    tool_pins: Mutex<BTreeMap<String, String>>,
+    /// The `schema_pin` each call arrived at the scripted tool provider
+    /// with, by its arguments.
+    dispatched_pins: Mutex<BTreeMap<String, Option<String>>>,
+    /// The arguments of the calls the runner denies before dispatch.
+    denied: Mutex<BTreeSet<String>>,
 }
 
 /// Route requests in arrival order: the case marked current when each
@@ -653,6 +682,21 @@ impl World {
     }
     fn serves(&self, group: &str) -> bool {
         self.groups.iter().any(|served| served == group)
+    }
+
+    /// The pin the scripted tool provider's catalog gives the scripted tool
+    /// for `session` now.
+    fn catalog_pin(&self, session: &str) -> String {
+        self.tool_pins
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .unwrap_or_else(|| {
+                cortexkit_role_llm_runner_conformance::call_identity::DISPATCHED_DEFINITION
+                    .schema_pin
+                    .to_owned()
+            })
     }
 
     /// Whether the fake numbers from a compaction provider's Setup
@@ -814,6 +858,11 @@ struct CallRec {
     run_id: String,
     intent: bool,
     result: bool,
+    /// The pin of the definition the call was dispatched against, recorded
+    /// on its dispatch intent; `None` for a call never dispatched.
+    schema_pin: Option<String>,
+    /// The runner refused the call before dispatch.
+    denied: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1745,6 +1794,8 @@ impl Module {
                             run_id: run_id.clone(),
                             intent: false,
                             result: false,
+                            schema_pin: None,
+                            denied: false,
                         },
                     );
                 }
@@ -1805,6 +1856,7 @@ impl Module {
             "intent" => {
                 if let Some(call) = sess.calls.get_mut(&text("call_key")) {
                     call.intent = true;
+                    call.schema_pin = record["schema_pin"].as_str().map(str::to_owned);
                 }
             }
             "result" => {
@@ -1816,6 +1868,7 @@ impl Module {
                     .unwrap_or_default();
                 if let Some(call) = sess.calls.get_mut(&key) {
                     call.result = true;
+                    call.denied = record["denied"] == json!(true);
                 }
                 if self.world.defects.run_tool_calls_embedded_results
                     || self.world.defects.run_tool_calls_omit_finished_arguments
@@ -1958,6 +2011,8 @@ impl Module {
                         run_id: String::new(),
                         intent: true,
                         result: true,
+                        schema_pin: None,
+                        denied: false,
                     },
                 );
                 let (call, result) = if profiled(&session) {
@@ -2010,8 +2065,36 @@ impl Module {
                 .iter()
                 .filter(|(_, call)| call.run_id == run_id)
                 .collect();
-            if let Some((key, call)) = mine.iter().find(|(_, call)| !call.intent) {
-                self.commit(session, json!({ "kind": "intent", "call_key": key }))?;
+            if let Some((key, call)) = mine.iter().find(|(_, call)| !call.intent && !call.result) {
+                if self
+                    .world
+                    .denied
+                    .lock()
+                    .unwrap()
+                    .contains(&call.arguments.to_string())
+                {
+                    // A hook refused the call: its denied result, with no
+                    // dispatch intent and nothing sent to the provider.
+                    self.commit(
+                        session,
+                        json!({ "kind": "result", "call_key": key, "denied": true,
+                                "content": {"executed": false, "error": {"code": "pre_tool_denied"}} }),
+                    )?;
+                    continue;
+                }
+                let mut intent = json!({ "kind": "intent", "call_key": key });
+                if self.world.serves(groups::CALL_IDENTITY) {
+                    // The pin of the definition the call goes out against,
+                    // frozen on its intent record.
+                    let pin = self.world.catalog_pin(session);
+                    intent["schema_pin"] = json!(pin);
+                    self.world
+                        .dispatched_pins
+                        .lock()
+                        .unwrap()
+                        .insert(call.arguments.to_string(), Some(pin));
+                }
+                self.commit(session, intent)?;
                 if self.world.held_first_reply(&call.arguments, key) {
                     return Ok(());
                 }
@@ -4698,6 +4781,9 @@ pub struct FakeSubject {
     pub head_sender_fixtures: bool,
     pub head_sender_group: bool,
     pub output_refs_group: bool,
+    /// Declare `call_identity`: display tool calls and live tool events
+    /// carry each call's `call_key` and dispatched `schema_pin`.
+    pub call_identity_group: bool,
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
@@ -4758,6 +4844,11 @@ pub struct FakeSubject {
     /// Refuse reads `transient` while a tag-rendering run waits for a Setup
     /// without descent, as the contract lets a runner.
     pub holds_reads_during_setup: bool,
+    /// The adapter cannot revert a session: `revert_session` errors.
+    pub cannot_revert: bool,
+    /// The adapter cannot compact a session in its host: `compact_in_host`
+    /// errors.
+    pub cannot_compact_in_host: bool,
     /// How the fake judges the prompt cache's lifetime.
     pub cache_ttl_defect: CacheTtlDefect,
     /// The case the suite is in, as a test's progress callback sets it: the
@@ -4823,6 +4914,7 @@ impl FakeSubject {
             head_sender_group: true,
             incarnation_fixtures: false,
             output_refs_group: false,
+            call_identity_group: false,
             descriptor_case: None,
             data_url_media: false,
             descriptor_fixtures: false,
@@ -4853,6 +4945,8 @@ impl FakeSubject {
             seed_hook: false,
             host_prefix_everywhere: 0,
             holds_reads_during_setup: false,
+            cannot_revert: false,
+            cannot_compact_in_host: false,
             cache_ttl_defect: CacheTtlDefect::None,
             current_case: Arc::new(Mutex::new(None)),
             route_calls: Arc::new(Mutex::new(Vec::new())),
@@ -4912,6 +5006,10 @@ impl FakeSubject {
                             self.output_refs_group
                                 .then(|| groups::OUTPUT_REFS.to_owned()),
                         )
+                        .chain(
+                            self.call_identity_group
+                                .then(|| groups::CALL_IDENTITY.to_owned()),
+                        )
                         .collect(),
                     delivery_order_modes: self.delivery_order_modes.clone(),
                     scripts: Mutex::new(BTreeMap::new()),
@@ -4948,6 +5046,9 @@ impl FakeSubject {
                     ride_clock: AtomicU64::new(0),
                     current_case: Arc::clone(&self.current_case),
                     route_calls: Arc::clone(&self.route_calls),
+                    tool_pins: Mutex::new(BTreeMap::new()),
+                    dispatched_pins: Mutex::new(BTreeMap::new()),
+                    denied: Mutex::new(BTreeSet::new()),
                 })
             })
             .clone()
@@ -5464,6 +5565,9 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
         mid: &str,
     ) -> Result<(), HarnessError> {
+        if self.cannot_revert {
+            return Err(HarnessError::new("this runner has no revert"));
+        }
         handle
             .0
             .commit(session, json!({"kind":"revert", "mid": mid}))
@@ -5637,6 +5741,9 @@ impl LlmRunnerSubject for FakeSubject {
         handle: &FakeHandle,
         session: &str,
     ) -> Result<(), HarnessError> {
+        if self.cannot_compact_in_host {
+            return Err(HarnessError::new("this host has no compaction"));
+        }
         handle
             .0
             .commit(session, json!({ "kind": "host_compact" }))
@@ -5768,6 +5875,44 @@ impl LlmRunnerSubject for FakeSubject {
             .get(&arguments.to_string())
             .copied()
             .unwrap_or(0)
+    }
+
+    async fn dispatched_schema_pin(
+        &self,
+        arguments: &Value,
+    ) -> Result<Option<String>, HarnessError> {
+        self.world()
+            .dispatched_pins
+            .lock()
+            .unwrap()
+            .get(&arguments.to_string())
+            .cloned()
+            .ok_or_else(|| HarnessError::new("the scripted provider never received that call"))
+    }
+
+    async fn change_tool_definition(&self, session: &str) -> Result<Option<String>, HarnessError> {
+        let pin = cortexkit_role_llm_runner_conformance::call_identity::CHANGED_DEFINITION
+            .schema_pin
+            .to_owned();
+        self.world()
+            .tool_pins
+            .lock()
+            .unwrap()
+            .insert(session.to_owned(), pin.clone());
+        Ok(Some(pin))
+    }
+
+    async fn deny_tool_call(
+        &self,
+        _session: &str,
+        arguments: &Value,
+    ) -> Result<bool, HarnessError> {
+        self.world()
+            .denied
+            .lock()
+            .unwrap()
+            .insert(arguments.to_string());
+        Ok(true)
     }
 
     fn not_executed_tool_result(

@@ -459,10 +459,17 @@ where
             }
         }
         "output_refs_rewind" => {
-            case.subject
+            // The subject trait lets an adapter that cannot revert return an
+            // error, and the cases that need a revert are then inapplicable.
+            if let Err(e) = case
+                .subject
                 .revert_session(case.handle.inner(), &session.name, &before_send)
                 .await
-                .map_err(|e| e.to_string())?;
+            {
+                return Ok(Ending::Inapplicable(format!(
+                    "the adapter cannot revert a session: {e}"
+                )));
+            }
             expect_code(
                 "removed set",
                 &expect_error(
@@ -481,10 +488,17 @@ where
         | "output_refs_writing_request"
         | "output_refs_held_placeholder" => {
             if name == "output_refs_compaction" {
-                case.subject
+                // As for a revert: a host that cannot compact makes the case
+                // inapplicable, the way the trait documents.
+                if let Err(e) = case
+                    .subject
                     .compact_in_host(case.handle.inner(), &session.name)
                     .await
-                    .map_err(|e| e.to_string())?;
+                {
+                    return Ok(Ending::Inapplicable(format!(
+                        "the adapter cannot compact a session in its host: {e}"
+                    )));
+                }
             } else if name == "output_refs_writing_request" {
                 case.subject
                     .renumber_output_refs(case.handle.inner(), &session.name)

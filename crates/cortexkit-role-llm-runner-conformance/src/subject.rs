@@ -592,6 +592,47 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// The `schema_pin` the scripted tool provider received on the actual
+    /// incoming call whose arguments are `arguments`, captured by the
+    /// provider when the call arrived, never read back from the runner. `None`
+    /// when the call arrived without one. Required when the runner declares
+    /// `call_identity`: the default fails those cases by name.
+    async fn dispatched_schema_pin(
+        &self,
+        _arguments: &Value,
+    ) -> Result<Option<String>, HarnessError> {
+        Err(HarnessError::new(
+            "dispatched schema_pin observation is not implemented",
+        ))
+    }
+
+    /// Change the definition the scripted tool provider's catalog gives
+    /// [`crate::SCRIPTED_TOOL`] for `session`, as a provider deploy would,
+    /// to [`crate::call_identity::CHANGED_DEFINITION`]'s input schema and
+    /// semantics, so the catalog's current pin for the tool differs from the
+    /// one any earlier call was dispatched against. Change the catalog only;
+    /// never touch the runner's records. Return the pin the catalog gives the
+    /// tool now, or `None` when the adapter cannot change it; the case then
+    /// reports that rule as not checked.
+    async fn change_tool_definition(&self, _session: &str) -> Result<Option<String>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Make the runner refuse the scripted call whose arguments are
+    /// `arguments` in `session` before it is dispatched, through the
+    /// runner's own refusal path (a pre-tool hook's deny, or a person
+    /// declining an approval), so the call gets the runner's denied result
+    /// and never reaches the tool provider. Called after the session's
+    /// script is installed and before its first send. Return false when the
+    /// adapter cannot; the denied-call case is then inapplicable, by name.
+    async fn deny_tool_call(
+        &self,
+        _session: &str,
+        _arguments: &Value,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
     /// The attested runner principal's bare module id, exactly as recorded in
     /// `session_binding.runner`, never `reserved:<id>` or any other prefix.
     /// This is not the caller-chosen harness or the project folder. The suite

@@ -200,6 +200,20 @@ where
             }
             expected.client_message_id = shown.row.client_message_id.clone();
             expected.sender = shown.row.sender.clone();
+            // Under call_identity the runner adds a tool call's key and, for a
+            // dispatched provider tool, its pin. The stored body carries
+            // neither, so they're copied here and the call_identity cases
+            // check their values.
+            for (call, served) in expected
+                .tool_calls_mut()
+                .zip(shown.row.parts.iter().filter_map(|part| match part {
+                    DisplayPart::ToolCall(call) => Some(call),
+                    _ => None,
+                }))
+            {
+                call.call_key = served.call_key.clone();
+                call.schema_pin = served.schema_pin.clone();
+            }
             if expected.role == "assistant" && expected.model.is_none() {
                 return Err(format!(
                     "{what}, the assistant row of {} carries no model: every assistant row names \

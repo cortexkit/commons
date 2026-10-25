@@ -1,0 +1,231 @@
+{
+  "describe": {
+    "accept": {
+      "majors": [
+        {
+          "version": "llm-runner/v1",
+          "ops": [
+            "role.describe",
+            "session.baseline",
+            "session.history",
+            "session.subscribe"
+          ],
+          "stability": "alpha"
+        }
+      ],
+      "implementation_version": "1.0.0",
+      "capabilities": [
+        "history_display",
+        "live_events",
+        "call_identity"
+      ],
+      "session_capabilities_from": "baseline"
+    },
+    "live_only": {
+      "majors": [
+        {
+          "version": "llm-runner/v1",
+          "ops": [
+            "role.describe",
+            "session.baseline",
+            "session.subscribe"
+          ],
+          "stability": "alpha"
+        }
+      ],
+      "implementation_version": "1.0.0",
+      "capabilities": [
+        "live_events",
+        "call_identity"
+      ],
+      "session_capabilities_from": "baseline"
+    },
+    "without_display": {
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.history"
+            ],
+            "stability": "alpha"
+          }
+        ],
+        "implementation_version": "1.0.0",
+        "capabilities": [
+          "host_history",
+          "call_identity"
+        ],
+        "session_capabilities_from": "baseline"
+      },
+      "problem": "call_identity_without_display"
+    },
+    "without": {
+      "majors": [
+        {
+          "version": "llm-runner/v1",
+          "ops": [
+            "role.describe",
+            "session.baseline",
+            "session.history"
+          ],
+          "stability": "alpha"
+        }
+      ],
+      "implementation_version": "1.0.0",
+      "capabilities": [
+        "history_display"
+      ],
+      "session_capabilities_from": "baseline"
+    }
+  },
+  "rows": [
+    {
+      "name": "a call dispatched to a tool provider carries both members",
+      "call_key": "run_7.c0",
+      "schema_pin": "tp1:conformance_echo:634bdb1fe768fce0974f9c89e6f15f889470a8288277c6433e4711ab6a5b9335:1",
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "toolu_1",
+            "name": "conformance_echo",
+            "arguments": "{\"marker\":\"x\"}",
+            "call_key": "run_7.c0",
+            "schema_pin": "tp1:conformance_echo:634bdb1fe768fce0974f9c89e6f15f889470a8288277c6433e4711ab6a5b9335:1"
+          }
+        ],
+        "model": "acme/m1"
+      }
+    },
+    {
+      "name": "a call to a runner-native tool carries call_key only",
+      "call_key": "run_7.c1",
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "toolu_2",
+            "name": "submit_result",
+            "arguments": "{\"answer\":42}",
+            "call_key": "run_7.c1"
+          }
+        ],
+        "model": "acme/m1"
+      }
+    },
+    {
+      "name": "a call denied before it was keyed carries neither",
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "toolu_3",
+            "name": "conformance_echo",
+            "arguments": "{\"marker\":\"y\"}"
+          }
+        ],
+        "model": "acme/m1"
+      }
+    },
+    {
+      "name": "a call prepared, then denied, carries call_key only",
+      "call_key": "run_7.c3",
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "toolu_4",
+            "name": "conformance_echo",
+            "arguments": "{\"marker\":\"z\"}",
+            "call_key": "run_7.c3"
+          }
+        ],
+        "model": "acme/m1"
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "tool_started of a call dispatched to a tool provider",
+      "call_key": "run_7.c0",
+      "schema_pin": "tp1:conformance_echo:634bdb1fe768fce0974f9c89e6f15f889470a8288277c6433e4711ab6a5b9335:1",
+      "event": {
+        "type": "tool_started",
+        "mid": "m7",
+        "tool_call_id": "toolu_1",
+        "name": "conformance_echo",
+        "arguments": "{\"marker\":\"x\"}",
+        "started_at": 1790000000000,
+        "call_key": "run_7.c0",
+        "schema_pin": "tp1:conformance_echo:634bdb1fe768fce0974f9c89e6f15f889470a8288277c6433e4711ab6a5b9335:1"
+      }
+    },
+    {
+      "name": "tool_finished of a call dispatched to a tool provider",
+      "call_key": "run_7.c0",
+      "schema_pin": "tp1:conformance_echo:634bdb1fe768fce0974f9c89e6f15f889470a8288277c6433e4711ab6a5b9335:1",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m7",
+        "tool_call_id": "toolu_1",
+        "outcome": "ok",
+        "output_bytes": 12,
+        "finished_at": 1790000000500,
+        "call_key": "run_7.c0",
+        "schema_pin": "tp1:conformance_echo:634bdb1fe768fce0974f9c89e6f15f889470a8288277c6433e4711ab6a5b9335:1"
+      }
+    },
+    {
+      "name": "tool_started of a call to a runner-native tool",
+      "call_key": "run_7.c1",
+      "event": {
+        "type": "tool_started",
+        "mid": "m7",
+        "tool_call_id": "toolu_2",
+        "name": "submit_result",
+        "arguments": "{\"answer\":42}",
+        "started_at": 1790000000600,
+        "call_key": "run_7.c1"
+      }
+    },
+    {
+      "name": "tool_finished of a call denied before it was keyed",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m7",
+        "tool_call_id": "toolu_3",
+        "outcome": "denied",
+        "output_bytes": 0,
+        "finished_at": 1790000000700
+      }
+    },
+    {
+      "name": "tool_finished of a call prepared, then denied",
+      "call_key": "run_7.c3",
+      "event": {
+        "type": "tool_finished",
+        "mid": "m7",
+        "tool_call_id": "toolu_4",
+        "outcome": "denied",
+        "output_bytes": 0,
+        "finished_at": 1790000000800,
+        "call_key": "run_7.c3"
+      }
+    }
+  ]
+}

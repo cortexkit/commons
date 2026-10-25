@@ -157,6 +157,14 @@ pub struct ToolStarted {
     /// Milliseconds since the Unix epoch; `None` when no time was recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<u64>,
+    /// As on the display row's tool call ([`crate::display::ToolCallPart::call_key`]),
+    /// on a runner declaring `call_identity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_key: Option<String>,
+    /// As on the display row's tool call ([`crate::display::ToolCallPart::schema_pin`]),
+    /// on a runner declaring `call_identity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_pin: Option<String>,
 }
 
 impl ToolStarted {
@@ -182,7 +190,21 @@ impl ToolStarted {
             arguments,
             arguments_truncated,
             started_at,
+            call_key: None,
+            schema_pin: None,
         }
+    }
+
+    /// Name the call's key, once the call is prepared or dispatched.
+    pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
+        self.call_key = Some(call_key.into());
+        self
+    }
+
+    /// Name the pin of the definition the call was dispatched against.
+    pub fn with_schema_pin(mut self, schema_pin: impl Into<String>) -> Self {
+        self.schema_pin = Some(schema_pin.into());
+        self
     }
 }
 
@@ -202,6 +224,12 @@ pub struct ToolFinished {
     /// Milliseconds since the Unix epoch; `None` when no time was recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<u64>,
+    /// As on [`ToolStarted::call_key`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_key: Option<String>,
+    /// As on [`ToolStarted::schema_pin`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_pin: Option<String>,
 }
 
 impl ToolFinished {
@@ -220,7 +248,21 @@ impl ToolFinished {
             outcome: outcome.into(),
             output_bytes,
             finished_at,
+            call_key: None,
+            schema_pin: None,
         }
+    }
+
+    /// Name the call's key, once the call is prepared or dispatched.
+    pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
+        self.call_key = Some(call_key.into());
+        self
+    }
+
+    /// Name the pin of the definition the call was dispatched against.
+    pub fn with_schema_pin(mut self, schema_pin: impl Into<String>) -> Self {
+        self.schema_pin = Some(schema_pin.into());
+        self
     }
 }
 
@@ -573,6 +615,73 @@ mod tests {
                 case["finished_at"].as_u64(),
             );
             assert_eq!(built, finished, "{name}");
+        }
+    }
+
+    /// Each `call_identity` event decodes strictly to the members its case
+    /// names and round-trips, and the setters rebuild it from the event
+    /// without them; an event without them keeps the bytes it had before
+    /// the group.
+    #[test]
+    fn call_identity_events_carry_their_members_or_leave_them_out() {
+        let file = vectors::load("call-identity.json");
+        for case in vectors::cases(&file, "events") {
+            let name = case["name"].as_str().unwrap();
+            let event =
+                LiveEvent::decode_strict(&case["event"]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(
+                serde_json::to_value(&event).unwrap(),
+                case["event"],
+                "{name}"
+            );
+            let (call_key, schema_pin, rebuilt) = match &event {
+                LiveEvent::ToolStarted(started) => {
+                    let arguments: Value = serde_json::from_str(&started.arguments).unwrap();
+                    let mut built = ToolStarted::new(
+                        &started.mid,
+                        &started.tool_call_id,
+                        &started.name,
+                        &arguments,
+                        None,
+                        started.started_at,
+                    );
+                    if let Some(key) = &started.call_key {
+                        built = built.with_call_key(key);
+                    }
+                    if let Some(pin) = &started.schema_pin {
+                        built = built.with_schema_pin(pin);
+                    }
+                    (
+                        &started.call_key,
+                        &started.schema_pin,
+                        LiveEvent::ToolStarted(built),
+                    )
+                }
+                LiveEvent::ToolFinished(finished) => {
+                    let mut built = ToolFinished::new(
+                        &finished.mid,
+                        &finished.tool_call_id,
+                        &finished.outcome,
+                        finished.output_bytes,
+                        finished.finished_at,
+                    );
+                    if let Some(key) = &finished.call_key {
+                        built = built.with_call_key(key);
+                    }
+                    if let Some(pin) = &finished.schema_pin {
+                        built = built.with_schema_pin(pin);
+                    }
+                    (
+                        &finished.call_key,
+                        &finished.schema_pin,
+                        LiveEvent::ToolFinished(built),
+                    )
+                }
+                other => panic!("{name}: not a tool event: {other:?}"),
+            };
+            assert_eq!(call_key.as_deref(), case["call_key"].as_str(), "{name}");
+            assert_eq!(schema_pin.as_deref(), case["schema_pin"].as_str(), "{name}");
+            assert_eq!(rebuilt, event, "{name}");
         }
     }
 

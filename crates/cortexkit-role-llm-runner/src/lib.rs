@@ -201,6 +201,13 @@ pub mod capabilities {
 
     /// Content-free, non-stored `step.finished.v1` hints after durable recording.
     pub const STEP_EVENTS: &str = "step_events";
+    /// `call_key` and `schema_pin` on display tool calls (`display::ToolCallPart`)
+    /// and on the live `tool_started` and `tool_finished` events: the call's
+    /// key once prepared or dispatched, and the pin of the tool definition it
+    /// was dispatched against, frozen at dispatch. Adds no op of its own; it
+    /// requires [`HISTORY_DISPLAY`] or [`LIVE_EVENTS`], whose entries it
+    /// extends.
+    pub const CALL_IDENTITY: &str = "call_identity";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -348,6 +355,9 @@ pub mod capabilities {
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (STEP_EVENTS, &[]),
+        // Extends whichever display surface the runner serves; `check_describe`
+        // requires at least one of them by name.
+        (CALL_IDENTITY, &[]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (HELD_CALLS, &[ops::RUN_STATUS]),
@@ -502,10 +512,11 @@ mod tests {
             ops::SEND_STATUS,
         ];
         for (group, group_ops) in capabilities::GROUPS {
-            // Step events are plain bus publishes, not management-route ops.
+            // Step events are plain bus publishes, not management-route ops,
+            // and call identity extends either of two ops, neither required.
             assert_eq!(
                 group_ops.is_empty(),
-                *group == capabilities::STEP_EVENTS,
+                [capabilities::STEP_EVENTS, capabilities::CALL_IDENTITY].contains(group),
                 "{group}"
             );
             for op in *group_ops {

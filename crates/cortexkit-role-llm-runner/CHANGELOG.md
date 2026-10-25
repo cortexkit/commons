@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.2
+
+- Add the `call_identity` describe group (contract §9.16). A runner declaring
+  it puts `call_key` (the key `session.read` and `run.tool_calls` expose for
+  the call, once prepared or dispatched) and `schema_pin` (the
+  `tool-provider/v1` pin of the definition the call was dispatched against,
+  frozen at dispatch) on every display tool call and on the live
+  `tool_started` and `tool_finished` events. A call never dispatched or one to
+  a runner-native tool has no pin. `check_describe` refuses the group without
+  `history_display` or `live_events` (`call_identity_without_display`).
+- Add optional `call_key` and `schema_pin` to `display::ToolCallPart`,
+  `live::ToolStarted` and `live::ToolFinished`, omitted when absent, with
+  `with_call_key` and `with_schema_pin` setters, and
+  `DisplayRow::tool_calls_mut` for filling them. Every existing vector keeps
+  its bytes; the new `call-identity.json` pins both members, `call_key`
+  only, and neither.
+
 ## 0.7.1
 
 - Add default-omitted `min_hold_days` and `deletion_waits_for_readers` describe

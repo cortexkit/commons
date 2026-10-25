@@ -78,6 +78,55 @@ fn call_holder(sess: &Sess, key: &str) -> (String, String) {
     (message.mid.clone(), name.to_owned())
 }
 
+/// The `call_key` and `schema_pin` a display entry of call `key` carries on
+/// a runner declaring `call_identity`, with the fake's deliberate breaks.
+/// `live` is set for a live tool event and clear for a display history row,
+/// so a break can hit one surface and leave the other right, as a runner
+/// whose two code paths disagree would.
+fn call_identity(
+    world: &World,
+    session: &str,
+    sess: &Sess,
+    key: &str,
+    live: bool,
+) -> (Option<String>, Option<String>) {
+    let defects = &world.defects;
+    let Some(call) = sess.calls.get(key) else {
+        return (None, None);
+    };
+    let shown_key = if defects.call_identity_omits_key
+        || (live && defects.call_identity_live_omits_key)
+    {
+        None
+    } else if defects.call_identity_swaps_keys || (live && defects.call_identity_live_swaps_keys) {
+        let siblings = sess
+            .messages
+            .iter()
+            .find(|m| m.calls.iter().any(|k| k == key))
+            .map(|m| m.calls.clone())
+            .unwrap_or_default();
+        siblings
+            .into_iter()
+            .find(|k| k != key)
+            .or_else(|| Some(key.to_owned()))
+    } else {
+        Some(key.to_owned())
+    };
+    let pin = if call.denied {
+        (defects.call_identity_pin_on_denied || (live && defects.call_identity_live_pin_on_denied))
+            .then(|| world.catalog_pin(session))
+    } else if call.intent && defects.call_identity_pin_from_catalog {
+        Some(world.catalog_pin(session))
+    } else {
+        call.schema_pin.clone()
+    };
+    (shown_key, pin)
+}
+
+/// The stored live event's member naming the call it is about, which the
+/// fake removes before serving the event.
+const EVENT_CALL_KEY: &str = "fake_call_key";
+
 /// Record the typed live events the record just applied maps onto: the
 /// run's start and end, a call's start and finish, and every message it
 /// wrote, each started then finished.
@@ -118,6 +167,7 @@ pub(super) fn live_events(
                     at,
                 )));
                 started["arguments_value"] = call.arguments.clone();
+                started[EVENT_CALL_KEY] = json!(key);
                 out.push(started);
             }
         }
@@ -125,13 +175,20 @@ pub(super) fn live_events(
             let key = record["call_key"].as_str().unwrap_or_default();
             if let Some(call) = sess.calls.get(key) {
                 let (mid, _) = call_holder(sess, key);
-                out.push(event(LiveEvent::ToolFinished(ToolFinished::new(
+                let outcome = if call.denied {
+                    live::tool_outcomes::DENIED
+                } else {
+                    live::tool_outcomes::OK
+                };
+                let mut finished = event(LiveEvent::ToolFinished(ToolFinished::new(
                     mid,
                     &call.tool_call_id,
-                    live::tool_outcomes::OK,
+                    outcome,
                     result_text(&record["content"]).len() as u64,
                     at,
-                ))));
+                )));
+                finished[EVENT_CALL_KEY] = json!(key);
+                out.push(finished);
             }
         }
         "legacy_call" => {
@@ -305,6 +362,22 @@ impl Module {
             }
         }
         output_refs::decorate(sess, &entry.mid, &mut row);
+        if self.world.serves(groups::CALL_IDENTITY) {
+            if let Some(message) = sess.messages.iter().find(|m| m.mid == entry.mid) {
+                for call in row.tool_calls_mut() {
+                    let key = message.calls.iter().find(|key| {
+                        sess.calls
+                            .get(*key)
+                            .is_some_and(|c| c.tool_call_id == call.tool_call_id)
+                    });
+                    if let Some(key) = key {
+                        let (call_key, pin) = call_identity(&self.world, session, sess, key, false);
+                        call.call_key = call_key;
+                        call.schema_pin = pin;
+                    }
+                }
+            }
+        }
         row
     }
 
@@ -396,6 +469,10 @@ impl Module {
                     continue;
                 }
                 let mut event = event.clone();
+                let call_key = event
+                    .as_object_mut()
+                    .and_then(|e| e.remove(EVENT_CALL_KEY))
+                    .and_then(|key| key.as_str().map(str::to_owned));
                 if let Some(arguments) = event
                     .as_object_mut()
                     .and_then(|e| e.remove("arguments_value"))
@@ -409,6 +486,19 @@ impl Module {
                         event["started_at"].as_u64(),
                     );
                     event = serde_json::to_value(LiveEvent::ToolStarted(started)).unwrap();
+                }
+                if let (Some(key), Some(sess), true) = (
+                    call_key,
+                    sessions.get(session),
+                    self.world.serves(groups::CALL_IDENTITY),
+                ) {
+                    let (call_key, pin) = call_identity(&self.world, session, sess, &key, true);
+                    if let Some(call_key) = call_key {
+                        event["call_key"] = json!(call_key);
+                    }
+                    if let Some(pin) = pin {
+                        event["schema_pin"] = json!(pin);
+                    }
                 }
                 let mut position = cursor(index + 1);
                 position.insert("sub".into(), json!(sub));

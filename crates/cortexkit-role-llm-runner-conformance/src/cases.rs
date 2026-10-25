@@ -93,6 +93,9 @@ where
                 crate::session_retention::run(self, name).await
             }
             name if name.starts_with("step_events_") => crate::step_events::run(self, name).await,
+            name if name.starts_with("call_identity_") => {
+                crate::call_identity::run(self, name).await
+            }
             name if name.starts_with("system_text_default_") => {
                 crate::system_text_default::run(self, name).await
             }
