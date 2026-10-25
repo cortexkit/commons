@@ -1,6 +1,7 @@
 //! Output-reference projection stored beside messages in the fake's log.
 use super::*;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use cortexkit_role_llm_runner::content_digest::sha256_hex;
 use cortexkit_role_llm_runner::output_refs::{
     self as refs, Descriptor, Record, ReferenceSlot, Resolution, Target,
 };
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub(super) struct State {
     pub sets: Vec<StoredSet>,
     pub snapshots: BTreeMap<String, Vec<u8>>,
+    pub original_tool_results: BTreeMap<String, String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct StoredSet {
@@ -26,7 +28,12 @@ fn targets(sess: &Sess, defects: &Defects) -> BTreeMap<u64, Target> {
         };
         let mut target = if m.body["role"] == "tool" {
             let key = m.body["call_key"].as_str().unwrap_or("held-key");
-            Target::text(&part, result_text(&m.body["content"]).into_bytes()).with_tool(
+            let content = if m.body["parts"].is_array() {
+                &m.body["parts"][part.parse::<usize>().unwrap()]["text"]
+            } else {
+                &m.body["content"]
+            };
+            Target::text(&part, result_text(content).into_bytes()).with_tool(
                 key,
                 SCRIPTED_TOOL,
                 TOOL_MODULE,
@@ -155,6 +162,20 @@ pub(super) fn capture(sess: &Sess, record: &Value, defects: &Defects) -> Value {
                 }
             }
             _ => {}
+        }
+    }
+    if defects.output_refs_uncapped_metadata {
+        for set in &mut sets {
+            for record in &mut set.records {
+                if let Some(original) = record
+                    .call_key
+                    .as_ref()
+                    .and_then(|key| sess.output_refs.original_tool_results.get(key))
+                {
+                    record.bytes = Some(original.len() as u64);
+                    record.sha256 = Some(sha256_hex(original.as_bytes()));
+                }
+            }
         }
     }
     let mut known: BTreeSet<_> = sess.output_refs.snapshots.keys().cloned().collect();
