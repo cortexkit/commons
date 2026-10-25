@@ -100,8 +100,11 @@ pub struct DisplayRow {
     /// Every part, in the stored message's order.
     #[serde(default)]
     pub parts: Vec<DisplayPart>,
-    /// The model that wrote the message. Every assistant row carries it; the
-    /// runner fills it where its stored body does not say.
+    /// The recorded model that wrote the message. A message written through
+    /// the runner's own run always has one. Imported or adopted messages may
+    /// lack a recorded model: absent means unknown, never a guess, a default
+    /// or the session's current model. Readers must handle absence as unknown
+    /// before a runner omits it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// The `client_message_id` of the send that created this user message,
@@ -887,6 +890,9 @@ impl DisplayEntry {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct DisplayPage {
+    /// Original identities of the pruned stored parts represented on this page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
     /// Oldest first.
     pub messages: Vec<DisplayEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -900,6 +906,13 @@ pub struct DisplayPage {
 }
 
 impl DisplayPage {
+    pub fn with_pruned_reasoning(
+        mut self,
+        parts: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
+    ) -> Self {
+        self.pruned_reasoning = parts;
+        self
+    }
     /// The display form of a raw `page`, each entry's row from `row`.
     pub fn from_history<F, E>(page: &crate::history::HistoryPage, mut row: F) -> Result<Self, E>
     where
@@ -915,6 +928,7 @@ impl DisplayPage {
             older: page.older.clone(),
             newer: page.newer.clone(),
             history_version: page.history_version,
+            pruned_reasoning: page.pruned_reasoning.clone(),
         })
     }
 
@@ -943,6 +957,7 @@ impl DisplayPage {
             older: self.older.clone(),
             newer: self.newer.clone(),
             history_version: self.history_version,
+            pruned_reasoning: self.pruned_reasoning.clone(),
         };
         skeleton.check(first_ordinal)
     }
@@ -1214,6 +1229,7 @@ mod tests {
     fn a_display_page_checks_like_a_raw_page() {
         let row = DisplayRow::new("user", vec![DisplayPart::Text(TextPart::new("0", "hi"))]);
         let page = DisplayPage {
+            pruned_reasoning: Vec::new(),
             messages: vec![
                 DisplayEntry::new("m1", 1, row.clone()).with_ordinal(1),
                 DisplayEntry::new("m0", 1, row).with_ordinal(0),

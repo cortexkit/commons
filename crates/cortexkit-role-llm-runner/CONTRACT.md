@@ -85,7 +85,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, archive_prunes_reasoning?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -167,6 +167,7 @@ shipping runner with this document.
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
+| `archive_prunes_reasoning` | `session.read`; extends every served `session.read` and `session.history` page form | §9.14.1 |
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `max_steps` | `session.send` with `stop_when.max_steps` | §9.3.1 |
@@ -367,7 +368,7 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 
 ### 4.2 The page
 
-`{messages, lineage_id, next_from_ordinal?, head?}` (`ReadPage`).
+`{messages, lineage_id, next_from_ordinal?, head?, pruned_reasoning?}` (`ReadPage`).
 
 - [pinned] Every page of a session that has a lineage carries `lineage_id`.
   A session that was never written has no lineage yet: a read of it returns
@@ -388,7 +389,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   final values: what later steps render and what executed. The raw view and
   the model view then differ only by compaction.
 - [pinned] **Only finished messages.** `session.read` returns only messages
-  the runner will no longer change. A message still being generated (a
+  the runner will no longer change, except for declared archive pruning
+  (§9.14.1). A message still being generated (a
   model step streaming, a tool result being written) is never an entry
   until it completes. This is stricter than, and contains, the final-values
   rule above; streaming progress reaches a consumer through the stream
@@ -397,7 +399,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   (§4.5). Once `session.read` has returned an entry
   under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
   `written_at`, `delivered_as`, and its part keys and tags never change
-  under that lineage. Envelope members that report later state move forward
+  under that lineage, except for declared archive pruning (§9.14.1).
+  Envelope members that report later state move forward
   only as their own rules say (`run.final`, §6; `tool_calls`'
   `call_key`, `dispatched_to` and `indeterminate`, §5). A runner that reads
   from a host freezes the bytes it first ingested and serves its own
@@ -405,10 +408,12 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   model (a revert, an edited part) and a recovery that drops or rewrites a
   written message (§14, property 4) start a new lineage, so reads of the old
   one are refused `lineage_changed`; changed bytes never appear under the
-  same lineage. A recovery that only appends, such as closing a never-sent
+  same lineage except for declared archive pruning (§9.14.1). A recovery that only appends, such as closing a never-sent
   call with its never-executed result (§14, property 4, shape (b)), keeps
   the lineage, because no byte already written changes. A reader may treat
-  changed bytes under one lineage as a runner defect.
+  changed bytes under one lineage as a runner defect, except for the
+  precisely listed archive-pruning changes of §9.14.1. That exception changes
+  only listed part payloads, never identity, ordering, tags or write-time digests.
 - [pinned] **Bookkeeping stays out.** Host records a runner writes for its
   own compaction bookkeeping (a host's native compaction message, summary or
   entry) are outside the transcript: they never appear in `session.read`
@@ -453,7 +458,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   text includes a tool result's string content and an OpenCode tool output.
   A described call keeps its id and name beside its `args_ref`; a result keeps
   its call id or `tool_use_id`, `is_error` and every other non-payload field;
-  reasoning retains its kind, signatures and provider metadata.
+  reasoning retains its kind, signatures and provider metadata, except for
+  payloads already pruned under §9.14.1.
 - [pinned] `DESCRIPTOR_MESSAGE_MAX = 3_145_728` bytes bounds one complete
   encoded `ReadMessage`, leaving 1 MiB of the daemon frame for the page
   envelope and transport header. If describing all media and all payloads
@@ -461,7 +467,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   first, ties broken by earlier part order, until it fits. Selection depends
   only on that message's own content and these constants, never `max_bytes`,
   page position or neighboring messages: repeated reads on one lineage return
-  identical bytes. The runner selects fewer messages to keep the complete
+  identical bytes except for declared archive pruning (§9.14.1). The runner
+  selects fewer messages to keep the complete
   page inside the frame. `max_bytes` is still soft for one message: an
   over-cap message is served alone. The only descriptors-mode
   `reply_too_large` is non-payload structure exceeding the fixed budget; its
@@ -481,7 +488,8 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   nested media excluded. Both digest fields are optional in inline mode.
   Digests use `content_digest::content_digest`:
   lowercase SHA-256 over RFC 8785 (JCS) of the full stored message or full
-  stored part, before any media rendering (§9.12). This is the same function used for compaction
+  stored part as originally written, before archive pruning (§9.14.1) or any
+  media rendering (§9.12). This is the same function used for compaction
   notices' `through_digest` and `descends_from`, re-exported by the provider
   crate; it never hashes descriptors. Digest rows with keys not matching the
   actual parts, missing rows, duplicate keys or wrong order are decode errors
@@ -790,7 +798,7 @@ need the whole-session walk the cost rule removes.
     `role.describe.max_bytes`), `media` and `include_originals` are those of
     `session.read`, with the same oversize and `reply_too_large` rules.
 - [pinned] The page is `{messages, lineage_id, history_version, older?,
-  newer?}` (`history::HistoryPage`), entries oldest to newest. `lineage_id`
+  newer?, pruned_reasoning?}` (`history::HistoryPage`), entries oldest to newest. `lineage_id`
   is the session's current lineage and `history_version` its history
   version (§4.3), as `session.head` states them; a never-written session
   answers an empty page without either.
@@ -806,6 +814,10 @@ need the whole-session walk the cost rule removes.
   changes that entry, or anything older, makes the runner refuse the cursor
   `cursor_expired`, never answer it with an empty page. A cursor minted for
   another session is refused `cursor_expired` too.
+  Declared archive pruning (§9.14.1), like a cut, preserves cursors: a cursor
+  issued before pruning stays valid. Pages served afterward carry
+  `pruned_reasoning` for the parts they serve pruned. A reader continuing a
+  walk learns of the payload change from its page, not from `cursor_expired`.
 - [pinned] **Entries** (`history::HistoryEntry`) are `session.read`'s entry
   envelope (§4.2) with two differences: every entry carries `mid` and
   `written_at`, and `ordinal` appears only where the runner has one. A
@@ -887,13 +899,22 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] The row comes from one pure function per serializer profile
   (`display::anthropic_messages`, `display::opencode_aisdk`, or
   `display::project` by name). A runner calls it on the entry's stored body
-  and then fills what the body lacks: `model` (the model that wrote it,
-  carried by every assistant row; an `anthropic-messages` body names none),
+  and then fills what the body lacks: `model` (the recorded model that wrote
+  it; an `anthropic-messages` body names none),
   `client_message_id` (§9.11) and `sender` (below), and on a runner
   declaring `call_identity` each tool call's `call_key` and `schema_pin`
   (§9.16). The conformance kit
   checks that a served row equals the function applied to the same entry's
   raw form, with only those members taken from the served row.
+- [pinned] An assistant row carries `model` whenever the runner recorded
+  which model wrote that message. A message written through the runner's
+  own run always has a recorded model, so its row always carries it. Only
+  a message that entered without a recorded model may omit it, for example
+  one imported or adopted from another harness's transcript. Absent means
+  unknown: a runner never fills it with a guess, a default, or the session's
+  current model.
+- [informative] Before a runner omits `model`, readers must treat its absence
+  as unknown.
 - [pinned] **Who sent a message.** A user message's row may carry `sender`
   (added in 0.5.2, `DisplayRow::with_sender`): the attested module id of the
   caller whose send wrote the message (the route principal it arrived on,
@@ -3271,7 +3292,8 @@ its host's file storage, not a second copy of the host's media store.
 - [pinned] Days and archive clocks count from the session's last durable
   activity: sends, adopt and run lifecycle, never cache warms or maintenance.
   An archived session's reads return exactly what they returned before archive;
-  only storage changes. Nothing is deleted while a run is active or a send is
+  only storage changes, unless `archive_prunes_reasoning` is declared and
+  §9.14.1's exception applies. Nothing is deleted while a run is active or a send is
   queued, whether deletion is due to days expiry, release or the fallback hold.
 - [pinned] No session's content is deleted less than `min_hold_days` after the
   later of its last durable activity and its release. The floor is a minimum,
@@ -3327,7 +3349,8 @@ its host's file storage, not a second copy of the host's media store.
   time; `delete_after_ms` is the earliest deletion time, the end of the floor
   measured from the later of release and last durable activity. Deletion may
   come later only while waiting on a declared reader (and never while a run is
-  active or a send queued). Reads and media are served as before. `released`
+  active or a send queued). Reads and media are served as before, subject only
+  to declared archive pruning (§9.14.1). `released`
   marks the session as ended; it does not change `last_run_state`, which keeps
   reporting the run as it is until the run ends. A send to the name is refused `session_released`
   (retryable) with `detail.delete_after_ms`. Release answers `pending`, including
@@ -3359,6 +3382,69 @@ its host's file storage, not a second copy of the host's media store.
   accepts and silently skips backup. A session with `backup: false` is absent
   after a restore, never half there. A restore never brings back a deleted
   incarnation, and never deletes a later incarnation under the same name.
+
+### 9.14.1 `archive_prunes_reasoning`: in-place pruning at rest
+
+- [pinned] A runner declares the `archive_prunes_reasoning` capability group
+  and the required describe object `archive_prunes_reasoning: {kinds: [...]}`
+  (`archive_prunes_reasoning::ArchivePrunesReasoning`). `kinds` is nonempty,
+  has no duplicates and contains only `reasoning`, `opaque_reasoning` and
+  `signature`. `check_describe` refuses either the group or object without
+  the other, or invalid kinds. Without the group, §9.14 and §4.2 hold exactly
+  as before: archive never changes served content. A runner applies only the
+  kinds it lists.
+- [pinned] Pruning is allowed only in an archived session at rest: no active
+  run and no queued send, the same exclusion as retention deletion. It is
+  an in-place payload change, not a cut, revert or new lineage.
+- [pinned] The kinds (`archive_prunes_reasoning::kinds`) mean:
+  - `reasoning`: empty a reasoning part's payload, keeping `text: ""` when
+    its format requires text, and removing optional signatures and encrypted
+    data. A `redacted_reasoning {data, provider_format}` part keeps required
+    `data: ""` and its `provider_format`; `reasoning {text, signature?}`
+    keeps `text: ""` and drops the optional signature.
+  - `opaque_reasoning`: remove only encrypted/opaque fields; a readable
+    summary in the same part stays byte-identical. A `redacted_reasoning`
+    part keeps required `data`, rewritten as the same item JSON with only
+    encrypted fields removed, preserving its summary and all other fields.
+  - `signature`: remove a provider signature on a non-reasoning part, for
+    example assistant text or a tool call. Text and call arguments stay
+    byte-identical. A call drops its optional `thought_signature`; a
+    `text_with_state` part keeps required `provider_state`, with only the
+    signature string inside it emptied to `""`.
+- [pinned] Every field required by the stored format stays present. Required
+  string payloads are emptied to `""`, never removed. No member is added to
+  a block: only the page says what was pruned. A reader encountering a kind
+  it does not know treats that part as changed in an unknown way: kept in
+  place, but its payload is not trusted.
+- [pinned] A pruned part stays at the same index with the same type and key.
+  Thus `m<ordinal>#<index>`, tags, resolve's `part`, `part_digests` positions
+  and reminder slots never move. Lineage, ordinals, tags, `history_version`
+  and history cursors are unchanged. Removing a signature never changes whether a part counts;
+  a `signature`-kind text part keeps its number and its exact text.
+- [pinned] Message `digest` and every `part_digests` entry retain their
+  write-time values, computed over original content, not pruned content.
+- [pinned] Every page serving a pruned part carries
+  `pruned_reasoning: [{mid, part, kind, bytes, sha256}]`
+  (`archive_prunes_reasoning::PrunedReasoning`), for exactly the pruned parts
+  it serves. This applies to raw and model `session.read` (`ReadPage`,
+  `ModelPage`) and raw and display `session.history` (`HistoryPage`,
+  `DisplayPage`), on every read, not only the first after pruning. A model
+  page does not list a stored part hidden by compaction. The member is absent
+  when no served part was pruned. `bytes` is the length of the original
+  stored part's RFC 8785 (JCS) bytes, the bytes `content_digest` hashes;
+  `sha256` equals its write-time `part_digests` entry's `digest`.
+- [pinned] **Re-read rule for readers.** A message re-read after pruning
+  differs from its prior served copy only in the parts its page lists, and
+  each listed entry's `sha256` equals that part's write-time digest. A reader
+  may rely on this to accept the change and replace its held copy. Part
+  identity and digests do not move when it does so.
+- [pinned] A runner never prunes a session enrolled with a compaction provider
+  whose `compaction.setup` ready answer did not list `pruned_reasoning` in
+  `accepts`. Omission or an empty list grants no permission. Sessions with no
+  compaction provider are unaffected by this enrollment gate.
+- [informative] Reopening continues without the pruned reasoning. Before
+  pruning a model family, the runner is responsible for ensuring that its
+  model provider accepts the resulting history.
 
 ### 9.15 `log-read-watermark/v1`: durable log-reader progress
 

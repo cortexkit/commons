@@ -1,0 +1,335 @@
+{
+  "cases": [
+    {
+      "kind": "reasoning",
+      "original": {
+        "type": "reasoning",
+        "text": "Consider the blue door.",
+        "signature": "invented-signature"
+      },
+      "served": {
+        "type": "reasoning",
+        "text": ""
+      },
+      "original_message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "signature": "invented-signature"
+          }
+        ]
+      },
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [
+          {
+            "ordinal": 0,
+            "mid": "message-0",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "reasoning",
+                  "text": ""
+                }
+              ]
+            },
+            "digest": "90f3682fa6d73b8f6810749768f58598d2a81d4011c8fb8bf61e638ee0abe23e",
+            "part_digests": [
+              {
+                "part": "m0#0",
+                "digest": "66f98956bd183583a1e905895bb76999de5846e77a6b96bb1c4e043447dd2ce0"
+              }
+            ],
+            "tags": [
+              {
+                "part": "m0#0"
+              }
+            ]
+          }
+        ],
+        "pruned_reasoning": [
+          {
+            "mid": "message-0",
+            "part": "m0#0",
+            "kind": "reasoning",
+            "bytes": 86,
+            "sha256": "66f98956bd183583a1e905895bb76999de5846e77a6b96bb1c4e043447dd2ce0"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "reasoning",
+      "original": {
+        "type": "redacted_reasoning",
+        "data": "invented-opaque-data",
+        "provider_format": "example"
+      },
+      "served": {
+        "type": "redacted_reasoning",
+        "data": "",
+        "provider_format": "example"
+      },
+      "original_message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "redacted_reasoning",
+            "data": "invented-opaque-data",
+            "provider_format": "example"
+          }
+        ]
+      },
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [
+          {
+            "ordinal": 1,
+            "mid": "message-1",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "redacted_reasoning",
+                  "data": "",
+                  "provider_format": "example"
+                }
+              ]
+            },
+            "digest": "4120f763e83103163ad349dfc760dc105d1d1fb7a6708f99638c72ec6319ec13",
+            "part_digests": [
+              {
+                "part": "m1#0",
+                "digest": "a96c0d1abeee21e1e913cc2f56583acbcf96f93bf9b5e1508ea47e9bf7039e58"
+              }
+            ],
+            "tags": [
+              {
+                "part": "m1#0"
+              }
+            ]
+          }
+        ],
+        "pruned_reasoning": [
+          {
+            "mid": "message-1",
+            "part": "m1#0",
+            "kind": "reasoning",
+            "bytes": 87,
+            "sha256": "a96c0d1abeee21e1e913cc2f56583acbcf96f93bf9b5e1508ea47e9bf7039e58"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "opaque_reasoning",
+      "original": {
+        "type": "redacted_reasoning",
+        "data": "{\"encrypted_content\":\"invented-ciphertext\",\"id\":\"item-example\",\"summary\":[{\"text\":\"Consider the blue door.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}",
+        "provider_format": "example-item"
+      },
+      "served": {
+        "type": "redacted_reasoning",
+        "data": "{\"id\":\"item-example\",\"summary\":[{\"text\":\"Consider the blue door.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}",
+        "provider_format": "example-item"
+      },
+      "original_message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "redacted_reasoning",
+            "data": "{\"encrypted_content\":\"invented-ciphertext\",\"id\":\"item-example\",\"summary\":[{\"text\":\"Consider the blue door.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}",
+            "provider_format": "example-item"
+          }
+        ]
+      },
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [
+          {
+            "ordinal": 2,
+            "mid": "message-2",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "redacted_reasoning",
+                  "data": "{\"id\":\"item-example\",\"summary\":[{\"text\":\"Consider the blue door.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}",
+                  "provider_format": "example-item"
+                }
+              ]
+            },
+            "digest": "613d487b9bdd6babaa8c2409b85ed266fcf870796a5c3780675e5d8e070716fd",
+            "part_digests": [
+              {
+                "part": "m2#0",
+                "digest": "203f324596cf074ace9b366366d9ae49d079a8a62bf3a3fbe35f4fe8f888b53b"
+              }
+            ],
+            "tags": [
+              {
+                "part": "m2#0"
+              }
+            ]
+          }
+        ],
+        "pruned_reasoning": [
+          {
+            "mid": "message-2",
+            "part": "m2#0",
+            "kind": "opaque_reasoning",
+            "bytes": 245,
+            "sha256": "203f324596cf074ace9b366366d9ae49d079a8a62bf3a3fbe35f4fe8f888b53b"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "signature",
+      "original": {
+        "type": "tool_call",
+        "id": "call-example",
+        "name": "open_door",
+        "arguments": "{\"color\": \"blue\"}",
+        "thought_signature": "invented-signature"
+      },
+      "served": {
+        "type": "tool_call",
+        "id": "call-example",
+        "name": "open_door",
+        "arguments": "{\"color\": \"blue\"}"
+      },
+      "original_message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "call-example",
+            "name": "open_door",
+            "arguments": "{\"color\": \"blue\"}",
+            "thought_signature": "invented-signature"
+          }
+        ]
+      },
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [
+          {
+            "ordinal": 3,
+            "mid": "message-3",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_call",
+                  "id": "call-example",
+                  "name": "open_door",
+                  "arguments": "{\"color\": \"blue\"}"
+                }
+              ]
+            },
+            "digest": "8f91ef0376d580a507f1db9cab1b41e7538c3847dcc2f148502ad376ff925e4a",
+            "part_digests": [
+              {
+                "part": "m3#0",
+                "digest": "ecc7b6f33dc51023c305405aff43db8295f7607612d8118d60412aa8e58ae1a9"
+              }
+            ],
+            "tags": [
+              {
+                "part": "m3#0"
+              }
+            ]
+          }
+        ],
+        "pruned_reasoning": [
+          {
+            "mid": "message-3",
+            "part": "m3#0",
+            "kind": "signature",
+            "bytes": 136,
+            "sha256": "ecc7b6f33dc51023c305405aff43db8295f7607612d8118d60412aa8e58ae1a9"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "signature",
+      "original": {
+        "type": "text_with_state",
+        "text": "The door is blue.",
+        "provider_state": {
+          "signature": "invented-signature",
+          "format": "example"
+        }
+      },
+      "served": {
+        "type": "text_with_state",
+        "text": "The door is blue.",
+        "provider_state": {
+          "signature": "",
+          "format": "example"
+        }
+      },
+      "original_message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "signature": "invented-signature",
+              "format": "example"
+            }
+          }
+        ]
+      },
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [
+          {
+            "ordinal": 4,
+            "mid": "message-4",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text_with_state",
+                  "text": "The door is blue.",
+                  "provider_state": {
+                    "signature": "",
+                    "format": "example"
+                  }
+                }
+              ]
+            },
+            "digest": "1d296d079362541e2801147c288b9d259be69d336d809dbafb38bc3bce30c19a",
+            "part_digests": [
+              {
+                "part": "m4#0",
+                "digest": "cbe40a1c6035268e9bdf389a3d452da3c165716a2368a906c8932ba20e31090c"
+              }
+            ],
+            "tags": [
+              {
+                "part": "m4#0"
+              }
+            ]
+          }
+        ],
+        "pruned_reasoning": [
+          {
+            "mid": "message-4",
+            "part": "m4#0",
+            "kind": "signature",
+            "bytes": 124,
+            "sha256": "cbe40a1c6035268e9bdf389a3d452da3c165716a2368a906c8932ba20e31090c"
+          }
+        ]
+      }
+    }
+  ]
+}

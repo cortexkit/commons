@@ -224,6 +224,9 @@ impl ReadRequest {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ReadPage {
+    /// Original identities of the pruned parts served on this page, on every read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
     pub messages: Vec<ReadMessage>,
     /// The session's lineage, on every page of a session that has one.
     /// Absent means the session has no lineage yet: it was never written,
@@ -251,6 +254,7 @@ impl ReadPage {
     /// A page of a session whose lineage is `lineage_id`.
     pub fn new(lineage_id: impl Into<String>, messages: Vec<ReadMessage>) -> Self {
         Self {
+            pruned_reasoning: Vec::new(),
             messages,
             lineage_id: Some(lineage_id.into()),
             next_from_ordinal: None,
@@ -262,6 +266,7 @@ impl ReadPage {
     /// and no `next_from_ordinal`.
     pub fn no_lineage() -> Self {
         Self {
+            pruned_reasoning: Vec::new(),
             messages: Vec::new(),
             lineage_id: None,
             next_from_ordinal: None,
@@ -271,6 +276,14 @@ impl ReadPage {
 
     pub fn with_next_from_ordinal(mut self, next_from_ordinal: u64) -> Self {
         self.next_from_ordinal = Some(next_from_ordinal);
+        self
+    }
+
+    pub fn with_pruned_reasoning(
+        mut self,
+        parts: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
+    ) -> Self {
+        self.pruned_reasoning = parts;
         self
     }
 
@@ -302,6 +315,9 @@ impl ReadPage {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ModelPage {
+    /// Pruned stored parts actually served, excluding parts hidden by compaction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
     /// Entries in non-decreasing anchor order, insertions first at a tie.
     pub messages: Vec<ModelEntry>,
     /// The session's lineage, as on a raw page ([`ReadPage::lineage_id`]):
@@ -442,10 +458,18 @@ pub enum ModelPageProblem {
 }
 
 impl ModelPage {
+    pub fn with_pruned_reasoning(
+        mut self,
+        parts: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
+    ) -> Self {
+        self.pruned_reasoning = parts;
+        self
+    }
     /// A page of a session whose lineage is `lineage_id`, before any
     /// compaction applied.
     pub fn new(lineage_id: impl Into<String>, messages: Vec<ModelEntry>) -> Self {
         Self {
+            pruned_reasoning: Vec::new(),
             messages,
             lineage_id: Some(lineage_id.into()),
             next_from_ordinal: None,
@@ -458,6 +482,7 @@ impl ModelPage {
     /// The page of a session that was never written.
     pub fn no_lineage() -> Self {
         Self {
+            pruned_reasoning: Vec::new(),
             messages: Vec::new(),
             lineage_id: None,
             next_from_ordinal: None,
@@ -593,15 +618,17 @@ impl ModelPage {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ReadMessage {
-    /// Content identity over the full inline message. Required in descriptors
-    /// mode, optional in inline mode; never computed over the refs.
+    /// Write-time content identity over the original full inline message.
+    /// Required in descriptors mode, optional in inline mode; never computed
+    /// over refs or a payload changed by archive pruning.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "descriptors::deserialize_digest"
     )]
     pub digest: Option<String>,
-    /// Every top-level part in message order, nested media excluded. Required
+    /// Original write-time identities of every top-level part in message
+    /// order, nested media excluded. Required
     /// in descriptors mode, optional in inline mode. Descriptors list exactly
     /// the same keys as this entry's complete `tags` rows, in the same order.
     #[serde(default, skip_serializing_if = "Option::is_none")]

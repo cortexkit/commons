@@ -312,6 +312,9 @@ impl HistoryRequest {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HistoryPage {
+    /// Original identities of the pruned parts served on this page, on every read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
     /// Oldest first.
     pub messages: Vec<HistoryEntry>,
     /// The session's current lineage, as on a `session.read` page. Absent
@@ -333,9 +336,17 @@ pub struct HistoryPage {
 }
 
 impl HistoryPage {
+    pub fn with_pruned_reasoning(
+        mut self,
+        parts: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
+    ) -> Self {
+        self.pruned_reasoning = parts;
+        self
+    }
     /// A page of a session whose current lineage is `lineage_id`.
     pub fn new(lineage_id: impl Into<String>, messages: Vec<HistoryEntry>) -> Self {
         Self {
+            pruned_reasoning: Vec::new(),
             messages,
             lineage_id: Some(lineage_id.into()),
             older: None,
@@ -353,6 +364,7 @@ impl HistoryPage {
     /// lineage and no cursors.
     pub fn no_lineage() -> Self {
         Self {
+            pruned_reasoning: Vec::new(),
             messages: Vec::new(),
             lineage_id: None,
             older: None,

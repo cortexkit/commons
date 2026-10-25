@@ -6,10 +6,21 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.7.2"
+cortexkit-role-llm-runner = "0.7.4"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+
+Since 0.7.4, `archive_prunes_reasoning` declares the exact pruning kinds a
+runner may apply at rest. Every affected raw/model read and raw/display history
+page repeats `pruned_reasoning`, carrying the original part's JCS byte length
+and write-time digest. Parts keep their types, positions, required fields,
+keys, tags and digests; only the declared payload changes. An enrolled
+compaction provider must opt in through Setup's `accepts: ["pruned_reasoning"]`.
+See §9.14.1 and the original/served vectors. Readers may replace held copies
+only for listed parts with matching original digests; an unknown kind means
+the changed payload is not trusted. Imported assistant display rows may omit
+an unrecorded model; readers must treat absence as unknown before rollout.
 
 Since 0.7.2, a runner declaring the `call_identity` group puts `call_key` and
 `schema_pin` on display tool calls (`display::ToolCallPart`) and on the live

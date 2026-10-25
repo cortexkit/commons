@@ -1,0 +1,6 @@
+{
+  "answer": "ready",
+  "request_id": "setup-example",
+  "initial": {"compaction_id": "compaction-example", "version": 0, "range": {"from": 0, "to": 0}, "replacement": []},
+  "accepts": ["pruned_reasoning"]
+}

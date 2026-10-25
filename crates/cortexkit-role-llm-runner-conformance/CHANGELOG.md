@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.4
+
+- Track llm-runner 0.7.4 and compaction-provider 0.7.1. Add capability-gated
+  archive-pruning cases and native fixture/maintenance/schema hooks, with independent
+  original/served oracles and named faulty runners for payloads, identities,
+  every-page attestations, write-time digests, unlisted changes, busy sessions
+  and Setup acceptance. Undeclared pruning is not applicable.
+- Accept unknown models on imported assistant display rows; independently
+  require `model` on messages driven through the runner's own run, with a
+  named faulty runner. The general projection case no longer assumes a
+  recorded model for every imported message.
+- Give each shared output-reference sample call a fresh tool-call id within
+  its assistant message; exercise a runner refusing duplicate ids.
+
 ## 0.15.3
 
 - Check event `attempt_id` against independently read durable step records

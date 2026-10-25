@@ -1,5 +1,12 @@
 # `llm-runner/v1` test vectors
 
+`archive-prunes-reasoning.json` pairs original and served parts with actual
+pages and matching original JCS byte lengths and digests. It covers required
+reasoning text/data emptied rather than removed, optional signatures removed,
+opaque item JSON retaining a readable summary, tool-call arguments unchanged,
+and required provider state retaining an emptied signature. The wire crate's
+archive-pruning tests verify these native-format examples and page round trips.
+
 `call-identity.json` pins the `call_identity` group (§9.16): describe answers
 declaring it beside display history or live events alone, its refusal
 without either (`call_identity_without_display`) and an answer without it;

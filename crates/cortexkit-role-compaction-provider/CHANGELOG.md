@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1
+
+- Add optional, empty-omitted `accepts` to ready Setup answers, with a setter,
+  accessor, `ACCEPTS_PRUNED_REASONING` and vectors. Providers explicitly opt
+  into archive-pruned re-reads; older answers grant no pruning permission.
+- Track llm-runner 0.7.4, including its clarification that an imported
+  assistant display row may have no recorded model.
+
 ## 0.7.0
 
 - Reference calls now use named `SessionIdentity` fields so legacy positional

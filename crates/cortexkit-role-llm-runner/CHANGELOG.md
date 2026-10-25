@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.4
+
+- Add the declared `archive_prunes_reasoning` group, its three pruning kinds,
+  and optional `pruned_reasoning` metadata on raw/model read and raw/display
+  history pages. Pin native required-field preservation, write-time digests,
+  reader replacement rules, at-rest exclusion and compaction Setup opt-in.
+  Ship original/served native-format vectors with matching JCS identities.
+- Clarify display `model`: runner-written assistant messages always carry
+  their recorded model; imported messages without one may omit it. Absence
+  means unknown, never the current model or a guess. Document reader rollout.
+
 ## 0.7.3
 
 - Add the durable provider-attempt `attempt_id` to `step.finished.v1`, required

@@ -300,7 +300,7 @@ the session and freezes that plan for use.
   is not a declaration of support. Later forks within the session are
   announced on advance notices instead (§5).
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?}` or `{answer: "refuse", request_id, code,
+  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?, accepts?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§10).
   - `initial` is a CompactionMessage (`message::CompactionMessage`,
     `{compaction_id, version, range: {from, to}, replacement}`): the
@@ -364,6 +364,18 @@ the session and freezes that plan for use.
   gone: they described the per-step call, and a view's cache behaviour is the
   runner's to manage. A `ready` answer that still carries `stability` or
   `call_when` decodes, and both are ignored.
+
+- [pinned] A ready Setup answer may carry `accepts: ["pruned_reasoning"]`
+  (`SetupAnswer::with_accepts`, `SetupAnswer::accepts`). It is omitted when
+  empty and decoded as open strings. Only that exact name opts this enrollment
+  into the runner's declared archive pruning (`llm-runner/v1` §9.14.1).
+  Without it, the runner never prunes the enrolled session. A provider opting
+  in accepts a re-read differing only in the parts its page lists in
+  `pruned_reasoning`, with each listed SHA-256 equal to the part's write-time
+  digest. It may replace its held copy on that basis; identities, ordering
+  and write-time digests stay unchanged. Unknown kinds leave the part in
+  place but its changed payload is not trusted. Sessions without a compaction
+  provider do not need this permission.
 
 ## 5. Advance notices: runner to provider
 

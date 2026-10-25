@@ -22,6 +22,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adopt;
+pub mod archive_prunes_reasoning;
 pub mod attachments;
 pub mod baseline;
 pub mod compaction;
@@ -163,6 +164,9 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 /// declares.
 pub mod capabilities {
     use crate::ops;
+
+    /// In-place pruning of declared reasoning kinds in archived sessions at rest.
+    pub const ARCHIVE_PRUNES_REASONING: &str = "archive_prunes_reasoning";
 
     /// Immutable output references captured against the writing request.
     /// Requires tags and applies only where the frozen plan renders tags.
@@ -355,6 +359,7 @@ pub mod capabilities {
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (STEP_EVENTS, &[]),
+        (ARCHIVE_PRUNES_REASONING, &[ops::SESSION_READ]),
         // Extends whichever display surface the runner serves; `check_describe`
         // requires at least one of them by name.
         (CALL_IDENTITY, &[]),

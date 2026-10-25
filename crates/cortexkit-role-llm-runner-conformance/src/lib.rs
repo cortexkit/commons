@@ -78,6 +78,7 @@
 #![forbid(unsafe_code)]
 
 mod adopt;
+mod archive_pruning;
 mod attachments;
 mod cache_ttl;
 pub mod call_identity;
@@ -132,10 +133,10 @@ pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, C
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
-    AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity,
-    RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall,
-    ScriptedTurn, ScriptedUsage, SystemTextDefaultObservation, ToolResultObservation,
-    UserCommandFixture, UserCommandObservation,
+    ArchivePruningPart, AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation,
+    PlanSenderIdentity, RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart,
+    ScriptedToolCall, ScriptedTurn, ScriptedUsage, SystemTextDefaultObservation,
+    ToolResultObservation, UserCommandFixture, UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

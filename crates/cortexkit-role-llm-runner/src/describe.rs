@@ -110,6 +110,9 @@ pub struct RoleDescribe {
     /// Publication granularity and durable-history join for `step_events`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_events: Option<crate::step_events::StepEvents>,
+    /// Kinds this runner may prune in archived sessions at rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_prunes_reasoning: Option<crate::archive_prunes_reasoning::ArchivePrunesReasoning>,
 }
 
 /// Limits for per-session storage policies.
@@ -229,6 +232,13 @@ pub enum Stability {
 }
 
 impl RoleDescribe {
+    pub fn with_archive_prunes_reasoning(
+        mut self,
+        settings: crate::archive_prunes_reasoning::ArchivePrunesReasoning,
+    ) -> Self {
+        self.archive_prunes_reasoning = Some(settings);
+        self
+    }
     /// An answer for the given majors and build identity, declaring no
     /// capability and no session-capability source.
     pub fn new(majors: Vec<Major>, implementation_version: impl Into<String>) -> Self {
@@ -389,6 +399,17 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if !raw.is_object() {
         return Err(vec![DescribeProblem::NotAnObject]);
     }
+    if let Some(settings) = raw.get("archive_prunes_reasoning") {
+        if serde_json::from_value::<crate::archive_prunes_reasoning::ArchivePrunesReasoning>(
+            settings.clone(),
+        )
+        .map_or(true, |s| !s.valid())
+        {
+            return Err(vec![DescribeProblem::Undecodable(
+                "archive_prunes_reasoning_invalid_kinds".into(),
+            )]);
+        }
+    }
     if let Some(policy) = raw.get("step_events") {
         if serde_json::from_value::<crate::step_events::StepEvents>(policy.clone())
             .map_or(true, |policy| !policy.valid())
@@ -403,6 +424,21 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    match (
+        describe.declares(capabilities::ARCHIVE_PRUNES_REASONING),
+        &describe.archive_prunes_reasoning,
+    ) {
+        (true, None) => problems.push(DescribeProblem::Undecodable(
+            "archive_prunes_reasoning_missing".into(),
+        )),
+        (false, Some(_)) => problems.push(DescribeProblem::Undecodable(
+            "archive_prunes_reasoning_undeclared".into(),
+        )),
+        (_, Some(settings)) if !settings.valid() => problems.push(DescribeProblem::Undecodable(
+            "archive_prunes_reasoning_invalid_kinds".into(),
+        )),
+        _ => {}
+    }
     match (
         describe.declares(capabilities::STEP_EVENTS),
         describe.step_events.is_some(),

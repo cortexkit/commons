@@ -1,5 +1,40 @@
 # cortexkit-role-llm-runner-conformance
 
+## Archive reasoning pruning (0.15.4)
+
+`archive_pruning_*` cases run only for `ArchivePrunesReasoning`; otherwise they
+are named not applicable. The adapter implements `archive_pruning_fixture`
+and `prune_archived_session`. The fixture seeds unpruned native messages under
+the owner and independently scripts original/served parts for every declared
+kind in at least two messages, plus an unchanged part. `read_parts` supplies
+the actual native part keys; `replace_read_part` supplies a pure schema
+replacement by key, so byte-identical neighbors cannot excuse an unlisted
+change. Override both schema operations together for other native formats.
+Fixture expectations must not call the pruning
+implementation: the kit reads original content over the route, then compares
+real maintenance results with that independently configured oracle.
+
+The checks cover declared kinds, exact native payloads, stable identity and
+resolve numbering, original digests and JCS sizes, unlisted changes, repeated
+multi-page raw/model reads and raw/display history where served, no-provider
+pruning, Setup opt-in, active runs, idle queues and reopening. The active case
+uses held-model hooks; the queued case uses `hold_retention_queue` and is named
+not applicable only when the adapter cannot expose a durable idle queue. The
+fixture's Setup receives exactly the requested accepts list; an empty list
+encodes an old ready answer with no opt-in.
+
+No format-neutral kit can infer every required member of an arbitrary native
+schema, or whether an external model provider will accept reopened history.
+The adapter's independent native oracle checks required fields for its format;
+the wire vectors pin concrete reasoning/redacted/state/call examples. Native
+integration tests remain responsible for other required fields and model-family
+compatibility. Reminder slots are protected by the unchanged part order/keys;
+their model-specific rendering remains the adapter's responsibility.
+
+`display_row_is_the_profile_projection` permits an imported assistant message
+with no recorded model. `display_own_run_records_model` separately drives a
+unique scripted answer through the runner and requires its recorded model.
+
 ## Per-session retention policies
 
 Version 0.15.0 depends on the llm-runner 0.7.1 wire contract. The new

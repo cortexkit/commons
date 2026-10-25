@@ -119,6 +119,20 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("archive_pruning_history_cursor", &[Capability::ArchivePrunesReasoning, TranscriptReads, Capability::HostHistory], "A pre-prune cursor stays valid and its later page lists the pruned parts."),
+    case("archive_pruning_reopen", &[Capability::ArchivePrunesReasoning, TranscriptReads, Queue], "Reopening continues without restoring or changing pruned history."),
+    case("display_own_run_records_model", DISPLAY, "An assistant message driven through the runner's own run carries its recorded model."),
+    case("archive_pruning_declared_kinds", &[Capability::ArchivePrunesReasoning, TranscriptReads], "Only declared pruning kinds are applied."),
+    case("archive_pruning_payloads", &[Capability::ArchivePrunesReasoning, TranscriptReads], "Native payloads match the independent fixture, preserving required fields."),
+    case("archive_pruning_identity", &[Capability::ArchivePrunesReasoning, TranscriptReads], "Part positions, types, keys, tags, lineage and history_version never move."),
+    case("archive_pruning_write_time_digests", &[Capability::ArchivePrunesReasoning, TranscriptReads], "Message and part digests retain their write-time values."),
+    case("archive_pruning_original_attestation", &[Capability::ArchivePrunesReasoning, TranscriptReads], "Listed SHA-256 and JCS length describe the original part."),
+    case("archive_pruning_only_listed_parts", &[Capability::ArchivePrunesReasoning, TranscriptReads], "A reader can replace its held copy: only listed parts change."),
+    case("archive_pruning_every_page", &[Capability::ArchivePrunesReasoning, TranscriptReads], "Every served read/history page form repeats precisely its pruning metadata."),
+    case("archive_pruning_active_run", &[Capability::ArchivePrunesReasoning, TranscriptReads, Queue], "No pruning during an active model request."),
+    case("archive_pruning_queued_send", &[Capability::ArchivePrunesReasoning, TranscriptReads, Queue], "No pruning while an idle queue holds an accepted send."),
+    case("archive_pruning_setup_opt_in", &[Capability::ArchivePrunesReasoning, TranscriptReads, Compaction], "A Setup without acceptance prevents pruning."),
+    case("archive_pruning_no_provider", &[Capability::ArchivePrunesReasoning, TranscriptReads], "No-provider sessions may prune at rest."),
     case("session_retention_floor_describe", &[Capability::SessionRetention], "shared describe check refuses a floor above max_days"),
     case("session_retention_floor", SESSION_RETAINED, "content survives the declared floor and expires at max(policy, floor), never their sum"),
     case("session_retention_release_hold", SESSION_RETAINED, "release stays visible and readable, refuses sends with its deadline and answers pending twice"),

@@ -18,6 +18,8 @@ use serde_json::{Map, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Capability {
+    /// In-place pruning of archived reasoning, with the native fixture hooks.
+    ArchivePrunesReasoning,
     /// Preset-less system-text admission checked against the daemon catalog.
     SystemTextDefault,
     /// Chunked uploads, send references and session-scoped media reads.
@@ -145,6 +147,7 @@ impl Capability {
     /// The role groups represented by this enum, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
+        Self::ArchivePrunesReasoning,
         Self::SystemTextDefault,
         Self::Attachments,
         Self::TranscriptReads,
@@ -206,6 +209,7 @@ impl Capability {
     /// capability.
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
+            Self::ArchivePrunesReasoning => groups::ARCHIVE_PRUNES_REASONING,
             Self::SystemTextDefault => groups::SYSTEM_TEXT_DEFAULT,
             Self::Attachments => groups::ATTACHMENTS,
             Self::UserCommands => groups::USER_COMMANDS,
@@ -576,6 +580,29 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Seed an unpruned, idle native transcript under this session's owner.
+    /// Include each declared pruning kind in at least two messages, plus an
+    /// unpruned part. Enroll with exactly `accepts` when Some; None means no
+    /// compaction provider. Return independently scripted original/served
+    /// parts, never expectations obtained by running the pruning code.
+    async fn archive_pruning_fixture(
+        &self,
+        _session: &str,
+        _accepts: Option<Vec<String>>,
+    ) -> Result<Vec<ArchivePruningPart>, HarnessError> {
+        Err(HarnessError::new(
+            "archive_pruning_fixture is not implemented",
+        ))
+    }
+
+    /// Archive and attempt pruning now, using the runner's real maintenance
+    /// path. Return after the attempt finishes, including when busy or denied
+    /// by Setup. Do not force past the run, queue or enrollment exclusions.
+    async fn prune_archived_session(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "prune_archived_session is not implemented",
+        ))
+    }
     /// Return actual publication subjects and bodies for the fixture session and each
     /// step's position read independently from the runner's native durable log.
     /// Capture publication order against the actual durability point at publish
@@ -1152,6 +1179,34 @@ pub trait LlmRunnerSubject: Harness {
         }
     }
 
+    /// Replace exactly the part named by `read_parts`, without changing its
+    /// neighbors or the message envelope. The pruning re-read check uses this
+    /// pure schema operation to compare by identity, even for byte-identical
+    /// parts. Override together with `read_parts` for other native schemas.
+    fn replace_read_part(&self, message: &mut Value, key: &str, replacement: Value) -> bool {
+        let field = if message.get("parts").is_some() {
+            "parts"
+        } else {
+            "content"
+        };
+        if let Some(parts) = message.get_mut(field).and_then(Value::as_array_mut) {
+            if let Some((_, part)) = parts.iter_mut().enumerate().find(|(index, part)| {
+                part.get("id")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| index.to_string() == key, |id| id == key)
+            }) {
+                *part = replacement;
+                return true;
+            }
+            false
+        } else if key == "0" {
+            *message = replacement;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Make session `fork` a fork or clone of the managed session `parent`
     /// the way the host makes one (OpenCode's fork copies the parent's
     /// parts, marker checkpoint included), so that the runner can know it
@@ -1660,6 +1715,16 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Wait a short while between polls that check whether a run has ended.
     async fn pause(&self);
+}
+
+/// A native fixture's pruning oracle, configured independently of maintenance.
+/// The kit matches `original` against actual parts from `read_parts` and checks
+/// the exact `served` value, including the format's required fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArchivePruningPart {
+    pub kind: String,
+    pub original: Value,
+    pub served: Value,
 }
 
 /// External observations for the preset-less system-text admission cases.

@@ -2201,6 +2201,12 @@ impl Module {
                     json!({ "kind": "terminal", "run_id": run_id, "state": "error" }),
                 );
             };
+            // Call ids pair calls and results within one model answer. Reusing
+            // an id in a later answer is valid; duplicates in this answer are not.
+            let mut ids = BTreeSet::new();
+            if turn.parts.iter().any(|part| matches!(part, ScriptedPart::ToolCall(call) if !ids.insert(call.tool_call_id.as_str()))) {
+                return self.commit(session, json!({"kind":"terminal","run_id":run_id,"state":"error"}));
+            }
             let received = self.world.model_calls.lock().unwrap().insert((
                 session.into(),
                 run_id.into(),

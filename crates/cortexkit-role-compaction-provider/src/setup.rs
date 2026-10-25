@@ -18,6 +18,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// Setup permission required before a runner prunes an enrolled session.
+pub const ACCEPTS_PRUNED_REASONING: &str = "pruned_reasoning";
+
 pub use cortexkit_role_llm_runner::tags::SetupCheckpoint;
 
 use crate::{
@@ -231,6 +234,10 @@ pub enum SetupAnswer {
         /// `ceiling` (§12). Omitted when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ride_wait_ms: Option<u64>,
+        /// Read transformations the provider accepts for this enrollment.
+        /// Empty means no opt-in; unknown names grant no known permission.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        accepts: Vec<String>,
     },
     /// Setup failed. No model call is made, and the run ends `error` with
     /// the role's `code` and, when present, the provider's own
@@ -248,6 +255,22 @@ pub enum SetupAnswer {
 }
 
 impl SetupAnswer {
+    /// Opt a ready answer into read transformations. A refusal is unchanged.
+    pub fn with_accepts(mut self, values: Vec<String>) -> Self {
+        if let Self::Ready { accepts, .. } = &mut self {
+            *accepts = values;
+        }
+        self
+    }
+
+    /// Accepted read transformations, or an empty slice for a refusal.
+    pub fn accepts(&self) -> &[String] {
+        match self {
+            Self::Ready { accepts, .. } => accepts,
+            Self::Refuse { .. } => &[],
+        }
+    }
+
     /// A `ready` answer with the session's initial CompactionMessage and no
     /// optional members.
     pub fn ready(request_id: impl Into<String>, initial: CompactionMessage) -> Self {
@@ -258,6 +281,7 @@ impl SetupAnswer {
             checkpoint: None,
             cache_ttl: None,
             ride_wait_ms: None,
+            accepts: Vec::new(),
         }
     }
 
@@ -433,6 +457,25 @@ impl SetupAnswer {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn setup_accepts_pruned_reasoning_is_optional_and_open() {
+        let raw: serde_json::Value =
+            serde_json::from_str(crate::vectors::file("setup-accepts.json").unwrap()).unwrap();
+        let answer: super::SetupAnswer = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(answer.accepts(), &[super::ACCEPTS_PRUNED_REASONING]);
+        assert_eq!(serde_json::to_value(&answer).unwrap(), raw);
+        let empty = answer.clone().with_accepts(vec![]);
+        let encoded = serde_json::to_value(&empty).unwrap();
+        assert!(encoded.get("accepts").is_none());
+        assert!(serde_json::from_value::<super::SetupAnswer>(encoded)
+            .unwrap()
+            .accepts()
+            .is_empty());
+        assert_eq!(
+            answer.with_accepts(vec!["future".into()]).accepts(),
+            &["future"]
+        );
+    }
     use super::*;
     use crate::vectors;
 

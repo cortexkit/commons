@@ -305,6 +305,13 @@ where
 /// The outcome of a case that cannot run against this subject: skipped
 /// with what it lacks, or inapplicable. `None` when the case can run.
 fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome> {
+    if spec.name.starts_with("archive_pruning_")
+        && !declared.contains(&Capability::ArchivePrunesReasoning)
+    {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "archive_prunes_reasoning is not declared".into(),
+        });
+    }
     if matches!(
         spec.name,
         "session_retention_floor_describe"
@@ -353,6 +360,27 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
 
 #[cfg(test)]
 mod retention_gate_tests {
+    #[test]
+    fn archive_cases_are_not_applicable_without_the_group() {
+        for spec in CASES
+            .iter()
+            .filter(|s| s.name.starts_with("archive_pruning_"))
+        {
+            assert!(
+                matches!(
+                    gate(spec, &BTreeSet::new()),
+                    Some(CaseOutcome::Inapplicable { .. })
+                ),
+                "{}",
+                spec.name
+            );
+            assert!(
+                gate(spec, &spec.requires.iter().copied().collect()).is_none(),
+                "{}",
+                spec.name
+            );
+        }
+    }
     use super::*;
 
     #[test]
