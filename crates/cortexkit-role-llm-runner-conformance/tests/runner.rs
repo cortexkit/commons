@@ -5550,6 +5550,136 @@ async fn output_refs_without_revert_or_host_compaction_is_inapplicable_not_faile
     }
 }
 
+#[tokio::test]
+async fn output_refs_snapshot_size_accepts_capped_stored_text_with_a_note() {
+    let mut subject = output_refs_subject(None);
+    subject.defects.output_refs_tool_result_cap = Some((1_048_576, " [truncated]"));
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("output_refs_snapshot_size"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn output_refs_snapshot_size_uses_nonfirst_result_part_tag() {
+    let mut subject = output_refs_subject(None);
+    subject.defects.output_refs_result_after_text = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("output_refs_snapshot_size"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn output_refs_snapshot_budget_uses_nonfirst_result_part_tag() {
+    let mut subject = output_refs_subject(None);
+    subject.defects.output_refs_result_after_text = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("output_refs_snapshot_budget"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn output_refs_snapshot_caps_use_stored_sizes_and_name_inapplicability() {
+    for cap in [1_048_576, 1_048_512, 512] {
+        let mut subject = output_refs_subject(None);
+        subject.defects.output_refs_tool_result_cap = Some((cap, ""));
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome("output_refs_snapshot_size"),
+            Some(&CaseOutcome::Inapplicable {
+                reason: format!("the runner stored {cap} bytes of the tool result, so no snapshot exceeds the cap"),
+            }),
+            "{}",
+            report.render()
+        );
+        let budget = if cap == 512 {
+            CaseOutcome::Inapplicable {
+                reason: "the runner stored 512 bytes of the tool result, so five snapshots cannot exercise the aggregate budget".into(),
+            }
+        } else {
+            CaseOutcome::Passed
+        };
+        assert_eq!(
+            report.outcome("output_refs_snapshot_budget"),
+            Some(&budget),
+            "{}",
+            report.render()
+        );
+        assert_none_failed_but(&report, &[]);
+    }
+}
+
+#[tokio::test]
+async fn output_refs_snapshot_size_rejects_metadata_of_uncapped_content() {
+    let mut subject = output_refs_subject(None);
+    subject.defects.output_refs_tool_result_cap = Some((1_048_576, " [truncated]"));
+    subject.defects.output_refs_uncapped_metadata = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        failed(&report, "output_refs_snapshot_size"),
+        "large snapshot lacks full size and digest"
+    );
+    assert_none_failed_but(&report, &["output_refs_snapshot_size"]);
+}
+
+#[tokio::test]
+async fn output_refs_without_renumbering_is_inapplicable_with_the_adapter_reason() {
+    let mut subject = output_refs_subject(None);
+    subject.cannot_renumber_output_refs = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("output_refs_writing_request"),
+        Some(&CaseOutcome::Inapplicable {
+            reason:
+                "the adapter cannot renumber output references: the runner has no renumbering event"
+                    .into(),
+        })
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn output_refs_without_held_install_is_inapplicable_with_the_adapter_reason() {
+    let mut subject = output_refs_subject(None);
+    subject.cannot_install_output_ref_held = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("output_refs_held_placeholder"),
+        Some(&CaseOutcome::Inapplicable {
+            reason: "the adapter cannot install a held output reference: the runner has no held-result event".into(),
+        })
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn output_refs_without_held_completion_is_inapplicable_with_the_adapter_reason() {
+    let mut subject = output_refs_subject(None);
+    subject.cannot_complete_output_ref_held = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("output_refs_held_placeholder"),
+        Some(&CaseOutcome::Inapplicable {
+            reason: "the adapter cannot complete a held output reference: the runner has no late-result event".into(),
+        })
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
 macro_rules! output_refs_fault {
     ($test:ident, $case:literal) => {
         #[tokio::test]

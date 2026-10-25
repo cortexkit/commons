@@ -12,7 +12,9 @@ use cortexkit_role_llm_runner::{
     content_digest::sha256_hex,
     describe::RoleDescribe,
     ops,
-    output_refs::{Descriptor, Page, ReadReply, Record, MAX_READ_BYTES, MAX_SNAPSHOT_BYTES},
+    output_refs::{
+        Descriptor, Page, ReadReply, Record, MAX_READ_BYTES, MAX_SET_BYTES, MAX_SNAPSHOT_BYTES,
+    },
 };
 use serde_json::{json, Map, Value};
 
@@ -116,6 +118,53 @@ fn tag_of(
         .ok_or("fixture message has no rendered tag".into())
 }
 
+fn matching_text<'a>(value: &'a Value, prefix: &str, found: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) if text.starts_with(prefix) => found.push(text),
+        Value::Array(items) => {
+            for item in items {
+                matching_text(item, prefix, found);
+            }
+        }
+        Value::Object(fields) => {
+            for field in fields.values() {
+                matching_text(field, prefix, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Locate the fixture's result by its unique prefix, but keep the entire stored
+/// text, including any truncation note. Tag rows point to the message part
+/// containing the result, which may not be the first part.
+fn stored_tool_text<S: LlmRunnerSubject>(
+    subject: &S,
+    messages: &[cortexkit_role_llm_runner::read::ReadMessage],
+    prefix: &str,
+) -> Check<(String, String)> {
+    let mut found = Vec::new();
+    for message in messages {
+        for (key, part) in subject.read_parts(&message.message) {
+            let mut texts = Vec::new();
+            matching_text(&part, prefix, &mut texts);
+            for text in texts {
+                let tag = message
+                    .tags
+                    .iter()
+                    .find(|row| row.part == key)
+                    .and_then(|row| row.tag.as_ref())
+                    .ok_or("stored tool-result part has no rendered tag")?;
+                found.push((tag.trim_matches('§').to_owned(), text.to_owned()));
+            }
+        }
+    }
+    match found.len() {
+        1 => Ok(found.pop().unwrap()),
+        n => Err(format!("found {n} stored tool-result texts, expected one")),
+    }
+}
+
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Check<Ending>
 where
     S: LlmRunnerSubject,
@@ -208,10 +257,9 @@ where
     let mut tool = case.mint.call("refs-source");
     let oversized = name == "output_refs_snapshot_size";
     let budget = name == "output_refs_snapshot_budget";
-    let content = if oversized {
-        "x".repeat(MAX_SNAPSHOT_BYTES + 1)
-    } else if budget {
-        "x".repeat(MAX_SNAPSHOT_BYTES)
+    let content = if oversized || budget {
+        let size = MAX_SNAPSHOT_BYTES + usize::from(oversized);
+        format!("{marker}{}", "x".repeat(size - marker.len()))
     } else {
         marker.clone()
     };
@@ -231,23 +279,40 @@ where
     crate::tags::send_and_wait(case, &mut session, Some(&fields), &user_marker, &Map::new())
         .await?;
     let (_, messages) = read_all(&session.route).await?;
-    let tag = tag_of(
-        &messages,
-        if oversized || budget {
-            &content[..100]
-        } else {
-            &marker
-        },
-    )?;
+    let (tag, stored) = if oversized || budget {
+        stored_tool_text(case.subject, &messages, &marker)?
+    } else {
+        (tag_of(&messages, &marker)?, String::new())
+    };
+    if oversized && stored.len() <= MAX_SNAPSHOT_BYTES {
+        return Ok(Ending::Inapplicable(format!(
+            "the runner stored {} bytes of the tool result, so no snapshot exceeds the cap",
+            stored.len()
+        )));
+    }
+    if budget && (stored.len() > MAX_SNAPSHOT_BYTES || stored.len() * 5 <= MAX_SET_BYTES) {
+        return Ok(Ending::Inapplicable(format!(
+            "the runner stored {} bytes of the tool result, so five snapshots cannot exercise the aggregate budget",
+            stored.len()
+        )));
+    }
     let user_tag = tag_of(&messages, &user_marker)?;
     let model_tag = tag_of(&messages, &model_marker)?;
     let mut held_tag = None;
     if name == "output_refs_held_placeholder" {
         held_tag = Some(
-            case.subject
+            match case
+                .subject
                 .install_output_ref_held(case.handle.inner(), &session.name, "held placeholder")
                 .await
-                .map_err(|e| e.to_string())?,
+            {
+                Ok(tag) => tag,
+                Err(e) => {
+                    return Ok(Ending::Inapplicable(format!(
+                        "the adapter cannot install a held output reference: {e}"
+                    )))
+                }
+            },
         );
     }
     let text = match name {
@@ -338,8 +403,8 @@ where
         "output_refs_snapshot_size" => {
             let record = r.first().ok_or("large reference missing")?;
             if record.state != "too_large"
-                || record.bytes != Some(content.len() as u64)
-                || record.sha256.as_deref() != Some(sha256_hex(content.as_bytes()).as_str())
+                || record.bytes != Some(stored.len() as u64)
+                || record.sha256.as_deref() != Some(sha256_hex(stored.as_bytes()).as_str())
             {
                 return Err("large snapshot lacks full size and digest".into());
             }
@@ -348,8 +413,8 @@ where
             if r.len() != 5
                 || r[..4].iter().any(|r| r.state != "resolved")
                 || r[4].state != "too_large"
-                || r[4].bytes != Some(content.len() as u64)
-                || r[4].sha256.as_deref() != Some(sha256_hex(content.as_bytes()).as_str())
+                || r[4].bytes != Some(stored.len() as u64)
+                || r[4].sha256.as_deref() != Some(sha256_hex(stored.as_bytes()).as_str())
             {
                 return Err("aggregate snapshot budget did not preserve full metadata".into());
             }
@@ -500,15 +565,23 @@ where
                     )));
                 }
             } else if name == "output_refs_writing_request" {
-                case.subject
+                if let Err(e) = case
+                    .subject
                     .renumber_output_refs(case.handle.inner(), &session.name)
                     .await
-                    .map_err(|e| e.to_string())?;
-            } else {
-                case.subject
-                    .complete_output_ref_held(case.handle.inner(), &session.name, "late answer")
-                    .await
-                    .map_err(|e| e.to_string())?;
+                {
+                    return Ok(Ending::Inapplicable(format!(
+                        "the adapter cannot renumber output references: {e}"
+                    )));
+                }
+            } else if let Err(e) = case
+                .subject
+                .complete_output_ref_held(case.handle.inner(), &session.name, "late answer")
+                .await
+            {
+                return Ok(Ending::Inapplicable(format!(
+                    "the adapter cannot complete a held output reference: {e}"
+                )));
             }
             let after = records(&session.route, &d).await?;
             if after != r {

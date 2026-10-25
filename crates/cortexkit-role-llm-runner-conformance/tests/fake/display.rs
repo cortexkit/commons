@@ -212,7 +212,7 @@ fn own_row(body: &Value, limits: Option<&Limits>) -> DisplayRow {
             other => parts.push(json!({ "type": "other", "part": key, "kind": other })),
         }
     }
-    if role == "tool" {
+    if role == "tool" && !body["parts"].is_array() {
         let (content, truncated) = cut(
             result_text(&body["content"]),
             limits.map(|l| l.result_bytes),

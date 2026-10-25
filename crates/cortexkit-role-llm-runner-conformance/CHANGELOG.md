@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.7
+
+- `output_refs_snapshot_size` checks the size and SHA-256 of the tool-result part read back from storage, not the original result sent by the kit. Runners that cap stored results can pass; when the stored part does not exceed the snapshot cap, the case reports not applicable with its stored size.
+- `output_refs_snapshot_budget` also uses stored output metadata and reports not applicable when the stored part cannot exercise the aggregate snapshot budget.
+- `output_refs_writing_request` and `output_refs_held_placeholder` report not applicable, with the adapter's reason, when the runner has no renumbering or held-result event. Runners that support these events but change committed records or snapshots still fail by name.
+
 ## 0.12.6
 
 - `output_refs_rewind` and `output_refs_compaction` report not applicable when the adapter's `revert_session` or `compact_in_host` returns an error, as the subject trait documents for both hooks and as the host-history and lineage cases already do. They used to fail such a runner. A faulty runner that can revert or compact but gets the result wrong still fails both cases by name. Cases and vectors are otherwise unchanged.

@@ -664,6 +664,8 @@ pub trait LlmRunnerSubject: Harness {
     /// model request. Return its tag as observed at the rendering seam. Later
     /// replace the native result through complete_output_ref_held; neither
     /// hook may alter the runner's saved reference records or serve replies.
+    /// Return an error when the runner has no such event; the held-placeholder
+    /// case is then not applicable.
     async fn install_output_ref_held(
         &self,
         _handle: &Self::Handle,
@@ -672,6 +674,11 @@ pub trait LlmRunnerSubject: Harness {
     ) -> Result<String, HarnessError> {
         Err(HarnessError::new("held output fixture is not implemented"))
     }
+    /// Replace the installed held placeholder through the runner's native
+    /// late-result path. Never edit saved reference records or synthesize route
+    /// replies.
+    /// Return an error when the runner has no such event; the held-placeholder
+    /// case is then not applicable.
     async fn complete_output_ref_held(
         &self,
         _handle: &Self::Handle,
@@ -683,6 +690,8 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Force a native lineage change that assigns different numbers while
     /// retaining the reference-bearing message. Never edit saved sets.
+    /// Return an error when the runner has no such event; the writing-request
+    /// case is then not applicable.
     async fn renumber_output_refs(
         &self,
         _handle: &Self::Handle,

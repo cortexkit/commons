@@ -507,6 +507,14 @@ pub struct Defects {
     /// A Setup answer whose `ride_wait_ms` is above the fake's own
     /// `ride_wait_max_ms` is accepted.
     pub ride_wait_cap_ignored: bool,
+    /// Cap stored output-reference fixture results at the given byte length,
+    /// then append the given note.
+    pub output_refs_tool_result_cap: Option<(usize, &'static str)>,
+    /// Report the original provider result's byte length and SHA-256 in
+    /// output-reference metadata, even when the stored result is capped.
+    pub output_refs_uncapped_metadata: bool,
+    /// Store snapshot fixture results after another tagged text part.
+    pub output_refs_result_after_text: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -1789,6 +1797,21 @@ impl Module {
             }
             "result" => {
                 let key = text("call_key");
+                let mut content = record["content"].clone();
+                if session.contains("output_refs_") {
+                    if let Some((cap, note)) = self.world.defects.output_refs_tool_result_cap {
+                        if let Some(original) = content.as_str().filter(|s| s.len() > cap) {
+                            sess.output_refs
+                                .original_tool_results
+                                .insert(key.clone(), original.to_owned());
+                            let mut end = cap;
+                            while !original.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            content = json!(format!("{}{note}", &original[..end]));
+                        }
+                    }
+                }
                 let run_id = sess
                     .calls
                     .get(&key)
@@ -1813,7 +1836,7 @@ impl Module {
                         .find(|part| part["type"] == "tool_call" && part["arguments"] == *arguments)
                         .unwrap();
                     if self.world.defects.run_tool_calls_embedded_results {
-                        part["result"] = record["content"].clone();
+                        part["result"] = content.clone();
                     }
                     if self.world.defects.run_tool_calls_omit_finished_arguments {
                         part.as_object_mut().unwrap().remove("arguments");
@@ -1829,10 +1852,19 @@ impl Module {
                         .map(|c| c.tool_call_id.clone())
                         .unwrap_or_default();
                     json!({ "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id,
-                            "content": result_text(&record["content"]) }] })
+                            "content": result_text(&content) }] })
                 } else {
-                    json!({ "role": "tool", "call_key": key, "content": record["content"] })
+                    json!({ "role": "tool", "call_key": key, "content": content })
                 };
+                if self.world.defects.output_refs_result_after_text
+                    && (session.contains("output_refs_snapshot_size")
+                        || session.contains("output_refs_snapshot_budget"))
+                {
+                    body = json!({"role":"tool","call_key":key,"parts":[
+                        {"type":"text","text":"earlier tagged text"},
+                        {"type":"text","text":content}
+                    ]});
+                }
                 if let Some(reason) = record.get("reason") {
                     body["reason"] = reason.clone();
                 }
@@ -4739,6 +4771,9 @@ pub struct FakeSubject {
     /// The adapter cannot compact a session in its host: `compact_in_host`
     /// errors.
     pub cannot_compact_in_host: bool,
+    pub cannot_renumber_output_refs: bool,
+    pub cannot_install_output_ref_held: bool,
+    pub cannot_complete_output_ref_held: bool,
     /// How the fake judges the prompt cache's lifetime.
     pub cache_ttl_defect: CacheTtlDefect,
     /// The case the suite is in, as a test's progress callback sets it: the
@@ -4832,6 +4867,9 @@ impl FakeSubject {
             holds_reads_during_setup: false,
             cannot_revert: false,
             cannot_compact_in_host: false,
+            cannot_renumber_output_refs: false,
+            cannot_install_output_ref_held: false,
+            cannot_complete_output_ref_held: false,
             cache_ttl_defect: CacheTtlDefect::None,
             current_case: Arc::new(Mutex::new(None)),
             route_calls: Arc::new(Mutex::new(Vec::new())),
@@ -5187,6 +5225,9 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
         placeholder: &str,
     ) -> Result<String, HarnessError> {
+        if self.cannot_install_output_ref_held {
+            return Err(HarnessError::new("the runner has no held-result event"));
+        }
         handle
             .0
             .commit(
@@ -5211,6 +5252,9 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
         answer: &str,
     ) -> Result<(), HarnessError> {
+        if self.cannot_complete_output_ref_held {
+            return Err(HarnessError::new("the runner has no late-result event"));
+        }
         handle
             .0
             .commit(session, json!({"kind":"refs_late","answer":answer}))
@@ -5222,6 +5266,9 @@ impl LlmRunnerSubject for FakeSubject {
         handle: &FakeHandle,
         session: &str,
     ) -> Result<(), HarnessError> {
+        if self.cannot_renumber_output_refs {
+            return Err(HarnessError::new("the runner has no renumbering event"));
+        }
         handle
             .0
             .commit(session, json!({"kind":"refs_renumber"}))
