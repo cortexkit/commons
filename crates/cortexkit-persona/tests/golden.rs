@@ -6,11 +6,15 @@
 //! not just for this crate agreeing with itself. See test-vectors/README.md
 //! for how to rerun it.
 
-use std::{collections::BTreeMap, fs};
+use std::{
+    collections::BTreeMap,
+    fs,
+    num::{NonZeroU64, NonZeroUsize},
+};
 
 use cortexkit_persona::{
     Approval, ApprovalSet, Digest, Extension, FragmentSources, LoadRequest, PersonaEngine,
-    ProjectKey, RenderContext, Rendered, Tier, TrustClass,
+    ProjectKey, RenderContext, RenderLimits, Rendered, Tier, TrustClass,
 };
 use serde::Deserialize;
 
@@ -43,6 +47,10 @@ fn read(path: &str) -> String {
 }
 
 fn render_case(name: &str) -> Rendered {
+    render_case_with_limits(name, None)
+}
+
+fn render_case_with_limits(name: &str, limits: Option<RenderLimits>) -> Rendered {
     let case: Case = serde_json::from_str(&read(&format!("{VECTORS}/cases/{name}/case.json")))
         .expect("case.json parses");
     let mut engine = PersonaEngine::new(&case.module).unwrap();
@@ -81,7 +89,11 @@ fn render_case(name: &str) -> Rendered {
             .insert(id, read(&format!("{VECTORS}/{path}")))
             .unwrap();
     }
-    role.render(&context, &supplied).expect("the case renders")
+    match limits {
+        Some(limits) => role.render_with_limits(&context, &supplied, limits),
+        None => role.render(&context, &supplied),
+    }
+    .expect("the case renders")
 }
 
 fn case_names() -> Vec<String> {
@@ -118,6 +130,22 @@ fn every_golden_case_renders_its_expected_bytes_digest_and_report() {
             "case {name}: report differs:\n{}",
             serde_json::to_string_pretty(&out.report).unwrap()
         );
+    }
+}
+
+#[test]
+fn render_limits_preserve_every_golden_bytes_digest_and_report() {
+    let names = case_names();
+    assert!(names.len() >= 5, "only {} golden cases found", names.len());
+    let limits = RenderLimits::default()
+        .with_recursion(NonZeroUsize::new(200).unwrap())
+        .with_fuel(NonZeroU64::new(100_000).unwrap());
+    for name in names {
+        let default = render_case(&name);
+        let configured = render_case_with_limits(&name, Some(limits));
+        assert_eq!(configured.bytes(), default.bytes(), "case {name}: bytes");
+        assert_eq!(configured.digest, default.digest, "case {name}: digest");
+        assert_eq!(configured.report, default.report, "case {name}: report");
     }
 }
 

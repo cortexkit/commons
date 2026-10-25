@@ -5,7 +5,7 @@
 # report. SPEC.md states every rule; the golden vectors ship in test-vectors/.
 [package]
 name = "cortexkit-persona"
-version = "0.2.0"
+version = "0.2.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

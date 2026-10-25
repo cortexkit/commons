@@ -117,9 +117,19 @@ same inputs render the same bytes; a module that puts a time in its own
 
 - MiniJinja at exactly `=2.12.0`, default features off, with `builtins`,
   `fuel`, `multi_template`, `serde` and `unstable_machinery`. Undefined values
-  are strict errors. One render may execute at most 1,000,000 instructions
-  (fuel) and has a recursion budget of 100. There is no loader and no custom
-  filter, test, function or global; auto-escaping is off. Whitespace settings
+  are strict errors. The default budgets are 1,000,000 instructions (fuel,
+  `FUEL_LIMIT`) and 100 recursion-depth units (`RECURSION_LIMIT`). MiniJinja
+  starts with one entry frame; each nested `include` adds ten units, and each
+  active loop, `with` block or block call adds one. Sixteen nested includes
+  therefore need `1 + 16 * 10 = 161` units, before any extra margin. A caller
+  may set both for one render with `RenderLimits` and `LoadedRole::render_with_limits`;
+  `LoadedRole::render` keeps the defaults. Each budget is nonzero and applies
+  only to that call, never to a later render of the loaded role. Limits are
+  separate from `RenderContext` and are not template roots or fields of
+  `ResolutionReport`. They decide only whether rendering completes and never
+  change layer or fragment digests, approval keys, or a completed render's
+  bytes, digest or report. There is no loader and no custom filter, test,
+  function or global; auto-escaping is off. Whitespace settings
   are MiniJinja's defaults: a template's single trailing newline is dropped,
   `trim_blocks` and `lstrip_blocks` are off.
 - `include`, `extends`, `import` and `from ... import` take a literal string

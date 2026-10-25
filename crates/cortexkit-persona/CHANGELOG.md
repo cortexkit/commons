@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1
+
+- `RenderLimits` configures nonzero recursion and fuel budgets with
+  `with_recursion` and `with_fuel`, read back through `recursion` and `fuel`.
+  Pass it to `LoadedRole::render_with_limits` to choose budgets for one call;
+  a call's limits cannot affect later renders of the same loaded role.
+- `LoadedRole::render` and `RenderContext` are unchanged. Default limits remain
+  `RECURSION_LIMIT` (100 recursion-depth units) and `FUEL_LIMIT` (1,000,000
+  instructions).
+  Limits decide only whether a render completes and never change digests,
+  approval keys, a completed render's bytes or its resolution report. Every
+  existing golden vector is unchanged.
+
 ## 0.2.0
 
 - Caller-declared roots: `RenderContext::with_root(name, value)` declares an

@@ -11,7 +11,8 @@ use crate::{
     digest::normalize_newlines,
     report::{FragmentOrigin, FragmentReport, ResolutionReport},
     template::{analyse, environment, Analysis},
-    Digest, FragmentId, LoadedRole, PersonaError, RenderContext, RenderFailure, SourceRef,
+    Digest, FragmentId, LoadedRole, PersonaError, RenderContext, RenderFailure, RenderLimits,
+    SourceRef,
 };
 
 /// The report and source-revision format tag.
@@ -90,10 +91,26 @@ struct Prepared {
 impl LoadedRole {
     /// Render the role. Touches no filesystem, environment or clock: every
     /// input is the loaded role, `context` and `supplied`.
+    /// Uses [`RenderLimits::default`]; see [`Self::render_with_limits`] to
+    /// choose execution budgets for one render.
     pub fn render<M: Serialize>(
         &self,
         context: &RenderContext<M>,
         supplied: &FragmentSources,
+    ) -> Result<Rendered, PersonaError> {
+        self.render_with_limits(context, supplied, RenderLimits::default())
+    }
+
+    /// Render the role with the given execution budgets for this call only.
+    ///
+    /// Like [`Self::render`], touches no filesystem, environment or clock.
+    /// Limits decide only whether rendering completes: they do not change
+    /// digests, approvals or a completed render's bytes.
+    pub fn render_with_limits<M: Serialize>(
+        &self,
+        context: &RenderContext<M>,
+        supplied: &FragmentSources,
+        limits: RenderLimits,
     ) -> Result<Rendered, PersonaError> {
         context.validate()?;
         let declared: BTreeSet<String> = self
@@ -217,7 +234,8 @@ impl LoadedRole {
             }
             wrapper
         });
-        let mut env = environment();
+        // Each call owns its environment, so its budgets cannot affect another render.
+        let mut env = environment(limits);
         for (name, t) in &templates {
             env.add_template(name, &t.source)
                 .map_err(|e| PersonaError::TemplateSyntax {

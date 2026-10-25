@@ -12,24 +12,27 @@ use minijinja::{
     AutoEscape, Environment, UndefinedBehavior,
 };
 
-use crate::{PersonaError, SourceRef};
+use crate::{PersonaError, RenderLimits, SourceRef};
 
-/// The most template instructions one render may execute.
+/// The default maximum number of template instructions one render may execute.
+/// Override it with [`RenderLimits::with_fuel`].
 pub const FUEL_LIMIT: u64 = 1_000_000;
 
-/// MiniJinja's recursion budget for one render. An `include` costs ten; each
-/// nested loop, `with` block or block call costs one; other statements are
-/// free.
+/// MiniJinja's default recursion budget for one render, in depth units.
+/// The entry frame costs one unit; each nested `include` adds ten, and each
+/// active loop, `with` block or block call adds one. Thus 16 nested includes
+/// need `1 + 16 * 10 = 161` units. Override the budget with
+/// [`RenderLimits::with_recursion`].
 pub const RECURSION_LIMIT: usize = 100;
 
 /// A MiniJinja environment with the built-in filters and tests only: strict
 /// undefined, fuel and recursion limits, no auto-escaping, and no loader, so
 /// only templates the engine adds can be reached.
-pub(crate) fn environment<'s>() -> Environment<'s> {
+pub(crate) fn environment<'s>(limits: RenderLimits) -> Environment<'s> {
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
-    env.set_fuel(Some(FUEL_LIMIT));
-    env.set_recursion_limit(RECURSION_LIMIT);
+    env.set_fuel(Some(limits.fuel().get()));
+    env.set_recursion_limit(limits.recursion().get());
     env.set_auto_escape_callback(|_| AutoEscape::None);
     env
 }

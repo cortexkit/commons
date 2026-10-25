@@ -9,7 +9,7 @@ a serialisable resolution report. [SPEC.md](SPEC.md) states every rule
 
 ```toml
 [dependencies]
-cortexkit-persona = "0.2.0"
+cortexkit-persona = "0.2.1"
 ```
 
 ## Use
@@ -76,6 +76,29 @@ take `role.tiers()[i]` for the repository tier, read its `layer_digest`, and
 store it keyed by module, role, project key and `relative_path`. A render's
 report lists the same tiers, so it shows a repository layer that applied or
 one that was skipped, but you never need a render to approve one.
+
+## Per-render execution limits
+
+`LoadedRole::render` keeps the default budgets: `FUEL_LIMIT` is 1,000,000
+template instructions and `RECURSION_LIMIT` is 100 recursion-depth units. To
+choose both budgets for a single render, pass `RenderLimits` to
+`render_with_limits`:
+
+```rust
+use std::num::{NonZeroU64, NonZeroUsize};
+use cortexkit_persona::RenderLimits;
+
+let limits = RenderLimits::default()
+    .with_recursion(NonZeroUsize::new(200).unwrap())
+    .with_fuel(NonZeroU64::new(100_000).unwrap());
+let out = role.render_with_limits(&context, &supplied, limits)?;
+```
+
+The nonzero budgets are available through `recursion()` and `fuel()`. They
+apply only to that call, not to later renders of the loaded role. Limits are
+not template roots or fields of `RenderContext` or `ResolutionReport`. They
+decide only whether rendering completes: they never change layer or fragment
+digests, approval keys, or a completed render's bytes, digest or report.
 
 ## Guarantees
 
