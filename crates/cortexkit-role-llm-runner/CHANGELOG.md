@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.6.12
+
+- Add the durable provider-attempt `attempt_id` to `step.finished.v1`, required
+  without `harness_step_ref`, with a builder, producer check and decode check.
+  Pin its grammar and restore-safe identity independently of display facts.
+
+- Pin a tool result as one numbered part: prefix only its first non-empty
+  exposed text block, ignoring empty text for classification and placement.
+- Add `ToolResultMediaOnly`, `media_label` and `MEDIA_LABEL_TEXT` for results
+  containing non-image media without text; preserve the image-only label.
+- Add shared `ToolResultBlock`, `tool_result_kind` and `numbered_block_index`
+  helpers. Empty and structured-value-only results do not count; JSON in a
+  text block remains ordinary counted text. Add block-rendering vectors.
+
+## 0.6.11
+
+- Additive release alongside `session_retention` from 0.6.10; its policy group
+  and §9.14 remain unchanged.
+
+- Omit folder paths from the closed live hint and refuse `project_root` as
+  unknown content. Treat `session_ref` as the runner's opaque reference.
+  Add `decode_step_finished`, which takes the publisher from the actual live
+  subject and refuses a different body `runner`.
+
+- Add the closed, content-free `step_events::StepFinished` body for plain
+  `step.finished.v1` bus hints, native durable `StepRef`, and checked
+  `role.describe.step_events` policy metadata. Publish only after durability;
+  consumers subscribe/buffer before reading durable history and re-query after
+  reconnect. Keep step/run usage types unchanged; copy per-step counters with
+  `with_usage` and add optional TTL splits and reasoning inclusion facts.
+- Add full/minimal vectors and named declaration/closed-decode refusals.
+
+## 0.6.10
+
+- Add the separate `session_retention` group: strict per-session policy on send
+  and adopt, describe limits, frozen policy and source/limitation state on head,
+  and session-bound owner release with durable pending deletion. Legacy §9.1
+  retention and existing wire vectors remain unchanged.
+- Pin activity clocks, release ownership independent of parent scopes, deletion
+  and restore incarnation safety, backup refusal and best-effort request dumps.
+  Add policy/release types, validation, refusal names and shared vectors.
+- Additive: the extended public structs (`RoleDescribe`, `SendRequest`,
+  `AdoptRequest`, `HeadMeta`) are non-exhaustive. New describe problem names use
+  the existing `Undecodable` variant rather than extending the exhaustive enum.
+
 ## 0.6.9
 
 - Use `cortexkit-rich-ui-syntax` 0.3.0, which pins `pulldown-cmark` exactly at 0.13.5 instead of 0.13.0, so dependent crates no longer have to downgrade the parser. Every sample parses as before; the runner API and wire are unchanged.

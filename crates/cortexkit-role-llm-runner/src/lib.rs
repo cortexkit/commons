@@ -13,7 +13,8 @@
 //! (admission, baseline, rungs, hooks, scopes). The types here are the wire
 //! shapes it describes. Shapes a consumer decodes are lenient (unknown fields ignored,
 //! enumerations decoded as open strings); request shapes whose missing field
-//! would silently change the question are strict.
+//! would silently change the question are strict. The content-free step-finished
+//! hint is also closed: unknown members must not become a user-content channel.
 //!
 //! The session an op acts on is the session the route is bound to; no
 //! request in this crate names its session.
@@ -42,6 +43,8 @@ pub mod send_status;
 pub mod serializer_profile;
 pub mod session_change;
 pub mod session_ref;
+pub mod session_retention;
+pub mod step_events;
 pub mod structured_output;
 pub mod subscribe;
 pub mod tags;
@@ -80,6 +83,7 @@ pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
+    pub const SESSION_RELEASE: &str = "session.release";
     pub const SESSION_OUTPUT_REFS: &str = "session.output_refs";
     pub const SESSION_OUTPUT_REF_READ: &str = "session.output_ref_read";
     pub const SESSION_UPLOAD_BEGIN: &str = "session.upload_begin";
@@ -192,6 +196,9 @@ pub mod capabilities {
     /// run; on any other runner it may only mean an older runner. Requires
     /// [`LIVE_EVENTS`], whose event it extends.
     pub const RUN_CAUSE: &str = "run_cause";
+
+    /// Content-free, non-stored `step.finished.v1` hints after durable recording.
+    pub const STEP_EVENTS: &str = "step_events";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -252,6 +259,8 @@ pub mod capabilities {
     /// Caller-chosen whole-session transcript retention, with limits in
     /// `role.describe.retention`.
     pub const RETENTION: &str = "retention";
+    /// Per-session storage policy and owner release, separate from legacy retention.
+    pub const SESSION_RETENTION: &str = "session_retention";
     /// Durable, lower-only session input-token budgets on `session.send`.
     pub const INPUT_TOKEN_CAP: &str = "input_token_cap";
     /// Positive model-response limit in `stop_when.max_steps`.
@@ -305,6 +314,10 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (
+            SESSION_RETENTION,
+            &[ops::SESSION_SEND, ops::SESSION_HEAD, ops::SESSION_RELEASE],
+        ),
         (SYSTEM_TEXT_DEFAULT, &[ops::SESSION_SEND]),
         (
             OUTPUT_REFS,
@@ -332,6 +345,7 @@ pub mod capabilities {
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
+        (STEP_EVENTS, &[]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (HELD_CALLS, &[ops::RUN_STATUS]),
@@ -456,6 +470,7 @@ mod tests {
     #[test]
     fn every_group_names_only_role_ops() {
         let role_ops = [
+            ops::SESSION_RELEASE,
             ops::SESSION_OUTPUT_REFS,
             ops::SESSION_OUTPUT_REF_READ,
             ops::SESSION_UPLOAD_BEGIN,
@@ -485,7 +500,12 @@ mod tests {
             ops::SEND_STATUS,
         ];
         for (group, group_ops) in capabilities::GROUPS {
-            assert!(!group_ops.is_empty(), "{group} names no op");
+            // Step events are plain bus publishes, not management-route ops.
+            assert_eq!(
+                group_ops.is_empty(),
+                *group == capabilities::STEP_EVENTS,
+                "{group}"
+            );
             for op in *group_ops {
                 assert!(role_ops.contains(op), "{group} names {op}");
             }

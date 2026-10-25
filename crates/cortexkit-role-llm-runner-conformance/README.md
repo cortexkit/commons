@@ -736,3 +736,11 @@ scripted tool result. `hold_send_staging` lets a host-side adapter delay staging
 for the separate already-sent-result case; it returns false only where
 acceptance and staging coincide, making that scenario N/A. Releasing a staging
 hold does not deliver the send or render a boundary.
+
+`tags_tool_result_blocks_share_one_number` uses the defaulted
+`numbering_tool_result(marker, blocks)` hook to script mixed text/media, empty
+and structured-only tool results. Preserve empty text blocks and keep the
+marker in metadata, not an extra text block. Unsupported shapes are named
+unchecked; block placement and image/media labels are checked when
+`rendered_model_input` is declared. Reads always check whole-result numbering
+and the next part.

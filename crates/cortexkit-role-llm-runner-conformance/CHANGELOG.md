@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.8
+
+- Track llm-runner 0.6.12. Add `tags_tool_result_blocks_share_one_number`,
+  checking whole-result counting, first non-empty text placement, image/media
+  labels, and the next part through reads and observed model input.
+- Add the defaulted `numbering_tool_result` fixture hook, naming unsupported
+  shapes unchecked. Exercise both result layouts and named faulty runners
+  that number every text block, number empty text, mislabel PDFs, or count
+  structured values.
+
 ## 0.12.7
 
 - `output_refs_snapshot_size` checks the size and SHA-256 of the tool-result part read back from storage, not the original result sent by the kit. Runners that cap stored results can pass; when the stored part does not exceed the snapshot cap, the case reports not applicable with its stored size.

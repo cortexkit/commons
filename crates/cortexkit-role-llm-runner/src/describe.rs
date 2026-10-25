@@ -27,6 +27,8 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const MISSING_SESSION_RETENTION: &str = "missing_session_retention";
+    pub const INVALID_SESSION_RETENTION: &str = "invalid_session_retention";
     pub const RUN_CANCEL_UNDECLARED: &str = "run_cancel_undeclared";
     pub const EMPTY_RUN_CANCEL_AT: &str = "empty_run_cancel_at";
     pub const MISSING_RUN_CANCEL_NOW: &str = "missing_run_cancel_now";
@@ -46,6 +48,9 @@ pub mod problem_names {
     /// The answer declares `run_cause` without `live_events`, whose
     /// `run_started` event carries the run's cause.
     pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
+    pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
+    pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
+    pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -93,9 +98,34 @@ pub struct RoleDescribe {
     /// Limits required when the `retention` capability group is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<Retention>,
+    /// Required limits when `session_retention` is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_retention: Option<SessionRetention>,
     /// Supported cancellation points; absent means only `now` is supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_cancel: Option<RunCancel>,
+    /// Publication granularity and durable-history join for `step_events`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_events: Option<crate::step_events::StepEvents>,
+}
+
+/// Limits for per-session storage policies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionRetention {
+    pub max_days: u32,
+    pub max_unreleased_hold_ms: u64,
+    pub required: bool,
+}
+
+impl SessionRetention {
+    pub fn new(max_days: u32, max_unreleased_hold_ms: u64, required: bool) -> Self {
+        Self {
+            max_days,
+            max_unreleased_hold_ms,
+            required,
+        }
+    }
 }
 
 /// Cancellation points advertised by a runner declaring `run_cancel`.
@@ -204,9 +234,20 @@ impl RoleDescribe {
         self
     }
 
+    pub fn with_session_retention(mut self, limits: SessionRetention) -> Self {
+        self.session_retention = Some(limits);
+        self
+    }
+
     /// State the cancellation points (the capability must also be listed).
     pub fn with_run_cancel(mut self, at: Vec<String>) -> Self {
         self.run_cancel = Some(RunCancel::new(at));
+        self
+    }
+
+    /// State the step-event policy (the capability must also be listed).
+    pub fn with_step_events(mut self, policy: crate::step_events::StepEvents) -> Self {
+        self.step_events = Some(policy);
         self
     }
 
@@ -325,11 +366,32 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if !raw.is_object() {
         return Err(vec![DescribeProblem::NotAnObject]);
     }
+    if let Some(policy) = raw.get("step_events") {
+        if serde_json::from_value::<crate::step_events::StepEvents>(policy.clone())
+            .map_or(true, |policy| !policy.valid())
+        {
+            return Err(vec![DescribeProblem::Undecodable(
+                problem_names::INVALID_STEP_EVENTS.into(),
+            )]);
+        }
+    }
     let describe: RoleDescribe = match serde_json::from_value(raw.clone()) {
         Ok(describe) => describe,
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    match (
+        describe.declares(capabilities::STEP_EVENTS),
+        describe.step_events.is_some(),
+    ) {
+        (true, false) => problems.push(DescribeProblem::Undecodable(
+            problem_names::STEP_EVENTS_MISSING.into(),
+        )),
+        (false, true) => problems.push(DescribeProblem::Undecodable(
+            problem_names::STEP_EVENTS_UNDECLARED.into(),
+        )),
+        _ => {}
+    }
     if describe.declares(capabilities::OUTPUT_REFS) && !describe.declares(capabilities::TAGS) {
         problems.push(DescribeProblem::Undecodable(
             "output_refs requires tags".into(),
@@ -375,6 +437,20 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
                 problems.push(DescribeProblem::InvalidRetention)
             }
             Some(_) => {}
+        }
+    }
+    if describe.declares(capabilities::SESSION_RETENTION) {
+        let problem = match describe.session_retention {
+            None => Some(problem_names::MISSING_SESSION_RETENTION),
+            Some(limits)
+                if !(1..=3650).contains(&limits.max_days) || limits.max_unreleased_hold_ms == 0 =>
+            {
+                Some(problem_names::INVALID_SESSION_RETENTION)
+            }
+            Some(_) => None,
+        };
+        if let Some(problem) = problem {
+            problems.push(DescribeProblem::Undecodable(problem.into()));
         }
     }
     if describe.session_capabilities_from.is_none() {

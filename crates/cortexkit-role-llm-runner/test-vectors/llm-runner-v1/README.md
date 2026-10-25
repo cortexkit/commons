@@ -1,5 +1,17 @@
 # `llm-runner/v1` test vectors
 
+`session-retention.json` pins the separate per-session policy (§9.14): all keep
+shapes, required/unknown members, value and combination refusals, describe limits,
+send/adopt/head members, state flags, session-bound release and all associated
+refusal shapes. `session_retention::tests` checks these bytes and decoded values;
+existing vector files are unchanged.
+
+`step-events.json` pins the full and minimal closed `step.finished.v1` bodies,
+open status/classification values, unknown/content-member refusals (including
+`project_root`, which is rejected as an unknown member), and valid
+or malformed `step_events` discovery groups. `step_events::tests` checks their
+round trips, absence versus reported zero, one-based attempts and named refusals.
+
 `read-descriptors.json` uses compact expansion recipes for large UTF-8 text
 and arguments. The shared descriptor tests expand them before checking the
 Anthropic top-level image, nested tool-result image, PDF/document, URL image,
@@ -333,3 +345,13 @@ commands, open reply/status states including the stored terminal `outcome_unknow
 status, the optional plan `interactive` boolean and safe host menu naming. The
 absent-command baseline reuses `baseline.json` and pins its unchanged JCS bytes.
 Command output is never transcript or model input.
+
+`tags.json` also pins whole tool-result block numbering (`tool_results`):
+only the first non-empty exposed text block is prefixed; image-only and
+non-image media-only results use their labels; empty and structured-only
+results consume no number. The next part follows the whole result.
+
+`step-events.json` pins `attempt_id` validation and conditional presence.
+Only the existing `minimal` event gains the member; `full` still demonstrates
+that a host-referenced event can omit it. Refusal vectors cover length,
+characters and absence of both identities.

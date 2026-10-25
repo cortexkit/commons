@@ -54,6 +54,7 @@ where
         "tags_numbered_in_rendered_order" => rendered_order(case).await,
         "tags_renumbering_waits_for_the_step_boundary" => passed(step_boundary(case).await),
         "tags_count_only_parts_rendered_with_a_number" => counted_parts(case).await,
+        "tags_tool_result_blocks_share_one_number" => tool_result_blocks(case).await,
         "tags_setup_checkpoint_anchors_at_its_cut" => passed(setup_checkpoint(case).await),
         "tags_fork_of_a_managed_session_refused" => fork_refused(case).await,
         "tags_lost_marker_key_keeps_numbers" => lost_marker_key(case).await,
@@ -1097,6 +1098,158 @@ where
         ));
     }
     Ok(entry)
+}
+
+/// A countable tool result has one number, placed on its first non-empty text
+/// block or, without text, on its image-only or media-only label. Empty and
+/// structured-only results consume none.
+async fn tool_result_blocks<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    use tags::ToolResultBlock::{Image, Media, Text};
+    let first = case.mint.next("blocks-first");
+    let later = case.mint.next("blocks-later");
+    // Expected placement and labels are independent of the runner's helpers.
+    let shapes = [
+        (
+            "text_image_text",
+            vec![Text(&first), Image, Text(&later)],
+            Some(0),
+            None,
+            true,
+        ),
+        ("image_text", vec![Image, Text(&first)], Some(1), None, true),
+        (
+            "empty_text_then_text",
+            vec![Text(""), Text(&first)],
+            Some(1),
+            None,
+            true,
+        ),
+        (
+            "image_empty_text",
+            vec![Image, Text("")],
+            None,
+            Some("[image]"),
+            true,
+        ),
+        ("pdf", vec![Media], None, Some("[media]"), true),
+        ("image_pdf", vec![Image, Media], None, Some("[media]"), true),
+        ("empty_text", vec![Text("")], None, None, false),
+        ("structured_only", vec![], None, None, false),
+        (
+            "json_text",
+            vec![Text("{\"invented\":true}")],
+            Some(0),
+            None,
+            true,
+        ),
+    ];
+    let mut unchecked = Vec::new();
+    for (name, blocks, placement, label, counted) in shapes {
+        let marker = case.mint.next(name);
+        let Some(result) = case.subject.numbering_tool_result(&marker, &blocks) else {
+            unchecked.push(name.to_owned());
+            continue;
+        };
+        let mut call = case.mint.call(name);
+        call.result = result;
+        let arguments = call.arguments.clone();
+        let (before, before_marker) = case.mint.text("blocks-before");
+        let (after, after_marker) = case.mint.text("blocks-after");
+        let session = session_with(
+            case,
+            name,
+            vec![
+                ScriptedTurn::new(vec![before, ScriptedPart::ToolCall(call)]),
+                ScriptedTurn::new(vec![after]),
+            ],
+            &[case.mint.next("blocks-prompt")],
+        )
+        .await?;
+        let (_, messages) = read_all(&session.route).await?;
+        check_tags(name, &messages)?;
+        let step = entry_holding(&messages, &before_marker)?;
+        let entry =
+            result_entry(case, &session.route, &messages, step, &arguments, &marker).await?;
+        let part = part_holding(case.subject, entry, &marker)?;
+        let before = number_of(case.subject, &messages, &before_marker, name)?;
+        let number = number_of_part(entry, &part)?;
+        let expected = counted.then_some(before + 1);
+        if number != expected {
+            return Err(format!(
+                "{name}: whole result number {number:?}, expected {expected:?}"
+            ));
+        }
+        let after = number_of(case.subject, &messages, &after_marker, name)?;
+        if after != before + 1 + u64::from(counted) {
+            return Err(format!(
+                "{name}: next part {after} does not follow the whole result"
+            ));
+        }
+        if !case.declared.contains(&Capability::RenderedModelInput) {
+            unchecked.push(format!("{name} rendering (rendered_model_input)"));
+            continue;
+        }
+        let requests = case
+            .subject
+            .model_requests(&session.name)
+            .await
+            .map_err(|e| format!("{name}: observing model requests: {e}"))?;
+        let rendered = requests
+            .last()
+            .ok_or("no model request after the result")?
+            .rendered
+            .join("\n");
+        let rendered_numbers: Vec<u64> = rendered
+            .split('§')
+            .filter_map(|piece| piece.parse().ok())
+            .collect();
+        let expected_numbers: Vec<u64> = (1..after).collect();
+        if rendered_numbers != expected_numbers {
+            return Err(format!(
+                "{name}: rendered numbers {rendered_numbers:?}, expected {expected_numbers:?}"
+            ));
+        }
+        if let Some(number) = expected {
+            let tag = format!("§{number}§");
+            if rendered.matches(&tag).count() != 1 {
+                return Err(format!("{name}: result must render exactly one {tag}"));
+            }
+            let text = if let Some(index) = placement {
+                let Text(text) = blocks[index] else {
+                    unreachable!()
+                };
+                text
+            } else {
+                label.expect("counted media result has a label")
+            };
+            if !rendered.contains(&format!("{tag} {text}")) {
+                return Err(format!(
+                    "{name}: number is not on the first non-empty text or correct label {text:?}"
+                ));
+            }
+            for (index, block) in blocks.iter().enumerate() {
+                if let Text(text) = block {
+                    if !text.is_empty() && Some(index) != placement && !rendered.contains(text) {
+                        return Err(format!("{name}: later text block was not preserved"));
+                    }
+                }
+            }
+        } else if rendered.contains(&format!("§{}§", before + 1)) {
+            return Err(format!("{name}: uncounted result rendered a number"));
+        }
+    }
+    if unchecked.is_empty() {
+        Ok(Ending::Passed)
+    } else {
+        Ok(Ending::PassedWithInapplicableRule(format!(
+            "tool-result numbering unchecked: {} (numbering_tool_result)",
+            unchecked.join(", ")
+        )))
+    }
 }
 
 /// Only parts rendered with a number are counted: the model's text, the part

@@ -507,8 +507,21 @@ pub const SESSION_CHANGE_CODES: &[&str] = &[
     TOOL_OUTSIDE_HOST_SET,
 ];
 
+/// A first send or adopt omitted a required session policy. Nothing was written.
+pub const RETENTION_REQUIRED: &str = "retention_required";
+/// A later policy differs from the starter's frozen policy; detail carries `frozen`.
+pub const RETENTION_CONFLICT: &str = "retention_conflict";
+/// Release is pending. Retryable after deletion, when a send starts a new incarnation.
+pub const SESSION_RELEASED: &str = "session_released";
+/// Single-session backup is unavailable; detail carries `reason`.
+pub const BACKUP_UNSUPPORTED: &str = "backup_unsupported";
+
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
+    RETENTION_REQUIRED,
+    RETENTION_CONFLICT,
+    SESSION_RELEASED,
+    BACKUP_UNSUPPORTED,
     UNKNOWN_REF,
     UNKNOWN_SESSION,
     UNKNOWN_UPLOAD,
@@ -566,7 +579,10 @@ pub const CODES: &[&str] = &[
 /// reloading or warming, target unavailable) are the transport's to judge
 /// and are not listed here.
 pub fn is_retryable(code: &str) -> bool {
-    matches!(code, TRANSIENT | FETCH_UNAVAILABLE | SCOPE_NOT_SYNCED)
+    matches!(
+        code,
+        TRANSIENT | FETCH_UNAVAILABLE | SCOPE_NOT_SYNCED | SESSION_RELEASED
+    )
 }
 
 /// The field an `invalid_params` or `send_id_reuse` refusal names, or `None`
@@ -779,10 +795,12 @@ mod tests {
         let file = vectors::load("errors.json");
         let output_refs = vectors::load("output-refs.json");
         let system_text_default = vectors::load("system-text-default.json");
+        let session_retention = vectors::load("session-retention.json");
         let cases: Vec<_> = vectors::cases(&file, "codes")
             .iter()
             .chain(vectors::cases(&output_refs, "codes"))
             .chain(vectors::cases(&system_text_default, "codes"))
+            .chain(vectors::cases(&session_retention, "codes"))
             .collect();
         let listed: Vec<&str> = cases
             .iter()

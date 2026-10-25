@@ -308,6 +308,10 @@ pub struct Defects {
     /// part is left unnumbered as if it held only the call, though it holds
     /// the call's result.
     pub tags_embedded_result_unnumbered: bool,
+    pub tags_number_every_text: bool,
+    pub tags_number_empty_block: bool,
+    pub tags_pdf_image_label: bool,
+    pub tags_count_structured_result: bool,
     /// A tool-result entry of its own (message-array layout) is left
     /// unnumbered, as if it held only a tool call.
     pub tags_tool_result_entry_unnumbered: bool,
@@ -5683,6 +5687,29 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn image_tool_result(&self, marker: &str) -> Option<Value> {
         (!self.no_image_results).then(|| tags::image_result(marker))
+    }
+
+    fn numbering_tool_result(
+        &self,
+        marker: &str,
+        blocks: &[cortexkit_role_llm_runner::tags::ToolResultBlock<'_>],
+    ) -> Option<Value> {
+        use cortexkit_role_llm_runner::tags::ToolResultBlock;
+        let content: Vec<Value> = blocks
+            .iter()
+            .map(|block| match block {
+                ToolResultBlock::Text(text) => json!({"type":"text","text":text}),
+                ToolResultBlock::Image => json!({"type":"image","name":"invented-square.png"}),
+                _ => {
+                    json!({"type":"file","mime_type":"application/pdf","name":"invented-notes.pdf"})
+                }
+            })
+            .collect();
+        Some(if blocks.is_empty() {
+            json!({"fake_numbering":true,"structuredContent":{"marker":marker}})
+        } else {
+            json!({"fake_numbering":true,"marker":marker,"content":content})
+        })
     }
 
     async fn fork_session(

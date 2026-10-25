@@ -129,12 +129,57 @@ pub fn render_counted_text(number: u64, text: &str) -> String {
 /// What follows the number in an image-only tool result's label.
 pub const IMAGE_LABEL_TEXT: &str = "[image]";
 
+/// What follows the number in a non-image media-only tool result's label.
+pub const MEDIA_LABEL_TEXT: &str = "[media]";
+
 /// The short text label an image-only tool result renders, carrying its
 /// number: `§N§ [image]`. The runner places it where the provider accepts
 /// text beside the image (on Anthropic's API, a text block before the image
 /// inside the `tool_result`).
 pub fn image_label(number: u64) -> String {
     format!("{SIGIL}{number}{SIGIL}{RENDER_SEPARATOR}{IMAGE_LABEL_TEXT}")
+}
+
+/// The short text label for a tool result with non-image media but no non-empty
+/// text: `§N§ [media]`. Place it where the provider accepts text beside media.
+pub fn media_label(number: u64) -> String {
+    format!("{SIGIL}{number}{SIGIL}{RENDER_SEPARATOR}{MEDIA_LABEL_TEXT}")
+}
+
+/// A tool-result block as numbering sees it, independent of provider storage.
+/// Map text to its exposed bytes, images to `Image`, and files or other media
+/// to `Media`. A structured value with no text block contributes no blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToolResultBlock<'a> {
+    Text(&'a str),
+    Image,
+    Media,
+}
+
+/// The block to prefix when rendering a whole tool result's number. Empty
+/// exposed text is ignored. Later text and all media render as exposed without
+/// a number. `None` means use the label selected by [`tool_result_kind`], if any.
+pub fn numbered_block_index(blocks: &[ToolResultBlock<'_>]) -> Option<usize> {
+    blocks
+        .iter()
+        .position(|block| matches!(block, ToolResultBlock::Text(text) if !text.is_empty()))
+}
+
+/// Classify one whole tool result, never individual blocks. Non-empty exposed
+/// text takes precedence over media; otherwise any non-image media selects the
+/// media label, images select the image label, and no media means uncounted.
+/// A text block containing JSON is text; a structured value alone is not.
+pub fn tool_result_kind(blocks: &[ToolResultBlock<'_>]) -> PartKind {
+    if numbered_block_index(blocks).is_some() {
+        PartKind::ToolResultText
+    } else if blocks.contains(&ToolResultBlock::Media) {
+        PartKind::ToolResultMediaOnly
+    } else if blocks.contains(&ToolResultBlock::Image) {
+        PartKind::ToolResultImageOnly
+    } else {
+        PartKind::EmptyText
+    }
 }
 
 /// The whole rendered text of a counted part a compaction provider dropped:
@@ -145,11 +190,13 @@ pub fn dropped_placeholder(number: u64) -> String {
 
 /// The text a runner renders for a part of `kind` numbered `number`, when
 /// the run renders tags: [`render_counted_text`] for counted text,
-/// [`image_label`] for an image-only tool result (its `text` is unused), and
+/// [`image_label`] or [`media_label`] for a tool result without non-empty text
+/// (its `text` is unused), and
 /// `text` unchanged for a part that does not count or has no number.
 pub fn render_part(kind: PartKind, number: Option<u64>, text: &str) -> String {
     match (kind, number) {
         (PartKind::ToolResultImageOnly, Some(number)) => image_label(number),
+        (PartKind::ToolResultMediaOnly, Some(number)) => media_label(number),
         (kind, Some(number)) if counts(kind) => render_counted_text(number, text),
         _ => text.to_owned(),
     }
@@ -525,7 +572,7 @@ mod tests {
             assert_eq!(rendered, case["rendered"].as_str().unwrap(), "{name}");
             kinds.insert(format!("{kind:?}"));
         }
-        assert_eq!(kinds.len(), 11, "every part kind has a vector");
+        assert_eq!(kinds.len(), 12, "every part kind has a vector");
         for case in vectors::cases(&file, "dropped") {
             let number = case["number"].as_u64().unwrap();
             assert_eq!(
@@ -534,6 +581,97 @@ mod tests {
             );
         }
         assert_eq!(image_label(3), "§3§ [image]");
+        assert_eq!(media_label(3), "§3§ [media]");
+    }
+
+    fn tool_result_vector(name: &str) {
+        let file = vectors::load("tags.json");
+        let case = vectors::cases(&file, "tool_results")
+            .iter()
+            .find(|case| case["name"] == name)
+            .expect("tool-result vector");
+        let content = case["result"]["content"].as_array();
+        let blocks: Vec<_> = content
+            .into_iter()
+            .flatten()
+            .map(|block| match block["type"].as_str().unwrap() {
+                "text" => ToolResultBlock::Text(block["text"].as_str().unwrap()),
+                "image" => ToolResultBlock::Image,
+                _ => ToolResultBlock::Media,
+            })
+            .collect();
+        let kind = tool_result_kind(&blocks);
+        assert_eq!(serde_json::to_value(kind).unwrap(), case["kind"]);
+        let index = numbered_block_index(&blocks);
+        assert_eq!(json!(index), case["numbered_block"]);
+        let numbers = try_number_parts(
+            40,
+            &[
+                RenderedPart::new(kind, 0),
+                RenderedPart::new(PartKind::AssistantText, 1),
+            ],
+        )
+        .unwrap();
+        assert_eq!(json!(numbers), case["numbers"]);
+        let mut rendered = content.cloned().unwrap_or_default();
+        if let Some(index) = index {
+            rendered[index]["text"] = json!(render_part(
+                kind,
+                numbers[0],
+                rendered[index]["text"].as_str().unwrap()
+            ));
+        } else if counts(kind) {
+            rendered.insert(
+                0,
+                json!({"type":"text", "text":render_part(kind, numbers[0], "")}),
+            );
+        }
+        assert_eq!(json!(rendered), case["rendered_blocks"]);
+    }
+
+    #[test]
+    fn tool_result_text_image_text() {
+        tool_result_vector("text_image_text");
+    }
+
+    #[test]
+    fn tool_result_image_text() {
+        tool_result_vector("image_text");
+    }
+
+    #[test]
+    fn tool_result_empty_text_then_text() {
+        tool_result_vector("empty_text_then_text");
+    }
+
+    #[test]
+    fn tool_result_image_empty_text() {
+        tool_result_vector("image_empty_text");
+    }
+
+    #[test]
+    fn tool_result_pdf() {
+        tool_result_vector("pdf");
+    }
+
+    #[test]
+    fn tool_result_image_pdf() {
+        tool_result_vector("image_pdf");
+    }
+
+    #[test]
+    fn tool_result_empty_text() {
+        tool_result_vector("empty_text");
+    }
+
+    #[test]
+    fn tool_result_structured_only() {
+        tool_result_vector("structured_only");
+    }
+
+    #[test]
+    fn tool_result_json_text() {
+        tool_result_vector("json_text");
     }
 
     #[test]

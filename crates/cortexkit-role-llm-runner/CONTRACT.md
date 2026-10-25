@@ -85,7 +85,7 @@ shipping runner with this document.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, run_cancel?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -145,6 +145,7 @@ shipping runner with this document.
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
+| `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
@@ -164,6 +165,7 @@ shipping runner with this document.
 | `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
+| `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
 | `retract` | `session.retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `max_steps` | `session.send` with `stop_when.max_steps` | §9.3.1 |
@@ -2264,12 +2266,27 @@ part's key and its content digest, never a number.
   visible number. One predicate drives both counting and rendering, so the
   two cannot drift apart: a runner maps each part it renders onto
   `tags::PartKind` and asks `tags::counts`.
-  - Counted: user text, a tool result's text (error text included), the
-    model's own text, and a tool result holding only images, which renders
+  - Counted: user text, a tool result with non-empty exposed text (error
+    text included), the model's own text, and a tool result holding only
+    images apart from empty text blocks, which renders
     a short text label carrying its number (`tags::image_label`, `§N§
     [image]`) where the provider accepts text beside the image (on
     Anthropic's API, a text block before the image inside the
     `tool_result`), so a context manager can reach a screenshot.
+  - A tool result is one part, whatever its blocks: a compaction provider
+    keeps or drops the whole result, never a block inside it. Empty exposed
+    text blocks are ignored for counting and number placement. With no
+    non-empty text, images alone select `ToolResultImageOnly`; any non-image
+    media (a PDF or other file, alone or beside images) selects
+    `ToolResultMediaOnly`, counted once with `tags::media_label` (`§N§ [media]`).
+    `tags::tool_result_kind` classifies the whole result.
+  - A tool result with neither non-empty exposed text nor media is
+    `EmptyText` and is not counted. This includes a result carried only as
+    a structured value with no text block, such as a legacy reply with only
+    `structuredContent` or an imported transcript's JSON tool result: some
+    providers receive the value as an object, not text, so no number can be
+    written on it consistently across providers. A text block whose text
+    happens to be JSON is ordinary text and counts.
   - A steer the runner stores as a user message counts, as a reminder or a
     delivered notice stored that way does. A `turn_system` message (§9.7)
     does not.
@@ -2550,8 +2567,14 @@ part's key and its content digest, never a number.
   leading tag notation stripped (`tags::render_counted_text`,
   `tags::RENDER_SEPARATOR`): only `§`-shaped notation, never bare digits,
   in up to eight rounds (`tags::strip_leading_tag_notation`). Rendering
-  what it rendered gives the same bytes again. An image-only tool result
-  renders its label; a part that does not count renders as exposed, with
+  what it rendered gives the same bytes again. A tool result's number
+  prefixes its first non-empty exposed text block (`tags::numbered_block_index`);
+  later text blocks and all media blocks render as exposed, unnumbered.
+  Thus `[text, image, text]` takes one number on block 0, `[image, text]`
+  and `["", text]` put it on block 1, and `[image, ""]` uses the image label.
+  A tool result without non-empty text renders its image-only or media-only
+  label once, where the provider accepts text beside media; a part that does
+  not count renders as exposed, with
   no number (`tags::render_part`). A compaction provider builds the same
   bytes for its placeholders. `tags.json` and `tag-cleaning.json` pin
   rendered parts.
@@ -3185,6 +3208,102 @@ its host's file storage, not a second copy of the host's media store.
   `session.read` and stored bodies never gain descriptors. A set may be empty
   when scanning found no references; no snapshot is copied in that case.
 
+### 9.14 `session_retention`: per-session storage policy and release
+
+- [pinned] This group is separate from §9.1 `retention`, which is unchanged.
+  `role.describe` declares `session_retention` and limits
+  `session_retention: {max_days: u32, max_unreleased_hold_ms: u64, required: bool}`
+  (`describe::SessionRetention`). `check_describe` refuses a declared group
+  without limits (`missing_session_retention`), or with `max_days` outside
+  1..=3650 or a zero `max_unreleased_hold_ms` (`invalid_session_retention`).
+  The group serves `session.send`, `session.head` and `session.release`;
+  it also extends `session.adopt` wherever `adopt` is declared.
+- [pinned] `session.send` and `session.adopt` accept optional
+  `retention_policy: {keep, archive_after_days, backup, request_dumps}`
+  (`session_retention::RetentionPolicy`). All four members are required inside
+  the object; unknown members inside are refused. `keep` is `"none"`,
+  `{"days": N}` or `"forever"`. Days are integers in 1..=the runner's
+  `max_days`. `archive_after_days` is an integer: 0 means never, otherwise
+  1..=3650. With days it must be less than N; with `"none"` it must be 0.
+  `backup` and `request_dumps` are booleans. Every runner refuses
+  `backup: true` with `keep: "none"`. Any bad value or combination is
+  `invalid_params` with `detail.field` naming the member path, for example
+  `retention_policy.keep.days`, `retention_policy.archive_after_days` or
+  `retention_policy.backup`. A runner without the group refuses the member
+  as `invalid_params {field: "retention_policy"}`, never ignores it.
+- [pinned] A runner declaring `session_retention` honours and enforces every
+  policy it accepts; it never accepts one and ignores it. While `required`
+  is false, a first send without a policy is still accepted. With `required`
+  true, a first send or first adopt without one is refused `retention_required`,
+  and nothing is written. A starter sends `retention_policy` to every runner
+  declaring `session_retention`, whatever `required` says, and to no other
+  runner. A runner may declare both groups during the switch; a send carrying
+  both `retention` and `retention_policy` is refused
+  `invalid_params {field: "retention_policy"}`. A runner may stop declaring
+  §9.1 `retention` in the same release in which it declares `session_retention`.
+  A starter picks which member to send by which group the runner declares;
+  when both are declared it sends only `retention_policy`.
+- [pinned] Days and archive clocks count from the session's last durable
+  activity: sends, adopt and run lifecycle, never cache warms or maintenance.
+  An archived session's reads return exactly what they returned before archive;
+  only storage changes. Nothing is deleted while a run is active or a send is
+  queued, whether deletion is due to days expiry, release or the fallback hold.
+- [pinned] The first send or adopt carrying a policy freezes it. Later sends
+  or adopts may repeat it. Equality is on decoded values, not bytes. A different
+  policy is refused `retention_conflict` with `detail.frozen` equal to the frozen
+  policy. Refusals write nothing. Adopt retains §9.5's caller, idempotency and
+  plan checks, then checks the policy before writing. Its idempotency comparison
+  includes the policy, naming `retention_policy` on `send_id_reuse` when it differs.
+- [pinned] Sessions not started by a send (person-started sessions a runner hosts,
+  or sessions predating the group) get the runner's configured policy, with
+  `source: "runner"`. The first send or adopt carrying a policy replaces a
+  runner-sourced policy exactly once. After that it is starter-sourced and frozen.
+- [pinned] `session.head` gains `retention_policy`, exactly as accepted or
+  runner-assigned, and `retention_state: {source: "starter" | "runner",
+  request_dumps_unsupported?: true, host_limited?: true}`. When dumps were
+  requested but the runner cannot save them, it sets `request_dumps_unsupported`:
+  dumps are best-effort, never a refusal, and the policy keeps `request_dumps: true`.
+  `host_limited` means the host keeps the transcript and may delete it sooner
+  than the policy says. Flags appear only as true, never false.
+- [pinned] `session.release {}` (`ReleaseRequest`) targets the bound session
+  name, for every keep value: the policy is the longest a session lives and
+  release is the owner ending it sooner. Owner-only means the principal that
+  made the session's first send (or adopt), as the daemon attested it, never
+  the owner of a parent scope. Any other principal is refused
+  `scope_owner_mismatch`, including a caller under that parent scope. The
+  starter's principal can release even under another principal's parent scope.
+- [pinned] Release is idempotent. The answer (`ReleaseReply`) is
+  `{state: "pending"}` while a run is active or a send is queued,
+  `{state: "deleted"}` when this call completed deletion before answering, and `{state: "absent"}`
+  when the bound name has no session (never created or already deleted).
+  The runner records release durably before answering pending. It then deletes
+  once the active run ends and the queue drains, without another starter call,
+  including after a process kill and restart. Pending means release was recorded
+  durably; deleted means this call completed deletion with nothing running;
+  absent means no session exists under the bound name right now. A repeat after
+  deletion always answers absent; no completed-deletion record is required.
+  Deletion after pending must not wait for another call, including after restart:
+  once the recovered run ends and the queue drains, deletion completes autonomously.
+  A release after that completion answers absent.
+- [pinned] After release and before deletion completes, a send to the name is
+  refused `session_released` (retryable). After deletion, head and reads refuse
+  `unknown_session`, and `session.media_read` refuses `unknown_media` for its
+  checksum. The next send starts a new incarnation under the same name.
+  Release frees live runner data only: backups already taken follow the backup
+  service's own retention.
+- [pinned] For `keep: "none"`, if no release arrives, the runner deletes the
+  session `max_unreleased_hold_ms` after its last run ends.
+- [pinned] Deletion removes everything the session owns: log, indexes, lease,
+  media and attachments the runner holds by checksum, outbox entries and request
+  dumps. A session's dumps never outlive it. Files placed in the user's project
+  folder (for example uploads written there) are the user's project files and
+  are never deleted with the session.
+- [pinned] A runner that cannot back up a single session refuses `backup: true`
+  with `backup_unsupported`, whose detail names the reason (`reason`). It never
+  accepts and silently skips backup. A session with `backup: false` is absent
+  after a restore, never half there. A restore never brings back a deleted
+  incarnation, and never deletes a later incarnation under the same name.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -3548,6 +3667,10 @@ treats it as a terminal refusal of that one request.
 | `unknown_media` | the bound session's history does not reference the digest | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
+| `retention_required` | first send or adopt omitted a required policy (§9.14) | — | no |
+| `retention_conflict` | policy differs from the starter's frozen policy (§9.14) | `frozen` (policy) | no |
+| `session_released` | send while release deletion is pending (§9.14) | — | **yes** |
+| `backup_unsupported` | runner cannot back up a single session (§9.14) | `reason` | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
@@ -3661,7 +3784,7 @@ above.
 
 - [pinned] Every field is declared required or optional.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
-  strings): `role.describe`, every reply and event a consumer decodes
+  strings): `role.describe`, every reply and session-stream event a consumer decodes
   (`ReadPage`, `ModelPage`, `HeadMeta`, `HistoryPage`, `RunResult`, `SubscribeEvent`,
   `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
   `ToolCallsPage`, `RefreshReply`, `RefreshPolicyReply`,
@@ -3670,6 +3793,9 @@ above.
   around it is exactly `{"result": <answer>}` (§1). A run call's `outcome`, a ceiling's
   `cause` and a read entry's `delivered_as.mode` are open strings. One
   exception: a model-view entry's `source` kind is strict (§8).
+- [pinned] **Closed live hint**: `step.finished.v1` refuses every unknown
+  member (§14.3), while its status and classification strings stay open.
+  `role.describe.step_events` is likewise closed and checked by name.
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `session.history`, `run.result`, `run.status`,
   `run.tool_calls`, `session.subscribe`, `session.baseline`,
@@ -3786,6 +3912,7 @@ their role.
 | `ToolResultRecorded` | a call's result with its PostTool output | 4, 5 |
 | `Terminal` | the run's terminal state | 3 |
 | `RetentionTombstoned` | a content-free expiry tombstone; transcript and derived copies not yet deleted | 9 |
+| `ReleasePending` | release pending was durably recorded and answered, before deferred deletion (§9.14) | 9 |
 | `UserCommandForwarded` | the invocation is durably reserved and its provider received it; the reply is not stored | 10, §9.10 |
 
 A runner whose durable state lives in a store where truncation is not
@@ -3837,6 +3964,98 @@ to the session's whole length.
   the opt-in case `per_step_cost_scales_with_new_messages` (§15); it does
   not measure memory and does not enforce the rule on a runner that does
   not opt in.
+
+## 14.3 `step_events`: content-free live step hints
+
+- [pinned] A runner publishing these hints lists `step_events` in
+  `role.describe.capabilities` and supplies `step_events: {granularity,
+  history_key}`. `granularity` is exactly `per_attempt` or
+  `per_completed_step`; `history_key` is exactly `step_ref` or `harness`.
+  The declaration is closed. `check_describe` refuses malformed declarations
+  as `invalid_step_events`, a declared group without metadata as
+  `step_events_missing`, and metadata without the group as
+  `step_events_undeclared`.
+- [pinned] The runner publishes one `step.finished.v1` event per durably
+  recorded step at its declared granularity, **only after the record is
+  durable, never before**. With `per_attempt`, each recorded attempt is
+  visible. With `per_completed_step`, attempts the host retried inside one
+  step are invisible: a missing attempt is not evidence of a lost event.
+  Terminal failed, cancelled and interrupted steps are included, not only
+  successful steps.
+- [pinned] The subject is `ck.{acct}.live.<runner>.step.finished.v1`, where
+  `runner` is the publishing module id. The `live` root is beside `event`,
+  not beneath it. This is a plain publish; no stream captures it and nothing
+  is stored on the bus. A deleted session therefore leaves nothing behind
+  there. Consumers subscribe to granted live subjects without connecting to
+  every runner. An app with account-wide live access can use
+  `ck.{acct}.live.*.step.finished.v1`; a filtered consumer uses its allowed
+  per-runner subjects.
+- [pinned] The subject's module token is the authority for who published:
+  bus grants let a module publish only on its own live subjects. A consumer
+  takes the publisher from that token and drops an event whose body `runner`
+  differs. `step_events::decode_step_finished` checks the concrete subject,
+  closed body and publisher agreement before returning a hint. Publisher
+  identity does not make the hint authoritative history or grant any right.
+- [pinned] The body (`step_events::StepFinished`) has exactly the following
+  closed field list. Unknown members, including content-looking members such
+  as `prompt` or `project_root`, are refused on decode. Identifiers and open classifications
+  must never carry prompt text, tool names or arguments, error text, or any
+  other host-supplied user content. Optional means unknown when absent, never
+  zero; optional members are omitted when unavailable.
+
+  | Fields | Wire type and meaning |
+  |---|---|
+  | `runner`, `session_ref`, `log_incarnation`, `seq` | Required strings for the first three, unsigned 64-bit integer for `seq`; together the durable `step_ref` |
+  | `run_id`, `step_id`, `attempt`, `terminal_status` | Required identifier strings, positive 64-bit integer attempt (1-based), and open status string (`completed`, `failed`, `cancelled`, `interrupted`, or a future value) |
+  | `harness_step_ref?`, `provider_request_id?` | Optional host-record and vendor-request identifier strings |
+  | `attempt_id?` | Opaque provider-attempt identifier string, required when `harness_step_ref` is absent; optional when it is present |
+  | `harness`, `session` | Required strings: the harness and session the runner received |
+  | `work_class?`, `provider`, `model` | Optional open work-class string, required provider identifier and the model actually sent |
+  | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters, with the same names as run usage |
+  | `cache_write_5m_tokens?`, `cache_write_1h_tokens?` | Optional unsigned 64-bit cache-write counters split by TTL; absent is not zero and a partial split need not add up to the total |
+  | `reasoning_included_in_output?` | Optional boolean stating whether reasoning tokens are included in output tokens; absence does not imply either convention |
+  | `request_body_bytes?`, `context_limit?`, `finish_reason?` | Optional unsigned 64-bit request-byte count and context-token limit, and optional open finish-reason string |
+  | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
+
+- [pinned] `attempt_id` is 1–128 characters of `[A-Za-z0-9_-]`, unique per
+  provider attempt and never reused, including after a session restore. It
+  is the exact value the runner writes in its own durable step record.
+  Before publishing, `StepFinished::check` refuses an event with neither
+  `harness_step_ref` nor `attempt_id`, or with an `attempt_id` outside that
+  grammar (`step_events::valid_attempt_id`); `decode_step_finished` checks
+  the same rule. Without `harness_step_ref`, the row identity of a runner
+  step is `(runner, attempt_id)`. `run_id`, `step_id` and `attempt` are display
+  facts: their triple can repeat after a restore and is not an identity.
+- [pinned] `seq` is the runner's **native durable log position**, scoped by
+  runner, session reference and log incarnation: the position acknowledged by
+  the step-history consumer. It is never assumed to equal a `session.read`
+  message ordinal or a `session.subscribe` frame sequence. This adds no field
+  to `session.read` or `session.history`.
+- [pinned] `session_ref` is the runner's §14.1 reference, opaque to consumers;
+  consumers never derive it. A live hint carries no folder path or project-root
+  member: paths name user directories and do not belong in a content-free hint.
+- [pinned] With `history_key: "harness"`, `harness_step_ref` is the host's own
+  record id (for example a request id or message id). Its absence means the
+  attempt has no host record, such as a refusal before forwarding; an app
+  shows it as unmatched. With `history_key: "step_ref"`, the member is
+  omitted. `provider_request_id` is absent when the provider gave none.
+- [pinned] The event is a hint for a live view, **never authority, never
+  billing, and grants nothing**. Missed or duplicate delivery may briefly
+  stale a view; durable reads repair it. Consumer rule: **subscribe first
+  and buffer, then read the native durable step history** (directly or through
+  the step-history consumer), then drop buffered events whose `step_ref`
+  (or present `harness_step_ref` under the harness key) is already in history.
+  After reconnecting, re-query history by cursor shortly after reconnect:
+  the step-history consumer may take seconds to read a just-recorded step.
+- [pinned] The event owns a separate closed wire shape. `StepUsage` supplies
+  the five per-step counters through `with_usage`, but is not itself a wire
+  shape. `RunUsage` is a lenient aggregate with required step counts and a
+  per-model list, so neither type is changed or flattened into the event.
+- [pinned] The kit gates its three cases on `step_events`. Its adapter reads
+  native durable step positions independently of actual captured publishes,
+  and observes publish order at the runner's durability point. Missing
+  adapter evidence fails by case name; a later read alone does not prove
+  publish-after-durability.
 
 ## 15. Conformance suite (planned)
 
