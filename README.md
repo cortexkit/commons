@@ -23,6 +23,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-mutate](crates/cortexkit-mutate/README.md) | The `ckdev-mutate` mutation-testing CLI. | Not published |
 | [cortexkit-paths](crates/cortexkit-paths/README.md) | Canonical project-root identities and absolute user-directory paths. | [Published](https://crates.io/crates/cortexkit-paths) |
 | [cortexkit-persona](crates/cortexkit-persona/README.md) | Load, merge and render a module's role personas: tiers with trust classes, project approvals, sealed MiniJinja templates and digests. | [Published](https://crates.io/crates/cortexkit-persona) |
+| [cortexkit-project-identity](crates/cortexkit-project-identity/README.md) | Typed requests, replies, and forward-compatible decoding for the project-identity module. | Not published |
 | [cortexkit-provider-usage](crates/cortexkit-provider-usage/README.md) | Provider usage, quota windows, and reset metadata wire types. | [Published](https://crates.io/crates/cortexkit-provider-usage) |
 | [cortexkit-push-seal](crates/cortexkit-push-seal/README.md) | HPKE encryption of push-notification payloads for a recipient device. | Not published |
 | [cortexkit-resource-busy](crates/cortexkit-resource-busy/README.md) | Shared refusal detail for exclusive resources held by another caller. | Not published |
